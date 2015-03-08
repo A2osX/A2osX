@@ -1,0 +1,219 @@
+PR#3
+PREFIX /DATA/A2OSX
+NEW
+INC 1
+AUTO 6
+				.LIST OFF
+				.OP	65C02
+				.OR	$2000
+				.TF BIN/ARP
+*--------------------------------------
+				.INB INC/MACROS.I
+				.INB INC/A2OSX.I
+				.INB INC/KERNEL.I
+				.INB INC/LIBSTR.I
+				.INB INC/LIBTCPIP.I
+*--------------------------------------
+ARP.TIMEOUT		.EQ 50					50*100ms = 5 sec.
+*--------------------------------------
+ZPPTR1			.EQ ZPBIN
+*--------------------------------------
+* Main entry point
+*--------------------------------------
+* Code signature and INIT table
+*--------------------------------------
+* CLD 			$D8
+* JMP (*,x)		$7C
+* 				#JMPTABLE
+*				/JMPTABLE
+*--------------------------------------
+CS.START		cld
+				jmp (.1,x)
+.1				.DA CS.INIT
+				.DA CS.RUN
+				.DA CS.EVENT		
+				.DA	CS.QUIT
+L.LIBSTR		.DA LIBSTR
+L.LIBTCPIP		.DA LIBTCPIP
+L.SSCANF.IP		.DA SSCANF.IP
+L.DST.IP		.DA DST.IP
+L.DST.MAC		.DA DST.MAC
+L.MSG0			.DA MSG0
+L.MSG1			.DA MSG1
+L.MSG2			.DA MSG2
+				.DA 0
+				.DA CS.END-CS.START		Code Length To Relocate
+				.DA DS.END-DS.START		Data Segment to Allocate
+*--------------------------------------
+CS.INIT			>LIBLOADP L.LIBSTR
+				sta hLIBSTR
+				
+				>LIBLOADP L.LIBTCPIP
+				sta hLIBTCPIP
+				
+				ldy #S.PS.hARGS
+				lda (pPsContext),y
+				beq CS.INIT.CACHE
+			
+				pha
+				>PUSHW L.DST.IP
+				>PUSHW L.SSCANF.IP
+				pla
+				>SYSCALL SYS.GetMemPtrA
+				>PUSHYA
+				>LIBCALL hLIBSTR,LIBSTR.SSCANF
+				bcs .9
+				
+				stz bCTRLC
+
+				lda (pPsContext)
+				ora #S.PS.F.EVENT		Now accept events
+				sta (pPsContext)
+
+				rts						CC,Give back control to CS.RUN
+					
+.9				lda #SYSMGR.ERRSYN
+				sec
+				rts
+				
+CS.INIT.CACHE	>LIBCALL hLIBTCPIP,LIBTCPIP.ARP.GETCACHE
+				>STYA ZPPTR1
+				>PUSHW L.MSG0
+				>LIBCALL hLIBSTR,LIBSTR.PRINTF
+
+				ldx #K.ARPCACHE.SIZE			
+.1				lda (ZPPTR1)
+*				beq .8
+				
+				ldy #S.ARPCACHE.IP+4
+.2				dey
+				lda (ZPPTR1),y
+				>PUSHA
+				cpy #S.ARPCACHE.IP
+				bne .2
+				
+				ldy #S.ARPCACHE.MAC+6
+.3				dey
+				lda (ZPPTR1),y
+				>PUSHA
+				cpy #S.ARPCACHE.MAC
+				bne .3
+				
+				ldy #S.ARPCACHE.RETRYCNT
+				lda (ZPPTR1),y
+				>PUSHA
+				
+				>PUSHB (ZPPTR1)
+				
+				>PUSHW L.MSG1
+				phx
+				>LIBCALL hLIBSTR,LIBSTR.PRINTF
+				plx
+				lda ZPPTR1
+				clc
+				adc #S.ARPCACHE
+				sta ZPPTR1
+				bcc .4
+				inc ZPPTR1+1
+.4				dex
+				bne .1		
+.8				lda #0					tell TSKMGR that all done ok, but 
+				sec						we do not want to stay in memory
+				rts
+*--------------------------------------
+CS.RUN			lda #ARP.TIMEOUT
+				sta TimeOut
+				
+.1				lda bCTRLC
+				bne .9
+				>PUSHW L.DST.MAC
+				>PUSHW L.DST.IP
+				>LIBCALL hLIBTCPIP,LIBTCPIP.ARP.QUERY
+				bcc .2					success, print & exit
+				
+				lda TimeOut
+				beq .9
+				jsr A2osX.SLEEP
+				bra .1
+				
+.2				ldx #5
+.3				>PUSHB DST.MAC,x
+				dex
+				bpl .3
+				
+				ldx #3
+.4				>PUSHB DST.IP,x
+				dex
+				bpl .4
+				
+				>PUSHW L.MSG2
+				>LIBCALL hLIBSTR,LIBSTR.PRINTF
+				
+.9				sec
+				rts
+*--------------------------------------
+CS.EVENT		>PULLW pEvent
+				lda (pEvent)
+				and #S.EVT.F.TIMER		is it a TIMER event?
+				beq .1					no....
+
+				lda TimeOut
+				beq .9
+				
+				dec TimeOut
+				bra .9
+				
+.1				lda (pEvent)
+				and #S.EVT.F.KEY		is it a KEY event?
+				beq .9
+				
+				ldy #S.EVT.hDEV			is Event from active IN device?
+				lda (pEvent),y
+				ldy #S.PS.hINDEV
+				cmp (pPsContext),y
+				bne .9
+				
+				ldy #S.EVT.DATAHI		is it an O or SAPPLE key ?
+				lda (pEvent),y
+				bne	.9
+				
+				ldy #S.EVT.DATALO	
+				lda (pEvent),y
+				cmp #$03				Ctrl-C
+				bne .9
+				
+				lda #$FF
+				sta bCTRLC
+				clc
+				rts
+				
+.9				sec
+				rts
+*--------------------------------------
+CS.QUIT			lda hLIBTCPIP
+				>SYSCALL SYS.UnloadLibA
+				lda hLIBSTR
+				>SYSCALL SYS.UnloadLibA
+				clc
+				rts
+*--------------------------------------
+CS.END
+LIBSTR			>PSTRING "libstr.o"
+LIBTCPIP		>PSTRING "libtcpip.o"
+SSCANF.IP		>PSTRING "%d.%d.%d.%d"
+MSG0			>CSTRING "STS RET MAC Address       IP Address\n"
+MSG1			>CSTRING "$%h %03d %h:%h:%h:%h:%h:%h %d.%d.%d.%d\n"
+MSG2			>CSTRING "%d.%d.%d.%d is at %h:%h:%h:%h:%h:%h\n"
+*--------------------------------------
+DS.START
+hLIBSTR			.BS	1
+hLIBTCPIP		.BS 1
+DST.IP			.BS 4
+DST.MAC			.BS 6
+TimeOut			.BS 1
+bCTRLC			.BS 1
+DS.END
+*--------------------------------------
+MAN
+SAVE BIN/ARP.S
+ASM

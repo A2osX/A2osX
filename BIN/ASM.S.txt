@@ -1,0 +1,382 @@
+PR#3
+PREFIX /DATA/A2OS
+NEW
+INC 1
+AUTO 6
+					.LIST OFF
+					.OP	65C02
+					.OR $2000
+					.TF	/DATA/A2OS/BIN/ASM
+*---------------------------------------
+					.INB INC/MACROS.I
+					.INB INC/A2OS.I
+					.INB INC/LIBSTR.I
+*---------------------------------------
+SYM.BLOCK.SIZE		.EQ 4096
+SYM.BLOCK.MAX		.EQ 8
+*---------------------------------------
+ERR.INV.ARGS		.EQ 1
+ERR.SRC.INV.TYPE	.EQ 2
+ERR.SRC.TOO.LONG	.EQ 3
+ERR.SYM.TOO.LARGE	.EQ 10
+*---------------------------------------
+CS.START			cld
+					jmp (.1,x)
+.1					.DA CS.INIT
+					.DA CS.RUN
+					.DA CS.EVENT		
+					.DA	CS.QUIT
+L.LIBSTR			.DA LIBSTR
+L.MSG.HELP1			.DA MSG.HELP1
+L.MSG.HELP2			.DA MSG.HELP2
+L.MSG.SRCLINE		.DA MSG.SRCLINE
+L.READ.BUFFER		.DA READ.BUFFER
+					.DA 0
+					.DA CS.END-CS.START		Code Length To Relocate
+					.DA 0					Data Segment to Allocate
+*---------------------------------------
+CS.INIT				>LIBLOADP L.LIBSTR
+					sta hLIBSTR
+					
+					ldx #VAR.INIT.END-VAR.INIT
+.1					stz	VAR.INIT-1,x
+					dex
+					bne .1
+					
+					ldy #S.PS.hARGS
+					lda (TSKMGR.TSKPTR),y
+					bne CS.INIT.ARGS
+					
+					>PUSHW L.MSG.HELP1
+					>LIBCALL hLIBSTR,LIBSTR.PRINTF
+					>PUSHW L.MSG.HELP2
+					>LIBCALL hLIBSTR,LIBSTR.PRINTF
+					lda #ERR.INV.ARGS
+					sec
+					rts
+
+CS.INIT.ARGS		>SYSCALL SYS.GetMemPtrA
+					>STYA ZPQuickPtr1
+					lda (ZPQuickPtr1)
+					bne .1
+					lda #ERR.INV.ARGS
+					sec
+					rts
+					
+.1					ldy #1
+					lda (ZPQuickPtr1),y
+					cmp #'/'
+					bne .2
+					ldy #S.PS.hARGS
+					lda (TSKMGR.TSKPTR),y
+					>SYSCALL SYS.PStrCpyA
+					bra CS.INIT.ARGS.OK
+					
+.2					ldy #S.PS.hARGS
+					lda (TSKMGR.TSKPTR),y
+					>PUSHA
+					ldy #S.PS.hPREFIX
+					lda (TSKMGR.TSKPTR),y
+					>PUSHA
+					>SYSCALL SYS.PStrCat
+					
+CS.INIT.ARGS.OK		sta SRC.hFILENAMES
+					
+					>SYSCALL SYS.OpenFileA
+					bcc CS.INIT.OPEN
+					sec
+					rts
+					
+CS.INIT.OPEN		sta SRC.hREFNUMS
+					stx SRC.hBUFFERS
+					inc SRC.COUNT
+					lda SRC.hFILENAMES
+					>SYSCALL SYS.GetFileInfoA
+					bcs .99
+					
+					>STYA ZPQuickPtr1
+					ldy #1
+					lda (ZPQuickPtr1),y
+					sta SRC.hFILETYPES
+					cmp #$04			TXT?
+					bne .1
+					>PUSHBI $0D
+					>PUSHBI $FF
+					>PUSHB SRC.hREFNUMS
+					>SYSCALL SYS.NewLine
+					bcs .99
+
+.1					cmp #$FA			BAS?
+					bne .98
+
+					stz bSTOP
+					stz bCANCEL
+					lda (TSKMGR.TSKPTR)
+					ora #S.PS.F.EVENT		Now accept events
+					sta (TSKMGR.TSKPTR)
+
+					clc
+					rts
+					
+.98					lda #ERR.SRC.INV.TYPE
+					sec
+.99					rts
+*--------------------------------------
+CS.RUN				lda bCANCEL
+					beq .1
+					sec
+					rts
+
+.1					lda bSTOP
+					beq .2
+					clc
+					rts
+					
+.2					jsr CS.RUN.READLINE
+					bcs .9
+
+					>PUSHWI TmpBuffer256
+					>PUSHW SRC.LINENUM
+					>PUSHW L.MSG.SRCLINE
+					>LIBCALL hLIBSTR,LIBSTR.PRINTF
+					clc
+.9					rts
+*---------------------------------------
+CS.RUN.READLINE		ldx SRC.COUNT
+					lda SRC.hFILETYPES-1,x
+					bmi CS.RUN.READLINE.BIN
+					jmp CS.RUN.READLINE.TXT
+*---------------------------------------
+CS.RUN.READLINE.BIN	>LDYAI 3			LEN + LINENUM
+					jsr CS.RUN.READLINE.YA
+					bcs .9
+					
+					lda READ.BUFFER+1
+					sta SRC.LINENUM
+					lda READ.BUFFER+2
+					sta SRC.LINENUM+1
+					
+					lda READ.BUFFER
+					dec
+					dec
+					dec
+					beq .8
+					
+					tay
+					lda #0
+					jsr CS.RUN.READLINE.YA
+					bcs .9
+					
+					ldy #0
+					ldx #0
+					
+.1					lda READ.BUFFER,y
+					bmi .2
+					sta TmpBuffer256,x
+					beq .8				Ending 00
+					inx
+					beq .99
+					iny
+					bne .1
+					bra .99
+.2					cmp #$C0			REPEAT char?
+					bne .5
+					iny
+					beq .99
+					lda READ.BUFFER,y
+					iny
+					beq .99
+.3					pha
+					lda READ.BUFFER,y
+					sta TmpBuffer256,x
+					pla
+					inx
+					beq .99
+					dec
+					bne .3
+					iny
+					bne .1
+					bra .99
+					
+.5					and #$3F			Compute blank count
+.6					pha
+					lda #$20
+					sta TmpBuffer256,x
+					pla
+					inx
+					beq .99
+					dec
+					bne .6
+					iny
+					bne .1
+					bra .99
+					
+.8					clc
+.9					rts
+.99					lda #ERR.SRC.TOO.LONG
+					sec
+					rts
+*--------------------------------------
+CS.RUN.READLINE.TXT >LDYAI 256			newline = $0D
+					jsr CS.RUN.READLINE.YA
+					bcs .9
+					
+					clc
+.9					rts
+*--------------------------------------
+CS.RUN.READLINE.YA	>PUSHYA
+					>PUSHW L.READ.BUFFER
+					ldx SRC.COUNT
+					lda SRC.hREFNUMS-1,x
+					>PUSHA
+					>SYSCALL SYS.ReadFile
+					rts
+*--------------------------------------
+CS.EVENT			ldy #S.EVT.hDEV		is Event from active IN device?
+					lda (EVTMGR.EVTPTR),y
+					ldy #S.PS.hINDEV
+					cmp (TSKMGR.TSKPTR),y
+					bne .9
+					lda (EVTMGR.EVTPTR)
+					and #S.EVT.F.KEY		is it a KEY event?
+					beq .9
+					ldy #S.EVT.DATAHI		is it an O or SAPPLE key ?
+					lda (EVTMGR.EVTPTR),y
+					bne	.9
+					ldy #S.EVT.DATALO	
+					lda (EVTMGR.EVTPTR),y
+					cmp #$03				Ctrl-C
+					bne .1
+					lda #$FF
+					sta bCANCEL
+					bra .8
+.1					cmp #$13				Ctrl-S
+					bne .8
+					lda bSTOP
+					eor #$FF
+					sta bSTOP
+.8					>SYSCALL SYS.DestroyEvent
+					clc
+					rts	
+.9					sec
+					rts
+*--------------------------------------
+CS.QUIT				ldx SRC.COUNT
+					beq .1
+					
+					lda SRC.hREFNUMS-1,x
+					>SYSCALL SYS.CloseFileA
+					
+					ldx SRC.COUNT
+					lda SRC.hFILENAMES-1,x
+					>SYSCALL SYS.FreeMemA
+					
+					ldx SRC.COUNT
+					lda SRC.hBUFFERS-1,x
+					>SYSCALL SYS.FreeMemA
+					
+					dec SRC.COUNT
+					bne CS.QUIT
+					
+.1					lda hLIBSTR
+					>SYSCALL SYS.UnloadLibA
+					clc
+					rts
+*---------------------------------------
+LOAD.ASM.T
+					clc
+					rts
+*---------------------------------------
+SYM.ADD		
+					clc
+					rts
+
+*---------------------------------------
+SYM.LOOKUP	
+					clc
+					rts
+*---------------------------------------
+SYM.BLOCK.ALLOC		ldx #0
+.1					lda SYM.BLOCKS,x
+					beq .2
+					inx
+					cpx #SYM.BLOCK.MAX
+					bne .1				
+					lda #ERR.SYM.TOO.LARGE
+					sec 				Out of block error
+					rts
+.2					phx					Save next free block
+					>LDYA SYM.BLOCK.SIZE
+					>SYSCALL SYS.GetMem
+					bcs .9
+					txa
+					plx
+					sta SYM.BLOCKS,x
+					clc
+.9					rts		
+*---------------------------------------
+CS.END
+T.DIRECTIVES		.AS "AS"
+					.AS "AT"
+					.AS "AZ"
+					.AS "BS"
+					.AS "DA"
+					.AS "DO"
+					.AS "DU"
+					.AS "ED"
+					.AS "EL"
+					.AS "EN"
+					.AS "EP"
+					.AS "EQ"
+					.AS "FI"
+					.AS "HS"
+					.AS "IN"
+					.AS "LI"
+					.AS "MA"
+					.AS "OP"
+					.AS "OR"
+					.AS "PG"
+					.AS "PH"
+					.AS "TA"
+					.AS "TF"
+					.AS "TI"
+					.AS "US"
+*---------------------------------------
+LIBSTR				>PSTRING "libstr.o"
+MSG.HELP1			>CSTRING "A2OS-Macro Assembler (S-C MASM 2.0 Based)\n"
+MSG.HELP2			>CSTRING "Usage : ASM <src file> [type TXT ($04) or S-C/BAS ($FA)]\n"
+MSG.SRCLINE			>CSTRING "%05D-%s\n"
+*---------------------------------------
+DS.START
+*---------------------------------------
+hLIBSTR				.BS	1
+bSTOP				.BS 1
+bCANCEL				.BS 1
+*---------------------------------------
+VAR.INIT
+SRC.COUNT			.BS 1
+SRC.hFILENAMES		.BS 8				Store full path to opened SRC files
+SRC.hFILETYPES		.BS 8				Store file type of opened SRC files
+SRC.hREFNUMS		.BS 8				Store ref_num of opened files (Main, .INs & .INBs)
+SRC.hBUFFERS		.BS 8				Store hMem to allocated buffers
+SRC.LINENUM			.BS 2
+ASM.T.hFILENAME		.BS 1
+ASM.T.hFILE			.BS 1				handle to loaded ASM.T.xxxxx
+DST.hFILENAME		.BS 1
+DST.hFILE			.BS 1
+DST.hBUFFER			.BS 1
+VAR.INIT.END
+*---------------------------------------
+ASM.T.FILENAME		.BS 65				PStr ProDOS Max Path Len +1 
+TARGET.FILENAME		.BS 65				PStr ProDOS Max Path Len +1
+TARGET.FILETYPE		.BS 1
+READ.BUFFER			.BS 256
+*---------------------------------------
+PASS				.BS 1
+ORIGIN				.BS 4				32Bits Origin
+SYM.BLOCKS			.BS SYM.BLOCK.MAX
+DS.END
+*---------------------------------------
+MAN
+SAVE /DATA/A2OS/BIN/ASM.S
+ASM

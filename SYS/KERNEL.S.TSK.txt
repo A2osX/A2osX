@@ -1,0 +1,544 @@
+PR#3
+PREFIX /DATA/A2OSX
+NEW
+INC 1
+AUTO 6
+				.LIST OFF
+				.OP	65C02
+*--------------------------------------
+* S.TskMgrInit
+*--------------------------------------
+S.TskMgrInit	stz TSKMGR.LASTID
+
+				>LDYAI TSKMGR.TABLE
+				>STYA TSKMGR.TSKPTR
+
+				ldx #K.PS.MAX
+				
+.1				lda #0	
+				ldy #S.PS.SIZE-1
+				
+.2				sta (TSKMGR.TSKPTR),y
+				dey
+				bpl .2
+				
+				lda TSKMGR.TSKPTR
+				clc
+				adc #S.PS.SIZE
+				sta TSKMGR.TSKPTR
+				bcc .3
+				inc	TSKMGR.TSKPTR+1
+.3				dex		
+				bne .1
+				
+				>LDYAI TSKMGR.TABLE		Make PS #0 as current process
+				>STYA TSKMGR.TSKPTR
+				
+				jsr S.CreateEnv
+				bcs .9
+				ldy #S.PS.hENV
+				sta TSKMGR.TABLE,y
+				
+				>LDYAI TmpBuffer256
+				jsr S.MLIGetPrefix
+				bcs .9
+				>PUSHWI TmpBuffer256	
+				jsr S.NewPStr
+				bcs .9
+				ldy #S.PS.hPREFIX
+				sta TSKMGR.TABLE,y
+				>PUSHWI TmpBuffer256	push ENV value
+				>PUSHWI ENV.A2osX		push ENV name
+				ldy #S.PS.hENV
+				lda TSKMGR.TABLE,y
+				>PUSHA
+				jsr S.SetEnvVarP
+				rts
+.9				sec
+				rts
+*--------------------------------------
+* S.TskMgrRun
+*--------------------------------------
+S.TskMgrRun		>LDYAI TSKMGR.TABLE+S.PS.SIZE
+				>STYA TSKMGR.TSKPTR
+				
+				lda #K.PS.MAX-1			Skip PS #0
+				sta TSKMGR.COUNT
+				
+.1				lda (TSKMGR.TSKPTR)		get S.PS.F
+				and #S.PS.F.INUSE		In use ?
+				beq .5
+				
+				lda (TSKMGR.TSKPTR)		get S.PS.F
+				and #S.PS.F.HOLD		Waiting for Another Task to Terminate?
+				beq .3
+				
+				ldy #S.PS.CID
+				lda (TSKMGR.TSKPTR),y
+				jsr S.IsPSRunningA
+				bcc .5					yes, running....
+				lda (TSKMGR.TSKPTR)		get S.PS.F
+				and #$FF^S.PS.F.HOLD	unmark as HOLD
+				sta (TSKMGR.TSKPTR)
+				
+.3				ldy #S.PS.hCS
+				lda (TSKMGR.TSKPTR),y
+				jsr S.GetMemPtrA		Y,A = CS
+				pha
+				tya						get CS LO
+				ldy #S.PS.PC
+				clc
+				adc (TSKMGR.TSKPTR),y
+				sta Kernel.JMP
+				iny
+				pla
+				adc (TSKMGR.TSKPTR),y
+				sta Kernel.JMP+1
+				
+				lda #0					Don't forget to reset S.PC
+				sta (TSKMGR.TSKPTR),y
+				dey
+				sta (TSKMGR.TSKPTR),y
+				
+				>LDYA TSKMGR.TSKPTR
+				ldx #TSKMGR.RUN
+				jsr Kernel.BINCALL		Call RUN function
+				bcc .5					RUN said CS=QUIT?
+				
+				ldy #S.PS.hCS
+				lda (TSKMGR.TSKPTR),y
+				jsr S.GetMemPtrA		Y,A = CS
+				>STYA Kernel.JMP
+				
+				>LDYA TSKMGR.TSKPTR
+				ldx #TSKMGR.QUIT		yes, quit this process
+				
+				jsr Kernel.BINCALL		Call QUIT function
+				
+				ldy #S.PS.ID
+				lda (TSKMGR.TSKPTR),y
+				jsr S.FreeProcessA
+				bcs .99	
+				
+.5				lda TSKMGR.TSKPTR
+				clc
+				adc #S.PS.SIZE
+				sta TSKMGR.TSKPTR
+				bcc .6
+				inc TSKMGR.TSKPTR+1
+				
+.6				dec TSKMGR.COUNT
+				bne .1
+				clc
+				rts
+.99				bra *
+*--------------------------------------
+* S.DispatchEvent
+*  IN: 
+*   PULLW = Event
+*  OUT:
+*	CS: Not Dispatched
+*	CC: Event Cleared 
+*--------------------------------------
+S.DispatchEvent	>LDYAI TSKMGR.TABLE+S.PS.SIZE
+				>STYA TSKMGR.TSKPTR
+								
+				lda #K.PS.MAX-1
+				sta TSKMGR.COUNT
+
+.1				lda (TSKMGR.TSKPTR)		get S.PS.F
+				and #S.PS.F.INUSE		In use ?
+				beq .3
+				
+				lda (TSKMGR.TSKPTR)		get S.PS.F
+				and #S.PS.F.HOLD		Waiting for Another Task to Terminate?
+				bne .3
+				
+				lda (TSKMGR.TSKPTR)		get S.PS.F
+				and #S.PS.F.EVENT		Accept Events ?
+				beq .3
+				
+				ldy #S.PS.hCS
+				lda (TSKMGR.TSKPTR),y
+				jsr S.GetMemPtrA
+				>STYA Kernel.JMP
+				
+				>PUSHW EVTMGR.EVTPTR
+				>LDYA TSKMGR.TSKPTR
+				ldx #TSKMGR.DOEVENT
+				jsr Kernel.BINCALL		Call DOEVENT function
+				bcc .8
+				
+.3				lda TSKMGR.TSKPTR
+				clc
+				adc #S.PS.SIZE
+				sta TSKMGR.TSKPTR
+				bcc .4
+				inc TSKMGR.TSKPTR+1
+
+.4				dec TSKMGR.COUNT
+				bne .1
+				sec
+.8				rts
+*--------------------------------------
+* S.TskMgrQuit
+*--------------------------------------
+S.TskMgrQuit	clc
+				rts
+*--------------------------------------
+*				PUBLIC
+*--------------------------------------
+* S.ExecProcessA	(Blocking Parent PID)
+*  in :
+*   A = hMem To Full Cmd Line
+*  out :
+*   A = Child PSID
+*--------------------------------------
+S.ExecProcessA	jsr S.CreateProcessA
+				bcs .9					terminated, do not set PID as HOLD
+				ldy #S.PS.CID
+				sta (TSKMGR.TSKPTR),y
+				pha						Save Child PID
+				lda (TSKMGR.TSKPTR)
+				ora #S.PS.F.HOLD
+				sta (TSKMGR.TSKPTR)
+				pla						Get Back PID
+				clc
+.9				rts
+*--------------------------------------
+* S.CreateProcessA (Non Blocking)
+*  in :
+*   A = hMem To Full Cmd Line
+*  out :
+*   A = Child PSID
+*--------------------------------------
+S.CreateProcessA
+				pha						save CMD line
+				>LDYAI MSG.NEWPS
+				jsr S.SysScrPPSTR
+				
+				ldy #S.PS.ID
+				lda (TSKMGR.TSKPTR),y
+				
+				jsr S.CreateChildProcessA
+				
+				bcs .99
+				>STYA TSKMGR.pNewPS
+				
+				pla						Get Back CMD Line
+				jsr S.InitProcessA
+				bcs .97					Init Failed or exit?
+				ldy #S.PS.ID
+				lda (TSKMGR.pNewPS),y
+				clc
+				rts
+				
+.97				pha						save error code
+				tay						error code =0 ?
+				bne .98					no, init failed
+				>LDYA TSKMGR.pNewPS
+				ldx #TSKMGR.QUIT		yes, simply call QUIT function
+				jsr Kernel.BINCALL		Call QUIT function
+				
+.98				ldy #S.PS.ID
+				lda (TSKMGR.pNewPS),y
+				jsr S.FreeProcessA
+				bra .90
+				
+.99				plx						Discard CMD Line
+				pha						save error code
+				
+.90				pla						get back error code
+				sec
+				rts
+*--------------------------------------
+* S.GetPSByIDA
+*  In : 
+*	A = PID 
+*  Out : 
+*   Y,A = PTR to TSKSLOT
+*--------------------------------------
+S.GetPSByIDA	tax
+				bne .10
+				>LDYAI TSKMGR.TABLE
+				clc
+				rts
+				
+.10				sta ZPQuickPtr1			Store requested PID
+				lda #K.PS.MAX
+				sta ZPQuickPtr1+1
+				
+				>LDYAI TSKMGR.TABLE+S.PS.SIZE
+				>STYA ZPQuickPtr2
+				
+.1				lda	(ZPQuickPtr2)
+				bpl .2
+				ldy #S.PS.ID
+				lda	(ZPQuickPtr2),y
+				cmp ZPQuickPtr1
+				beq .8
+.2				dec ZPQuickPtr1+1	
+				beq .9
+				lda ZPQuickPtr2
+				clc
+				adc #S.PS.SIZE
+				sta ZPQuickPtr2
+				bcc .1
+				inc ZPQuickPtr2+1
+				bra .1
+.8				>LDYA ZPQuickPtr2
+				clc
+				rts
+.9				sec
+				rts	
+*--------------------------------------
+*				PRIVATE
+*--------------------------------------
+* S.CreateChildProcessA
+*  in :
+*   A = Parent PSID
+*  out :
+*   X = PSID
+*	Y,A = PTR to S.PS	
+* we cannot use ZPQuickPtrs
+* because of calling S.PStrCpyA & S.DupEnvA
+*--------------------------------------
+S.CreateChildProcessA
+				jsr S.GetPSByIDA
+				bcs .9
+				
+				>STYA R.AX
+				>LDYAI TSKMGR.TABLE+S.PS.SIZE
+				>STYA R.BX
+				
+				ldx #K.PS.MAX
+.1				lda (R.BX)
+				bpl .3
+				lda R.BL
+				clc
+				adc #S.PS.SIZE
+				sta R.BL
+				bcc .2
+				inc R.BH
+.2				dex
+				bne .1
+				lda #TSKMGR.ERROOS
+				sec
+				rts
+				
+.9				lda #TSKMGR.ERRNSP
+				sec
+				rts
+
+.3				lda #S.PS.F.INUSE
+				sta (R.BX)
+				ldy #S.PS.ID
+				lda (R.AX),y
+				ldy #S.PS.PID
+				sta (R.BX),y
+				
+				inc TSKMGR.LASTID
+				bne .4
+				inc TSKMGR.LASTID		Ensure PSID not 0
+.4				lda TSKMGR.LASTID
+
+				ldy #S.PS.ID
+				sta (R.BX),y
+				lda #0
+				ldy #S.PS.hCS
+.5				sta (R.BX),y			Blank Everything in this S.PS
+				iny 
+				cpy #S.PS.SIZE
+				bne .5
+				
+				ldy #S.PS.hPREFIX		copy hPREFIX...
+				lda (R.AX),y
+				jsr S.PStrCpyA
+				bcs .99
+				
+				ldy #S.PS.hPREFIX
+				sta (R.BX),y
+				ldy #S.PS.hENV			...and hENV from parent PS
+				lda (R.AX),y
+				jsr S.DupEnvA
+				bcs .99
+				ldy #S.PS.hENV
+				sta (R.BX),y
+				
+				ldy #S.PS.hINDEV
+				lda (R.AX),y
+				sta (R.BX),y
+				ldy #S.PS.hOUTDEV
+				lda (R.AX),y
+				sta (R.BX),y
+				ldy #S.PS.hERRDEV
+				lda (R.AX),y
+				sta (R.BX),y
+				
+				ldy #S.PS.ID
+				lda (R.BX),y
+				tax						Exit with X=PSID
+				>LDYA R.BX				And Y,A=S.PS
+				clc
+				rts
+.99				sec
+				rts	
+*--------------------------------------
+* S.InitProcessA
+*  In : 
+*   A = hMem To Full Cmd Line  
+*--------------------------------------
+*  LS(2)
+*   0 : hMem to ENVPATH value
+*   1 : hMem to FULLPATH value
+*--------------------------------------
+S.InitProcessA	>ADDLOCAL 2
+				>PUSHA					Push Cmd Line
+				>PUSHBI $20				Push SEP=' '
+				>PUSHBI 0				Push 0 for getting CMD And ARGS
+				jsr S.PStrGetTkn
+				bcs .99					OOM error
+				ldy #S.PS.hCMD
+				sta (TSKMGR.pNewPS),y
+				>PUSHA					push CMD for S.FileSearch
+				txa
+				ldy #S.PS.hARGS
+				sta (TSKMGR.pNewPS),y	set ARGS hMem (0 if none)
+				>PUSHWI ENV.PATH		push ENVNAME=PATH
+				ldy #S.PS.hENV
+				lda (TSKMGR.pNewPS),y
+				>PUSHA
+				jsr S.GetEnvVarP		get value for ENV=PATH
+				bcs .99
+				>STAL 0					save VALUE hMem for discard
+				>PUSHA					A=PStr to ENV Value
+				jsr S.FileSearch		find File in %PATH%
+				bcs .98
+				>STAL 1					save FULLPATH hMem for discard
+				pha
+				jsr S.SysScrPPSTRA
+				pla
+				jsr S.LoadBinA			A = BinPath hMem
+				bcs .97
+				>STYA Kernel.JMP		save PTR to Code Segment
+				txa
+				ldy #S.PS.hCS
+				sta (TSKMGR.pNewPS),y	save CS hMem in TSKSLOT
+				>LDYA TSKMGR.pNewPS
+				ldx #TSKMGR.INIT
+				jsr Kernel.BINCALL		Call INIT function
+				bcs .97
+				jsr .97
+				clc
+				rts
+.97				pha						save ERR
+				>LDAL 1
+				jsr S.FreeMemA
+				pla
+.98				pha						save ERR
+				>LDAL 0
+				jsr S.FreeMemA
+				pla			
+.99				>REMLOCAL 2
+				sec
+				rts
+*--------------------------------------
+* S.QuitProcessA
+*   In : A = PID to Quit (call TSKMGR.QUIT)
+*--------------------------------------
+S.QuitProcessA	jsr S.GetPSByIDA
+				bcs .9
+				>STYA ZPQuickPtr1
+				ldy #S.PS.hCS
+				lda (ZPQuickPtr1),y
+				jsr S.GetMemPtrA
+				>STYA Kernel.JMP
+				>LDYA ZPQuickPtr1
+				ldx #TSKMGR.QUIT
+				jsr Kernel.BINCALL		Call QUIT function
+				clc
+				rts
+.9				bra *				
+*--------------------------------------
+* S.FreeProcessA
+*   In : A = PID to free
+*--------------------------------------
+S.FreeProcessA	jsr S.GetPSByIDA
+				bcs .9
+				>STYA ZPQuickPtr1
+				ldy #S.PS.hARGS
+				lda (ZPQuickPtr1),y
+				beq .1
+				jsr S.FreeMemA
+.1				ldy #S.PS.hCMD
+				lda (ZPQuickPtr1),y
+				beq .2
+				jsr S.FreeMemA
+.2				ldy #S.PS.hENV
+				lda (ZPQuickPtr1),y
+				beq .3
+				jsr S.FreeMemA
+.3				ldy #S.PS.hPREFIX
+				lda (ZPQuickPtr1),y
+				beq .4
+				jsr S.FreeMemA
+.4				ldy #S.PS.hDS
+				lda (ZPQuickPtr1),y
+				beq .5
+				jsr S.FreeMemA
+.5				ldy #S.PS.hCS
+				lda (ZPQuickPtr1),y
+				beq .8
+				jsr S.FreeMemA
+.8				lda #0
+				sta (ZPQuickPtr1)		Mark TSKSLOT as free
+				clc
+				rts
+.9				bra *				
+*--------------------------------------
+* S.IsPSRunningA
+*  In : 
+*	A = PID 
+*  Out : 
+*   CC = Running
+*   CS = no PS
+*--------------------------------------
+S.IsPSRunningA	pha						save PID
+				ldx #K.PS.MAX
+				>LDYAI TSKMGR.TABLE+S.PS.SIZE
+				>STYA ZPQuickPtr1
+				
+.1				lda	(ZPQuickPtr1)
+				bpl .2
+				ldy #S.PS.ID
+				pla
+				pha
+				cmp	(ZPQuickPtr1),y
+				beq .8
+				
+				lda ZPQuickPtr1
+				clc
+				adc #S.PS.SIZE
+				sta ZPQuickPtr1
+				bcc .2
+				
+				inc ZPQuickPtr2+1
+.2				dex
+				bne .1
+				
+				pla
+				sec
+				rts
+				
+.8				pla
+				clc
+				rts
+*--------------------------------------
+TSKMGR.COUNT	.BS 1 
+TSKMGR.LASTID	.BS 1
+*--------------------------------------
+MSG.NEWPS		>PSTRING "\nTskMgr:"
+MAN
+SAVE SYS/KERNEL.S.TSK
+LOAD SYS/KERNEL.S
+ASM

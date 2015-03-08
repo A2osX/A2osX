@@ -1,0 +1,314 @@
+PR#3
+PREFIX /DATA/A2OSX
+NEW
+INC 1
+AUTO 6
+				.LIST OFF	
+				.OP	65C02
+*--------------------------------------
+DNS.CLEAR		ldx #K.DNSCACHE.SIZE*S.DNSCACHE
+.1				stz DNS.CACHE-1,x
+				dex
+				bne .1
+				clc
+				rts
+*--------------------------------------
+* DNS.QUERY
+*  In:
+*	PULLA = hostname PSTR 
+*   PULLW = PTR to IP to fill with cached data
+*  Out:
+*   CC: hit: IP filled with address
+*   CS: missed 
+*--------------------------------------
+DNS.QUERY		>PULLB hHOST			Get host string hMem
+				>SYSCALL SYS.GetMemPtrA
+				>STYA ZPDNSHostname
+				>PULLW ZPDNSIP			Get IP address to fill
+				
+				ldx #0
+				
+.1				lda DNS.CACHE,x
+				beq .6					empty DNS cache entry?
+				
+				lda DNS.CACHE+S.DNSCACHE.hNAME,x
+				>SYSCALL SYS.GetMemPtrA
+				>STYA ZPQuickPtr3
+				lda (ZPDNSHostname)
+				cmp (ZPQuickPtr3)		Same Length?
+				bne .6
+				tay
+.2				lda (ZPDNSHostname),y
+				jsr ToLowerCaseA
+				cmp (ZPQuickPtr3),y
+				bne .6
+				dey
+				bne .2
+				
+				lda DNS.CACHE,x			get back status...
+				bpl .4					Pending...
+				
+				ldy #0
+.3				lda DNS.CACHE+S.DNSCACHE.IP,x
+				sta (ZPDNSIP),y
+				inx
+				iny
+				cpy #4
+				bne .3
+				clc
+				rts
+
+.4				sec
+				rts
+				
+.6				txa
+				clc
+				adc #S.DNSCACHE
+				tax
+				cmp #K.DNSCACHE.SIZE*S.DNSCACHE
+				bne .1
+				
+DNS.REQUEST		jsr NEW.UDP.FRAME
+				bcc .1
+				
+				bra *
+				
+				rts
+				
+.1				phx
+				
+				ldy #S.UDP.SRCPORT
+				lda /UDP.PORT.DNS
+				sta (ZPFrameBase1),y
+				iny
+				lda #UDP.PORT.DNS
+				sta (ZPFrameBase1),y
+				
+				ldy #S.UDP.DSTPORT
+				lda /UDP.PORT.DNS
+				sta (ZPFrameBase1),y
+				iny
+				lda #UDP.PORT.DNS
+				sta (ZPFrameBase1),y
+				
+				ldy #S.DNS.F
+				lda /S.DNS.F.RD
+				sta (ZPFrameBase1),y
+				iny 
+				lda #S.DNS.F.RD
+				sta (ZPFrameBase1),y
+				
+				ldy #S.DNS.QDCOUNT
+				lda /1
+				sta (ZPFrameBase1),y
+				iny
+				lda #1
+				sta (ZPFrameBase1),y
+				
+				lda #S.DNS
+				clc
+				adc ZPFrameBase1
+				sta ZPFramePtr1
+				lda /S.DNS
+				adc ZPFrameBase1+1
+				sta ZPFramePtr1+1
+				
+				lda (ZPDNSHostname)		Get hostname len
+				tay
+				ldx #0
+.2				lda (ZPDNSHostname),y
+				cmp #'.'
+				bne .3
+				txa
+				ldx #$FF
+.3				sta (ZPFramePtr1),y
+				inx
+				dey
+				bne .2
+				txa
+				sta (ZPFramePtr1)
+				
+				lda (ZPDNSHostname)
+				tay
+				iny
+				lda #$0					Ending #0
+				sta (ZPFramePtr1),y
+				
+				iny
+				lda /S.DNS.QTYPE.A
+				sta (ZPFramePtr1),y
+				iny
+				lda #S.DNS.QTYPE.A
+				sta (ZPFramePtr1),y
+				
+				iny
+				lda /S.DNS.QCLASS.IN
+				sta (ZPFramePtr1),y
+				iny
+				lda #S.DNS.QCLASS.IN
+				sta (ZPFramePtr1),y
+
+				lda (ZPDNSHostname)		Get hostname len again (QNAME)
+				clc						
+				adc #6					(len+1) + Ending 0 + QTYPE + QCLASS
+				adc #S.DNS
+				sta ZPFrameLen1
+				lda #0
+				adc /S.DNS
+				sta ZPFrameLen1+1
+				
+				ldx #S.IPCFG.DNS
+				ldy #S.IP.DST
+				
+				lda IPCFG,x
+				beq .5
+				
+.4				lda IPCFG,x
+				sta (ZPFrameBase1),y
+				iny
+				inx
+				cpx #S.IPCFG.DNS+4
+				bne .4
+				jsr SEND.UDP.FRAME.I
+				bcs .8
+				
+.5				ldx #S.IPCFG.DNS+4
+				ldy #S.IP.DST
+				
+				lda IPCFG,x
+				beq .7
+				
+.6				lda IPCFG,x
+				sta (ZPFrameBase1),y
+				iny
+				inx
+				cpx #S.IPCFG.DNS+8
+				bne .6
+				jsr SEND.UDP.FRAME.I
+				bcs .8
+				
+.7				jsr DNS.ADD.PENDING.I
+				
+.8				pla
+				>SYSCALL SYS.FreeMemA
+				sec
+				rts
+*--------------------------------------
+* DNS.ADD
+*  In:
+*	PULLA = hostname PSTR to Add
+*   PULLW = PTR to IP
+*	PULLW = TTL
+*--------------------------------------
+DNS.ADD			>PULLB hHOST			Get host string hMem
+				>SYSCALL SYS.GetMemPtrA
+				>STYA ZPDNSHostname
+				>PULLW ZPDNSIP			Get host IP address
+				>PULLW HOST.TTL
+				lda #S.DNSCACHE.STATUS.RESOLVED
+				bra DNS.ADD.I
+
+DNS.ADD.PENDING.I
+				lda #S.DNSCACHE.STATUS.PENDING
+				
+DNS.ADD.I		sta Status
+				ldx #0
+				
+.1				lda DNS.CACHE,x
+				beq	DNS.ADD.ENTRY		free ?
+				
+				lda DNS.CACHE+S.DNSCACHE.hNAME,x
+				>SYSCALL SYS.GetMemPtrA
+				>STYA ZPQuickPtr3
+				lda (ZPDNSHostname)
+				cmp (ZPQuickPtr3)		Same Length?
+				bne .4
+				
+				tay
+.2				lda (ZPDNSHostname),y
+				jsr ToLowerCaseA
+				cmp (ZPQuickPtr3),y
+				bne .4
+				dey
+				bne .2
+				
+				bra DNS.UPD.ENTRY
+				
+.4				txa
+				clc
+				adc #S.DNSCACHE
+				cmp #K.DNSCACHE.SIZE*S.DNSCACHE
+				beq .5
+				tax
+				bra .1
+
+.5				lda DNS.CACHE+S.DNSCACHE.hNAME		discard oldest entry hNAME
+				>SYSCALL SYS.FreeMemA
+				
+				ldx #K.DNSCACHE.SIZE*S.DNSCACHE-S.DNSCACHE
+.6				lda DNS.CACHE+S.DNSCACHE-1,x
+				sta DNS.CACHE-1,x
+				dex
+				bne .6
+
+				ldx #K.DNSCACHE.SIZE*S.DNSCACHE-S.DNSCACHE				
+				
+DNS.ADD.ENTRY	phx
+				lda (ZPDNSHostname)
+				inc						add 1 for len
+				tay
+				lda #0
+				>PUSHYA					push PSTR len
+				>PUSHBI 0				no option
+				>SYSCALL SYS.GetMem
+				bcc .10
+				plx
+				rts
+				
+.10				>STYA ZPQuickPtr3
+				txa
+				plx
+				sta DNS.CACHE+S.DNSCACHE.hNAME,x
+
+				lda (ZPDNSHostname)
+				sta (ZPQuickPtr3)
+				tay
+				
+.1				lda (ZPDNSHostname),y
+				jsr ToLowerCaseA
+				sta (ZPQuickPtr3),y
+				dey
+				bne .1
+	
+DNS.UPD.ENTRY	lda Status
+				sta DNS.CACHE,x
+				bpl .9					pending...
+				
+				lda HOST.TTL
+				sta DNS.CACHE+S.DNSCACHE.TTL,x
+				lda HOST.TTL+1
+				sta DNS.CACHE+S.DNSCACHE.TTL+1,x
+				
+				ldy #0
+.2				lda (ZPDNSIP),y
+				sta DNS.CACHE+S.DNSCACHE.IP,x
+				inx
+				iny
+				cpy #4
+				bne .2
+				
+				clc
+				rts
+.9				sec
+				rts
+*--------------------------------------
+DNS.GETCACHE	>LDYA L.DNS.CACHE
+				clc
+				rts
+*--------------------------------------
+*				PRIVATE
+*--------------------------------------
+MAN
+SAVE LIB/LIBTCPIP.S.DNS
+LOAD LIB/LIBTCPIP.S
+ASM

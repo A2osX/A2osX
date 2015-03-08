@@ -1,0 +1,483 @@
+PR#3
+PREFIX /DATA/A2OSX
+NEW
+INC 1
+AUTO 6
+				.LIST OFF	
+				.OP	65C02
+				.OR $2000
+				.TF DRV/DHGR.DRV
+*--------------------------------------
+				.INB INC/MACROS.I
+				.INB INC/A2OSX.I
+				.INB INC/IO.I
+*--------------------------------------
+ZPBASE			.EQ ZPDRV
+ZPCOLOR			.EQ ZPDRV+2
+*--------------------------------------
+* Main DRV entry point
+* input :
+* X = CMD
+*	0 : OPEN
+*	2 : GETEVENT
+*	6 : OUT
+*   8 : CLOSE
+*--------------------------------------
+* CLD 			$D8
+* JMP (*,x)		$7C
+* 				#JMPTABLE
+*				/JMPTABLE
+*--------------------------------------
+CS.START		cld
+				jmp (.1,x)
+.1				.DA OPEN
+				.DA GETEVENT
+				.DA OUT
+				.DA CLOSE
+				.DA GETINFO
+				.DA SETPIXEL
+				.DA GETPIXEL
+				.DA HLINE
+				.DA VLINE
+				.DA FILLREC
+				.DA BITBLT
+L.DEVINFO		.DA DEVINFO
+				.DA 0					end or relocation
+				.DA CS.END-CS.START		Code Length To Relocate
+				.DA DS.END-DS.START		Data Segment to Allocate
+*--------------------------------------
+OPEN			
+				lda #S.DEV.F.GFX
+				sta (pDevContext)
+				
+				ldy #S.DEV.NAME
+				ldx #0
+.1				lda DEVNAME,x
+				sta (pDevContext),y
+				cpx DEVNAME
+				beq .8
+				inx
+				iny
+				bne .1
+				
+.8				lda A2osX.SCREENS
+				ora #A2osX.SCREENS.G
+				sta A2osX.SCREENS
+				
+				clc
+				rts
+*--------------------------------------
+GETEVENT		
+OUT				clc
+				rts
+*--------------------------------------
+CLOSE			lda A2osX.SCREENS
+				and #$FF^A2osX.SCREENS.G
+				sta A2osX.SCREENS
+				clc
+				rts
+*--------------------------------------
+GETINFO			>LDYA L.DEVINFO
+				clc
+				rts
+*--------------------------------------
+* SETPIXEL
+*--------------------------------------
+* PULLB = X.LO
+* PULLB = X.HI
+* PULLB = Y
+* PULLB = Mode
+*		00000000=mono
+*		00000001=xor (mono on 1 bit)
+*		10000000=color
+* PULLB = Color	(if not xor)
+*--------------------------------------
+SETPIXEL		>PULLA					X.LO
+				tax
+				>PULLA					X.HI
+				lsr						if 256 =< x < 511 
+				bcs .1
+				lsr
+				bcs	.2					if 512 < x
+				lda DIV7.0,x
+				tay
+				lda MOD7.0,x
+				bra .3
+				
+.1				lda DIV7.256,x
+				tay
+				lda MOD7.256,x
+				bra .3
+
+.2				lda DIV7.512,x
+				tay
+				lda MOD7.512,x
+
+.3				pha						save MOD,y=DIV
+				
+				>PULLA					Pull Y
+				tax
+				lda BASEL,x				setup line Base Ptr
+				sta ZPBASE
+				lda BASEH,x
+				sta ZPBASE+1
+
+				sta SET80STORE			and prepare for page switching
+				
+				plx						get back MOD in x
+
+				>PULLA					Pull Mode
+				bmi SETPIXEL.COLOR
+*--------------------------------------
+* X=MOD,Y=DIV
+*--------------------------------------
+SETPIXEL.MONO	pha
+				tya
+				lsr
+				tay
+				bcs .1					odd=main ram
+				sta SETPAGE2
+				bra .2
+.1				sta CLRPAGE2
+.2				pla
+				lsr						CS=xor
+				bcs SETPIXEL.MONOX
+				
+				>PULLA					get COLOR
+				lsr 
+				bcs SETPIXEL.MONOW
+
+				lda (ZPBASE),y
+				and Mono.NMasks,x
+				sta (ZPBASE),y
+				rts
+				
+SETPIXEL.MONOW	lda (ZPBASE),y
+				and #$7F				switch back ths byte to mono
+				ora Mono.Masks,x
+				sta (ZPBASE),y
+				rts
+
+SETPIXEL.MONOX	lda (ZPBASE),y
+				eor Mono.Masks,x
+				sta (ZPBASE),y
+				rts
+*--------------------------------------
+* X=MOD,Y=DIV
+*--------------------------------------
+SETPIXEL.COLOR	tya						
+				lsr						Divide Col by 2 to get in range 0->39
+				and #$FE				make it 0->38 as color mask on 4 bytes
+				clc
+				adc ZPBASE				ZPBASE now point to first of the 4 columns
+				sta ZPBASE
+				txa						get MOD
+				asl						times 4 to compute index in color tables
+				asl						
+				tax						set in X for Masks,NMasks
+				
+				>PULLA					get COLOR
+				asl
+				asl
+				tay
+				
+				lda Color.Masks,x
+				beq .1
+				
+				sta SETPAGE2
+				lda (ZPBASE)
+				and Color.NMasks,x		reset existing pixel, 
+				ora Color.Pixels,y		apply color
+				and Color.Enable,x		filter 4 color bits color.enable bit 
+				sta (ZPBASE)
+
+.1				inx
+				iny
+				
+				lda Color.Masks,x
+				beq .2
+				
+				sta CLRPAGE2
+				lda (ZPBASE)
+				and Color.NMasks,x		reset existing pixel, 
+				ora Color.Pixels,y		apply color
+				and Color.Enable,x		filter 4 color bits color.enable bit 
+				sta (ZPBASE)
+				
+.2				inc ZPBASE
+				inx
+				iny
+				
+				lda Color.Masks,x
+				beq .3
+				
+				sta SETPAGE2
+				lda (ZPBASE)
+				and Color.NMasks,x		reset existing pixel, 
+				ora Color.Pixels,y		apply color
+				and Color.Enable,x		filter 4 color bits color.enable bit 
+				sta (ZPBASE)
+				
+.3				inx
+				iny
+				
+				lda Color.Masks,x
+				beq .8
+				
+				sta CLRPAGE2
+				lda (ZPBASE)
+				and Color.NMasks,x		reset existing pixel, 
+				ora Color.Pixels,y		apply color
+				and Color.Enable,x		filter 4 color bits color.enable bit 
+				sta (ZPBASE)
+.8				rts
+*--------------------------------------
+GETPIXEL
+*--------------------------------------
+HLINE
+*--------------------------------------
+VLINE
+*--------------------------------------
+FILLREC
+*--------------------------------------
+* params : X,Y,W,H
+*--------------------------------------
+BITBLT
+				rts
+*--------------------------------------
+*				PRIVATE
+*--------------------------------------
+DIV7.0			.HS 0000000000000001010101010101
+				.HS 0202020202020203030303030303
+				.HS 0404040404040405050505050505
+				.HS 0606060606060607070707070707
+				.HS 0808080808080809090909090909
+				.HS 0A0A0A0A0A0A0A0B0B0B0B0B0B0B
+				.HS 0C0C0C0C0C0C0C0D0D0D0D0D0D0D
+				.HS 0E0E0E0E0E0E0E0F0F0F0F0F0F0F
+				.HS 1010101010101011111111111111
+				.HS 1212121212121213131313131313
+				.HS 1414141414141415151515151515
+				.HS 1616161616161617171717171717
+				.HS 1818181818181819191919191919
+				.HS 1A1A1A1A1A1A1A1B1B1B1B1B1B1B
+				.HS 1C1C1C1C1C1C1C1D1D1D1D1D1D1D
+				.HS 1E1E1E1E1E1E1E1F1F1F1F1F1F1F
+				.HS 2020202020202021212121212121
+				.HS 2222222222222223232323232323
+				.HS 24242424
+DIV7.256		.HS 24242425252525252525
+				.HS 2626262626262627272727272727
+				.HS 2828282828282829292929292929
+				.HS 2A2A2A2A2A2A2A2B2B2B2B2B2B2B
+				.HS 2C2C2C2C2C2C2C2D2D2D2D2D2D2D
+				.HS 2E2E2E2E2E2E2E2F2F2F2F2F2F2F
+				.HS 3030303030303031313131313131
+				.HS 3232323232323233333333333333
+				.HS 3434343434343435353535353535
+				.HS 3636363636363637373737373737
+				.HS 3838383838383839393939393939
+				.HS 3A3A3A3A3A3A3A3B3B3B3B3B3B3B
+				.HS 3C3C3C3C3C3C3C3D3D3D3D3D3D3D
+				.HS 3E3E3E3E3E3E3E3F3F3F3F3F3F3F
+				.HS 4040404040404041414141414141
+				.HS 4242424242424243434343434343
+				.HS 4444444444444445454545454545
+				.HS 4646464646464647474747474747
+				.HS 4848484848484849
+DIV7.512		.HS 494949494949
+				.HS 4A4A4A4A4A4A4A4B4B4B4B4B4B4B
+				.HS 4C4C4C4C4C4C4C4D4D4D4D4D4D4D
+				.HS 4E4E4E4E4E4E4E4F4F4F4F4F4F4F
+*--------------------------------------
+MOD7.0			.HS 0001020304050600010203040506
+				.HS 0001020304050600010203040506
+				.HS 0001020304050600010203040506
+				.HS 0001020304050600010203040506
+				.HS 0001020304050600010203040506
+				.HS 0001020304050600010203040506
+				.HS 0001020304050600010203040506
+				.HS 0001020304050600010203040506
+				.HS 0001020304050600010203040506
+				.HS 0001020304050600010203040506
+				.HS 0001020304050600010203040506
+				.HS 0001020304050600010203040506
+				.HS 0001020304050600010203040506
+				.HS 0001020304050600010203040506
+				.HS 0001020304050600010203040506
+				.HS 0001020304050600010203040506
+				.HS 0001020304050600010203040506
+				.HS 0001020304050600010203040506
+				.HS 00010203
+MOD7.256		.HS	04050600010203040506
+				.HS 0001020304050600010203040506
+				.HS 0001020304050600010203040506
+				.HS 0001020304050600010203040506
+				.HS 0001020304050600010203040506
+				.HS 0001020304050600010203040506
+				.HS 0001020304050600010203040506
+				.HS 0001020304050600010203040506
+				.HS 0001020304050600010203040506
+				.HS 0001020304050600010203040506
+				.HS 0001020304050600010203040506
+				.HS 0001020304050600010203040506
+				.HS 0001020304050600010203040506
+				.HS 0001020304050600010203040506
+				.HS 0001020304050600010203040506
+				.HS 0001020304050600010203040506
+				.HS 0001020304050600010203040506
+				.HS 0001020304050600010203040506
+				.HS 0001020304050600
+MOD7.512		.HS 010203040506
+				.HS 0001020304050600010203040506
+				.HS 0001020304050600010203040506
+				.HS 0001020304050600010203040506
+*--------------------------------------
+BASEL			.HS	00.00.00.00.00.00.00.00
+				.HS 80.80.80.80.80.80.80.80
+				.HS	00.00.00.00.00.00.00.00
+				.HS 80.80.80.80.80.80.80.80
+				.HS	00.00.00.00.00.00.00.00
+				.HS 80.80.80.80.80.80.80.80
+				.HS	00.00.00.00.00.00.00.00
+				.HS 80.80.80.80.80.80.80.80
+				.HS 28.28.28.28.28.28.28.28
+				.HS A8.A8.A8.A8.A8.A8.A8.A8
+				.HS 28.28.28.28.28.28.28.28
+				.HS A8.A8.A8.A8.A8.A8.A8.A8
+				.HS 28.28.28.28.28.28.28.28
+				.HS A8.A8.A8.A8.A8.A8.A8.A8
+				.HS 28.28.28.28.28.28.28.28
+				.HS A8.A8.A8.A8.A8.A8.A8.A8
+				.HS 50.50.50.50.50.50.50.50
+				.HS D0.D0.D0.D0.D0.D0.D0.D0
+				.HS 50.50.50.50.50.50.50.50
+				.HS D0.D0.D0.D0.D0.D0.D0.D0
+				.HS 50.50.50.50.50.50.50.50
+				.HS D0.D0.D0.D0.D0.D0.D0.D0
+				.HS 50.50.50.50.50.50.50.50
+				.HS D0.D0.D0.D0.D0.D0.D0.D0
+*--------------------------------------
+BASEH			.HS	20.24.28.2C.30.34.38.3C
+				.HS	20.24.28.2C.30.34.38.3C
+				.HS	21.25.29.2D.31.35.39.3D
+				.HS	21.25.29.2D.31.35.39.3D
+				.HS	22.26.2A.2E.32.36.3A.3E
+				.HS	22.26.2A.2E.32.36.3A.3E
+				.HS	23.27.2B.2F.33.37.3B.3F
+				.HS	23.27.2B.2F.33.37.3B.3F
+				.HS	20.24.28.2C.30.34.38.3C
+				.HS	20.24.28.2C.30.34.38.3C
+				.HS	21.25.29.2D.31.35.39.3D
+				.HS	21.25.29.2D.31.35.39.3D
+				.HS	22.26.2A.2E.32.36.3A.3E
+				.HS	22.26.2A.2E.32.36.3A.3E
+				.HS	23.27.2B.2F.33.37.3B.3F
+				.HS	23.27.2B.2F.33.37.3B.3F
+				.HS	20.24.28.2C.30.34.38.3C
+				.HS	20.24.28.2C.30.34.38.3C
+				.HS	21.25.29.2D.31.35.39.3D
+				.HS	21.25.29.2D.31.35.39.3D
+				.HS	22.26.2A.2E.32.36.3A.3E
+				.HS	22.26.2A.2E.32.36.3A.3E
+				.HS	23.27.2B.2F.33.37.3B.3F
+				.HS	23.27.2B.2F.33.37.3B.3F
+*--------------------------------------
+Mono.NMasks		.DA %01111110
+				.DA %01111101
+				.DA %01111011
+				.DA %01110111
+				.DA %01101111
+				.DA %01011111
+				.DA %00111111
+*--------------------------------------
+Mono.Masks		.DA	%00000001
+				.DA %00000010
+				.DA %00000100
+				.DA %00001000
+				.DA %00010000
+				.DA %00100000
+				.DA %01000000
+*--------------------------------------
+* bits to "and"	to reset color of pixel (0 means nothing to do)
+*--------------------------------------
+Color.NMasks	.DA %01110000.00000000.00000000.00000000
+				.DA %00001111.01111110.00000000.00000000
+				.DA %00000000.01100001.00000000.00000000
+				.DA %00000000.00011111.01111100.00000000
+				.DA %00000000.00000000.01000011.00000000
+				.DA %00000000.00000000.00111111.01111000
+				.DA %00000000.00000000.00000000.00000111
+*--------------------------------------
+* bits to "and"	to Get color of pixel (0 means nothing to do)
+* 4 bytes * 7 mods
+*--------------------------------------
+Color.Masks		.DA %00001111.00000000.00000000.00000000	(nothing to do)
+				.DA %01110000.00000001.00000000.00000000	asl0,asl0,rol1,asl0,rol1,asl0,rol1
+				.DA %00000000.00011110.00000000.00000000	lsr1
+				.DA %00000000.01100000.00000011.00000000	asl1,asl1,rol2,asl1,rol2
+				.DA %00000000.00000000.00111100.00000000	lsr2,lsr2
+				.DA %00000000.00000000.01000000.00000111	asl2,asl2,rol3
+				.DA %00000000.00000000.00000000.01111000	lsr3,lsr3,lsr3	
+*--------------------------------------
+Color.Enable	.DA %10001111.00000000.00000000.00000000
+				.DA %11110000.00000001.00000000.00000000
+				.DA %00000000.10011110.00000000.00000000
+				.DA %00000000.11100000.00000011.00000000
+				.DA %00000000.00000000.10111100.00000000
+				.DA %00000000.00000000.11000000.00000111
+				.DA %00000000.00000000.00000000.11111000
+*--------------------------------------
+* bits to "ora" to set color of pixel (including "color bit set " for byte hosting bit0)
+* 4 bytes * 16 Colors
+* pixel masks		 c1110000.c3322221.c5444433.c6666555    
+*--------------------------------------
+Color.Pixels	.DA %00000000.00000000.00000000.00000000	0000,Black (color bit disable)
+				.DA %10010001.10100010.11000100.10001000	0001,Magenta
+				.DA %10100010.11000100.10001000.10010001	0010,Brown
+				.DA %10110011.11100110.11001100.10011001	0011,Orange
+				.DA %11000100.10001000.10010001.10100010	0100,Dark Green
+				.DA %11010101.10101010.11010101.10101010	0101,Grey1
+				.DA %11100110.11001100.10011001.10110011	0110,Green
+				.DA %11110111.11101110.11011101.10111011	0111,Yellow
+				.DA %10001000.10010001.10100010.11000100	1000,Dark Blue
+				.DA %10011001.10110011.11100110.11001100	1001,Violet
+				.DA %10101010.11010101.10101010.11010101	1010,Grey2
+				.DA %10111011.11110111.11101111.11011101	1011,Pink
+				.DA %11001100.10011001.10110011.11100110	1100,Medium Blue
+				.DA %11011101.10111011.11110111.11101110	1101,Light Blue
+				.DA %11101110.11011101.10111011.11110111	1110,Aqua
+				.DA %01111111.01111111.01111111.01111111	1111,White (color bit disable)
+				
+*Black          00    00    00    00    0000
+*Magenta        08    11    22    44    0001
+*Brown          44    08    11    22    0010
+*Orange         4C    19    33    66    0011
+*Dark Green     22    44    08    11    0100
+*Grey1          2A    55    2A    55    0101
+*Green          66    4C    19    33    0110
+*Yellow         6E    5D    3B    77    0111
+*Dark Blue      11    22    44    08    1000
+*Violet         19    33    66    4C    1001
+*Grey2          55    2A    55    2A    1010
+*Pink           5D    3B    77    6E    1011
+*Medium Blue    33    66    4C    19    1100
+*Light Blue     3B    77    6E    5D    1101
+*Aqua           77    6E    5D    3B    1110
+*White          7F    7F    7F    7F    1111
+				
+
+*--------------------------------------
+CS.END
+DEVNAME			>PSTRING "GFX"
+*--------------------------------------
+DS.START
+*--------------------------------------
+DEVINFO			.DA #S.DEV.F.GFX		type of DEVINFO STRUCT
+DEVINFO.W		.DA 560					X.SIZE
+DEVINFO.H		.DA 192					Y.SIZE
+DS.END
+*--------------------------------------
+MAN
+SAVE DRV/DHGR.DRV.S
+ASM

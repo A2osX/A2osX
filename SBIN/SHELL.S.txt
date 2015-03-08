@@ -1,0 +1,568 @@
+PR#3
+PREFIX /DATA/A2OSX
+NEW
+INC 1
+AUTO 6
+				.LIST OFF	
+				.OP	65C02
+				.OR	$2000
+				.TF SBIN/SHELL
+*--------------------------------------
+				.INB INC/MACROS.I
+				.INB INC/A2OSX.I
+				.INB INC/PRODOS.I
+				.INB INC/LIBSTR.I
+*--------------------------------------
+ZPPTR1			.EQ ZPBIN
+ZPPTR2			.EQ ZPBIN+2
+ZPPTR3			.EQ ZPBIN+4
+*--------------------------------------
+CmdBuffer.MAX	.EQ 127
+*--------------------------------------
+* Main entry point
+*--------------------------------------
+* Code signature and INIT table
+*--------------------------------------
+* CLD 			$D8
+* JMP (*,x)		$7C
+* 				#JMPTABLE
+*				/JMPTABLE
+*--------------------------------------
+CS.START		cld
+				jmp (.1,x)
+.1				.DA CS.INIT
+				.DA CS.RUN
+				.DA CS.DOEVENT
+				.DA	CS.QUIT
+*--------------------------------------
+L.LIBSTR		.DA LIBSTR
+L.CmdBuffer		.DA CmdBuffer
+L.MSG.GREETINGS	.DA MSG.GREETINGS
+L.MSG.UNKNOWN	.DA MSG.UNKNOWN
+L.MSG.SYNERR	.DA MSG.SYNERR
+L.CMDS			.DA CMDS
+T.INTCMDS		.DA EXEC.CMD.CD
+				.DA EXEC.CMD.SET
+				.DA EXEC.CMD.DATE
+				.DA EXEC.CMD.TIME
+				.DA EXEC.CMD.ECHO
+				.DA EXEC.CMD.TYPE
+				.DA EXEC.CMD.EXIT
+				.DA 0
+				.DA CS.END-CS.START		Code Length To Relocate
+				.DA DS.END-DS.START		Data Segment to Allocate
+*--------------------------------------
+CS.INIT			stz bEXIT
+
+				stz CmdHistory
+				stz CmdHistory.IDX
+				stz CmdHistory.END
+				
+				>LIBLOADP L.LIBSTR
+				
+				bcs .99
+				sta hLIBSTR
+				
+				ldy #S.PS.ID
+				lda (pPsContext),y
+				>PUSHA
+				ldy #S.PS.hOUTDEV
+				lda (pPsContext),y
+				>PUSHA
+				ldy #S.PS.hINDEV
+				lda (pPsContext),y
+				>PUSHA
+				>PUSHW L.MSG.GREETINGS
+				>LIBCALL hLIBSTR,LIBSTR.PRINTF
+				
+				lda (pPsContext)
+				ora #S.PS.F.EVENT		Now accept events
+				sta (pPsContext)
+				
+				clc
+.99				rts
+*--------------------------------------
+CS.RUN			stz	CmdBuffer
+				lda #"$"
+				jsr COUT		
+				lda #" "
+				jsr COUT
+
+.1				lda CmdBuffer
+				bmi .2
+				jsr A2osX.SLEEP
+				
+				bra .1
+
+.2				and #$7F
+				sta CmdBuffer
+				beq CS.RUN				Empty line
+				
+				>PUSHW L.CmdBuffer
+				>SYSCALL SYS.NewPStr
+				bcs .99
+				sta hCMDLINE
+				jsr HISTORY.ADD
+				jsr EXEC.CMD
+				bcc .3
+
+				pha
+				lda #"["
+				jsr COUT
+				pla
+				jsr PRBYTE		
+				lda #"]"
+				jsr COUT
+				jsr CROUT
+
+.3				lda hCMDLINE
+				>SYSCALL SYS.FreeMemA
+				stz hCMDLINE
+				
+				lda	bEXIT	
+				bne .99
+				clc
+				rts
+.99				sec
+				rts	
+*--------------------------------------
+CS.DOEVENT		>PULLW pEvent
+
+				ldy #S.EVT.hDEV		is Event from active IN device?
+				lda (pEvent),y
+				ldy #S.PS.hINDEV
+				cmp (pPsContext),y
+
+				bne .9
+				lda (pEvent)
+				and #S.EVT.F.KEY		is it a KEY event?
+				beq .9
+
+				ldy #S.EVT.DATAHI		is it an O or SAPPLE key ?
+				lda (pEvent),y
+				bne	.9
+
+				ldy #S.EVT.DATALO	
+				lda (pEvent),y
+				cmp #$1F
+				bpl .1
+				jsr CS.EVENT.CTRL.CHAR
+				bra .8
+
+.1				cmp #$7f
+				bne .2
+				jsr CmdBuffer.DEL
+				bra .8
+
+.2				ldx CmdBuffer
+				cpx #CmdBuffer.MAX
+				beq .8
+				inx
+				sta CmdBuffer,x
+				inc CmdBuffer
+				ora #$80
+				jsr COUT
+				
+.8				>SYSCALL SYS.DestroyEvent
+				clc
+				rts	
+				
+.9				sec
+				rts
+*--------------------------------------
+CS.EVENT.CTRL.CHAR
+				cmp #13					CR
+				bne .10
+				jsr CROUT
+				lda CmdBuffer
+				ora #$80
+				sta CmdBuffer
+				clc
+				rts
+				
+.10				cmp #3
+				bne .1
+				jsr CmdBuffer.CLR
+				clc
+				rts
+				
+.1				cmp #8					BS (left arrow)
+				bne .2
+				jsr CmdBuffer.DEL
+				clc
+				rts
+				
+.2				cmp #10					LF (down arrow)
+				bne .3
+				
+				jsr HISTORY.GETNEXT
+				clc
+				rts
+				
+.3				cmp #11					VT (up arrow)
+				bne .4
+				
+				jsr HISTORY.GETPREV
+				clc
+				rts
+				
+.4				cmp #21					NAK (right arrow)
+				bne .8
+				
+				clc
+				rts
+				
+.8				jsr PRBYTE
+				clc
+				rts
+*--------------------------------------
+CS.QUIT			lda hLIBSTR
+				>SYSCALL SYS.UnloadLibA
+				clc
+				rts
+*--------------------------------------
+*				PRIVATE
+*--------------------------------------
+EXEC.CMD		>PUSHB hCMDLINE
+				>PUSHBI $20				Push SEP=' '
+				>PUSHBI 0				Push 0 for getting CMD & ARGS
+				>SYSCALL SYS.PStrGetTkn
+				bcs .99
+
+				sta hCMD
+				stx hARGS
+				>SYSCALL SYS.GetMemPtrA
+				>PUSHYA
+				>PUSHYA
+				>LIBCALL hLIBSTR,LIBSTR.UCASEP
+				>PUSHW L.CMDS
+				>SYSCALL SYS.GetPStrIndex
+				bcs .1					Not An internal command
+				jsr EXEC.CMD.INT		
+				bcs .98
+				jsr .98
+				clc
+				rts
+				
+.1				jsr .98					Discard CMD & ARGS			
+				lda hCMDLINE				
+				>SYSCALL SYS.ExecProcessA
+				rts
+				
+.98				pha
+				lda hCMD
+				>SYSCALL SYS.FreeMemA
+				lda hARGS
+				>SYSCALL SYS.FreeMemA
+				pla
+				sec
+.99				rts	
+*--------------------------------------
+EXEC.CMD.INT	asl
+				tax
+				jmp (T.INTCMDS,x)
+*--------------------------------------
+EXEC.CMD.CD		lda hARGS
+				bne EXEC.CMD.CD.C
+				ldy #S.PS.hPREFIX
+				lda (pPsContext),y
+				>SYSCALL SYS.GetMemPtrA
+				>PUSHYA
+				>LIBCALL hLIBSTR,LIBSTR.PRINTP
+				jsr CROUT
+				clc	
+				rts
+				
+EXEC.CMD.CD.C	>SYSCALL SYS.GetMemPtrA
+				>STYA ZPPTR2
+				ldy #S.PS.hPREFIX
+				lda (pPsContext),y
+				>SYSCALL SYS.GetMemPtrA
+				>STYA ZPPTR1
+				>PUSHWI MLI.MAXPATH+1	Get a buffer for new PATH
+				>PUSHBI 0				no particular Option
+				>SYSCALL SYS.GetMem
+				bcs .99
+				stx hNEWPATH
+				>STYA ZPPTR3
+				lda #0
+				sta (ZPPTR3)
+				ldy #1
+				lda (ZPPTR2),y
+				cmp #'/'				Full Path?
+				beq .3
+				cmp #'.'				".." ?
+				bne .2
+				lda (ZPPTR2)
+				cmp #2
+				bne .97
+				iny
+				lda (ZPPTR2),y
+				cmp #'.'
+				bne .97
+				lda (ZPPTR1)
+				tay
+.1				dey
+				beq .97
+				lda (ZPPTR1),y
+				cmp #'/'
+				bne .1
+				tya
+				sta (ZPPTR3)
+.11				lda (ZPPTR1),y
+				sta (ZPPTR3),y
+				dey
+				bne .11
+				bra .4
+.97				lda #SYSMGR.ERRSYN
+.98				pha
+				lda hNEWPATH
+				>SYSCALL SYS.FreeMemA
+				pla
+				sec
+.99				rts
+.2				>PUSHW ZPPTR1
+				>PUSHW ZPPTR3
+				>LIBCALL hLIBSTR,LIBSTR.STRCPYP
+.3				>PUSHW ZPPTR2
+				>PUSHW ZPPTR3
+				>LIBCALL hLIBSTR,LIBSTR.STRCATP
+				lda (ZPPTR3)
+				tay
+				lda #'/'				Ending with '/'?
+				cmp (ZPPTR3),y
+				beq .4
+				iny
+				sta (ZPPTR3),y
+				tya
+				sta (ZPPTR3)
+.4				lda hNEWPATH
+				>SYSCALL SYS.CheckPrefixA
+				bcs .98
+				ldy #S.PS.hPREFIX
+				lda (pPsContext),y
+				pha
+				lda hNEWPATH
+				sta (pPsContext),y
+				pla
+				>SYSCALL SYS.FreeMemA
+				clc
+				rts
+*--------------------------------------
+EXEC.CMD.SET	clc
+				rts
+*--------------------------------------
+EXEC.CMD.DATE	jsr MLI
+				.DA #MLIGETTIME
+				.DA 0
+				bcs .9
+				>PUSHW DATELO
+				>LIBCALL hLIBSTR,LIBSTR.PRINTDATE
+				jsr CROUT
+				clc
+.9				rts
+*--------------------------------------
+EXEC.CMD.TIME	jsr MLI
+				.DA #MLIGETTIME
+				.DA 0
+				bcs .9
+				>PUSHW TIMELO
+				>LIBCALL hLIBSTR,LIBSTR.PRINTTIME
+				jsr CROUT
+				clc
+.9				rts
+*--------------------------------------
+EXEC.CMD.ECHO	lda #$DD
+				sec
+				rts
+*--------------------------------------
+EXEC.CMD.TYPE	lda hARGS
+				beq .98
+				>SYSCALL SYS.LoadFileA
+				bcs .99
+				>STYA ZPPTR2			store file len
+				phx
+				txa
+				>SYSCALL SYS.GetMemPtrA
+				>STYA ZPPTR1
+.1				lda ZPPTR2
+				bne .2
+				lda ZPPTR2+1
+				beq .3
+				dec ZPPTR2+1
+.2				dec ZPPTR2
+
+				lda (ZPPTR1)
+				ora #$80
+				jsr COUT
+				inc ZPPTR1
+				bne .1
+				inc ZPPTR1+1
+				bra .1
+
+.3				pla
+				>SYSCALL SYS.FreeMemA
+				clc
+				rts
+				
+.98				lda #SYSMGR.ERRSYN
+.99				rts
+*--------------------------------------
+EXEC.CMD.EXIT	lda #$FF
+				sta bEXIT
+				clc
+				rts
+*--------------------------------------
+HISTORY.ADD		lda CmdHistory.END		ending 0
+				inc						keep room for new ending 0
+				sec						add len+1
+				adc CmdBuffer
+				bcc .2					enough room
+				
+				ldx CmdHistory			get len of oldest string
+				ldy #0
+.1				inx
+				iny
+				lda CmdHistory,x		move back until 0 found
+				sta CmdHistory-1,y
+				bne .1
+				sty CmdHistory.END		mark new end of history
+				bra HISTORY.ADD			retry....
+				
+.2				ldx CmdHistory.END
+				ldy #$FF
+.3				iny 
+				lda CmdBuffer,y
+				sta CmdHistory,x
+				inx
+				cpy CmdBuffer
+				bne .3
+				stz CmdHistory,x		set ending 0
+				stx CmdHistory.IDX
+				stx CmdHistory.END
+.9				rts
+*--------------------------------------
+HISTORY.GETPREV	lda CmdHistory.END
+				beq HISTORY.RTS			empty history,nothing to do
+				lda CmdHistory.IDX
+				beq HISTORY.RTS			already oldest,nothing to do
+				lda #0
+.1				tax						save current index
+				sec
+				adc CmdHistory,x
+				cmp CmdHistory.IDX
+				bne .1					not yet reached current index
+				stx CmdHistory.IDX		set new index
+				bra HISTORY.SETBUF
+HISTORY.RTS		rts
+*--------------------------------------
+HISTORY.GETNEXT ldx CmdHistory.END
+				beq HISTORY.RTS			empty history,nothing to do
+				cpx CmdHistory.IDX
+				beq HISTORY.RTS
+				ldx CmdHistory.IDX
+				lda CmdHistory,x
+				sec
+				adc CmdHistory.IDX
+				cmp CmdHistory.END
+				sta CmdHistory.IDX
+				beq CmdBuffer.CLR		end of history, just blank buffer
+*--------------------------------------
+HISTORY.SETBUF	jsr CmdBuffer.CLR
+				ldx	CmdHistory.IDX
+				ldy #$ff
+.1				iny
+				lda CmdHistory,x
+				inx
+				sta CmdBuffer,y
+				cpy CmdBuffer
+				bne .1
+				bra CmdBuffer.PRINT
+*--------------------------------------
+CmdBuffer.PRINT	ldx #0
+.1				inx
+				lda CmdBuffer,x
+				ora #$80
+				phx
+				jsr COUT
+				plx
+				cpx CmdBuffer
+				bne .1
+				rts
+*--------------------------------------
+CmdBuffer.CLR	jsr CmdBuffer.DEL
+				bne CmdBuffer.CLR
+.9				rts
+*--------------------------------------
+CmdBuffer.DEL	lda CmdBuffer
+				beq .9
+				lda #8
+				jsr COUT
+				dec CmdBuffer
+.9				rts
+*--------------------------------------
+PRBYTE			pha
+				lsr
+				lsr
+				lsr
+				lsr
+				ora #$B0
+				cmp #$BA
+				bcc .1
+				adc #6
+.1				jsr COUT
+				pla
+				and #$0F
+				ora #$B0
+				cmp #$BA
+				bcc COUT
+				adc #6
+				bra COUT
+*--------------------------------------
+CROUT			lda #13	
+*--------------------------------------
+COUT			phx
+				phy
+				>PUSHA
+				ldy #S.PS.hOUTDEV
+				lda	(pPsContext),y
+				>SYSCALL SYS.DevOutA
+				ply
+				plx
+				rts
+*--------------------------------------
+CS.END
+*--------------------------------------
+CMDS			>PSTRING "CD"
+CMDS1			>PSTRING "SET"
+CMDS2			>PSTRING "DATE"
+CMDS3			>PSTRING "TIME"
+CMDS4			>PSTRING "ECHO"
+CMDS5			>PSTRING "TYPE"
+CMDS6			>PSTRING "EXIT"
+				.DA #0
+*--------------------------------------
+LIBSTR			>PSTRING "libstr.o"
+MSG.GREETINGS	>CSTRING "\nA2osX-Shell on Dev=(%h:%h),PS=%h\n\n"
+MSG.UNKNOWN		>CSTRING "Command Not Found\n"
+MSG.SYNERR		>CSTRING "Syntax Error Or Invalid Pathname\n"
+*--------------------------------------
+DS.START
+*--------------------------------------
+hLIBSTR			.BS 1
+bEXIT			.BS 1
+hCMDLINE		.BS 1
+hCMD			.BS 1
+hARGS			.BS 1
+hNEWPATH		.BS 1
+CmdBuffer		.BS CmdBuffer.MAX+1
+CmdBuffer.POS	.BS 1
+CmdHistory		.BS 256
+CmdHistory.IDX	.BS 1 
+CmdHistory.END	.BS 1 
+*--------------------------------------
+DS.END
+*--------------------------------------
+MAN
+SAVE SBIN/SHELL.S
+ASM

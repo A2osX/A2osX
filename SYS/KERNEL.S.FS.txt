@@ -1,0 +1,556 @@
+PR#3
+PREFIX /DATA/A2OSX
+NEW
+INC 1
+AUTO 6
+				.LIST OFF
+				.OP	65C02
+*--------------------------------------
+*               PUBLIC
+*--------------------------------------
+S.CheckPrefixA	jsr S.GetMemPtrA
+S.CheckPrefix	>STYA MLICALL.PARAMS+1
+				>STYA ZPQuickPtr1
+				lda (ZPQuickPtr1)
+				beq .98
+				tax
+				ldy #1
+				lda (ZPQuickPtr1),y
+				cmp #'/'
+				bne .98
+				cpx #1					"/" allowed for listing online volumes
+				beq .8
+				>KMLICALL MLIGETFILEINFO
+				bcs .98					No, invalid path...
+				lda MLICALL.PARAMS+4	Check file type
+				cmp #$0F				Directory?	
+				bne .98
+.8				clc
+				rts
+.98				lda #SYSMGR.ERRIDIR
+.99				sec
+				rts
+*--------------------------------------
+* S.FileSearch
+*  in :
+*   PULLB = hMem to Search Path (PSTRING) %LIB%;/SYS/SLIB
+*   PULLB = hMem to File Name (PSTRING)		
+*  out :
+*   A = hMem of FilePath (PSTRING)
+*--------------------------------------
+S.FileSearch	>PULLA					Get Search path
+				jsr S.ExpandPStrA		Expand it
+				bcc .10
+				pha						save error code
+				>PULLA					discard file name
+				pla
+				sec
+				rts
+.10				sta R.BL				Store Expanded path list to search
+				>PULLB R.AH				Store Filename
+				lda #1
+				sta R.BH				Start At Token 1
+.1				>PUSHB R.BL				push expanded path list
+				>PUSHBI $3B				Push SEP=';'
+				>PUSHB R.BH				Push Token IDX
+				jsr S.PStrGetTkn		Get R.BL token in A
+				bcs .98
+				sta R.CL				Store Token path
+				>PUSHB R.AH				push filename
+				>PUSHB R.CL				Push Token path
+				jsr S.PStrCat
+				bcs .97
+				sta R.CH				Store Full path (Token Path+filename)
+				jsr S.MLIGetFileInfoA
+				bcc .8
+				lda R.CH				Discard this Full Path
+				jsr S.FreeMemA
+				lda R.CL				Discard Token path
+				jsr S.FreeMemA
+				inc R.BH				Try next Token
+				bne .1
+				beq .98					go to discard Expanded path list
+.97				lda R.CL				Discard Token path
+				jsr S.FreeMemA
+.98				lda R.BL				Discard Expanded Path list
+				jsr S.FreeMemA
+				lda #SYSMGR.ERRFNF
+				sec
+				rts
+.8				jsr .97					Dicard all except Full Path
+				lda R.CH
+				clc
+				rts		
+*--------------------------------------
+* S.LoadFileA
+*  in :
+*   A = hMem of FilePath (PSTRING)
+* out :
+*   Y,A = File Length
+*   X = hMem of Loaded File
+*--------------------------------------
+S.LoadFileA		jsr S.MLIOpenA
+				bcs .99
+				sta R.AL				save ref_num
+				stx	R.AH				save Prodos Buffer for freemem
+				jsr S.MLIGetEOFA
+				bcs .98
+				phx						Larger than 64k?
+				plx
+				beq	.1					File too big!!!!
+				lda #SYSMGR.ERRFTB
+				bra .98
+.1				>STYA R.BX				save Length
+				>PUSHYA					Push Length for S.GetMem
+				>PUSHBI 0
+				jsr S.GetMem
+				bcs .98
+				>STYA R.CX
+				stx R.DL				save Segment hMem
+				>PUSHW R.BX				Push Length for S.ReadFile	
+				>PUSHW R.CX				Push Dest PTR
+				>PUSHB R.AL				Push ref_num
+				jsr S.MLIRead
+				bcs .97
+				lda R.AL
+				jsr S.MLICloseA
+				lda R.AH			
+				jsr S.FreeMemA			Discard ProDOS IO Buffer
+				>LDYA R.BX				Return File Length...
+				ldx	R.DL				...and  hMem to Caller
+				clc
+				rts
+.97				pha
+				lda R.DL
+				jsr S.FreeMemA   		freemem because of failed load
+				pla
+.98				pha
+				lda R.AL
+				jsr S.MLICloseA
+				lda R.AH
+				jsr S.FreeMemA			ProDOS IO Buffer
+				pla
+.99				sec
+				rts
+*--------------------------------------
+* S.ListDirInitA
+*  in :
+*   A = PATH (PSTR) /DIR,/DIR/*.?s 
+*  out :
+*   A = hMem of Dir Listing
+*--------------------------------------
+S.ListDirInitA	sta R.AL
+				stz TmpFileName			Reset File.Pattern
+				jsr S.GetMemPtrA
+				>STYA R.BX				Store path
+				jsr S.CheckPrefix		is it a existing directory?
+				bcc .4					yes, continue with empty pattern
+				
+				lda (R.BX)				no, get pattern at end of full path
+				tay
+				ldx #0
+				
+.1				lda (R.BX),y
+				cmp #'/'
+				beq .2
+				inx
+				dey
+				bne .1		
+				
+.2				stx TmpFileName
+				txa
+				beq .4
+
+				lda (R.BX)
+				tay
+
+.3				lda (R.BX),y
+				sta TmpFileName,x
+				dey
+				dex
+				bne .3
+				
+				tya
+				sta (R.BX)				remove pattern from path
+				
+.4				>PUSHWI S.LISTDIR.SIZE	get LISTDIR Struct
+				>PUSHBI 0
+				jsr S.GetMem
+				bcs .99
+				stx R.AH
+				>STYA R.CX				Store LISTDIR Struct
+				txa
+				jsr S.ClrMemA			reset all bytes
+				
+				ldy TmpFileName
+				beq .5
+				
+				lda #0
+				>PUSHYA
+				>PUSHBI 0
+				jsr S.GetMem
+				bcs .98
+				>STYA ZPQuickPtr1
+				
+				txa
+				ldy #S.LISTDIR.hPATTERN
+				sta (R.CX),y
+				
+				ldy TmpFileName
+.40				lda TmpFileName,y
+				sta (ZPQuickPtr1),y
+				dey
+				bpl .40
+				
+.5				lda (R.BX)
+				cmp #1					length = 1 ? ('/')
+				bne .6
+				jsr S.ListDirInitAV
+				bcs .98
+				lda R.AH
+				rts
+				
+.6				jsr S.ListDirInitAD
+				bcs .98
+				lda R.AH
+				rts
+				
+.98				pha
+				lda R.AH				Discard S.LISTDIR
+				jsr S.ListDirCloseA
+				pla
+.99				sec
+				rts
+*--------------------------------------
+S.ListDirInitAV	>PUSHWI 256
+				>PUSHBI 0
+				jsr S.GetMem
+				bcs .99
+				>PUSHYA					push buffer for online call
+				txa
+				sta (R.CX)				save hONLINE buffer
+				>PUSHBI 0				All devices
+				jsr S.MLIOnline
+				bcs .98
+				ldy #S.LISTDIR.ONLINEPTR
+				lda #0					make index point first Entry
+				sta (R.CX),y
+				clc
+				rts
+.98				lda (R.CX)
+				jsr S.FreeMemA
+.99				sec
+				rts
+*--------------------------------------
+S.ListDirInitAD	lda #0
+				sta (R.CX)				reset hONLINE
+				>LDYA R.BX				Open DIR
+				jsr S.MLIOpen
+				bcs .99
+				ldy #S.LISTDIR.REFNUM
+				sta (R.CX),y			save ref_num
+				txa
+				ldy #S.LISTDIR.hIOBUF
+				sta (R.CX),y			save ProDOS IO buffer hMem
+
+				>PUSHWI 512				get Read buffer
+				>PUSHBI 0
+				jsr S.GetMem
+				bcs .99
+				txa
+				ldy #S.LISTDIR.hREADBUF save Read Buffer hMem
+				sta (R.CX),y			
+				jsr S.ListDirReadBlock
+				bcs .99
+				>STYA ZPQuickPtr1
+
+				ldy #$23				get entry_length
+				lda (ZPQuickPtr1),y
+				ldy #S.LISTDIR.EL
+				sta (R.CX),y
+
+				ldy #$24				get entry_per_block
+				lda (ZPQuickPtr1),y
+				ldy #S.LISTDIR.EPB
+				sta (R.CX),y
+
+				ldy #$25				get File_count LO
+				lda (ZPQuickPtr1),y
+				ldy #S.LISTDIR.FC
+				sta (R.CX),y
+
+				ldy #$26				get File_count HI
+				lda (ZPQuickPtr1),y
+				ldy #S.LISTDIR.FC+1
+				sta (R.CX),y
+
+				ldy	#S.LISTDIR.FI
+				sta (R.CX),y
+				iny
+				sta (R.CX),y			set FI to $0000
+				clc
+.99				rts
+*--------------------------------------
+* S.DirListNextA
+*   A = S.LISTDIR hMEM
+*  out :
+*   A = hMem To Dir Entry
+*--------------------------------------
+S.ListDirNextA	jsr S.GetMemPtrA		Get PTR to S.LISTDIR	
+				>STYA R.CX
+				lda (R.CX)				Online Data?
+				beq S.ListDirNextAD		no,list files
+*--------------------------------------
+S.ListDirNextAV	jsr S.GetMemPtrA
+				>STYA ZPQuickPtr1		ZPQuickPtr1 = Online DATA
+.10				ldy #S.LISTDIR.ONLINEPTR
+				lda (R.CX),y
+				cmp #16
+				beq .9
+				
+				inc
+				sta (R.CX),y
+				dec
+				asl
+				asl
+				asl
+				asl
+				tay
+				
+				lda (ZPQuickPtr1),y
+				and #$0F
+				beq .10
+				
+				sta TmpFileName
+				ldx #0
+.1				iny
+				inx
+				lda (ZPQuickPtr1),y
+				sta TmpFileName,x
+				cpx TmpFileName
+				bne .1
+				
+				>PUSHWI	16
+				>PUSHBI 0
+				jsr S.GetMem
+				bcs .9
+
+				>STYA ZPQuickPtr2
+
+				ldy #15
+.2				lda TmpFileName,y
+				sta (ZPQuickPtr2),y
+				dey
+				bpl .2
+
+				lda (ZPQuickPtr2)		Mark Record as "VOL"
+				ora #$C0
+				sta (ZPQuickPtr2)
+				
+				txa						Get back hMem of Volume.Name
+				clc
+				rts
+				
+.9				sec
+				rts
+*--------------------------------------
+S.ListDirNextAD	stz R.DL				Reset Return Record hMem
+				ldy #S.LISTDIR.FI		File Index = File count ?
+				lda (R.CX),y
+				ldy #S.LISTDIR.FC
+				cmp (R.CX),y
+				bne .1
+				ldy #S.LISTDIR.FI+1
+				lda (R.CX),y
+				ldy #S.LISTDIR.FC+1
+				cmp (R.CX),y
+				bne .1
+				sec						yes, exit no more file
+				rts
+*--------------------------------------
+.1				ldy #S.LISTDIR.EIB		Entry Index in block = Entry per block ?
+				lda (R.CX),y
+				ldy #S.LISTDIR.EPB
+				cmp (R.CX),y
+				bne .2
+				jsr S.ListDirReadBlock
+				bcc .3
+				rts
+*--------------------------------------
+.2				ldy #S.LISTDIR.hREADBUF
+				lda (R.CX),y
+				jsr S.GetMemPtrA
+.3				>STYA R.AX				R.AX = READ BUFFER
+				ldy #S.LISTDIR.BLKPTR
+				lda (R.CX),y
+				clc
+				adc R.AX
+				sta R.AX
+				iny
+				lda (R.CX),y
+				adc R.AX+1
+				sta R.AX+1
+				
+				lda (R.AX)				Is is a deleted file ? (storage_type=0)
+				and #$F0
+				beq .40
+				
+				cmp #$F0				Volume header ?
+				beq .30					yes, do not filter
+				cmp #$E0				Directory header ?
+				beq .30					yes, do not filter
+				
+				ldy #S.LISTDIR.hPATTERN	any filter ?
+				lda (R.CX),y
+				beq .30
+				jsr S.GetMemPtrA
+				>PUSHYA					push Filter hMem
+				
+				lda (R.AX)
+				and #$0F
+				sta TmpFileName
+				tay
+.31				lda (R.AX),y
+				sta TmpFileName,y
+				dey
+				bne .31
+				
+				>PUSHWI TmpFileName		push Filename
+				jsr S.PStrMatchP
+				bcs .40					no match
+				
+.30				ldy #S.LISTDIR.EL		Get Entry length
+				lda (R.CX),y
+				tay
+				lda #0
+				>PUSHYA					Get an entry_length buffer
+				>PUSHBI 0
+				jsr S.GetMem
+				bcs .99
+				>STYA R.BX				R.BX = DEST RECORD
+				stx R.DL
+			
+				ldy #S.LISTDIR.EL
+				lda (R.CX),y
+				tay
+				dey
+.4				lda (R.AX),y
+				sta (R.BX),y
+				dey
+				bpl .4
+				
+.40				ldy #S.LISTDIR.EIB		Set ENTRY INDEX IN BLOCK +=1
+				lda (R.CX),y
+				inc
+				sta (R.CX),y
+				ldy #S.LISTDIR.EL		Set BLOCK PTR +=entry_length
+				lda (R.CX),y
+				ldy #S.LISTDIR.BLKPTR
+				clc
+				adc (R.CX),y
+				sta (R.CX),y
+				bcc .5
+				iny
+				lda (R.CX),y
+				inc
+				sta (R.CX),y
+				
+.5				lda (R.AX)
+				and #$E0				is storage_type = $F or $E ?
+				cmp #$E0				yes, do NOT increase FI
+				bne .6
+				
+				ldy #S.LISTDIR.FI		Increase FILE INDEX
+				lda (R.CX),y
+				inc
+				sta (R.CX),y
+				bne .6
+				iny
+				lda (R.CX),y
+				inc
+				sta (R.CX),y
+				
+.6				lda R.DL
+				bne .8
+				jmp S.ListDirNextAD		Nothing to return, start over for next file entry
+	
+.8				clc
+				rts
+				
+.99				sec
+				rts
+*--------------------------------------
+* S.DirListCloseA
+*  in :
+*   A = hS.LISTDIR
+*--------------------------------------
+S.ListDirCloseA	pha
+				jsr S.GetMemPtrA
+				>STYA ZPQuickPtr1
+				ldy #S.LISTDIR.REFNUM
+				lda (ZPQuickPtr1),y
+				beq .1
+				jsr S.MLICloseA
+				bcs *					If Close Failed, we cannot free IOBUF
+				
+.1				ldy #S.LISTDIR.hIOBUF
+				lda (ZPQuickPtr1),y
+				beq .2
+				jsr S.FreeMemA
+				
+.2				ldy #S.LISTDIR.hREADBUF
+				lda (ZPQuickPtr1),y
+				beq .3
+				jsr S.FreeMemA
+				
+.3				lda (ZPQuickPtr1)		Online buffer
+				beq .4
+				jsr S.FreeMemA
+				
+.4				ldy #S.LISTDIR.hPATTERN
+				lda (ZPQuickPtr1),y
+				beq .5
+				jsr S.FreeMemA
+				
+.5				pla
+				jsr S.FreeMemA
+				clc
+				rts
+*--------------------------------------
+*               PRIVATE
+*--------------------------------------
+* S.ListDirReadBlock
+*  In :
+*   CX = LISTDIR
+*  Out :
+*   Y,A = READ BUFFER
+*--------------------------------------
+S.ListDirReadBlock
+				ldy #S.LISTDIR.REFNUM
+				lda (R.CX),y			get ref_num
+				sta MLICALL.PARAMS+1
+				ldy #S.LISTDIR.hREADBUF
+				lda (R.CX),y			get READ BUFFER
+				jsr S.GetMemPtrA
+				>STYA MLICALL.PARAMS+2
+				>LDYAI 512
+				>STYA MLICALL.PARAMS+4
+				>KMLICALL MLIREAD
+				bcs .9
+				ldy #S.LISTDIR.BLKPTR	set BLKPTR to $0004
+				lda #4
+				sta (R.CX),y
+				iny
+				lda #0
+				sta (R.CX),y
+				ldy #S.LISTDIR.EIB		set EIB to 0
+				sta (R.CX),y
+				>LDYA MLICALL.PARAMS+2
+.9				rts
+*--------------------------------------
+TmpFileName		.BS 16
+*--------------------------------------
+MAN
+SAVE SYS/KERNEL.S.FS
+LOAD SYS/KERNEL.S
+ASM

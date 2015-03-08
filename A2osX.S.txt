@@ -1,0 +1,538 @@
+PR#3
+PREFIX /DATA/A2OSX
+NEW
+INC 1
+AUTO 6
+				.LIST OFF
+				.OP	65C02
+				.OR	$2000
+*				.TF A2osX.SYSTEM
+				.TF A
+*--------------------------------------
+				.INB INC/MACROS.I
+				.INB INC/A2OSX.I
+				.INB INC/IO.I
+				.INB INC/MONITOR.I
+				.INB INC/PRODOS.I
+*--------------------------------------
+TmpPtr1			.EQ	$0					main & aux ZP
+TmpPtr2			.EQ	$2					main & aux ZP
+*--------------------------------------
+IO.Buffer		.EQ $3C00				1k Buffer for MLI open
+Load.Address	.EQ $4000				for loading kernel.bin before relocation
+*--------------------------------------
+* 				A2osX LOADER
+*--------------------------------------
+*	TODO :
+* /intercept MLI CALLS with 
+* PREFIX=/MNT/
+*--------------------------------------
+START			jmp	A2osX.INIT
+				.DA $EEEE
+				.DA #$7F
+				.BS	$7F
+*--------------------------------------
+A2osX.INIT		ldx	#$FF				init 6502 stack to highest
+*				txs
+
+				php
+				sei
+				sta SETALTZP			Switch to alt ZP
+				stx A2osX.SaveS			make Alt SP to highest too
+				sta CLRALTZP			Switch to main ZP
+				plp
+				
+				>LDYAI D.STACKSEG
+				>STYA R.SP				init Soft Stack
+				
+*				>LDYAI WARMBOOT
+*				>STYA POWERUP
+*				jsr SETPWRC
+
+				>LDAXI MSG.SYSMEM
+				jsr PrintCStrAX
+
+				lda MACHID
+				and #MACHIDRAM
+				cmp #MACHIDRAM128
+				beq A2osX.SysMemOK
+
+				>LDAXI MSG.SYSMEM.KO
+				jsr PrintCStrAX
+				bra *
+*--------------------------------------				
+A2osX.SysMemOK	>LDAXI MSG.SYSMEM.OK
+				jsr PrintCStrAX
+				
+				>LDAXI MSG.65x
+				jsr PrintCStrAX
+				jsr Init6502
+				ldy A2osX.CPUTYPE
+				lda MSG.CPUTYPEH,y
+				tax
+				lda MSG.CPUTYPEL,y
+				jsr PrintCStrAX
+				
+				lda A2osX.CPUTYPE
+				bne A2osX.RamDrv
+				>LDAXI MSG.65x.KO
+				jsr PrintCStrAX
+				bra *
+*--------------------------------------
+A2osX.RamDrv	>LDAXI MSG.RAMDRV
+				jsr PrintCStrAX
+				jsr DisableRamDRV
+				bcc .2
+				tax
+				beq .1
+				>LDAXI MSG.RAMDRV.KO1
+				jsr PrintCStrAX
+				bra A2osX.RamWorks
+				
+.1				>LDAXI MSG.RAMDRV.KO0
+				jsr PrintCStrAX
+				bra A2osX.RamWorks
+.2				>LDAXI MSG.RAMDRV.OK
+				jsr PrintCStrAX
+*--------------------------------------
+A2osX.RamWorks	>LDAXI MSG.RW
+				jsr PrintCStrAX
+				
+				jsr RWDetect
+				bcs .10
+
+				>LDAXI MSG.RW.OK
+				jsr PrintCStrAX
+				
+				bra A2osX.Z80
+
+.10				jsr RWInit
+				bcc .1
+				
+				>LDAXI MSG.RW.KO1
+				jsr PrintCStrAX
+				bra A2osX.Z80
+				
+.1				pha
+				>LDAXI MSG.RW.OK1
+				jsr PrintCStrAX
+
+				jsr RWInstall
+				bcc .2
+
+				>LDAXI MSG.RW.KO2
+				jsr PrintCStrAX
+				bra A2osX.Z80
+
+.2				>LDAXI MSG.RW.OK2
+				jsr PrintCStrAX
+
+				jsr RWFormat
+				bcc .3
+
+				>LDAXI MSG.RW.KO3
+				jsr PrintCStrAX
+				bra A2osX.Z80
+				
+.3				>LDAXI MSG.RW.OK3
+				jsr PrintCStrAX
+*--------------------------------------
+A2osX.Z80		>LDAXI MSG.Z80
+				jsr PrintCStrAX
+				jsr InitZ80
+				bcs .1
+				pha 					Push  Z80Slot
+				
+				>LDAXI MSG.Z80.OK
+				jsr PrintCStrAX
+				bra .8
+
+.1				>LDAXI MSG.Z80.KO
+				jsr PrintCStrAX
+				
+.8				>LDAXI MSG.LOADING
+				jsr PrintCStrAX
+				
+				jsr LoadKernel
+				bcs .9
+				
+				phx
+				pha
+				>LDAXI MSG.LOADING.OK
+				jsr PrintCStrAX
+				
+				ldx #A2osX.GP.End-A2osX.GP.start
+				
+.81				lda	A2osX.GP.start-1,x
+				sta A2osX.GP-1,x
+				dex
+				bne .81
+				
+				>DEBUG
+
+				php
+				pla
+				sei
+				tsx
+				stx A2osX.SaveS
+				stx SETALTZP
+				bit RRAMWRAMBNK1
+				bit RRAMWRAMBNK1
+				ldx	A2osX.SaveS
+				txs
+				pha
+				plp
+				jmp $E000
+
+				
+.9				pha
+				>LDAXI MSG.LOADING.KO
+				jsr PrintCStrAX
+
+				bra *
+*--------------------------------------
+* Out:
+*  A = 0, 6502
+*  A = 1, 65C02
+*  A = 2, R65C02
+*  A = 3, 65C816
+*--------------------------------------
+Init6502		ldy #0					Test 6502 BCD bug
+				sed
+				lda #$99
+				clc
+				adc #$01
+				cld
+				bmi .9					BUG!, we have 6502
+
+				ldy #3					test 65C816 TYX Instruction
+				ldx #0
+				.OP 65816
+				tyx						TYX: if 65C816, x becomes non-zero
+				.OP 65C02
+				bne .9					worked! 65C816
+
+				dey						y=2 -> R65C02
+				ldx $EA					save zp $EA
+				stz $EA					store 0 in $EA
+				.OP 65R02
+				smb 7,$EA				if not Rockwell, assemble as nop nop
+				.OP	65C02
+				asl $EA					cs if Rockwell
+				stx $EA					restore zp $EA
+				bcs .9
+				
+				dey						y=1 -> 65C02
+				
+.9				sty A2osX.CPUTYPE
+				rts
+*--------------------------------------
+DisableRamDRV	php
+				sei
+				lda DEVPTRS3D2
+				cmp DEVPTRS0D1
+				bne .1
+				lda DEVPTRS3D2+1
+				cmp DEVPTRS0D1+1
+				beq .9					S3D2=NODEV, nothing to do
+				
+.1				ldx DEVCNT
+.2				lda DEVLST,x			LOOKING FOR $BF, $BB, $B7, $B3
+				and #$F3
+				cmp #$B3
+				beq .3
+				dex
+				bpl .2
+				plp
+				lda #1					No device found, exit with error
+				sec
+				rts
+				
+.3				ldx #0
+.4				lda DEVLST+1,x
+				sta DEVLST,x
+				inx
+				cpx DEVCNT
+				bne .4
+				
+				stz DEVLST,x
+				dec DEVCNT
+				
+				lda DEVPTRS0D1
+				sta DEVPTRS3D2
+				lda DEVPTRS0D1+1
+				sta DEVPTRS3D2+1
+				plp
+				clc						Success!!
+				rts
+				
+.9				plp
+				lda #0					Not detected
+				sec
+				rts
+*--------------------------------------
+LoadKernel		jsr MLI
+				.DA #MLIGETPREFIX
+				.DA MLIGETPREFIX01
+				bcs .9
+				ldy #0
+				ldx Path.Buffer
+.1				lda SYSKERNEL,y
+				beq .2
+				sta Path.Buffer+1,x
+				inx
+				iny
+				bra .1
+				
+.2				stx	Path.Buffer		
+				jsr MLI
+				.DA #MLIOPEN
+				.DA MLIOPEN01
+				bcs .9
+				
+				lda MLIOPEN01+5
+				sta MLIREAD01+1
+				sta MLICLOSE01+1
+				jsr MLI
+				.DA #MLIREAD
+				.DA MLIREAD01
+				bcs .9
+				
+				jsr MLI
+				.DA #MLICLOSE
+				.DA MLICLOSE01
+				bcs .9
+				
+				php
+				sei
+				sta SETALTZP
+				lda RRAMWRAMBNK1
+				lda RRAMWRAMBNK1
+
+				>LDYAI Load.Address+$1F00
+				>STYA TmpPtr1
+				>LDYAI $E000+$1F00
+				>STYA TmpPtr2
+				ldy #$F9				do not trash NMI,BRK,IRQ Vectors
+				
+.3				lda (TmpPtr1),y
+				sta (TmpPtr2),y
+				dey
+				cpy #$FF
+				bne .3
+				
+				dec TmpPtr1+1
+				dec TmpPtr2+1
+				lda TmpPtr2+1
+				cmp #$DF
+				bne .3
+				
+				lda RROMBNK1
+				sta CLRALTZP
+				plp		
+				>LDAX MLIREAD01+6
+				
+				clc
+.9				rts
+*--------------------------------------
+MLIGETPREFIX01	.DA #1
+				.DA Path.Buffer
+MLIOPEN01		.DA #3
+				.DA Path.Buffer
+				.DA IO.Buffer
+				.BS 1
+MLIREAD01		.DA #4
+				.BS 1
+				.DA Load.Address
+				.DA $2000
+				.BS 2
+MLICLOSE01		.DA #1
+				.BS 1
+*--------------------------------------
+Path.Buffer		.BS MLI.MAXPATH
+SYSKERNEL		>CSTRING "SYS/KERNEL"
+*--------------------------------------
+PrintCStrAX		>STAX TmpPtr1
+				pla 
+				sta TmpPtr2
+				pla 
+				sta TmpPtr2+1
+				
+				ldy #0
+.1				lda (TmpPtr1),y
+				beq .9
+				cmp #'%'
+				bne .4
+				
+				iny
+				lda (TmpPtr1),y
+				beq .9
+				cmp #'d'
+				bne .2
+				pla
+				jsr PrintADec
+				bra .8
+				
+.2				cmp #'D'
+				bne .3
+				pla
+				plx
+				jsr PrintAXDec
+				bra .8
+				
+.3				cmp #'h'
+				bne .4
+				pla
+				jsr PRBYTE
+				
+.4				cmp #'\'
+				bne .7
+				iny
+				lda (TmpPtr1),y
+				beq .9
+				cmp #'n'
+				bne .9
+				lda #$0D
+				
+.7				ora #$80
+				jsr COUT
+.8				iny
+				bne .1
+
+.9				lda TmpPtr2+1
+				pha 
+				lda TmpPtr2
+				pha
+				rts				
+*--------------------------------------
+PrintADec		ldx #0
+PrintAXDec		>STAX HEX
+PrintDec		stz BCD
+				stz BCD+1
+				stz BCD+2
+				
+				phy
+				
+				ldx #16			let's roll 16 bits
+				sed
+.2				asl HEX
+				rol	HEX+1
+				php				cpy will disturb carry while BCD adc
+				ldy #0
+.3				plp
+				lda BCD,y
+				adc BCD,y
+				sta BCD,y
+				php
+				iny
+				cpy #3			Last byte of BCDBUF?
+				bne .3
+				plp
+				dex
+				bne .2
+				
+				cld
+				
+				stz bFlag
+				
+				ldx #2
+.4				lda BCD,x
+				lsr
+				lsr
+				lsr
+				lsr
+				bne .5
+				bit bFlag
+				bpl .6
+.5				sec
+				ror bFlag
+				ora #$B0
+				jsr COUT
+.6				lda BCD,x
+				and #$0F
+				bne .7
+				bit bFlag
+				bpl .8
+.7				sec
+				ror bFlag
+				ora #$B0
+				jsr COUT
+.8				dex
+				bpl .4
+				
+				bit bFlag
+				bmi .9
+				lda #$B0
+				jsr COUT
+				
+.9				ply
+				rts
+*--------------------------------------
+MSG.SYSMEM		>CSTRING "Checking System Memory..."
+MSG.SYSMEM.OK	>CSTRING "128k Detected.\n"
+MSG.SYSMEM.KO	>CSTRING "A2osX Requires At Least 128k Memory.\n"
+MSG.65x			>CSTRING "Checking 65x CPU..."
+MSG.65x.KO		>CSTRING "A2osX Requires At Least A 65C02 CPU.\n"
+MSG.RAMDRV		>CSTRING "Checking ProDOS RamDrive..."
+MSG.RAMDRV.OK	>CSTRING "Successfully Disabled.\n"
+MSG.RAMDRV.KO0	>CSTRING "Not Detected.\n"
+MSG.RAMDRV.KO1	>CSTRING "Uninstall Failed !!!\n"
+MSG.CLOCK.OK1	>CSTRING "Already Installed.\n"
+MSG.CLOCK.OK2	>CSTRING "Successfully Installed.\n"
+MSG.CLOCK.KO	>CSTRING "Install Failed !!!\n"
+MSG.RW			>CSTRING "Detecting Ramworks Card..."
+MSG.RW.OK		>CSTRING "Already Installed as /RAM31.\n"
+MSG.RW.OK1		>CSTRING "%d Pages Detected.\n"
+MSG.RW.OK2		>CSTRING "RamWorks Driver Installed.\n"
+MSG.RW.OK3		>CSTRING "RamWorks Drive Formatted.\n"
+MSG.RW.KO1		>CSTRING "Not Detected.\n"
+MSG.RW.KO2		>CSTRING "RamWorks Driver Install Error.\n"
+MSG.RW.KO3		>CSTRING "RamWorks Drive Format Error.\n"
+MSG.Z80			>CSTRING "Detecting Z80 CPU..."
+MSG.Z80.OK		>CSTRING "Detected In Slot %d.\n"
+MSG.Z80.KO		>CSTRING "Not Detected.\n"
+MSG.LOADING		>CSTRING "Loading Kernel..."
+MSG.LOADING.OK	>CSTRING "%D Bytes Read.\n"
+MSG.LOADING.KO	>CSTRING "Error $%h While Loading Kernel.\n"
+*--------------------------------------
+MSG.CPUTYPEL	.DA #MSG.6502
+				.DA #MSG.65C02
+				.DA #MSG.R65C02
+				.DA #MSG.65C816
+MSG.CPUTYPEH	.DA /MSG.6502
+				.DA /MSG.65C02
+				.DA /MSG.R65C02
+				.DA /MSG.65C816
+*--------------------------------------
+MSG.6502		>CSTRING "NMOS 6502.\n"
+MSG.65C02		>CSTRING "CMOS 65C02.\n"
+MSG.R65C02		>CSTRING "Rockwell R65C02.\n"
+MSG.65C816		>CSTRING "16 Bits 65C816.\n"
+*--------------------------------------
+HEX				.BS 2
+BCD				.BS 3
+bFlag			.BS 1
+*--------------------------------------
+				.INB A2OSX.S.GP
+				.INB A2OSX.S.RW
+				.INB A2OSX.S.Z80
+*--------------------------------------
+* ****** START OF MLI QUIT CODE ******
+* setup $0300 Global page :
+* Copy Back from $D010-$D0FF to $300-$3F0
+* setup $1000 Z80 switch code				
+*--------------------------------------
+				.PH $1000
+				cld
+				rts
+				
+ROOT.PATH		.BS MLI.MAXPATH			
+				.EP
+*--------------------------------------
+* Driver for NoSlotClock
+* Load at (DATETIME+1)
+*--------------------------------------
+*--------------------------------------
+MAN
+SAVE A2OSX.S
+ASM

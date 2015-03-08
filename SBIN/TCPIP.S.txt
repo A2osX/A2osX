@@ -1,0 +1,449 @@
+PR#3
+PREFIX /DATA/A2OSX
+NEW
+INC 1
+AUTO 6
+				.LIST OFF
+				.OP	65C02
+				.OR	$2000
+				.TF SBIN/TCPIP
+*--------------------------------------
+				.INB INC/MACROS.I
+				.INB INC/A2OSX.I
+				.INB INC/KERNEL.I
+				.INB INC/LIBTCPIP.I
+*--------------------------------------
+ZPFrameBase1	.EQ ZPBIN
+ZPFrameLen1		.EQ ZPBIN+2
+ZPFramePtr1		.EQ ZPBIN+4
+ZPFrameBase2	.EQ ZPBIN+6
+ZPFrameLen2		.EQ ZPBIN+8
+ZPFramePtr2		.EQ ZPBIN+10
+*--------------------------------------
+* Main entry point
+*--------------------------------------
+* Code signature and INIT table
+*--------------------------------------
+* CLD 			$D8
+* JMP (*,x)		$7C
+* 				#JMPTABLE
+*				/JMPTABLE
+*--------------------------------------
+CS.START		cld
+				jmp (.1,x)
+.1				.DA CS.INIT
+				.DA CS.RUN
+				.DA CS.DOEVENT
+				.DA	CS.QUIT
+L.LIBTCPIP		.DA LIBTCPIP
+L.CFGFILENAME	.DA CFGFILENAME
+L.IPCFG			.DA IPCFG
+				.DA 0
+				.DA CS.END-CS.START		Code Length To Relocate
+				.DA DS.END-DS.START		Data Segment to Allocate
+*--------------------------------------
+CS.INIT			>LIBLOADP L.LIBTCPIP
+				bcs .99
+				sta hLIBTCPIP
+				ldx #0
+.1				stz IPCFG,x
+				inx
+				cpx #S.IPCFG
+				bne .1
+				
+				jsr CS.INIT.DEV
+				
+				bcs .99
+				
+*				jsr CS.INIT.CFGFILE		continue even if error opening CFG file
+
+				ldx #S.IPCFG.HOSTNAME
+				lda IPCFG,x
+				bne .3
+
+				ldy #0
+.2				lda DefaultHostName,y
+				sta IPCFG,x
+				beq .3
+				inx
+				iny
+				bne .2
+			
+.3				>PUSHW L.IPCFG
+				>PUSHBI K.PROTOID.IP
+				>SYSCALL SYS.AddNetCfg
+				bcs .99
+				
+				lda (pPsContext)
+				ora #S.PS.F.EVENT		Now accept events
+				sta (pPsContext)
+				
+				clc
+.99				rts
+*--------------------------------------
+CS.INIT.DEV		ldy #S.PS.hARGS
+				lda (pPsContext),y
+				>PUSHA
+				>PUSHBI $20				Push SEP=' '
+				>PUSHBI 1				Push 1 for getting DEV
+				>SYSCALL SYS.PStrGetTkn
+				bcs .99
+				sta hDEVNAME			save DevName for discard
+				>SYSCALL SYS.GetDevByNameA
+				bcs .98
+
+				sta hDev
+				ldx #S.IPCFG.HDEV
+				sta IPCFG,x
+				
+				>SYSCALL SYS.GetDevInfoA
+				>STYA ZPQuickPtr1
+
+				ldy #0
+				ldx #S.IPCFG.MAC
+.1				lda (ZPQuickPtr1),y
+				sta IPCFG,x
+				inx
+				iny
+				cpy #S.IPCFG.MAC+6
+				bne .1
+				
+				lda hDEVNAME
+				>SYSCALL SYS.FreeMemA
+				clc
+				rts
+.98				pha
+				lda hDEVNAME
+				>SYSCALL SYS.FreeMemA
+				pla
+.99				rts				
+*--------------------------------------
+CS.INIT.CFGFILE	>PUSHW L.CFGFILENAME
+				>SYSCALL SYS.ExpandPStr
+				bcs .99
+				sta hCfgFileName
+				>SYSCALL SYS.LoadFileA
+				bcs .98
+				stx hCfgFile
+				>STYA hCfgFileLen
+				txa
+				>SYSCALL SYS.GetMemPtrA
+				>STYA ZPQuickPtr1
+				
+				
+				
+				
+.89				lda hCfgFile
+				>SYSCALL SYS.FreeMemA
+				
+				lda hCfgFileName
+				>SYSCALL SYS.FreeMemA
+				clc
+				rts
+				
+.98				pha
+				lda hCfgFileName
+				>SYSCALL SYS.FreeMemA
+				pla
+				
+.99				sec
+				rts
+*--------------------------------------
+CS.RUN			clc
+				rts
+*--------------------------------------
+CS.DOEVENT		>PULLW pEvent
+				lda (pEvent)
+				and #S.EVT.F.NET
+				beq .9
+				
+				ldy #S.EVT.hDEV
+				lda (pEvent),y
+				cmp hDev
+				beq CS.DOEVENT.NET
+.9				sec
+				rts
+				
+CS.DOEVENT.NET	ldy #S.EVT.DATALO		Get Frame hMem
+				lda (pEvent),y
+				>SYSCALL SYS.GetMemPtrA
+				>STYA ZPFrameBase1
+				
+				ldy #S.EVT.DATAW1		Get Frame Len
+				lda (pEvent),y
+				sta ZPFrameLen1
+				iny
+				lda (pEvent),y
+				sta ZPFrameLen1+1
+				
+				ldy #S.ETH.ETHERTYPE
+				lda (ZPFrameBase1),y
+				tax
+				iny
+				lda (ZPFrameBase1),y
+				
+				cmp #S.ETH.ETHERTYPE.ARP
+				bne .1
+				cpx /S.ETH.ETHERTYPE.ARP
+				bne .1
+				jsr ARPListener				
+				bcc .89
+				rts
+				
+.1				cmp #S.ETH.ETHERTYPE.IP
+				bne .99
+				cpx /S.ETH.ETHERTYPE.IP
+				bne .99
+				
+				ldy #S.IP.PROTOCOL				
+				lda (ZPFrameBase1),y
+				cmp #S.IP.PROTOCOL.ICMP
+				bne .2
+				jsr ICMPListener
+				bcc .89
+				rts
+				
+.2				cmp #S.IP.PROTOCOL.UDP
+				bne .3
+				>PUSHW ZPFrameLen1
+				>PUSHW ZPFrameBase1
+				>LIBCALL hLIBTCPIP,LIBTCPIP.UDP.LISTENER
+				bcc .89
+				rts
+				
+.3				cmp #S.IP.PROTOCOL.TCP
+				bne .99
+				>PUSHW ZPFrameLen1
+				>PUSHW ZPFrameBase1
+				>LIBCALL hLIBTCPIP,LIBTCPIP.TCP.LISTENER
+				bcc .89
+				rts
+				
+.89				>SYSCALL SYS.DestroyEvent
+				clc
+				rts
+.99				sec
+				rts
+*--------------------------------------
+CS.QUIT			lda hLIBTCPIP
+				>SYSCALL SYS.FreeMemA
+				clc
+				rts
+*--------------------------------------
+*				PRIVATE
+*--------------------------------------
+ARPListener		jsr GetIPCFG
+				
+				ldy #S.ARP.TPA
+				ldx #S.IPCFG.IP
+				
+.1				lda (ZPFrameBase1),y
+				cmp IPCFG,x
+				bne .9
+				iny
+				inx
+				cpx #S.IPCFG.IP+4
+				bne .1
+				
+				ldy #S.ARP.OPERATION+1	HI byte
+				lda (ZPFrameBase1),y
+				cmp #S.ARP.OPERATION.REQ
+				beq ARPListener.REQ
+				
+				cmp #S.ARP.OPERATION.REP
+				beq ARPListener.REP
+				
+.9				clc						Discard any other ARP frames
+				rts
+
+ARPListener.REP	>LDAXI S.ARP.SHA
+				jsr SetFramePtr1AX
+				>PUSHW ZPFramePtr1
+				>LDAXI S.ARP.SPA
+				jsr SetFramePtr1AX
+				>PUSHW ZPFramePtr1
+				>LIBCALL hLIBTCPIP,LIBTCPIP.ARP.ADD
+				clc
+ARPListener.RTS	rts
+
+ARPListener.REQ	>LIBCALL hLIBTCPIP,LIBTCPIP.NEW.ARP.FRAME
+				bcs ARPListener.RTS
+				
+				phx
+				>STYA ZPFrameBase2
+				ldy #S.ARP.OPERATION+1
+				lda #S.ARP.OPERATION.REP
+				sta (ZPFrameBase2),y
+				
+				>LDAXI S.ARP.SHA
+				jsr SetFramePtr1AX
+
+				>LDAXI S.ETH.DSTMAC
+				jsr SetFramePtr2AX
+
+				ldy #6
+				jsr CopyFramePtr12
+				
+				>LDAXI S.ARP.THA
+				jsr SetFramePtr2AX
+
+				ldy #10					IP(4) + MAC(6)
+				jsr CopyFramePtr12
+				
+				>PUSHW ZPFramePtr1		still point to SHA
+				>LDAXI S.ARP.SPA
+				jsr SetFramePtr1AX
+				>PUSHW ZPFramePtr1
+				>LIBCALL hLIBTCPIP,LIBTCPIP.ARP.ADD
+				
+				ldx #5
+				ldy #S.ARP.SHA+5
+.4				lda IPCFG+S.IPCFG.MAC,x
+				sta (ZPFrameBase2),y
+				dey
+				dex
+				bpl .4
+				
+				ldx #3
+				ldy #S.ARP.SPA+3
+.5				lda IPCFG+S.IPCFG.IP,x
+				sta (ZPFrameBase2),y
+				dey
+				dex
+				bpl .5
+				
+				>PUSHW ZPFrameBase2
+				>LIBCALL hLIBTCPIP,LIBTCPIP.SEND.ARP.FRAME
+			
+				pla
+				>SYSCALL SYS.FreeMemA
+				clc
+				rts
+*--------------------------------------
+ICMPListener	ldy #S.ICMP.TYPE
+				lda (ZPFrameBase1),y
+				cmp #S.ICMP.TYPE.ECHOREQ
+				bne .9
+				
+				jsr GetIPCFG
+							
+				ldy #S.IP.DST
+				ldx #S.IPCFG.IP
+.10				lda (ZPFrameBase1),y
+				cmp IPCFG,x
+				bne .9
+				iny
+				inx
+				cpx #S.IPCFG.IP+4
+				bne .10
+				
+				>LIBCALL hLIBTCPIP,LIBTCPIP.NEW.ICMP.FRAME
+				bcs .9
+				phx
+				>STYA ZPFrameBase2
+				ldy #S.ICMP.TYPE
+				lda #S.ICMP.TYPE.ECHOREP
+				sta (ZPFrameBase2),y
+				jsr MakeIPReply
+				
+				ldy #S.ICMP.IDENTIFIER
+.1				lda (ZPFrameBase1),y
+				sta (ZPFrameBase2),y
+				iny
+				cpy #ZPFrameLen1
+				bne .1
+				
+				>PUSHW ZPFrameLen1
+				>PUSHW ZPFrameBase2
+				>LIBCALL hLIBTCPIP,LIBTCPIP.SEND.ICMP.FRAME
+				
+				pla
+				>SYSCALL SYS.FreeMemA
+				clc
+				rts
+.9				sec
+				rts
+*--------------------------------------
+GetIPCFG		>LIBCALL hLIBTCPIP,LIBTCPIP.GET.IPCFG
+				>STYA ZPQuickPtr1
+				
+				ldy #S.IPCFG
+.1				dey
+				lda (ZPQuickPtr1),y
+				sta IPCFG,y
+				tya
+				bne .1
+				rts
+*--------------------------------------
+MakeIPReply		>LDAXI S.IP.SRC			
+				jsr SetFramePtr1AX
+				>LDAXI S.IP.DST
+				jsr SetFramePtr2AX
+				ldy #4
+				jsr CopyFramePtr12
+				
+				>LDAXI S.IP.DST
+				jsr SetFramePtr1AX
+				>LDAXI S.IP.SRC
+				jsr SetFramePtr2AX
+				ldy #4
+				jsr CopyFramePtr12
+				
+				>LDAXI S.ETH.SRCMAC			
+				jsr SetFramePtr1AX
+				>LDAXI S.ETH.DSTMAC
+				jsr SetFramePtr2AX
+				ldy #6
+				jsr CopyFramePtr12
+				rts
+*--------------------------------------
+* A,X = Frame PTR
+*--------------------------------------
+SetFramePtr1AX	clc
+				adc ZPFrameBase1
+				sta ZPFramePtr1
+				txa
+				adc ZPFrameBase1+1
+				sta ZPFramePtr1+1
+				rts
+*--------------------------------------
+* A,X = Frame PTR
+*--------------------------------------
+SetFramePtr2AX	clc
+				adc ZPFrameBase2
+				sta ZPFramePtr2
+				txa
+				adc ZPFrameBase2+1
+				sta ZPFramePtr2+1
+				rts
+*--------------------------------------
+* Y = bytes to copy from ZPFramePtr1 to ZPFramePtr2
+*--------------------------------------
+CopyFramePtr12	dey
+				lda (ZPFramePtr1),y
+				sta (ZPFramePtr2),y
+				tya
+				bne CopyFramePtr12
+				rts
+*--------------------------------------
+CS.END
+*--------------------------------------
+LIBTCPIP		>PSTRING "libtcpip.o"
+CFGFILENAME		>PSTRING "%ETC%TCPIP.CONF"
+DefaultHostName	>CSTRING "a2osx-host"
+*--------------------------------------
+DS.START
+*--------------------------------------
+hLIBTCPIP		.BS 1
+hDEVNAME		.BS 1
+hDev			.BS 1
+hCfgFileName	.BS 1
+hCfgFile		.BS 1
+hCfgFileLen		.BS 2
+IPCFG			.BS S.IPCFG				Get in cache for faster access with ,X
+*--------------------------------------
+DS.END
+*--------------------------------------
+MAN
+SAVE SBIN/TCPIP.S
+ASM

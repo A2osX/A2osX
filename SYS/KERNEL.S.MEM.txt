@@ -1,0 +1,474 @@
+PR#3
+PREFIX /DATA/A2OSX
+NEW
+INC 1
+AUTO 6
+				.LIST OFF
+				.OP	65C02
+*--------------------------------------
+* !!!!!!!! DO NOT USE VCPU16 !!!!!!!!
+* !!!!!! DO NOT USE ZPQuickPTRs !!!!!
+*--------------------------------------
+ZPMemMgrReqS 	.EQ ZPMemMgr			store requested Size
+ZPMemMgrReqF 	.EQ ZPMemMgr+2			store requested Flags
+ZPMemMgrSPtr 	.EQ ZPMemMgr+6			Pointer To Slot selected
+ZPMemMgrTmp1	.EQ ZPMemMgr+8
+ZPMemMgrTmp2	.EQ ZPMemMgr+10
+ZPMemMgrTmp3	.EQ ZPMemMgr+12
+*--------------------------------------
+* TODO :
+* Create a 256 bytes table in SLOT #0 
+* (eh, mem.ID=0 always used! useful to test if hMem=0)
+* mapping hMem's to real memory blocks to help 
+* Garbage collector move blocks
+*--------------------------------------
+S.MemMgrInit	ldx	/A2osX.LOMEM
+				lda	#A2osX.LOMEM
+				beq .1
+				inx
+.1				phx
+				txa
+				lsr
+				lsr
+				lsr
+				tay
+				txa
+				and #7
+				tax
+				lda #$80
+.2				dex
+				bmi	.3
+				lsr
+				bra .2
+.3				and MEMTABL,y
+				bne .4
+				plx
+				inx
+				cpx /MLI
+				bne .1
+				bra .5
+.4				plx
+.5				stz	MEMMGR.MHLIMIT
+				stz MEMMGR.HIMEM
+				stx MEMMGR.MHLIMIT+1
+				stx MEMMGR.HIMEM+1
+				>LDYAI A2osX.LOMEM
+				>STYA MEMMGR.LOMEM
+				>STYA MEMMGR.MLLIMIT
+				stz MEMMGR.TABLESIZE	Init Table Size to 0
+*				jsr S.UpdateMemStats	Not needed, will be called by S.GetMem
+				>PUSHWI 256				get a 256 bytes buffer for Map Table, hMem=0
+				>PUSHBI 0
+				jsr S.GetMem			create it...
+				clc
+				rts
+*--------------------------------------
+*               PUBLIC
+*--------------------------------------
+S.SetLowMemLimit
+				clc
+				rts
+*--------------------------------------
+S.GarbageCollector
+				clc
+				rts
+*--------------------------------------
+* S.GetMem
+*  In: 
+*	PULLB = FLAGS 
+*   PULLW = Size Requested
+*  Out:
+*   YA = PTR to Mem
+*	X = S.MEM.ID
+*   CS on err
+*--------------------------------------
+S.GetMem		>PULLB ZPMemMgrReqF		store requested flags
+				>PULLW ZPMemMgrReqS		store requested size
+				lda ZPMemMgrReqS		align REQS to 16 bytes
+				and #$0F
+				beq .10
+				lda ZPMemMgrReqS
+				and #$F0
+				clc
+				adc #$10
+				sta ZPMemMgrReqS
+				bcc .10
+				inc ZPMemMgrReqS+1
+.10				ldx	#0					init to SLOT #0 of MEMSLOT list
+				lda MEMMGR.TABLESIZE	Check if some free slot to reuse first
+				beq .6
+.1				txa
+				jsr S.GetMemByIDA
+				lda (ZPMemMgrSPtr)		Get Flags
+				bmi .4					in use ?
+.2				lda ZPMemMgrReqF		Found an empty slot
+				and #S.MEM.F.ALIGN		is request needs a page align ?
+				beq .3
+				ldy #S.MEM.PTR
+				lda (ZPMemMgrSPtr),y	get LO of PTR
+				bne .4					not page-aligned
+.3				ldy #S.MEM.LEN
+				lda (ZPMemMgrSPtr),y	get LEN of this block
+				cmp ZPMemMgrReqS		compare with requested size
+				bne .4
+				iny
+				lda (ZPMemMgrSPtr),y
+				cmp ZPMemMgrReqS+1
+				beq .5					requested size matches slot size !!!
+.4				inx						move to next slot
+				cpx MEMMGR.TABLESIZE	last slot ?
+				bne .1					check for another slot
+				beq .6					last one, create a new slot
+*-------------- Reuse this SLOT
+.5				lda ZPMemMgrReqF		get requested flags
+				ora #S.MEM.F.INUSE		mark as in use
+				sta (ZPMemMgrSPtr)
+				lda #0
+				ldy #S.MEM.BIN
+				sta (ZPMemMgrSPtr),y
+				inc						Mark this slot used by one task
+				ldy #S.MEM.REFCNT
+				sta (ZPMemMgrSPtr),y
+				ldy #S.PS.ID
+				lda (TSKMGR.TSKPTR),y
+				ldy #S.MEM.OWNERPID
+				sta (ZPMemMgrSPtr),y
+				ldy #S.MEM.PTR
+				lda (ZPMemMgrSPtr),y
+				pha
+				iny
+				lda (ZPMemMgrSPtr),y	A = HI PTR
+				ply						Y = LO PTR	
+				clc						X = Current hMem
+				rts						
+*-------------- Create a New SLOT
+.6				lda ZPMemMgrReqF
+				and #S.MEM.F.ALIGN		is request needs a page align ?
+				beq .7
+				lda MEMMGR.MHLIMIT		target PTR will be page aligned ?
+				sec
+				sbc ZPMemMgrReqS
+				beq .7					yes, allocate
+				tay						no, reserve a free slot to fill gap
+				lda #0
+				jsr S.AddSlot
+				bcs .99
+.7				>LDYA ZPMemMgrReqS
+				jsr S.AddSlot
+				bcs .99
+				phx						Save hMem
+				>STYA ZPMemMgrTmp1
+				lda ZPMemMgrReqF
+				ora #S.MEM.F.INUSE
+				sta (ZPMemMgrSPtr)		set Flags
+				lda #1
+				ldy #S.MEM.REFCNT		Mark this slot referenced
+				sta (ZPMemMgrSPtr),y
+				ldy #S.PS.ID
+				lda (TSKMGR.TSKPTR),y
+				ldy #S.MEM.OWNERPID
+				sta (ZPMemMgrSPtr),y
+				jsr S.UpdateMemStats
+				>LDYA ZPMemMgrTmp1		Y,A = PTR
+				plx						X = hMem
+				clc
+				rts
+.99				sec
+				rts
+*--------------------------------------
+* S.FreeMemA
+* In:
+*  A = hMem To Free
+* Out:
+*  X,Y unmodified
+*--------------------------------------
+S.FreeMemA		and #$FF
+				bne S.FreeMemA0			Slot=0, reserved by Kernel
+				rts
+
+S.FreeMemA0	    phy
+				phx
+				jsr S.GetMemByIDA
+				lda (ZPMemMgrSPtr)
+				bmi .10					In use ?
+				bra *
+				
+.10				ldy #S.MEM.REFCNT
+				lda (ZPMemMgrSPtr),y	Get count of those referencing this hMem
+				dec						only one left ?	
+				sta (ZPMemMgrSPtr),y
+				bne .82					no, must be a code segment loaded several times
+				
+				ldy #S.MEM.BIN
+				lda (ZPMemMgrSPtr),y	Any BINPATH to discard ?		
+				beq .11
+				
+				pha						save hMem
+				>PUSHW ZPMemMgrSPtr
+				pla
+				jsr S.GetMemByIDA
+				lda (ZPMemMgrSPtr)
+				bmi .12					In use ?
+				bra *
+				
+.12				lda (ZPMemMgrSPtr)		mark record as free
+				and #$7F
+				sta (ZPMemMgrSPtr)
+				>PULLW ZPMemMgrSPtr
+				
+.11				lda (ZPMemMgrSPtr)		mark record as free
+				and #$7F
+				sta (ZPMemMgrSPtr)
+
+.20				lda MEMMGR.TABLESIZE
+				beq .82
+.21				dec
+				jsr S.GetMemByIDA
+				lda (ZPMemMgrSPtr)
+				bmi .81
+				dec	MEMMGR.TABLESIZE	discard last record	
+				ldy #S.MEM.LEN
+				lda (ZPMemMgrSPtr),y	give back LEN bytes
+				clc
+				adc MEMMGR.MHLIMIT		to HLIMIT
+				sta MEMMGR.MHLIMIT
+				iny
+				lda (ZPMemMgrSPtr),y
+				adc MEMMGR.MHLIMIT+1
+				sta MEMMGR.MHLIMIT+1
+				lda MEMMGR.MLLIMIT		And give back S.MEM.SIZE
+				sec
+				sbc	#S.MEM.SIZE
+				sta MEMMGR.MLLIMIT		to LLIMIT
+				bcs .2
+				dec MEMMGR.MLLIMIT+1
+.2				lda	MEMMGR.TABLESIZE
+				bne .21					no slot left, exit
+.81				jsr S.UpdateMemStats
+.82				plx
+				ply
+				clc
+				rts
+*--------------------------------------
+* IN/OUT
+*  A = hMem
+*--------------------------------------
+S.ClrMemA		pha
+				jsr S.GetMemByIDA
+				ldy #S.MEM.LEN			ZPMemMgrSPtr already set by S.GetMemByIDA
+				lda (ZPMemMgrSPtr),y
+				sta ZPMemMgrReqS		set ZPMemMgrReqS to mem size
+				iny
+				lda (ZPMemMgrSPtr),y
+				sta ZPMemMgrReqS+1
+				ldy #S.MEM.PTR
+				lda (ZPMemMgrSPtr),y
+				tax
+				iny
+				lda (ZPMemMgrSPtr),y
+				stx ZPMemMgrSPtr
+				sta ZPMemMgrSPtr+1		set ZPMemMgrSPtr to Mem
+				lda #0
+.1				ldx ZPMemMgrReqS
+				bne .2
+				ldx ZPMemMgrReqS+1
+				beq .3
+				dec ZPMemMgrReqS+1
+.2				dec ZPMemMgrReqS
+				sta (ZPMemMgrSPtr)
+				inc ZPMemMgrSPtr
+				bne .1
+				inc ZPMemMgrSPtr+1
+				bra .1
+.3				pla
+				rts
+*--------------------------------------
+* S.GetMemByIDA
+* In:
+*   A = hMem
+* Out:
+*	Y,A = ZPMemMgrSPtr = PTR to S.MEM
+*   X unmodified
+*--------------------------------------
+S.GetMemByIDA	stz ZPMemMgrSPtr+1
+				asl
+				rol ZPMemMgrSPtr+1
+				asl
+				rol ZPMemMgrSPtr+1
+				asl
+				rol ZPMemMgrSPtr+1
+				clc
+				adc MEMMGR.LOMEM
+				sta ZPMemMgrSPtr
+				tay
+				lda ZPMemMgrSPtr+1
+				adc MEMMGR.LOMEM+1	
+				sta ZPMemMgrSPtr+1
+				rts
+*--------------------------------------
+* In:
+*	A = hMem to BINPATH (PSTR)
+* Out:
+*	Y,A = ZPMemMgrSPtr = PTR to S.MEM
+*   X = hMem
+*--------------------------------------
+S.GetMemByNameA	jsr S.GetMemPtrA
+				>STYA ZPMemMgrTmp1		save BINPATH
+				>LDYA MEMMGR.LOMEM
+				>STYA ZPMemMgrTmp2		
+				ldx #0
+.1				lda (ZPMemMgrTmp2)
+				bpl .6					In Use?
+				ldy #S.MEM.BIN			any BIN PATH in this slot?	
+				lda (ZPMemMgrTmp2),y
+				beq .6
+				jsr S.GetMemPtrA		get pathname
+				>STYA ZPMemMgrTmp3
+				ldy #0
+.2				lda (ZPMemMgrTmp1),y
+				cmp (ZPMemMgrTmp3),y
+				bne .6
+				tya
+				iny
+				cmp (ZPMemMgrTmp1)
+				bne .2
+				>LDYA ZPMemMgrTmp2
+				clc
+				rts
+.6				lda ZPMemMgrTmp2
+				clc
+				adc #S.MEM.SIZE
+				sta ZPMemMgrTmp2
+				bcc .7
+				inc ZPMemMgrTmp2+1
+.7				inx
+				cpx MEMMGR.TABLESIZE
+				bne .1
+				sec
+				rts
+*--------------------------------------
+* S.GetMemPtrA
+* In:
+*   A = hMem
+* Out:
+*	Y,A = PTR to MemBlock
+*   X unmodified
+*--------------------------------------
+S.GetMemPtrA	jsr S.GetMemByIDA
+				ldy #S.MEM.PTR
+				lda (ZPMemMgrSPtr),y
+				pha
+				iny
+				lda (ZPMemMgrSPtr),y
+				ply
+				rts
+*--------------------------------------
+* S.GetMemLenA
+* In:
+*   A = hMem
+* Out:
+*	Y,A = PTR to MemLength
+*   X unmodified
+*--------------------------------------
+S.GetMemLenA	jsr S.GetMemByIDA
+				ldy #S.MEM.LEN
+				lda (ZPMemMgrSPtr),y
+				pha
+				iny
+				lda (ZPMemMgrSPtr),y
+				ply
+				rts
+*--------------------------------------
+*               PRIVATE
+*--------------------------------------
+* S.AddSlot
+*  In:
+*   Y,A = Requested size
+*  Out: 
+*	Y,A = PTR to MemSlot
+*   X = SLOT.ID
+*--------------------------------------
+S.AddSlot	    >STYA ZPMemMgrTmp1		save req size
+				lda MEMMGR.TABLESIZE		
+				inc
+				beq .99					> 255 ERR:OUT OF SLOT
+				dec
+				jsr S.GetMemByIDA		yes, get PTR to slot
+
+				lda MEMMGR.MHLIMIT		Compute base PTR=HLIMIT-REQ size
+				sec
+				sbc ZPMemMgrTmp1
+				sta ZPMemMgrTmp2		store new HLIMIT in ZPMemMgrTmp2
+				lda MEMMGR.MHLIMIT+1
+				sbc ZPMemMgrTmp1+1
+				sta ZPMemMgrTmp2+1
+
+				lda MEMMGR.MLLIMIT		compute new LLIMIT
+				clc
+				adc #S.MEM.SIZE
+				sta ZPMemMgrTmp3		store new LLIMIT in ZPMemMgrTmp3
+				lda MEMMGR.MLLIMIT+1
+				adc #0
+				sta ZPMemMgrTmp3+1
+
+				lda ZPMemMgrTmp2		ensure new LLIMIT is not higher
+				sec						than new HLIMIT
+				sbc ZPMemMgrTmp3
+				lda ZPMemMgrTmp2+1
+				sbc ZPMemMgrTmp3+1
+				bcc .98					ERR out of mem
+
+				>LDYA ZPMemMgrTmp3		get new LLIMIT	
+				>STYA MEMMGR.MLLIMIT	And set it allocated
+
+				lda #0
+				sta (ZPMemMgrSPtr)
+				ldy #S.MEM.BIN
+				sta (ZPMemMgrSPtr),y
+				ldy #S.MEM.REFCNT
+				sta (ZPMemMgrSPtr),y
+				ldy #S.MEM.OWNERPID
+				sta (ZPMemMgrSPtr),y
+
+				ldy #S.MEM.PTR
+				lda ZPMemMgrTmp2		get new HLIMIT
+				sta MEMMGR.MHLIMIT		set as system HLIMIT value
+				sta (ZPMemMgrSPtr),y	store is as base address of new slot
+				iny
+				lda ZPMemMgrTmp2+1
+				sta MEMMGR.MHLIMIT+1
+				sta (ZPMemMgrSPtr),y
+
+				ldy #S.MEM.LEN
+				lda ZPMemMgrTmp1		get requested size
+				sta (ZPMemMgrSPtr),y	setup slot LEN
+				iny	
+				lda ZPMemMgrTmp1+1
+				sta (ZPMemMgrSPtr),y
+
+				>LDYA ZPMemMgrTmp2		Y,A = PTR
+				ldx	MEMMGR.TABLESIZE	X = SLOT.ID
+				inc MEMMGR.TABLESIZE	mark this slot allocated
+				clc
+				rts
+.98				lda #MEMMGR.ERROOM
+				sec
+				rts	
+.99				lda #MEMMGR.ERROOS
+				sec
+				rts	
+*--------------------------------------
+S.UpdateMemStats
+				lda	MEMMGR.MHLIMIT
+				sec
+				sbc MEMMGR.MLLIMIT
+				sta MEMMGR.MFREE
+				lda	MEMMGR.MHLIMIT+1
+				sbc MEMMGR.MLLIMIT+1
+				sta MEMMGR.MFREE+1
+				rts	
+*--------------------------------------
+MAN
+SAVE SYS/KERNEL.S.MEM
+LOAD SYS/KERNEL.S
+ASM
