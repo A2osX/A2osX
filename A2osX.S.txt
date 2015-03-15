@@ -1,12 +1,11 @@
 PR#3
-PREFIX /DATA/A2OSX
+PREFIX /A2OSX.BUILD
 NEW
 INC 1
 AUTO 6
 				.LIST OFF
 				.OP	65C02
 				.OR	$2000
-*				.TF A2osX.SYSTEM
 				.TF A
 *--------------------------------------
 				.INB INC/MACROS.I
@@ -18,25 +17,43 @@ AUTO 6
 TmpPtr1			.EQ	$0					main & aux ZP
 TmpPtr2			.EQ	$2					main & aux ZP
 *--------------------------------------
-* 				A2osX LOADER
+A2osX.Z80Stack	.EQ $0F00				$0fff=0ffffh
+A2osX.RelocAddr	.EQ $1000
+A2osX.KMLOAD	.EQ $2000
+A2osX.KMMAXLEN	.EQ $4000
+A2osX.OpenBuff1	.EQ $6000				1024 Buffer for MLIOPEN01
+A2osX.OpenBuff2	.EQ $6400				1024 Buffer for MLIOPEN02
+A2osX.ReadBuff	.EQ	$6800				512 Buffer for MLIREAD01
+Boot.Prefix		.EQ $6A00				MLI.MAXPATH
+KM.Filename		.EQ $6A80				MLI.MAXPATH
 *--------------------------------------
-A2osX.INIT		php
-				pla
-				sei
-				ldx	#$FF				init 6502 stack to highest
+A2osX.Start		.EQ *
+				.PH	A2osX.RelocAddr
+A2osX.Init0		ldx	#$FF				init 6502 stack to highest
 				txs
 				stx A2osX.SaveSM
-				pha
-				plp
 				
-*				php						EDIT:Already Set By ProDOS	
-*				sei
-*				sta SETALTZP			Switch to alt ZP
-*				stx A2osX.SaveSX		make Alt SP to highest too
-*				sta CLRALTZP			Switch to main ZP
-*				plp
+				>LDYAI A2osX.Start
+				>STYA TmpPtr1
+				>LDYAI A2osX.RelocAddr
+				>STYA TmpPtr2
+
+				ldx #$10				reloc $2000-$2FFF to $1000-$1FFF
+				ldy #0
 				
-				jsr HOME
+.1				lda (TmpPtr1),y
+				sta (TmpPtr2),y
+				iny
+				bne .1
+				
+				inc TmpPtr1+1
+				inc TmpPtr2+1
+				dex
+				bne .1
+				
+				jmp A2osX.Init1
+*--------------------------------------
+A2osX.Init1		jsr HOME
 				>LDAXI MSG.STAGE0
 				jsr PrintCStrAX
 
@@ -47,8 +64,8 @@ A2osX.INIT		php
 				jsr PrintCStrAX
 
 				lda MACHID
-				and #MACHIDRAM
-				cmp #MACHIDRAM128
+				and #MACHID.RAM
+				cmp #MACHID.RAM.128
 				beq .1
 
 				>LDAXI MSG.SYSMEM.KO
@@ -115,10 +132,14 @@ A2osX.Z80		>LDAXI MSG.Z80
 				
 				>LDAXI MSG.Z80.OK
 				jsr PrintCStrAX
-				bra A2osX.MLIQuit
+				bra A2osX.EnumKM
 
 .1				>LDAXI MSG.Z80.KO
 				jsr PrintCStrAX
+*--------------------------------------
+A2osX.EnumKM	>LDAXI MSG.KMENUM
+				jsr PrintCStrAX
+				jsr EnumKM
 *--------------------------------------
 A2osX.MLIQuit	>LDAXI MSG.STAGE0OK
 				jsr PrintCStrAX
@@ -212,6 +233,176 @@ DisableRamDRV	php
 				sec
 				rts
 *--------------------------------------
+InitZ80			ldx #Z80Code.Size
+.1				lda Z80Code.Start-1,x
+				sta $1000-1,x				00000H for Z80
+				dex
+				bne .1
+				
+				stz TmpPtr1
+				lda #$C1
+				sta TmpPtr1+1
+				
+.2				sta (TmpPtr1)
+				lda $100D
+				bmi .8
+				inc TmpPtr1+1
+				lda TmpPtr1+1
+				cmp #$C8
+				beq .9
+				clc
+				adc #$20
+				sta $100A
+				bra .2
+				
+.8				lda TmpPtr1+1
+				and #$0F
+				sta A2osX.Z80Slot
+				clc
+				rts
+				
+.9				stz A2osX.Z80Slot
+				sec
+				rts
+*--------------------------------------
+EnumKM.EPB		.EQ $0D
+EnumKM.EL		.EQ $27
+*--------------------------------------
+EnumKM			ldx #0
+				ldy Boot.Prefix
+.1				inx
+				lda SYS,x
+				sta Boot.Prefix+1,y
+				iny
+				cpx SYS
+				bne .1
+				
+				sty Boot.Prefix
+				
+				jsr MLI
+				.DA #MLIOPEN
+				.DA MLIOPEN01
+				bcs .99
+				
+				lda MLIOPEN01+5
+				sta MLIREAD01+1
+				sta MLICLOSE01+1
+				
+.2				jsr MLI
+				.DA #MLIREAD
+				.DA MLIREAD01
+				bcs .98
+				
+				lda #EnumKM.EPB
+				sta EnumKM.EC
+				>LDYAI A2osX.ReadBuff+4
+				>STYA EnumKM.BPTR
+				
+.3				>LDYA EnumKM.BPTR
+				>STYA TmpPtr1
+				lda (TmpPtr1)
+				and #$F0				Empty ?
+				beq .5					yes, skip
+				and #$C0				anything out of type 1,2 or 3 ?
+				bne .5					yes, skip
+				lda (TmpPtr1)
+				and #$0F
+				cmp KM.PREFIX			at least enough chars for KM.*?
+				bcc .5					no, skip
+				ldy #$10				file type
+				lda (TmpPtr1),y
+				cmp #$06				'BIN'?
+				bne .5					skip
+				ldy KM.PREFIX
+.4				lda (TmpPtr1),y
+				cmp KM.PREFIX,y
+				bne .5
+				dey
+				bne .4
+				
+				jsr LoadKM
+				
+.5				lda EnumKM.BPTR
+				clc	
+				adc #EnumKM.EL
+				sta EnumKM.BPTR
+				bcc .6
+				inc EnumKM.BPTR+1
+
+.6				dec EnumKM.EC
+				bne .3
+				bra .2
+				
+.8				jsr MLI
+				.DA #MLICLOSE
+				.DA MLICLOSE01
+				rts
+				
+.98				cmp #MLI.ERR.EOF
+				beq .8
+				pha
+				jsr .8
+				pla
+.99				sec
+				rts
+EnumKM.EC		.BS 1
+EnumKM.BPTR		.BS 2
+*--------------------------------------
+LoadKM			ldx Boot.Prefix
+.1				lda Boot.Prefix,x
+				sta KM.Filename,x
+				dex
+				bne .1
+				
+				ldx Boot.Prefix
+				lda (TmpPtr1)
+				and #$0F
+				tay
+				clc
+				adc Boot.Prefix
+				sta KM.Filename
+				tax
+				
+.2				lda (TmpPtr1),y
+				sta KM.Filename,x
+				dex
+				dey
+				bne .2
+				
+				>LDAXI MSG.KMLOAD
+				jsr PrintCStrAX
+				>LDAXI KM.Filename
+				jsr PrintPStrAX
+				jsr CROUT
+				
+				jsr MLI
+				.DA #MLIOPEN
+				.DA MLIOPEN02
+				bcs .99
+
+				lda MLIOPEN02+5
+				sta MLIREAD02+1
+				sta MLICLOSE02+1
+				
+				jsr MLI
+				.DA #MLIREAD
+				.DA MLIREAD02
+				bcs .98
+				jsr .9
+				jsr A2osX.KMLOAD
+				jsr CROUT
+				
+.98				pha
+				jsr .9
+				pla
+				sec
+				rts
+				
+.9				jsr MLI
+				.DA #MLICLOSE
+				.DA MLICLOSE02
+.99				rts
+*--------------------------------------
 SetupQuitCode	lda RRAMWRAMBNK2
 				lda RRAMWRAMBNK2
 
@@ -228,121 +419,7 @@ SetupQuitCode	lda RRAMWRAMBNK2
 				lda RROMBNK1
 				rts
 *--------------------------------------
-PrintCStrAX		>STAX TmpPtr1
-				pla 
-				sta TmpPtr2
-				pla 
-				sta TmpPtr2+1
-				
-				ldy #0
-.1				lda (TmpPtr1),y
-				beq .9
-				cmp #'%'
-				bne .4
-				
-				iny
-				lda (TmpPtr1),y
-				beq .9
-				cmp #'d'
-				bne .2
-				pla
-				jsr PrintADec
-				bra .8
-				
-.2				cmp #'D'
-				bne .3
-				pla
-				plx
-				jsr PrintAXDec
-				bra .8
-				
-.3				cmp #'h'
-				bne .4
-				pla
-				jsr PRBYTE
-				
-.4				cmp #'\'
-				bne .7
-				iny
-				lda (TmpPtr1),y
-				beq .9
-				cmp #'n'
-				bne .9
-				lda #$0D
-				
-.7				ora #$80
-				jsr COUT
-.8				iny
-				bne .1
-
-.9				lda TmpPtr2+1
-				pha 
-				lda TmpPtr2
-				pha
-				rts				
-*--------------------------------------
-PrintADec		ldx #0
-PrintAXDec		>STAX HEX
-PrintDec		stz BCD
-				stz BCD+1
-				stz BCD+2
-				
-				phy
-				
-				ldx #16			let's roll 16 bits
-				sed
-.2				asl HEX
-				rol	HEX+1
-				php				cpy will disturb carry while BCD adc
-				ldy #0
-.3				plp
-				lda BCD,y
-				adc BCD,y
-				sta BCD,y
-				php
-				iny
-				cpy #3			Last byte of BCDBUF?
-				bne .3
-				plp
-				dex
-				bne .2
-				
-				cld
-				
-				stz bFlag
-				
-				ldx #2
-.4				lda BCD,x
-				lsr
-				lsr
-				lsr
-				lsr
-				bne .5
-				bit bFlag
-				bpl .6
-.5				sec
-				ror bFlag
-				ora #$B0
-				jsr COUT
-.6				lda BCD,x
-				and #$0F
-				bne .7
-				bit bFlag
-				bpl .8
-.7				sec
-				ror bFlag
-				ora #$B0
-				jsr COUT
-.8				dex
-				bpl .4
-				
-				bit bFlag
-				bmi .9
-				lda #$B0
-				jsr COUT
-				
-.9				ply
-				rts
+				.INB A2OSX.S.TOOLS
 *--------------------------------------
 MSG.STAGE0		>CSTRING "A2osX[Stage0]:Init\n"
 MSG.SYSMEM		>CSTRING "Checking System Memory..."
@@ -358,8 +435,9 @@ MSG.RAMDRV.KO1	>CSTRING "Uninstall Failed !!!\n"
 MSG.Z80			>CSTRING "Detecting Z80 CPU..."
 MSG.Z80.OK		>CSTRING "Detected In Slot %d.\n"
 MSG.Z80.KO		>CSTRING "Not Detected.\n"
+MSG.KMENUM		>CSTRING "Looking For Kernel Modules...\n"
+MSG.KMLOAD		>CSTRING "Loading KM : "
 MSG.STAGE0OK	>CSTRING "A2osX[Stage0]:Complete.\n"
-*--------------------------------------
 MSG.CPUTYPEL	.DA #MSG.6502
 				.DA #MSG.65C02
 				.DA #MSG.R65C02
@@ -368,30 +446,63 @@ MSG.CPUTYPEH	.DA /MSG.6502
 				.DA /MSG.65C02
 				.DA /MSG.R65C02
 				.DA /MSG.65C816
-*--------------------------------------
-MSG.6502		>CSTRING "NMOS 6502.\n"
-MSG.65C02		>CSTRING "CMOS 65C02.\n"
-MSG.R65C02		>CSTRING "Rockwell R65C02.\n"
-MSG.65C816		>CSTRING "16 Bits 65C816.\n"
+MSG.6502		>CSTRING "6502.\n"
+MSG.65C02		>CSTRING "65C02.\n"
+MSG.R65C02		>CSTRING "R65C02.\n"
+MSG.65C816		>CSTRING "65C816.\n"
 *--------------------------------------
 MLIGETPREFIX01	.DA #1
 				.DA Boot.Prefix
+MLIOPEN01		.DA #3					For DIR listing
+				.DA Boot.Prefix
+				.DA A2osX.OpenBuff1		
+				.BS 1
+MLIREAD01		.DA #4
+				.BS 1
+				.DA A2osX.ReadBuff		Load address Dir Blocks
+				.DA $200				Maxlen of Dir Blocks (512)
+				.BS 2
+MLICLOSE01		.DA #1
+				.BS 1
+MLIOPEN02		.DA #3
+				.DA KM.Filename
+				.DA A2osX.OpenBuff2
+				.BS 1
+MLIREAD02		.DA #4
+				.BS 1
+				.DA A2osX.KMLOAD		Load address for KMs
+				.DA A2osX.KMMAXLEN		Maxlen of KM
+				.BS 2
+MLICLOSE02		.DA #1
+				.BS 1
 MLIQUIT01		.DA #4
 				.DA #0
 				.DA 0
 				.DA #0
 				.DA 0
 *--------------------------------------
-Boot.Prefix		.BS MLI.MAXPATH
-*--------------------------------------
+SYS				>PSTRING "SYS/"
+KM.PREFIX		>PSTRING "KM."
 HEX				.BS 2
 BCD				.BS 3
 bFlag			.BS 1
 *--------------------------------------
-				.INB A2OSX.S.Z80
+Z80Code.Start	.HS	31FFFF				START:	LD SP,0FFFFH		Init Stack
+				.HS	3EFF						LD A,0FFH			Set Flag
+				.HS	320D00						LD (FLAG),A
+				.HS	3200E1						LD (0E100H),A		Back to 6502
+				.HS	18F3						JR START			Loop
+				.HS 00					FLAG:	.DB 0
+Z80Code.End		.EQ *
+Z80Code.Size	.EQ Z80Code.End-Z80Code.Start
+				.EP
 				.INB A2OSX.S.QC
 				.INB A2OSX.S.GP
-*--------------------------------------
+A2osX.End		.EQ *
+A2osX.SIZE		.EQ A2osX.End-A2osX.Start
+				.DO A2osX.SIZE>$1000
+				ERROR:A2osX.SIZE too big
+				.FIN
 MAN
 SAVE A2OSX.S
 ASM
