@@ -9,10 +9,18 @@ AUTO 6
 				.TF DRV/MOUSE.DRV
 *--------------------------------------
 				.INB INC/MACROS.I
+				.INB INC/IO.I
 				.INB INC/A2OSX.I
 *--------------------------------------
 ZPGoMouse		.EQ ZPDRV
 ZPTmpPtr1		.EQ ZPDRV+2
+*--------------------------------------
+EVENT.MOUSEUP	.EQ %00000001
+EVENT.MOUSEDOWN	.EQ %00000010
+EVENT.MOUSEMOVE	.EQ %00000100
+EVENT.MOUSEDRAG	.EQ %00001000
+EVENT.MOUSECLK	.EQ %00010000
+EVENT.MOUSEDCLK	.EQ %00100000
 *--------------------------------------
 SETMOUSE		.EQ $12  				Sets mouse mode 
 SERVEMOUSE		.EQ $13					Services mouse interrupt 
@@ -22,10 +30,18 @@ POSMOUSE		.EQ $16					Sets mouse position to a user-defined pos
 CLAMPMOUSE		.EQ $17					Sets mouse bounds in a window 
 HOMEMOUSE 		.EQ $18					Sets mouse to upper-left corner of clamp win 
 INITMOUSE 		.EQ $19					Resets mouse clamps to default values,sets mouse position to 0,0
-XCLAMPLO		.EQ $0478 				low byte of low clamp. 
-XCLAMPHI		.EQ $04F8 				low byte of high clamp. 
-YCLAMPLO		.EQ $0578 				high byte of low clamp. 
-YCLAMPHI		.EQ $05F8				high byte of high clamp.
+LOCLAMPLO		.EQ $0478 				low byte of low clamp. 
+HICLAMPLO		.EQ $04F8 				low byte of high clamp. 
+LOCLAMPHI		.EQ $0578 				high byte of low clamp. 
+HICLAMPHI		.EQ $05F8				high byte of high clamp.
+MOUSEXLOx		.EQ $0478
+MOUSEYLOx		.EQ $04F8
+MOUSEXHIx		.EQ $0578
+MOUSEYHIx		.EQ $05F8
+MOUSESTSx		.EQ $0778
+MOUSESTSx.DOWN	.EQ %10000000
+MOUSESTSx.LDOWN	.EQ %01000000
+MOUSESTSx.MOVED	.EQ %00100000
 *--------------------------------------
 * Main DRV entry point
 * input :
@@ -58,19 +74,23 @@ OPEN			stz ZPTmpPtr1
 .2				ldy DEVSIG.Offset,x
 				lda (ZPTmpPtr1),y
 				cmp DEVSIG.Value,x
-				beq .3
+				bne .3
+				dex
+				bpl .2
+				bra .10
 				
-				inc ZPTmpPtr1+1			no match, try next slot....
+.3				inc ZPTmpPtr1+1			no match, try next slot....
 				lda ZPTmpPtr1+1
 				cmp #$C8
 				bne .1	
-				beq .99					Not Found in any slot, exiting
 				
-.3				dex
-				bpl .2
-
-				lda ZPTmpPtr1+1
+				lda #DEVMGR.ERRNOHW		Not Found in any slot, exiting
+				sec
+				rts	
+				
+.10				lda ZPTmpPtr1+1
 				and #$0F
+				sta DEVSLOT0n
 				pha
 				ora #$30
 				sta DEVNAME+4
@@ -86,13 +106,22 @@ OPEN			stz ZPTmpPtr1
 				ldx #0
 				ldy #S.DEV.NAME
 				
-.7				lda DEVNAME,x
+.4				lda DEVNAME,x
 				sta (pDevContext),y
 				cpx DEVNAME
-				beq .8
+				beq .5
 				inx
 				iny
-				bne .7
+				bne .4
+				
+.5				bit RROMBNK2			Renable ROM to allow MOUSE II firmware
+						
+				php						to read  IIe ROM ID bytes
+				sei
+				
+				lda RD80STORE
+				pha
+				sta CLR80STORE
 				
 				lda #1					Enable, Polling mode
 				ldy #SETMOUSE
@@ -100,41 +129,131 @@ OPEN			stz ZPTmpPtr1
 				
 				ldy #INITMOUSE			Reset
 				jsr GOMOUSE
-				
-*				lda #0					set X
-*				ldy #CLAMPMOUSE 
-*				jsr GOMOUSE
 
-*				lda #1					set Y
-*				ldy #CLAMPMOUSE 
-*				jsr GOMOUSE
+				stz LOCLAMPLO
+				stz LOCLAMPHI
+				lda #559
+				sta HICLAMPLO
+				lda /559
+				sta HICLAMPHI
 				
-.8				lda #S.DEV.F.MOUSE+S.DEV.F.EVENT
+				lda #0					set X
+				ldy #CLAMPMOUSE 
+				jsr GOMOUSE
+
+				stz LOCLAMPLO
+				stz LOCLAMPHI
+				lda #191
+				sta HICLAMPLO
+				lda /191
+				sta HICLAMPHI
+				
+				lda #1					set Y
+				ldy #CLAMPMOUSE 
+				jsr GOMOUSE
+				
+				ldy #HOMEMOUSE				
+				jsr GOMOUSE
+
+				pla
+				bpl .6
+				sta SET80STORE
+
+.6				plp
+				
+				lda #S.DEV.F.MOUSE+S.DEV.F.EVENT
 				sta (pDevContext)
 				clc
 				rts
-				
-.99				lda #DEVMGR.ERRNOHW
-				sec
-				rts	
 *--------------------------------------
 GETEVENT		>PULLW pEvent
-				lda #0
-				sec
+
+				php
+				sei
+
+				lda RD80STORE
+				pha
+				sta CLR80STORE
+				
+				ldy #READMOUSE
+				jsr GOMOUSE
+				
+				ldx DEVSLOT0n
+				ldy #S.EVT.DATALO
+				
+				lda MOUSESTSx,x
+				and #MOUSESTSx.DOWN+MOUSESTSx.LDOWN
+				beq .3					no button state change:up & previously up
+				cmp #MOUSESTSx.DOWN+MOUSESTSx.LDOWN
+				beq .3					no button state change:down & previously down
+				
+				asl						if CS, down & previoulsy up
+				bcc .1
+				
+				lda #EVENT.MOUSEUP
+				bra .2
+				
+.1				lda #EVENT.MOUSEDOWN
+
+.2				sta (pEvent),y
+				
+.3				lda MOUSESTSx,x
+				and #MOUSESTSx.MOVED
+				beq .4
+				
+				lda (pEvent),y
+				ora #EVENT.MOUSEMOVE
+				sta (pEvent),y
+				
+				ldy #S.EVT.DATAW1
+				lda MOUSEXLOx,x
+				sta (pEvent),y
+				iny
+				lda MOUSEXHIx,x
+				sta (pEvent),y
+				iny
+				lda MOUSEYLOx,x
+				sta (pEvent),y
+				iny
+				lda MOUSEYHIx,x
+				sta (pEvent),y
+			
+.4				pla
+				bpl .5
+				sta SET80STORE
+				
+.5				plp
+				ldy #S.EVT.DATALO
+				lda (pEvent),y
+				beq .9
+				
+				lda #S.EVT.F.MOUSE
+				sta (pEvent)
+				clc
+				rts
+
+.9				sec						A=0 : no event
 				rts
 *--------------------------------------
 OUT				clc
 				rts
 *--------------------------------------
-CLOSE			clc
+CLOSE			php
+				sei
+				lda #0					Disable
+				ldy #SETMOUSE
+				jsr GOMOUSE
+				plp
+				clc
 				rts
 *--------------------------------------
 GOMOUSE			pha
 				stz ZPGoMouse
-				lda DEVSLOTCn
-				sta ZPGoMouse+1
+				ldx DEVSLOTCn
+				stx ZPGoMouse+1
 				lda (ZPGoMouse),y
 				sta ZPGoMouse
+				ldy DEVSLOTn0
 				pla
 				jmp (ZPGoMouse)
 *--------------------------------------
@@ -143,6 +262,7 @@ DEVSIG.Offset	.HS 05070B0CFB
 DEVSIG.Value	.HS 38180120D6
 DEVSIG.Length	.EQ DEVSIG.Value-DEVSIG.Offset
 DEVNAME			>PSTRING "MOU0"
+DEVSLOT0n		.BS 1
 DEVSLOTCn		.BS 1
 DEVSLOTn0		.BS 1
 *--------------------------------------
