@@ -1,45 +1,73 @@
 PR#3
-PREFIX /A2OSX.BUILD
+PREFIX /A2OSX.SRC
 NEW
 INC 1
 AUTO 6
 				.LIST OFF	
 				.OP	65C02
 				.OR $2000
-				.TF DRV/CONSOLE.DRV
+				.TF /A2OSX.BOOT/DRV/CONSOLE.DRV
 *--------------------------------------
 				.INB INC/MACROS.I
 				.INB INC/A2OSX.I
+				.INB INC/A2OSX.API.I
+				.INB INC/KERNEL.I
 				.INB INC/IO.I
+*--------------------------------------
+CURSOR.BLINK.SPEED	.EQ 2
 *--------------------------------------
 ZPBASL1			.EQ ZPDRV
 ZPBASL2			.EQ ZPDRV+2
 *--------------------------------------
-* Main DRV entry point
-* input :
-* X = CMD
-*	0 : OPEN
-*	2 : GETEVENT
-*	6 : OUT
-*   8 : CLOSE
-*--------------------------------------
-* CLD 			$D8
-* JMP (*,x)		$7C
-* 				#JMPTABLE
-*				/JMPTABLE
-*--------------------------------------
-CURSOR.BLINK.SPEED	.EQ 2
+*			File Header (16 Bytes)
 *--------------------------------------
 CS.START		cld
-				jmp (.1,x)
-.1				.DA OPEN
+				jmp Dev.Detect			cld,jmp abs=DRV
+				.DA #$61				6502,Level 1 (65c02)
+				.DA #1					DRV Layout Version 1
+				.DA 0
+				.DA CS.END-CS.START			Code Length
+				.DA DEV.HEADER-CS.START		Device Header Offset
+				.DA DRV.CS.START-CS.START	Driver Code Offset
+				.DA DRV.CS.END-DRV.CS.START	Drv Code Length
+*--------------------------------------
+* Relocation Table
+*--------------------------------------
+L.MSG.DETECT	.DA MSG.DETECT
+				.DA 0					End Of Reloc Table
+*--------------------------------------
+Dev.Detect		>LDYA L.MSG.DETECT
+				>SYSCALL SYS.SysScrPPSTRYA
+
+				lda A2osX.SCREENS
+				ora #A2osX.SCREENS.C
+				sta A2osX.SCREENS
+				
+				clc
+				rts
+CS.END
+MSG.DETECT		>PSTRING "\nApple IIe/IIc 80 Col Driver."
+*--------------------------------------
+*			Device Header (16 Bytes)
+*--------------------------------------
+DEV.HEADER		cld
+				jmp (DRV.CS.START,x)
+				.DA #S.DEV.F.EVENT+S.DEV.F.COUT+S.DEV.F.CHAR
+				>PSTRING "CON"			NAME
+				.HS 00					NAME must Be 5 bytes long
+				.HS 00.00
+				.HS 00.00.00.00
+*--------------------------------------
+*			Driver Code
+*--------------------------------------
+DRV.CS.START	.DA OPEN
 				.DA GETEVENT
-				.DA OUT
+				.DA COUT
 				.DA CLOSE
 				.DA GETINFO
+				.DA IRQ
+L.DEVINFO		.DA DEVINFO
 				.DA 0					end or relocation
-				.DA CS.END-CS.START		Code Length To Relocate
-				.DA 0					Data Segemnt to Allocate
 *--------------------------------------
 OPEN			stz CURON
 				lda #$80
@@ -47,31 +75,10 @@ OPEN			stz CURON
 				
 				jsr HOME
 				
-				lda #S.DEV.F.CHAR+S.DEV.F.EVENT+S.DEV.F.OUT
-				sta (pDevContext)
-				
-				ldy #S.DEV.NAME
-				ldx #0
-.1				lda DEVNAME,x
-				sta (pDevContext),y
-				cpx DEVNAME
-				beq .8
-				inx
-				iny
-				bne .1
-				
-.8				lda A2osX.SCREENS
-				ora #A2osX.SCREENS.C
-				sta A2osX.SCREENS
-
-				lda #A2osX.SCREENS.C
-				>SYSCALL SYS.ScreenSelectA
-				
 				clc
 				rts
 *--------------------------------------
-GETEVENT		>PULLW pEvent
-				lda A2osX.TIMER16
+GETEVENT		lda A2osX.TIMER16
 				and #CURSOR.BLINK.SPEED
 				eor CURON
 				beq .9
@@ -81,24 +88,24 @@ GETEVENT		>PULLW pEvent
 				sec
 				rts
 *--------------------------------------
-OUT				>PULLA
-				jsr COUT
+COUT			jsr COUT1
 				clc
 				rts
 *--------------------------------------
-CLOSE			lda A2osX.SCREENS
-				and #$FF^A2osX.SCREENS.C
-				sta A2osX.SCREENS
+CLOSE			
+*				lda A2osX.SCREENS
+*				and #$FF^A2osX.SCREENS.C
+*				sta A2osX.SCREENS
 				clc
 				rts
 *--------------------------------------
-GETINFO			clc
+GETINFO			>LDYA L.DEVINFO
+IRQ				clc
 				rts
-
 *--------------------------------------
 *				PRIVATE
 *--------------------------------------
-COUT			cmp #8
+COUT1			cmp #8
 				bne .2
 				ldx CH
 				beq .10
@@ -113,7 +120,8 @@ COUT			cmp #8
 				sta CH
 				dec CV	
 				
-.12				lda #$A0
+.12				lda #$20
+				ora INVFLG
 				ldx CH
 				ldy CV
 				jsr SetCharAtXY
@@ -121,6 +129,7 @@ COUT			cmp #8
 				
 .2				cmp #13
 				beq CROUT
+				ora INVFLG
 				ldx CH
 				ldy CV
 				jsr SetCharAtXY
@@ -131,14 +140,19 @@ FSOUT			ldx CH
 				rts
 *--------------------------------------
 CROUT			jsr CLREOL
+*--------------------------------------
 CROUT1			stz CH
 				ldy CV
 				cpy #23
 				beq SCROLL.UP
 				inc CV
 				rts
-				
+*--------------------------------------
 SCROLL.UP		ldx #0
+
+				lda RD80STORE
+				pha
+				
 				sta SET80STORE
 				
 .1				lda BASEL,x
@@ -169,13 +183,18 @@ SCROLL.UP		ldx #0
 
 				cpx #23
 				bne .1
+				jsr CLREOL
+				pla
+				bmi .8
+				sta CLR80STORE
 				
-				
+.8				rts
 *--------------------------------------
 CLREOL			ldx CH
 .1				phx
 				ldy CV
-				lda #$A0
+				lda #$20
+				ora INVFLG
 				jsr SetCharAtXY
 				plx
 				inx
@@ -186,8 +205,6 @@ CLREOL			ldx CH
 HOME			stz CH
 				stz CV
 
-				lda RDPAGE2
-				pha
 				lda RD80STORE
 				pha
 				
@@ -221,23 +238,15 @@ HOME			stz CH
 				bpl .1
 				
 				pla
-				bmi .4
+				bmi .8
 				sta CLR80STORE
-				bra .5
-.4				sta SET80STORE
-
-.5				pla
-				bmi .6
-				sta CLRPAGE2
-				bra .8
-.6				sta SETPAGE2
 				
 .8				rts
 *--------------------------------------
 CUROFF			lda CURON
 				beq	CUREXIT.RTS
 				
-CURBLNK			lda A2osX.ACTIVESCRN
+CURBLNK			lda A2osX.ASCREEN
 				and #A2osX.SCREENS.C
 				bne CURBLNK1
 				
@@ -268,8 +277,6 @@ CUREXIT			lda CURON
 CUREXIT.RTS		rts
 *--------------------------------------
 SetCharAtXY		pha
-				lda RDPAGE2
-				pha
 				lda RD80STORE
 				pha
 				sta SET80STORE
@@ -287,23 +294,16 @@ SetCharAtXY		pha
 				lda BASEH,y
 				sta ZPBASL1+1
 
-				ply
 				plx
 				pla
 				sta (ZPBASL1)
-				tya
-				bmi .3
+				txa
+				bmi .8
 				sta CLR80STORE
-.3				txa
-				bpl .4
-				sta SETPAGE2
-				rts
-.4				sta CLRPAGE2
-				rts	
+				
+.8				rts	
 *--------------------------------------
-GetCharAtXY		lda RDPAGE2
-				pha
-				lda RD80STORE
+GetCharAtXY		lda RD80STORE
 				pha
 				sta SET80STORE
 				txa
@@ -323,28 +323,22 @@ GetCharAtXY		lda RDPAGE2
 				lda (ZPBASL1)
 				
 				plx
-				bmi .3
+				bmi .8
 				sta CLR80STORE
 				
-.3				plx
-				bpl .4
-
-				sta SETPAGE2
-				rts
-
-.4				sta CLRPAGE2
-				rts	
+.8				rts	
 *--------------------------------------
-CS.END
-DEVNAME			>PSTRING "CON"
+DRV.CS.END
+BASEL			.HS	00.80.00.80.00.80.00.80.28.A8.28.A8.28.A8.28.A8.50.D0.50.D0.50.D0.50.D0
+BASEH			.HS	04.04.05.05.06.06.07.07.04.04.05.05.06.06.07.07.04.04.05.05.06.06.07.07
 CH				.BS 1
 CV				.BS 1
 INVFLG			.BS 1
 CURON			.BS 1
 CURCHAR			.BS 1
-*--------------------------------------
-BASEL			.HS	00.80.00.80.00.80.00.80.28.A8.28.A8.28.A8.28.A8.50.D0.50.D0.50.D0.50.D0
-BASEH			.HS	04.04.05.05.06.06.07.07.04.04.05.05.06.06.07.07.04.04.05.05.06.06.07.07
+DEVINFO			.DA #S.DEVINFO.TYPE.CHAR
+				.DA #80
+				.DA #24
 *--------------------------------------
 MAN
 SAVE DRV/CONSOLE.DRV.S

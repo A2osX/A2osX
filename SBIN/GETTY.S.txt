@@ -1,40 +1,43 @@
 PR#3
-PREFIX /A2OSX.BUILD
+PREFIX /A2OSX.SRC
 NEW
 INC 1
 AUTO 6
 				.LIST OFF
 				.OP	65C02
 				.OR	$2000
-				.TF SBIN/GETTY
+				.TF /A2OSX.BOOT/SBIN/GETTY
 *--------------------------------------
 				.INB INC/MACROS.I
 				.INB INC/A2OSX.I
+				.INB INC/A2OSX.API.I
+				.INB INC/KERNEL.I
 *--------------------------------------
-* Main entry point
+ZPTmp1			.EQ ZPBIN
 *--------------------------------------
-* Code signature and INIT table
-*--------------------------------------
-* CLD 			$D8
-* JMP (*,x)		$7C
-* 				#JMPTABLE
-*				/JMPTABLE
+*			File Header (16 Bytes)
 *--------------------------------------
 CS.START		cld
 				jmp (.1,x)
+				.DA #$61				6502,Level 1 (65c02)
+				.DA #1					BIN Layout Version 1
+				.DA 0
+				.DA CS.END-CS.START
+				.DA DS.END-DS.START		Data Segment to Allocate
+				.DA 0
+				.DA 0
+*--------------------------------------
+* Relocation Table
+*--------------------------------------
 .1				.DA CS.INIT
 				.DA CS.RUN
 				.DA CS.DOEVENT
 				.DA	CS.QUIT
 L.MSG.GREETINGS .DA MSG.GREETINGS				
-L.MSG.LOGIN		.DA MSG.LOGIN
-L.MSG.PASSWORD	.DA MSG.PASSWORD
-				.DA 0
-				.DA CS.END-CS.START		Code Length To Relocate
-				.DA DS.END-DS.START		Data Segment to Allocate
+				.DA 0					End Of Reloc Table
 *--------------------------------------
 CS.INIT			ldy #S.PS.hARGS
-				lda (pPsContext),y
+				lda (pPs),y
 				>PUSHA
 				>PUSHBI $20				Push SEP=' '
 				>PUSHBI 1				Push 1 for getting INDEV
@@ -45,14 +48,16 @@ CS.INIT			ldy #S.PS.hARGS
 				>SYSCALL SYS.GetDevByNameA
 				bcs .8
 
-				sta hINDEV
+				txa
 				ldy #S.PS.hINDEV
-				sta (pPsContext),y
+				sta (pPs),y
+				
+				
 				lda hDEVNAME
 				>SYSCALL SYS.FreeMemA
 				
 				ldy #S.PS.hARGS
-				lda (pPsContext),y
+				lda (pPs),y
 				>PUSHA
 				>PUSHBI $20				Push SEP=' '
 				>PUSHBI 2				Push 1 for getting OUTDEV
@@ -63,40 +68,31 @@ CS.INIT			ldy #S.PS.hARGS
 				>SYSCALL SYS.GetDevByNameA
 .8				bcs .98
 
-				sta hOUTDEV
+				>STYA pDev
+				txa
 				ldy #S.PS.hOUTDEV
-				sta (pPsContext),y
+				sta (pPs),y
 				ldy #S.PS.hERRDEV
-				sta (pPsContext),y
+				sta (pPs),y
 				lda hDEVNAME
 				>SYSCALL SYS.FreeMemA
 				
 				ldy #S.PS.hARGS
-				lda (pPsContext),y
+				lda (pPs),y
 				>PUSHA
 				>PUSHBI $20				Push SEP=' '
 				>PUSHBI 3				Push 3 for getting BIN
 				>SYSCALL SYS.PStrGetTkn
 				bcs .99
 
-				sta BINID
-				ldy #S.PS.ID
-				lda (pPsContext),y
-*				ldy #S.DEV.hOWNERPS
-*				sta (DEVMGR.DEVPTR),y
-
-				>LDYA L.MSG.GREETINGS
-				jsr PRINT.MSG
-
-				lda hOUTDEV
-				jsr PRBYTE
+				ldy #hBinName
+				sta (pData),y
+			
+				ldx #DEVMGR.OPEN
+				jsr pDevJmp			if error CS, else...
 				
-				stz STATUS
-				lda (pPsContext)
-				ora #S.PS.F.EVENT		Now accept events
-				sta (pPsContext)
-				clc						Tell TskMgr To stay in memory
-				rts
+				rts					...Tell TskMgr To stay in memory
+
 
 .98				pha
 				lda hDEVNAME
@@ -105,200 +101,108 @@ CS.INIT			ldy #S.PS.hARGS
 				sec	
 .99				rts
 *--------------------------------------
-CS.RUN			lda STATUS
-				bne CS.RUN.1
-				jsr CROUT
-				jsr CROUT
-				>LDYA L.MSG.LOGIN
+CS.RUN			ldy #S.PS.hOUTDEV
+				lda	(pPs),y
+				>SYSCALL SYS.GetDevByIDA
+				>STYA pDev
+				
+				lda #13					try send a CR...
+				
+				jsr COUT				Device Is Ready ?
+
+				bcc .1					
+				clc						no..loop...
+				rts
+			
+.1				>LDYA L.MSG.GREETINGS
 				jsr PRINT.MSG
-				jsr INPUT.INIT
-				inc STATUS
-				clc
-				rts
-CS.RUN.1		cmp #1
-				bne CS.RUN.2
-				ldx INSTATUS
-				beq .9
-				ldx INBUFFER
-				beq .2
-.1				lda INBUFFER,x
-				sta USERNAME,x
-				dex
-				bpl .1
-				inc STATUS
-				clc
-				rts
-.2				dec STATUS
-.9				clc
-				rts
-CS.RUN.2		cmp #2
-				bne CS.RUN.3
-				jsr CROUT
-				>LDYA L.MSG.PASSWORD
-				jsr PRINT.MSG
-				jsr INPUT.INIT
-				inc STATUS
-				clc
-				rts
-CS.RUN.3		cmp #3
-				bne CS.RUN.4
-				ldx INSTATUS
-				beq .9
-				ldx INBUFFER
-				beq .2
-.1				lda INBUFFER,x
-				sta PASSWORD,x
-				dex
-				bpl .1
-.2				inc STATUS
-.9				clc
-				rts
-CS.RUN.4		cmp #4
-				bne CS.RUN.5
-				jsr CROUT
-				inc STATUS				TODO:CHECK USER/PASS
-				clc
-				rts
-CS.RUN.5		cmp #5
-				bne CS.RUN.6
-				lda BINID
-				ldx pPsContext
-				stx pPsContext.SAVE
-				ldx pPsContext+1
-				stx pPsContext.SAVE+1
-				>SYSCALL SYS.CreateProcessA
-				ldx pPsContext.SAVE
-				stx pPsContext
-				ldx pPsContext.SAVE+1
-				stx pPsContext+1
 				bcs .9
-				sta CHILDPSID
-				inc STATUS
-				clc
-				rts
-.9				jsr PRBYTE
-				stz STATUS
-				clc
-				rts	
-CS.RUN.6		dec CHILDPSIDPOLL
-				bne .8 
-				lda CHILDPSID			Check for CHILDTSKID
-				>SYSCALL SYS.GetPSByIDA
-				bcc .8					Still Alive ?
-				stz STATUS
-				stz CHILDPSID
-.8				clc
-				rts
+				
+				ldy #S.PS.hINDEV
+				lda	(pPs),y
+				jsr PRBYTE
+				bcs .9
+				lda #','
+				
+				jsr COUT
+				bcs .9
+				
+				ldy #S.PS.hOUTDEV
+				lda	(pPs),y
+				jsr PRBYTE
+				bcs .9
+
+				ldy #hBinName
+				lda (pData),y
+				>SYSCALL SYS.ExecProcessA
+.9				rts
 *--------------------------------------
-CS.DOEVENT		>PULLW pEvent
-				lda CHILDPSID
-				bne .99
-				ldy #S.EVT.hDEV
-				lda (pEvent),y
-				cmp hINDEV
-				bne .99
-				lda (pEvent)
-				and #S.EVT.F.KEY
-				beq .99
-				ldy #S.EVT.DATAHI
-				lda (pEvent),y
-				bne .99
-				ldy #S.EVT.DATALO
-				lda (pEvent),y
-				jsr INPUT.CHARIN	
-				>SYSCALL SYS.DestroyEvent
-				clc
-				rts
-.99				sec
+CS.DOEVENT		sec
 				rts		
 *--------------------------------------
-CS.QUIT			clc
+CS.QUIT			ldy #hBinName
+				lda (pData),y
+				>SYSCALL SYS.FreeMemA
+				
+				ldx #DEVMGR.CLOSE
+				jsr pDevJmp
+				
+				clc
 				rts
 *--------------------------------------
 *				PRIVATE
 *--------------------------------------
-PRINT.MSG		>STYA ZPQuickPtr1
+PRINT.MSG		>STYA ZPTmp1
 				ldy #0
-.1				lda (ZPQuickPtr1),y
+.1				lda (ZPTmp1),y
 				beq .2
-				ora #$80
 				jsr COUT
+				bcs .9
 				iny
 				bne .1
-.2				rts				
-*--------------------------------------
-INPUT.INIT		stz INSTATUS
-				stz INBUFFER
-				rts
-*--------------------------------------
-INPUT.CHARIN	ldx INSTATUS
-				bne .9
-				cmp #$20
-				bcc .1
-				ldx INBUFFER
-				inx
-				cpx #16
-				beq .9
-				sta INBUFFER,x
-				stx INBUFFER
-				ora #$80
-				jmp COUT
-.1				cmp #$0D
-				bne .9
-				inc INSTATUS
-.9				rts				
+.2				clc
+.9				rts		
 *--------------------------------------
 PRBYTE			pha
 				lsr
 				lsr
 				lsr
 				lsr
-				ora #$B0
-				cmp #$BA
+				ora #$30
+				cmp #$3A
 				bcc .1
 				adc #6
 .1				jsr COUT
 				pla
+				bcs .9
 				and #$0F
-				ora #$B0
-				cmp #$BA
-				bcc COUT
+				ora #$30
+				cmp #$3A
+				bcc .2
 				adc #6
-				bra COUT
+.2				jsr COUT
+.9				rts
 *--------------------------------------
 CROUT			lda #13	
 *--------------------------------------
-COUT			>PUSHA
-				phx
+COUT			phx
 				phy
-				ldy #S.PS.hOUTDEV
-				lda	(pPsContext),y
-				>SYSCALL SYS.DevOutA
+				ldx #DEVMGR.COUT
+				jsr pDevJmp
 				ply
 				plx
 				rts
-*--------------------------------------
-MSG.GREETINGS	>CSTRING "A2osX-GeTTY on Dev="
-MSG.LOGIN		>CSTRING "login:"
-MSG.PASSWORD	>CSTRING "password:"
+pDevJmp			jmp (pDev)				
 *--------------------------------------
 CS.END
-DS.START
-*--------------------------------------
+MSG.GREETINGS	>CSTRING "A2osX-GeTTY on Dev="
 hDEVNAME		.BS 1
-hINDEV			.BS 1
-hOUTDEV			.BS 1
-BINID			.BS 1
-STATUS			.BS 1
-CHILDPSID		.BS 1
-CHILDPSIDPOLL	.BS 1
-INSTATUS		.BS 1
-INBUFFER		.BS 16
-USERNAME		.BS 16
-PASSWORD		.BS 16
-pPsContext.SAVE	.BS 2
 *--------------------------------------
-DS.END
+				.DUMMY
+				.OR 0
+DS.START				
+hBinName		.BS 1
+DS.END			.ED
 MAN
 SAVE SBIN/GETTY.S
 ASM

@@ -1,5 +1,5 @@
 PR#3
-PREFIX /A2OSX.BUILD
+PREFIX /A2OSX.SRC
 NEW
 INC 1
 AUTO 6
@@ -13,375 +13,227 @@ AUTO 6
 *   Y,A = MEMPTR	
 *   X = hMem of Code Segment
 *--------------------------------------
-S.LoadBinA		sta R.DH				save file path
+S.LoadBinA		sta S.LoadBinA.hFilename	save file path
 				jsr S.GetMemByNameA
 				bcs .1					not already loaded
-				>STYA R.AX				Save base address
+				
+				>STYA ZPQuickPtr1		Save base address
 				ldy #S.MEM.REFCNT
-				lda (R.AX),y
+				lda (ZPQuickPtr1),y
 				inc
-				sta (R.AX),y
+				sta (ZPQuickPtr1),y
+				
 				ldy #S.MEM.PTR
-				lda (R.AX),y
+				lda (ZPQuickPtr1),y
 				pha						Y,A = MEM PTR...
 				iny
-				lda (R.AX),y
+				lda (ZPQuickPtr1),y
 				ply						X=hMem from S.GetMemByNameA
 				clc
 				rts
 				
-.1				lda R.DH
+.1				lda S.LoadBinA.hFilename
 				jsr S.LoadFileA
-				bcs .99
-				>STYA R.BX				save file length for relocation
-				stx R.DL				save hMem
+				bcc .2
+				rts						Error Loading file
+				
+.2				>STYA S.LoadBinA.FileLen
+				stx S.LoadBinA.hMem		save hMem
 				txa
 				jsr S.GetMemPtrA
-				>STYA R.AX				save base address for relocation
-				lda R.DH
-				jsr S.MLIGetFileInfoA	Get File Info for AUXTYPE
-				bcs .98
-				>STYA ZPQuickPtr1
-				ldy #2					get AUXTYPE
+				>STYA ZPQuickPtr1		save base address for relocation
+			
+				ldy #H.BIN.CODE.LEN		make AX = Code Len
 				lda (ZPQuickPtr1),y
-				sta R.CL
+				sta R.AL
 				iny
 				lda (ZPQuickPtr1),y
-				sta R.CH				save File load address for relocation
-				lda R.AL				compute offset for relocation....
+				sta R.AH
+			
+				lda S.LoadBinA.hFilename
+				jsr S.MLIGetFileInfoA	Get File Info for AUXTYPE
+				bcs .98
+				
+				>STYA ZPQuickPtr2
+				ldy #2					get AUXTYPE
+				lda (ZPQuickPtr2),y
+				sta R.BL				Make BX=Range Start=AUXTYPE
+				sta S.LoadBinA.AuxType
+				clc
+				adc S.LoadBinA.FileLen
+				sta R.CL				Make CX=Range End=AUXTYPE+FILELEN
+				iny
+				lda (ZPQuickPtr2),y
+				sta R.BH
+				sta S.LoadBinA.AuxType+1
+				adc S.LoadBinA.FileLen+1
+				sta R.CH
+				
+				lda ZPQuickPtr1			Compute relocation offset in DX
 				sec
-				sbc R.CL				...AX-CX...
-				sta R.CL
-				lda R.AH
-				sbc R.CH
-				sta R.CH				...to CX
-				jsr S.BinRelocate
+				sbc S.LoadBinA.AuxType
+				sta R.DL				DX=Offset=ZPQuickPtr1-AUXTYPE	
+				lda ZPQuickPtr1+1
+				sbc S.LoadBinA.AuxType+1
+				sta R.DH
+				
+				>LDYA ZPQuickPtr1
+				jsr S.BinRelocateYA
+				
 				bcs .98					relocation error, dicard Code segment
-				lda R.DH				get back bin path
+				
+				lda S.LoadBinA.hFilename				get back bin path
 				jsr S.PStrCpyA
 				bcs .98
+				
 				pha						save copy of bin path
-				lda R.DL		
+				lda S.LoadBinA.hMem			
 				jsr S.GetMemByIDA
 				>STYA ZPQuickPtr1
+				
 				lda (ZPQuickPtr1) 
 				ora #S.MEM.F.CODE		This is a code segment
 				sta (ZPQuickPtr1)
+				
 				ldy #S.MEM.BIN
 				pla						get back copy of bin path
 				sta (ZPQuickPtr1),y
-				>LDYA R.AX				return CS PTR ... not modified by S.LoadCodeReloc
-				ldx R.DL				...and  hMEM to Caller
-				clc
+							
+				lda S.LoadBinA.hMem		
+				tax						return hMEM to Caller...
+				jsr S.GetMemPtrA
+				clc						...and Y,A=PTR to CS
 				rts
+				
 .98				pha
-				lda R.DL
+				lda S.LoadBinA.hMem	
 				jsr S.FreeMemA			Discard Loaded Code
 				pla
-.99				sec
-				rts
-*--------------------------------------
-* S.LoadDrvA
-*  in :
-*   A = hMem To Full Cmd Line
-*  out :
-*   none
-*--------------------------------------
-S.LoadDrvA		>PUSHA					push Cmd Line for S.PStrGetTkn
-				>LDYAI MSG.DRVLOAD
-				jsr S.SysScrPPSTR
-				jsr S.CreateDevice
-				bcc .1
-				pha						save error code
-				>PULLA					discard Cmd Line
-				pla
+				
 				sec
 				rts
-				
-.1				>PUSHBI $20				Push SEP=' '
-				>PUSHBI 0				Push 0 for getting CMD And ARGS
-				jsr S.PStrGetTkn
-				bcs .98
-				ldy #S.DEV.hCMD
-				sta (DEVMGR.DEVPTR),y
-				
-				>PUSHA					push CMD for S.FileSearch
-				txa
-				ldy #S.DEV.hARGS
-				sta (DEVMGR.DEVPTR),y
-				>PUSHWI ENV.DRV			push ENVNAME=DRV
-				ldy #S.PS.hENV
-				lda TSKMGR.TABLE,y		Get PS #0 Env
-				>PUSHA
-				jsr S.GetEnvVarP		get value for ENV=%DRV%
-				bcs .98
-				
-				sta LoadDrv.ENV
-				>PUSHA					A=PStr to Value
-				jsr S.FileSearch		find File in %DRV%
-				bcs .98					not Found
-				
-				sta LoadDrv.BIN
-				jsr S.SysScrPPSTRA
-				
-				lda LoadDrv.BIN
-				jsr S.LoadBinA			X = BinPath hMem
-				bcs .97
-				>STYA Kernel.JMP		save PTR to Code Segment
-				txa
-				ldy #S.DEV.hCS
-				sta (DEVMGR.DEVPTR),y	save CS hMem in DEVSLOT
-				
-				lda LoadDrv.BIN			
-				jsr S.FreeMemA
-				lda LoadDrv.ENV
-				jsr S.FreeMemA
-				
-				ldx #DEVMGR.OPEN
-				>LDYA DEVMGR.DEVPTR	
-				jsr Kernel.DRVCALL		Call DRV Open function
-				bcs .99
-				
-				lda (DEVMGR.DEVPTR)
-				ora #S.DEV.F.INUSE		Get Device Flags in A
-				sta (DEVMGR.DEVPTR)
+*--------------------------------------
+S.LoadBinA.hFilename	.BS 1
+S.LoadBinA.hMem			.BS 1
+S.LoadBinA.AuxType		.BS 2
+S.LoadBinA.FileLen		.BS 2
+*--------------------------------------
+* S.BinRelocateYA :
+* YA = Ptr to Code
+* R.AX = Code Length
+* R.BX = Range Start address to relocate
+* R.CX = Range End  address to relocate
+* R.DX = offset to apply to all abs addresses between R.BX and R.CX
+*--------------------------------------
+S.BinRelocateYA	>STYA ZPQuickPtr1
+				ldy #H.BIN.JMP			relocate Main JMP
+				lda (ZPQuickPtr1),y
 				clc
-				rts
-				
-.97				pha						save error code
-				lda LoadDrv.BIN
-				jsr S.FreeMemA			discard BIN in case of failed load
-				pla
-				
-.98				pha
-				lda LoadDrv.ENV
-				jsr S.FreeMemA
-				pla
-				
-.99				pha				
-				jsr S.DestroyDevice
-				pla
-				sec				
-				rts
-*--------------------------------------
-* S.LoadLib
-*  in :
-*   PULLW = PTR To Lib Name
-* out :
-*   A = hMem To loaded LIB
-*--------------------------------------
-S.LoadLib		jsr S.NewPStr
-				bcs .99
-				pha						save LibName hMem for discard
-				jsr S.LoadLibA
-				bcs .98
-				plx						get back STR hMem
-				pha						save error code/hMem
-				txa
-				jsr S.FreeMemA			discard STR hMem
-				pla						get back error code/hMem
-				clc
-				rts
-.98				plx						get back STR hMem
-				pha						save error code/hMem
-				txa
-				jsr S.FreeMemA			discard STR hMem
-				pla						get back error code/hMem
-				sec
-.99				rts				
-*--------------------------------------
-* S.LoadLibA
-*  in :
-*   A = hMem To Lib Name
-* out :
-*   A = hMem of Loaded Lib
-*--------------------------------------
-S.LoadLibA		>PUSHA					push libname for S.FileSearch
-				>LDYAI MSG.LOADLIB
-				jsr S.SysScrPPSTR
-				>PUSHWI ENV.LIB			push ENVNAME=LIB
-				ldy #S.PS.hENV
-				lda (TSKMGR.TSKPTR),y
-				>PUSHA
-				jsr S.GetEnvVarP		get value for ENV=LIB
-				bcs .99
-				pha						save hMem to LIB VALUE
-				>PUSHA					Push %LIB% VALUE
-				jsr S.FileSearch		find libname in %LIB%
-				bcs .98
-				pha						save hMem to LIB full path
-				jsr S.SysScrPPSTRA
-				pla
-				pha
-				jsr S.LoadBinA			A = hMem of filename full path
-				bcs .97
-				phx
-				>STYA Kernel.JMP	
-
-				ldx #LIBMGR.LOAD
-				jsr Kernel.LIBCALL		Call LIB.LOAD function
-				
-				bcs .97				
-
-				plx
-				pla						discard LIB PATH
-				jsr S.FreeMemA			
-				pla						discard LIB VALUE
-				jsr S.FreeMemA	
-				txa	
-				clc
-				rts
-.97				pla						discard LIB PATH
-				jsr S.FreeMemA			
-.98				pla						discard LIB VALUE
-				jsr S.FreeMemA			
-				sec
-.99				rts
-*--------------------------------------
-* S.UnloadLibA
-*  in :
-*   A = hMem To Lib
-* out :
-*--------------------------------------
-S.UnloadLibA	pha
-				jsr S.GetMemByIDA
-				>STYA ZPQuickPtr1
-				ldy #S.MEM.REFCNT
-				lda (ZPQuickPtr1),y		Get count of those referencing this lib
-				dec						only one left ?	
-				beq .1
+				adc R.DL
 				sta (ZPQuickPtr1),y
-				pla
-				clc
-				rts
-				
-.1				ldy #S.MEM.PTR
-				lda (ZPQuickPtr1),y
-				pha
+
 				iny
 				lda (ZPQuickPtr1),y
-				ply
-				>STYA Kernel.JMP
+				adc R.DH
+				sta (ZPQuickPtr1),y
+
+				ldy #H.BIN.RELOC.TABLE	skip Header, CS.SIZE & DS.SIZE... (16 bytes)
+				bra S.JmpRelocate
 				
-				ldx #LIBMGR.UNLOAD
-				jsr Kernel.BINCALL		Call LIB.UNLOAD function
-				pla
-				jmp S.FreeMemA
-*--------------------------------------
-* S.BinRelocate :
-* R.AX = base address to start relocate
-* R.BX = segment length (including data)
-* R.CX = offset to apply to all abs addresses within segment
-* R.DX unmodified
-*--------------------------------------
-S.BinRelocate	lda (R.AX)
-				cmp #K.BIN.MAGICHEADER
-				bne .99
-				ldy #1
-				lda (R.AX),y
-				cmp /K.BIN.MAGICHEADER
-				beq .1
-.99				sec						Not a Valid Relocatable BIN File, exiting		
-				rts
-.1				>PUSHW R.DX
-				lda R.AL
-				clc
-				adc R.BL				Make BX end of Segment Range (BX=AX+BX)
-				sta R.BL
-				lda R.AH
-				adc R.BH
-				sta R.BH
+S.DrvRelocateYA	>STYA ZPQuickPtr1
+				ldy #0
+				
+S.JmpRelocate	lda (ZPQuickPtr1),y		Start Relocate JMP table
+				tax
 				iny
-.2				lda (R.AX),y			Start Relocate JMP table
-				clc
-				adc R.CL
-				tax						save LO to X
-				iny
-				lda (R.AX),y			if HI = 0,we are done
-				beq .3
-				adc R.CH
-				sta (R.AX),y
+				ora (ZPQuickPtr1),y
+				beq S.CodeRelocate		$0000 = end of table
+				
 				dey
-				txa						get back LO
-				sta (R.AX),y
-				iny
-				iny
-				bra .2
-.3				iny						we already skipped the 2 "0" bytes indicating end of JMP table
-				lda R.AL				
+				txa
 				clc
-				adc (R.AX),y			make DX = end of opcode range
-				sta R.DL
+				adc R.DL
+				sta (ZPQuickPtr1),y
+
 				iny
-				lda R.AH
-				adc (R.AX),y
-				sta R.DH
+				lda (ZPQuickPtr1),y
+				adc R.DH
+				sta (ZPQuickPtr1),y
+
 				iny
-* Start relocating opcodes between R.AX and R.DX with abs addressing pointing between R.AX and R.BX
-* Applying offset = R.CX
-				tya						add current offset in Y to R.AX
+
+				bra S.JmpRelocate
+				
+S.CodeRelocate	lda ZPQuickPtr1
 				clc
-				adc R.AL
-				sta ZPQuickPtr1
-				lda #0
+				adc R.AL				Make ZPQuickPtr2=End of code
+				sta ZPQuickPtr2			=ZPQuickPtr1+AX (code len)
+				lda ZPQuickPtr1+1
 				adc R.AH
-				sta ZPQuickPtr1+1
-.4				lda (ZPQuickPtr1)		get OPCODE
+				sta ZPQuickPtr2+1
+	
+				iny
+				tya						add current offset in Y to Ptr
+				clc
+				adc ZPQuickPtr1
+				sta ZPQuickPtr1
+				bcc .5	
+				inc ZPQuickPtr1+1		ZPQuickPtr1=Current Code PTR
+				clc
+				
+.5				lda (ZPQuickPtr1)		get OPCODE
 				tax
 				lda OPCODES,x			get OPCODE definition
 				bpl .7					abs addressing?
+				
+				and #3					save Opcode length...
+				pha
+				
 				ldy #1
 				lda (ZPQuickPtr1),y		Get LO
-				clc
-				adc R.CL				add CX to abs address
-				sta ZPQuickPtr2			store relocated addr LO
-				iny
-				lda (ZPQuickPtr1),y		Get HI
-				adc R.CH
-				sta ZPQuickPtr2+1		store relocated addr LO
-				dey	
-				lda ZPQuickPtr2			Get new LO
-				sec
-				sbc R.AL
-				iny 
-				lda ZPQuickPtr2+1		Get new HI
-				sbc R.AH
-				bcc .6					new addr < AX, out of range
-				dey
-				lda ZPQuickPtr2			Get new LO
 				sec
 				sbc R.BL
 				iny
-				lda ZPQuickPtr2+1		Get new HI
+				lda (ZPQuickPtr1),y		Get HI
 				sbc R.BH
-				bcs .6					new addr > BX, out of range
+				bcc .6					addr < AX, out of range
+				
 				dey
-				lda ZPQuickPtr2			Get new LO
-				sta (ZPQuickPtr1),y
+				lda (ZPQuickPtr1),y		Get LO
+				sec
+				sbc R.CL
 				iny
-				lda ZPQuickPtr2+1		Get new HI
-				sta (ZPQuickPtr1),y
-.6				lda OPCODES,x
-.7				and #$3					get OPCODE length
+				lda (ZPQuickPtr1),y		Get HI
+				sbc R.CH
+				bcs .6					addr > CX, out of range
+				
+				dey
+				lda (ZPQuickPtr1),y		Get LO
 				clc
+				adc R.DL				add DX to abs address
+				sta (ZPQuickPtr1),y		store relocated addr LO
+				iny
+				lda (ZPQuickPtr1),y		Get HI
+				adc R.DH
+				sta (ZPQuickPtr1),y		store relocated addr HI
+				
+.6				pla
+
+.7				clc						A = OPCODE length
 				adc ZPQuickPtr1
 				sta ZPQuickPtr1
 				bcc .8
 				inc ZPQuickPtr1+1
-.8				sec						A already got Ptr LO 
-				sbc R.DL
-				lda ZPQuickPtr1+1		is Ptr greater than DX ?
-				sbc R.DH
-				bcc .4					no, continue relocating
-				>PULLW R.DX
+				
+.8				lda ZPQuickPtr1			is Current PTR < Code Limit ?
+				sec
+				sbc ZPQuickPtr2
+				lda ZPQuickPtr1+1
+				sbc ZPQuickPtr2+1
+				bcc .5					yes, continue relocating
+				
 				clc
 				rts
-*--------------------------------------
-MSG.DRVLOAD		>PSTRING "\nLoadDrv:"
-MSG.LOADLIB		>PSTRING "\nLoadLib:"
-LoadDrv.ENV		.BS 1
-LoadDrv.BIN		.BS 1
-
 *--------------------------------------
 * 65C02 OPCODES
 * Bit 7 : 1 absolute addressing

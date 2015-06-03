@@ -1,15 +1,16 @@
 PR#3
-PREFIX /A2OSX.BUILD
+PREFIX /A2OSX.SRC
 NEW
 INC 1
 AUTO 6
 				.LIST OFF
 				.OP	65C02
 				.OR	$2000
-				.TF BIN/PING
+				.TF /A2OSX.BOOT/BIN/PING
 *--------------------------------------
 				.INB INC/MACROS.I
 				.INB INC/A2OSX.I
+				.INB INC/A2OSX.API.I
 				.INB INC/KERNEL.I
 				.INB INC/LIBSTR.I
 				.INB INC/LIBTCPIP.I
@@ -20,44 +21,44 @@ ZPFrameBase1	.EQ ZPBIN
 ZPFrameLen1		.EQ ZPBIN+2
 ZPFramePtr1		.EQ ZPBIN+4
 *--------------------------------------
-* Main entry point
-*--------------------------------------
-* Code signature and INIT table
-*--------------------------------------
-* CLD 			$D8
-* JMP (*,x)		$7C
-* 				#JMPTABLE
-*				/JMPTABLE
+*			File Header (16 Bytes)
 *--------------------------------------
 CS.START		cld
 				jmp (.1,x)
+				.DA #$61				6502,Level 1 (65c02)
+				.DA #1					BIN Layout Version 1
+				.DA 0
+				.DA CS.END-CS.START		Code Length To Relocate
+				.DA DS.END-DS.START		Data Segment to Allocate
+				.DA 0
+				.DA 0
+*--------------------------------------
 .1				.DA CS.INIT
 				.DA CS.RUN
-				.DA CS.EVENT		
+				.DA CS.DOEVENT		
 				.DA	CS.QUIT
 L.LIBSTR		.DA LIBSTR
 L.LIBTCPIP		.DA LIBTCPIP
 L.SSCANF.IP		.DA SSCANF.IP
-L.DST.IP		.DA DST.IP
 L.MSG0			.DA MSG0
 L.MSG1			.DA MSG1
 L.MSG2			.DA MSG2
 L.MSG3			.DA MSG3
 				.DA 0
-				.DA CS.END-CS.START		Code Length To Relocate
-				.DA DS.END-DS.START		Data Segment to Allocate
 *--------------------------------------
 CS.INIT			ldy #S.PS.hARGS
-				lda (pPsContext),y
+				lda (pPs),y
 				bne .1
 				lda #SYSMGR.ERRSYN
 				sec
 				rts
 				
-.1				>LIBLOADP L.LIBSTR
+.1				>LDYA L.LIBSTR
+				>LOADLIBYA
 				sta hLIBSTR
 
-				>LIBLOADP L.LIBTCPIP
+				>LDYA L.LIBTCPIP
+				>LOADLIBYA
 				sta hLIBTCPIP
 
 				>LIBCALL hLIBTCPIP,LIBTCPIP.GET.IPCFG	is TCPIP loaded ?
@@ -72,45 +73,52 @@ CS.INIT			ldy #S.PS.hARGS
 				sta hDev
 				
 				lda A2OSX.RANDOM16
-				sta Identifier
+				ldy #Identifier
+				sta (pData),y
 				lda A2OSX.RANDOM16+1
-				sta Identifier+1
+				iny
+				sta (pData),y
 
-				stz Sequence
-				stz Sequence+1
+				lda #0
+				ldy #Sequence
+				sta (pData),y
+				iny
+				sta (pData),y
 				
-				lda (pPsContext)
+				lda (pPs)
 				ora #S.PS.F.EVENT		Now accept events
-				sta (pPsContext)
+				sta (pPs)
 				clc
 				
 .9				rts
 *--------------------------------------
-CS.RUN			>PUSHW L.DST.IP
+CS.RUN			>PUSHW pData			DST.IP
 				>PUSHW L.SSCANF.IP
 				ldy #S.PS.hARGS
-				lda (pPsContext),y
+				lda (pPs),y
 				>SYSCALL SYS.GetMemPtrA
 				>PUSHYA
 				>LIBCALL hLIBSTR,LIBSTR.SSCANF
 				bcc CS.RUN.IPOK
 				
 				lda #PING.TIMEOUT
-				sta TimeOut
-				
-CS.RUN.DNSQUERY	>PUSHW L.DST.IP
+				ldy #TimeOut
+				sta (pData),y
+
+CS.RUN.DNSQUERY	>PUSHW pData			DST.IP
 				ldy #S.PS.hARGS
-				lda (pPsContext),y
+				lda (pPs),y
 				>PUSHA
 				>LIBCALL hLIBTCPIP,LIBTCPIP.DNS.QUERY
 				bcc CS.RUN.IPOK
 
 				jsr A2osX.SLEEP
-				lda TimeOut
+				ldy #TimeOut
+				lda (pData),y
 				bne CS.RUN.DNSQUERY
 				
 				ldy #S.PS.hARGS
-				lda (pPsContext),y
+				lda (pPs),y
 				>SYSCALL SYS.GetMemPtrA
 				>PUSHYA
 				>PUSHW L.MSG0
@@ -120,24 +128,37 @@ CS.RUN.DNSQUERY	>PUSHW L.DST.IP
 CS.RUN.RTS		rts
 				
 CS.RUN.IPOK		ldy #S.PS.hARGS
-				lda (pPsContext),y
+				lda (pPs),y
 				>SYSCALL SYS.GetMemPtrA
 				>PUSHYA
-				>PUSHB DST.IP+3
-				>PUSHB DST.IP+2
-				>PUSHB DST.IP+1
-				>PUSHB DST.IP
+				ldy #3
+				>PUSHB (pData),y			DST.IP+3	
+				dey
+				>PUSHB (pData),y			DST.IP+2
+				dey
+				>PUSHB (pData),y			DST.IP+1
+				>PUSHB (pData)				DST.IP
 				>PUSHW L.MSG1
 				>LIBCALL hLIBSTR,LIBSTR.PRINTF
 		
 CS.RUN.ECHO		>LIBCALL hLIBTCPIP,LIBTCPIP.NEW.ICMP.FRAME
 				bcs CS.RUN.RTS
 				>STYA ZPFrameBase1
-				stx hFrame
+				txa
+				ldy #hFrame
+ 				sta (pData),y
+
+				ldx #3
+				ldy #0
+.10				lda (pData),y
+				pha
+				iny
+				dex
+				bpl .10
 				
 				ldx #3
 				ldy #S.IP.DST+3
-.1				lda DST.IP,x
+.1				pla
 				sta (ZPFrameBase1),y
 				dey
 				dex
@@ -147,63 +168,92 @@ CS.RUN.ECHO		>LIBCALL hLIBTCPIP,LIBTCPIP.NEW.ICMP.FRAME
 				lda #S.ICMP.TYPE.ECHOREQ
 				sta (ZPFrameBase1),y
 				
-				ldy #S.ICMP.IDENTIFIER
-				lda Identifier
-				sta (ZPFrameBase1),y
+				ldy #Identifier
+				lda (pData),y
+				tax
 				iny
-				lda Identifier+1
+				lda (pData),y
+				
+				ldy #S.ICMP.IDENTIFIER+1
+				sta (ZPFrameBase1),y
+				dey
+				txa
 				sta (ZPFrameBase1),y
 				
-				inc Sequence
+				ldy #Sequence+1
+				lda (pData),y
+				tax		
+				dey
+				lda (pData),y 
+				inc
+				sta (pData),y
 				bne .2
-				inc Sequence+1
+				pha
+				inx
+				txa
+				sta (pData),y
+				pla
 				
 .2				ldy #S.ICMP.SEQUENCE
-				lda Sequence
 				sta (ZPFrameBase1),y
 				iny
-				lda Sequence+1
+				txa
 				sta (ZPFrameBase1),y
 				
 				lda #PING.TIMEOUT
-				sta TimeOut
+				ldy #TimeOut
+				sta (pData),y
 				
 .3				>PUSHWI S.ICMP+32
-				lda hFrame
+				ldy #hFrame
+				lda (pData),y
 				>SYSCALL SYS.GetMemPtrA
 				>PUSHYA
 				>LIBCALL hLIBTCPIP,LIBTCPIP.SEND.ICMP.FRAME
 				bcc .4
 				jsr A2osX.SLEEP
-				lda TimeOut
+				ldy #TimeOut
+				lda (pData),y
 				bne .3
 
-.4				lda hFrame
+.4				ldy #hFrame
+				lda (pData),y
 				>SYSCALL SYS.FreeMemA
 				
-				stz bReply
+				ldy #bReply
+				lda #0
+				sta (pData),y
 				lda #PING.TIMEOUT
-				sta TimeOut
+				ldy #TimeOut
+				sta (pData),y
 				
 CS.RUN.WAIT		jsr A2osX.SLEEP
-				lda bReply
+				ldy #bReply
+				lda (pData),y
 				bne .1
 
-				lda bCTRLC
+				ldy #bCTRLC
+				lda (pData),y
 				bne CS.RUN.ERROR
-				lda TimeOut
+				ldy #TimeOut
+				lda (pData),y
 				bne CS.RUN.WAIT
 				
-				>PUSHB DST.IP+3
-				>PUSHB DST.IP+2
-				>PUSHB DST.IP+1
-				>PUSHB DST.IP
+				ldy #3
+				>PUSHB (pData),y			DST.IP+3	
+				dey
+				>PUSHB (pData),y			DST.IP+2
+				dey
+				>PUSHB (pData),y			DST.IP+1
+				>PUSHB (pData)				DST.IP
 				>PUSHW L.MSG2
 				>LIBCALL hLIBSTR,LIBSTR.PRINTF
 
-.1				lda bCTRLC
+.1				ldy #bCTRLC
+				lda (pData),y
 				bne CS.RUN.ERROR
-				lda TimeOut
+				ldy #TimeOut
+				lda (pData),y
 				beq .2
 				
 				jsr A2osX.SLEEP
@@ -214,14 +264,16 @@ CS.RUN.WAIT		jsr A2osX.SLEEP
 CS.RUN.ERROR	sec
 				rts
 *--------------------------------------
-CS.EVENT		lda (pEvent)
+CS.DOEVENT		lda (pEvent)
 				and #S.EVT.F.TIMER		is it a TIMER event?
 				beq .1					no....
 
-				lda TimeOut
+				ldy #TimeOut
+				lda (pData),y
 				beq .10
 				
-				dec TimeOut
+				dec 
+				sta (pData),y
 .10				sec					do not discard TIMER event
 				rts
 				
@@ -232,7 +284,7 @@ CS.EVENT		lda (pEvent)
 				ldy #S.EVT.hDEV			is Event from active IN device?
 				lda (pEvent),y
 				ldy #S.PS.hINDEV
-				cmp (pPsContext),y
+				cmp (pPs),y
 				bne .9
 				
 				ldy #S.EVT.DATAHI		is it an O or SAPPLE key ?
@@ -245,7 +297,8 @@ CS.EVENT		lda (pEvent)
 				bne .8
 				
 				lda #$FF
-				sta bCTRLC
+				ldy #bCTRLC
+				sta (pData),y
 				bra .8
 				
 .2				lda (pEvent)
@@ -275,15 +328,19 @@ CS.EVENT		lda (pEvent)
 				
 				ldy #S.ICMP.IDENTIFIER
 				lda (ZPFrameBase1),y
-				cmp Identifier
-				bne .9
+				tax
 				iny
 				lda (ZPFrameBase1),y
-				cmp Identifier+1
+				ldy #Identifier+1 
+				cmp (pData),y
 				bne .9
+				dey
+				txa
+				cmp (pData),y
+				bne .9
+				
 				jsr CS.EVENT.REPLY
-.8				>SYSCALL SYS.DestroyEvent
-				clc
+.8				clc
 				rts	
 				
 .9				sec
@@ -304,7 +361,7 @@ CS.EVENT.REPLY	lda #PING.TIMEOUT
 				adc #K.TIMER16RESOLUTION*20
 				sta TimeOut.ms
 				bcc .2
-				inc TimeOut+1+1
+				inc TimeOut
 .2				dey
 				bne .1
 				
@@ -329,7 +386,10 @@ CS.EVENT.REPLY	lda #PING.TIMEOUT
 				>PUSHW L.MSG3
 				>LIBCALL hLIBSTR,LIBSTR.PRINTF				
 				
-				inc bReply
+				ldy #bReply
+				lda (pData),y
+				inc
+				sta (pData),y
 				rts
 *--------------------------------------
 CS.QUIT			lda hLIBTCPIP
@@ -347,20 +407,23 @@ MSG0			>CSTRING "%S: Unknown host\n"
 MSG1			>CSTRING "PING %d.%d.%d.%d (%S)\n"
 MSG2			>CSTRING "%d.%d.%d.%d: TimeOut/Host unreachable\n"
 MSG3			>CSTRING "32 bytes from %d.%d.%d.%d, icmp_seq=%D, ttl=%d, time=%D ms\n"
-*--------------------------------------
-DS.START
 hLIBSTR			.BS	1
 hLIBTCPIP		.BS 1
 hDev			.BS 1
+TimeOut.ms		.BS 2
+*--------------------------------------
+				.DUMMY
+				.OR 0
+DS.START
 DST.IP			.BS 4
 hFrame			.BS 1
 TimeOut			.BS 1
-TimeOut.ms		.BS 2
 Identifier		.BS 2
 Sequence		.BS 2
 bCTRLC			.BS 1
 bReply			.BS 1
 DS.END
+				.ED
 *--------------------------------------
 MAN
 SAVE BIN/PING.S

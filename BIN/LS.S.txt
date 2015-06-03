@@ -1,33 +1,37 @@
 PR#3
-PREFIX /A2OSX.BUILD
+PREFIX /A2OSX.SRC
 NEW
 INC 1
 AUTO 6
 				.LIST OFF
 				.OP	65C02
 				.OR	$2000
-				.TF BIN/LS
+				.TF /A2OSX.BOOT/BIN/LS
 *--------------------------------------
 				.INB INC/MACROS.I
 				.INB INC/A2OSX.I
+				.INB INC/A2OSX.API.I
 				.INB INC/LIBSTR.I
 *--------------------------------------
-* Main entry point
-*--------------------------------------
-* Code signature and INIT table
-*--------------------------------------
-* CLD 			$D8
-* JMP (*,x)		$7C
-* 				#JMPTABLE
-*				/JMPTABLE
+*			File Header (16 Bytes)
 *--------------------------------------
 CS.START		cld
 				jmp (.1,x)
+				.DA #$61				6502,Level 1 (65c02)
+				.DA #1					BIN Layout Version 1
+				.DA 0
+				.DA CS.END-CS.START		Code Length To Relocate
+				.DA DS.END-DS.START		Data Segment to Allocate
+				.DA 0
+				.DA 0
+*--------------------------------------
+* Relocation Table
+*--------------------------------------				
 .1				.DA CS.INIT
 				.DA CS.RUN
 				.DA CS.DOEVENT		
 				.DA	CS.QUIT
-L.LIB.LIBSTR	.DA LIB.LIBSTR
+L.LIBSTR		.DA LIBSTR
 L.MSG.VOL.HEADER	.DA MSG.VOL.HEADER
 L.MSG.DIR.HEADER	.DA MSG.DIR.HEADER
 L.MSG.VOL		.DA MSG.VOL
@@ -37,21 +41,21 @@ L.MSG.VOL.END	.DA MSG.VOL.END
 L.MSG.DIR.END	.DA MSG.DIR.END
 L.PRODOS.FT.TXT	.DA PRODOS.FT.TXT
 				.DA 0
-				.DA CS.END-CS.START		Code Length To Relocate
-				.DA DS.END-DS.START		Data Segment to Allocate
 *--------------------------------------
-CS.INIT			>LIBLOADP L.LIB.LIBSTR
+CS.INIT			>LDYA L.LIBSTR
+				>LOADLIBYA
 				sta hLIBSTR
-				stz hDIRPATH
-				stz hS.LISTDIR
-				stz hVOLHEADER
-				stz hDIRHEADER
-				stz bSTOP
-				stz bCANCEL
+				
+				lda #0
+				ldy #DS.END-DS.START-1
+.11				sta (pData),y
+				dey
+				bpl .11
 				
 				ldy #S.PS.hARGS
-				lda (pPsContext),y
+				lda (pPs),y
 				beq .1
+				
 				>SYSCALL SYS.GetMemPtrA
 				>STYA ZPQuickPtr1
 				lda (ZPQuickPtr1)
@@ -60,50 +64,52 @@ CS.INIT			>LIBLOADP L.LIB.LIBSTR
 				lda (ZPQuickPtr1),y
 				cmp #'/'
 				bne .10
+				
 				ldy #S.PS.hARGS
-				bra .2
+				lda (pPs),y
+				bra .3
 				
 .10				ldy #S.PS.hARGS
-				lda (pPsContext),y
+				lda (pPs),y
 				>PUSHA
 				ldy #S.PS.hPREFIX
-				lda (pPsContext),y
+				lda (pPs),y
 				>PUSHA
 				>SYSCALL SYS.PStrCat
 				sta hDIRPATH
 				bra .3
 				
 .1				ldy #S.PS.hPREFIX
-.2				lda (pPsContext),y
+				lda (pPs),y
 				
 .3				>SYSCALL SYS.ListDirInitA
-				bcs .98
-				sta hS.LISTDIR
+				bcs .9
+				ldy #hS.LISTDIR
+				sta (pData),y
 				
-				lda (pPsContext)
+				lda (pPs)
 				ora #S.PS.F.EVENT		Now accept events
-				sta (pPsContext)
+				sta (pPs)
 				clc
 				rts
 				
-.98				pha
-				lda hLIBSTR
-				>SYSCALL SYS.FreeMemA
-				pla
-				sec
+.9				sec
 				rts
 *--------------------------------------
-CS.RUN			lda bCANCEL
+CS.RUN			ldy #bCANCEL
+				lda (pData),y
 				beq .1
 				sec
 				rts
 				
-.1				lda bSTOP
+.1				ldy #bSTOP
+				lda (pData),y
 				beq .2
 				clc
 				rts
 				
-.2				lda hS.LISTDIR
+.2				ldy #hS.LISTDIR
+				lda (pData),y
 				>SYSCALL SYS.ListDirNextA
 				bcc .3
 				
@@ -124,7 +130,8 @@ CS.RUN			lda bCANCEL
 				bne .31
 				
 				pla
-				sta hVOLHEADER
+				ldy #hVOLHEADER
+				sta (pData),y
 				>PUSHW ZPQuickPtr1
 				>PUSHW L.MSG.VOL.HEADER
 				>LIBCALL hLIBSTR,LIBSTR.PRINTF
@@ -135,8 +142,9 @@ CS.RUN			lda bCANCEL
 				bne .4
 				
 				pla
-				sta hDIRHEADER
-
+				ldy #hDIRHEADER
+				sta (pData),y
+				
 				>PUSHW ZPQuickPtr1
 				>PUSHW L.MSG.DIR.HEADER
 				>LIBCALL hLIBSTR,LIBSTR.PRINTF
@@ -145,6 +153,7 @@ CS.RUN			lda bCANCEL
 				
 .4				cmp #$D0				Directory ?
 				bne .5
+				
 				jsr Push.Dates
 				jsr Push.Dir
 				>PUSHW L.MSG.DIR
@@ -263,13 +272,14 @@ Push.Dates		ldy #$24				get modification time
 				>PUSHA
 				rts					
 *--------------------------------------
-Push.Footer		lda hVOLHEADER
+Push.Footer		ldy #hVOLHEADER
+				lda (pData),y
 				beq .20
 
 				>SYSCALL SYS.GetMemPtrA 
 				>STYA ZPQuickPtr1
 				
-				ldy #22					file_count
+				ldy #$22				file_count
 				lda (ZPQuickPtr1),y
 				>PUSHA
 				dey
@@ -279,13 +289,14 @@ Push.Footer		lda hVOLHEADER
 				>PUSHW L.MSG.VOL.END
 				>LIBCALL hLIBSTR,LIBSTR.PRINTF
 				
-.20				lda hDIRHEADER
+.20				ldy #hDIRHEADER
+				lda (pData),y
 				beq .21
 
 				>SYSCALL SYS.GetMemPtrA 
 				>STYA ZPQuickPtr1
 
-				ldy #22					file_count
+				ldy #$22				file_count
 				lda (ZPQuickPtr1),y
 				>PUSHA
 				dey
@@ -301,47 +312,60 @@ Push.Footer		lda hVOLHEADER
 CS.DOEVENT		ldy #S.EVT.hDEV		is Event from active IN device?
 				lda (pEvent),y
 				ldy #S.PS.hINDEV
-				cmp (pPsContext),y
+				cmp (pPs),y
 				bne .9
+
 				lda (pEvent)
 				and #S.EVT.F.KEY		is it a KEY event?
 				beq .9
+
 				ldy #S.EVT.DATAHI		is it an O or SAPPLE key ?
 				lda (pEvent),y
 				bne	.9
+
 				ldy #S.EVT.DATALO	
 				lda (pEvent),y
 				cmp #$03				Ctrl-C
 				bne .1
+
 				lda #$FF
-				sta bCANCEL
+				ldy #bCANCEL
+				sta (pData),y
 				bra .8
+				
 .1				cmp #$13				Ctrl-S
 				bne .8
-				lda bSTOP
+				
+				ldy #bSTOP
+				lda (pData),y
 				eor #$FF
-				sta bSTOP
-.8				>SYSCALL SYS.DestroyEvent
-				clc
+				sta (pData),y
+
+.8				clc
 				rts
 				
 .9				sec
 				rts
 *--------------------------------------
-CS.QUIT			lda hVOLHEADER
+CS.QUIT			ldy #hVOLHEADER
+				lda (pData),y
 				beq .1
 				
 				>SYSCALL SYS.FreeMemA
 				
-.1				lda hDIRHEADER
+.1				ldy #hDIRHEADER
+				lda (pData),y
 				beq .2
 				
 				>SYSCALL SYS.FreeMemA
 				
-.2				lda hS.LISTDIR
+.2				ldy #hS.LISTDIR
+				lda (pData),y
+				
 				>SYSCALL SYS.ListDirCloseA
 				
-				lda hDIRPATH
+				ldy #hDIRPATH
+				lda (pData),y
 				beq .3
 				>SYSCALL SYS.FreeMemA
 				
@@ -352,7 +376,7 @@ CS.QUIT			lda hVOLHEADER
 				rts
 *--------------------------------------
 CS.END
-LIB.LIBSTR		>PSTRING "libstr.o"
+LIBSTR			>PSTRING "libstr.o"
 MSG.VOL.HEADER	>CSTRING "Volume Listing Of %S\n"
 MSG.DIR.HEADER	>CSTRING "Directory Listing Of %S\n"
 MSG.VOL			>CSTRING "/%S\n"
@@ -373,9 +397,11 @@ TE2				>PSTRING "ATK"
 TFF				>PSTRING "SYS"
 PRODOS.FT.DFLT	>PSTRING "$  "
 HEXDIGIT		.AS '0123456789ABCDEF'
-*--------------------------------------
-DS.START
 hLIBSTR			.BS	1
+*--------------------------------------
+				.DUMMY
+				.OR 0
+DS.START
 hDIRPATH		.BS 1
 hS.LISTDIR		.BS 1
 hVOLHEADER		.BS 1
@@ -383,6 +409,7 @@ hDIRHEADER		.BS 1
 bSTOP			.BS 1
 bCANCEL			.BS 1
 DS.END
+				.ED
 *--------------------------------------
 MAN
 SAVE BIN/LS.S

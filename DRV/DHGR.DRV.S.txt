@@ -1,73 +1,81 @@
 PR#3
-PREFIX /A2OSX.BUILD
+PREFIX /A2OSX.SRC
 NEW
 INC 1
 AUTO 6
 				.LIST OFF	
 				.OP	65C02
 				.OR $2000
-				.TF DRV/DHGR.DRV
+				.TF /A2OSX.BOOT/DRV/DHGR.DRV
 *--------------------------------------
 				.INB INC/MACROS.I
 				.INB INC/A2OSX.I
+				.INB INC/A2OSX.API.I
+				.INB INC/KERNEL.I
 				.INB INC/IO.I
 *--------------------------------------
 ZPBASE			.EQ ZPDRV
 ZPCOLOR			.EQ ZPDRV+2
 *--------------------------------------
-* Main DRV entry point
-* input :
-* X = CMD
-*	0 : OPEN
-*	2 : GETEVENT
-*	6 : OUT
-*   8 : CLOSE
-*--------------------------------------
-* CLD 			$D8
-* JMP (*,x)		$7C
-* 				#JMPTABLE
-*				/JMPTABLE
+*			File Header (16 Bytes)
 *--------------------------------------
 CS.START		cld
-				jmp (.1,x)
-.1				.DA OPEN
+				jmp Dev.Detect			cld,jmp abs=DRV
+				.DA #$61				6502,Level 1 (65c02)
+				.DA #1					DRV Layout Version 1
+				.DA 0
+				.DA CS.END-CS.START			Code Length
+				.DA DEV.HEADER-CS.START		Device Header Offset
+				.DA DRV.CS.START-CS.START	Driver Code Offset
+				.DA DRV.CS.END-DRV.CS.START	Drv Code Length
+*--------------------------------------
+* Relocation Table
+*--------------------------------------
+L.MSG.DETECT	.DA MSG.DETECT
+				.DA 0					End Of Reloc Table
+*--------------------------------------
+Dev.Detect		>LDYA L.MSG.DETECT
+				>SYSCALL SYS.SysScrPPSTRYA
+				
+				lda A2osX.SCREENS
+				ora #A2osX.SCREENS.G
+				sta A2osX.SCREENS
+				
+				clc
+				rts
+CS.END
+MSG.DETECT		>PSTRING "\nApple IIe/IIc DoubleHGR Driver."
+*--------------------------------------
+*			Device Header (16 Bytes)
+*--------------------------------------
+DEV.HEADER		cld
+				jmp (DRV.CS.START,x)
+				.DA #0
+				>PSTRING "GFX"			NAME
+				.HS 00					NAME must Be 5 bytes long
+				.HS 00.00
+				.HS 00.00.00.00
+*--------------------------------------
+*			Driver Code
+*--------------------------------------
+DRV.CS.START	.DA OPEN
 				.DA GETEVENT
-				.DA OUT
+				.DA COUT
 				.DA CLOSE
 				.DA GETINFO
+				.DA IRQ
 				.DA SETPIXEL
 				.DA GETPIXEL
 				.DA HLINE
 				.DA VLINE
-				.DA FILLREC
 				.DA BITBLT
+				.DA FILLREC
 L.DEVINFO		.DA DEVINFO
 				.DA 0					end or relocation
-				.DA CS.END-CS.START		Code Length To Relocate
-				.DA DS.END-DS.START		Data Segment to Allocate
 *--------------------------------------
-OPEN			lda #S.DEV.F.GFX
-				sta (pDevContext)
+OPEN			sta SETHIRES
+				sta SET80STORE			prepare for page switching
 				
-				ldy #S.DEV.NAME
-				ldx #0
-.1				lda DEVNAME,x
-				sta (pDevContext),y
-				cpx DEVNAME
-				beq .8
-				inx
-				iny
-				bne .1
-				
-			
-.8				lda A2osX.SCREENS
-				ora #A2osX.SCREENS.G
-				sta A2osX.SCREENS
-				
-				lda #A2osX.SCREENS.G
-				>SYSCALL SYS.ScreenSelectA
-				
-				sta SET80STORE
 				ldx #192
 				
 .81				dex
@@ -77,61 +85,37 @@ OPEN			lda #S.DEV.F.GFX
 				lda BASEH,x
 				sta ZPBASE+1
 
-				lda #$D5
-				
+				lda #$55
+*				lda #$00		
+
 				ldy #39
 				sta SETPAGE2
 .82				sta (ZPBASE),y
 				dey
 				bpl .82
 
-				lda #$AA
-				
+				lda #$2A
+*				lda #$00	
+
 				ldy #39
 				sta CLRPAGE2
 .83				sta (ZPBASE),y
 				dey
 				bpl .83
 				
-				dex
-				
-				lda BASEL,x
-				sta ZPBASE
-				lda BASEH,x
-				sta ZPBASE+1
-
-				lda #$2A
-				
-				ldy #39
-				sta SETPAGE2
-.84				sta (ZPBASE),y
-				dey
-				bpl .84
-
-				lda #$55
-
-				ldy #39
-				sta CLRPAGE2
-.85				sta (ZPBASE),y
-				dey
-				bpl .85
-				
 				txa
 				bne .81
 				
 				>DEBUG
-				
 				clc
 				rts
 *--------------------------------------
 GETEVENT		
-OUT				clc
+COUT
+IRQ				sec
 				rts
 *--------------------------------------
-CLOSE			lda A2osX.SCREENS
-				and #$FF^A2osX.SCREENS.G
-				sta A2osX.SCREENS
-				clc
+CLOSE			clc
 				rts
 *--------------------------------------
 GETINFO			>LDYA L.DEVINFO
@@ -139,104 +123,139 @@ GETINFO			>LDYA L.DEVINFO
 				rts
 *--------------------------------------
 * SETPIXEL
-*--------------------------------------
-* PULLB = X.LO
-* PULLB = X.HI
-* PULLB = Y
 * PULLB = Mode
-*		00000001=mono
+*		00000001=B/W
 *		00000010=16 colors
 *		1000000=xor (mono on 1 bit)
+* PULLW = X
+* PULLB = Y
 * PULLB = Color	(if not xor)
 *--------------------------------------
-SETPIXEL		>PULLA					X.LO
-				tax
-				>PULLA					X.HI
+SETPIXEL		sta SETHIRES
+				sta SET80STORE			prepare for page switching
+				
+				>PULLA					Pull Mode
+				and #$FF
+				bpl SETPIXEL.1
+				
+SETPIXEL.XOR	>PULLYA					Y=X.LO,A=X.HI
 				lsr						if 256 =< x < 511 
 				bcs .1
 				lsr
 				bcs	.2					if 512 < x
-				ldy DIV7.0,x
-				lda MOD7.0,x
+				lda DIV7.0,y
+				ldx MOD7.0,y
 				bra .3
 				
-.1				ldy DIV7.256,x
-				lda MOD7.256,x
+.1				lda DIV7.256,y
+				ldx MOD7.256,y
 				bra .3
 
-.2				ldy DIV7.512,x
-				lda MOD7.512,x
+.2				lda DIV7.512,y
+				ldx MOD7.512,y
 
-.3				pha						save MOD,y=DIV
+.3				lsr
+				tay
+				bcs .4					odd=main ram
+				sta SETPAGE2
+				bra .5
+.4				sta CLRPAGE2
+
+.5				>PULLA					Pull Y
+				tax
+				lda BASEL,x				setup line Base Ptr
+				sta ZPBASE
+				lda BASEH,x
+				sta ZPBASE+1
 				
+				lda (ZPBASE),y
+				eor Mono.Masks,x
+				sta (ZPBASE),y
+				rts
+*--------------------------------------
+SETPIXEL.1		lsr
+				bcc SETPIXEL.COLOR
+				
+				>PULLYA					Y=X.LO,A=X.HI
+				lsr						if 256 =< x < 511 
+				bcs .1
+				lsr
+				bcs	.2					if 512 < x
+				lda DIV7.0,y
+				ldx MOD7.0,y
+				bra .3
+				
+.1				lda DIV7.256,y
+				ldx MOD7.256,y
+				bra .3
+
+.2				lda DIV7.512,y
+				ldx MOD7.512,y
+
+.3				lsr
+				tay
+				bcs .4					odd=main ram
+				sta SETPAGE2
+				bra .5
+.4				sta CLRPAGE2
+
+.5				phx
 				>PULLA					Pull Y
 				tax
 				lda BASEL,x				setup line Base Ptr
 				sta ZPBASE
 				lda BASEH,x
 				sta ZPBASE+1
-
-				sta SET80STORE			and prepare for page switching
-				sta SETHIRES
-				plx						get back MOD in x
-
-				>PULLA					Pull Mode
-				and #$FF
-				bpl SETPIXEL.SOLID
-
-SETPIXEL.XOR	tya
-				lsr
-				tay
-				bcs .1					odd=main ram
-				sta SETPAGE2
-				bra .2
-.1				sta CLRPAGE2
-.2				lda (ZPBASE),y
-				eor Mono.Masks,x
-				sta (ZPBASE),y
-				rts
-*--------------------------------------
-* A=Mode,X=MOD,Y=DIV
-*--------------------------------------
-SETPIXEL.SOLID	dec
-				bne  SETPIXEL.COLOR
-				tya
-				lsr
-				tay
-				bcs .1					odd=main ram
-				sta SETPAGE2
-				bra .2
-.1				sta CLRPAGE2
-			
-.2				>PULLA					get COLOR
+				plx
+				
+				>PULLA					Pull Color
 				lsr 
-				bcs .3					set white pixel
+				bcs .6					set white pixel
 
 				lda (ZPBASE),y
 				and Mono.NMasks,x		includes And $7F for mono 
 				sta (ZPBASE),y
 				rts
 				
-.3				lda (ZPBASE),y
+.6				lda (ZPBASE),y
 				and #$7F				switch back this byte to mono
 				ora Mono.Masks,x
 				sta (ZPBASE),y
 				rts
 *--------------------------------------
-* X=MOD,Y=DIV
-*--------------------------------------
-SETPIXEL.COLOR	tya						
-				lsr						Divide Col by 2 to get in range 0->39
-				and #$FE				make it 0->38 as color mask on 4 bytes
-				clc
+SETPIXEL.COLOR	>PULLA					Get X.LO...
+				pha
+				>PULLB GBYTE			Get X.HI in temp location
+				pla
+				lsr GBYTE				divide by 4 (range 0->139)
+				ror
+				lsr GBYTE
+				ror
+				tay
+
+				>PULLA					Pull Y
+				tax
+				lda BASEL,x				setup line Base Ptr
+				sta ZPBASE
+				lda BASEH,x
+				sta ZPBASE+1
+								
+				lda DIV7.0,y
+
+				asl						Carry Cleared, by ASL
 				adc ZPBASE				ZPBASE now point to first of the 4 columns
 				sta ZPBASE
+
+
+				ldx MOD7.0,y
+
 				txa						get MOD
 				asl						times 4 to compute index in color tables
-				asl						
+				asl
 				tax						set in X for Masks,NMasks
 				
 				>PULLA					get COLOR
+				
 				asl
 				asl
 				tay
@@ -310,7 +329,68 @@ FILLREC
 BITBLT
 				rts
 *--------------------------------------
-CS.END
+DRV.CS.END
+*--------------------------------------
+Mono.NMasks		.DA #%01111110
+				.DA #%01111101
+				.DA #%01111011
+				.DA #%01110111
+				.DA #%01101111
+				.DA #%01011111
+				.DA #%00111111
+*--------------------------------------
+Mono.Masks		.DA	#%00000001
+				.DA #%00000010
+				.DA #%00000100
+				.DA #%00001000
+				.DA #%00010000
+				.DA #%00100000
+				.DA #%01000000
+*--------------------------------------
+* bits to "and"	to reset color of pixel (0 means nothing to do)
+*--------------------------------------
+*					  c1110000   c3322221   c5444433   c6666555    
+Color.NMasks	.DA #%01110000,#%00000000,#%00000000,#%00000000
+				.DA #%00001111,#%01111110,#%00000000,#%00000000
+				.DA #%00000000,#%01100001,#%00000000,#%00000000
+				.DA #%00000000,#%00011111,#%01111100,#%00000000
+				.DA #%00000000,#%00000000,#%01000011,#%00000000
+				.DA #%00000000,#%00000000,#%00111111,#%01111000
+				.DA #%00000000,#%00000000,#%00000000,#%00000111
+*--------------------------------------
+* bits to "and"	to Get color of pixel (0 means nothing to do)
+* 4 bytes * 7 mods
+*--------------------------------------
+*					  c1110000   c3322221   c5444433   c6666555    
+Color.Masks		.DA #%10001111,#%00000000,#%00000000,#%00000000
+				.DA #%11110000,#%00000001,#%00000000,#%00000000
+				.DA #%00000000,#%10011110,#%00000000,#%00000000
+				.DA #%00000000,#%11100000,#%00000011,#%00000000
+				.DA #%00000000,#%00000000,#%10111100,#%00000000
+				.DA #%00000000,#%00000000,#%11000000,#%00000111
+				.DA #%00000000,#%00000000,#%00000000,#%11111000
+*--------------------------------------
+* bits to "ora" to set color of pixel (including "color bit set" for byte hosting bit0)
+* 4 bytes * 16 Colors
+*--------------------------------------
+*					  c1110000   c3322221   c5444433   c6666555    
+Color.Pixels	.DA #%00000000,#%00000000,#%00000000,#%00000000	black (color bit disable)
+				.DA #%10010001,#%10100010,#%11000100,#%10001000	dark blue
+				.DA #%10100010,#%11000100,#%10001000,#%10010001	dark green
+				.DA #%10110011,#%11100110,#%11001100,#%10011001	medium blue
+				.DA #%11000100,#%10001000,#%10010001,#%10100010	brown
+				.DA #%11010101,#%10101010,#%11010101,#%10101010	grey2
+				.DA #%11100110,#%11001100,#%10011001,#%10110011	green
+				.DA #%11110111,#%11101110,#%11011101,#%10111011	aqua
+				.DA #%10001000,#%10010001,#%10100010,#%11000100	Magenta
+				.DA #%10011001,#%10110011,#%11100110,#%11001100	violet
+				.DA #%10101010,#%11010101,#%10101010,#%11010101	grey1
+				.DA #%10111011,#%11110111,#%11101110,#%11011101	light blue
+				.DA #%11001100,#%10011001,#%10110011,#%11100110	orange
+				.DA #%11011101,#%10111011,#%11110111,#%11101110	pink
+				.DA #%11101110,#%11011101,#%10111011,#%11110111	yellow
+				.DA #%01111111,#%01111111,#%01111111,#%01111111	white (color bit disable)
+*--------------------------------------
 DIV7.0			.HS 0000000000000001010101010101
 				.HS 0202020202020203030303030303
 				.HS 0404040404040405050505050505
@@ -447,98 +527,12 @@ BASEH			.HS	20.24.28.2C.30.34.38.3C
 				.HS	23.27.2B.2F.33.37.3B.3F
 				.HS	23.27.2B.2F.33.37.3B.3F
 *--------------------------------------
-Mono.NMasks		.DA #%01111110
-				.DA #%01111101
-				.DA #%01111011
-				.DA #%01110111
-				.DA #%01101111
-				.DA #%01011111
-				.DA #%00111111
-*--------------------------------------
-Mono.Masks		.DA	#%00000001
-				.DA #%00000010
-				.DA #%00000100
-				.DA #%00001000
-				.DA #%00010000
-				.DA #%00100000
-				.DA #%01000000
-*--------------------------------------
-* bits to "and"	to reset color of pixel (0 means nothing to do)
-*--------------------------------------
-Color.NMasks	.DA #%01110000,#%00000000,#%00000000,#%00000000
-				.DA #%00001111,#%01111110,#%00000000,#%00000000
-				.DA #%00000000,#%01100001,#%00000000,#%00000000
-				.DA #%00000000,#%00011111,#%01111100,#%00000000
-				.DA #%00000000,#%00000000,#%01000011,#%00000000
-				.DA #%00000000,#%00000000,#%00111111,#%01111000
-				.DA #%00000000,#%00000000,#%00000000,#%00000111
-*--------------------------------------
-* bits to "and"	to Get color of pixel (0 means nothing to do)
-* 4 bytes * 7 mods
-*--------------------------------------
-Color.Masks.DEL	.DA #%00001111,#%00000000,#%00000000,#%00000000	(nothing to do)
-				.DA #%01110000,#%00000001,#%00000000,#%00000000	asl0,asl0,rol1,asl0,rol1,asl0,rol1
-				.DA #%00000000,#%00011110,#%00000000,#%00000000	lsr1
-				.DA #%00000000,#%01100000,#%00000011,#%00000000	asl1,asl1,rol2,asl1,rol2
-				.DA #%00000000,#%00000000,#%00111100,#%00000000	lsr2,lsr2
-				.DA #%00000000,#%00000000,#%01000000,#%00000111	asl2,asl2,rol3
-				.DA #%00000000,#%00000000,#%00000000,#%01111000	lsr3,lsr3,lsr3	
-*--------------------------------------
-Color.Masks		.DA #%10001111,#%00000000,#%00000000,#%00000000
-				.DA #%11110000,#%00000001,#%00000000,#%00000000
-				.DA #%00000000,#%10011110,#%00000000,#%00000000
-				.DA #%00000000,#%11100000,#%00000011,#%00000000
-				.DA #%00000000,#%00000000,#%10111100,#%00000000
-				.DA #%00000000,#%00000000,#%11000000,#%00000111
-				.DA #%00000000,#%00000000,#%00000000,#%11111000
-*--------------------------------------
-* bits to "ora" to set color of pixel (including "color bit set " for byte hosting bit0)
-* 4 bytes * 16 Colors
-* pixel masks		 c1110000.c3322221.c5444433.c6666555    
-*--------------------------------------
-Color.Pixels	.DA #%00000000,#%00000000,#%00000000,#%00000000	(color bit disable)
-				.DA #%10010001,#%10100010,#%11000100,#%10001000	
-				.DA #%10100010,#%11000100,#%10001000,#%10010001	
-				.DA #%10110011,#%11100110,#%11001100,#%10011001	
-				.DA #%11000100,#%10001000,#%10010001,#%10100010	
-				.DA #%11010101,#%10101010,#%11010101,#%10101010	
-				.DA #%11100110,#%11001100,#%10011001,#%10110011	
-				.DA #%11110111,#%11101110,#%11011101,#%10111011	
-				.DA #%10001000,#%10010001,#%10100010,#%11000100	
-				.DA #%10011001,#%10110011,#%11100110,#%11001100	
-				.DA #%10101010,#%11010101,#%10101010,#%11010101	
-				.DA #%10111011,#%11110111,#%11101111,#%11011101	
-				.DA #%11001100,#%10011001,#%10110011,#%11100110	
-				.DA #%11011101,#%10111011,#%11110111,#%11101110	
-				.DA #%11101110,#%11011101,#%10111011,#%11110111	
-				.DA #%01111111,#%01111111,#%01111111,#%01111111	(color bit disable)
-				
-*Black          00    00    00    00    0000
-*Magenta        08    11    22    44    0001
-*Brown          44    08    11    22    0010
-*Orange         4C    19    33    66    0011
-*Dark Green     22    44    08    11    0100
-*Grey1          2A    55    2A    55    0101
-*Green          66    4C    19    33    0110
-*Yellow         6E    5D    3B    77    0111
-*Dark Blue      11    22    44    08    1000
-*Violet         19    33    66    4C    1001
-*Grey2          55    2A    55    2A    1010
-*Pink           5D    3B    77    6E    1011
-*Medium Blue    33    66    4C    19    1100
-*Light Blue     3B    77    6E    5D    1101
-*Aqua           77    6E    5D    3B    1110
-*White          7F    7F    7F    7F    1111
-*--------------------------------------
-DEVNAME			>PSTRING "GFX"
 GBYTE			.BS 1
 *--------------------------------------
-DS.START
-DEVINFO			.DA #S.DEV.F.GFX		type of DEVINFO STRUCT
+DEVINFO			.DA #S.DEVINFO.TYPE.GFX	type of DEVINFO STRUCT
 DEVINFO.MODES	.DA #%10000011			XOR,16 & B/W
 DEVINFO.W		.DA 560					X.SIZE
 DEVINFO.H		.DA 192					Y.SIZE
-DS.END
 *--------------------------------------
 MAN
 SAVE DRV/DHGR.DRV.S

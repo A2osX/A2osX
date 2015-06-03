@@ -1,0 +1,285 @@
+PR#3
+PREFIX /A2OSX.SRC
+NEW
+INC 1
+AUTO 6
+				.LIST OFF
+				.OP	65C02
+*--------------------------------------
+* S.LoadDrvA
+*  in :
+*   A = hMem To Full Cmd Line
+*  out :
+*   none
+*--------------------------------------
+S.LoadDrvA		>PUSHA					push Cmd Line for S.PStrGetTkn
+				>LDYAI MSG.DRVLOAD
+				jsr S.SysScrPPSTRYA
+
+				>PUSHBI $20				Push SEP=' '
+				>PUSHBI 0				Push 0 for getting CMD And ARGS
+				jsr S.PStrGetTkn
+				bcc .1
+				rts
+
+.1				sta LoadDrv.Cmd
+				stx LoadDrv.Args
+				>PUSHA					push CMD for S.FileSearch
+				
+				>PUSHWI ENV.DRV			push ENVNAME=DRV
+				ldy #S.PS.hENV
+				lda TskMgr.Table,y		Get PS #0 Env
+				>PUSHA
+				jsr S.GetEnvVarP		get value for ENV=%DRV%
+				bcs .98
+				
+				sta LoadDrv.Path
+				>PUSHA					A=PStr to Value
+				jsr S.FileSearch		find File in %DRV%
+				bcs .97					not Found
+				
+				sta LoadDrv.FullName
+				jsr S.SysScrPPSTRA
+				
+				lda LoadDrv.FullName
+				jsr S.LoadBinA
+				bcs .96
+				
+				>STYA pCode
+				stx LoadDrv.hMem
+				
+				lda LoadDrv.Args
+				jsr pCodeJmp			call Dev.Detect
+
+				bcs .95
+				
+				jsr S.InsDrv
+				bcs .95
+				
+				jsr .95
+				
+				ldy #S.DEV.F
+				lda (pDev),y
+				ora #S.DEV.F.INUSE
+				sta (pDev),y
+				clc
+				rts
+				
+.95				pha
+				lda LoadDrv.hMem	
+				jsr S.FreeMemA
+				pla
+				
+.96				pha
+				lda LoadDrv.FullName	
+				jsr S.FreeMemA
+				pla
+				
+.97				pha
+				lda LoadDrv.Path
+				jsr S.FreeMemA
+				pla
+				
+.98				pha
+				lda LoadDrv.Args
+				jsr S.FreeMemA
+				lda LoadDrv.Cmd
+				jsr S.FreeMemA
+				pla
+				
+.99				sec				
+				rts
+*--------------------------------------
+MSG.DRVLOAD		>PSTRING "\nLoadDrv:"
+LoadDrv.Cmd			.BS 1
+LoadDrv.Args		.BS 1
+LoadDrv.Path		.BS 1
+LoadDrv.FullName	.BS 1
+LoadDrv.hMem		.BS 1
+*--------------------------------------
+* pCode = .DRV File Loaded Address
+*--------------------------------------
+S.InsDrv		ldy #H.BIN.DRV.CODE.LEN
+				lda (pCode),y
+				sta R.AL
+				iny
+				lda (pCode),y
+				sta R.AH
+				
+				ldy #H.BIN.DRV.CODE.O
+				lda (pCode),y
+				clc
+				adc S.LoadBinA.AuxType
+				sta R.BL
+				iny
+				lda (pCode),y
+				adc S.LoadBinA.AuxType+1
+				sta R.BH				set BX=End Of Code
+				
+				lda S.LoadBinA.AuxType
+				clc
+				adc S.LoadBinA.FileLen
+				sta R.CL
+				lda S.LoadBinA.AuxType+1
+				adc S.LoadBinA.FileLen+1
+				sta R.CH				set CX=End Of Range
+				
+				ldy #H.BIN.DRV.CODE.O
+				lda	S.LoadBinA.FileLen
+				sec
+				sbc (pCode),y
+				sta S.InsDrv.DRVLen
+				iny
+				lda	S.LoadBinA.FileLen+1
+				sbc (pCode),y
+				sta S.InsDrv.DRVLen+1	Compute DRV Len
+				
+				lda DevMgr.Free
+				clc
+				adc S.InsDrv.DRVLen
+				sta S.InsDrv.DRVEnd
+				lda DevMgr.Free+1
+				adc S.InsDrv.DRVLen+1
+				sta S.InsDrv.DRVEnd+1
+
+				bcs .98					we crossed $FFFF, out of mem
+				
+				lda S.InsDrv.DRVEnd
+				sec
+				sbc #DevMgr.HiMem
+				lda S.InsDrv.DRVEnd+1
+				sbc /DevMgr.HiMem
+				bcs .98					No More Room to load Driver....
+
+				lda DevMgr.LastDevID
+				inc
+				cmp #K.DEV.MAX
+				beq .99					No Device Handle Left
+				
+				sta DevMgr.LastDevID
+				
+				ldy	#H.BIN.DEV.HEADER.O
+				lda (pCode),y
+				clc
+				adc pCode
+				sta ZPQuickPtr1
+				iny
+				lda (pCode),y
+				adc pCode+1
+				sta ZPQuickPtr1+1
+
+				ldy #S.DEV.JMP
+				
+				lda DevMgr.Free
+				sec
+				sbc (ZPQuickPtr1),y
+				sta R.DL
+				lda DevMgr.Free+1
+				iny
+				sbc (ZPQuickPtr1),y
+				sta R.DH				set DX=Offset
+
+				ldy #H.BIN.DRV.CODE.O
+				lda (pCode),y
+				clc
+				adc pCode
+				pha
+				iny
+				lda (pCode),y
+				adc pCode+1
+				ply
+				
+				jsr S.DrvRelocateYA
+				
+				jsr S.InsDrv.Move
+				
+				>LDYA S.InsDrv.DrvEnd
+				>STYA DevMgr.Free
+				clc
+				rts
+				
+.98				lda #DEVMGR.ERROOM
+				sec
+				rts
+				
+.99				lda #DEVMGR.ERROOH
+				sec
+				rts
+*--------------------------------------
+S.InsDrv.Move	ldy	#H.BIN.DEV.HEADER.O
+				lda (pCode),y
+				clc
+				adc pCode
+				sta ZPQuickPtr1
+				iny
+				lda (pCode),y
+				adc pCode+1
+				sta ZPQuickPtr1+1
+
+				ldy #S.DEV.JMP			Relocate Main JMP
+				lda (ZPQuickPtr1),y
+				clc
+				adc R.DL
+				sta (ZPQuickPtr1),y
+				iny
+				lda (ZPQuickPtr1),y
+				adc R.DH
+				sta (ZPQuickPtr1),y
+				
+				lda DevMgr.LastDevID
+				jsr S.GetDevByIDA
+				>STYA pDev
+								
+				ldy #S.DEV.SIZE-1		Copy DRV.Header
+				
+.1				lda (ZPQuickPtr1),y
+				sta (pDev),y
+				dey
+				bpl .1
+				
+				ldy #H.BIN.DRV.CODE.O
+				lda (pCode),y
+				clc
+				adc pCode
+				sta ZPQuickPtr1
+				iny 
+				lda (pCode),y
+				adc pCode+1
+				sta ZPQuickPtr1+1		Make ZPQuickPtr1=DRV.CODE
+				
+				lda DevMgr.Free
+				sta ZPQuickPtr2
+				lda DevMgr.Free+1
+				sta ZPQuickPtr2+1		Make ZPQuickPtr2=Dest Ram Location
+				
+				ldy S.InsDrv.DrvLen
+				ldx S.InsDrv.DrvLen+1
+				
+.2				lda (ZPQuickPtr1)
+				sta (ZPQuickPtr2)
+				
+				inc ZPQuickPtr1
+				bne .3
+				inc ZPQuickPtr1+1
+				
+.3				inc ZPQuickPtr2
+				bne .4
+				inc ZPQuickPtr2+1
+				
+.4				tya
+				bne .5
+				txa
+				beq .8
+				dex
+				
+.5				dey
+				bra .2		
+.8				rts
+*--------------------------------------
+S.InsDrv.DrvLen	.BS 2
+S.InsDrv.DrvEnd	.BS 2
+*--------------------------------------
+MAN
+SAVE SYS/KERNEL.S.DRV
+LOAD SYS/KERNEL.S
+ASM

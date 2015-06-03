@@ -1,16 +1,17 @@
 PR#3
-PREFIX /A2OSX.BUILD
+PREFIX /A2OSX.SRC
 NEW
 INC 1
 AUTO 6
 				.LIST OFF	
 				.OP	65C02
 				.OR $2000
-				.TF DRV/MOUSE.DRV
+				.TF /A2OSX.BOOT/DRV/MOUSE.DRV
 *--------------------------------------
 				.INB INC/MACROS.I
 				.INB INC/IO.I
 				.INB INC/A2OSX.I
+				.INB INC/A2OSX.API.I
 *--------------------------------------
 ZPGoMouse		.EQ ZPDRV
 ZPTmpPtr1		.EQ ZPDRV+2
@@ -43,29 +44,30 @@ MOUSESTSx.DOWN	.EQ %10000000
 MOUSESTSx.LDOWN	.EQ %01000000
 MOUSESTSx.MOVED	.EQ %00100000
 *--------------------------------------
-* Main DRV entry point
-* input :
-* X = CMD
-*	0 : OPEN
-*	2 : GETEVENT
-*	4 : OUT
-*   6 : CLOSE
-*--------------------------------------
-* CLD 			$D8
-* JMP (*,x)		$7C
-* 				#JMPTABLE
-*				/JMPTABLE
+*			File Header (16 Bytes)
 *--------------------------------------
 CS.START		cld
-				jmp (.1,x)
-.1				.DA OPEN
-				.DA GETEVENT
-				.DA OUT
-				.DA CLOSE
-				.DA 0					end or relocation
-				.DA CS.END-CS.START				
+				jmp Dev.Detect			cld,jmp abs=DRV
+				.DA #$61				6502,Level 1 (65c02)
+				.DA #1					DRV Layout Version 1
+				.DA 0
+				.DA CS.END-CS.START			Code Length
+				.DA DEV.HEADER-CS.START		Device Header Offset
+				.DA DRV.CS.START-CS.START	Driver Code Offset
+				.DA DRV.CS.END-DRV.CS.START	Drv Code Length
 *--------------------------------------
-OPEN			stz ZPTmpPtr1
+* Relocation Table
+*--------------------------------------
+L.MSG.DETECT	.DA MSG.DETECT
+L.MSG.DETECT.OK	.DA MSG.DETECT.OK
+L.MSG.DETECT.KO	.DA MSG.DETECT.KO
+L.DEV.HEADER.NAME	.DA DEV.HEADER.NAME
+				.DA 0					End Of Reloc Table
+*--------------------------------------
+Dev.Detect		>LDYA L.MSG.DETECT
+				>SYSCALL SYS.SysScrPPSTRYA
+
+				stz ZPTmpPtr1
 				lda #$C1
 				sta ZPTmpPtr1+1
 				
@@ -77,44 +79,66 @@ OPEN			stz ZPTmpPtr1
 				bne .3
 				dex
 				bpl .2
-				bra .10
+				bra .4
 				
 .3				inc ZPTmpPtr1+1			no match, try next slot....
 				lda ZPTmpPtr1+1
 				cmp #$C8
 				bne .1	
 				
+				>LDYA L.MSG.DETECT.KO
+				>SYSCALL SYS.SysScrPPSTRYA
+
 				lda #DEVMGR.ERRNOHW		Not Found in any slot, exiting
 				sec
 				rts	
 				
-.10				lda ZPTmpPtr1+1
+.4				lda ZPTmpPtr1+1
+				sta DEVSLOTCn
 				and #$0F
 				sta DEVSLOT0n
-				pha
 				ora #$30
-				sta DEVNAME+4
-				pla
-				ora #$C0
-				sta DEVSLOTCn
+				sta DEV.HEADER.NAME+4
 				asl
 				asl
 				asl
 				asl
 				sta DEVSLOTn0
 				
-				ldx #0
-				ldy #S.DEV.NAME
-				
-.4				lda DEVNAME,x
-				sta (pDevContext),y
-				cpx DEVNAME
-				beq .5
-				inx
-				iny
-				bne .4
-				
-.5				bit RROMBNK2			Renable ROM to allow MOUSE II firmware
+				>LDYA L.MSG.DETECT.OK
+				>SYSCALL SYS.SysScrPPSTRYA
+				>LDYA L.DEV.HEADER.NAME
+				>SYSCALL SYS.SysScrPPSTRYA
+				clc
+				rts
+*--------------------------------------
+CS.END
+MSG.DETECT		>PSTRING "\nApple II Mouse Driver."
+MSG.DETECT.OK	>PSTRING "\nMouse Card Driver Installed As Device : "
+MSG.DETECT.KO	>PSTRING "\nMouse Card Not Found."
+*--------------------------------------
+*			Device Header (16 Bytes)
+*--------------------------------------
+DEV.HEADER		cld
+				jmp (DRV.CS.START,x)
+				.DA #S.DEV.F.EVENT
+DEV.HEADER.NAME	>PSTRING "MOU1"			NAME
+				.HS 00.00
+				.HS 00.00.00.00
+*--------------------------------------
+*			Driver Code
+*--------------------------------------
+DRV.CS.START	.DA OPEN
+				.DA GETEVENT
+				.DA COUT
+				.DA CLOSE
+				.DA GETINFO
+				.DA IRQ
+L.DEVINFO		.DA DEVINFO
+				.DA 0					end or relocation
+*--------------------------------------
+OPEN			
+*				bit RROMBNK2			Renable ROM to allow MOUSE II firmware
 						
 				php						to read  IIe ROM ID bytes
 				sei
@@ -156,19 +180,15 @@ OPEN			stz ZPTmpPtr1
 				jsr GOMOUSE
 
 				pla
-				bpl .6
+				bpl .1
 				sta SET80STORE
 
-.6				plp
+.1				plp
 				
-				lda #S.DEV.F.MOUSE+S.DEV.F.EVENT
-				sta (pDevContext)
 				clc
 				rts
 *--------------------------------------
-GETEVENT		>PULLW pEvent
-
-				php
+GETEVENT		php
 				sei
 
 				lda RD80STORE
@@ -205,7 +225,7 @@ GETEVENT		>PULLW pEvent
 				ora #EVENT.MOUSEMOVE
 				sta (pEvent),y
 				
-				ldy #S.EVT.DATAW1
+.4				ldy #S.EVT.DATAW1
 				lda MOUSEXLOx,x
 				sta (pEvent),y
 				iny
@@ -218,7 +238,7 @@ GETEVENT		>PULLW pEvent
 				lda MOUSEYHIx,x
 				sta (pEvent),y
 			
-.4				pla
+				pla
 				bpl .5
 				sta SET80STORE
 				
@@ -235,7 +255,8 @@ GETEVENT		>PULLW pEvent
 .9				sec						A=0 : no event
 				rts
 *--------------------------------------
-OUT				clc
+COUT
+IRQ				sec
 				rts
 *--------------------------------------
 CLOSE			php
@@ -244,6 +265,10 @@ CLOSE			php
 				ldy #SETMOUSE
 				jsr GOMOUSE
 				plp
+				clc
+				rts
+*--------------------------------------
+GETINFO			>LDYA L.DEVINFO
 				clc
 				rts
 *--------------------------------------
@@ -257,15 +282,15 @@ GOMOUSE			pha
 				pla
 				jmp (ZPGoMouse)
 *--------------------------------------
-CS.END
+DRV.CS.END
 DEVSIG.Offset	.HS 05070B0CFB
 DEVSIG.Value	.HS 38180120D6
 DEVSIG.Length	.EQ DEVSIG.Value-DEVSIG.Offset
-DEVNAME			>PSTRING "MOU0"
 DEVSLOT0n		.BS 1
 DEVSLOTCn		.BS 1
 DEVSLOTn0		.BS 1
 *--------------------------------------
+DEVINFO			.DA #S.DEVINFO.TYPE.XY
 MAN
 SAVE DRV/MOUSE.DRV.S
 ASM

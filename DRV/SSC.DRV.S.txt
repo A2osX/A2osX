@@ -1,5 +1,5 @@
 PR#3
-PREFIX /A2OSX.BUILD
+PREFIX /A2OSX.SRC
 NEW
 INC 1
 AUTO 6
@@ -11,12 +11,46 @@ AUTO 6
 				.INB INC/MACROS.I
 				.INB INC/A2OSX.I
 *--------------------------------------
-ZPTmpPtr1		.EQ ZPDRV
+BUF.SIZE		.EQ $20
+BUF.MASK		.EQ $1F
 *--------------------------------------
-SIG.05			.EQ $38
-SIG.07			.EQ $18
-SIG.0B			.EQ $01
-SIG.0C			.EQ $31
+ZPGoCard		.EQ ZPDRV
+ZPTmpPtr1		.EQ ZPDRV+2
+*--------------------------------------
+* Pascal 1.1 Protocol
+*--------------------------------------
+SSC.INIT		.EQ $0D
+SSC.READ		.EQ $0E
+SSC.WRITE		.EQ $0F
+SSC.STATUS		.EQ $10
+*--------------------------------------
+* SSC/ACIA I/O
+*--------------------------------------
+SSC.REG.DIPSW1	.EQ $C081				R
+SSC.REG.DIPSW2	.EQ $C082				R
+SSC.REG.DATA	.EQ $C088				R,W
+SSC.REG.RESET	.EQ $C089				W
+SSC.REG.STATUS	.EQ $C089				R
+SSC.REG.STATUS.IRQ	.EQ %10000000
+SSC.REG.STATUS.DSR	.EQ %01000000
+SSC.REG.STATUS.DCD	.EQ %00100000
+SSC.REG.STATUS.TDRF	.EQ %00010000
+SSC.REG.STATUS.RDRF	.EQ %00001000
+SSC.REG.STATUS.OE	.EQ %00000100
+SSC.REG.STATUS.FE	.EQ %00000010
+SSC.REG.STATUS.PE	.EQ %00000001
+SSC.REG.CMD		.EQ $C08A				W
+SSC.REG.CMD.ODDP	.EQ %00100000
+SSC.REG.CMD.EVENP	.EQ %01100000
+SSC.REG.CMD.MARKP	.EQ %10100000
+SSC.REG.CMD.SPACEP	.EQ %11100000
+SSC.REG.CMD.ECHO	.EQ %00010000
+SSC.REG.CMD.TE		.EQ %00001000
+SSC.REG.CMD.TEIRQ	.EQ %00000100
+SSC.REG.CMD.TBRK	.EQ %00001100
+SSC.REG.CMD.RIRQDIS	.EQ %00000010
+SSC.REG.CMD.DTR		.EQ %00000001
+SSC.REG.CTL		.EQ $C08B				W
 *--------------------------------------
 * Main DRV entry point
 * input :
@@ -25,6 +59,8 @@ SIG.0C			.EQ $31
 *	2 : GETEVENT
 *	4 : OUT
 *   6 : CLOSE
+*  	8 : GETINFO
+*	10 : IRQ
 *--------------------------------------
 * CLD 			$D8
 * JMP (*,x)		$7C
@@ -33,53 +69,81 @@ SIG.0C			.EQ $31
 *--------------------------------------
 CS.START		cld
 				jmp (.1,x)
+				.DA CS.END-CS.START
+				.DA 0
 .1				.DA OPEN
 				.DA GETEVENT
 				.DA OUT
 				.DA CLOSE
+				.DA GETINFO
+L.IRQ			.DA IRQ
+L.DEVINFO		.DA DEVINFO
 				.DA 0					end or relocation
-				.DA CS.END-CS.START				
 *--------------------------------------
 OPEN			stz ZPTmpPtr1
 				lda #$C1
 				sta ZPTmpPtr1+1
-.1				ldy #5
-				lda (ZPTmpPtr1),y
-				cmp #SIG.05
-				bne .2
 				
-				ldy #7
-				lda (ZPTmpPtr1),y
-				cmp #SIG.07
-				bne .2
-				
-				ldy #$B
-				lda (ZPTmpPtr1),y
-				cmp #SIG.0B
-				bne .2
-				
-				ldy #$C
-				lda (ZPTmpPtr1),y
-				cmp #SIG.0C
-				beq .3
+.1				ldx #DEVSIG.Length-1
 
-.2				inc ZPTmpPtr1+1
+.2				ldy DEVSIG.Offset,x
+				lda (ZPTmpPtr1),y
+				cmp DEVSIG.Value,x
+				bne .3
+				dex
+				bpl .2
+				bra .4
+				
+.3				inc ZPTmpPtr1+1			no match, try next slot....
 				lda ZPTmpPtr1+1
 				cmp #$C8
 				bne .1	
-				beq .99
 				
-.3				lda ZPTmpPtr1+1
+				lda #DEVMGR.ERRNOHW		Not Found in any slot, exiting
+				sec
+				rts	
+
+.4				lda ZPTmpPtr1+1
+				sta DEVSLOTCn
 				and #$0F
-				sta DEVSLOT
+				sta DEVSLOT0n
 				ora #$30
 				sta DEVNAME+4
+				asl
+				asl
+				asl
+				asl
+				sta DEVSLOTn0
 				
-				lda #S.DEV.F.CHAR+S.DEV.F.OUT
-				sta (pDevContext)
-				ldy #S.DEV.NAME
+*				ldy #SSC.INIT
+*				jsr GoCard
+				ldx DEVSLOTn0
+				
+				stz SSC.REG.RESET,x 
+				lda #$1E
+				sta SSC.REG.CTL,x
+				
+				stz INBUF.PTR
+				stz INBUF.CNT
+				stz OUTBUF.PTR
+				stz OUTBUF.CNT
+				
+				>PUSHW L.IRQ
+				>PUSHBI 4
+				>SYSCALL SYS.MLIAllocIRQ
+				bcs *
+
+				php
+				sei
+				ldx DEVSLOTn0
+				lda #SSC.REG.CMD.TEIRQ+SSC.REG.CMD.DTR
+				sta SSC.REG.CMD,x
+				
+				lda SSC.REG.STATUS,x	clear any IRQ pending
+				plp
 				
 				ldx #0
+				ldy #S.DEV.NAME
 .7				lda DEVNAME,x
 				sta (pDevContext),y
 				cpx DEVNAME
@@ -87,25 +151,166 @@ OPEN			stz ZPTmpPtr1
 				inx
 				iny
 				bne .7
+				
+				lda #S.DEV.F.CHAR+S.DEV.F.OUT+S.DEV.F.EVENT
+				sta (pDevContext)
+				
 .8				clc
 				rts
-.99				lda #DEVMGR.ERRNOHW
-				sec
-				rts	
 *--------------------------------------
-GETEVENT		lda #0
+GETEVENT		>PULLW pEvent
+				
+				php
+				sei
+				lda INBUF.CNT
+				beq .9
+				
+				ldx INBUF.PTR
+				lda INBUF,x
+				ldy #S.EVT.DATA
+				sta (pEvent),y
+
+				iny
+				lda #0
+				sta (pEvent),y
+				
+				lda #S.EVT.F.KEY
+				sta (pEvent)
+				
+				inx
+				cpx #BUF.SIZE
+				bne .1
+				ldx #0
+				
+.1				stx INBUF.PTR		
+				dec INBUF.CNT
+				
+				
+				plp
+				clc
+				rts
+				
+.9				plp
+				lda #0
 				sec
 				rts
 *--------------------------------------
-OUT				clc
+OUT				php
+				sei
+				
+				ldx DEVSLOTn0
+				lda SSC.REG.STATUS,x
+				and #SSC.REG.STATUS.DCD+SSC.REG.STATUS.DSR
+				beq .9
+				
+				ldx OUTBUF.CNT
+				cpx #BUF.SIZE
+				beq .9
+
+				>PULLA
+				ldx OUTBUF.PTR
+				sta OUTBUF,x
+				inx
+				cpx #BUF.SIZE
+				bne .1
+				ldx #0
+				
+.1				stx OUTBUF.PTR		
+				inc OUTBUF.CNT
+				
+				plp
+				clc
+				rts
+				
+.9				>PULLA
+				plp
+				sec
 				rts
 *--------------------------------------
 CLOSE			clc
 				rts
 *--------------------------------------
+GETINFO			>LDYA L.DEVINFO
+				clc
+				rts
+*--------------------------------------
+* IRQ Handler
+* on exit, CS if handled
+*--------------------------------------
+IRQ				cld
+
+				ldx DEVSLOTn0
+				lda SSC.REG.STATUS,x	IRQ from this device ?
+*				bpl .9					no, exit
+				pha						save status ...
+				and #SSC.REG.STATUS.RDRF	incoming char?
+				beq .1					
+				
+				ldy SSC.REG.DATA,x		read data to clear IRQ
+				lda INBUF.CNT
+				cmp #BUF.SIZE
+				beq .1					buffer full, discard
+				phy
+				clc
+				adc INBUF.PTR
+				and #BUF.MASK
+				tay
+				pla						get back data
+				sta INBUF,y
+				inc INBUF.CNT
+				
+.1				pla						get back status
+				and #SSC.REG.STATUS.TDRF
+				beq .8
+
+				lda OUTBUF.CNT			something to transmit ?
+				beq .8					no, exit
+				
+				clc
+				adc OUTBUF.PTR
+				and #BUF.MASK
+				tay
+	
+				lda OUTBUF,Y
+				sta SSC.REG.DATA,x
+				
+				dec INBUF.CNT
+				
+.8				clc
+				rts
+				
+.9				sec
+				rts
+*--------------------------------------
+*				PRIVATE
+*--------------------------------------
+GOCARD			sta	$CFFF				Prevent SSC firmware bug
+				pha
+				stz ZPGoCard
+				ldx DEVSLOTCn
+				stx ZPGoCard+1
+				lda (ZPGoCard),y
+				sta ZPGoCard
+				ldy DEVSLOTn0
+				pla
+				jmp (ZPGoCard)
+*--------------------------------------
 CS.END
+DEVSIG.Offset	.HS 05070B0C
+DEVSIG.Value	.HS 38180131
+DEVSIG.Length	.EQ DEVSIG.Value-DEVSIG.Offset
 DEVNAME			>PSTRING "COM0"
-DEVSLOT			.BS 1
+DEVSLOT0n		.BS 1
+DEVSLOTCn		.BS 1
+DEVSLOTn0		.BS 1
+INBUF.PTR		.BS 1
+INBUF.CNT		.BS 1
+OUTBUF.PTR		.BS 1
+OUTBUF.CNT		.BS 1
+INBUF			.BS BUF.SIZE
+OUTBUF			.BS BUF.SIZE
+DEVINFO			.DA #S.DEV.F.CHAR+S.DEV.F.OUT+S.DEV.F.EVENT
+				.DA #0
 *--------------------------------------
 MAN
 SAVE DRV/SSC.DRV.S

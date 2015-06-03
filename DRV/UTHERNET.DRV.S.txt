@@ -1,16 +1,17 @@
 PR#3
-PREFIX /A2OSX.BUILD
+PREFIX /A2OSX.SRC
 NEW
 INC 1
 AUTO 6
 				.LIST OFF	
 				.OP	65C02
 				.OR	$2000
-				.TF DRV/UTHERNET.DRV
+				.TF /A2OSX.BOOT/DRV/UTHERNET.DRV
 *--------------------------------------
 				.INB INC/MACROS.I
 				.INB INC/A2OSX.I
-*				.INB INC/ZP.I
+				.INB INC/A2OSX.API.I
+				.INB INC/KERNEL.I
 *--------------------------------------
 ZPTmpPTR		.EQ ZPDRV
 *--------------------------------------
@@ -110,39 +111,28 @@ ERRTNOFRAME		.EQ 0
 ERRNOBUFFER		.EQ 1
 ERRTIMEOUT		.EQ 2
 *--------------------------------------
-* Main DRV entry point
-* input :
-* X = CMD
-*	0 : OPEN
-*	2 : GETEVENT
-*	4 : OUT
-*   6 : CLOSE
-*   8 : GETINFO
-*--------------------------------------
-* CLD 			$D8
-* JMP (*,x)		$7C
-* 				#JMPTABLE
-*				/JMPTABLE
+*			File Header (16 Bytes)
 *--------------------------------------
 CS.START		cld
-				jmp (.1,x)
-.1				.DA OPEN
-				.DA GETEVENT
-				.DA OUT
-				.DA CLOSE
-				.DA GETINFO
-L.DEVINFO		.DA DEVINFO
-				.DA 0					end or relocation
-				.DA CS.END-CS.START		Code Length To Relocate
-				.DA DS.END-DS.START		Data Segment to Allocate
+				jmp Dev.Detect			cld,jmp abs=DRV
+				.DA #$61				6502,Level 1 (65c02)
+				.DA #1					DRV Layout Version 1
+				.DA 0
+				.DA CS.END-CS.START			Code Length
+				.DA DEV.HEADER-CS.START		Device Header Offset
+				.DA DRV.CS.START-CS.START	Driver Code Offset
+				.DA DRV.CS.END-DRV.CS.START	Drv Code Length
 *--------------------------------------
-* input :
-* none
-* output :
-* CC on success
-* CS on error
-*--------------------------------------				
-OPEN			ldx #$10
+* Relocation Table
+*--------------------------------------
+L.MSG.DETECT	.DA MSG.DETECT
+				.DA 0					End Of Reloc Table
+*--------------------------------------
+Dev.Detect		sta hArgs
+				>LDYA L.MSG.DETECT
+				>SYSCALL SYS.SysScrPPSTRYA
+				
+				ldx #$10
 .1				stx DEVSLOTx0
 				>LDYAI PP.ID
 				>STYA PacketPagePTR,x
@@ -151,18 +141,21 @@ OPEN			ldx #$10
 				bne	.2
 				cmp	/DEVID
 				beq	.3
-.2				inc DEVNAME+4
+				
+.2				inc DEV.HEADER.NAME+4
 				txa
 				clc
 				adc #$10
 				tax
 				cpx #$80
 				bne .1
+				
 				lda #DEVMGR.ERRNOHW
 				sec
 				rts
-.3				ldy #S.DEV.hARGS
-				lda (pDevContext),y
+				
+.3				lda hARGS
+				
 				beq .4
 				>SYSCALL SYS.GetMemPtrA
 				>STYA ZPTmpPTR
@@ -172,8 +165,93 @@ OPEN			ldx #$10
 				sec
 				rts
 				
-.4				jsr Reset
-
+.4				clc
+				rts
+*--------------------------------------
+DecodeMac		lda (ZPTmpPTR)
+				cmp #12
+				bne .9
+				
+				ldy #1
+				ldx #0
+				
+.1				lda (ZPTmpPTR),y
+				jsr Asc2NibbleA
+				bcs .9
+				
+				asl
+				asl
+				asl
+				asl
+				sta MAC,x
+				
+				iny
+				lda (ZPTmpPTR),y
+				jsr Asc2NibbleA
+				bcs .9
+				
+				ora MAC,x
+				sta MAC,x
+				inx
+				iny
+				cpy #13
+				bne .1
+				
+				clc
+				rts
+				
+.9				sec
+				rts
+*--------------------------------------
+Asc2NibbleA		cmp #$30
+				bcc .9
+				cmp #$3A
+				bcs .1
+				and #$0F
+				clc
+				rts	
+.1				cmp #$41
+				bcc .9
+				cmp #$47
+				bcs .9
+				sbc #$36
+				clc
+				rts
+.9				sec
+				rts			
+*--------------------------------------
+CS.END
+MSG.DETECT		>PSTRING "\nUtherNet/CS8900A Driver."
+hArgs			.BS 1
+*--------------------------------------
+*			Device Header (16 Bytes)
+*--------------------------------------
+DEV.HEADER		cld
+				jmp (DRV.CS.START,x)
+				.DA #S.DEV.F.SHARE+S.DEV.F.EVENT
+DEV.HEADER.NAME	>PSTRING "ETH1"			NAME
+				.HS 00.00
+				.HS 00.00.00.00
+*--------------------------------------
+*			Driver Code
+*--------------------------------------
+DRV.CS.START	.DA OPEN
+				.DA GETEVENT
+				.DA $FFFF				no COUT
+				.DA CLOSE
+				.DA GETINFO
+				.DA $FFFF				no IRQ
+				.DA SEND
+L.DEVINFO		.DA DEVINFO
+				.DA 0					end or relocation
+*--------------------------------------
+* input :
+* none
+* output :
+* CC on success
+* CS on error
+*--------------------------------------				
+OPEN			jsr Reset
 				>LDYAI PP.RxCTL
 				>STYA PacketPagePTR,x
 				>LDYAI PP.RxCTL.LID+PP.RxCTL.RxOKA+PP.RxCTL.IA+PP.RxCTL.BroadcastA
@@ -197,18 +275,7 @@ OPEN			ldx #$10
 				>LDYAI PP.LineCTL.LID+PP.LineCTL.SerRxOn+PP.LineCTL.SerTxOn+PP.LineCTL.Auto
 				>STYA PacketPageDATA,x
 
-				lda #S.DEV.F.NET+S.DEV.F.EVENT+S.DEV.F.OUT
-				sta (pDevContext)
-				ldy #S.DEV.NAME
-				ldx #0
-.7				lda DEVNAME,x
-				sta (pDevContext),y
-				cpx DEVNAME
-				beq .8
-				inx
-				iny
-				bne .7
-.8				clc
+				clc
 				rts
 *--------------------------------------
 * input :
@@ -217,8 +284,7 @@ OPEN			ldx #$10
 * CC no event
 * CS event
 *--------------------------------------				
-GETEVENT		>PULLW pEvent
-				ldx DEVSLOTx0
+GETEVENT		ldx DEVSLOTx0
 				>LDYAI PP.RxEvent
 				>STYA PacketPagePTR,x
 				>LDYA PacketPageDATA,x
@@ -237,7 +303,7 @@ GETEVENT.RxOK
 				>LDYA RTDATA,x			get RxLength
 				>STYA FRAMELEN
 				>PUSHYA
-				>PUSHB 0
+				>PUSHBI 0
 				>SYSCALL SYS.GetMem
 				bcs .99
 				>STYA ZPTmpPTR
@@ -254,6 +320,7 @@ GETEVENT.RxOK
 				sta (pEvent)
 				ldy #0
 				ldx DEVSLOTx0
+				
 .1				lda RTDATA,x
 				sta	(ZPTmpPTR),y
 				iny
@@ -267,12 +334,25 @@ GETEVENT.RxOK
 				bne .3
 				inc ZPTmpPTR+1
 .3				jsr DecFrameLen
-				beq .8
-				bra .1
+				bne .1
 .8				clc
 				rts
 				
 .99				sec				
+				rts
+*--------------------------------------
+CLOSE			jsr Reset
+				clc
+				rts
+*--------------------------------------				
+*  in:
+*  out:
+*   Y,A = BUFFER PTR
+* 	CC on success
+* 	CS on error
+*--------------------------------------
+GETINFO			>LDYA L.DEVINFO
+				clc
 				rts
 *--------------------------------------				
 *  in:
@@ -282,7 +362,7 @@ GETEVENT.RxOK
 * 	CC on success
 * 	CS on error
 *--------------------------------------				
-OUT				>PULLW ZPTmpPTR
+SEND			>PULLW ZPTmpPTR
 				>PULLW FRAMELEN
 
 				ldy #11					Add Src MAC Address
@@ -341,20 +421,6 @@ SENDPREADY		ldy #0
 .8				clc
 				rts	
 *--------------------------------------
-CLOSE			jsr Reset
-				clc
-				rts
-*--------------------------------------				
-*  in:
-*  out:
-*   Y,A = BUFFER PTR
-* 	CC on success
-* 	CS on error
-*--------------------------------------
-GETINFO			>LDYA L.DEVINFO
-				clc
-				rts
-*--------------------------------------
 * 				PRIVATE
 *--------------------------------------
 Reset			ldx DEVSLOTx0
@@ -363,74 +429,25 @@ Reset			ldx DEVSLOTx0
 				>LDYAI PP.SelfCTL.LID+PP.SelfCTL.RESET
 				>STYA PacketPageDATA,x
 				rts
-*--------------------------------------
-DecodeMac		lda (ZPTmpPTR)
-				cmp #12
-				bne .9
-				ldy #1
-				ldx #0
-.1				lda (ZPTmpPTR),y
-				jsr Asc2NibbleA
-				bcs .9
-				asl
-				asl
-				asl
-				asl
-				sta MAC,x
-				iny
-				lda (ZPTmpPTR),y
-				jsr Asc2NibbleA
-				bcs .9
-				ora MAC,x
-				sta MAC,x
-				inx
-				iny
-				cpy #13
-				bne .1
-				clc
-				rts
-.9				sec
-				rts
-*--------------------------------------
-Asc2NibbleA		cmp #$30
-				bcc .9
-				cmp #$3A
-				bcs .1
-				and #$0F
-				clc
-				rts	
-.1				cmp #$41
-				bcc .9
-				cmp #$47
-				bcs .9
-				sbc #$36
-				clc
-				rts
-.9				sec
-				rts			
 *--------------------------------------	
 DecFrameLen		lda FRAMELEN
 				bne .1
 				lda FRAMELEN+1
-				beq .2
+				beq .8
 				dec FRAMELEN+1
 .1				dec FRAMELEN
-.2				lda FRAMELEN
-				ora FRAMELEN+1
-				rts
+				lda #1					Make something NZ
+.8				rts
 *--------------------------------------	
-CS.END
-DEVNAME			>PSTRING "ETH1"
-*--------------------------------------	
-DS.START
+DRV.CS.END
 *--------------------------------------	
 DEVSLOTx0		.BS 1
 FRAMELEN		.BS 2
 *--------------------------------------	
-DEVINFO
+DEVINFO			.DA #S.DEVINFO.TYPE.NET
 MAC				.BS 6
-*--------------------------------------
-DS.END
+LINK.STATUS		.BS 1
+LINK.SPEED		.BS 1					SPEED/DUPLEX
 *--------------------------------------
 MAN
 SAVE DRV/UTHERNET.DRV.S

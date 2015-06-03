@@ -1,15 +1,16 @@
 PR#3
-PREFIX /A2OSX.BUILD
+PREFIX /A2OSX.SRC
 NEW
 INC 1
 AUTO 6
 				.LIST OFF
 				.OP	65C02
 				.OR	$2000
-				.TF SBIN/TCPIP
+				.TF /A2OSX.BOOT/SBIN/TCPIP
 *--------------------------------------
 				.INB INC/MACROS.I
 				.INB INC/A2OSX.I
+				.INB INC/A2OSX.API.I
 				.INB INC/KERNEL.I
 				.INB INC/LIBTCPIP.I
 *--------------------------------------
@@ -20,17 +21,20 @@ ZPFrameBase2	.EQ ZPBIN+6
 ZPFrameLen2		.EQ ZPBIN+8
 ZPFramePtr2		.EQ ZPBIN+10
 *--------------------------------------
-* Main entry point
-*--------------------------------------
-* Code signature and INIT table
-*--------------------------------------
-* CLD 			$D8
-* JMP (*,x)		$7C
-* 				#JMPTABLE
-*				/JMPTABLE
+*			File Header (16 Bytes)
 *--------------------------------------
 CS.START		cld
 				jmp (.1,x)
+				.DA #$61				6502,Level 1 (65c02)
+				.DA #1					BIN Layout Version 1
+				.DA 0
+				.DA CS.END-CS.START		Code Length To Relocate
+				.DA 0
+				.DA 0
+				.DA 0
+*--------------------------------------
+* Relocation Table
+*--------------------------------------				
 .1				.DA CS.INIT
 				.DA CS.RUN
 				.DA CS.DOEVENT
@@ -39,11 +43,11 @@ L.LIBTCPIP		.DA LIBTCPIP
 L.CFGFILENAME	.DA CFGFILENAME
 L.IPCFG			.DA IPCFG
 				.DA 0
-				.DA CS.END-CS.START		Code Length To Relocate
-				.DA DS.END-DS.START		Data Segment to Allocate
 *--------------------------------------
-CS.INIT			>LIBLOADP L.LIBTCPIP
+CS.INIT			>LDYA L.LIBTCPIP
+				>LOADLIBYA
 				bcs .99
+
 				sta hLIBTCPIP
 				ldx #0
 .1				stz IPCFG,x
@@ -74,15 +78,15 @@ CS.INIT			>LIBLOADP L.LIBTCPIP
 				>SYSCALL SYS.AddNetCfg
 				bcs .99
 				
-				lda (pPsContext)
+				lda (pPs)
 				ora #S.PS.F.EVENT		Now accept events
-				sta (pPsContext)
+				sta (pPs)
 				
 				clc
 .99				rts
 *--------------------------------------
 CS.INIT.DEV		ldy #S.PS.hARGS
-				lda (pPsContext),y
+				lda (pPs),y
 				>PUSHA
 				>PUSHBI $20				Push SEP=' '
 				>PUSHBI 1				Push 1 for getting DEV
@@ -91,25 +95,29 @@ CS.INIT.DEV		ldy #S.PS.hARGS
 				sta hDEVNAME			save DevName for discard
 				>SYSCALL SYS.GetDevByNameA
 				bcs .98
-
+				>STYA pDev
+				txa
 				sta hDev
 				ldx #S.IPCFG.HDEV
 				sta IPCFG,x
 				
-				>SYSCALL SYS.GetDevInfoA
-				>STYA ZPQuickPtr1
+				ldx #DEVMGR.OPEN
+				jsr pDevJmp
 
-				ldy #0
+				ldx #DEVMGR.GETINFO
+				jsr pDevJmp
+				>STYA ZPQuickPtr1
+				
+				ldy #1
 				ldx #S.IPCFG.MAC
 .1				lda (ZPQuickPtr1),y
 				sta IPCFG,x
-				inx
 				iny
-				cpy #S.IPCFG.MAC+6
+				inx
+				cpx #S.IPCFG.MAC+6
 				bne .1
 				
-				lda hDEVNAME
-				>SYSCALL SYS.FreeMemA
+				jsr .98
 				clc
 				rts
 				
@@ -120,8 +128,8 @@ CS.INIT.DEV		ldy #S.PS.hARGS
 .99				sec
 				rts				
 *--------------------------------------
-CS.INIT.CFGFILE	>PUSHW L.CFGFILENAME
-				>SYSCALL SYS.ExpandPStr
+CS.INIT.CFGFILE	>LDYA L.CFGFILENAME
+				>SYSCALL SYS.ExpandPStrYA
 				bcs .99
 				sta hCfgFileName
 				>SYSCALL SYS.LoadFileA
@@ -154,8 +162,7 @@ CS.INIT.CFGFILE	>PUSHW L.CFGFILENAME
 CS.RUN			clc
 				rts
 *--------------------------------------
-CS.DOEVENT		>PULLW pEvent
-				lda (pEvent)
+CS.DOEVENT		lda (pEvent)
 				and #S.EVT.F.NET
 				beq .9
 				
@@ -221,13 +228,20 @@ CS.DOEVENT.NET	ldy #S.EVT.DATALO		Get Frame hMem
 				bcc .89
 				rts
 				
-.89				>SYSCALL SYS.DestroyEvent
-				clc
+.89				clc
 				rts
+				
 .99				sec
 				rts
 *--------------------------------------
-CS.QUIT			lda hLIBTCPIP
+CS.QUIT			lda hDev
+				>SYSCALL SYS.GetDevByIDA
+				>STYA pDev
+				
+				ldx #DEVMGR.OPEN
+				jsr pDevJmp
+
+				lda hLIBTCPIP
 				>SYSCALL SYS.FreeMemA
 				clc
 				rts
@@ -428,14 +442,12 @@ CopyFramePtr12	dey
 				bne CopyFramePtr12
 				rts
 *--------------------------------------
+pDevJmp			jmp (pDev)
 CS.END
 *--------------------------------------
 LIBTCPIP		>PSTRING "libtcpip.o"
 CFGFILENAME		>PSTRING "%ETC%TCPIP.CONF"
 DefaultHostName	>CSTRING "a2osx-host"
-*--------------------------------------
-DS.START
-*--------------------------------------
 hLIBTCPIP		.BS 1
 hDEVNAME		.BS 1
 hDev			.BS 1
@@ -443,8 +455,6 @@ hCfgFileName	.BS 1
 hCfgFile		.BS 1
 hCfgFileLen		.BS 2
 IPCFG			.BS S.IPCFG				Get in cache for faster access with ,X
-*--------------------------------------
-DS.END
 *--------------------------------------
 MAN
 SAVE SBIN/TCPIP.S

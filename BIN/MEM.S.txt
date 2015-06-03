@@ -1,31 +1,38 @@
 PR#3
-PREFIX /A2OSX.BUILD
+PREFIX /A2OSX.SRC
 NEW
 INC 1
 AUTO 6
 				.LIST OFF
 				.OP	65C02
 				.OR	$2000
-				.TF BIN/MEM
+				.TF /A2OSX.BOOT/BIN/MEM
 *--------------------------------------
 				.INB INC/MACROS.I
+				.INB INC/KERNEL.I
 				.INB INC/A2OSX.I
+				.INB INC/A2OSX.API.I
 				.INB INC/LIBSTR.I
+*--------------------------------------
+PAGELEN			.EQ 22
 *--------------------------------------
 ZPPTR1			.EQ ZPBIN
 ZPPTR2			.EQ ZPBIN+2
 *--------------------------------------
-* Main entry point
-*--------------------------------------
-* Code signature and INIT table
-*--------------------------------------
-* CLD 			$D8
-* JMP (*,x)		$7C
-* 				#JMPTABLE
-*				/JMPTABLE
+*			File Header (16 Bytes)
 *--------------------------------------
 CS.START		cld
 				jmp (.1,x)
+				.DA #$61				6502,Level 1 (65c02)
+				.DA #1					BIN Layout Version 1
+				.DA 0
+				.DA CS.END-CS.START		Code Length To Relocate
+				.DA DS.END-DS.START		Data Segment to Allocate
+				.DA 0
+				.DA 0
+*--------------------------------------
+* Relocation Table
+*--------------------------------------				
 .1				.DA CS.INIT
 				.DA CS.RUN
 				.DA CS.DOEVENT		
@@ -38,55 +45,120 @@ L.MSG3			.DA MSG3
 L.MSG4			.DA MSG4
 L.MSG5			.DA MSG5
 L.MSG6			.DA MSG6
-L.MSG7			.DA MSG7
 				.DA 0
-				.DA CS.END-CS.START		Code Length To Relocate
-				.DA DS.END-DS.START		Data Segment to Allocate
 *--------------------------------------
-CS.INIT			>LIBLOADP L.LIBSTR
+CS.INIT			>LDYA L.LIBSTR
+				>LOADLIBYA
 				bcs .9
 				sta hLIBSTR
 
-				stz LINE.COUNT
-				stz MEM.COUNT
-				stz USED.COUNT
-				stz bSTOP
-				stz bCANCEL
+				lda #0
+				ldy #DS.END-DS.START-1
 				
-				lda (pPsContext)
+.1				sta (pData),y
+				dey
+				bpl .1
+				
+				ldy #MEM.COUNT			Skip SLOT0
+				lda (pData),y
+				inc
+				sta (pData),y
+
+				lda (pPs)
 				ora #S.PS.F.EVENT		Now accept events
-				sta (pPsContext)
+				sta (pPs)
 				clc
 .9				rts
 *--------------------------------------
-CS.RUN			lda bCANCEL
-				bne .99
-				lda bSTOP
+CS.RUN			ldy #bCANCEL
+				lda (pData),y
+				bne .9
+				
+				ldy #bSTOP
+				lda (pData),y
 				bne .8
-				lda LINE.COUNT
+				
+				ldy #LINE.COUNT
+				lda (pData),y
 				bne .1
+				
 				>PUSHW L.MSG0
 				>LIBCALL hLIBSTR,LIBSTR.PRINTF
 
-.1				lda MEM.COUNT
+.1				ldy #MEM.COUNT
+				lda (pData),y
 				>SYSCALL SYS.GetMemByIDA
 				>STYA ZPPTR1
 				lda (ZPPTR1)
 				bpl .2
-				inc USED.COUNT
+				
+				ldy #USED.COUNT
+				lda (pData),y
+				inc
+				sta (pData),y
+				
 .2				jsr CS.RUN.PRINTMEM
 				
-				inc MEM.COUNT
-				lda MEM.COUNT
-				cmp MEMMGR.TABLESIZE
+				ldy #MEM.COUNT
+				lda (pData),y
+				inc
+				sta (pData),y
+				cmp MemMgr.LastSlot
 				beq .9
 
-.8				
-				clc
+.8				clc
 				rts
 				
 .9				jsr CS.RUN.PRINTEND
-.99				sec				
+				sec				
+				rts
+*--------------------------------------
+CS.DOEVENT		ldy #S.EVT.hDEV		is Event from active IN device?
+				lda (pEvent),y
+				ldy #S.PS.hINDEV
+				cmp (pPs),y
+				bne .9
+				
+				lda (pEvent)
+				and #S.EVT.F.KEY		is it a KEY event?
+				beq .9
+				
+				ldy #S.EVT.DATAHI		is it an O or SAPPLE key ?
+				lda (pEvent),y
+				bne	.9
+				
+				ldy #S.EVT.DATALO	
+				lda (pEvent),y
+				cmp #$03				Ctrl-C
+				bne .1
+				
+				lda #$FF
+				ldy #bCANCEL
+				sta (pData),y
+				bra .8
+				
+.1				cmp #$13				Ctrl-S
+				bne .2
+				
+				ldy #bSTOP
+				lda (pData),y
+				eor #$FF
+				sta (pData),y
+				bra .8
+				
+.2				ldy #bSTOP
+				lda #0
+				sta (pData),y
+				
+.8				clc
+				rts	
+				
+.9				sec
+				rts
+*--------------------------------------
+CS.QUIT			lda hLIBSTR
+				>SYSCALL SYS.UnloadLibA
+				clc
 				rts
 *--------------------------------------
 CS.RUN.PRINTMEM	ldy #S.MEM.LEN
@@ -96,6 +168,7 @@ CS.RUN.PRINTMEM	ldy #S.MEM.LEN
 				lda (ZPPTR1),y
 				ply
 				>PUSHYA
+				
 				ldy #S.MEM.PTR
 				lda (ZPPTR1),y
 				pha
@@ -103,18 +176,25 @@ CS.RUN.PRINTMEM	ldy #S.MEM.LEN
 				lda (ZPPTR1),y
 				ply
 				>PUSHYA
+				
 				ldy #S.MEM.REFCNT
 				lda (ZPPTR1),y
 				>PUSHA
+				
 				ldy #S.MEM.OWNERPID
 				lda (ZPPTR1),y
 				>PUSHA
+				
 				lda (ZPPTR1)
 				>PUSHA
-				lda MEM.COUNT
+				
+				ldy #MEM.COUNT
+				lda (pData),y
 				>PUSHA
+				
 				>PUSHW L.MSG1
 				>LIBCALL hLIBSTR,LIBSTR.PRINTF
+				
 				ldy #S.MEM.BIN
 				lda (ZPPTR1),y
 				bne .3
@@ -132,15 +212,18 @@ CS.RUN.PRINTMEM	ldy #S.MEM.LEN
 				lda #"|"
 				jsr COUT
 				ldy #1
+				
 .1				lda (ZPPTR2),y
 				ora #$80
 				cmp #$A0
 				bcs .2
+				
 				ora #$20
 .2				jsr COUT
 				iny 
 				cpy #40
 				bne .1
+				
 				lda #"}"
 				jsr COUT
 				bra .4
@@ -150,84 +233,52 @@ CS.RUN.PRINTMEM	ldy #S.MEM.LEN
 				>LIBCALL hLIBSTR,LIBSTR.PRINTP
 				
 .4				jsr CROUT
-				inc LINE.COUNT
-				lda LINE.COUNT
-				cmp #22
+				ldy #LINE.COUNT
+				lda (pData),y
+				inc
+				sta (pData),y
+				cmp #PAGELEN
 				bne .5
+				
 				lda #$FF
-				sta bSTOP
-				stz LINE.COUNT
+				ldy #bSTOP
+				sta (pData),y
+				
+				ldy #LINE.COUNT
+				lda #0
+				sta (pData),y
+				
 .5				rts
 *--------------------------------------
-CS.RUN.PRINTEND	>PUSHB MEM.COUNT
-				>PUSHB USED.COUNT
+CS.RUN.PRINTEND	ldy #MEM.COUNT
+				>PUSHB (pData),y
+				ldy #USED.COUNT
+				>PUSHB (pData),y
 				>PUSHW L.MSG2
 				>LIBCALL hLIBSTR,LIBSTR.PRINTF
 
-				>PUSHW MEMMGR.LOMEM
+				>PUSHW MemMgr.HiMem
 				>PUSHW L.MSG3
 				>LIBCALL hLIBSTR,LIBSTR.PRINTF
 
-				>PUSHW MEMMGR.MLLIMIT
+				>PUSHW MemMgr.Free
 				>PUSHW L.MSG4
 				>LIBCALL hLIBSTR,LIBSTR.PRINTF
-				
-				>PUSHW MEMMGR.MHLIMIT
+
+				>PUSHW MemMgr.LoMem
 				>PUSHW L.MSG5
 				>LIBCALL hLIBSTR,LIBSTR.PRINTF
-
-				>PUSHW MEMMGR.HIMEM
+				
+				lda MemMgr.Free
+				sec
+				sbc MemMgr.LoMem
+				tay
+				lda MemMgr.Free+1
+				sbc MemMgr.LoMem+1
+				
+				>PUSHYA
 				>PUSHW L.MSG6
 				>LIBCALL hLIBSTR,LIBSTR.PRINTF
-
-				>PUSHW MEMMGR.MFREE
-				>PUSHW L.MSG7
-				>LIBCALL hLIBSTR,LIBSTR.PRINTF
-				rts
-*--------------------------------------
-CS.DOEVENT		>PULLW pEvent
-				ldy #S.EVT.hDEV		is Event from active IN device?
-				lda (pEvent),y
-				ldy #S.PS.hINDEV
-				cmp (pPsContext),y
-				bne .9
-				
-				lda (pEvent)
-				and #S.EVT.F.KEY		is it a KEY event?
-				beq .9
-				
-				ldy #S.EVT.DATAHI		is it an O or SAPPLE key ?
-				lda (pEvent),y
-				bne	.9
-				
-				ldy #S.EVT.DATALO	
-				lda (pEvent),y
-				cmp #$03				Ctrl-C
-				bne .1
-				lda #$FF
-				sta bCANCEL
-				bra .8
-				
-.1				cmp #$13				Ctrl-S
-				bne .2
-				lda bSTOP
-				eor #$FF
-				sta bSTOP
-				bra .8
-				
-.2				lda bSTOP
-				beq .8
-				stz bSTOP
-				
-.8				>SYSCALL SYS.DestroyEvent
-				clc
-				rts	
-.9				sec
-				rts
-*--------------------------------------
-CS.QUIT			lda hLIBSTR
-				>SYSCALL SYS.UnloadLibA
-				clc
 				rts
 *--------------------------------------
 PRBYTE			pha
@@ -252,33 +303,34 @@ CROUT			lda #13
 *--------------------------------------
 COUT			phx
 				phy
-				>PUSHA
-				ldy #S.PS.hOUTDEV
-				lda	(pPsContext),y
-				>SYSCALL SYS.DevOutA
+				ldx #DEVMGR.COUT
+				jsr pDevJmp
 				ply
 				plx
 				rts
+pDevJmp			jmp (pDev)
 *--------------------------------------
 CS.END
-DS.START			
-*--------------------------------------
+LIBSTR			>PSTRING "libstr.o"
+MSG0			>CSTRING "hMem Flags    PID REF PTR   LEN   BINPATH/DATA\n"
+MSG1			>CSTRING " %03d %b $%h $%h $%H $%H "
+MSG2			>CSTRING "\nAllocated hMem:%d, Total:%d\n"
+MSG3			>CSTRING "High Memory:   $%H\n"
+MSG4			>CSTRING "Free ULimit:   $%H\n"
+MSG5			>CSTRING "Low Memory:    $%H\n"
+MSG6			>CSTRING "\nFree Memory:   %D Bytes.\n"
 hLIBSTR			.BS	1
+*--------------------------------------
+				.DUMMY
+				.OR 0
+DS.START
 LINE.COUNT		.BS 1
 MEM.COUNT		.BS 1
 USED.COUNT		.BS 1
 bSTOP			.BS 1
 bCANCEL			.BS 1
-LIBSTR			>PSTRING "libstr.o"
-MSG0			>CSTRING "hMem Flags    PID REF PTR   LEN   BINPATH/DATA\n"
-MSG1			>CSTRING " %03d %b $%h $%h $%H $%H "
-MSG2			>CSTRING "\nAllocated hMem:%d, Total:%d\n"
-MSG3			>CSTRING "Low Memory:    $%H\n"
-MSG4			>CSTRING "Low Free PTR:  $%H\n"
-MSG5			>CSTRING "High Free PTR: $%H\n"
-MSG6			>CSTRING "High Memory:   $%H\n"
-MSG7			>CSTRING "\nFree Memory:   %D Bytes.\n"
 DS.END
+				.ED
 *--------------------------------------
 MAN
 SAVE BIN/MEM.S

@@ -1,12 +1,12 @@
 PR#3
-PREFIX /A2OSX.BUILD
+PREFIX /A2OSX.SRC
 NEW
 INC 1
 AUTO 6
 				.LIST OFF
 				.OP	65C02
 				.OR	$2000
-				.TF SYS/KM.RAMWORKS
+				.TF /A2OSX.BOOT/SYS/KM.RAMWORKS
 *--------------------------------------
 				.INB INC/MACROS.I
 				.INB INC/IO.I
@@ -166,7 +166,7 @@ RW.Install		lda RRAMWRAMBNK1
 				
 				inc DEVCNT
 				ldx DEVCNT
-				lda #$30				Slot 3,Drive 1
+				lda #$30				Slot 3,Drive 1,0=Not Removable, 0=no int, 00=1 Volume
 				sta DEVLST,x
 				
 				lda #RWDRV.START
@@ -276,7 +276,8 @@ RW.Format		jsr RW.BLOCK.SET00
 				cmp #4					Are we writing first volume bitmap ?
 				bne .63					no, regular one
 
-				lda #$CF				Mark Block 0 & 1 free, 2,3 used (vol hdr)
+*				lda #$CF				Mark Block 0 & 1 free, 2,3 used (vol hdr)
+				lda #$0F
 				sta RW.BLOCK			
 				
 				ldy #0
@@ -371,9 +372,13 @@ RW.MSG.KO3		>CSTRING "RamWorks Drive Format Error."
 * Driver for Ramworks in main LC
 * $FF00 -> $FF9A (Inclusive)
 * $FF58	MUST BE $60 (RTS)
-* DO NOT trash DRV.BLKNUM as ProDOS 
+* DO NOT trash DRV.COMMAND...DRV.BLKNUM as ProDOS 
 * reuses it after Block operation
+* A1,A2 are used by Disk II Driver, 
+* so we use it safely as Tmp Ptr
 *--------------------------------------
+DRV.A2L			.EQ $3E
+DRV.A2H			.EQ $3F
 DRV.COMMAND 	.EQ $42
 DRV.BUFF		.EQ $44        
 DRV.BLKNUM		.EQ $46        
@@ -389,14 +394,13 @@ RWDRV.START		cld						ProDOS will check that byte!!!
 				bcs RWDRV.IOERR			> 3 = Invalid OP, IO error
 
 				lda DRV.BLKNUM
-				sec
-				sbc RWDRV.MAXLO+1
+				sbc RWDRV.MAXLO+1		Carry is Clear 
 				lda DRV.BLKNUM+1
 				sbc RWDRV.MAXHI+1
 				bcs	RWDRV.IOERR			DRV.BLKNUM >= RW.DRV.SIZE, IO error
 				
-				lda DRV.BLKNUM			compute PAGE = blocknumLO *2
-				asl
+				lda DRV.BLKNUM			Get Back DRV.BLKNUM
+				asl						compute PAGE = blocknumLO *2
 				pha
 				lda DRV.BLKNUM+1		compute BANK = blocknumHI *2
 				rol
@@ -408,50 +412,54 @@ RWDRV.START		cld						ProDOS will check that byte!!!
 *--------------------------------------
 * X=Page($02 -> $BF),A=Bank,Y=CMD
 *--------------------------------------
-				php
+*				php
 				sei						Disable IRQ as no vector set in RW Banks
 				sta RWBankSelect		Select RAMWorks Bank
 				sta CLR80STORE			make sure SETREADAUX/SETWRITEAUX effective everywhere
 
-				stx DRV.COMMAND+1		Reuse DRV.COMMAND for RAM PTR
-				stz DRV.COMMAND
+				inx						second 256 bytes first
+				stx DRV.A2H				Use DRV.A1L/H for RAM PTR
+				stz DRV.A2L
+				
+				inc DRV.BUFF+1
 				
 				dey						Y=CMD, zero if read
-				bne RWDRV.W				CC, go write
-
+				bne RWDRV.W				non zero, go write
+				
 				sta SETREADAUX
-				ldx #DRV.COMMAND		READ:copy from RAM to BUFF
-				ldy #DRV.BUFF
+				ldx #DRV.A2L			READ:copy from RAM to BUFF
+				lda #DRV.BUFF
 				bra RWDRV.RW
 				
 RWDRV.W			sta SETWRITEAUX				
 				ldx #DRV.BUFF
-				ldy #DRV.COMMAND		WRITE:copy from BUFF to RAM
+				lda #DRV.A2L			WRITE:copy from BUFF to RAM
+				dey						Make sure Y=0 for main loop below
 
 RWDRV.RW		stx RWDRV.RW.SRC+1
-				sty RWDRV.RW.DST+1
+				sta RWDRV.RW.DST+1
 
 				ldx #2					2 pages to copy
-
-				ldy #0
 
 RWDRV.RW.SRC	lda ($FF),y
 RWDRV.RW.DST	sta ($FF),y
 				iny
 				bne RWDRV.RW.SRC
+
 				
 				.HS	24				BIT Zero Page to skip RTS
 RWDRV.RTS		rts					$FF58 Must Be RTS
 
-				inc DRV.BUFF+1
-				inc DRV.COMMAND+1
+				dec DRV.BUFF+1
+				dec DRV.A2H
 				dex
 				bne RWDRV.RW.SRC
 
 				stz RWBankSelect
 				sta CLRREADAUX
 				sta CLRWRITEAUX
-				plp
+*				plp
+				cli
 
 RMDRV.CMDSTATUS				
 RWDRV.MAXLO		ldx #$FF				return device block count in X,Y...
