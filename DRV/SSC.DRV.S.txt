@@ -6,10 +6,11 @@ AUTO 6
 				.LIST OFF	
 				.OP	65C02
 				.OR $2000
-				.TF DRV/SSC.DRV
+				.TF /A2OSX.BOOT/DRV/SSC.DRV
 *--------------------------------------
 				.INB INC/MACROS.I
 				.INB INC/A2OSX.I
+				.INB INC/A2OSX.API.I
 *--------------------------------------
 BUF.SIZE		.EQ $20
 BUF.MASK		.EQ $1F
@@ -52,35 +53,28 @@ SSC.REG.CMD.RIRQDIS	.EQ %00000010
 SSC.REG.CMD.DTR		.EQ %00000001
 SSC.REG.CTL		.EQ $C08B				W
 *--------------------------------------
-* Main DRV entry point
-* input :
-* X = CMD
-*	0 : OPEN
-*	2 : GETEVENT
-*	4 : OUT
-*   6 : CLOSE
-*  	8 : GETINFO
-*	10 : IRQ
-*--------------------------------------
-* CLD 			$D8
-* JMP (*,x)		$7C
-* 				#JMPTABLE
-*				/JMPTABLE
+*			File Header (16 Bytes)
 *--------------------------------------
 CS.START		cld
-				jmp (.1,x)
-				.DA CS.END-CS.START
+				jmp Dev.Detect			cld,jmp abs=DRV
+				.DA #$61				6502,Level 1 (65c02)
+				.DA #1					DRV Layout Version 1
 				.DA 0
-.1				.DA OPEN
-				.DA GETEVENT
-				.DA OUT
-				.DA CLOSE
-				.DA GETINFO
-L.IRQ			.DA IRQ
-L.DEVINFO		.DA DEVINFO
-				.DA 0					end or relocation
+				.DA CS.END-CS.START			Code Length
+				.DA DEV.HEADER-CS.START		Device Header Offset
+				.DA DRV.CS.START-CS.START	Driver Code Offset
+				.DA DRV.CS.END-DRV.CS.START	Drv Code Length
 *--------------------------------------
-OPEN			stz ZPTmpPtr1
+* Relocation Table
+*--------------------------------------
+L.MSG.DETECT	.DA MSG.DETECT
+				.DA 0					End Of Reloc Table
+*--------------------------------------
+Dev.Detect		sta hArgs
+				>LDYA L.MSG.DETECT
+				>SYSCALL SYS.SysScrPPSTRYA
+				
+				stz ZPTmpPtr1
 				lda #$C1
 				sta ZPTmpPtr1+1
 				
@@ -108,13 +102,43 @@ OPEN			stz ZPTmpPtr1
 				and #$0F
 				sta DEVSLOT0n
 				ora #$30
-				sta DEVNAME+4
+				sta DEV.HEADER.NAME+4
 				asl
 				asl
 				asl
 				asl
 				sta DEVSLOTn0
-				
+				clc
+				rts
+*--------------------------------------
+CS.END
+DEVSIG.Offset	.HS 05070B0C
+DEVSIG.Value	.HS 38180131
+DEVSIG.Length	.EQ DEVSIG.Value-DEVSIG.Offset
+MSG.DETECT		>PSTRING "\nApple Super Serial Card Driver."
+hArgs			.BS 1
+*--------------------------------------
+*			Device Header (16 Bytes)
+*--------------------------------------
+DEV.HEADER		cld
+				jmp (DRV.CS.START,x)
+				.DA #S.DEV.F.IRQ+S.DEV.F.EVENT+S.DEV.F.COUT+S.DEV.F.CHAR
+DEV.HEADER.NAME	>PSTRING "COM1"			NAME
+				.HS 00.00
+				.HS 00.00.00.00
+*--------------------------------------
+*			Driver Code
+*--------------------------------------
+DRV.CS.START	.DA OPEN
+				.DA GETEVENT
+				.DA COUT
+				.DA CLOSE
+				.DA GETINFO
+				.DA IRQ
+L.DEVINFO		.DA DEVINFO
+				.DA 0					end or relocation
+*--------------------------------------
+OPEN				
 *				ldy #SSC.INIT
 *				jsr GoCard
 				ldx DEVSLOTn0
@@ -128,11 +152,6 @@ OPEN			stz ZPTmpPtr1
 				stz OUTBUF.PTR
 				stz OUTBUF.CNT
 				
-				>PUSHW L.IRQ
-				>PUSHBI 4
-				>SYSCALL SYS.MLIAllocIRQ
-				bcs *
-
 				php
 				sei
 				ldx DEVSLOTn0
@@ -142,25 +161,10 @@ OPEN			stz ZPTmpPtr1
 				lda SSC.REG.STATUS,x	clear any IRQ pending
 				plp
 				
-				ldx #0
-				ldy #S.DEV.NAME
-.7				lda DEVNAME,x
-				sta (pDevContext),y
-				cpx DEVNAME
-				beq .8
-				inx
-				iny
-				bne .7
-				
-				lda #S.DEV.F.CHAR+S.DEV.F.OUT+S.DEV.F.EVENT
-				sta (pDevContext)
-				
 .8				clc
 				rts
 *--------------------------------------
-GETEVENT		>PULLW pEvent
-				
-				php
+GETEVENT		php
 				sei
 				lda INBUF.CNT
 				beq .9
@@ -195,7 +199,7 @@ GETEVENT		>PULLW pEvent
 				sec
 				rts
 *--------------------------------------
-OUT				php
+COUT			php
 				sei
 				
 				ldx DEVSLOTn0
@@ -295,11 +299,7 @@ GOCARD			sta	$CFFF				Prevent SSC firmware bug
 				pla
 				jmp (ZPGoCard)
 *--------------------------------------
-CS.END
-DEVSIG.Offset	.HS 05070B0C
-DEVSIG.Value	.HS 38180131
-DEVSIG.Length	.EQ DEVSIG.Value-DEVSIG.Offset
-DEVNAME			>PSTRING "COM0"
+DRV.CS.END
 DEVSLOT0n		.BS 1
 DEVSLOTCn		.BS 1
 DEVSLOTn0		.BS 1
@@ -309,7 +309,7 @@ OUTBUF.PTR		.BS 1
 OUTBUF.CNT		.BS 1
 INBUF			.BS BUF.SIZE
 OUTBUF			.BS BUF.SIZE
-DEVINFO			.DA #S.DEV.F.CHAR+S.DEV.F.OUT+S.DEV.F.EVENT
+DEVINFO			.DA #S.DEVINFO.TYPE.CHAR
 				.DA #0
 *--------------------------------------
 MAN
