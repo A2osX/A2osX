@@ -16,11 +16,14 @@ AUTO 6
 SYM.BLOCK.SIZE		.EQ 4096
 SYM.BLOCK.MAX		.EQ 8
 SRC.IN.DEPTH.MAX	.EQ 7
+SRC.LABEL.MAXLEN	.EQ 16
 *---------------------------------------
 ERR.INV.ARGS		.EQ 1
 ERR.SRC.INV.TYPE	.EQ 2
 ERR.SRC.TOO.MANY.IN	.EQ 3
-ERR.SYM.TOO.LARGE	.EQ 10
+ERR.SYNTAX.ERROR	.EQ 99
+ERR.SYM.TOO.LONG	.EQ 10
+ERR.VAL.TOO.BIG		.EQ 11
 ERR.LINE.TOO.LONG	.EQ 20
 ERR.INVALID.LABEL	.EQ 21
 
@@ -47,7 +50,9 @@ L.LIBSTR			.DA LIBSTR
 L.MSG.HELP1			.DA MSG.HELP1
 L.MSG.HELP2			.DA MSG.HELP2
 L.MSG.SRCLINE		.DA MSG.SRCLINE
+L.MSG.ERROR			.DA MSG.ERROR
 L.READ.BUFFER		.DA READ.BUFFER
+T.DIRECTIVES.JMP	.DA DIR.LI
 					.DA 0
 *---------------------------------------
 CS.INIT				>LDYA L.LIBSTR
@@ -88,10 +93,10 @@ CS.INIT.ARGS		>SYSCALL SYS.GetMemPtrA
 					>PUSHA
 					>SYSCALL SYS.PStrCat
 					
-.3					jsr SRC.OPEN
-					bcs .99
+					ldy #SRC.hFILENAME
+					sta (pData),y			Store filename
 					
-					lda (pPs)
+.3					lda (pPs)
 					ora #S.PS.F.EVENT		Now accept events
 					sta (pPs)
 
@@ -105,28 +110,63 @@ CS.INIT.ARGS		>SYSCALL SYS.GetMemPtrA
 *--------------------------------------
 CS.RUN				ldy #bCANCEL
 					lda (pData),y
-					beq .1
-					sec
-					rts
+					bne .99
 
-.1					ldy #bSTOP
+					ldy #bSTOP
 					lda (pData),y
-					beq .2
+					bne .8
+					
+					ldy #SRC.COUNT		root file is already opened?
+					lda (pData),y
+					bne .10 
+					
+					ldy #SRC.hFILENAME
+					lda (pData),y
+					
+					jsr SRC.OpenFileA
+					bcs *
+					
+.10					jsr SRC.ReadLine
+					bcc .2
+					cmp #$4C			End Of File?
+					bne .9
+					
+					jsr SRC.FileClose
+					
+					ldy #SRC.COUNT		end of root file ?
+					lda (pData),y
+					bne .8				no continue back to previous file
+					
+					ldy #ASM.PASS
+					lda (pData),y		End of pass #2 ??
+					bne .1
+					inc
+					sta (pData),y
 					clc
 					rts
 					
-.2					jsr SRC.ReadLine
-					bcs .9
-
-					jsr SRC.ParseLine
+.1					lda #0				End of assembly, exit with no error
+.99					sec		
+					rts
+					
+.2					jsr SRC.ParseLine
 					bcs .9
 					
 					>PUSHWI TmpBuffer256
 					>PUSHW SRC.LINENUM
 					>PUSHW L.MSG.SRCLINE
 					>LIBCALL hLIBSTR,LIBSTR.PRINTF
-					clc
-.9					rts
+					
+.8					clc
+					rts
+
+.9					>PUSHA
+					>PUSHW SRC.LINENUM
+					>PUSHW L.MSG.ERROR
+					>LIBCALL hLIBSTR,LIBSTR.PRINTF
+					
+					sec
+					rts
 *--------------------------------------
 CS.DOEVENT			ldy #S.EVT.hDEV		is Event from active IN device?
 					lda (pEvent),y
@@ -163,29 +203,14 @@ CS.DOEVENT			ldy #S.EVT.hDEV		is Event from active IN device?
 .9					sec
 					rts
 *--------------------------------------
-CS.QUIT				ldy #SRC.COUNT
+CS.QUIT				jsr SRC.FileClose
+					bne CS.QUIT 
+
+					ldy #SRC.hFILENAME
 					lda (pData),y
 					beq .8
 					
-.1					clc
-					adc #SRC.hREFNUMS-1
-					tay
-					lda (pData),y
-					>SYSCALL SYS.MLICloseA
-					
-					ldy SRC.COUNT
-					lda (pData),y
-					clc
-					adc #SRC.hBUFFERS-1
-					tay
-					lda (pData),y
 					>SYSCALL SYS.FreeMemA
-					
-					ldy #SRC.COUNT
-					lda (pData),y
-					dec
-					sta (pData),y
-					bne .1
 					
 .8					lda hLIBSTR
 					>SYSCALL SYS.UnloadLibA
@@ -196,7 +221,7 @@ LOAD.ASM.T
 					clc
 					rts
 *---------------------------------------
-SRC.OPEN			sta hFileName
+SRC.OpenFileA		sta hFileName
 
 					ldy #SRC.COUNT
 					lda (pData),y
@@ -246,19 +271,26 @@ SRC.OPEN			sta hFileName
 					txa
 					sta (pData),y
 					
-					cmp #$04			TXT?
-					bne .1
+					cmp #$FA			S-C/BAS?
+					beq .8
 					
-					>PUSHBI $0D
-					>PUSHBI $FF
-					>PUSHB hFileName
-					>SYSCALL SYS.MLINewLine
-					bcs .99
-					bra .8
+					cmp #$04			TXT ?
 					
-.1					cmp #$FA			S-C/BAS?
 					bne .98
 
+					>PUSHBI $0D		Line separator for TXT file
+					>PUSHBI $FF
+					
+					ldy #SRC.COUNT
+					lda (pData),y
+					clc
+					adc #SRC.hREFNUMS
+					tay
+					lda (pData),y
+					>PUSHA
+					>SYSCALL SYS.MLINewLine
+					bcs .99
+					
 .8					ldy #SRC.COUNT
 					lda (pData),y
 					inc
@@ -277,13 +309,22 @@ SRC.ReadLine		ldy #SRC.COUNT
 					adc #SRC.hFILETYPES-1
 					tay
 					lda (pData),y
-					bmi SRC.ReadLine.TFA
-					jmp SRC.ReadLine.T04
-*---------------------------------------
-SRC.ReadLine.TFA	>LDYAI 3			LEN + LINENUM
-					jsr SRC.ReadLine.YA
-					bcs .9 
+					bmi .10
 					
+					>PUSHWI 256
+					>PUSHWI TmpBuffer256
+					jsr SRC.ReadFromFile
+					bcs .19 
+					
+					lda #0				replace ending $0D with $00
+					sta TmpBuffer256,y
+.19					rts
+
+.10					>PUSHWI 3
+					>PUSHW L.READ.BUFFER
+					jsr SRC.ReadFromFile
+					bcs .9 
+
 					lda READ.BUFFER+1
 					sta SRC.LINENUM
 					lda READ.BUFFER+2
@@ -291,20 +332,21 @@ SRC.ReadLine.TFA	>LDYAI 3			LEN + LINENUM
 					
 					lda READ.BUFFER		LEN
 					sec
-					sbc #3				remove LEN + LINENUM from LEN
+					sbc #3
 					bcc .9				LEN should be at least 3
-					beq .8
-					
-					tay					Read remaining chars
+
+					tay
 					lda #0
-					jsr SRC.ReadLine.YA
-					bcs .9
+					>PUSHYA
+					>PUSHW L.READ.BUFFER
+					jsr SRC.ReadFromFile
 					
 					ldy #0
 					ldx #0
 					
 .1					lda READ.BUFFER,y
 					bmi .2
+					
 					sta TmpBuffer256,x
 					beq .8				Ending 00
 					inx
@@ -352,13 +394,7 @@ SRC.ReadLine.TFA	>LDYAI 3			LEN + LINENUM
 					sec
 					rts
 *--------------------------------------
-SRC.ReadLine.T04
-					clc
-					rts
-*--------------------------------------
-SRC.ReadLine.YA		>PUSHYA
-					>PUSHW L.READ.BUFFER
-					ldy #SRC.COUNT
+SRC.ReadFromFile	ldy #SRC.COUNT
 					lda (pData),y
 					clc
 					adc #SRC.hREFNUMS-1
@@ -366,52 +402,216 @@ SRC.ReadLine.YA		>PUSHYA
 					lda (pData),y
 					>PUSHA
 					>SYSCALL SYS.MLIRead
+					bcs .9
+					tax					$100 byte transfered ?
+					beq .9
+					lda #ERR.LINE.TOO.LONG
+					sec
+.9					rts
+*---------------------------------------
+SRC.FileClose		ldy #SRC.COUNT
+					lda (pData),y
+					beq .8
+					
+					clc
+					adc #SRC.hREFNUMS-1
+					tay
+					lda (pData),y
+					>SYSCALL SYS.MLICloseA
+					
+					ldy #SRC.COUNT
+					lda (pData),y
+					clc
+					adc #SRC.hBUFFERS-1
+					tay
+					lda (pData),y
+					>SYSCALL SYS.FreeMemA
+					
+					ldy #SRC.COUNT
+					lda (pData),y
+					dec
+					sta (pData),y
+					
+.8					clc
 					rts
 *---------------------------------------
-SRC.ParseLine		stz SRC.BufPtr
-					jsr SRC.GetNextChar
-					beq .8
+SRC.ParseLine		stz SRC.Label.Flags
+					stz SRC.BufPtr
+					lda TmpBuffer256
+					beq SRC.ParseLine.Ok
 					cmp #'*'			Comment?
-					beq .8
+					beq SRC.ParseLine.Ok
 					cmp #' '
-					beq SRC.ParseLine.OpCode
+					beq SRC.ParseLine.OpCde
 					
 SRC.ParseLine.Sym	cmp #'.'			Local Label?
 					bne SRC.ParseLine.SymG
 					
-					jsr SRC.GetNextToken
-					bcs
-					jsr SRC.IsNumber
+					jsr SRC.GetChar
+					beq SRC.ParseLine.Err1
+					jsr SRC.GetDecimal
 					bcs SRC.ParseLine.Err1
+					jsr SYM.AddLocal
+					bcc SRC.ParseLine.OpCde
+					rts
  
-SRC.ParseLine.SymG	
-					jsr SRC.GetToken
-					jsr SYM.ClearLocal
+SRC.ParseLine.SymG	jsr SYM.ClearLocal
+					jsr SRC.GetLabel
+					bcs SRC.ParseLine.Err1
 					
+					inc SRC.Label.Flags	Remember to Add Label
 					
-SRC.ParseLine.OpCode	
-					jsr SRC.GetNextCharNB
+					ldx #3				Makes Current Label = PC for now
+					ldy #ASM.PC
+					lda (pdata),y
+.1					sta SRC.LabelValue,x
+					dey
+					dex
+					bpl .1
+											
+SRC.ParseLine.OpCde	jsr SRC.GetCharNB
+					beq SRC.ParseLine.Ok
+					
+SRC.ParseLine.Ok	lda SRC.Label.Flags
 					beq .8
+					
+					jsr SYM.AddLocal
 					
 .8					clc					
 					rts
 					
 SRC.ParseLine.Err1	lda #ERR.INVALID.LABEL
+SRC.ParseLine.Err	sec
+					rts
+*---------------------------------------
+SRC.GetDecimal		stz SRC.ACC+1
+					stz SRC.ACC+2
+					stz SRC.ACC+3
+					
+					jsr SRC.GetChar
+					beq .99
+					jsr SRC.IsDigit10
+					bcs .99
+					and #$0F
+					sta SRC.ACC
+					
+.1					jsr SRC.GetChar
+					beq .8
+					cmp #' '
+					beq .8
+					jsr SRC.IsDigit10
+					bcs .99
+					and #$0F
+					
+					pha
+					jsr SRC.ACC10
+					pla
+					bcs .9
+					clc
+					adc SRC.ACC
+					sta SRC.ACC
+					bcc .1
+					
+					inc SRC.ACC+1
+					bne .1
+					inc SRC.ACC+2
+					bne .1
+					inc SRC.ACC+3
+					bne .1
+					
+.9					lda #ERR.VAL.TOO.BIG
+					sec
+					rts
+					
+.8					clc
+					rts
+					
+.99					lda #ERR.SYNTAX.ERROR
 					sec
 					rts
 *---------------------------------------
-SRC.GetToken		
+SRC.GetLabel		jsr SRC.GetChar
+					
+					beq .9
+					jsr SRC.IsLetter
+					bcs .9
+					sta SRC.Label
+					
+					ldy #1
+					
+.1					jsr SRC.GetChar
+					beq .8
+					
+					cmp #' '
+					beq .8
+					
+					cmp #'.'
+					beq .2
+					
+					jsr SRC.IsLetterOrDigit
+					bcs .9
+.2					sta SRC.Label,y
+					iny
+					cpy #SRC.LABEL.MAXLEN
+					bne .1				if equ Carry is set
+					
+.9					sec
+					rts					
+					
+.8					lda #0
+					sta SRC.Label,y
+					clc
+					rts
 *---------------------------------------
-SRC.GetNextCharNB	jsr SRC.GetNextChar
+SRC.IsLetterOrDigit jsr SRC.IsDigit10
+					bcc SRC.IsLetterRTS
+*---------------------------------------
+SRC.IsLetter		cmp #'A'
+					bcc .9
+					cmp #'['
+					bcc SRC.IsLetterRTS
+
+					cmp #'a'
+					bcc .9
+					cmp #'{'
+					bcs SRC.IsLetterRTS
+					
+					adc #$20			to Uppercase
+					rts
+					
+.9					sec					
+SRC.IsLetterRTS		rts					
+*---------------------------------------
+SRC.IsDigit10		cmp #'0'
+					bcc .9
+					cmp #':'
+					rts					cc if ok, cs if not
+					
+.9					sec
+					rts
+*---------------------------------------
+SRC.GetCharNB		jsr SRC.GetChar
 					beq .9
 					cmp #' '
-					beq SRC.GetNextCharNB
+					beq SRC.GetCharNB
 .9					rts
 *---------------------------------------
-SRC.GetNextChar		ldx SRC.BufPtr
+SRC.GetChar			ldx SRC.BufPtr
 					lda TmpBuffer256,x
 					inc SRC.BufPtr
 					and #$7f
+					rts
+*---------------------------------------
+SYM.ClearPrivate
+					clc
+					rts
+*---------------------------------------
+SYM.AddPrivate		
+					clc
+					rts
+*---------------------------------------
+SYM.LookupPrivate
+					clc
 					rts
 *---------------------------------------
 SYM.ClearLocal
@@ -422,12 +622,15 @@ SYM.AddLocal
 					clc
 					rts
 *---------------------------------------
-*---------------------------------------
-SYM.AddGlobal
+SYM.LookupLocal	
 					clc
 					rts
 *---------------------------------------
-SYM.Lookup	
+SYM.AddGlobal		
+					clc
+					rts
+*---------------------------------------
+SYM.LookupGlobal	
 					clc
 					rts
 *---------------------------------------
@@ -437,7 +640,7 @@ SYM.BLOCK.ALLOC		ldx #0
 					inx
 					cpx #SYM.BLOCK.MAX
 					bne .1				
-					lda #ERR.SYM.TOO.LARGE
+					lda #ERR.SYM.TOO.LONG
 					sec 				Out of block error
 					rts
 					
@@ -450,6 +653,51 @@ SYM.BLOCK.ALLOC		ldx #0
 					sta SYM.BLOCKS,x
 					clc
 .9					rts		
+*---------------------------------------
+SRC.ACC10			lda SRC.ACC			ACC*2-> ACC & ACCTMP
+					asl
+					sta SRC.ACC
+					sta SRC.ACCTMP
+					lda SRC.ACC+1
+					rol
+					sta SRC.ACC+1
+					sta SRC.ACCTMP+1
+					lda SRC.ACC+2
+					rol
+					sta SRC.ACC+2
+					sta SRC.ACCTMP+2
+					lda SRC.ACC+3
+					rol
+					sta SRC.ACC+3
+					sta SRC.ACCTMP+3
+					bcs .9
+					
+					ldx #1
+.1					asl SRC.ACC			ACC=ACC*8
+					rol SRC.ACC+1
+					rol SRC.ACC+2
+					rol SRC.ACC+3
+					bcs .9
+					dex
+					bne .1
+					
+					lda SRC.ACC			CC from ROL SRC.ACC+3
+					adc SRC.ACCTMP
+					sta SRC.ACC
+					lda SRC.ACC+1
+					adc SRC.ACCTMP+1
+					sta SRC.ACC+1
+					lda SRC.ACC+2
+					adc SRC.ACCTMP+2
+					sta SRC.ACC+2
+					lda SRC.ACC+3
+					adc SRC.ACCTMP+3
+					sta SRC.ACC+3		CS if overflow
+					
+.9					rts					
+*---------------------------------------
+DIR.LI				clc
+					rts
 *---------------------------------------
 CS.END
 T.DIRECTIVES		.AS "AS"
@@ -483,11 +731,16 @@ LIBSTR				>PSTRING "libstr.o"
 MSG.HELP1			>CSTRING "A2osX-Macro Assembler (S-C MASM 2.0 Based)\n"
 MSG.HELP2			>CSTRING "Usage : ASM <src file> [type TXT ($04) or S-C/BAS ($FA)]\n"
 MSG.SRCLINE			>CSTRING "%05D-%s\n"
+MSG.ERROR			>CSTRING "%05D-Error:$%h\n"
 hLIBSTR				.BS	1
 hFileName			.BS 1
 SRC.LINENUM			.BS 2
 SRC.BufPtr			.BS 1
-SRC.Token			.BS	256
+SRC.Label.Flags		.BS 1
+SRC.Label			.BS	SRC.LABEL.MAXLEN
+SRC.LabelValue		.BS 4
+SRC.ACC				.BS 4
+SRC.ACCTMP			.BS 4
 READ.BUFFER			.BS 256
 *--------------------------------------
 					.DUMMY
@@ -496,20 +749,25 @@ DS.START
 bSTOP				.BS 1
 bCANCEL				.BS 1
 
+SRC.hFILENAME		.BS 1
+
 SRC.COUNT			.BS 1
 SRC.hREFNUMS		.BS SRC.IN.DEPTH.MAX	Store ref_num of opened files (Main, .INs & .INBs)
 SRC.hBUFFERS		.BS SRC.IN.DEPTH.MAX	Store hMem to allocated buffers
 SRC.hFILETYPES		.BS SRC.IN.DEPTH.MAX	Store file type of opened SRC files
 
 DST.hFILENAME		.BS 1
-DST.hFILETYPE		.BS 1
 DST.hREFNUM			.BS 1
 DST.hBUFFER			.BS 1
+DST.hFILETYPE		.BS 1
 
 ASM.T.hFILENAME		.BS 1
 ASM.T.hFILE			.BS 1				handle to loaded ASM.T.xxxxx
 ASM.PASS			.BS 1
-ASM.ORG				.BS 4				32Bits Origin
+ASM.PH.ON			.BS 1
+ASM.LI.OFF			.BS 1
+ASM.PC				.BS 4				32Bits PC
+ASM.PC.PH			.BS 4				32Bits PC saved for PH directive
 
 SYM.BLOCKS			.BS SYM.BLOCK.MAX
 DS.END				.ED
