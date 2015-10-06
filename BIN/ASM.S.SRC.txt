@@ -1,0 +1,581 @@
+PR#3
+PREFIX /A2OSX.SRC
+NEW
+INC 1
+AUTO 6
+					.LIST OFF
+					.OP	65C02
+*---------------------------------------
+SRC.OpenFileA		sta hFileName
+					>SYSCALL SYS.GetMemPtrA
+					>STYA ZPPtr1
+					
+					ldy #1
+					lda (ZPPtr1),y
+					cmp #'/'
+					beq .1
+
+					>PUSHB hFileName
+					ldy #S.PS.hPREFIX
+					lda (pPs),y
+					>PUSHA
+					>SYSCALL SYS.PStrCat
+					sta hFileName
+					>SYSCALL SYS.GetMemPtrA
+					>STYA ZPPtr1
+					
+.1					>PUSHW ZPPtr1
+					>PUSHW L.MSG.SRC.FILE
+					>LIBCALL hLIBSTR,LIBSTR.PRINTF
+					
+					ldy #SRC.COUNT
+					lda (pData),y
+					cmp #SRC.IN.DEPTH.MAX
+					bne .10
+					
+					lda #ERR.SRC.TOO.MANY.IN
+					sec
+					rts
+					
+.10					lda hFileName
+					>SYSCALL SYS.MLIOpenA
+					bcs .99
+					
+					pha
+					ldy #SRC.COUNT
+					lda (pData),y
+					clc
+					adc #SRC.hREFNUMS
+					tay
+					pla
+					sta (pData),y
+					
+					ldy #SRC.COUNT
+					lda (pData),y
+					clc
+					adc #SRC.hBUFFERS
+					tay
+					txa
+					sta (pData),y
+
+					lda hFileName
+					>SYSCALL SYS.MLIGetFileInfoA
+					bcs .99
+
+					>STYA ZPQuickPtr1
+					ldy #1
+					lda (ZPQuickPtr1),y
+					tax
+					
+					ldy #SRC.COUNT
+					lda (pData),y
+					clc
+					adc #SRC.hFILETYPES
+					tay
+
+					txa
+					sta (pData),y
+					
+					cmp #$FA			S-C/BAS?
+					beq .8
+					
+					cmp #$04			TXT ?
+					
+					bne .98
+
+					>PUSHBI $0D		Line separator for TXT file
+					>PUSHBI $FF
+					
+					ldy #SRC.COUNT
+					lda (pData),y
+					clc
+					adc #SRC.hREFNUMS
+					tay
+					lda (pData),y
+					>PUSHA
+					>SYSCALL SYS.MLINewLine
+					bcs .99
+					
+.8					ldy #SRC.COUNT
+					lda (pData),y
+					inc
+					sta (pData),y
+					clc
+					rts
+					
+.98					lda #ERR.SRC.INV.TYPE
+					
+.99					sec
+					rts
+*---------------------------------------
+SRC.ReadLine		ldy #SRC.COUNT
+					lda (pData),y
+					clc
+					adc #SRC.hFILETYPES-1
+					tay
+					lda (pData),y
+					bmi .10
+					
+					>PUSHWI 256
+					>PUSHWI TmpBuffer256
+					jsr SRC.ReadFromFile
+					bcs .19 
+					
+					lda #0				replace ending $0D with $00
+					sta TmpBuffer256,y
+.19					rts
+
+.10					>PUSHWI 3
+					>PUSHW L.SRC.Buffer
+					jsr SRC.ReadFromFile
+					bcs .9 
+
+					lda SRC.Buffer+1
+					sta SRC.LINENUM
+					lda SRC.Buffer+2
+					sta SRC.LINENUM+1
+					
+					lda SRC.Buffer		LEN
+					sec
+					sbc #3
+					bcc .9				LEN should be at least 3
+
+					tay
+					lda #0
+					>PUSHYA
+					>PUSHW L.SRC.BUFFER
+					jsr SRC.ReadFromFile
+					
+					ldy #0
+					ldx #0
+					
+.1					lda SRC.Buffer,y
+					bmi .2
+					
+					sta TmpBuffer256,x
+					beq .8				Ending 00
+					inx
+					beq .99
+					iny
+					bne .1
+					bra .99
+					
+.2					cmp #$C0			REPEAT char?
+					bne .5
+					iny
+					beq .99
+					lda SRC.Buffer,y
+					iny
+					beq .99
+.3					pha
+					lda SRC.Buffer,y
+					sta TmpBuffer256,x
+					pla
+					inx
+					beq .99
+					dec
+					bne .3
+					iny
+					bne .1
+					bra .99
+					
+.5					and #$3F			Compute blank count
+.6					pha
+					lda #$20
+					sta TmpBuffer256,x
+					pla
+					inx
+					beq .99
+					dec
+					bne .6
+					iny
+					bne .1
+					bra .99
+					
+.8					clc
+.9					rts
+
+.99					lda #ERR.LINE.TOO.LONG
+					sec
+					rts
+*--------------------------------------
+SRC.ReadFromFile	ldy #SRC.COUNT
+					lda (pData),y
+					clc
+					adc #SRC.hREFNUMS-1
+					tay
+					lda (pData),y
+					>PUSHA
+					>SYSCALL SYS.MLIRead
+					bcs .9
+					tax					$100 byte transfered ?
+					beq .9
+					lda #ERR.LINE.TOO.LONG
+					sec
+.9					rts
+*---------------------------------------
+SRC.FileClose		ldy #SRC.COUNT
+					lda (pData),y
+					beq .8
+					
+					clc
+					adc #SRC.hREFNUMS-1
+					tay
+					lda (pData),y
+					>SYSCALL SYS.MLICloseA
+					
+					ldy #SRC.COUNT
+					lda (pData),y
+					clc
+					adc #SRC.hBUFFERS-1
+					tay
+					lda (pData),y
+					>SYSCALL SYS.FreeMemA
+					
+					ldy #SRC.COUNT
+					lda (pData),y
+					dec
+					sta (pData),y
+					
+.8					clc
+					rts
+*---------------------------------------
+SRC.ParseLine		stz SRC.Label.Flags
+					stz SRC.BufPtr
+					lda TmpBuffer256
+					beq SRC.ParseLine.Ok
+					cmp #'*'			Comment?
+					beq SRC.ParseLine.Ok
+					cmp #';'			Comment?
+					beq SRC.ParseLine.Ok
+					
+					tax
+					ldy #ASM.MA.ON
+					lda (pData),y
+					bpl .1
+					
+					jmp	SRC.ParseLine.Macro
+					
+.1					txa
+					cmp #' '
+					beq SRC.ParseLine.OpCde
+					
+SRC.ParseLine.Sym	cmp #'.'			Local Label?
+					bne SRC.ParseLine.SymG
+					
+					jsr SRC.GetChar
+					beq SRC.ParseLine.Err1
+					jsr SRC.GetDecimal
+					bcs SRC.ParseLine.Err1
+					jsr SYM.AddLocal
+					bcc SRC.ParseLine.OpCde
+					rts
+ 
+SRC.ParseLine.SymG	jsr SYM.ClearLocal
+					jsr SRC.GetLabel
+					bcs SRC.ParseLine.Err1
+					
+					inc SRC.Label.Flags	Remember to Add Label
+					
+					ldx #3				Makes Current Label = PC for now
+					ldy #ASM.PC
+					lda (pdata),y
+.1					sta SRC.LabelValue,x
+					dey
+					dex
+					bpl .1
+											
+SRC.ParseLine.OpCde	jsr SRC.GetCharNB
+					beq SRC.ParseLine.Ok
+					
+					cmp #'.'
+					beq SRC.ParseLine.Dir
+
+					
+					
+					bra SRC.ParseLine.Ok
+
+
+					
+SRC.ParseLine.Ok	lda SRC.Label.Flags
+					beq .8
+					
+					jsr SYM.AddLocal
+					
+.8					clc					
+					rts
+					
+SRC.ParseLine.Err1	lda #ERR.INVALID.LABEL
+SRC.ParseLine.Err	sec
+					rts
+*---------------------------------------
+SRC.ParseLine.Dir	>LDYA L.T.DIRECTIVES
+					jsr SRC.GetKeyword
+					bcs .9
+					
+					jmp (J.DIRECTIVES,x)
+					
+.9					lda #ERR.INVALID.DIRECTIVE
+					sec
+					rts
+*---------------------------------------
+SRC.ParseLine.Macro
+					clc
+					rts
+*---------------------------------------
+SRC.PrintLine		bcs .1				if CS, unconditional
+					ldy #ASM.MA.ON
+					lda (pData),y
+					bpl .1
+					
+					ldy #ASM.LI.CON
+					lda (pData),y
+					bpl .9
+					bmi .8
+					
+.1					ldy #ASM.LI.ON
+					lda (pData),y
+					bpl .9
+					
+.8					>PUSHWI TmpBuffer256
+					>PUSHW SRC.LINENUM
+					>PUSHW L.MSG.SRCLINE
+					>LIBCALL hLIBSTR,LIBSTR.PRINTF
+.9					rts
+*---------------------------------------
+SRC.GetDecimal		stz SRC.ACC+1
+					stz SRC.ACC+2
+					stz SRC.ACC+3
+					
+					jsr SRC.GetChar
+					beq .99
+					jsr SRC.IsDigit10
+					bcs .99
+					and #$0F
+					sta SRC.ACC
+					
+.1					jsr SRC.GetChar
+					beq .8
+					cmp #' '
+					beq .8
+					jsr SRC.IsDigit10
+					bcs .99
+					and #$0F
+					
+					pha
+					jsr SRC.ACC10
+					pla
+					bcs .9
+					clc
+					adc SRC.ACC
+					sta SRC.ACC
+					bcc .1
+					
+					inc SRC.ACC+1
+					bne .1
+					inc SRC.ACC+2
+					bne .1
+					inc SRC.ACC+3
+					bne .1
+					
+.9					lda #ERR.VAL.TOO.BIG
+					sec
+					rts
+					
+.8					clc
+					rts
+					
+.99					lda #ERR.SYNTAX.ERROR
+					sec
+					rts
+*---------------------------------------
+SRC.GetLabel		jsr SRC.GetCharUC
+					
+					beq .9
+					jsr SRC.IsLetter
+					bcs .9
+					sta SRC.Label
+					
+					ldy #1
+					
+.1					jsr SRC.GetCharUC
+					beq .8
+					
+					cmp #' '
+					beq .8
+					
+					cmp #'.'
+					beq .2
+					
+					jsr SRC.IsLetterOrDigit
+					bcs .9
+.2					sta SRC.Label,y
+					iny
+					cpy #SRC.LABEL.MAXLEN
+					bne .1				if equ Carry is set
+					
+.9					sec
+					rts					
+					
+.8					lda #0
+					sta SRC.Label,y
+					clc
+					rts
+*---------------------------------------
+SRC.GetKeyword		>STYA ZPPtr1
+
+					jsr SRC.GetArg
+					bcs .9
+					
+					stz SRC.Keyword.ID
+					
+					ldy #0
+					
+.3					lda (ZPPtr1),y
+					beq .9
+					cmp SRC.Buffer
+					bne .6
+					phy
+					
+					ldx #0
+.4					iny
+					inx
+					lda (ZPPtr1),y
+					cmp SRC.Buffer,x
+					bne .5
+					cpx SRC.Buffer
+					bne .4
+
+					ply
+					
+					ldx SRC.Keyword.ID
+					clc
+					rts
+					
+.5					ply	
+			
+.6					tya
+					sec					Add keyword Len+1
+					adc (ZPPtr1),y
+					tay
+					inc SRC.Keyword.ID
+					inc SRC.Keyword.ID
+					bra .3
+					
+.9					sec
+					rts
+*---------------------------------------
+SRC.GetArg			jsr SRC.GetCharUC
+					beq .9
+
+					sta SRC.Buffer+1
+					ldy #1
+					
+.1					jsr SRC.GetCharUC
+					beq .2
+					cmp #' '
+					beq .2
+					cmp #','
+					iny
+					sta SRC.Buffer,y
+					bra .1
+					
+.2					sty SRC.Buffer
+					clc
+					rts
+					
+.9					sec
+					rts
+*---------------------------------------
+SRC.IsLetterOrDigit jsr SRC.IsDigit10
+					bcc SRC.IsLetterRTS
+*---------------------------------------
+SRC.IsLetter		cmp #'A'
+					bcc .9
+					cmp #'['
+					bcc SRC.IsLetterRTS
+
+					cmp #'a'
+					bcc .9
+					cmp #'{'
+					rts					CC if lowercase
+					
+.9					sec					
+SRC.IsLetterRTS		rts					
+*---------------------------------------
+SRC.IsDigit10		cmp #'0'
+					bcc .9
+					cmp #':'
+					rts					cc if ok, cs if not
+					
+.9					sec
+					rts
+*---------------------------------------
+SRC.GetCharNB		jsr SRC.GetChar
+					beq .9
+					cmp #' '
+					beq SRC.GetCharNB
+.9					rts
+*---------------------------------------
+SRC.GetCharUC		jsr SRC.GetChar
+					beq .9
+					cmp #'a'
+					bcc .9
+					cmp #'{'
+					bcs .9
+					eor #$20			to Uppercase
+.9					rts
+*---------------------------------------
+SRC.GetChar			ldx SRC.BufPtr
+					lda TmpBuffer256,x
+					inc SRC.BufPtr
+					and #$7f
+					rts
+*---------------------------------------
+SRC.ACC10			lda SRC.ACC			ACC*2-> ACC & ACCTMP
+					asl
+					sta SRC.ACC
+					sta SRC.ACCTMP
+					lda SRC.ACC+1
+					rol
+					sta SRC.ACC+1
+					sta SRC.ACCTMP+1
+					lda SRC.ACC+2
+					rol
+					sta SRC.ACC+2
+					sta SRC.ACCTMP+2
+					lda SRC.ACC+3
+					rol
+					sta SRC.ACC+3
+					sta SRC.ACCTMP+3
+					bcs .9
+					
+					ldx #1
+.1					asl SRC.ACC			ACC=ACC*8
+					rol SRC.ACC+1
+					rol SRC.ACC+2
+					rol SRC.ACC+3
+					bcs .9
+					dex
+					bne .1
+					
+					lda SRC.ACC			CC from ROL SRC.ACC+3
+					adc SRC.ACCTMP
+					sta SRC.ACC
+					lda SRC.ACC+1
+					adc SRC.ACCTMP+1
+					sta SRC.ACC+1
+					lda SRC.ACC+2
+					adc SRC.ACCTMP+2
+					sta SRC.ACC+2
+					lda SRC.ACC+3
+					adc SRC.ACCTMP+3
+					sta SRC.ACC+3		CS if overflow
+					
+.9					rts					
+
+*---------------------------------------
+MAN
+SAVE BIN/ASM.S.SRC
+LOAD BIN/ASM.S
+ASM
