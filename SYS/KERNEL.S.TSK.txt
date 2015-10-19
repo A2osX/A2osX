@@ -206,7 +206,11 @@ S.TskMgrQuit	clc
 *  out :
 *   A = Child PSID
 *--------------------------------------
-S.ExecProcessA	jsr S.CreateProcessA
+S.ExecProcessNewEnvA
+				ldy #S.PS.F.ENV
+				bra S.ExecProcess
+S.ExecProcessA	ldy #0
+S.ExecProcess	jsr S.CreateProcess
 				bcs .9					terminated, do not set PID as HOLD
 
 				ldy #S.PS.CID
@@ -226,7 +230,12 @@ S.ExecProcessA	jsr S.CreateProcessA
 *  out :
 *   A = Child PSID
 *--------------------------------------
+S.CreateProcessNewEnvA 
+				ldy #S.PS.F.ENV
+				bra S.CreateProcess
 S.CreateProcessA
+				ldy #0
+S.CreateProcess	sty S.CreateChildProcess.Flags
 				sta S.CreateProcessA.Cmd
 				>LDYAI MSG.NEWPS
 				jsr S.SysScrPPSTRYA
@@ -353,6 +362,7 @@ S.CreateChildProcess
 .30				inc TSKMGR.SIZE
 
 .3				lda #S.PS.F.INUSE
+				ora S.CreateChildProcess.Flags
 				sta (R.AX)
 				
 .4				inc TSKMGR.LASTID		Get a PSID not alredy running
@@ -371,6 +381,10 @@ S.CreateChildProcess
 				iny 
 				cpy #S.PS.SIZE
 				bne .5
+
+				lda S.CreateChildProcess.Flags
+				and #S.PS.F.ENV			need to create ENV & Prefix ?	
+				beq .6
 				
 				ldy #S.PS.hPREFIX		copy hPREFIX...
 				lda (pPs),y
@@ -387,8 +401,17 @@ S.CreateChildProcess
 				
 				ldy #S.PS.hENV
 				sta (R.AX),y
+				bra .8
 				
-				ldy #S.PS.hINDEV
+.6				ldy #S.PS.hPREFIX		reuse same hPREFIX...
+				lda (pPs),y
+				sta (R.AX),y
+				
+				ldy #S.PS.hENV			...and hENV from parent PS
+				lda (pPs),y
+				sta (R.AX),y
+				
+.8				ldy #S.PS.hINDEV
 				lda (pPs),y
 				sta (R.AX),y
 				ldy #S.PS.hOUTDEV
@@ -404,52 +427,72 @@ S.CreateChildProcess
 				ldy #S.PS.PID
 				sta (R.AX),y
 
-				ldy #S.PS.ID
-				lda (R.AX),y
+				lda TSKMGR.LASTID
 				clc						Exit with A=PSID
 				rts
 				
 .99				sec
 				rts	
 *--------------------------------------
+S.CreateChildProcess.Flags
+				.BS 1
+*--------------------------------------
 * S.InitProcessA
 *  In : 
 *   A = hMem To Full Cmd Line  
 *--------------------------------------
-S.InitProcessA	>PUSHA					Push Cmd Line
+S.InitProcessA	stz	S.InitProcessA.hPath
+				stz	S.InitProcessA.hFullPath
+				>PUSHA					Push Cmd Line
 				>PUSHBI $20				Push SEP=' '
 				>PUSHBI 0				Push 0 for getting CMD And ARGS
 				jsr S.PStrGetTkn
 				bcc .10
-				rts 					OOM error
+.99				rts 					OOM error
 				
-.10				ldy #S.PS.hCMD
-				sta (pPs),y
-				>PUSHA					push CMD for S.FileSearch
+.10				sta S.InitProcessA.hCmd
+				pha
 				txa
 				ldy #S.PS.hARGS
 				sta (pPs),y				set ARGS hMem (0 if none)
 				
-				>PUSHWI ENV.PATH		push ENVNAME=PATH
+				pla
+				jsr S.GetMemPtrA
+				>STYA ZPQuickPtr1
+				lda (ZPQuickPtr1)
+				cmp #'/'
+				bne .20
+				
+				lda S.InitProcessA.hCmd
+				bra .30
+				
+.20				>PUSHWI ENV.PATH		push ENVNAME=PATH
 				ldy #S.PS.hENV
 				lda (pPs),y
 				>PUSHA
 				jsr S.GetEnvVarP		get value for ENV=PATH
 				bcs .99
 				
-				sta	S.InitProcessA.PATH	save VALUE hMem for discard
+				sta	S.InitProcessA.hPath	save VALUE hMem for discard
+				pha
+				lda S.InitProcessA.hCmd
+				>PUSHA					push CMD for S.FileSearch
+				pla
 				>PUSHA					A=PStr to ENV Value
 				jsr S.FileSearch		find File in %PATH%
-				bcs .98
+				bcs S.InitProcessA.ClnUp
 				
-				sta	S.InitProcessA.FULLPATH	save FULLPATH hMem for discard
+				sta	S.InitProcessA.hFullPath	save FULLPATH hMem for discard
+				
+.30				jsr S.PStrCpyA
+				ldy #S.PS.hCMD
+				sta (pPs),y
 				pha
 				jsr S.SysScrPPSTRA
 				pla
 				
 				jsr S.LoadBinA			A = BinPath hMem
-
-				bcs .97
+				bcs S.InitProcessA.ClnUp
 				
 				>STYA pCode				save PTR to Code Segment
 				txa
@@ -468,7 +511,7 @@ S.InitProcessA	>PUSHA					Push Cmd Line
 				>PUSHAX					Push DS.SIZE
 				>PUSHBI S.MEM.F.INIT0	Clear DS
 				jsr S.GetMem				
-				bcs .97
+				bcs S.InitProcessA.ClnUp
 				
 				>STYA pData
 				txa
@@ -477,25 +520,25 @@ S.InitProcessA	>PUSHA					Push Cmd Line
 				
 .1				ldx #TSKMGR.INIT
 				jsr pCodeJmp			Call INIT function
-				bcs .97
-				jsr .97
-				clc
-				rts
 				
-.97				pha						save ERR
-				lda S.InitProcessA.FULLPATH
+S.InitProcessA.ClnUp
+				php						save Carry
+				pha						save ERR
+				lda S.InitProcessA.hFullPath
+				beq .1
 				jsr S.FreeMemA
-				pla
 				
-.98				pha						save ERR
-				lda S.InitProcessA.PATH
+.1				lda S.InitProcessA.hPath
+				beq .2
 				jsr S.FreeMemA
-				pla			
-
-.99				sec
+				
+.2				pla
+				plp
 				rts
-S.InitProcessA.PATH	.BS 1
-S.InitProcessA.FULLPATH	.BS 1
+*--------------------------------------
+S.InitProcessA.hCmd .BS 1
+S.InitProcessA.hPath	.BS 1
+S.InitProcessA.hFullPath	.BS 1
 *--------------------------------------
 * S.SelectProcessA
 *   In : A=PSID
@@ -544,6 +587,10 @@ S.FreeProcessA	jsr S.GetPSByIDA
 				beq .2
 				
 				jsr S.FreeMemA
+
+				lda (ZPQuickPtr1)		get S.PS.F
+				and #S.PS.F.ENV			do we have to dscard duplicated env & prefix ?
+				beq .4
 				
 .2				ldy #S.PS.hENV
 				lda (ZPQuickPtr1),y

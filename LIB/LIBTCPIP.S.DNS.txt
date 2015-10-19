@@ -15,13 +15,15 @@ DNS.CLEAR		ldx #K.DNSCACHE.SIZE*S.DNSCACHE
 *--------------------------------------
 * DNS.QUERY
 *  In:
-*	PULLA = hostname PSTR 
+*	PULLW = hostname PTR to PSTR 
 *   PULLW = PTR to IP to fill with cached data
 *  Out:
 *   CC: hit: IP filled with address
 *   CS: missed 
 *--------------------------------------
-DNS.QUERY		>PULLW ZPDNSHostname	Get host string
+DNS.QUERY		>PULLYA 				Get host string
+				jsr PSTR2DNSHostName
+
 				>PULLW ZPDNSIP			Get IP address to fill
 				
 				ldx #0
@@ -29,21 +31,25 @@ DNS.QUERY		>PULLW ZPDNSHostname	Get host string
 .1				lda DNS.CACHE,x
 				beq .6					empty DNS cache entry?
 				
+				phx
 				lda DNS.CACHE+S.DNSCACHE.hNAME,x
 				>SYSCALL SYS.GetMemPtrA
 				>STYA ZPQuickPtr3
-				lda (ZPDNSHostname)
-				cmp (ZPQuickPtr3)		Same Length?
+				plx
+				
+				ldy #0
+				
+.2				lda DNSHostname,y
+				bne .21
+				lda (ZPQuickPtr3),y
+				beq .22
+				
+.21				cmp (ZPQuickPtr3),y
 				bne .6
-				tay
-.2				lda (ZPDNSHostname),y
-				jsr ToLowerCaseA
-				cmp (ZPQuickPtr3),y
-				bne .6
-				dey
+				iny
 				bne .2
 				
-				lda DNS.CACHE,x			get back status...
+.22				lda DNS.CACHE,x			get back status...
 				bpl .4					Pending...
 				
 				ldy #0
@@ -92,18 +98,18 @@ DNS.REQUEST		jsr NEW.UDP.FRAME
 				ldy #S.DNS.ID
 				lda A2osX.RANDOM16
 				sta (ZPFrameBase1),y
-				sta MESSAGE.ID
+				sta DNSMessageID
 				iny
 				lda A2osX.RANDOM16+1
 				sta (ZPFrameBase1),y
-				sta MESSAGE.ID+1
+				sta DNSMessageID+1
 				
-				ldy #S.DNS.F
-				lda /S.DNS.F.RD
-				sta (ZPFrameBase1),y
-				iny 
-				lda #S.DNS.F.RD
-				sta (ZPFrameBase1),y
+*				ldy #S.DNS.F
+*				lda /S.DNS.F.RD
+*				sta (ZPFrameBase1),y
+*				iny 
+*				lda #S.DNS.F.RD
+*				sta (ZPFrameBase1),y
 				
 				ldy #S.DNS.QDCOUNT
 				lda /1
@@ -120,28 +126,14 @@ DNS.REQUEST		jsr NEW.UDP.FRAME
 				adc ZPFrameBase1+1
 				sta ZPFramePtr1+1
 				
-				lda (ZPDNSHostname)		Get hostname len
-				tay
-				ldx #0
-.2				lda (ZPDNSHostname),y
-				cmp #'.'
-				bne .3
-				txa
-				ldx #$FF
-.3				sta (ZPFramePtr1),y
-				inx
-				dey
-				bne .2
-				txa
-				sta (ZPFramePtr1)
-				
-				lda (ZPDNSHostname)
-				tay
-				iny
-				lda #$0					Ending #0
+				ldy #0
+.2				lda DNSHostname,y
 				sta (ZPFramePtr1),y
-				
+				beq .3
 				iny
+				bne .2
+				
+.3				iny
 				lda /S.DNS.QTYPE.A
 				sta (ZPFramePtr1),y
 				iny
@@ -155,7 +147,7 @@ DNS.REQUEST		jsr NEW.UDP.FRAME
 				lda #S.DNS.QCLASS.IN
 				sta (ZPFramePtr1),y
 
-				lda (ZPDNSHostname)		Get hostname len again (QNAME)
+				lda DNSHostnameLen		Get hostname len again (QNAME)
 				clc						
 				adc #6					(len+1) + Ending 0 + QTYPE + QCLASS
 				adc #S.DNS
@@ -203,13 +195,19 @@ DNS.REQUEST		jsr NEW.UDP.FRAME
 *--------------------------------------
 * DNS.ADD
 *  In:
-*	PULLA = hostname PSTR to Add
+*	PULLW = hostname PSTR to Add
 *   PULLW = PTR to IP
-*	PULLW = TTL
 *--------------------------------------
-DNS.ADD			>PULLW ZPDNSHostname	Get host string
+DNS.ADD			>PULLYA 				Get host string
+				jsr PSTR2DNSHostName
 				>PULLW ZPDNSIP			Get host IP address
-				>PULLW HOST.TTL
+				
+				lda #$80
+				sta DNSHostTTL+3
+				stz DNSHostTTL+2
+				stz DNSHostTTL+1
+				stz DNSHostTTL
+				
 				lda #S.DNSCACHE.STATUS.RESOLVED
 				bra DNS.ADD.I
 
@@ -223,34 +221,35 @@ DNS.ADD.I		sta Status
 				beq	DNS.ADD.ENTRY		free ?
 				
 				lda DNS.CACHE+S.DNSCACHE.hNAME,x
+				phx
 				>SYSCALL SYS.GetMemPtrA
 				>STYA ZPQuickPtr3
-				lda (ZPDNSHostname)
-				cmp (ZPQuickPtr3)		Same Length?
-				bne .4
+				plx
 				
-				tay
-.2				lda (ZPDNSHostname),y
-				jsr ToLowerCaseA
+				ldy #0
+				
+.2				lda DNSHostname,y
 				cmp (ZPQuickPtr3),y
 				bne .4
-				dey
-				bne .2
 				
-				bra DNS.UPD.ENTRY
+				and #$FF				End Of String?
+				beq DNS.UPD.ENTRY
+				
+				iny
+				bne .2
 				
 .4				txa
 				clc
 				adc #S.DNSCACHE
-				cmp #K.DNSCACHE.SIZE*S.DNSCACHE
-				beq .5
 				tax
-				bra .1
-
-.5				lda DNS.CACHE+S.DNSCACHE.hNAME		discard oldest entry hNAME
+				cmp #K.DNSCACHE.SIZE*S.DNSCACHE
+				bne .1
+				
+				lda DNS.CACHE+S.DNSCACHE.hNAME		discard oldest entry hNAME
 				>SYSCALL SYS.FreeMemA
 				
 				ldx #K.DNSCACHE.SIZE*S.DNSCACHE-S.DNSCACHE
+				
 .6				lda DNS.CACHE+S.DNSCACHE-1,x
 				sta DNS.CACHE-1,x
 				dex
@@ -259,9 +258,9 @@ DNS.ADD.I		sta Status
 				ldx #K.DNSCACHE.SIZE*S.DNSCACHE-S.DNSCACHE				
 				
 DNS.ADD.ENTRY	phx
-				lda (ZPDNSHostname)
-				inc						add 1 for len
-				tay
+
+				ldy DNSHostnameLen
+				iny						add 1 for Ending 00
 				lda #0
 				>PUSHYA					push PSTR len
 				>PUSHBI 0				no option
@@ -270,29 +269,40 @@ DNS.ADD.ENTRY	phx
 				plx
 				rts
 				
-.10				>STYA ZPQuickPtr3
+.10				>STYA ZPQuickPtr4
 				txa
 				plx
 				sta DNS.CACHE+S.DNSCACHE.hNAME,x
 
-				lda (ZPDNSHostname)
-				sta (ZPQuickPtr3)
-				tay
-				
-.1				lda (ZPDNSHostname),y
-				jsr ToLowerCaseA
-				sta (ZPQuickPtr3),y
-				dey
+				ldy #0
+.1				lda DNSHostname,y
+				sta (ZPQuickPtr4),y
+				iny
+				cpy DNSHostnameLen
 				bne .1
+				
+				lda #0
+				sta (ZPQuickPtr4),y
 	
 DNS.UPD.ENTRY	lda Status
-				sta DNS.CACHE,x
-				bpl .9					pending...
+				sta DNS.CACHE+S.DNSCACHE.STATUS,x
+				bmi .1					pending?
 				
-				lda HOST.TTL
+				lda DNSMessageID
+				sta DNS.CACHE+S.DNSCACHE.ID,x
+				lda DNSMessageID+1
+				sta DNS.CACHE+S.DNSCACHE.ID+1,x
+				
+				bra .9
+				
+.1				lda DNSHostTTL
 				sta DNS.CACHE+S.DNSCACHE.TTL,x
-				lda HOST.TTL+1
+				lda DNSHostTTL+1
 				sta DNS.CACHE+S.DNSCACHE.TTL+1,x
+				lda DNSHostTTL+2
+				sta DNS.CACHE+S.DNSCACHE.TTL+2,x
+				lda DNSHostTTL+3
+				sta DNS.CACHE+S.DNSCACHE.TTL+3,x
 				
 				ldy #0
 .2				lda (ZPDNSIP),y
@@ -313,6 +323,53 @@ DNS.GETCACHE	>LDYA L.DNS.CACHE
 *--------------------------------------
 *				PRIVATE
 *--------------------------------------
+PSTR2DNSHostName >STYA ZPQuickPtr1
+
+				lda (ZPQuickPtr1)
+				beq .9
+				
+				cmp #K.DNS.MAXLEN-1
+				bcs .9
+				
+				tay
+				
+				inc
+				sta DNSHostNameLen
+
+				lda #0					Ending 0
+				sta DNSHostName+1,y
+
+				ldx #0
+				
+.1				lda (ZPQuickPtr1),y
+				and #$7f
+				cmp #'.'
+				beq .2
+				
+				cmp #'A'
+				bcc .10
+				cmp #'Z'+1
+				bcs .10
+				adc #$20
+				
+.10				inx
+				bra .3
+				
+.2				txa				
+				ldx #0
+				
+.3				sta DNSHostName,y
+				dey
+				bne .1
+				stx DNSHostName
+				
+				clc
+				rts
+				
+.9				sec
+				rts				
+*--------------------------------------
+				
 MAN
 SAVE LIB/LIBTCPIP.S.DNS
 LOAD LIB/LIBTCPIP.S
