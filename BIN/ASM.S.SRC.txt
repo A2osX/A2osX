@@ -118,7 +118,7 @@ SRC.ParseLine.OpCode
 					>SYSCALL SYS.GetMemPtrA
 					>STYA ZPPtr1
 
-					ldy #ASM.T.O
+					ldy #ASM.T.O		setup Ptr to Opcodes
 					lda (ZPPtr1),y
 					clc
 					adc ZPPtr1
@@ -127,6 +127,17 @@ SRC.ParseLine.OpCode
 					lda (ZPPtr1),y
 					adc ZPPtr1+1
 					sta ZPPtr2+1
+					
+					ldy #ASM.T.R		setup Ptr to Registers
+					lda (ZPPtr1),y
+					clc
+					adc ZPPtr1
+					sta ZPPtr3
+					iny
+					lda (ZPPtr1),y
+					adc ZPPtr1+1
+					sta ZPPtr3+1
+					
 					
 .10					lda (ZPPtr2)
 					ldy #1
@@ -144,6 +155,8 @@ SRC.ParseLine.OpCode
 					cpx SRC.Buffer
 					bne .1
 					
+					jsr SRC.ParseLine.AM
+					bcs .99
 					clc
 					rts
 					
@@ -160,7 +173,97 @@ SRC.ParseLine.OpCode
 					
 .9					lda #ERR.INVALID.OPCODE
 					sec
+.99					rts
+*---------------------------------------
+SRC.ParseLine.AM	stz SRC.AM.ID
+					stz SRC.AM.StrBuf
+					
+.1					jsr SRC.GetCharUC	any arg immediately after ' '?
+					beq .8				no, AM.ID=0 (implied)
+
+					cmp #' '			another space ?
+					beq .8				ignore end of line (comment)
+					
+					jsr SRC.IsAMReserved
+					bcs .2
+					
+					inc SRC.AM.StrBuf
+					ldx SRC.AM.StrBuf
+					sta SRC.AM.StrBuf,x
+					bra .1
+
+										
+.8					lda SRC.AM.StrBuf
+					beq .89
+					>PUSHW L.SRC.AM.StrBuf
+					>PUSHW L.MSG.DEBUG
+					>LIBCALL hLIBSTR,LIBSTR.PRINTF
+.89					clc
 					rts
+					
+.2					jsr SRC.IsLetter	Any register?
+					bcs .70				no, try something else
+					
+					stz SRC.AM.tmpBuf
+					sta SRC.AM.tmpBuf+1
+					inc SRC.AM.tmpBuf
+					
+.3					jsr SRC.GetCharUC
+					beq .4
+					jsr SRC.IsLetterOrDigit
+					bne .4
+					inc SRC.AM.tmpBuf
+					ldx SRC.AM.tmpBuf
+					sta SRC.AM.tmpBuf,x
+					bra .3
+					
+.4					dec SRC.BufPtr		back one char
+
+					ldy #0
+					
+.5					lda (ZPPtr3),y
+					beq .71				last register ?
+					
+					ldx #$ff
+					
+.6					lda (ZPPtr3),y
+					iny
+					inx
+					cmp SRC.AM.tmpBuf,x
+					bne .7
+					
+					cpx SRC.AM.tmpBuf
+					bne .6
+					
+					ldy #0				register match, add to AM string
+					ldx SRC.AM.StrBuf
+					
+.61					iny
+					lda SRC.AM.tmpBuf,y
+					sta SRC.AM.StrBuf,x					
+					inx
+					cpy SRC.AM.tmpBuf
+					bne .61
+					stx SRC.AM.StrBuf
+					bra .72
+					
+.7					iny 
+					bra .5
+
+.70					dec SRC.BufPtr		back one char
+					
+					
+.71					jsr SRC.GetExp
+					bcs .99
+.72					jmp .1
+					clc
+					rts
+
+					
+					
+.9					lda #ERR.INVALID.AM.SYN
+					sec
+.99					rts
 *---------------------------------------
 SRC.PrintLine		bcs .8				if CS, unconditional
 					ldy #ASM.MACRO.ON
@@ -252,6 +355,52 @@ SRC.GetHex			stz SRC.ACC+1
 					asl
 					
 					ldx #4
+.2					asl
+					rol SRC.ACC
+					rol SRC.ACC+1
+					rol SRC.ACC+2
+					rol SRC.ACC+3
+					bcs .9
+					dex
+					bne .2
+					bra .1
+					
+.8					clc
+					rts
+					
+.9					lda #ERR.VAL.TOO.BIG
+					sec
+					rts
+					
+.99					lda #ERR.SYNTAX.ERROR
+					sec
+					rts
+*---------------------------------------
+SRC.GetOctal		stz SRC.ACC+1
+					stz SRC.ACC+2
+					stz SRC.ACC+3
+					
+					jsr SRC.GetChar
+					beq .99
+					jsr SRC.IsDigit8
+					bcs .99
+					and #$0F
+					sta SRC.ACC
+					
+.1					jsr SRC.GetChar
+					beq .8
+					cmp #' '
+					beq .8
+					jsr SRC.IsDigit8
+					bcs .99
+					
+					asl
+					asl
+					asl
+					asl
+					asl
+					
+					ldx #3
 .2					asl
 					rol SRC.ACC
 					rol SRC.ACC+1
@@ -389,6 +538,35 @@ SRC.GetKeyword		>STYA ZPPtr1
 .9					sec
 					rts
 *---------------------------------------
+SRC.GetExp			stz SRC.Exp
+					jsr SRC.GetCharUC
+					beq .9
+
+					ldy #0
+					jsr SRC.IsAMReserved
+					bcc .8
+					
+					iny
+					sta SRC.Exp+1
+					
+.1					jsr SRC.GetCharUC
+					beq .89
+					cmp #' '
+					beq .89
+					jsr SRC.IsAMReserved
+					bcc .8
+					iny
+					sta SRC.Exp,y
+					bra .1
+					
+.8					dec SRC.BufPtr
+.89					sty SRC.Exp
+					clc
+					rts
+					
+.9					sec
+					rts
+*---------------------------------------
 SRC.GetArg			jsr SRC.GetCharUC
 					beq .9
 
@@ -409,6 +587,26 @@ SRC.GetArg			jsr SRC.GetCharUC
 					
 .9					sec
 					rts
+*---------------------------------------
+SRC.IsAMReserved	ldx SRC.AM.RESERVED
+.1					cmp SRC.AM.RESERVED,x
+					beq .8
+					dex
+					bne .1
+					sec
+					rts
+.8					clc
+					rts					
+*---------------------------------------
+SRC.IsEXPReserved	ldx SRC.EXP.RESERVED
+.1					cmp SRC.EXP.RESERVED,x
+					beq .8
+					dex
+					bne .1
+					sec
+					rts
+.8					clc
+					rts					
 *---------------------------------------
 SRC.IsLetterOrDigit jsr SRC.IsDigit10
 					bcc SRC.IsLetterRTS
@@ -450,6 +648,14 @@ SRC.IsDigit10		cmp #'0'
 .9					sec
 					rts
 *---------------------------------------
+SRC.IsDigit8		cmp #'0'
+					bcc .9
+					cmp #'7'+1
+					rts					cc if ok, cs if not
+					
+.9					sec
+					rts
+*---------------------------------------
 SRC.GetCharNB		jsr SRC.GetCharUC
 					beq .9
 					cmp #' '
@@ -460,7 +666,7 @@ SRC.GetCharUC		jsr SRC.GetChar
 					beq .9
 					cmp #'a'
 					bcc .9
-					cmp #'{'
+					cmp #'z'+1
 					bcs .9
 					eor #$20			to Uppercase
 .9					rts
