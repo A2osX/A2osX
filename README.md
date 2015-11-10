@@ -1,18 +1,18 @@
-## A2osX
+# A2osX
 Multi-Tasking OS for Apple II
 
-# Requires :
+## Requires :
 Enh IIe with 128k, //c, IIgs
 
-# General Information:
+## General Information:
 A2OSX.BOOT.DSK : 140k A2osX boot disk will all binaries
 A2OSX.SRC.po : 800k S-C MASM boot disk with all sources
 
 OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
 (OApple+shift+1,OApple+shift+2,OApple+shift+3 on FR keyboard)
 
-# Shell commands:
- internal:
+## Shell commands:
+ ### internal:
   CD
   SET
   DATE
@@ -21,7 +21,7 @@ OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
   TYPE
   PAUSE
   ECHO
- external:
+ ### external:
   INSDEV
   LS
   MEM
