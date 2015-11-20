@@ -13,10 +13,12 @@ SRC.ParseLine		ldx TmpBuffer256
 					cpx #';'			Comment?
 					beq SRC.ParseLine.Skip
 					
+					stz SRC.GLabel.New
+					
 					cpx #' '			no label...go scan dir/opcode
 					beq .4
 					
-.1					cpx #'.'			local symbol?
+					cpx #'.'			local symbol?
 					bne	.2
 					jsr SRC.ParseLine.SymL
 					bra .3
@@ -46,47 +48,117 @@ SRC.ParseLine		ldx TmpBuffer256
 					bcs SRC.ParseLine.Err
 
 					
-SRC.ParseLine.Ok	lda SRC.GLabel.Len
-					beq .1
+SRC.ParseLine.Ok	lda SRC.GLabel.New
+					bpl .1
 					
-*					jsr SYM.AddToGBlock
-*					bcs SRC.ParseLine.Err
-.1										
+					lda SRC.GLabel.Flags
+					lsr					.SE ?
+					bcs .1				yes, update during pass 1 & 2
+
+					ldy #ASM.PASS		
+					lda (pData),y		pass#2?
+					bne .8				yes, skip to avoid redefinition error
+					
+					jsr SYM.FindGlobal
+					bcs SRC.ParseLine.Redef
+					
+.1					jsr SYM.AddGToGBlock
+					bcs SRC.ParseLine.Err
+
+					
+.8
+										
 SRC.ParseLine.skip	clc					
 					rts
 					
 SRC.ParseLine.Err1	lda #ERR.INVALID.LABEL
 SRC.ParseLine.Err	sec
 					rts
+SRC.ParseLine.Redef lda #ERR.SYMBOL.REDEFINE
+					sec
+					rts
 *---------------------------------------
 SRC.ParseLine.SymP	jsr SRC.GetChar
 					beq SRC.ParseLine.SymE
 					jsr SRC.GetDecimal
-					bcs SRC.ParseLine.SymR
+					bcs SRC.ParseLine.SymE
 					jmp SYM.AddPrivate
 *---------------------------------------
 SRC.ParseLine.SymL	jsr SRC.GetChar
 					beq SRC.ParseLine.SymE
 					jsr SRC.GetDecimal
-					bcs SRC.ParseLine.SymR
-					jmp SYM.AddLocal
+					bcs SRC.ParseLine.SymE
+					lda SRC.ACC+1
+					ora SRC.ACC+2
+					ora SRC.ACC+3
+					bne SRC.ParseLine.SymE	Max .255
+					lda SRC.ACC
+					beq SRC.ParseLine.SymE	.0 is not allowed
+					sta SRC.LLabel.ID
+					
+					ldy #ASM.PC
+					lda (pData),y
+					ldy #ASM.PC.GLABEL
+					sec		
+					sbc (pData),y
+					sta SRC.LLabel.Offset
+					
+					ldy #ASM.PC+1
+					lda (pData),y
+					ldy #ASM.PC.GLABEL+1
+					sbc (pData),y
+					bne SRC.ParseLine.SymR
+					
+					ldy #ASM.PC+2
+					lda (pData),y
+					ldy #ASM.PC.GLABEL+2
+					sbc (pData),y
+					bne SRC.ParseLine.SymR
+					
+					ldy #ASM.PC+3
+					lda (pData),y
+					ldy #ASM.PC.GLABEL+3
+					sbc (pData),y
+					bne SRC.ParseLine.SymR
+					bcc SRC.ParseLine.SymR
+					jmp SYM.AddLToGBlock
 *---------------------------------------
-SRC.ParseLine.SymG	jsr SRC.GetGLabel
+SRC.ParseLine.SymE	lda #ERR.INVALID.LABEL
+					sec
+					rts
+					
+SRC.ParseLine.SymR	lda #ERR.RANGE
+					sec
+					rts
+*---------------------------------------
+SRC.ParseLine.SymG	>LDYA L.SRC.GLabel.Len
+					jsr SRC.GetLabel
 					bcs SRC.ParseLine.SymE
 					
 					ldx #3				Makes Current Label = PC for now
-					ldy #ASM.PC
-					lda (pdata),y
-.1					sta SRC.GLabel.Value,x
+					ldy #ASM.PC+3
+					
+.1					lda (pData),y
+					sta SRC.GLabel.Value,x
 					dey
 					dex
 					bpl .1
+					
+					ldx #3				Makes Current Label = Ref for next local
+					ldy #ASM.PC.GLABEL+3
+					
+.2					lda SRC.GLabel.Value,x
+					sta (pData),y
+					dey
+					dex
+					bpl .2
+					
+					lda #$80			Mark GLabel Flag...
+					sta SRC.GLabel.Flags
+					sta SRC.GLabel.New
+					
 					clc
 					rts
-					
-SRC.ParseLine.SymE	lda #ERR.INVALID.LABEL
-					sec
-SRC.ParseLine.SymR	rts
 *---------------------------------------
 SRC.ParseLine.Dir	>LDYA L.T.DIRECTIVES
 					jsr SRC.GetKeyword
@@ -154,7 +226,18 @@ SRC.ParseLine.OpCode
 					
 					jsr SRC.ParseLine.AM
 					bcs .99
-					clc
+					
+					ldy #ASM.PC
+					lda (pData),y
+					inc
+					sta (pData),y
+					bne .2
+					iny
+					lda (pData),y
+					inc
+					sta (pData),y
+					
+.2					clc
 					rts
 					
 .7					lda ZPPtr1
@@ -189,14 +272,7 @@ SRC.ParseLine.AM	stz SRC.AM.ID
 					sta SRC.AM.StrBuf,x
 					bra .1
 										
-.8					lda SRC.AM.StrBuf
-					beq .89
-					>PUSHWI TmpBuffer256
-					>PUSHW L.SRC.AM.StrBuf
-					>PUSHB SRC.AM.StrBuf
-					>PUSHW L.MSG.DEBUG
-					>LIBCALL hLIBSTR,LIBSTR.PRINTF
-.89					clc
+.8					clc
 					rts
 					
 .2					jsr SRC.IsLetter	Any register?
@@ -207,7 +283,7 @@ SRC.ParseLine.AM	stz SRC.AM.ID
 					inc SRC.AM.tmpBuf
 					
 .3					jsr SRC.GetCharUC
-					beq .4
+					beq .41
 					jsr SRC.IsLetterOrDigit
 					bne .4
 					inc SRC.AM.tmpBuf
@@ -217,7 +293,7 @@ SRC.ParseLine.AM	stz SRC.AM.ID
 					
 .4					dec SRC.BufPtr		back one char
 
-					ldy #0
+.41					ldy #0
 					
 .5					lda (ZPPtr3),y
 					beq .71				last register ?
@@ -241,10 +317,11 @@ SRC.ParseLine.AM	stz SRC.AM.ID
 					
 .61					iny
 					lda SRC.AM.tmpBuf,y
-					sta SRC.AM.StrBuf,x					
 					inx
+					sta SRC.AM.StrBuf,x					
 					cpy SRC.AM.tmpBuf
 					bne .61
+					
 					stx SRC.AM.StrBuf
 					bra .72
 					
@@ -258,7 +335,7 @@ SRC.ParseLine.AM	stz SRC.AM.ID
 .70					dec SRC.BufPtr		back one char
 					
 					
-.71					jsr SRC.GetExp
+.71					jsr EXP.Eval
 					bcs .99
 .72					jmp .1
 					clc
@@ -313,7 +390,7 @@ SRC.GetDecimal		stz SRC.ACC+1
 					jsr SRC.ACC10
 					pla
 					bcs .9
-					clc
+
 					adc SRC.ACC
 					sta SRC.ACC
 					bcc .1
@@ -344,7 +421,7 @@ SRC.GetHex			stz SRC.ACC+1
 					beq .99
 					jsr SRC.IsDigit16
 					bcs .99
-					and #$0F
+
 					sta SRC.ACC
 					
 .1					jsr SRC.GetChar
@@ -354,20 +431,16 @@ SRC.GetHex			stz SRC.ACC+1
 					jsr SRC.IsDigit16
 					bcs .99
 					
-					asl
-					asl
-					asl
-					asl
-					
 					ldx #4
-.2					asl
-					rol SRC.ACC
+.2					asl SRC.ACC
 					rol SRC.ACC+1
 					rol SRC.ACC+2
 					rol SRC.ACC+3
 					bcs .9
 					dex
 					bne .2
+					ora SRC.ACC
+					sta SRC.ACC
 					bra .1
 					
 .8					clc
@@ -467,37 +540,44 @@ SRC.GetBinary		stz SRC.ACC+1
 					sec
 					rts
 *---------------------------------------
-SRC.GetGLabel		jsr SRC.GetCharUC
+SRC.GetLabel		>STYA ZPPtr1
+					jsr SRC.GetCharUC
 					
 					beq .9
 					jsr SRC.IsLetter
 					bcs .9
-					sta SRC.GLabel.Name
 					
 					ldy #1
-					
+					sta (ZPPtr1),y
+
 .1					jsr SRC.GetCharUC
 					beq .8
-					
+
 					cmp #' '
 					beq .8
 					
 					cmp #'.'
 					beq .2
 					
+					cmp #'_'
+					beq .2
+					
+					jsr SRC.IsEXPReserved
+					bcc .8
 					jsr SRC.IsLetterOrDigit
 					bcs .9
 					
-.2					sta SRC.GLabel.Name,y
-					iny
+.2					iny
+					sta (ZPPtr1),y
 					cpy #SRC.GLABEL.MAXLEN
-					bne .1				if equ Carry is set
+					bcc .1				if equ Carry is set
 					
-.9					sec
+.9					lda #ERR.SYNTAX.ERROR
+					sec
 					rts					
 					
 .8					tya
-					sta SRC.GLabel.Len
+					sta (ZPPtr1)
 					clc
 					rts
 *---------------------------------------
@@ -544,7 +624,7 @@ SRC.GetKeyword		>STYA ZPPtr1
 .9					sec
 					rts
 *---------------------------------------
-SRC.GetExp			stz SRC.Exp
+SRC.GetExp.DELETE			stz SRC.Exp
 					jsr SRC.GetCharUC
 					beq .9
 
@@ -634,11 +714,11 @@ SRC.IsDigit16		jsr SRC.IsDigit10
 					bcc .8
 					cmp #'A'
 					bcc .9
-					cmp #'G'
+					cmp #'F'+1
 					bcc .1
 					rts					cc if ok, cs if not
 					
-.1					sbc #'A'-10			cc so A->10
+.1					sbc #'A'-11			cc so A->10 (11-CC)
 					clc
 .8					and #$0F					
 					rts
@@ -702,8 +782,8 @@ SRC.ACC10			lda SRC.ACC			ACC*2-> ACC & ACCTMP
 					sta SRC.ACCTMP+3
 					bcs .9
 					
-					ldx #1
-.1					asl SRC.ACC			ACC=ACC*8
+					ldx #2
+.1					asl SRC.ACC			ACC=ACC*4
 					rol SRC.ACC+1
 					rol SRC.ACC+2
 					rol SRC.ACC+3
