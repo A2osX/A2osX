@@ -11,7 +11,6 @@ AUTO 6
 				.INB INC/MACROS.I
 				.INB INC/PRODOS.I
 				.INB INC/A2OSX.I
-				.INB INC/A2OSX.API.I
 				.INB INC/LIBSTR.I
 *--------------------------------------
 ZPPTR1			.EQ ZPBIN
@@ -41,28 +40,35 @@ CS.START		cld
 *--------------------------------------
 L.LIBSTR		.DA LIBSTR
 L.MSG.GREETINGS	.DA MSG.GREETINGS
-L.MSG.UNKNOWN	.DA MSG.UNKNOWN
-L.MSG.SYNERR	.DA MSG.SYNERR
+L.MSG.ERROR		.DA MSG.ERROR
 L.ENV.PATH		.DA ENV.PATH
 J.INTCMDS		.DA EXEC.CMD.CD
-				.DA EXEC.CMD.SET
 				.DA EXEC.CMD.DATE
-				.DA EXEC.CMD.TIME
 				.DA EXEC.CMD.ECHO
-				.DA EXEC.CMD.TYPE
 				.DA EXEC.CMD.EXIT
+				.DA EXEC.CMD.PAUSE
+				.DA EXEC.CMD.READ
+				.DA EXEC.CMD.SET
+				.DA EXEC.CMD.TIME
+				.DA EXEC.CMD.TYPE
 				.DA 0
 *--------------------------------------
-CS.INIT			>LDYA L.LIBSTR
-				>LOADLIBYA
+CS.INIT			>DEBUG
+				>LDYA L.LIBSTR
+				>SYSCALL SYS.LoadLibYA
 				bcs .9
 				sta hLIBSTR
 				
-				ldy #S.PS.hARGS			Batch mode ?
+				ldy #S.PS.hARGS			Batch file ?
 				lda (pPs),y
 				beq CS.INIT.INTERACTIVE	no,continue starting interactive
 
+				jsr OpenTxtFileA
+				bcs .9
 				
+				ldy #bExitOnEOF
+				lda #$FF
+				sta (pData),y
 				clc
 .9				rts
 *--------------------------------------
@@ -70,17 +76,11 @@ CS.INIT.INTERACTIVE
 				jsr History.Init
 				bcs .9
 				
-				ldy #S.PS.ID
-				lda (pPs),y
-				>PUSHA
-				ldy #S.PS.hOUTDEV
-				lda (pPs),y
-				>PUSHA
 				ldy #S.PS.hINDEV
 				lda (pPs),y
 				>PUSHA
-				>PUSHW L.MSG.GREETINGS
-				>LIBCALL hLIBSTR,LIBSTR.PRINTF
+				>LDYA L.MSG.GREETINGS
+				>SYSCALL SYS.PSTROutYA
 				
 				lda (pPs)
 				ora #S.PS.F.EVENT		Now accept events
@@ -92,56 +92,77 @@ CS.INIT.INTERACTIVE
 CS.RUN			lda #0
 				sta (pData)
 				
-				lda #"$"
-				jsr COUT		
-				lda #" "
-				jsr COUT
+				ldy #bPause
+				lda (pData),y
+				bpl .10
+				clc
+				rts
 
-.1				jsr A2osX.SLEEP
+.10				ldy #hInputFile			batch mode ?
+				lda (pData),y
+				bne .2
+				
+				jsr PrintPrompt
+
+.1				>SYSCALL SYS.Sleep
 				lda (pData)
 				bpl .1
 
-.2				and #$7F
+				and #$7F
 				sta (pData)
+				bra .3
+
+.2				jsr	ReadTxtFile
+				bcs .81
+				
+.3				lda (pData)
 				beq CS.RUN				Empty line
+
 				ldy #1
 				lda (pData),y
 				cmp #'#'				Comment
 				beq CS.RUN
 				
-				jsr History.Add
+				ldy #hInputFile
+				lda (pData),y
+				bne .32
+				
+				ldy #bEchoOff
+				lda (pData),y
+				beq .31
 				
 				>LDYA pData
+				>SYSCALL SYS.PSTROutYA
+				
+.31				jsr History.Add
+
+.32				>LDYA pData
 				>SYSCALL SYS.NewPStrYA
 				bcs .99
 				
 				ldy #hCmdLine
 				sta (pData),y
 				jsr EXEC.CMD
-				bcc .3
+				bcc .4
 
-				pha
-				lda #"["
-				jsr COUT
-				pla
-				jsr PRBYTE		
-				lda #"]"
-				jsr COUT
-				jsr CROUT
+				jsr PrintError
 
-.3				ldy #hCmdLine
+.4				ldy #hCmdLine
 				lda (pData),y
 				>SYSCALL SYS.FreeMemA
 				ldy #hCmdLine
 				lda #0
 				sta (pData),y
 				
-				ldy	#bEXIT
+.8				ldy	#bEXIT
 				lda (pData),y
 				bne .99
 				
 				clc
 				rts
+
+.81				jsr CloseTxtFile
+				bra .8
 				
 .99				sec
 				rts	
@@ -150,8 +171,8 @@ CS.DOEVENT		ldy #S.EVT.hDEV		is Event from active IN device?
 				lda (pEvent),y
 				ldy #S.PS.hINDEV
 				cmp (pPs),y
-
 				bne .9
+
 				lda (pEvent)
 				and #S.EVT.F.KEY		is it a KEY event?
 				beq .9
@@ -164,7 +185,37 @@ CS.DOEVENT		ldy #S.EVT.hDEV		is Event from active IN device?
 				lda (pEvent),y
 				tax
 				
-				cpx #$20
+				ldy #bPause
+				lda (pData),y
+				bpl .11
+				
+				lda #0
+				sta (pData),y
+				bra .8
+				
+.11				ldy #hInputFile			Batch mode ?
+				lda (pData),y
+				beq .10
+				
+				cpx #3					test Ctrl-c
+				bne .12
+				
+				jsr CloseTxtFile
+				ldy #bExitOnEOF
+				lda (pData),y
+				ldy #bExit
+				sta (pData),y
+				clc
+				rts
+
+.12				cpx #19					test Ctrl-s
+				bne .8
+				ldy #bPause
+				lda #$80
+				sta (pData),y
+				bra .8
+				
+.10				cpx #$20
 				bcs .1
 				jsr CS.EVENT.CTRL.CHAR
 				bra .8
@@ -185,8 +236,7 @@ CS.DOEVENT		ldy #S.EVT.hDEV		is Event from active IN device?
 				txa
 				sta (pData),y
 
-				ora #$80
-				jsr COUT
+				>SYSCALL SYS.COutA
 				
 .8				clc
 				rts	
@@ -195,64 +245,89 @@ CS.DOEVENT		ldy #S.EVT.hDEV		is Event from active IN device?
 				rts
 *--------------------------------------
 CS.EVENT.CTRL.CHAR
-				cmp #13					CR
+				cpx #13					CR
 				bne .10
-				jsr CROUT
+				txa
+				>SYSCALL SYS.COutA
 				lda (pData)				CmdBuffer
 				ora #$80
 				sta (pData)
 				clc
 				rts
 				
-.10				cmp #3
+.10				cpx #3					Ctrl-C
 				bne .1
+
 				jsr CmdBuffer.CLR
 				clc
 				rts
 				
-.1				cmp #8					BS (left arrow)
+.1				cpx #8					BS (left arrow)
 				bne .2
 				jsr CmdBuffer.DEL
 				clc
 				rts
 				
-.2				cmp #10					LF (down arrow)
+.2				cpx #10					LF (down arrow)
 				bne .3
 				
 				jsr HISTORY.GETNEXT
 				clc
 				rts
 				
-.3				cmp #11					VT (up arrow)
+.3				cpx #11					VT (up arrow)
 				bne .4
 				
 				jsr HISTORY.GETPREV
 				clc
 				rts
 				
-.4				cmp #21					NAK (right arrow)
+.4				cpx #21					NAK (right arrow)
 				bne .8
 				
 				clc
 				rts
 				
-.8				jsr PRBYTE
-				clc
+.8				clc
 				rts
 *--------------------------------------
 CS.QUIT			jsr History.Quit
-				lda hLIBSTR
+
+				ldy #hInputFile
+				lda (pData),y
+				beq .1
+				>SYSCALL SYS.MLICloseA
+
+.1				ldy #hInputBuffer
+				lda (pData),y
+				beq .2
+				>SYSCALL SYS.FreeMemA
+
+.2				lda hLIBSTR
 				>SYSCALL SYS.UnloadLibA
 				clc
 				rts
 *--------------------------------------
 *				PRIVATE
 *--------------------------------------
+PrintPrompt		lda #"$"
+				>SYSCALL SYS.COutA
+				lda #" "
+				>SYSCALL SYS.COutA
+				rts
+*--------------------------------------
+PrintError		pha
+				>PUSHA
+				>LDYA L.MSG.ERROR
+				>SYSCALL SYS.PSTROutYA
+				pla
+				rts
+*--------------------------------------
 CmdBuffer.PRINT	ldy #0
 .1				iny
 				lda (pData),y
 				ora #$80
-				jsr COUT
+				>SYSCALL SYS.COutA
 				tya
 				cmp (pData)
 				bne .1
@@ -265,40 +340,92 @@ CmdBuffer.CLR	jsr CmdBuffer.DEL
 CmdBuffer.DEL	lda (pData)
 				beq .9
 				lda #8
-				jsr COUT
+				>SYSCALL SYS.COutA
 				lda (pData)
 				dec
 				sta (pData)
 .9				rts
 *--------------------------------------
-PRBYTE			pha
-				lsr
-				lsr
-				lsr
-				lsr
-				ora #$B0
-				cmp #$BA
-				bcc .1
-				adc #6
-.1				jsr COUT
+OpenTxtFileA	>SYSCALL SYS.MLIOpenA
+				bcs .9
+				
+				ldy #hInputFile
+				sta (pData),y
+				pha
+				txa
+				ldy #hInputBuffer
+				sta (pData),y
+				
+				>PUSHBI $0D		Line separator for TXT file
+				>PUSHBI $FF
 				pla
-				and #$0F
-				ora #$B0
-				cmp #$BA
-				bcc COUT
-				adc #6
-				bra COUT
+				>PUSHA
+				>SYSCALL SYS.MLINewLine
+				bcc .9
+				pha
+				jsr CloseTxtFile
+				pla
+				sec
+.9				rts
 *--------------------------------------
-CROUT			lda #13	
+ReadTxtFile		>PUSHWI 127
+				>PUSHWI TmpBuffer256+1
+				ldy #hInputFile
+				lda (pData),y
+				>PUSHA
+				>SYSCALL SYS.MLIRead
+				bcs .9
+
+				lda TmpBuffer256,y		Y,A=Bytes read
+				cmp #$0D
+				bne .10
+
+				dey
+				
+.10				tya
+				sta (pData)
+
+.1				lda TmpBuffer256,y
+				sta (pData),y
+				dey
+				bne .1
+				
+				lda #'>'
+				>SYSCALL SYS.COutA
+				lda #'"'
+				>SYSCALL SYS.COutA
+				>LDYA pData
+				>SYSCALL SYS.PSTROutYA
+				lda #'"'
+				>SYSCALL SYS.COutA
+				lda #13
+				>SYSCALL SYS.COutA
+				
+				clc
+.9				rts
 *--------------------------------------
-COUT			phx
-				phy
-				ldx #DEVMGR.COUT
-				jsr pDevJmp
-				ply
-				plx
+CloseTxtFile	ldy #hInputArgs
+				lda (pData),y
+				beq .1
+				>SYSCALL SYS.FreeMemA
+
+.1				ldy #hInputFile
+				lda (pData),y
+				beq .9
+				
+				>SYSCALL SYS.MLICloseA
+				ldy #hInputBuffer
+				lda (pData),y
+				>SYSCALL SYS.FreeMemA
+
+.9				lda #0
+				ldy #hInputArgs
+				sta (pData),y
+				ldy #hInputFile
+				sta (pData),y
+				ldy #hInputBuffer
+				sta (pData),y
 				rts
-pDevJmp			jmp (pDev)
 *--------------------------------------
 				.INB SBIN/SHELL.S.CMD
 				.INB SBIN/SHELL.S.HIS
@@ -307,18 +434,21 @@ CS.END
 *--------------------------------------
 ENV.PATH		>PSTRING "PATH"
 CMDS			>PSTRING "CD"
-				>PSTRING "SET"
 				>PSTRING "DATE"
-				>PSTRING "TIME"
 				>PSTRING "ECHO"
-				>PSTRING "TYPE"
 				>PSTRING "EXIT"
+				>PSTRING "PAUSE"
+				>PSTRING "READ"
+				>PSTRING "SET"
+				>PSTRING "TIME"
+				>PSTRING "TYPE"
 				.HS 00
 *--------------------------------------
 LIBSTR			>PSTRING "libstr.o"
-MSG.GREETINGS	>CSTRING "\nA2osX-Shell on Dev=(%h:%h),PS=%h\n\n"
-MSG.UNKNOWN		>CSTRING "Command Not Found\n"
-MSG.SYNERR		>CSTRING "Syntax Error Or Invalid Pathname\n"
+MSG.GREETINGS	>PSTRING "\nA2osX-Shell on Dev=%h\n\n"
+MSG.ERROR		>PSTRING "[%h]\n"
+*MSG.NOTFOUND	>CSTRING "Command Not Found\n"
+*MSG.SYNERR		>CSTRING "Syntax Error Or Invalid Pathname\n"
 hLIBSTR			.BS 1
 hNEWPATH		.BS 1
 hExecCmd		.BS 1
@@ -333,10 +463,16 @@ ExecCmdIdx		.BS 1
 				.OR 0
 DS.START
 CmdBuffer		.BS CmdBuffer.MAX+1
-bEXIT			.BS 1
+bPause			.BS 1
+bExit			.BS 1
+bEchoOff		.BS 1
 hCmdLine		.BS 1
 hCmdHistory		.BS 1
 CmdHistory.IDX	.BS 1
+bExitOnEOF		.BS 1
+hInputFile		.BS 1
+hInputArgs		.BS 1
+hInputBuffer	.BS 1
 CmdHistory.END	.BS 1
 DS.END
 				.ED

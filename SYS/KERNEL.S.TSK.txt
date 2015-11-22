@@ -12,35 +12,31 @@ S.TskMgrInit	stz TSKMGR.LASTID
 				lda #1
 				sta TSKMGR.SIZE			One Slot Busy (Kernel PS=0)
 
-				>LDYAI TskMgr.Table		Make PS #0 as current process
-				>STYA pPs
+				>LDYAI TskMgr.Table		Clear whole process table
+				>STYA ZPQuickPtr1
 				
 				ldx #K.PS.MAX
 				
 .1				lda #0	
 				ldy #S.PS.SIZE-1
 				
-.2				sta (pPs),y
+.2				sta (ZPQuickPtr1),y
 				dey
 				bpl .2
 				
-				lda pPs
+				lda ZPQuickPtr1
 				clc
 				adc #S.PS.SIZE
-				sta pPs
+				sta ZPQuickPtr1
 				bcc .3
 				
-				inc pPs+1
+				inc ZPQuickPtr1+1
 .3				dex
 				bne .1
-				
-				>LDYAI TskMgr.Table		Make PS #0 as current process
-				>STYA pPs
-				
-				lda #0
+
+				lda #1
 				ldy #S.PS.hINDEV
-				sta TskMgr.Table,y		Make In DEV = NUL
-				inc
+				sta TskMgr.Table,y		Make In DEV = SYS
 				ldy #S.PS.hOUTDEV
 				sta TskMgr.Table,y		Make OUT DEV = SYS
 				ldy #S.PS.hERRDEV
@@ -62,16 +58,33 @@ S.TskMgrInit	stz TSKMGR.LASTID
 				
 				ldy #S.PS.hPREFIX
 				sta TskMgr.Table,y
+S.TskMgrInit.Env				
 				>PUSHWI TmpBuffer256	push ENV value
 				>PUSHWI ENV.A2osX		push ENV name
-				ldy #S.PS.hENV
-				lda TskMgr.Table,y
-				>PUSHA
 				jsr S.SetEnvVarP
-				rts
+				bcs .9
+
+				>PUSHWI ENV.PATH.VALUE
+				>PUSHWI ENV.PATH
+				jsr S.SetEnvVarP
+				bcs .9
+
+				>PUSHWI ENV.LIB.VALUE
+				>PUSHWI ENV.LIB
+				jsr S.SetEnvVarP
+				bcs .9
+
+				>PUSHWI ENV.DRV.VALUE
+				>PUSHWI ENV.DRV
+				jsr S.SetEnvVarP
+				bcs .9
+
+				jsr S.SelectProcess0
+
+				ldx #DEVMGR.OPEN
+				jsr pDevJmp
 				
-.9				sec
-				rts
+.9				rts
 *--------------------------------------
 * S.TskMgrRun
 *--------------------------------------
@@ -209,16 +222,20 @@ S.TskMgrQuit	clc
 *--------------------------------------
 *				PUBLIC
 *--------------------------------------
-* S.ExecProcessA	(Blocking Parent PID)
+* S.ExecProcessNewEnvYA
+* S.ExecProcessYA	(Blocking Parent PID)
+* S.CreateProcessNewEnvYA 
+* S.CreateProcessYA (Non Blocking)
 *  in :
 *   A = hMem To Cmd Line
+*   Y = hMem To Args
 *  out :
 *   A = Child PSID
 *--------------------------------------
-S.ExecProcessNewEnvA
-				ldy #S.PS.F.ENV
-				bra S.ExecProcess
-S.ExecProcessA	ldy #0
+S.ExecProcessNewEnvYA
+				ldx #S.PS.F.ENV
+				.HS 2C					bit abs
+S.ExecProcessYA	ldx #0
 S.ExecProcess	jsr S.CreateProcess
 				bcs .9					terminated, do not set PID as HOLD
 
@@ -233,31 +250,36 @@ S.ExecProcess	jsr S.CreateProcess
 				clc
 .9				rts
 *--------------------------------------
-* S.CreateProcessA (Non Blocking)
-*  in :
-*   A = hMem To Full Cmd Line
-*  out :
-*   A = Child PSID
-*--------------------------------------
-S.CreateProcessNewEnvA 
-				ldy #S.PS.F.ENV
-				bra S.CreateProcess
-S.CreateProcessA
-				ldy #0
-S.CreateProcess	sty S.CreateChildProcess.Flags
+S.CreateProcessNewEnvYA 
+				ldx #S.PS.F.ENV
+				.HS 2C					bit abs
+S.CreateProcessYA
+				ldx #0
+S.CreateProcess	stx S.CreateChildProcess.Flags
 				sta S.CreateProcessA.Cmd
-				>LDYAI MSG.NEWPS
-				jsr S.SysScrPPSTRYA
+				sty S.CreateProcessA.Args
+		
+*				lda #'|'
+*				jsr S.CoutA
+*				lda S.CreateProcessA.Cmd
+*				jsr S.PSTROutA
+*				lda #'|'
+*				jsr S.CoutA
+*				lda S.CreateProcessA.Args
+*				beq .1
+*				jsr S.PSTROutA
+*.1				lda #'|'
+*				jsr S.CoutA
+*				lda #13
+*				jsr S.CoutA
 				
 				jsr S.CreateChildProcess
 				bcs .99
 
 				sta S.CreateProcessA.CPSID
-
 				jsr S.SelectProcessA
 				
-				lda S.CreateProcessA.Cmd
-				jsr S.InitProcessA
+				jsr S.InitProcess
 				bcs .98					Init Failed or exit?
 				
 				ldy #S.PS.PID			switch back to Parent Process
@@ -284,6 +306,7 @@ S.CreateProcess	sty S.CreateChildProcess.Flags
 				rts
 *--------------------------------------
 S.CreateProcessA.Cmd	.BS 1
+S.CreateProcessA.Args	.BS 1
 S.CreateProcessA.CPSID	.BS 1
 *--------------------------------------
 * S.GetPSByIDA
@@ -469,62 +492,24 @@ S.CreateChildProcess
 S.CreateChildProcess.Flags
 				.BS 1
 *--------------------------------------
-* S.InitProcessA
+* S.InitProcess
 *  In : 
 *   A = hMem To Full Cmd Line  
 *--------------------------------------
-S.InitProcessA	stz	S.InitProcessA.hPath
-				stz	S.InitProcessA.hFullPath
-				>PUSHA					Push Cmd Line
-				>PUSHBI $20				Push SEP=' '
-				>PUSHBI 0				Push 0 for getting CMD And ARGS
-				jsr S.PStrGetTkn
-				bcc .10
-.99				rts 					OOM error
-				
-.10				sta S.InitProcessA.hCmd
-				pha
-				txa
-				ldy #S.PS.hARGS
+S.InitProcess	lda S.CreateProcessA.Args
+				beq .1
+				jsr S.ExpandPStrA				
+.1				ldy #S.PS.hARGS
 				sta (pPs),y				set ARGS hMem (0 if none)
+
+				lda S.CreateProcessA.Cmd
+				jsr S.ExpandPStrA
 				
-				pla
-				jsr S.GetMemPtrA
-				>STYA ZPQuickPtr1
-				lda (ZPQuickPtr1)
-				cmp #'/'
-				bne .20
-				
-				lda S.InitProcessA.hCmd
-				bra .30
-				
-.20				>PUSHWI ENV.PATH		push ENVNAME=PATH
-				ldy #S.PS.hENV
-				lda (pPs),y
-				>PUSHA
-				jsr S.GetEnvVarP		get value for ENV=PATH
-				bcs .99
-				
-				sta	S.InitProcessA.hPath	save VALUE hMem for discard
-				pha
-				lda S.InitProcessA.hCmd
-				>PUSHA					push CMD for S.FileSearch
-				pla
-				>PUSHA					A=PStr to ENV Value
-				jsr S.FileSearch		find File in %PATH%
-				bcs S.InitProcessA.ClnUp
-				
-				sta	S.InitProcessA.hFullPath	save FULLPATH hMem for discard
-				
-.30				jsr S.PStrCpyA
 				ldy #S.PS.hCMD
 				sta (pPs),y
-				pha
-				jsr S.SysScrPPSTRA
-				pla
 				
 				jsr S.LoadBinA			A = BinPath hMem
-				bcs S.InitProcessA.ClnUp
+				bcs .99
 				
 				>STYA pCode				save PTR to Code Segment
 				txa
@@ -537,48 +522,38 @@ S.InitProcessA	stz	S.InitProcessA.hPath
 				dey	
 				ora (pCode),y
 				
-				beq .1					DS.SIZE=0...
+				beq .2					DS.SIZE=0...
 				
 				lda (pCode),y		
 				>PUSHAX					Push DS.SIZE
 				>PUSHBI S.MEM.F.INIT0	Clear DS
 				jsr S.GetMem				
-				bcs S.InitProcessA.ClnUp
+				bcs .99
 				
 				>STYA pData
 				txa
 				ldy #S.PS.hDS
 				sta (pPs),y				save DS hMem in TSKSLOT
 				
-.1				ldx #TSKMGR.INIT
+.2				ldx #TSKMGR.INIT
 				jsr pCodeJmp			Call INIT function
 				
-S.InitProcessA.ClnUp
-				php						save Carry
-				pha						save ERR
-				lda S.InitProcessA.hFullPath
-				beq .1
-				jsr S.FreeMemA
-				
-.1				lda S.InitProcessA.hPath
-				beq .2
-				jsr S.FreeMemA
-				
-.2				pla
-				plp
-				rts
-*--------------------------------------
-S.InitProcessA.hCmd .BS 1
-S.InitProcessA.hPath	.BS 1
-S.InitProcessA.hFullPath	.BS 1
+.99				rts
 *--------------------------------------
 * S.SelectProcessA
 *   In : A=PSID
 *--------------------------------------
 S.SelectProcessA
+				tay
+				bne S.SelectProcessN
+S.SelectProcess0
+				>LDYAI TskMgr.Table		Make PS #0 as current process
+				>STYA pPs
+				bra S.SelectProcessDev
+S.SelectProcessN				
 				jsr S.GetPSByIDA
 				bcs *
-				>STYA pPS
+				>STYA pPs
 
 S.SelectProcess	ldy #S.PS.hCS
 				lda (pPs),y
@@ -587,12 +562,13 @@ S.SelectProcess	ldy #S.PS.hCS
 
 				ldy #S.PS.hDS
 				lda (pPs),y
-				beq .1
+				beq S.SelectProcessDev
 
 				jsr S.GetMemPtrA
 				>STYA pData
 
-.1				ldy #S.PS.hOUTDEV
+S.SelectProcessDev
+				ldy #S.PS.hOUTDEV
 				lda	(pPs),y
 				beq .8
 				
@@ -658,7 +634,6 @@ TSKMGR.SIZE		.BS 1
 TSKMGR.COUNT	.BS 1 
 TSKMGR.LASTID	.BS 1
 *--------------------------------------
-MSG.NEWPS		>PSTRING "\nTskMgr:"
 MAN
 SAVE SYS/KERNEL.S.TSK
 LOAD SYS/KERNEL.S

@@ -13,6 +13,11 @@ AUTO 6
 				.INB INC/IO.I
 				.INB INC/PRODOS.I
 *--------------------------------------
+ZPQuickPtr1		.EQ $0					Temp Ptrs for use in very limited scope
+ZPQuickPtr2		.EQ $2					(could be trashed by any JSR)
+ZPQuickPtr3		.EQ $4
+ZPQuickPtr4		.EQ $6
+*--------------------------------------
 * $D000-D0FF  	KERNEL.SYSCALL Jmp Table
 *--------------------------------------
 				.DA S.GetMem			$00
@@ -47,13 +52,13 @@ AUTO 6
 *--------------------------------------
 				.DA S.ExpandPStrA		$30
 				.DA S.ExpandPStrYA
-				.DA S.GetEnvVarH
-				.DA S.GetEnvVarP
+				.DA S.GetEnvVarA
+				.DA S.GetEnvVarYA
 				
 				.DA S.SetEnvVarH	
 				.DA S.SetEnvVarP	
-				.DA S.DelEnvVarH	
-				.DA S.DelEnvVarP	
+				.DA S.DelEnvVarA	
+				.DA S.DelEnvVarYA	
 *--------------------------------------
 				.DA S.MLICreateFile		$40
 				.DA S.MLICreateDirA
@@ -105,10 +110,10 @@ AUTO 6
 				.DA 0
 				.DA 0
 *--------------------------------------
-				.DA S.ExecProcessNewEnvA	$90
-				.DA S.ExecProcessA		
-				.DA S.CreateProcessNewEnvA
-				.DA S.CreateProcessA
+				.DA S.ExecProcessNewEnvYA	$90
+				.DA S.ExecProcessYA		
+				.DA S.CreateProcessNewEnvYA
+				.DA S.CreateProcessYA
 
 				.DA S.GetPSByIDA 
 				.DA 0
@@ -137,22 +142,22 @@ AUTO 6
 *--------------------------------------
 				.DA S.ScreenSelectA		$C0
 				.DA 0
-				.DA S.SysScrPPSTRA
-				.DA S.SysScrPPSTRYA
+				.DA 0
+				.DA 0
 
 				.DA 0
 				.DA 0
 				.DA 0
 				.DA 0
 *--------------------------------------
-				.DA 0					$D0
+				.DA S.COutA				$D0
+				.DA S.PSTROutA
+				.DA S.PSTROutYA
 				.DA 0
-				.DA 0
-				.DA 0
-				.DA 0
-				.DA 0
-				.DA 0
-				.DA 0
+				.DA S.HexOutA
+				.DA S.HexOutYA
+				.DA S.DecOutA
+				.DA S.DecOutYA
 *--------------------------------------
 				.DA 0					$E0
 				.DA 0
@@ -185,73 +190,50 @@ Kernel.Init		sei
 				stz	A2osX.SCREENS
 				stz A2osX.ASCREEN
 				
-				jsr S.SysScrInit
+				jsr S.MemMgrInit
+				bcs *
+				jsr S.DevMgrInit
+				bcs *
+				jsr S.EvtMgrInit
+				bcs *
+				jsr S.TskMgrInit
+				bcs *
+
+				>DEBUG
 				
 				>LDYAI MSG.Init
-				jsr S.SysScrPPSTRYA
-				
-				>LDYAI MSG.Init.MemMgr
-				jsr S.SysScrPPSTRYA
-				jsr S.MemMgrInit
-				jsr S.SysScrPRCode
-				bcs .1
-
-				>LDYAI MSG.Init.TskMgr
-				jsr S.SysScrPPSTRYA
-				jsr S.TskMgrInit
-				jsr S.SysScrPRCode
-.1				bcs .2
-
-				>LDYAI MSG.Init.DevMgr
-				jsr S.SysScrPPSTRYA
-				jsr S.DevMgrInit
-				jsr S.SysScrPRCode
-.2				bcs .3
-
-				>LDYAI MSG.Init.EvtMgr
-				jsr S.SysScrPPSTRYA
-				jsr S.EvtMgrInit
-				jsr S.SysScrPRCode
-.3				bcs .99
+				jsr S.PSTROutYA
 				
 				>LDYAI MSG.Init.Startup
-				jsr S.SysScrPPSTRYA
-				
-				>LDYAI STARTUP.FILE			Build A2osX.STARTUP full path...
+				jsr S.PSTROutYA
+
+				>LDYAI STARTUP.ARGS			Get A2osX.STARTUP full path...
 				jsr S.NewPStrYA
-				pha							save for discard
-
-				>PUSHA
-				>PUSHWI ENV.A2osX			get KRNL root path
-				ldy #S.PS.hENV
-				lda TskMgr.Table,y
-				>PUSHA
-				jsr S.GetEnvVarP
-				pha							save for discard
-				>PUSHA
-				jsr S.PStrCat
-				pha							save for discard
-
-				jsr S.ExecFileA
-				jsr S.SysScrPRCode
+				pha
+				>LDYAI STARTUP.CMD			Get A2osX.STARTUP full path...
+				jsr S.NewPStrYA
+				ply							get back ARGS in Y
+				phy
+				pha							A=CMH, save for discard
+				>DEBUG
+				jsr S.CreateProcessYA
 				bcs *
+
+				>DEBUG
 				
 				pla
 				jsr S.FreeMemA
 				pla
 				jsr S.FreeMemA
-				pla
-				jsr S.FreeMemA
-
-.99				bcs *
 
 				>LDYAI MSG.Init.OK
-				jsr S.SysScrPPSTRYA
+				jsr S.PSTROutYA
+				>DEBUG
+
 *--------------------------------------
 S.KernelRun		jsr S.TskMgrRun
 				bcs .98
 				
-				jsr S.SysScrCPULoad
 				jsr S.GetEvent
 				bcs S.KernelRun			CS=no event
 
@@ -264,7 +246,9 @@ S.KernelRun		jsr S.TskMgrRun
 				jsr S.DestroyEvent
 				bra	S.KernelRun
 				
-.1				lda (pEvent)
+.1				jsr S.SelectProcess0
+				
+				lda (pEvent)
 				and #S.EVT.F.KEY		any special key?
 				beq .99
 				
@@ -298,15 +282,35 @@ S.KernelRun		jsr S.TskMgrRun
 .98				lda #A2osX.SCREENS.S
 				jsr S.ScreenSelectA
 				>LDYAI MSG.KRNLPANIC
-				jsr	S.SysScrPPSTRYA
+				jsr	S.PSTROutYA
 				bra *
 				
-.99				>LDYAI MSG.EVNTPANIC
-				jsr	S.SysScrPPSTRYA
-				jsr S.DumpEvent
+.99				jsr S.DumpEvent
 				
 				jsr S.DestroyEvent
 				jmp S.KernelRun
+*--------------------------------------
+S.DumpEvent		ldy #S.EVT.DATAW2+1
+				>PUSHB (pEvent),y
+				dey
+				>PUSHB (pEvent),y
+				
+				ldy #S.EVT.DATAW1+1
+				>PUSHB (pEvent),y
+				dey
+				>PUSHB (pEvent),y
+
+				ldy #S.EVT.DATAHI
+				>PUSHB (pEvent),y
+				ldy #S.EVT.DATALO
+				>PUSHB (pEvent),y
+
+				ldy #S.EVT.hDEV
+				>PUSHB (pEvent),y
+				
+				>PUSHB (pEvent)
+				>LDYAI MSG.DumpEvent
+				jmp S.PSTROutYA
 *--------------------------------------
 * S.ScreenSelectA
 *  IN :
@@ -318,19 +322,19 @@ S.ScreenSelectA	and A2osX.SCREENS		Screen is available ?
 				cmp #A2osX.SCREENS.S
 				bne .1
 				sta SETTEXT
+				sta SETALTCHAR
 				sta SET80DISP
 				sta CLR80STORE
 				sta SETPAGE2
-				sta SETALTCHAR
 				bra .8
 
 .1				cmp #A2osX.SCREENS.C
 				bne .2
 				sta SETTEXT
+				sta SETALTCHAR
 				sta SET80DISP
 				sta CLR80STORE
 				sta CLRPAGE2
-				sta SETALTCHAR
 				bra .8
 				
 .2				cmp #A2osX.SCREENS.G
@@ -341,6 +345,7 @@ S.ScreenSelectA	and A2osX.SCREENS		Screen is available ?
 				sta SETHIRES
 				sta CLR80STORE
 				sta CLRPAGE2
+				sta SET80STORE
 				sta SETIOUDIS
 				sta SETDHIRES
 				
@@ -355,46 +360,35 @@ S.ScreenSelectA	and A2osX.SCREENS		Screen is available ?
 .8				sta A2osX.ASCREEN
 .9				rts
 *--------------------------------------
-S.SysScrCPULoad ldx SYSSCR.CPULOADI
-				lda SYSSCR.CPULOADC,x
-				sta SYSSCR.BASL0+38
-				dec SYSSCR.CPULOADI
-				bpl .1
-				lda #3
-				sta SYSSCR.CPULOADI
-.1				rts
-*--------------------------------------
 MSG.Init		>PSTRING "A2osX[Stage2]:Init\n"
-MSG.Init.MemMgr	>PSTRING "->MemMgr Init"
-MSG.Init.TskMgr	>PSTRING "->TskMgr Init"
-MSG.Init.DevMgr	>PSTRING "->DevMgr Init"
-MSG.Init.EvtMgr	>PSTRING "->EvtMgr Init"
 MSG.Init.Startup	>PSTRING "EXEC A2osX.Startup...\n"
-MSG.Init.OK		>PSTRING "A2osX[Stage2]:Complete."
-
-MSG.EVNTPANIC	>PSTRING "\nEVT:F/hDev/DATA/W1/W2="
+MSG.Init.OK		>PSTRING "A2osX[Stage2]:Complete.\n"
+MSG.DumpEvent	>PSTRING "\nEVT:F=%h,hDev=%d,DATA=%H,W1=%H,W2=%H"
 MSG.KRNLPANIC	>PSTRING "\n\n!!!Kernel Panic!!!"
 *--------------------------------------
-STARTUP.FILE 	>PSTRING "A2osX.STARTUP"
+STARTUP.CMD 	>PSTRING "${A2OSX}SBIN/SHELL"
+STARTUP.ARGS	>PSTRING "${A2OSX}A2osX.STARTUP"
 *--------------------------------------
 ENV.A2osX		>PSTRING "A2OSX"
 ENV.PATH		>PSTRING "PATH"
+ENV.PATH.VALUE	>PSTRING "${A2OSX}SBIN/;${A2OSX}BIN/"
 ENV.LIB			>PSTRING "LIB"
+ENV.LIB.VALUE	>PSTRING "${A2OSX}LIB/"
+ENV.DRV			>PSTRING "DRV"
+ENV.DRV.VALUE	>PSTRING "${A2OSX}DRV/"
 *--------------------------------------
 				.INB SYS/KERNEL.S.MEM
-				.INB SYS/KERNEL.S.SCR
 				.INB SYS/KERNEL.S.STR
-				.INB SYS/KERNEL.S.FS
+				.INB SYS/KERNEL.S.CIO
+				.INB SYS/KERNEL.S.FIO
 				.INB SYS/KERNEL.S.MLI
 				.INB SYS/KERNEL.S.BIN
 				.INB SYS/KERNEL.S.DRV
 				.INB SYS/KERNEL.S.LIB
 				.INB SYS/KERNEL.S.NET
-*				.INB SYS/KERNEL.S.RDR
 				.INB SYS/KERNEL.S.ENV
 				.INB SYS/KERNEL.S.TSK
 				.INB SYS/KERNEL.S.EVT
-				.INB SYS/KERNEL.S.EXE
 *--------------------------------------
 				.INB SYS/KERNEL.S.DEV
 *--------------------------------------

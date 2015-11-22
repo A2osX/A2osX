@@ -10,7 +10,8 @@ EXEC.CMD		stz hFullCmd
 				stz hEnvPath
 				
 				ldy #hCmdLine
-				>PUSHB (pData),y
+				lda (pData),y
+				>PUSHA
 				>PUSHBI $20				Push SEP=' '
 				>PUSHBI 0				Push 0 for getting CMD & ARGS
 				>SYSCALL SYS.PStrGetTkn
@@ -38,7 +39,7 @@ EXEC.CMD		stz hFullCmd
 				lda (ZPPtr1),y
 				cmp #'a'
 				bcc .3
-				cmp #'{'
+				cmp #'z'+1
 				bcs .3
 				eor #$20			to Uppercase
 .3				cmp CMDS,x
@@ -60,24 +61,24 @@ EXEC.CMD		stz hFullCmd
 				inc ExecCmdIdx
 				bra .1
 .99				rts	
-
+*--------------------------------------
+* ZPPtr1 = hExecCmd
+*--------------------------------------
 EXEC.CMD.EXT	ldy #1
 				lda (ZPPtr1),y
 				cmp #'/'
-				bne .2
-				ldy #hCmdLine
-				lda (pPs),y
-				bra .11
+				bne .1
+				>LDYA ZPPtr1
+				>SYSCALL SYS.NewPStrYA
+				bra .10
 
-.2				>PUSHW L.ENV.PATH		push ENVNAME=PATH
-				ldy #S.PS.hENV
-				lda (pPs),y
-				>PUSHA
-				>SYSCALL SYS.GetEnvVarP		get value for ENV=PATH
+.1				>LDYA L.ENV.PATH		push ENVNAME=PATH
+				>SYSCALL SYS.GetEnvVarYA	get value for ENV=PATH
 				
-				bcs EXEC.CMD.ClnUp
+				bcc .12
+				jmp EXEC.CMD.ClnUp
 				
-				sta hEnvPath
+.12				sta hEnvPath
 				>PUSHB hExecCmd
 				>PUSHB hEnvPath
 				>SYSCALL SYS.FileSearch
@@ -89,27 +90,55 @@ EXEC.CMD.EXT	ldy #1
 				>PUSHA
 				>SYSCALL SYS.FileSearch
 
-				bcs EXEC.CMD.ClnUp
+.10				bcs EXEC.CMD.ClnUp
 
-.10				sta hFullCmd
-.11				>SYSCALL SYS.MLIGetFileInfoA
+				sta hFullCmd
+				>SYSCALL SYS.MLIGetFileInfoA
 				bcs EXEC.CMD.ClnUp
 
 				>STYA ZPPTR1
 				ldy #1					Get File Type
 				lda (ZPPTR1),y
 				cmp #$04				TXT File ?
-				bne .1
+				bne .2
+				
+				lda hFullCmd
+				jsr OpenTxtFileA
+				bcs EXEC.CMD.ClnUp
+				
+				lda hExecArgs
+				beq .11
+				
+				>SYSCALL SYS.PStrCpyA
+				bcs EXEC.CMD.ClnUp
+.11				ldy #hInputArgs
+				sta (pData),y
+				bra EXEC.CMD.ClnUp	
+				
+.2				cmp #$06				BIN File ?
+				bne .4
+				
+				ldy #S.PS.PID
+				lda (pPs),y
+				beq .3					0, we are in kernel space
+				
+				lda hFullCmd
+				ldy hExecArgs
+				>SYSCALL SYS.ExecProcessNewEnvYA
+				bra EXEC.CMD.ClnUp
+
+.3				lda hFullCmd
+				ldy hExecArgs
+				>SYSCALL SYS.CreateProcessYA
+				bra EXEC.CMD.ClnUp
+				
+.4				cmp #$ff				SYS File ?
+				bne .5
 				
 				bra *
 				
-.1				jsr EXEC.CMD.ClnUp		Discard CMD & ARGS
-				ldy #hCmdLine
-				lda (pData),y
-				>SYSCALL SYS.ExecProcessNewEnvA
-				
-				rts
-				
+.5				lda #SYSMGR.ERRSYN
+				sec		
 EXEC.CMD.ClnUp	pha
 				php
 				lda hFullCmd
@@ -138,10 +167,9 @@ EXEC.CMD.CD		lda hExecArgs
 				bne EXEC.CMD.CD.C
 				ldy #S.PS.hPREFIX
 				lda (pPs),y
-				>SYSCALL SYS.GetMemPtrA
-				>PUSHYA
-				>LIBCALL hLIBSTR,LIBSTR.PRINTP
-				jsr CROUT
+				>SYSCALL SYS.PSTROutA
+				lda #13
+				>SYSCALL SYS.COutA
 				clc	
 				rts
 				
@@ -224,7 +252,7 @@ EXEC.CMD.CD.C	>SYSCALL SYS.GetMemPtrA
 				rts
 *--------------------------------------
 EXEC.CMD.SET	lda hExecArgs
-				bne .2
+				bne EXEC.CMD.SETVAR
 				
 				ldy #S.PS.hENV
 				lda (pPs),y
@@ -233,9 +261,10 @@ EXEC.CMD.SET	lda hExecArgs
 				
 .1				lda (ZPPTR1)
 				beq .8					Ending 0 ?
-				>PUSHW ZPPTR1
-				>LIBCALL hLIBSTR,LIBSTR.PRINTP
-				jsr CROUT
+				>LDYA ZPPTR1
+				>SYSCALL SYS.PSTROutYA
+				lda #13
+				>SYSCALL SYS.COutA
 
 				lda ZPPTR1
 				sec
@@ -248,7 +277,7 @@ EXEC.CMD.SET	lda hExecArgs
 .8				clc
 				rts				
 				
-.2				>PUSHA					Push Cmd Line
+EXEC.CMD.SETVAR	>PUSHA					Push Cmd Line
 				>PUSHBI $3D				Push SEP='='
 				>PUSHBI 0				Push Token IDX
 				>SYSCALL SYS.PStrGetTkn
@@ -259,46 +288,42 @@ EXEC.CMD.SET	lda hExecArgs
 .3				sta hVarName
 				stx hVarValue
 				txa
-				bne .7
+				beq .31
 				
-				lda hExecArgs
+				>PUSHB hVarValue
+				>PUSHB hVarName
+				>SYSCALL SYS.SetEnvVarH				
+				jmp .97
+				
+.31				lda hExecArgs
 				>SYSCALL SYS.GetMemPtrA
 				>STYA ZPPTR1
 				lda (ZPPTR1)
 				tay
 				lda (ZPPTR1),y
 				cmp #'='
-				beq .7
+				bne  .4
+
+				lda hVarName
+				>SYSCALL SYS.DelEnvVarA
+				bra .97
 				
-				>PUSHB hVarName
-				ldy #S.PS.hENV
-				>PUSHB (pPs),y
-				>SYSCALL SYS.GetEnvVarH
+.4				lda hVarName
+				>SYSCALL SYS.GetEnvVarA
 				bcs .97
 				sta hVarValue
 
 				lda hVarName
-				>SYSCALL SYS.GetMemPtrA
-				>PUSHYA
-				>LIBCALL hLIBSTR,LIBSTR.PRINTP
-
+				>SYSCALL SYS.PSTROutA
 				lda #'='
-				jsr COUT
-				
+				>SYSCALL SYS.COutA
 				lda hVarValue
-				>SYSCALL SYS.GetMemPtrA
-				>PUSHYA
-				>LIBCALL hLIBSTR,LIBSTR.PRINTP
-				jsr CROUT
-				
-				bra .97
-				
-.7				>PUSHB hVarValue
-				>PUSHB hVarName
-				ldy #S.PS.hENV
-				>PUSHB (pPs),y
-				>SYSCALL SYS.SetEnvVarH
-				
+				>SYSCALL SYS.PSTROutA
+				lda #13
+				>SYSCALL SYS.COutA
+
+				clc
+			
 .97				php
 				pha
 				lda hVarValue
@@ -314,7 +339,8 @@ EXEC.CMD.DATE	>SYSCALL SYS.MLIGetTime
 				bcs .9
 				>PUSHW DATELO
 				>LIBCALL hLIBSTR,LIBSTR.PRINTDATE
-				jsr CROUT
+				lda #13
+				>SYSCALL SYS.COutA
 				clc
 .9				rts
 *--------------------------------------
@@ -322,7 +348,8 @@ EXEC.CMD.TIME	>SYSCALL SYS.MLIGetTime
 				bcs .9
 				>PUSHW TIMELO
 				>LIBCALL hLIBSTR,LIBSTR.PRINTTIME
-				jsr CROUT
+				lda #13
+				>SYSCALL SYS.COutA
 				clc
 .9				rts
 *--------------------------------------
@@ -332,10 +359,9 @@ EXEC.CMD.ECHO	lda hExecArgs
 				bcs .99
 				
 				pha
-				>SYSCALL SYS.GetMemPtrA
-				>PUSHYA
-				>LIBCALL hLIBSTR,LIBSTR.PRINTP
-				jsr CROUT
+				>SYSCALL SYS.PSTROutA
+				lda #13
+				>SYSCALL SYS.COutA
 				pla
 				>SYSCALL SYS.FreeMemA
 				clc
@@ -363,7 +389,7 @@ EXEC.CMD.TYPE	lda hExecArgs
 .2				dec ZPPTR2
 
 				lda (ZPPTR1)
-				jsr COUT
+				>SYSCALL SYS.COutA
 				inc ZPPTR1
 				bne .1
 				inc ZPPTR1+1
@@ -377,6 +403,16 @@ EXEC.CMD.TYPE	lda hExecArgs
 .98				lda #SYSMGR.ERRSYN
 				sec
 .99				rts
+*--------------------------------------
+EXEC.CMD.READ
+				clc
+				rts
+*--------------------------------------
+EXEC.CMD.PAUSE	ldy #bPause
+				lda #$80
+				sta (pData),y
+				clc
+				rts
 *--------------------------------------
 EXEC.CMD.EXIT	ldy #bEXIT
 				lda #$FF
