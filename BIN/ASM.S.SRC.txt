@@ -49,20 +49,32 @@ SRC.ParseLine		ldx TmpBuffer256
 
 					
 SRC.ParseLine.Ok	lda SRC.GLabel.New
-					bpl .1
+					bpl .8
 					
-					lda SRC.GLabel.Flags
-					lsr					.SE ?
+					jsr SYM.FindGlobal
+					bcs .1				if CS, not found, add
+
+					lda SRC.FLabel.Flags				
+					and SRC.GLabel.Flags
+					lsr					both are .SE ?
 					bcs .1				yes, update during pass 1 & 2
 
-					ldy #ASM.PASS		
+					lda SRC.FLabel.Flags
+					and #$40			found symbol pending ?
+					bne .10
+					
+					lda SRC.GLabel.Flags
+					and #$40			new is pending ? (if yes, no need to update)
+					bne .8
+					
+.10					ldy #ASM.PASS		
 					lda (pData),y		pass#2?
 					bne .8				yes, skip to avoid redefinition error
 					
-					jsr SYM.FindGlobal
-					bcs SRC.ParseLine.Redef
+					bra SRC.ParseLine.Redef
 					
-.1					jsr SYM.AddGToGBlock
+.1					>LDYA L.SRC.GLabel.Flags
+					jsr SYM.AddGToGBlockYA
 					bcs SRC.ParseLine.Err
 
 					
@@ -225,6 +237,19 @@ SRC.ParseLine.OpCode
 					bne .1
 					
 					jsr SRC.ParseLine.AM
+					
+					
+					
+					
+					
+					bcs *
+					
+					
+					
+					
+					
+					
+					
 					bcs .99
 					
 					ldy #ASM.PC
@@ -277,6 +302,9 @@ SRC.ParseLine.AM	stz SRC.AM.ID
 					
 .2					jsr SRC.IsLetter	Any register?
 					bcs .70				no, try something else
+					
+					lda SRC.BufPtr
+					sta SRC.BufPtrSave
 					
 					stz SRC.AM.tmpBuf
 					sta SRC.AM.tmpBuf+1
@@ -332,10 +360,13 @@ SRC.ParseLine.AM	stz SRC.AM.ID
 					tay
 					bra .5
 
+.71					lda SRC.BufPtrSave	Does not match a register,restore Ptr
+					sta SRC.BufPtr
+
 .70					dec SRC.BufPtr		back one char
-					
-					
-.71					jsr EXP.Eval
+									
+					jsr EXP.Eval
+					bcs *
 					bcs .99
 .72					jmp .1
 					clc
@@ -382,6 +413,10 @@ SRC.GetDecimal		stz SRC.ACC+1
 					beq .8
 					cmp #' '
 					beq .8
+					jsr SRC.IsEXPReserved
+					bcc .88
+					jsr SRC.IsAMReserved
+					bcc .88
 					jsr SRC.IsDigit10
 					bcs .99
 					and #$0F
@@ -405,7 +440,8 @@ SRC.GetDecimal		stz SRC.ACC+1
 .9					lda #ERR.VAL.TOO.BIG
 					sec
 					rts
-					
+
+.88					dec SRC.BufPtr		Back One Char
 .8					clc
 					rts
 					
@@ -428,6 +464,10 @@ SRC.GetHex			stz SRC.ACC+1
 					beq .8
 					cmp #' '
 					beq .8
+					jsr SRC.IsEXPReserved
+					bcc .88
+					jsr SRC.IsAMReserved
+					bcc .88
 					jsr SRC.IsDigit16
 					bcs .99
 					
@@ -443,6 +483,7 @@ SRC.GetHex			stz SRC.ACC+1
 					sta SRC.ACC
 					bra .1
 					
+.88					dec SRC.BufPtr		Back One Char
 .8					clc
 					rts
 					
@@ -469,6 +510,10 @@ SRC.GetOctal		stz SRC.ACC+1
 					beq .8
 					cmp #' '
 					beq .8
+					jsr SRC.IsEXPReserved
+					bcc .88
+					jsr SRC.IsAMReserved
+					bcc .88
 					jsr SRC.IsDigit8
 					bcs .99
 					
@@ -489,6 +534,7 @@ SRC.GetOctal		stz SRC.ACC+1
 					bne .2
 					bra .1
 					
+.88					dec SRC.BufPtr		Back One Char
 .8					clc
 					rts
 					
@@ -515,6 +561,12 @@ SRC.GetBinary		stz SRC.ACC+1
 					
 .1					jsr SRC.GetChar
 					beq .8
+					cmp #' '
+					beq .8
+					jsr SRC.IsEXPReserved
+					bcc .88
+					jsr SRC.IsAMReserved
+					bcc .88
 					cmp #'1'
 					beq .11
 					cmp #'0'
@@ -529,6 +581,7 @@ SRC.GetBinary		stz SRC.ACC+1
 					bcs .9
 					bra .1
 					
+.88					dec SRC.BufPtr		Back One Char
 .8					clc
 					rts
 					
@@ -563,9 +616,12 @@ SRC.GetLabel		>STYA ZPPtr1
 					beq .2
 					
 					jsr SRC.IsEXPReserved
-					bcc .8
+					bcc .88
+					jsr SRC.IsAMReserved
+					bcc .88
 					jsr SRC.IsLetterOrDigit
-					bcs .9
+					bcs *
+*					bcs .9
 					
 .2					iny
 					sta (ZPPtr1),y
@@ -575,7 +631,8 @@ SRC.GetLabel		>STYA ZPPtr1
 .9					lda #ERR.SYNTAX.ERROR
 					sec
 					rts					
-					
+
+.88					dec SRC.BufPtr		Back One Char				
 .8					tya
 					sta (ZPPtr1)
 					clc
@@ -620,35 +677,6 @@ SRC.GetKeyword		>STYA ZPPtr1
 					inc SRC.Keyword.ID
 					inc SRC.Keyword.ID
 					bra .3
-					
-.9					sec
-					rts
-*---------------------------------------
-SRC.GetExp.DELETE			stz SRC.Exp
-					jsr SRC.GetCharUC
-					beq .9
-
-					ldy #0
-					jsr SRC.IsAMReserved
-					bcc .8
-					
-					iny
-					sta SRC.Exp+1
-					
-.1					jsr SRC.GetCharUC
-					beq .89
-					cmp #' '
-					beq .89
-					jsr SRC.IsAMReserved
-					bcc .8
-					iny
-					sta SRC.Exp,y
-					bra .1
-					
-.8					dec SRC.BufPtr
-.89					sty SRC.Exp
-					clc
-					rts
 					
 .9					sec
 					rts
