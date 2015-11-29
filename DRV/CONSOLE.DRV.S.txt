@@ -13,9 +13,11 @@ AUTO 6
 				.INB INC/IO.I
 *--------------------------------------
 CURSOR.BLINK.SPEED	.EQ 2
+ESCSEQ.MAXLEN	.EQ 16
 *--------------------------------------
-ZPBASL1			.EQ ZPDRV
-ZPBASL2			.EQ ZPDRV+2
+ZPBaseL1		.EQ ZPDRV
+ZPBaseL2		.EQ ZPDRV+2
+ZPTmpByte		.EQ ZPDRV+4
 *--------------------------------------
 *			File Header (16 Bytes)
 *--------------------------------------
@@ -64,11 +66,18 @@ DRV.CS.START	.DA OPEN
 				.DA GETINFO
 				.DA IRQ
 L.DEVINFO		.DA DEVINFO
-				.DA 0					end or relocation
+J.EscSeq		.DA Esc.DispAttr		m
+				.DA Esc.Scroll			r
+				.DA Esc.EraseLine		K
+				.DA	Esc.Home			H
+				.DA 0					end of relocation
 *--------------------------------------
 OPEN			stz CURON
-				lda #$80
-				sta INVFLG
+				stz bEscMode
+				stz bEscModeCSI
+				
+				jsr RESET
+				jsr RESETATTR
 				jsr HOME
 
 				lda #A2osX.SCREENS.C
@@ -95,7 +104,52 @@ GETEVENT		lda A2osX.TIMER16
 				sec
 				rts
 *--------------------------------------
-COUT			jsr COUT1
+COUT			bit bEscMode
+				bpl .1
+				jmp EscMode
+				
+.1				pha
+				jsr CUROFF
+				pla
+				cmp #32
+				bcc COUT.CTRL
+
+				ora INVFLG
+				ldx CH
+				ldy CV
+				jsr SetCharAtXY
+				bra FSOUT
+				
+COUT.CTRL		cmp #8
+				bne .2
+				ldx CH
+				beq .10
+				dec CH
+				bra .12
+				
+.10				ldy CV
+				bne .11
+				clc
+				rts
+				
+.11				lda #79
+				sta CH
+				dec CV	
+				
+.12				lda #$20
+				ora INVFLG
+				ldx CH
+				ldy CV
+				jmp SetCharAtXY
+				
+.2				cmp #12
+				beq HOME
+				
+.3				cmp #13
+				beq CROUT
+				
+				cmp #27					ESC
+				dec bEscMode
 				clc
 				rts
 *--------------------------------------
@@ -112,52 +166,22 @@ IRQ				clc
 *--------------------------------------
 *				PRIVATE
 *--------------------------------------
-COUT1			pha
-				jsr CUROFF
-				pla
-				cmp #32
-				bcs .80					regular char
-				
-				cmp #8
-				bne .2
-				ldx CH
-				beq .10
-				dec CH
-				bra .12
-				
-.10				ldy CV
-				bne .11
+RESET			lda #0
+				sta SCROLLTOP
+				lda #23
+				sta SCROLLBOT
 				rts
-				
-.11				lda #79
-				sta CH
-				dec CV	
-				
-.12				lda #$20
-				ora INVFLG
-				ldx CH
-				ldy CV
-				jsr SetCharAtXY
+*--------------------------------------
+RESETATTR		lda #$80
+				sta INVFLG
 				rts
-				
-.2				cmp #12
-				bne .3
-				jmp HOME
-				
-.3				cmp #13
-				beq CROUT
-				
-				rts
-				
-.80				ora INVFLG
-				ldx CH
-				ldy CV
-				jsr SetCharAtXY
+*--------------------------------------
 FSOUT			ldx CH
 				cpx #79
 				beq CROUT1
 				inc CH
-				rts
+				clc
+				rts				
 *--------------------------------------
 CROUT			jsr CLREOL
 *--------------------------------------
@@ -166,51 +190,7 @@ CROUT1			stz CH
 				cpy #23
 				beq SCROLL.UP
 				inc CV
-				rts
-*--------------------------------------
-SCROLL.UP		ldx #0
-				
-.1				lda BASEL,x
-				sta ZPBASL1
-				lda BASEH,x
-				sta ZPBASL1+1
-				inx
-				lda BASEL,x
-				sta ZPBASL2
-				lda BASEH,x
-				sta ZPBASL2+1
-				
-				ldy #39
-				sta SETWRITEAUX
-				sta SETREADAUX
-				
-.2				lda (ZPBASL2),y
-				sta (ZPBASL1),y 
-				dey
-				bpl .2
-
-				ldy #39
-				sta CLRWRITEAUX
-				sta CLRREADAUX
-				
-.3				lda (ZPBASL2),y
-				sta (ZPBASL1),y 
-				dey
-				bpl .3
-
-				cpx #23
-				bne .1
-*--------------------------------------
-CLREOL			ldx CH
-.1				phx
-				ldy CV
-				lda #$20
-				ora INVFLG
-				jsr SetCharAtXY
-				plx
-				inx
-				cpx #80
-				bne .1
+				clc
 				rts
 *--------------------------------------
 HOME			stz CH
@@ -219,9 +199,9 @@ HOME			stz CH
 				ldx #23
 				
 .1				lda BASEL,x
-				sta ZPBASL1
+				sta ZPBaseL1
 				lda BASEH,x
-				sta ZPBASL1+1
+				sta ZPBaseL1+1
 				
 				lda #' '
 				ora INVFLG
@@ -230,7 +210,7 @@ HOME			stz CH
 				sta SETREADAUX
 				
 				ldy #39
-.2				sta (ZPBASL1),y		
+.2				sta (ZPBaseL1),y		
 				dey
 				bpl .2
 				
@@ -238,13 +218,71 @@ HOME			stz CH
 				sta CLRREADAUX
 
 				ldy #39
-.3				sta (ZPBASL1),y		
+.3				sta (ZPBaseL1),y		
 				dey
 				bpl .3
 
 				dex
 				bpl .1
 				
+				clc
+				rts
+*--------------------------------------
+SCROLL.UP		ldx SCROLLTOP
+				
+.1				lda BASEL,x
+				sta ZPBaseL1
+				lda BASEH,x
+				sta ZPBaseL1+1
+				inx
+				lda BASEL,x
+				sta ZPBaseL2
+				lda BASEH,x
+				sta ZPBaseL2+1
+				
+				ldy #39
+				sta SETWRITEAUX
+				sta SETREADAUX
+				
+.2				lda (ZPBaseL2),y
+				sta (ZPBaseL1),y 
+				dey
+				bpl .2
+
+				ldy #39
+				sta CLRWRITEAUX
+				sta CLRREADAUX
+				
+.3				lda (ZPBaseL2),y
+				sta (ZPBaseL1),y 
+				dey
+				bpl .3
+
+				cpx SCROLLBOT
+				bne .1
+*--------------------------------------
+CLREOL			ldx CH
+				ldy #80
+				bra CLR
+				
+CLRLINE			ldx #0
+				ldy #80
+				bra CLR
+				
+CLRSOL			ldx #0
+				ldy CH	
+				
+CLR				sty ZPTmpByte
+.1				phx
+				lda #$20
+				ora INVFLG
+				ldy CV
+				jsr SetCharAtXY
+				plx
+				inx
+				cpx ZPTmpByte
+				bne .1
+				clc
 				rts
 *--------------------------------------
 CUROFF			lda CURON
@@ -264,9 +302,10 @@ CURBLNK1		lda CURON
 				ldy CV
 				jsr GetCharAtXY
 				sta CURCHAR
+				and #$80
 				ldx CH
 				ldy CV
-				lda #$20
+				eor #" "
 				jsr SetCharAtXY
 				bra CUREXIT
 				
@@ -280,7 +319,13 @@ CUREXIT			lda CURON
 				sta CURON
 CUREXIT.RTS		rts
 *--------------------------------------
-SetCharAtXY		pha
+SetCharAtXY		cmp #$40
+				bcc .10
+				cmp #$5F
+				bcs .10
+				and #$3F
+				
+.10				pha
 				txa
 				lsr
 
@@ -289,12 +334,12 @@ SetCharAtXY		pha
 				
 .1				clc
 				adc BASEL,y
-				sta ZPBASL1
+				sta ZPBaseL1
 				lda BASEH,y
-				sta ZPBASL1+1
+				sta ZPBaseL1+1
 
 				pla
-				sta (ZPBASL1)
+				sta (ZPBaseL1)
 				sta CLRWRITEAUX
 				rts	
 *--------------------------------------
@@ -306,13 +351,183 @@ GetCharAtXY		txa
 				
 .1				clc
 				adc BASEL,y
-				sta ZPBASL1
+				sta ZPBaseL1
 				lda BASEH,y
-				sta ZPBASL1+1
+				sta ZPBaseL1+1
 
-				lda (ZPBASL1)
+				lda (ZPBaseL1)
 				sta CLRREADAUX
 				rts	
+*--------------------------------------
+EscMode			bit bEscModeCSI
+				bmi EscModeCSI
+				cmp #'['
+				bne .1
+								
+				dec bEscModeCSI
+				stz EscSeq
+				clc
+				rts
+				
+.1				cmp #'7'				save cup & attr
+
+				cmp #'8'				restore cup & attr
+				
+				stz bEscMode
+				clc
+				rts
+				
+EscModeCSI		inc EscSeq
+				ldx EscSeq
+				sta EscSeq,x
+				cmp #64					End of Seq ?
+				bcs ExecEscSeq
+				cpx #ESCSEQ.MAXLEN		too long?
+				bne .1
+				stz bEscModeCSI
+				stz bEscMode
+.1				clc
+				rts
+*--------------------------------------
+ExecEscSeq		stz EscSeqParamCnt
+				stz EscSeqInNum
+				ldx #0					EscSeq Ptr
+				ldy #0					EsqSeqParam Ptr
+
+.1				inx
+				lda EscSeq,x
+				jsr IsDigit 
+				bcs .2
+				
+				dec EscSeqInNum
+				and #$0F
+				pha
+				lda EscSeqParam,y	    param=param*10	
+				asl
+				asl
+				clc
+				adc EscSeqParam,y
+				sta EscSeqParam,y
+				pla
+				clc
+				adc EscSeqParam,y
+				sta EscSeqParam,y
+				bra .1
+				
+.2				bit EscSeqInNum
+				bpl .3
+				
+				stz EscSeqInNum
+				iny
+				
+.3				lda EscSeq,x
+				cmp #';'
+				beq .1
+				
+				sty EscSeqParamCnt
+				stz bEscModeCSI
+				stz bEscMode
+				
+				ldy #0
+				ldx #0
+
+.4				iny
+				cmp EscSeqCmds,y
+				beq .5
+				inx
+				inx
+				cpy EscSeqCmds
+				bne .4
+				clc
+				rts
+				
+.5				jmp (J.EscSeq,x)
+*--------------------------------------
+IsDigit			cmp #'0'
+				bcc .9
+				cmp #'9'+1
+				rts					cc if ok, cs if not
+.9				sec
+				rts
+*--------------------------------------
+Esc.DispAttr	ldx EscSeqParamCnt
+				beq .8
+				
+.1				lda EscSeqParam-1,x
+				bne .2
+				jsr RESETATTR
+				bra .7
+				
+.2				cmp #7
+				bne .8
+				stz INVFLG
+				
+.7				dex
+				bne .1
+	
+.8				clc
+				rts
+*--------------------------------------
+Esc.Scroll		ldx EscSeqParamCnt
+				bne .1
+				
+				lda #0
+				ldy #23
+				bra .8
+				
+.1				cpx #2
+				bne .9
+				
+				lda EscSeqParam
+				dec
+				ldy EscSeqParam+1
+				dey
+				
+.8				sta SCROLLTOP
+				sty SCROLLBOT
+.9				clc
+				rts
+*--------------------------------------
+Esc.EraseLine	ldx EscSeqParamCnt
+
+				bne .1
+				jmp CLREOL
+				
+.1				lda EscSeqParam
+				cmp #1
+				bne .2
+				jmp CLRSOL
+
+.2				cmp #2
+				bne .9
+				jmp CLRLINE
+
+.9				clc
+				rts
+*--------------------------------------
+Esc.Home		ldx EscSeqParamCnt
+				bne .1
+				stz CH
+				stz CV
+				clc
+				rts
+				
+.1				lda EscSeqParam
+				dec
+				bmi .9
+				cmp #80
+				bcs .9
+				sta CH
+				
+				lda EscSeqParam+1
+				dec
+				bmi .9
+				cmp #24
+				bcs .9
+				sta CV
+				
+.9				clc
+				rts
 *--------------------------------------
 DRV.CS.END
 BASEL			.HS	00.80.00.80.00.80.00.80.28.A8.28.A8.28.A8.28.A8.50.D0.50.D0.50.D0.50.D0
@@ -320,8 +535,17 @@ BASEH			.HS	04.04.05.05.06.06.07.07.04.04.05.05.06.06.07.07.04.04.05.05.06.06.07
 CH				.BS 1
 CV				.BS 1
 INVFLG			.BS 1
+SCROLLTOP		.BS 1
+SCROLLBOT		.BS 1
 CURON			.BS 1
 CURCHAR			.BS 1
+bEscMode		.BS 1
+bEscModeCSI		.BS 1
+EscSeq			.BS ESCSEQ.MAXLEN+1
+EscSeqParamCnt	.BS 1
+EscSeqParam		.BS 4
+EscSeqInNum		.BS 1
+EscSeqCmds		>PSTRING "mrKH"
 DEVINFO			.DA #S.DEVINFO.TYPE.CHAR
 				.DA #80
 				.DA #24
