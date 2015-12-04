@@ -22,6 +22,7 @@ ASM.T.AM			.EQ 0
 ASM.T.R				.EQ 2
 ASM.T.O				.EQ 4
 *---------------------------------------
+SRC.DO.MAXDEPTH		.EQ 8
 SRC.IN.MAXDEPTH		.EQ 7
 SRC.GLABEL.MAXLEN	.EQ 32
 *---------------------------------------
@@ -47,6 +48,7 @@ ERR.INVALID.AM.4.OC	.EQ $A8
 ERR.RANGE			.EQ $A9
 ERR.UNDEF.SYMBOL	.EQ $AA
 ERR.SYMBOL.REDEFINE	.EQ $AB
+ERR.TOO.MANY.DO		.EQ $AC
 ERR.MISSING.EXP		.EQ $B0
 ERR.EXP.SYN.ERROR	.EQ $B1
 ERR.INVALID.MACRO.DEF	.EQ $E0
@@ -74,7 +76,6 @@ L.MSG.HELP1			.DA MSG.HELP1
 L.MSG.HELP2			.DA MSG.HELP2
 L.MSG.SRCLINE		.DA MSG.SRCLINE
 L.MSG.ERROR			.DA MSG.ERROR
-L.MSG.DEBUG			.DA MSG.DEBUG
 L.MSG.SYMBOLS		.DA MSG.SYMBOLS
 L.MSG.GSYMBOL		.DA MSG.GSYMBOL
 L.MSG.LSYMBOL		.DA MSG.LSYMBOL
@@ -138,6 +139,17 @@ J.LI				.DA DIR.LI.CON
 					.DA DIR.LI.XOFF
 					.DA DIR.LI.ON
 					.DA DIR.LI.OFF
+J.EXP.OP			.DA EXP.Compute.EOR ^!|&<=>+-*/
+					.DA EXP.Compute.ORA
+					.DA EXP.Compute.ORA
+					.DA EXP.Compute.AND
+					.DA EXP.Compute.LOW
+					.DA EXP.Compute.EQU
+					.DA EXP.Compute.GRT
+					.DA EXP.Compute.ADD
+					.DA EXP.Compute.SUB
+					.DA EXP.Compute.MUL
+					.DA EXP.Compute.DIV	
 					.DA 0
 *---------------------------------------
 CS.INIT				>LDYA L.LIBSTR
@@ -146,73 +158,35 @@ CS.INIT				>LDYA L.LIBSTR
 					
 					ldy #S.PS.hARGS
 					lda (pPs),y
-					bne .1
+					beq .99
 					
-					>PUSHW L.MSG.HELP1
-					>LIBCALL hLIBSTR,LIBSTR.PRINTF
-					>PUSHW L.MSG.HELP2
-					>LIBCALL hLIBSTR,LIBSTR.PRINTF
-					lda #ERR.INV.ARGS
-					sec
-					rts
-
-.1					>SYSCALL SYS.PStrCpyA
+					>SYSCALL SYS.PStrCpyA
 					ldy #SRC.hFILENAME
-					sta (pData),y			Store filename
+					sta (pData),y
 					
-					ldy #S.PS.hCMD
-					lda (pPS),y
-					>SYSCALL SYS.GetMemPtrA
-					bcs .99
-					>STYA ZPPtr1
-					lda (ZPPtr1)
-					tay
-					adc #3					len of ".T."
-					sta ASM.T.FILENAMELEN
-					adc #4					len of "6502"
-					sta ASM.T.FILENAME
-					tax
-					
-.2					lda (ZPPtr1),y
-					sta ASM.T.FILENAME,y
-					dey
-					bne .2
-					
-					ldy #6
 
-.3					lda ASM.T.DEFAULT,y
-					sta ASM.T.FILENAME,x
-					dex
-					dey
-					bpl .3
-					
-					jsr LOAD.ASM.T
-					bcs .99
+					jsr FIO.Init
+					bcs .9
 					
 					jsr SYM.Init
-					bcs .99
+					bcs .9
 					
-					lda #$80
-					ldy #ASM.LI.ON
-					sta (pData),y
-
-					lda #$00
-					ldy #ASM.LI.CON
-					sta (pData),y
-					ldy #ASM.LI.XON
-					sta (pData),y
+					jsr DIR.Init
 					
 					lda (pPs)
-					ora #S.PS.F.EVENT		Now accept events
+					ora #S.PS.F.EVENT
 					sta (pPs)
 
 					clc
 					rts
 					
-.98					lda #ERR.INV.ARGS
-
+.99					>PUSHW L.MSG.HELP1
+					>LIBCALL hLIBSTR,LIBSTR.PRINTF
+					>PUSHW L.MSG.HELP2
+					>LIBCALL hLIBSTR,LIBSTR.PRINTF
+					lda #ERR.INV.ARGS
 					sec
-.99					rts
+.9					rts
 *--------------------------------------
 CS.RUN				ldy #bCANCEL
 					lda (pData),y
@@ -455,9 +429,8 @@ MSG.PASS			>CSTRING "Pass:#%d\n"
 MSG.SRC.FILE		>CSTRING "Reading SRC File:%S\n"
 MSG.OBJ.FILE		>CSTRING "Writing OBJ File:%S, Type=%02x\n"
 MSG.T.FILE			>CSTRING "Loading CPU File:%S\n"
-MSG.SRCLINE			>CSTRING "%05D-%s\n"
+MSG.SRCLINE			>CSTRING "%H:        %05D-%s\n"
 MSG.ERROR			>CSTRING "%05D-Error:$%h\n"
-MSG.DEBUG			>CSTRING "DEBUG:%h:%S:%s\n"
 MSG.SYMBOLS			>CSTRING "Symbol Table:\n"
 MSG.GSYMBOL			>CSTRING "$%H%H:%S"
 MSG.LSYMBOL			>CSTRING " .%d:+$%h"
@@ -514,25 +487,26 @@ bCANCEL				.BS 1
 SRC.hFILENAME		.BS 1
 
 SRC.COUNT			.BS 1
-SRC.hREFNUMS		.BS SRC.IN.MAXDEPTH	Store ref_num of opened files (Main, .INs & .INBs)
-SRC.hBUFFERS		.BS SRC.IN.MAXDEPTH	Store hMem to allocated buffers
-SRC.hFILETYPES		.BS SRC.IN.MAXDEPTH	Store file type of opened SRC files
+SRC.hREFNUMS		.BS SRC.IN.MAXDEPTH
+SRC.hBUFFERS		.BS SRC.IN.MAXDEPTH
+SRC.hFILETYPES		.BS SRC.IN.MAXDEPTH
 
 DST.hFILENAME		.BS 1
 DST.hREFNUM			.BS 1
 DST.hBUFFER			.BS 1
 DST.hFILETYPE		.BS 1
 
-ASM.T.hMem			.BS 1				handle to ASM.T.xxxxx
+ASM.T.hMem			.BS 1
 
 SYM.hCurSBlock		.BS 1
 SYM.iCurSBlock		.BS	1
 SYM.LastSBlock		.BS 1
 SYM.hSBlocks		.BS SYM.SBLOCK.MAX
 
-SYM.hCurGBlock		.BS 1
+SYM.pCurGBlock		.BS 1
 SYM.iCurGBlock		.BS	1
-SYM.LastGBlock		.BS 1
+SYM.pLastGBlock		.BS 1
+SYM.iLastGBlock		.BS 1
 SYM.hGBlocks		.BS SYM.GBLOCK.MAX
 
 SYM.hCurPBlock		.BS 1
@@ -547,15 +521,21 @@ SYM.hMBlocks		.BS SYM.MBLOCK.MAX
 
 SYM.DumpCount		.BS 1
 
+DIR.Counter			.BS 2
+DIR.Byte			.BS 1
+
 ASM.PASS			.BS 1
 ASM.MACRO.ON		.BS 1
+ASM.DO.Count		.BS 1
+ASM.DOELSE.Flag		.BS SRC.DO.MAXDEPTH
+ASM.DO.ON			.BS 1
 ASM.PH.ON			.BS 1
 ASM.LI.ON			.BS 1
 ASM.LI.CON			.BS 1
 ASM.LI.XON			.BS 1
-ASM.PC				.BS 4				32Bits PC
-ASM.PC.PH			.BS 4				32Bits PC saved for PH directive
-ASM.PC.GLABEL		.BS 4				32Bits PC for last Label (for local labels)
+ASM.PC				.BS 4
+ASM.PC.PH			.BS 4
+ASM.PC.GLABEL		.BS 4
 ASM.LOCAL.OFFSET	.BS 1				Store local offset from last Global Symbol for local (.xx)
 ASM.LOCAL.INVALID	.BS 1				If not in global or offset out of range this flag is set
 ASM.SYM.ID			.BS 2				For reference when a local label is parsed

@@ -32,10 +32,10 @@ AUTO 6
 * Macro Record: ( bytes)
 *---------------------------------------
 SYM.Init			lda #0
-					ldy #SYM.iCurGBlock
+					ldy #SYM.iLastGBlock
 					sta (pData),y
 					dec
-					ldy #SYM.hCurGBlock
+					ldy #SYM.pLastGBlock
 					sta (pData),y
 					
 					jsr SYM.NewGBlock
@@ -44,7 +44,7 @@ SYM.Init			lda #0
 					clc
 .9					rts
 *---------------------------------------
-SYM.Quit			ldy #SYM.LastGBlock
+SYM.Quit			ldy #SYM.pLastGBlock
 					lda (pData),y
 					bmi .8
 					
@@ -53,7 +53,7 @@ SYM.Quit			ldy #SYM.LastGBlock
 					tay
 					lda (pData),y
 					>SYSCALL SYS.FreeMemA
-					ldy #SYM.LastGBlock
+					ldy #SYM.pLastGBlock
 					lda (pData),y
 					dec
 					sta (pData),y
@@ -69,7 +69,7 @@ SYM.Dump			>PUSHW L.MSG.SYMBOLS
 					lda #20
 					sta (pData),y
 					
-					jsr SYM.ResetGBlock
+					jsr SYM.ResetGBlockPtr
 
 .1					jsr SYM.GetByteGBlock	Get Flags
 					sta SRC.GLabel.Flags
@@ -81,11 +81,8 @@ SYM.Dump			>PUSHW L.MSG.SYMBOLS
 .2					jsr SYM.GetByteGBlock
 					sta SRC.GLabel.Value,x
 					inx
-					cpx #4
-					bne .2
-					
-					jsr SYM.GetByteGBlock
-					sta SRC.GLabel.Len
+					cpx #5
+					bne .2					Get Value+Len
 					
 					ldx #0
 .3					jsr SYM.GetByteGBlock
@@ -107,6 +104,7 @@ SYM.Dump			>PUSHW L.MSG.SYMBOLS
 					
 					>PUSHW L.MSG.GSYMBOL
 					>LIBCALL hLIBSTR,LIBSTR.PRINTF
+
 					bcs .9
 					
 .4					jsr SYM.GetByteGBlock
@@ -120,6 +118,7 @@ SYM.Dump			>PUSHW L.MSG.SYMBOLS
 					>PUSHW L.MSG.LSYMBOL
 					>LIBCALL hLIBSTR,LIBSTR.PRINTF
 					bcc .4
+					rts
 					
 .5					lda #13
 					>SYSCALL SYS.CoutA
@@ -128,11 +127,38 @@ SYM.Dump			>PUSHW L.MSG.SYMBOLS
 					lda (pData),y
 					dec
 					bne .6
-					>DEBUG					
+				
 					lda #20
 .6					sta (pData),y
 					jmp .1
 .9					rts
+*---------------------------------------
+SYM.DumpGSymbol.DELETE		>SYSCALL SYS.CoutA
+					lda ZPSymbolPtr
+					clc
+					adc #5
+					tay
+					lda ZPSymbolPtr+1
+					adc #0
+					>PUSHYA
+					
+					ldy #2
+					lda (ZPSymbolPtr),y
+					>PUSHA
+					dey
+					lda (ZPSymbolPtr),y
+					>PUSHA
+					ldy #4
+					lda (ZPSymbolPtr),y
+					>PUSHA
+					dey
+					lda (ZPSymbolPtr),y
+					>PUSHA
+					
+					>PUSHW L.MSG.GSYMBOL
+					>LIBCALL hLIBSTR,LIBSTR.PRINTF
+					
+					rts
 *---------------------------------------
 SYM.AddPrivate		
 					clc
@@ -154,11 +180,13 @@ SYM.UpdateGlobal
 					clc
 					rts
 *---------------------------------------
-SYM.FindLocal		
+SYM.SearchLocal		
 					clc
 					rts
 *---------------------------------------
-SYM.FindGlobal		jsr SYM.ResetGBlock
+SYM.SearchGlobal	>STYA ZPSymbolPtr
+
+					jsr SYM.ResetGBlockPtr
 
 .1					jsr SYM.GetByteGBlock	Get Flags
 					beq .9
@@ -169,12 +197,9 @@ SYM.FindGlobal		jsr SYM.ResetGBlock
 .2					jsr SYM.GetByteGBlock
 					sta SRC.FLabel.Value,x
 					inx
-					cpx #4
-					bne .2
-					
-					jsr SYM.GetByteGBlock
-					sta SRC.FLabel.Len
-					
+					cpx #5
+					bne .2					Get Value+Len
+										
 					ldx #0
 .3					jsr SYM.GetByteGBlock
 					sta SRC.FLabel.Name,x
@@ -182,18 +207,24 @@ SYM.FindGlobal		jsr SYM.ResetGBlock
 					cpx SRC.FLabel.Len
 					bne .3
 
-					cpx SRC.ELabel.Len
+					txa
+					ldy #5
+					cmp (ZPSymbolPtr),y
 					bne .5
 
-.4					lda SRC.FLabel.Name-1,x
-					cmp SRC.ELabel.Name-1,x
+					ldx #0
+.4					inx
+					iny
+					lda SRC.FLabel.Name-1,x
+					cmp (ZPSymbolPtr),y
 					bne .5
-					dex
+					cpx SRC.FLabel.Len
 					bne .4
+					
 					clc
 					rts
 					
-.5					jsr SYM.GetByteGBlock
+.5					jsr SYM.GetByteGBlock	skip Locals
 					beq .1
 					jsr SYM.GetByteGBlock
 					bra .5
@@ -201,22 +232,13 @@ SYM.FindGlobal		jsr SYM.ResetGBlock
 .9					sec
 					rts
 *---------------------------------------
-SYM.AddLToGBlock	jsr SYM.GetLastGBlock
-
-					lda SRC.LLabel.ID
-					jsr SYM.AddByteGBlock
-					bcs .9
-					
-					lda SRC.LLabel.Offset
-					jmp SYM.AddByteGBlock
-.9					rts					
-*---------------------------------------
 SYM.AddGToGBlockYA	>STYA ZPSymbolPtr
-					jsr SYM.GetLastGBlock
+
+					jsr SYM.SetGBlockPtr
 					
-					ldy #SYM.hCurGBlock		1st Gblock to add?
+					ldy #SYM.pLastGBlock		1st Gblock to add?
 					lda (pData),y
-					ldy #SYM.iCurGBlock
+					ldy #SYM.iLastGBlock
 					ora (pData),y
 					beq .10					yes, skip closing previous one
 					
@@ -238,22 +260,31 @@ SYM.AddGToGBlockYA	>STYA ZPSymbolPtr
 					jsr SYM.AddByteGBlock
 					bcs .9
 					
-.2					lda (ZPSymbolPtr),y					
+.2					iny
+					lda (ZPSymbolPtr),y					
 					jsr SYM.AddByteGBlock
 					bcs .9
-					iny
 					dex
 					bne .2
 
 					clc
 .9					rts
 *---------------------------------------
-SYM.ResetGBlock		ldy #SYM.hGBlocks
-					lda (pData),y
-					>SYSCALL SYS.GetMemPtrA
-					>STYA ZPBlockPtr
+SYM.AddLToGBlock	jsr SYM.SetGBlockPtr
+
+					lda SRC.LLabel.ID
+					jsr SYM.AddByteGBlock
+					bcs .9
+					
+					lda SRC.LLabel.Offset
+					jmp SYM.AddByteGBlock
+.9					rts					
+*---------------------------------------
+SYM.ResetGBlockPtr	lda #0
+					jsr SYM.GetGBlockA
+					
 					lda #0
-					ldy #SYM.hCurGBlock
+					ldy #SYM.pCurGBlock
 					sta (pData),y
 					ldy #SYM.iCurGBlock
 					sta (pData),y
@@ -271,7 +302,7 @@ SYM.GetByteGBlock	ldy #SYM.iCurGBlock
 					sta (pData),y
 					bne .1
 						
-					ldy #SYM.hCurGBlock					
+					ldy #SYM.pCurGBlock					
 					lda (pData),y
 					inc
 					sta (pData),y
@@ -281,8 +312,9 @@ SYM.GetByteGBlock	ldy #SYM.iCurGBlock
 					clc
 					rts
 *---------------------------------------
-SYM.GetLastGBlock	ldy #SYM.LastGBlock
+SYM.SetGBlockPtr	ldy #SYM.pLastGBlock
 					lda (pData),y
+					
 SYM.GetGBlockA		clc
 					adc #SYM.hGBlocks
 					tay
@@ -296,7 +328,7 @@ SYM.GetGBlockA		clc
 SYM.AddByteGBlock	phx
 					phy
 					pha
-					ldy #SYM.iCurGBlock
+					ldy #SYM.iLastGBlock
 					lda (pData),y
 					tay
 					
@@ -307,7 +339,7 @@ SYM.AddByteGBlock	phx
 					inc
 					beq SYM.NewGBlock2
 					
-					ldy #SYM.iCurGBlock
+					ldy #SYM.iLastGBlock
 					sta (pData),y
 					ply
 					plx
@@ -323,7 +355,7 @@ SYM.NewGBlock2		>PUSHWI 256
 					bcs .9
 					>STYA ZPBlockPtr
 					
-					ldy #SYM.LastGBlock
+					ldy #SYM.pLastGBlock
 					lda (pData),y
 					inc
 					sta (pData),y
@@ -336,7 +368,7 @@ SYM.NewGBlock2		>PUSHWI 256
 					sta (pData),y
 					
 					lda #0
-					ldy #SYM.iCurGBlock
+					ldy #SYM.iLastGBlock
 					sta (pData),y
 
 					clc
