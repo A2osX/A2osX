@@ -6,10 +6,13 @@ AUTO 6
 				.LIST OFF	
 				.OP	65C02
 				.OR $2000
-				.TF /A2OSX.BOOT/DRV/SSC.DRV
+				.TF /A2OSX.BOOT/DRV/SSC.I.DRV
 *--------------------------------------
 				.INB INC/MACROS.I
 				.INB INC/A2OSX.I
+*--------------------------------------
+BUF.SIZE		.EQ $20
+BUF.MASK		.EQ $1F
 *--------------------------------------
 ZPTmpPtr1		.EQ ZPDRV
 *--------------------------------------
@@ -29,17 +32,42 @@ SSC.REG.STATUS.OE	.EQ %00000100
 SSC.REG.STATUS.FE	.EQ %00000010
 SSC.REG.STATUS.PE	.EQ %00000001
 SSC.REG.CMD		.EQ $C08A				W
+SSC.REG.CMD.NOP		.EQ %00000000
 SSC.REG.CMD.ODDP	.EQ %00100000
 SSC.REG.CMD.EVENP	.EQ %01100000
 SSC.REG.CMD.MARKP	.EQ %10100000
 SSC.REG.CMD.SPACEP	.EQ %11100000
 SSC.REG.CMD.ECHO	.EQ %00010000
-SSC.REG.CMD.TENOIRQ		.EQ %00001000
-SSC.REG.CMD.TEIRQ	.EQ %00000100
 SSC.REG.CMD.TBRK	.EQ %00001100
+SSC.REG.CMD.TE		.EQ %00001000
+SSC.REG.CMD.TEIRQ	.EQ %00000100
 SSC.REG.CMD.RIRQDIS	.EQ %00000010
 SSC.REG.CMD.DTR		.EQ %00000001
 SSC.REG.CTL		.EQ $C08B				W
+SSC.REG.CTL.1S		.EQ %00000000
+SSC.REG.CTL.2S		.EQ %10000000
+SSC.REG.CTL.8D		.EQ %00000000
+SSC.REG.CTL.7D		.EQ %00100000
+SSC.REG.CTL.6D		.EQ %01000000
+SSC.REG.CTL.5D		.EQ %01100000
+SSC.REG.CTL.CEXT	.EQ %00000000
+SSC.REG.CTL.CINT	.EQ %00010000
+SSC.REG.CTL.B16EXT	.EQ %00000000
+SSC.REG.CTL.B50		.EQ %00000001
+SSC.REG.CTL.B75		.EQ %00000010
+SSC.REG.CTL.B110	.EQ %00000011
+SSC.REG.CTL.B135	.EQ %00000100
+SSC.REG.CTL.B150	.EQ %00000101
+SSC.REG.CTL.B300	.EQ %00000110
+SSC.REG.CTL.B600	.EQ %00000111
+SSC.REG.CTL.B1200	.EQ %00001000
+SSC.REG.CTL.B1800	.EQ %00001001
+SSC.REG.CTL.B2400	.EQ %00001010
+SSC.REG.CTL.B3600	.EQ %00001011
+SSC.REG.CTL.B4800	.EQ %00001100
+SSC.REG.CTL.B7200	.EQ %00001101
+SSC.REG.CTL.B9600	.EQ %00001110
+SSC.REG.CTL.B19200	.EQ %00001111
 *--------------------------------------
 *			File Header (16 Bytes)
 *--------------------------------------
@@ -92,7 +120,7 @@ Dev.Detect		sta hArgs
 				rts	
 
 .4				lda ZPTmpPtr1+1
-				sta DEVSLOTCn
+*				sta DEVSLOTCn
 				and #$0F
 				sta DEVSLOT0n
 				ora #$30
@@ -117,7 +145,7 @@ CS.END
 DEVSIG.Offset	.HS 05070B0C
 DEVSIG.Value	.HS 38180131
 DEVSIG.Length	.EQ DEVSIG.Value-DEVSIG.Offset
-MSG.DETECT		>PSTRING "Apple SSC (Super Serial Card,//c Serial Port) Driver.\n"
+MSG.DETECT		>PSTRING "Apple SSC (Super Serial Card,//c Serial Port) Driver (IRQ Enabled).\n"
 MSG.DETECT.OK	>PSTRING "SSC Installed As Device : "
 MSG.DETECT.KO	>PSTRING "No SSC Found.\n"
 hArgs			.BS 1
@@ -126,7 +154,7 @@ hArgs			.BS 1
 *--------------------------------------
 DEV.HEADER		cld
 				jmp (DRV.CS.START,x)
-				.DA #S.DEV.F.EVENT+S.DEV.F.COUT+S.DEV.F.CHAR
+				.DA #S.DEV.F.IRQ+S.DEV.F.EVENT+S.DEV.F.COUT+S.DEV.F.CHAR
 DEV.HEADER.NAME	>PSTRING "COM1"			NAME
 				.HS 00.00
 				.HS 00.00.00.00
@@ -144,31 +172,37 @@ L.DEVINFO		.DA DEVINFO
 *--------------------------------------
 OPEN			ldx DEVSLOTn0
 				
-				php
-				sei
 				stz SSC.REG.RESET,x 
-				
-				lda #$1E
+				lda #SSC.REG.CTL.CINT+SSC.REG.CTL.B9600
 				sta SSC.REG.CTL,x
 				
-				ldx DEVSLOTn0
-				lda #SSC.REG.CMD.TENOIRQ+SSC.REG.CMD.RIRQDIS
+				stz INBUF.PTR
+				stz INBUF.CNT
+				stz OUTBUF.PTR
+				stz OUTBUF.CNT
+				stz IDX
+				
+				php
+				sei
+				lda #SSC.REG.CMD.TEIRQ+SSC.REG.CMD.DTR
 				sta SSC.REG.CMD,x
 				
 				lda SSC.REG.STATUS,x	clear any IRQ pending
-				bmi *
+				lda SSC.REG.DATA,x		discard any garbage byte
+
 				plp
+
 				clc
 				rts
 *--------------------------------------
-GETEVENT		ldx DEVSLOTn0
-				lda SSC.REG.STATUS,x
-				bmi *
-
-				and #SSC.REG.STATUS.RDRF	incoming char?
-				beq	.9
+GETEVENT		php
+				sei
+				lda INBUF.CNT
+				beq .9
 				
-				lda SSC.REG.DATA,x
+				ldx INBUF.PTR
+				lda INBUF,x
+				
 				ldy #S.EVT.DATA
 				sta (pEvent),y
 
@@ -179,31 +213,66 @@ GETEVENT		ldx DEVSLOTn0
 				lda #S.EVT.F.KEY
 				sta (pEvent)
 				
+				inx
+				cpx #BUF.SIZE
+				bne .1
+				ldx #0
+				
+.1				stx INBUF.PTR		
+				dec INBUF.CNT
+				
+				plp
 				clc
 				rts
 				
-.9				lda #0
+.9				plp
+				lda #0
 				sec
 				rts
 *--------------------------------------
-COUT			pha
-				
+COUT			php
+				sei
+*				tay						save char in Y
+
 				ldx DEVSLOTn0
-.1				lda SSC.REG.STATUS,x
-				bmi *
-				and #SSC.REG.STATUS.DCD+SSC.REG.STATUS.DSR
-				beq .9
-								
-				and #SSC.REG.STATUS.TDRE	Outgoing char?
-				bne .1
+*				lda SSC.REG.STATUS,x
+				bit #SSC.REG.STATUS.DCD+SSC.REG.STATUS.DSR
+*				beq .9
 				
-				pla
+*				ldx OUTBUF.CNT			Buffer Empty?
+*				bne .10
+
+*				bit #SSC.REG.STATUS.TDRE Register Empty ?
+*				beq .10					not empty, queue char
+				
+*				tya						yes, write directly to ACIA
+				ldx DEVSLOTn0
 				sta SSC.REG.DATA,x
 				
+				plp
+				clc
+				rts
+	
+.10				cpx #BUF.SIZE
+				beq .9					Buffer Full!!
+
+				ldx OUTBUF.PTR
+				tya
+				sta OUTBUF,x
+				
+				inx
+				cpx #BUF.SIZE
+				bne .1
+				ldx #0
+				
+.1				stx OUTBUF.PTR		
+				inc OUTBUF.CNT
+				
+				plp
 				clc
 				rts
 				
-.9				pla
+.9				plp
 				sec
 				rts
 *--------------------------------------
@@ -216,16 +285,88 @@ CLOSE			php
 				rts
 *--------------------------------------
 GETINFO			>LDYA L.DEVINFO
-IRQ				clc
+				clc
+				rts
+*--------------------------------------
+* IRQ Handler
+* on exit, CC if handled
+*--------------------------------------
+IRQ				ldx DEVSLOTn0
+				lda SSC.REG.STATUS,x	IRQ from this device ?
+*				bpl .9					no, exit
+
+				pha						save status ...
+				and #SSC.REG.STATUS.RDRF	incoming char?
+				beq .1					
+				
+				ldy SSC.REG.DATA,x		read data to clear IRQ
+
+				phx
+				ldx IDX
+				tya
+				cmp #$20
+				bcc .10
+				ora #$80
+.10				sta $402,x
+				inx
+				txa
+				and #$1F
+				sta IDX
+				plx
+
+				lda INBUF.CNT
+				cmp #BUF.SIZE
+				beq .1					buffer full, discard
+				
+				phy
+				clc
+				adc INBUF.PTR
+				and #BUF.MASK
+				tay
+				pla						get back data
+				sta INBUF,y
+				inc INBUF.CNT
+				
+.1				pla						get back status
+				and #SSC.REG.STATUS.TDRE
+				beq .8
+
+				lda OUTBUF.CNT			something to transmit ?
+				beq .8					no, exit
+				
+				clc
+				adc OUTBUF.PTR
+				and #BUF.MASK
+				tay
+	
+				lda OUTBUF,Y
+				sta SSC.REG.DATA,x
+				
+				ora #$80
+				sta $401
+				
+				dec INBUF.CNT
+				
+.8				clc
+				rts
+				
+.9				sec
 				rts
 *--------------------------------------
 DRV.CS.END
+IDX				.BS 1
 DEVSLOT0n		.BS 1
-DEVSLOTCn		.BS 1
+*DEVSLOTCn		.BS 1
 DEVSLOTn0		.BS 1
+INBUF.PTR		.BS 1
+INBUF.CNT		.BS 1
+OUTBUF.PTR		.BS 1
+OUTBUF.CNT		.BS 1
+INBUF			.BS BUF.SIZE
+OUTBUF			.BS BUF.SIZE
 DEVINFO			.DA #S.DEVINFO.TYPE.CHAR
 				.DA #0
 *--------------------------------------
 MAN
-SAVE DRV/SSC.DRV.S
+SAVE DRV/SSC.DRV.I.S
 ASM
