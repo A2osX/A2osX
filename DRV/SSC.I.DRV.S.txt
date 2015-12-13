@@ -54,8 +54,8 @@ SSC.REG.CTL.8D		.EQ %00000000
 SSC.REG.CTL.7D		.EQ %00100000
 SSC.REG.CTL.6D		.EQ %01000000
 SSC.REG.CTL.5D		.EQ %01100000
-SSC.REG.CTL.CEXT	.EQ %00000000
-SSC.REG.CTL.CINT	.EQ %00010000
+SSC.REG.CTL.CLKEXT	.EQ %00000000
+SSC.REG.CTL.CLKINT	.EQ %00010000
 SSC.REG.CTL.B16EXT	.EQ %00000000
 SSC.REG.CTL.B50		.EQ %00000001
 SSC.REG.CTL.B75		.EQ %00000010
@@ -176,34 +176,34 @@ DRV.CS.START	.DA OPEN
 L.DEVINFO		.DA DEVINFO
 				.DA 0					end or relocation
 *--------------------------------------
-OPEN			ldx DEVSLOTn0
+OPEN			php
+				sei
+				ldx DEVSLOTn0
 				
 				stz SSC.REG.RESET,x 
-				lda #SSC.REG.CTL.CINT+SSC.REG.CTL.B9600
-				sta SSC.REG.CTL,x
 				
 				stz INBUF.PTR
 				stz INBUF.CNT
 				stz OUTBUF.PTR
 				stz OUTBUF.CNT
-				stz IDX
 				
-				php
-				sei
-				lda #SSC.REG.CMD.TEIRQ+SSC.REG.CMD.DTR
+				lda #SSC.REG.CTL.CLKINT+SSC.REG.CTL.B9600
+				sta SSC.REG.CTL,x
+				
+				lda #SSC.REG.CMD.TE+SSC.REG.CMD.DTR
 				sta SSC.REG.CMD,x
 				
-				lda SSC.REG.STATUS,x	clear any IRQ pending
 				lda SSC.REG.DATA,x		discard any garbage byte
-
+				lda SSC.REG.STATUS,x	clear any IRQ pending
+				bmi *
 				plp
-
 				clc
 				rts
 *--------------------------------------
 GETEVENT		php
 				sei
 				lda INBUF.CNT
+				
 				beq .9
 				
 				ldx INBUF.PTR
@@ -219,12 +219,10 @@ GETEVENT		php
 				lda #S.EVT.F.KEY
 				sta (pEvent)
 				
-				inx
-				cpx #BUF.SIZE
-				bne .1
-				ldx #0
-				
-.1				stx INBUF.PTR		
+				txa
+				inc
+				and #BUF.MASK
+				sta INBUF.PTR
 				dec INBUF.CNT
 				
 				plp
@@ -240,20 +238,20 @@ COUT			php
 				sei
 				tay						save char in Y
 
-*				ldx DEVSLOTn0
-*				lda SSC.REG.STATUS,x
-*				bit #SSC.REG.STATUS.DCD+SSC.REG.STATUS.DSR
-*				beq .9
+				ldx DEVSLOTn0
+				lda SSC.REG.STATUS,x
+				bit #SSC.REG.STATUS.DCD+SSC.REG.STATUS.DSR		true when 0
+				bne .9
 				
 				ldx OUTBUF.CNT			Buffer Empty?
-				bne .10
+				bne .10					not empty, queue char
 
-				bit #SSC.REG.STATUS.TDRE Register Empty ?
+				and #SSC.REG.STATUS.TDRE Register Empty ?
 				beq .10					not empty, queue char
 				
 				tya						yes, write directly to ACIA
-				ldx DEVSLOTn0
-				sta SSC.REG.DATA,x
+				ldx DEV.DATA.BFFF
+				sta $BFFF,x
 				
 				plp
 				clc
@@ -262,18 +260,20 @@ COUT			php
 .10				cpx #BUF.SIZE
 				beq .9					Buffer Full!!
 
-				ldx OUTBUF.PTR
+				lda OUTBUF.PTR
+				clc
+				adc OUTBUF.CNT
+				and #BUF.MASK
+				tax
+	
 				tya
 				sta OUTBUF,x
 				
-				inx
-				cpx #BUF.SIZE
-				bne .1
-				ldx #0
-				
-.1				stx OUTBUF.PTR		
 				inc OUTBUF.CNT
 				
+				ldx DEVSLOTn0
+				lda #SSC.REG.CMD.TEIRQ+SSC.REG.CMD.DTR
+				sta SSC.REG.CMD,x
 				plp
 				clc
 				rts
@@ -299,61 +299,59 @@ GETINFO			>LDYA L.DEVINFO
 *--------------------------------------
 IRQ				ldx DEVSLOTn0
 				lda SSC.REG.STATUS,x	IRQ from this device ?
-*				bpl .9					no, exit
+				bpl .9					no, exit
 
-				pha						save status ...
-				and #SSC.REG.STATUS.RDRF	incoming char?
+				bit #SSC.REG.STATUS.RDRF	incoming char?
 				beq .1					
-				
-				ldy SSC.REG.DATA,x		read data to clear IRQ
 
-				phx
-				ldx IDX
-				tya
-				cmp #$20
-				bcc .10
-				ora #$80
-.10				sta $402,x
-				inx
-				txa
-				and #$1F
-				sta IDX
-				plx
+*------------ IRQ In
+
+				ldy SSC.REG.DATA,x		read data to clear IRQ
 
 				lda INBUF.CNT
 				cmp #BUF.SIZE
-				beq .1					buffer full, discard
+				beq .8					buffer full, discard
 				
-				phy
 				clc
 				adc INBUF.PTR
 				and #BUF.MASK
-				tay
-				pla						get back data
-				sta INBUF,y
+				tax
+				tya						get back data
+				sta INBUF,x
 				inc INBUF.CNT
+				clc
+				rts
 				
-.1				pla						get back status
-				and #SSC.REG.STATUS.TDRE
-				beq .8
+*------------ IRQ Out
+
+.1				bit #SSC.REG.STATUS.TDRE
+				beq .2					no transmit, no recieve, CTS changed!
 
 				lda OUTBUF.CNT			something to transmit ?
-				beq .8					no, exit
+				beq .11					no, disable IRQ and exit
 				
-				clc
-				adc OUTBUF.PTR
+				ldx OUTBUF.PTR
+				lda OUTBUF,x
+				ldy DEV.DATA.BFFF
+				sta $BFFF,y
+				
+				dec OUTBUF.CNT
+				txa						get back OUTBUF.PTR
+				inc
 				and #BUF.MASK
-				tay
-	
-				ldx DEV.DATA.BFFF
-				lda OUTBUF,Y
-				sta $BFFF,x
+				sta OUTBUF.PTR
+				clc
+				rts
 				
-				ora #$80
-				sta $401
-				
-				dec INBUF.CNT
-				
+.11				lda #SSC.REG.CMD.TE+SSC.REG.CMD.DTR
+				sta SSC.REG.CMD,x
+				clc
+				rts
+
+*------------ IRQ CTS High
+
+.2				
+
 .8				clc
 				rts
 				
@@ -361,7 +359,6 @@ IRQ				ldx DEVSLOTn0
 				rts
 *--------------------------------------
 DRV.CS.END
-IDX				.BS 1
 DEVSLOT0n		.BS 1
 *DEVSLOTCn		.BS 1
 DEV.DATA.BFFF	.BS 1
