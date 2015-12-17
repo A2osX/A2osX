@@ -5,6 +5,66 @@ INC 1
 AUTO 6
 					.LIST OFF
 *---------------------------------------
+SRC.PrintLine		ldy #ASM.MACRO.ON
+					lda (pData),y
+					bpl .1
+					
+					ldy #ASM.LI.CON
+					lda (pData),y
+					bpl .9
+					bmi .8
+					
+.1					ldy #ASM.LI.ON
+					lda (pData),y
+					bpl .9
+					
+.8					>PUSHWI TmpBuffer256
+					>PUSHW SRC.LINENUM
+					ldy #ASM.PC+1
+					>PUSHB (pData),y
+					dey
+					>PUSHB (pData),y
+					>PUSHW L.MSG.SRCLINE
+					>LIBCALL hLIBSTR,LIBSTR.PRINTF
+.9					rts
+*---------------------------------------
+SRC.PrintLineErr	ldx #0
+.1					lda TmpBuffer256,x
+					beq .2
+					phx
+					>SYSCALL SYS.CoutA
+					plx
+					inx
+					bcc .1
+					rts	
+					
+.2					lda #13
+					>SYSCALL SYS.CoutA
+					bcs .9
+					
+					ldx #0
+.3					lda TmpBuffer256,x
+					beq .5
+					inx
+					cpx SRC.BufPtr
+					beq .4
+					phx
+					lda #'-'
+					>SYSCALL SYS.CoutA
+					plx
+					bcs .9
+					bra .3
+					
+.4					lda #'^'
+					phx
+					>SYSCALL SYS.CoutA
+					plx
+					bcs .9
+
+.5					lda #13
+					>SYSCALL SYS.CoutA
+.9					rts
+*---------------------------------------
 SRC.ParseLine		ldx TmpBuffer256
 					beq .1
 					
@@ -59,40 +119,37 @@ SRC.ParseLine		ldx TmpBuffer256
 SRC.ParseLine.Ok	lda SRC.GLabel.New
 					bpl .8
 					
+					ldy #ASM.PASS		
+					lda (pData),y		pass#2?
+					bne .8				yes, nothing to do
+* --- Pass #1					
 					>LDYA L.SRC.GLabel.Flags
 					jsr SYM.SearchGlobal
 					bcs .1				if CS, not found, add
 
-					lda SRC.FLabel.Flags				
-					and SRC.GLabel.Flags
-					lsr					both are .SE ?
-					bcs .1				yes, update during pass 1 & 2
+					lda SRC.FLabel.Flags
+					bit #$40			found symbol pending ?
+					bne .2				yes, update
+					
+					bit #$1					found is .SE ?
+					beq SRC.ParseLine.Redef		no, redefine error
 
-					lda SRC.FLabel.Flags
-					and #$40			found symbol pending ?
-					bne .10
-					
-					lda SRC.GLabel.Flags
-					and #$40			new is pending ? (if yes, no need to update)
-					bne .8
-					
-.10					ldy #ASM.PASS		
-					lda (pData),y		pass#2?
-					beq .1				yes, skip to avoid redefinition error
-					
-					lda SRC.FLabel.Flags
-					and #$40
-					beq SRC.ParseLine.Redef
+.2					ldx #0					update current symbol with
+.3					lda SRC.GLabel.Flags	flags & value
+					jsr SYM.AddByteGBlock
+					inx
+					cpx #5
+					bne .3
+					bra .8								
 					
 .1					>LDYA L.SRC.GLabel.Flags
 					jsr SYM.AddGToGBlockYA
 					bcs SRC.ParseLine.Err
-
-					
+								
 .8					clc
 					rts
-										
-SRC.ParseLine.Err1	lda #ERR.INVALID.LABEL
+
+SRC.ParseLine.Inv	lda #ERR.INVALID.LABEL
 SRC.ParseLine.Err	sec
 					rts
 					
@@ -202,9 +259,10 @@ SRC.ParseLine.Add.Macro
 *---------------------------------------
 SRC.ParseLine.OpCode
 					jsr SRC.GetArg
-					bcs .9
+					bcc .11
+					rts
 
-					ldy #ASM.T.hMem
+.11					ldy #ASM.T.hMem
 					lda (pData),y
 					>SYSCALL SYS.GetMemPtrA
 					>STYA ZPPtr1
@@ -252,7 +310,7 @@ SRC.ParseLine.OpCode
 					
 					
 					
-					bcs *
+
 					
 					
 					
@@ -261,8 +319,22 @@ SRC.ParseLine.OpCode
 					
 					
 					bcs .99
+					bcc .20
+					ldx SRC.AM.StrBuf
+					beq .20
+					ldx #0
+.21					inx
+					lda SRC.AM.StrBuf,x
+					phx
+					>SYSCALL SYS.CoutA
+					plx
+					cpx SRC.AM.StrBuf
+					bne .21
+					lda #13
+					>SYSCALL SYS.CoutA
 					
-					ldy #ASM.PC
+					
+.20					ldy #ASM.PC
 					lda (pData),y
 					inc
 					sta (pData),y
@@ -310,11 +382,19 @@ SRC.ParseLine.AM	stz SRC.AM.ID
 .8					clc
 					rts
 					
-.2					jsr SRC.IsLetter	Any register?
+.2					jsr SRC.IsMODReserved
+					bcs .21
+					lda #'#'
+					inc SRC.AM.StrBuf
+					ldx SRC.AM.StrBuf
+					sta SRC.AM.StrBuf,x
+					bra .1
+					
+.21					jsr SRC.IsLetter	Any register?
 					bcs .70				no, try something else
 					
-					lda SRC.BufPtr
-					sta SRC.BufPtrSave
+					ldx SRC.BufPtr
+					stx SRC.BufPtrSave
 					
 					stz SRC.AM.tmpBuf
 					sta SRC.AM.tmpBuf+1
@@ -323,7 +403,7 @@ SRC.ParseLine.AM	stz SRC.AM.ID
 .3					jsr SRC.GetCharUC
 					beq .41
 					jsr SRC.IsLetterOrDigit
-					bne .4
+					bcs .4
 					inc SRC.AM.tmpBuf
 					ldx SRC.AM.tmpBuf
 					sta SRC.AM.tmpBuf,x
@@ -336,8 +416,8 @@ SRC.ParseLine.AM	stz SRC.AM.ID
 .5					lda (ZPPtr3),y
 					beq .71				last register ?
 					
-					ldx #$ff
 					phy
+					ldx #$ff
 					
 .6					lda (ZPPtr3),y
 					iny
@@ -361,7 +441,7 @@ SRC.ParseLine.AM	stz SRC.AM.ID
 					bne .61
 					
 					stx SRC.AM.StrBuf
-					bra .72
+					jmp .1
 					
 .7					ply
 					tya
@@ -376,9 +456,23 @@ SRC.ParseLine.AM	stz SRC.AM.ID
 .70					dec SRC.BufPtr		back one char
 									
 					jsr EXP.Eval
-					bcs *
+
 					bcs .99
-.72					jmp .1
+					
+					ldx #3
+.73					lda SRC.ACC,x					
+					bne .72
+					dex
+					bne .73
+					
+.72					inx
+					txa
+					ora #$30
+					inc SRC.AM.StrBuf
+					ldx SRC.AM.StrBuf
+					sta SRC.AM.StrBuf,x
+					
+					jmp .1
 					clc
 					rts
 
@@ -387,31 +481,6 @@ SRC.ParseLine.AM	stz SRC.AM.ID
 .9					lda #ERR.INVALID.AM.SYN
 					sec
 .99					rts
-*---------------------------------------
-SRC.PrintLine		bcs .8				if CS, unconditional
-
-					ldy #ASM.MACRO.ON
-					lda (pData),y
-					bpl .1
-					
-					ldy #ASM.LI.CON
-					lda (pData),y
-					bpl .9
-					bmi .8
-					
-.1					ldy #ASM.LI.ON
-					lda (pData),y
-					bpl .9
-					
-.8					>PUSHWI TmpBuffer256
-					>PUSHW SRC.LINENUM
-					ldy #ASM.PC+1
-					>PUSHB (pData),y
-					dey
-					>PUSHB (pData),y
-					>PUSHW L.MSG.SRCLINE
-					>LIBCALL hLIBSTR,LIBSTR.PRINTF
-.9					rts
 *---------------------------------------
 SRC.GetDecimal		stz SRC.ACC+1
 					stz SRC.ACC+2
@@ -427,7 +496,7 @@ SRC.GetDecimal		stz SRC.ACC+1
 .1					jsr SRC.GetChar
 					beq .8
 					cmp #' '
-					beq .8
+					beq .88
 					jsr SRC.IsEXPReserved
 					bcc .88
 					jsr SRC.IsAMReserved
@@ -478,7 +547,7 @@ SRC.GetHex			stz SRC.ACC+1
 .1					jsr SRC.GetChar
 					beq .8
 					cmp #' '
-					beq .8
+					beq .88
 					jsr SRC.IsEXPReserved
 					bcc .88
 					jsr SRC.IsAMReserved
@@ -524,7 +593,7 @@ SRC.GetOctal		stz SRC.ACC+1
 .1					jsr SRC.GetChar
 					beq .8
 					cmp #' '
-					beq .8
+					beq .88
 					jsr SRC.IsEXPReserved
 					bcc .88
 					jsr SRC.IsAMReserved
@@ -577,7 +646,7 @@ SRC.GetBinary		stz SRC.ACC+1
 .1					jsr SRC.GetChar
 					beq .8
 					cmp #' '
-					beq .8
+					beq .88
 					jsr SRC.IsEXPReserved
 					bcc .88
 					jsr SRC.IsAMReserved
@@ -609,9 +678,10 @@ SRC.GetBinary		stz SRC.ACC+1
 					rts
 *---------------------------------------
 SRC.GetLabel		>STYA ZPPtr1
+
 					jsr SRC.GetCharUC
-					
 					beq .9
+					
 					jsr SRC.IsLetter
 					bcs .9
 					
@@ -621,31 +691,29 @@ SRC.GetLabel		>STYA ZPPtr1
 .1					jsr SRC.GetCharUC
 					beq .8
 
-					cmp #' '
-					beq .8
-					
+					jsr SRC.IsLetterOrDigit
+					bcc .2
 					cmp #'.'
 					beq .2
 					
 					cmp #'_'
 					beq .2
 					
+					cmp #' '
+					beq .88
 					jsr SRC.IsEXPReserved
 					bcc .88
 					jsr SRC.IsAMReserved
 					bcc .88
-					jsr SRC.IsLetterOrDigit
-					bcs *
-*					bcs .9
+					
+.9					lda #ERR.SYNTAX.ERROR
+					sec
+					rts	
 					
 .2					iny
 					sta (ZPPtr1),y
 					cpy #SRC.GLABEL.MAXLEN
 					bcc .1				if equ Carry is set
-					
-.9					lda #ERR.SYNTAX.ERROR
-					sec
-					rts					
 
 .88					dec SRC.BufPtr		Back One Char				
 .8					tya
@@ -719,6 +787,16 @@ SRC.GetArg			jsr SRC.GetCharUC
 *---------------------------------------
 SRC.IsAMReserved	ldx SRC.AM.RESERVED
 .1					cmp SRC.AM.RESERVED,x
+					beq .8
+					dex
+					bne .1
+					sec
+					rts
+.8					clc
+					rts					
+*---------------------------------------
+SRC.IsMODReserved	ldx SRC.MOD.RESERVED
+.1					cmp SRC.MOD.RESERVED,x
 					beq .8
 					dex
 					bne .1
@@ -804,7 +882,6 @@ SRC.GetChar			ldx SRC.BufPtr
 					lda TmpBuffer256,x
 					beq .9
 					inc SRC.BufPtr		if 255, will make Z
-					and #$7f			Make sure NZ
 .9					rts
 *---------------------------------------
 SRC.ACC10			lda SRC.ACC			ACC*2-> ACC & ACCTMP
