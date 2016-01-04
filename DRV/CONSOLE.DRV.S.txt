@@ -12,7 +12,7 @@ AUTO 6
 				.INB INC/A2OSX.I
 				.INB INC/IO.I
 *--------------------------------------
-CURSOR.BLINK.SPEED	.EQ 2
+CURSOR.BLINK.SPEED	.EQ 4
 ESCSEQ.MAXLEN	.EQ 16
 *--------------------------------------
 ZPBaseL1		.EQ ZPDRV
@@ -66,17 +66,32 @@ DRV.CS.START	.DA OPEN
 				.DA GETINFO
 				.DA IRQ
 L.DEVINFO		.DA DEVINFO
-J.EscSeq		.DA Esc.DispAttr		m
+*--------------------------------------
+J.CtrlChars		.DA BS					8
+				.DA LF					10
+				.DA	HOME				12
+				.DA CROUT				13
+				.DA ESC					27
+*--------------------------------------
+J.EscCodes		.DA Scroll.Dn			D
+				.DA Scroll.Up			M
+				.DA RESET				c
+*--------------------------------------
+J.EscSequences	.DA Esc.DispAttr		m
+				.DA Esc.Query			n
 				.DA Esc.Scroll			r
-				.DA Esc.EraseLine		K
+				.DA Esc.Erase			K
 				.DA	Esc.Home			H
 				.DA 0					end of relocation
 *--------------------------------------
 OPEN			stz CURON
-				stz KeyRemapIdx
+
 				stz bEscMode
 				stz bEscModeCSI
 				
+				stz OutPtr
+				stz OutCnt
+
 				jsr RESET
 				jsr HOME
 
@@ -92,13 +107,14 @@ GETEVENT		lda A2osX.TIMER16
 				beq .1
 				jsr CURBLNK
 
-.1				lda A2osX.ASCREEN
+.1				jsr Char.Out.Get
+				bcc .7
+				
+				lda A2osX.ASCREEN
 				and #A2osX.SCREENS.C	is screen active?
 				beq .9
 				
-				ldx KeyRemapIdx			are we in remap mode ?
-				bne .4
-.11				>SYSCALL SYS.GetKeyboardEvent
+				>SYSCALL SYS.GetKeyboardEvent
 				bcs .9
 				
 				ldy #S.EVT.DATAHI
@@ -116,85 +132,173 @@ GETEVENT		lda A2osX.TIMER16
 				rts
 				
 .3				lda KeyRemappedIdx,x
-				tax
-				lda KeyRemappedTable,x
-				sta (pEvent),y
-				inx
-				stx KeyRemapIdx
-				clc
-				rts
+				tay
 				
-.4				lda KeyRemappedTable,x
-				bne .5
-				stz KeyRemapIdx
-				bra .11
-.5				inx
-				stx KeyRemapIdx
-				ldy #S.EVT.DATALO
+.4				lda KeyRemappedTbl,y
+				beq .6
+				jsr Char.Out
+				iny
+				bra .4
+	
+.6				jsr Char.Out.Get				
+				
+.7				ldy #S.EVT.DATALO
 				sta (pEvent),y
 				iny
 				lda #0
 				sta (pEvent),y
 				lda #S.EVT.F.KEY
-				sta (pEvent)				
-				clc
-.8				rts
+				sta (pEvent)
+			
+.8				clc
+				rts
 				
 .9				lda	#0					Error = no event
 				sec
 				rts
 *--------------------------------------
 COUT			bit bEscMode
-				bpl .1
-				jmp EscMode
+				bmi COUT.EscMode
 				
-.1				pha
+				pha
 				jsr CUROFF
 				pla
 				cmp #32
-				bcc COUT.CTRL
+				bcc COUT.Ctrl
 
 				ora INVFLG
 				ldx CH
 				ldy CV
 				jsr SetCharAtXY
-				bra FSOUT
-				
-COUT.CTRL		cmp #8
+				jmp FSOUT
+*--------------------------------------
+COUT.Ctrl		ldy #0
+				ldx #0
+
+.2				iny
+				cmp CtrlChars,y
+				beq .3
+				inx
+				inx
+				cpy CtrlChars
 				bne .2
-				ldx CH
+				clc
+				rts
+				
+.3				jmp (J.CtrlChars,x)
+*--------------------------------------
+COUT.EscMode	bit bEscModeCSI
+				bmi COUT.EscModeCSI
+				cmp #'['
+				bne .1
+								
+				dec bEscModeCSI
+				stz EscSeq
+				clc
+				rts
+				
+.1				stz bEscMode
+				
+				ldy #0
+				ldx #0
+
+.2				iny
+				cmp EscCodes,y
+				beq .3
+				inx
+				inx
+				cpy EscCodes
+				bne .2
+				clc
+				rts
+				
+.3				jmp (J.EscCodes,x)
+*--------------------------------------
+COUT.EscModeCSI	inc EscSeq
+				ldx EscSeq
+				sta EscSeq,x
+				cmp #64					End of Seq ?
+				bcs COUT.ExecEscSeq
+				cpx #ESCSEQ.MAXLEN		too long?
+				bne .1
+				stz bEscModeCSI
+				stz bEscMode
+.1				clc
+				rts
+
+COUT.ExecEscSeq	stz EscSeqParamCnt
+				stz bEscSeqInNum
+				
+				ldx #0					EscSeq Ptr
+
+.10				stz EscSeqParamTmp
+				stz EscSeqParamTmp+1
+				
+.1				inx
+				lda EscSeq,x
+				jsr IsDigit 
+				bcs .2
+				
+				dec bEscSeqInNum
+				and #$0F
+				pha
+				lda EscSeqParamTmp
+				ldy EscSeqParamTmp+1
+				asl EscSeqParamTmp	    param=param*10
+				rol EscSeqParamTmp+1
+				asl EscSeqParamTmp
+				rol EscSeqParamTmp+1
+				clc
+				adc EscSeqParamTmp
+				sta EscSeqParamTmp
+				tya
+				adc EscSeqParamTmp+1
+				sta EscSeqParamTmp+1
+				asl EscSeqParamTmp
+				rol EscSeqParamTmp+1
+
+				pla
+				clc
+				adc EscSeqParamTmp
+				sta EscSeqParamTmp
+				bcc .1
+				inc EscSeqParamTmp+1
+				bra .1
+				
+.2				bit bEscSeqInNum
+				bpl .3
+				
+				stz bEscSeqInNum
+				lda #255
+				ldy EscSeqParamTmp+1
+				bne .21
+				
+				lda EscSeqParamTmp
+.21				ldy EscSeqParamCnt
+				sta EscSeqParam,y
+				inc EscSeqParamCnt
+				
+.3				lda EscSeq,x
+				cmp #';'
 				beq .10
-				dec CH
-				bra .12
 				
-.10				ldy CV
-				bne .11
+				stz bEscModeCSI
+				stz bEscMode
+				
+				ldy #0
+				ldx #0
+
+.4				iny
+				cmp EscSeqCmds,y
+				beq .5
+				inx
+				inx
+				cpy EscSeqCmds
+				bne .4
 				clc
 				rts
 				
-.11				lda #79
-				sta CH
-				dec CV	
-				
-.12				lda #$20
-				ora INVFLG
-				ldx CH
-				ldy CV
-				jmp SetCharAtXY
-				
-.2				cmp #10
-				beq LFOUT
-	
-				cmp #12
-				beq HOME
-				
-				cmp #13
-				beq CROUT
-				
-				cmp #27					ESC
-				dec bEscMode
-				clc
-				rts
+.5				jmp (J.EscSequences,x)
 *--------------------------------------
 CLOSE			
 *				lda A2osX.SCREENS
@@ -216,27 +320,33 @@ RESET			lda #0
 *--------------------------------------
 RESETATTR		lda #$80
 				sta INVFLG
-				rts
-*--------------------------------------
-FSOUT			ldx CH
-				cpx #79
-				beq CROUT1
-				inc CH
-				clc
-				rts				
-*--------------------------------------
-CROUT			jsr CLREOL
-				stz CH
 				clc
 				rts
 *--------------------------------------
-CROUT1			stz CH
-LFOUT			ldy CV
-				cpy #23
-				beq SCROLL.UP
-				inc CV
+ESC				lda #$80
+				sta bEscMode
 				clc
 				rts
+*--------------------------------------
+BS 				ldx CH
+				beq .1
+				dec CH
+				bra .3
+				
+.1				ldy CV
+				bne .2
+				clc
+				rts
+				
+.2				lda #79
+				sta CH
+				dec CV	
+				
+.3				lda #$20
+				ora INVFLG
+				ldx CH
+				ldy CV
+				jmp SetCharAtXY
 *--------------------------------------
 HOME			stz CH
 				stz CV
@@ -270,6 +380,25 @@ HOME			stz CH
 				dex
 				bpl .1
 				
+				clc
+				rts
+*--------------------------------------
+FSOUT			ldx CH
+				cpx #79
+				beq CROUT1
+				inc CH
+				clc
+				rts				
+*--------------------------------------
+CROUT			jsr CLREOL
+				stz CH
+				clc
+				rts
+CROUT1			stz CH
+LF				ldy CV
+				cpy #23
+				beq SCROLL.UP
+				inc CV
 				clc
 				rts
 *--------------------------------------
@@ -328,6 +457,166 @@ CLR				sty ZPTmpByte
 				cpx ZPTmpByte
 				bne .1
 				clc
+				rts
+*--------------------------------------
+SCROLL.DN		ldx SCROLLBOT
+				
+.1				lda BASEL,x
+				sta ZPBaseL1
+				lda BASEH,x
+				sta ZPBaseL1+1
+				dex
+				lda BASEL,x
+				sta ZPBaseL2
+				lda BASEH,x
+				sta ZPBaseL2+1
+				
+				ldy #39
+				sta SETWRITEAUX
+				sta SETREADAUX
+				
+.2				lda (ZPBaseL2),y
+				sta (ZPBaseL1),y 
+				dey
+				bpl .2
+
+				ldy #39
+				sta CLRWRITEAUX
+				sta CLRREADAUX
+				
+.3				lda (ZPBaseL2),y
+				sta (ZPBaseL1),y 
+				dey
+				bpl .3
+
+				cpx SCROLLTOP
+				bne .1
+				
+				
+				
+				clc
+				rts
+*--------------------------------------
+Esc.DispAttr	ldx EscSeqParamCnt
+				beq .8
+				
+.1				lda EscSeqParam-1,x
+				bne .2
+				jsr RESETATTR
+				bra .7
+				
+.2				cmp #7
+				bne .8
+				stz INVFLG
+				
+.7				dex
+				bne .1
+	
+.8				clc
+				rts
+*--------------------------------------
+Esc.Query		ldx EscSeqParamCnt
+				beq .8
+				dex
+				bne .8
+
+				lda EscSeqParam
+				cmp #6
+				bne .8
+				
+				lda #$1B
+				jsr Char.Out
+				lda #$5B
+				jsr Char.Out
+				lda CV
+				inc
+				jsr Decimal.Out 
+				lda #';'
+				jsr Char.Out
+				lda CH
+				inc
+				jsr Decimal.Out 
+				lda #'R'
+				jsr Char.Out
+				
+.8				clc
+				rts
+*--------------------------------------
+Esc.Scroll		ldx EscSeqParamCnt
+				bne .1
+				
+				lda #0
+				ldy #23
+				bra .8
+				
+.1				cpx #2
+				bne .9
+				
+				lda EscSeqParam
+				dec
+				ldy EscSeqParam+1
+				dey
+				
+.8				sta SCROLLTOP
+				sty SCROLLBOT
+.9				clc
+				rts
+*--------------------------------------
+Esc.Erase		ldx EscSeqParamCnt
+
+				bne .1
+				jmp CLREOL
+				
+.1				lda EscSeqParam
+				cmp #1
+				bne .2
+				jmp CLRSOL
+
+.2				cmp #2
+				bne .9
+				jmp CLRLINE
+
+.9				clc
+				rts
+*--------------------------------------
+Esc.Home		ldx EscSeqParamCnt
+				bne .1
+				stz CH
+				stz CV
+				clc
+				rts
+				
+.1				ldx #1
+				lda EscSeqParam
+				beq .2
+				
+				ldx #24
+				cmp #24
+				bcs .2
+				
+				tax
+				
+.2				dex
+				stx CV
+				
+				dec EscSeqParamCnt
+				beq .8
+				
+				ldx #1
+				lda EscSeqParam+1
+				beq .3
+				
+				ldx #80
+				cmp #80
+				
+				bcs .3
+				
+				tax
+				
+.3				dex
+				stx CH
+				
+.8				clc
 				rts
 *--------------------------------------
 CUROFF			lda CURON
@@ -404,94 +693,6 @@ GetCharAtXY		txa
 				sta CLRREADAUX
 				rts	
 *--------------------------------------
-EscMode			bit bEscModeCSI
-				bmi EscModeCSI
-				cmp #'['
-				bne .1
-								
-				dec bEscModeCSI
-				stz EscSeq
-				clc
-				rts
-				
-.1				cmp #'7'				save cup & attr
-
-				cmp #'8'				restore cup & attr
-				
-				stz bEscMode
-				clc
-				rts
-				
-EscModeCSI		inc EscSeq
-				ldx EscSeq
-				sta EscSeq,x
-				cmp #64					End of Seq ?
-				bcs ExecEscSeq
-				cpx #ESCSEQ.MAXLEN		too long?
-				bne .1
-				stz bEscModeCSI
-				stz bEscMode
-.1				clc
-				rts
-*--------------------------------------
-ExecEscSeq		stz EscSeqParamCnt
-				stz EscSeqInNum
-				ldx #0					EscSeq Ptr
-				ldy #0					EsqSeqParam Ptr
-
-.10				lda #0
-				sta EscSeqParam,y
-				
-.1				inx
-				lda EscSeq,x
-				jsr IsDigit 
-				bcs .2
-				
-				dec EscSeqInNum
-				and #$0F
-				pha
-				lda EscSeqParam,y	    param=param*10	
-				asl
-				asl
-				clc
-				adc EscSeqParam,y
-				asl
-				sta EscSeqParam,y
-				pla
-				clc
-				adc EscSeqParam,y
-				sta EscSeqParam,y
-				bra .1
-				
-.2				bit EscSeqInNum
-				bpl .3
-				
-				stz EscSeqInNum
-				iny
-				
-.3				lda EscSeq,x
-				cmp #';'
-				beq .10
-				
-				sty EscSeqParamCnt
-				stz bEscModeCSI
-				stz bEscMode
-				
-				ldy #0
-				ldx #0
-
-.4				iny
-				cmp EscSeqCmds,y
-				beq .5
-				inx
-				inx
-				cpy EscSeqCmds
-				bne .4
-				clc
-				rts
-				
-.5				jmp (J.EscSeq,x)
-*--------------------------------------
 IsDigit			cmp #'0'
 				bcc .9
 				cmp #'9'+1
@@ -499,86 +700,78 @@ IsDigit			cmp #'0'
 .9				sec
 				rts
 *--------------------------------------
-Esc.DispAttr	ldx EscSeqParamCnt
-				beq .8
+Decimal.Out		stz DecimalBuffer
+				stz DecimalBuffer+1
 				
-.1				lda EscSeqParam-1,x
-				bne .2
-				jsr RESETATTR
-				bra .7
+				ldx #8
+				sed
 				
-.2				cmp #7
-				bne .8
-				stz INVFLG
+				tay
 				
-.7				dex
+.1				tya
+				asl
+				tay
+				lda DecimalBuffer
+				adc DecimalBuffer
+				sta DecimalBuffer
+				lda DecimalBuffer+1
+				adc DecimalBuffer+1
+				sta DecimalBuffer+1
+				dex
 				bne .1
-	
-.8				clc
-				rts
+				cld
+				
+				stz bDecimal0Out
+				lda DecimalBuffer+1
+				and #$0f
+				beq .2
+				ora #$30
+				dec bDecimal0Out
+				jsr Char.Out
+				
+.2				lda DecimalBuffer
+				lsr
+				lsr
+				lsr
+				lsr
+				bne .3
+				bit bDecimal0Out
+				bpl .4
+.3				ora #$30
+				jsr Char.Out
+.4				lda DecimalBuffer
+				and #$0f
+				ora #$30
 *--------------------------------------
-Esc.Scroll		ldx EscSeqParamCnt
-				bne .1
-				
-				lda #0
-				ldy #23
-				bra .8
-				
-.1				cpx #2
-				bne .9
-				
-				lda EscSeqParam
-				dec
-				ldy EscSeqParam+1
-				dey
-				
-.8				sta SCROLLTOP
-				sty SCROLLBOT
-.9				clc
-				rts
-*--------------------------------------
-Esc.EraseLine	ldx EscSeqParamCnt
-
-				bne .1
-				jmp CLREOL
-				
-.1				lda EscSeqParam
-				cmp #1
-				bne .2
-				jmp CLRSOL
-
-.2				cmp #2
-				bne .9
-				jmp CLRLINE
-
-.9				clc
-				rts
-*--------------------------------------
-Esc.Home		ldx EscSeqParamCnt
-				bne .1
-				stz CH
-				stz CV
+Char.Out		pha
+				lda OutPtr
 				clc
+				adc OutCnt
+				and #$0f
+				tax
+				pla
+				sta OutBuffer,x
+				inc OutCnt
 				rts
-				
-.1				lda EscSeqParam
-				dec
-				bmi .9
-				cmp #24
-				bcs .9
-				sta CV
-				
-				lda EscSeqParam+1
-				dec
-				bmi .9
-				cmp #80
-				bcs .9
-				sta CH
-				
-.9				clc
-				rts
+*--------------------------------------
+Char.Out.Get	sec
+				lda OutCnt
+				beq .9
+				dec OutCnt
+				ldx OutPtr
+				lda OutBuffer,x
+				pha
+				txa
+				inc
+				and #$0f
+				sta OutPtr
+				pla
+				clc
+.9				rts				
 *--------------------------------------
 DRV.CS.END
+EscCodes		>PSTRING "DMc" 
+EscSeqCmds		>PSTRING "mnrKH"
 BASEL			.HS	00.80.00.80.00.80.00.80.28.A8.28.A8.28.A8.28.A8.50.D0.50.D0.50.D0.50.D0
 BASEH			.HS	04.04.05.05.06.06.07.07.04.04.05.05.06.06.07.07.04.04.05.05.06.06.07.07
 CH				.BS 1
@@ -588,28 +781,31 @@ SCROLLTOP		.BS 1
 SCROLLBOT		.BS 1
 CURON			.BS 1
 CURCHAR			.BS 1
+OutBuffer		.BS 16
+OutPtr			.BS 1
+OutCnt			.BS 1
+DecimalBuffer	.BS 2
+bDecimal0Out	.BS 1
 *--------------------------------------
-KeyRemapIdx		.BS 1
 KeyRemapped		.HS 05080A0B0D15		L,D,U,CR,R
 KeyRemappedIdx	.HS 050004080C0F
-KeyRemappedTable	.EQ *
+KeyRemappedTbl	.EQ *
 KeyRemappedLEFT	.HS 1B5B4400			esc[D
 KeyRemappedDOWN	.HS 1B5B4200			esc[B
 KeyRemappedUP	.HS 1B5B4100			esc[A
 KeyRemappedCR	.HS 0D0A00				crlf
 KeyRemappedRGHT	.HS 1B5B4300			esc[C
 *--------------------------------------
+CtrlChars		.HS 05080A0C0D1B
 bEscMode		.BS 1
 bEscModeCSI		.BS 1
+bEscSeqInNum	.BS 1
 EscSeq			.BS ESCSEQ.MAXLEN+1
+EscSeqParamTmp	.BS 2
 EscSeqParamCnt	.BS 1
 EscSeqParam		.BS 4
-EscSeqInNum		.BS 1
-EscSeqCmds		>PSTRING "mrKH"
 *--------------------------------------
 DEVINFO			.DA #S.DEVINFO.TYPE.CHAR
-				.DA #80
-				.DA #24
 *--------------------------------------
 MAN
 SAVE DRV/CONSOLE.DRV.S
