@@ -41,7 +41,11 @@ CS.START		cld
 				.DA	CS.QUIT
 L.LIBTCPIP		.DA LIBTCPIP
 L.MSG.HELP		.DA MSG.HELP
-L.CFGFILENAME	.DA CFGFILENAME
+L.MSG.CFG		.DA MSG.CFG
+L.MSG.CFG.KO	.DA MSG.CFG.KO
+L.MSG.CFG.OK	.DA MSG.CFG.OK
+L.HOSTNAME		.DA HOSTNAME
+L.TCPIP.CONF	.DA TCPIP.CONF
 L.IPCFG			.DA IPCFG
 				.DA 0
 *--------------------------------------
@@ -52,24 +56,17 @@ CS.INIT			>LDYA L.LIBTCPIP
 
 				ldy #S.PS.hARGS
 				lda (pPs),y
-				bne .10
+				bne .1
 				>LDYA L.MSG.HELP
 				>SYSCALL SYS.PSTROutYA
 				lda #0
 				sec
 				rts
 
-.10				ldx #0
-.1				stz IPCFG,x
-				inx
-				cpx #S.IPCFG
-				bne .1
-				
-				jsr CS.INIT.DEV
-				
+.1				jsr CS.INIT.DEV
 				bcs .99
 				
-*				jsr CS.INIT.CFGFILE		continue even if error opening CFG file
+				jsr CFG.Read			continue even if error opening CFG file
 
 				ldx #S.IPCFG.HOSTNAME
 				lda IPCFG,x
@@ -105,23 +102,28 @@ CS.INIT.DEV		ldy #S.PS.hARGS
 				sta hDEVNAME			save DevName for discard
 				>SYSCALL SYS.GetDevByNameA
 				bcs .98
-				>STYA pDev
+				>STYA pNetDevJmp+1
 				txa
-				sta hDev
+				sta hNetDev
 				ldx #S.IPCFG.HDEV
 				sta IPCFG,x
 				
 				ldx #DEVMGR.OPEN
-				jsr pDevJmp
+				jsr pNetDevJmp
 				bcs .98
 				
 				ldx #DEVMGR.GETINFO
-				jsr pDevJmp
+				jsr pNetDevJmp
 				bcs .98
 				>STYA ZPIPDevPtr
 				
 				ldy #1
+				lda (ZPIPDevPtr),y
+				sta DEVFLAGS
+				
+				iny
 				ldx #S.IPCFG.MAC
+				
 .1				lda (ZPIPDevPtr),y
 				sta IPCFG,x
 				iny
@@ -140,37 +142,6 @@ CS.INIT.DEV		ldy #S.PS.hARGS
 .99				sec
 				rts				
 *--------------------------------------
-CS.INIT.CFGFILE	>LDYA L.CFGFILENAME
-				>SYSCALL SYS.ExpandPStrYA
-				bcs .99
-				sta hCfgFileName
-				>SYSCALL SYS.LoadFileA
-				bcs .98
-				stx hCfgFile
-				>STYA hCfgFileLen
-				txa
-				>SYSCALL SYS.GetMemPtrA
-				>STYA ZPIPCfgPtr
-				
-				
-				
-				
-.89				lda hCfgFile
-				>SYSCALL SYS.FreeMemA
-				
-				lda hCfgFileName
-				>SYSCALL SYS.FreeMemA
-				clc
-				rts
-				
-.98				pha
-				lda hCfgFileName
-				>SYSCALL SYS.FreeMemA
-				pla
-				
-.99				sec
-				rts
-*--------------------------------------
 CS.RUN			clc
 				rts
 *--------------------------------------
@@ -180,7 +151,7 @@ CS.DOEVENT		lda (pEvent)
 				
 				ldy #S.EVT.hDEV
 				lda (pEvent),y
-				cmp hDev
+				cmp hNetDev
 				beq CS.DOEVENT.NET
 .9				sec
 				rts
@@ -260,187 +231,16 @@ CS.DOEVENT.NET	ldy #S.EVT.DATALO		Get Frame hMem
 .99				sec
 				rts
 *--------------------------------------
-CS.QUIT			lda hDev
-				>SYSCALL SYS.GetDevByIDA
-				>STYA pDev
-				
-				ldx #DEVMGR.CLOSE
-				jsr pDevJmp
+CS.QUIT			ldx #DEVMGR.CLOSE
+				jsr pNetDevJmp
 
 				lda hLIBTCPIP
 				>SYSCALL SYS.UnloadLibA
 				clc
 				rts
 *--------------------------------------
-*				PRIVATE
 *--------------------------------------
-ARPListener		jsr GetIPCFG
-				
-				ldy #S.ARP.TPA
-				ldx #S.IPCFG.IP
-				
-.1				lda (ZPFrameBase1),y
-				cmp IPCFG,x
-				bne .9
-				iny
-				inx
-				cpx #S.IPCFG.IP+4
-				bne .1
-				
-				ldy #S.ARP.OPERATION+1	HI byte
-				lda (ZPFrameBase1),y
-				cmp #S.ARP.OPERATION.REQ
-				beq ARPListener.REQ
-				
-				cmp #S.ARP.OPERATION.REP
-				beq ARPListener.REP
-				
-.9				clc						Discard any other ARP frames
-				rts
-
-ARPListener.REP	>LDAXI S.ARP.SHA
-				jsr SetFramePtr1AX
-				>PUSHW ZPFramePtr1
-				>LDAXI S.ARP.SPA
-				jsr SetFramePtr1AX
-				>PUSHW ZPFramePtr1
-				>LIBCALL hLIBTCPIP,LIBTCPIP.ARP.ADD
-				clc
-ARPListener.RTS	rts
-
-ARPListener.REQ	>LIBCALL hLIBTCPIP,LIBTCPIP.NEW.ARP.FRAME
-				bcs ARPListener.RTS
-				
-				phx
-				>STYA ZPFrameBase2
-				ldy #S.ARP.OPERATION+1
-				lda #S.ARP.OPERATION.REP
-				sta (ZPFrameBase2),y
-				
-				>LDAXI S.ARP.SHA
-				jsr SetFramePtr1AX
-
-				>LDAXI S.ETH.DSTMAC
-				jsr SetFramePtr2AX
-
-				ldy #6
-				jsr CopyFramePtr12
-				
-				>LDAXI S.ARP.THA
-				jsr SetFramePtr2AX
-
-				ldy #10					IP(4) + MAC(6)
-				jsr CopyFramePtr12
-				
-				>PUSHW ZPFramePtr1		still point to SHA
-				>LDAXI S.ARP.SPA
-				jsr SetFramePtr1AX
-				>PUSHW ZPFramePtr1
-				>LIBCALL hLIBTCPIP,LIBTCPIP.ARP.ADD
-				
-				ldx #5
-				ldy #S.ARP.SHA+5
-.4				lda IPCFG+S.IPCFG.MAC,x
-				sta (ZPFrameBase2),y
-				dey
-				dex
-				bpl .4
-				
-				ldx #3
-				ldy #S.ARP.SPA+3
-.5				lda IPCFG+S.IPCFG.IP,x
-				sta (ZPFrameBase2),y
-				dey
-				dex
-				bpl .5
-				
-				>PUSHW ZPFrameBase2
-				>LIBCALL hLIBTCPIP,LIBTCPIP.SEND.ARP.FRAME
-			
-				pla
-				>SYSCALL SYS.FreeMemA
-				clc
-				rts
 *--------------------------------------
-ICMPListener	ldy #S.ICMP.TYPE
-				lda (ZPFrameBase1),y
-				cmp #S.ICMP.TYPE.ECHOREQ
-				bne .9
-				
-				jsr GetIPCFG
-							
-				ldy #S.IP.DST
-				ldx #S.IPCFG.IP
-.10				lda (ZPFrameBase1),y
-				cmp IPCFG,x
-				bne .9
-				iny
-				inx
-				cpx #S.IPCFG.IP+4
-				bne .10
-				
-				>LIBCALL hLIBTCPIP,LIBTCPIP.NEW.ICMP.FRAME
-				bcs .9
-				phx
-				>STYA ZPFrameBase2
-				ldy #S.ICMP.TYPE
-				lda #S.ICMP.TYPE.ECHOREP
-				sta (ZPFrameBase2),y
-				jsr MakeIPReply
-				
-				ldy #S.ICMP.IDENTIFIER
-.1				lda (ZPFrameBase1),y
-				sta (ZPFrameBase2),y
-				iny
-				cpy #ZPFrameLen1
-				bne .1
-				
-				>PUSHW ZPFrameLen1
-				>PUSHW ZPFrameBase2
-				>LIBCALL hLIBTCPIP,LIBTCPIP.SEND.ICMP.FRAME
-				
-				pla
-				>SYSCALL SYS.FreeMemA
-				clc
-				rts
-.9				sec
-				rts
-*--------------------------------------
-DNSListener		ldy #S.DNS.F+1
-				lda (ZPFrameBase1),y
-				and /S.DNS.F.QR
-				beq .9
-
-				ldy #S.DNS.ANCOUNT+1
-				lda (ZPFrameBase1),y
-				beq .9
-				
-				ldy #S.DNS.QDCOUNT+1
-				lda (ZPFrameBase1),y
-				tax
-				beq .3					no QUERY to skip
-				
-				ldy #S.DNS				Read query
-				
-.1				lda (ZPFrameBase1),y
-				beq .2
-				iny
-				bne .1
-.2				tya 
-				clc
-				adc #4					Skip QTYPE & QCLASS
-				tay
-				dex						skip another QUERY ?
-				bne .1
-				
-.3				iny						skip high byte of offset
-				iny						skip lo byte of offset
-				
-				clc
-				rts
-				
-.9				sec
-				rts
 *--------------------------------------
 GetIPCFG		>LIBCALL hLIBTCPIP,LIBTCPIP.GET.IPCFG
 				>STYA ZPIPCfgPtr
@@ -504,19 +304,46 @@ CopyFramePtr12	dey
 				bne CopyFramePtr12
 				rts
 *--------------------------------------
+pNetDevJmp		jmp *
+*--------------------------------------
+				.INB SBIN/TCPIP.S.CFG
+				.INB SBIN/TCPIP.S.ARP
+				.INB SBIN/TCPIP.S.DNS
+				.INB SBIN/TCPIP.S.ICMP
+*--------------------------------------
 CS.END
 *--------------------------------------
 LIBTCPIP		>PSTRING "libtcpip.o"
 MSG.HELP		>PSTRING "Usage: TCPIP ETHx\n"
-CFGFILENAME		>PSTRING "${A2OSX}ETC/TCPIP.CONF"
+MSG.CFG			>PSTRING "Reading : %S..."
+MSG.CFG.KO		>PSTRING "Failed!!! [%h]\n"
+MSG.CFG.OK		>PSTRING "OK.\n"
+HOSTNAME		>PSTRING "${A2OSX}ETC/HOSTNAME"
+TCPIP.CONF		>PSTRING "${A2OSX}ETC/TCPIP.CONF"
 DefaultHostName	>CSTRING "a2osx-host"
+CFG.Keywords	>PSTRING "DOMAIN"
+				>PSTRING "IP"
+				>PSTRING "MASK"
+				>PSTRING "GW"
+				>PSTRING "DNS1"
+				>PSTRING "DNS2"
+CFG.Keyword.Map	.DA #0					End Of Keyword table and NA Keyword
+				.DA #S.IPCFG.IP
+				.DA #S.IPCFG.MASK
+				.DA #S.IPCFG.GW
+				.DA #S.IPCFG.DNS
+				.DA #S.IPCFG.DNS+4
 hLIBTCPIP		.BS 1
 hDEVNAME		.BS 1
-hDev			.BS 1
-hCfgFileName	.BS 1
-hCfgFile		.BS 1
-hCfgFileLen		.BS 2
+hNetDev			.BS 1
+DEVFLAGS		.BS 1
 IPCFG			.BS S.IPCFG				Get in cache for faster access with ,X
+CFG.hCfgFile	.BS 1
+CFG.FileLen		.BS 2
+CFG.Keyword		.BS 1
+CFG.StrBuf		.BS 4
+CFG.HexByte		.BS 1
+CFG.IP			.BS 5
 *--------------------------------------
 MAN
 SAVE SBIN/TCPIP.S
