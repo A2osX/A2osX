@@ -23,13 +23,13 @@ ZPTmpPTR		.EQ ZPDRV
 *--------------------------------------
 * WIZnet W5100 IO Registers
 *--------------------------------------
-W5100.MR		.EQ	$C080   			Mode Register
+W5100.MR		.EQ	$C084   			Mode Register
 W5100.MR.RST	.EQ %10000000
 W5100.MR.PB		.EQ %00010000
 W5100.MR.PPPOE	.EQ %00001000
 W5100.MR.AI		.EQ %00000010
 W5100.MR.IND	.EQ %00000001
-W5100.AR		.EQ	$C081				Memory Pointer
+W5100.AR		.EQ	$C085				Memory Pointer
 W5100.AR.GAR		.EQ $0001
 W5100.AR.SUBR		.EQ $0005
 W5100.AR.SHAR		.EQ $0009
@@ -62,7 +62,11 @@ W5100.AR.S0.TX.RD	.EQ $0422
 W5100.AR.S0.TX.WR	.EQ $0424
 W5100.AR.S0.RX.RSR	.EQ $0426
 W5100.AR.S0.RX.RD	.EQ $0428
-W5100.DR			.EQ	$C083
+W5100.DR			.EQ	$C087
+*--------------------------------------
+RX.BASE				.EQ $4000
+TX.BASE				.EQ $6000
+RXTX.MASK			.EQ $1FFF
 *--------------------------------------
 ERRTNOFRAME		.EQ 0
 ERRNOBUFFER		.EQ 1
@@ -93,8 +97,7 @@ Dev.Detect		sta hArgs
 				>SYSCALL SYS.PSTROutYA
 				
 				ldx #$10+$81
-.1				stx DEVSLOTxF
-				lda #W5100.MR.RST
+.1				lda #W5100.MR.RST
 				sta W5100.MR-$81,x
 
 				lda #W5100.MR.AI+W5100.MR.IND
@@ -102,9 +105,18 @@ Dev.Detect		sta hArgs
  
 				lda W5100.MR-$81,x
 				cmp #W5100.MR.AI+W5100.MR.IND
+				bne .2
+				
+				>AR.SELECT RTR			Double Check with RTR default value...
+				
+				lda W5100.DR-$81,x		Get RTR HI
+				cmp /2000
+				bne .2
+				lda W5100.DR-$81,x		Get RTR LO 
+				cmp #2000
 				beq	.3
 				
-				inc DEV.HEADER.NAME+4
+.2				inc DEV.HEADER.NAME+4
 				txa
 				clc
 				adc #$10
@@ -112,11 +124,16 @@ Dev.Detect		sta hArgs
 				cpx #$80+$81
 				bne .1
 				
+				>LDYA L.MSG.DETECT.KO
+				>SYSCALL SYS.PSTROutYA
+
 				lda #DEVMGR.ERRNOHW
 				sec
 				rts
 				
-.3				lda hARGS
+.3				stx DEVSLOTxF
+				
+				lda hARGS
 				
 				beq .4
 				>SYSCALL SYS.GetMemPtrA
@@ -127,7 +144,13 @@ Dev.Detect		sta hArgs
 				sec
 				rts
 				
-.4				clc
+.4				>LDYA L.MSG.DETECT.OK
+				>SYSCALL SYS.PSTROutYA
+				>LDYA L.DEV.HEADER.NAME
+				>SYSCALL SYS.PSTROutYA
+				lda #13
+				>SYSCALL SYS.COutA
+				clc
 				rts
 *--------------------------------------
 DecodeMac		lda (ZPTmpPTR)
@@ -206,6 +229,7 @@ DRV.CS.START	.DA OPEN
 				.DA GETINFO
 				.DA $FFFF				no IRQ
 				.DA SEND
+				.DA SETIPCFG
 L.DEVINFO		.DA DEVINFO
 				.DA 0					end or relocation
 *--------------------------------------
@@ -233,6 +257,7 @@ OPEN			jsr Reset
 				>AR.SELECT S0.MR
 				lda #3					IPRAW
 				sta W5100.DR-$81,x		for S0.MR
+*				>AR.SELECT S0.CR
 				lda #1					OPEN
 				sta W5100.DR-$81,x		for S0.CR
 				clc
@@ -245,16 +270,41 @@ OPEN			jsr Reset
 * CS event
 *--------------------------------------				
 GETEVENT		ldx DEVSLOTxF
-
-
-
+				>AR.SELECT S0.RX.RSR
+				lda W5100.DR-$81,x		get the received size HI
+				sta RX.Size+1
+				lda W5100.DR-$81,x      LO
+				sta RX.Size
+				ora RX.Size+1
 				bne GETEVENT.RxOK
 				lda #ERRTNOFRAME
 				sec
 				rts
-GETEVENT.RxOK	
-				>STYA FRAMELEN
-				>PUSHYA
+				
+GETEVENT.RxOK	clc
+				lda W5100.DR-$81,x		get the received ptr HI
+				and /RXTX.MASK
+				sta RX.Ptr+1
+				adc /RX.BASE
+				tay
+				
+				lda W5100.DR-$81,x      LO
+*				and #RXTX.MASK			$ff
+				sta RX.Ptr
+				
+				sta W5100.AR-$81,x
+				tya
+				sta W5100.AR-$80,x
+
+				lda RX.Size
+				clc
+				adc #S.IP
+				sta FRAMELEN
+				lda RX.Size+1
+				adc /S.IP
+				sta FRAMELEN+1
+				
+				>PUSHW FRAMELEN
 				>PUSHBI 0
 				>SYSCALL SYS.GetMem
 				bcs .99
@@ -272,8 +322,45 @@ GETEVENT.RxOK
 				sta (pEvent)
 				ldy #0
 				ldx DEVSLOTxF
+
+				ldy #S.IP.DST
 				
-.8				clc
+.1				jsr GetRxByte
+				bcs .8
+				sta (ZPTmpPTR),y
+				iny
+				cpy #S.IP.DST+4
+				bne .1
+				
+				jsr GetRxByte			skip Data Size
+				bcs .8
+				jsr GetRxByte
+				bcs .8
+				
+				ldy #S.IP
+.2				jsr GetRxByte
+				bcs .8
+				sta (ZPTmpPTR),y
+				iny
+				bne .2
+				inc ZPTmpPTR+1
+				bra .2
+				
+.8				>AR.SELECT S0.RX.RD
+				lda RX.Size
+				clc
+				adc #6
+				tay
+				lda RX.Size+1
+				adc #0
+				sta W5100.DR-$81,x
+				tya
+				sta W5100.DR-$80,x
+				
+				>AR.SELECT S0.CR
+				lda #$40				RECV
+				sta W5100.DR-$81,x
+				clc
 				rts
 				
 .99				sec				
@@ -373,6 +460,33 @@ Reset			ldx DEVSLOTxF
 				sta W5100.MR-$81,x
 				rts
 *--------------------------------------	
+GetRxByte		lda RX.Size
+				bne .1
+				lda RX.Size+1
+				beq .9
+				dec RX.Size+1
+.1				dec RX.Size
+
+				lda W5100.DR-$81,x
+				
+				inc RX.Ptr
+				bne .8
+				inc RX.Ptr+1
+				lda RX.Ptr+1
+				and /RXTX.MASK
+				bne .8
+				sta RX.Ptr+1
+
+				lda /RX.Base
+				sta W5100.AR-$81,x
+				lda #RX.Base
+				sta W5100.AR-$80,x
+.8				clc
+				rts
+				
+.9				sec
+				rts				
+*--------------------------------------	
 DecFrameLen		lda FRAMELEN
 				bne .1
 				lda FRAMELEN+1
@@ -386,9 +500,11 @@ DRV.CS.END
 *--------------------------------------	
 DEVSLOTxF		.BS 1
 FRAMELEN		.BS 2
+RX.Size			.BS 2
+RX.Ptr			.BS 2
 *--------------------------------------	
 DEVINFO			.DA #S.DEVINFO.TYPE.NET
-DEVFLAGS		.DA #DEVMGR.NET.CAP.ARPOFFLOAD
+DEVFLAGS		.DA #S.DEVINFO.FLAGS.ARPOFFLOAD
 MAC				.BS 6
 LINK.STATUS		.BS 1
 LINK.SPEED		.BS 1					SPEED/DUPLEX
