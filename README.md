@@ -10,8 +10,8 @@ OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
 (OApple+shift+1,OApple+shift+2,OApple+shift+3 on FR keyboard)  
   
 ## Internal Shell commands:  
-| Name | Status | Description |
-| ---- | ------ | ----------- |
+| Name | Status | Comment |
+| ---- | ------ | ------- |
 | CD | | |
 | SET | | |
 | DATE | | |
@@ -21,8 +21,8 @@ OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
 | PAUSE | | |
 | ECHO | | |
 ## External Shell commands:  
-| Name | Status | Description |
-| ---- | ------ | ----------- |
+| Name | Status | Comment |
+| ---- | ------ | ------- |
 | INSDEV | | |
 | LS | | |
 | MEM | | |
@@ -37,18 +37,21 @@ OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
 | EDIT | | |
 
 ## Supported Hardware At Kernel Level (ProDOS):
-   NosSlotClock  
-   Ramworks I,II,III  
+| KM.Name | Status | Comment |
+| ------- | ------ | ------- |
+| KM.NSC | Working | No-Slot-Clock |
+| KM.RAMWORKS | Working | AE-Ramworks I,II,III |
 
 ## Drivers:  
-| Name | Status | Description |
-| ---- | ------ | ----------- |
-| Console.DRV | | |
+| Name.DRV | Status | Comment |
+| -------- | ------ | ------- |
+| Console.DRV | Working | ANSI support in Progress. |
 | PPIC.DRV | | |
 | SSC.DRV | | |
-| Mouse.DRV | | |
-| Uthernet.DRV | | |
-| UthernetII.DRV | | |
-| LanCeGS.DRV | | |
+| SSC.I.DRV | | |
+| Mouse.DRV | Working | |
+| Uthernet.DRV | Working | |
+| UthernetII.DRV | In Progress | |
+| LanCeGS.DRV | In Progress | |
   
   
