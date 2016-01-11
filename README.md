@@ -13,7 +13,7 @@ OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
 
 ## Internal Shell commands:  
 | Name | Status | Description |  
-| = | = | = |  
+| - | - | - |  
 | CD | | |  
 | SET | | |  
 | DATE | | |  
@@ -24,7 +24,7 @@ OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
 | ECHO | | |  
 ## External Shell commands:  
 | Name | Status | Description |  
-| = | = | = |  
+| - | - | - |  
 | INSDEV | | |  
 | LS | | |  
 | MEM | | |  
@@ -44,7 +44,7 @@ OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
 
 ## Drivers:  
 | Name | Status | Description |  
-| = | = | = |  
+| - | - | - |  
 | SSC.DRV | | |  
 | Uthernet.DRV | | |  
  
