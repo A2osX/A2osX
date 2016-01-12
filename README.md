@@ -9,49 +9,60 @@ Enh IIe (65c02 cpu) with 128k, //c, IIgs
 OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.  
 (OApple+shift+1,OApple+shift+2,OApple+shift+3 on FR keyboard)  
   
-## Internal Shell commands:  
-| Name | Status | Comment |
-| ---- | ------ | ------- |
-| CD | | |
-| SET | | |
-| DATE | | |
-| TIME | | |
-| EXIT | | |
-| TYPE | | |
-| PAUSE | | |
-| ECHO | | |
-## External Shell commands:  
-| Name | Status | Comment |
-| ---- | ------ | ------- |
-| INSDEV | | |
-| LS | | |
-| MEM | | |
-| LSDEV | | |
-| MD | | |
-| RM | | |
-| NETINFO | | |
-| PS | | |
-| ARP | | |
-| PING | | |
-| DNSINFO | | |
-| EDIT | | |
-
 ## Supported Hardware At Kernel Level (ProDOS):
 | KM.Name | Status | Comment |
 | ------- | ------ | ------- |
 | KM.NSC | Working | No-Slot-Clock |
 | KM.RAMWORKS | Working | AE-Ramworks I,II,III |
-
-## Drivers:  
+  
+## SBIN,Daemons:  
+| Name.DRV | Status | Comment |
+| -------- | ------ | ------- |
+| INSDEV | Working | |
+| GETTY | Working | |
+| LOGIN | In Progress | no auth using /etc/passd yet |
+| TCPIP | In Progress | |
+| DHCPCLNT | Working | |
+| SHELL | Working | BUG: History nav|
+  
+## DRV,Drivers:  
 | Name.DRV | Status | Comment |
 | -------- | ------ | ------- |
 | Console.DRV | Working | ANSI support in Progress. |
-| PPIC.DRV | | |
-| SSC.DRV | | |
-| SSC.I.DRV | | |
+| PPIC.DRV | In Progress | |
+| SSC.DRV | In Progress | |
+| SSC.I.DRV | In Progress | |
 | Mouse.DRV | Working | |
 | Uthernet.DRV | Working | |
 | UthernetII.DRV | In Progress | |
 | LanCeGS.DRV | In Progress | |
+| Mouse.DRV | Working | |
+| DHGR.DRV | Working | |
   
+## Internal Shell commands:  
+| Name | Status | Comment |
+| ---- | ------ | ------- |
+| CD | Working | |
+| SET | Working  | |
+| DATE | Working  | |
+| TIME | Working  | |
+| EXIT | Working  | |
+| TYPE | Working  | |
+| PAUSE | Working | |
+| ECHO | Working | |
+  
+## BIN,External Shell commands:  
+| Name | Status | Comment |
+| ---- | ------ | ------- |
+| LS | Working  | BUG: ls <dir> does not list dir content |
+| MEM | Working  | |
+| LSDEV | Working | |
+| MD | Working  | |
+| RM | Working | |
+| NETINFO | Working  | |
+| PS | Working  | |
+| ARP | Working  | |
+| PING | Working | |
+| DNSINFO | | |
+| EDIT | In Progress | BUG: DEL |
   
