@@ -54,7 +54,7 @@ OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
 ## BIN,External Shell commands:  
 | Name | Status | Comment |
 | ---- | ------ | ------- |
-| LS | Working  | BUG: ls <dir> does not list dir content |
+| LS | Working  | BUG: ls dir does not list dir content (ls dir/ works) |
 | MEM | Working  | |
 | LSDEV | Working | |
 | MD | Working  | |
