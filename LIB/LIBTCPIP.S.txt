@@ -15,11 +15,17 @@ AUTO 6
 ZPFrameBase1	.EQ ZPLIB
 ZPFrameLen1		.EQ ZPLIB+2
 ZPFramePtr1		.EQ ZPLIB+4
-ZPPtrIP			.EQ ZPLIB+6
-ZPPtrMAC		.EQ ZPLIB+8
-ZPPtrDNS		.EQ ZPLIB+10
-ZPTmpPtr1		.EQ ZPLIB+12
-ZPTmpPtr2		.EQ ZPLIB+14
+ZPFrameBase2	.EQ ZPBIN+6
+ZPFrameLen2		.EQ ZPBIN+8
+ZPFramePtr2		.EQ ZPBIN+10
+ZPPtrIP			.EQ ZPLIB+12
+ZPPtrMAC		.EQ ZPLIB+14
+ZPPtrDNS		.EQ ZPLIB+16
+ZPPtrSKT		.EQ ZPLIB+18
+ZPTmpPtr1		.EQ ZPLIB+20
+ZPTmpPtr2		.EQ ZPLIB+22
+ZPDataPtr		.EQ ZPLIB+24
+ZPDataLen		.EQ ZPLIB+26
 *--------------------------------------
 *			File Header (16 Bytes)
 *--------------------------------------
@@ -65,21 +71,31 @@ CS.START		cld
 				.DA DNS.ADD
 				.DA DNS.GETCACHE
 				
-				.DA UDP.LISTENER
-				.DA TCP.LISTENER
-				.DA ADD.LISTENER
-				.DA REM.LISTENER
+				.DA ARP.IN
+				.DA IP.IN
+				
+				.DA SKT.NEW	
+				.DA SKT.LISTEN
+				.DA SKT.ACCEPT
+				.DA SKT.SENDA
+				.DA SKT.SEND
+				.DA SKT.RCVDA
+				.DA SKT.RCVD
+				.DA SKT.CLOSE
+				.DA SKT.GETTABLE
 *--------------------------------------
 L.IPCFG			.DA IPCFG
 L.ARP.CACHE		.DA ARP.CACHE
 L.DNS.CACHE		.DA DNS.CACHE
+L.SKT.TABLE		.DA SKT.TABLE
 				.DA 0
 *--------------------------------------
 LIB.LOAD		lda bFirstLoad
 				bne .8
 				jsr ARP.CLEAR
 				jsr DNS.CLEAR
-				jsr DYN.CLEAR
+				>LDYA K.DYNPORT.START
+				>STYA DYNPORT.LAST
 				inc bFirstLoad
 .8				clc
 				rts
@@ -89,27 +105,16 @@ LIB.UNLOAD		clc
 *--------------------------------------
 *  PULLW = PTR to S.IPCFG
 *--------------------------------------
-SET.IPCFG		>PUSHBI K.PROTOID.IP
-				>SYSCALL SYS.SetNetCfg
-				bcs GET.IPCFG.RTS
-*--------------------------------------
-* grab a copy on the fly for lib function
-* OUT :
-*  Y,A = PTR to S.IPCFG
-*--------------------------------------
-GET.IPCFG		lda #K.PROTOID.IP
-				>SYSCALL SYS.GetNetCfgA
-				bcs GET.IPCFG.RTS
-				>STYA ZPTmpPtr1
-				ldy #S.IPCFG
-.1				dey
-				lda (ZPTmpPtr1),y
+SET.IPCFG		>PULLW ZPTmpPtr1
+				ldy #0
+.1				lda (ZPTmpPtr1),y
 				sta IPCFG,y
-				tya
+				iny
+				cpy #S.IPCFG
 				bne .1
-
-				ldx #S.IPCFG.HDEV
-				lda IPCFG,x
+				
+				lda IPCFG+S.IPCFG.HDEV
+				
 				>SYSCALL SYS.GetDevByIDA
 				>STYA NetDevJmp+1
 
@@ -128,296 +133,16 @@ GET.IPCFG		lda #K.PROTOID.IP
 				jsr NetDevJmp
 				
 .2				>LDYA ZPTmpPtr1
-				
 				clc
-GET.IPCFG.RTS	rts
-*--------------------------------------
-*  Out:
-*	Y,A = Frame PTR
-*	X = hMem
-*--------------------------------------
-NEW.ICMP.FRAME	jsr NEW.IP.FRAME
-				bcs .9
-				ldy #S.IP.PROTOCOL
-				lda #S.IP.PROTOCOL.ICMP
-				sta (ZPFrameBase1),y
-				>LDYA ZPFrameBase1
-				clc
-.9				rts
-*--------------------------------------
-*  Out:
-*	Y,A = Frame PTR
-*	X = hMem
-*--------------------------------------
-NEW.TCP.FRAME	jsr NEW.IP.FRAME
-				bcs .9
-				ldy #S.IP.PROTOCOL
-				lda #S.IP.PROTOCOL.TCP
-				sta (ZPFrameBase1),y
-				>LDYA ZPFrameBase1
-				clc
-.9				rts
-*--------------------------------------
-*  Out:
-*	Y,A = Frame PTR
-*	X = hMem
-*--------------------------------------
-NEW.UDP.FRAME	jsr NEW.IP.FRAME
-				bcs .9
-				ldy #S.IP.PROTOCOL
-				lda #S.IP.PROTOCOL.UDP
-				sta (ZPFrameBase1),y
-				>LDYA ZPFrameBase1
-				clc
-.9				rts
-*--------------------------------------
-*  Out:
-*	Y,A = Frame PTR
-*	X = hMem
-*--------------------------------------
-NEW.IP.FRAME	jsr NEW.ETH.FRAME
-				bcs .9
-
-				ldy #S.ETH.ETHERTYPE
-				lda /S.ETH.ETHERTYPE.IP
-				sta (ZPFrameBase1),y		
-				iny
-				lda #S.ETH.ETHERTYPE.IP
-				sta (ZPFrameBase1),y
-
-				ldy #S.IP.V.IHL.DSCP.ECN
-				lda #$45
-				sta (ZPFrameBase1),y
-				iny
-				lda #$0
-				sta (ZPFrameBase1),y
-				
-				ldy #S.IP.IDENTIFICATION
-				sta (ZPFrameBase1),y
-				inc
-				iny
-				sta (ZPFrameBase1),y
-				dec
-				ldy #S.IP.FRAGMENT.FLAGS 
-				sta (ZPFrameBase1),y
-				iny
-				sta (ZPFrameBase1),y
-
-				ldy #S.IP.TTL
-				lda #K.IP.TTL
-				sta (ZPFrameBase1),y
-				>LDYA ZPFrameBase1
-				clc
-.9				rts
-*--------------------------------------
-*  Out:
-*	Y,A = Frame PTR
-*	X = hMem
-*--------------------------------------
-NEW.ARP.FRAME	jsr NEW.ETH.FRAME
-				bcs .9
-
-				ldy #S.ETH.ETHERTYPE
-				lda /S.ETH.ETHERTYPE.ARP
-				sta (ZPFrameBase1),y		
-				iny
-				lda #S.ETH.ETHERTYPE.ARP
-				sta (ZPFrameBase1),y
-
-				ldy #S.ARP.HTYPE
-				lda #0
-				sta (ZPFrameBase1),y
-				iny
-				lda #1
-				sta (ZPFrameBase1),y
-				iny
-				lda #8
-				sta (ZPFrameBase1),y
-				iny
-				lda #0
-				sta (ZPFrameBase1),y
-				iny
-				lda #6
-				sta (ZPFrameBase1),y
-				iny
-				lda #4
-				sta (ZPFrameBase1),y
-				>LDYA ZPFrameBase1
-				clc
-.9				rts
-*--------------------------------------
-*  Out:
-*	Y,A = Frame PTR
-*	X = hMem
-*--------------------------------------
-NEW.ETH.FRAME	>PUSHWI K.ETH.FRAME.LEN
-				>PUSHBI S.MEM.F.INIT0
-				>SYSCALL SYS.GetMem
-				bcs .9
-				>STYA ZPFrameBase1
-				clc
-.9				rts		
-*--------------------------------------
-* In:
-*  Out:
-*--------------------------------------
-SEND.ICMP.FRAME	>PULLW ZPFrameBase1
-				>PULLW ZPFrameLen1
-				
-				>PUSHW ZPFrameLen1
-				>PUSHWI S.ICMP.TYPE
-				jsr ComputeChecksum
-
-				phy
-				ldy #S.ICMP.CHECKSUM
-				sta (ZPFrameBase1),y
-				iny
-				pla
-				sta (ZPFrameBase1),y
-				
-				bra SEND.IP.FRAME.I
-*--------------------------------------
-* In:
-*  Out:
-*--------------------------------------
-SEND.TCP.FRAME	>PULLW ZPFrameBase1
-				>PULLW ZPFrameLen1
-				bra SEND.IP.FRAME.I
-*--------------------------------------
-* In:
-*  Out:
-*--------------------------------------
-SEND.UDP.FRAME	>PULLW ZPFrameBase1
-				>PULLW ZPFrameLen1
-SEND.UDP.FRAME.I				
-				ldy #S.UDP.LENGTH+1
-				lda ZPFrameLen1
-				sec
-				sbc #S.IP
-				sta (ZPFrameBase1),y
-				dey
-				lda ZPFrameLen1+1
-				sbc /S.IP
-				sta (ZPFrameBase1),y
-				lda #0					SET.UDP.CHECKSUM
-				ldy #S.UDP.CHECKSUM		(0 = Disable UDP Checksum)
-				sta (ZPFrameBase1),y
-				iny
-				sta (ZPFrameBase1),y
-				bra SEND.IP.FRAME.I
-*--------------------------------------
-* In:
-* Out:
-*--------------------------------------
-SEND.IP.FRAME	>PULLW ZPFrameBase1
-				>PULLW ZPFrameLen1
-				
-SEND.IP.FRAME.I	ldx #S.IPCFG.IP
-				ldy #S.IP.SRC
-				
-.10				lda IPCFG,x
-				sta (ZPFrameBase1),y	
-				inx
-				iny
-				cpy #S.IP.SRC+4
-				bne .10
-				
-				jsr ARP.RESOLVE
-				bcs .9
-				ldy #S.IP.TOTAL.LENGTH+1
-				lda ZPFrameLen1
-				sec
-				sbc #S.ETH
-				sta (ZPFrameBase1),y
-				dey
-				lda ZPFrameLen1+1
-				sbc /S.ETH
-				sta (ZPFrameBase1),y
-				
-				stz IP.CHECKSUM			RESET.IP.CHECKSUM	
-				stz IP.CHECKSUM+1
-				stz IP.CHECKSUM+2
-*				stz IP.CHECKSUM+3		Optimized for IP Header
-
-				ldy #S.IP.V.IHL.DSCP.ECN
-.1				lda (ZPFrameBase1),y
-				tax
-				iny
-				lda (ZPFrameBase1),y
-				iny
-				clc
-				adc IP.CHECKSUM
-				sta IP.CHECKSUM
-				txa
-				adc IP.CHECKSUM+1
-				sta IP.CHECKSUM+1
-				bcc .2
-				inc IP.CHECKSUM+2
-*.2				bne .3					Optimized for IP Header
-*				inc IP.CHECKSUM+3		Optimized for IP Header
-.2				cpy #S.IP
-				bne .1
-				
-				lda IP.CHECKSUM
-				clc
-				adc IP.CHECKSUM+2
-				eor #$FF
-				ldy #S.IP.HDR.CHECKSUM+1
-				sta (ZPFrameBase1),y
-				dey
-				lda IP.CHECKSUM+1
-*				adc IP.CHECKSUM+3		Optimized for IP Header
-				adc #0					Optimized for IP Header	
-				eor #$FF
-				sta (ZPFrameBase1),y
-				bra SEND.ETH.FRAME
-.9				rts
-*--------------------------------------
-* In:
-* Out:
-*--------------------------------------
-SEND.ARP.FRAME	>PULLW ZPFrameBase1
-SEND.ARP.FRAME.I	
-				>LDYAI S.ARP			default ARP Frame length
-				>STYA ZPFrameLen1
-*--------------------------------------
-* In:
-* Out:
-*--------------------------------------
-SEND.ETH.FRAME	>PUSHW ZPFrameLen1
-				>PUSHW ZPFrameBase1
-				ldx #DEVMGR.NET.SEND
-				jsr NetDevJmp
 				rts
 *--------------------------------------
-UDP.LISTENER	>PULLW ZPFrameBase1
-				>PULLW ZPFrameLen1
-				sec
+* grab a copy on the fly for lib function
+* OUT :
+*  Y,A = PTR to S.IPCFG
+*--------------------------------------
+GET.IPCFG		>LDYA L.IPCFG
+				clc
 				rts
-*--------------------------------------
-TCP.LISTENER	>PULLW ZPFrameBase1
-				>PULLW ZPFrameLen1
-				sec
-				rts
-*--------------------------------------
-ADD.LISTENER	sec
-				rts
-*--------------------------------------
-REM.LISTENER	sec
-				rts
-*--------------------------------------
-DYN.CLEAR
-*--------------------------------------
-DYN.GET
-*--------------------------------------
-DYN.RELEASE
-*--------------------------------------
-				.INB LIB/LIBTCPIP.S.ARP
-				.INB LIB/LIBTCPIP.S.DNS
-*--------------------------------------
-* 				PRIVATE
-*--------------------------------------
-
 *--------------------------------------
 ToLowerCaseA	cmp #'A'
 				bcc .1
@@ -426,67 +151,139 @@ ToLowerCaseA	cmp #'A'
 				adc #$20
 .1				rts				
 *--------------------------------------
-* In:
-*  PULLW = Start Offset
-*  PULLW = End Offset
-* Out:
-*  Y,A = CheckSum
-*--------------------------------------
-ComputeChecksum	>PULLA
-				clc
-				adc ZPFrameBase1
-				sta ZPTmpPtr1
-				>PULLA
-				adc ZPFrameBase1+1
-				sta ZPTmpPtr1+1
-
-				>PULLA
-				clc
-				adc ZPFrameBase1
-				sta TmpOffset
-				>PULLA
-				adc ZPFrameBase1+1
-				sta TmpOffset+1
-
-				stz IP.CHECKSUM			RESET.IP.CHECKSUM	
-				stz IP.CHECKSUM+1
-				stz IP.CHECKSUM+2
-				stz IP.CHECKSUM+3
+MakeIPReply		>LDAXI S.IP.SRC			
+				jsr SetFramePtr1AX
+				>LDAXI S.IP.DST
+				jsr SetFramePtr2AX
+				ldy #4
+				jsr CopyFramePtr12
 				
-				ldy #1
-.1				lda (ZPTmpPtr1),y
-				clc
-				adc IP.CHECKSUM
-				sta IP.CHECKSUM
-				lda (ZPTmpPtr1)
-				adc IP.CHECKSUM+1
-				sta IP.CHECKSUM+1
-				bcc .3
-				inc IP.CHECKSUM+2
-				bne .3
-				inc IP.CHECKSUM+3
-.3				lda ZPTmpPtr1
-				clc
-				adc #2
-				sta ZPTmpPtr1
-				bcc .4
-				inc ZPTmpPtr1+1
-.4				cmp TmpOffset
-				bne	.1	
-				lda ZPTmpPtr1+1
-				cmp TmpOffset+1
-				bne .1
-				lda IP.CHECKSUM
-				clc
-				adc IP.CHECKSUM+2
-				eor #$FF
-				tay
-				lda IP.CHECKSUM+1
-				adc IP.CHECKSUM+3
-				eor #$FF
+				>LDAXI S.IP.DST
+				jsr SetFramePtr1AX
+				>LDAXI S.IP.SRC
+				jsr SetFramePtr2AX
+				ldy #4
+				jsr CopyFramePtr12
+				
+				>LDAXI S.ETH.SRCMAC			
+				jsr SetFramePtr1AX
+				>LDAXI S.ETH.DSTMAC
+				jsr SetFramePtr2AX
+				ldy #6
+				jsr CopyFramePtr12
 				rts
 *--------------------------------------
+* A,X = Frame PTR
+*--------------------------------------
+SetFramePtr1AX	clc
+				adc ZPFrameBase1
+				sta ZPFramePtr1
+				txa
+				adc ZPFrameBase1+1
+				sta ZPFramePtr1+1
+				rts
+*--------------------------------------
+* A,X = Frame PTR
+*--------------------------------------
+SetFramePtr2AX	clc
+				adc ZPFrameBase2
+				sta ZPFramePtr2
+				txa
+				adc ZPFrameBase2+1
+				sta ZPFramePtr2+1
+				rts
+*--------------------------------------
+* Y = bytes to copy from ZPFramePtr1 to ZPFramePtr2
+*--------------------------------------
+CopyFramePtr12	dey
+				lda (ZPFramePtr1),y
+				sta (ZPFramePtr2),y
+				tya
+				bne CopyFramePtr12
+				rts
+*--------------------------------------
+GetDynPort		inc DYNPORT.LAST
+				bne .1
+				inc DYNPORT.LAST+1
+				lda DYNPORT.LAST
+				sec
+				sbc #K.DYNPORT.END
+				lda DYNPORT.LAST+1
+				sbc /K.DYNPORT.END
+				bcs .1
+				>LDAXI K.DYNPORT.END
+				>STAX DYNPORT.LAST
+				rts						CC
+				
+.1				>LDAX DYNPORT.LAST
+				clc
+				rts
+*--------------------------------------
+PSTR2DNSHostName >STYA ZPTmpPtr1
+
+				lda (ZPTmpPtr1)
+				beq .9
+				
+				cmp #K.DNS.MAXLEN-1
+				bcs .9
+				
+				tay
+				
+				inc
+				sta DNSHostNameLen
+
+				lda #0					Ending 0
+				sta DNSHostName+1,y
+
+				ldx #0
+				
+.1				lda (ZPTmpPtr1),y
+				and #$7f
+				cmp #'.'
+				beq .2
+				
+				cmp #'A'
+				bcc .10
+				cmp #'Z'+1
+				bcs .10
+				adc #$20
+				
+.10				inx
+				bra .3
+				
+.2				txa				
+				ldx #0
+				
+.3				sta DNSHostName,y
+				dey
+				bne .1
+				stx DNSHostName
+				
+				clc
+				rts
+				
+.9				sec
+				rts				
+*--------------------------------------
+DecDataLen		lda ZPDataLen
+				bne .1
+				lda ZPDataLen+1
+				beq .9
+				dec ZPDataLen+1
+.1				dec ZPDataLen
+				lda #$FF				Make NZ
+.9				rts
+*--------------------------------------
 NetDevJmp		jmp *
+*--------------------------------------
+				.INB LIB/LIBTCPIP.S.FRM
+				.INB LIB/LIBTCPIP.S.ARP
+				.INB LIB/LIBTCPIP.S.IP
+				.INB LIB/LIBTCPIP.S.ICMP
+				.INB LIB/LIBTCPIP.S.UDP
+				.INB LIB/LIBTCPIP.S.TCP
+				.INB LIB/LIBTCPIP.S.DNS
+				.INB LIB/LIBTCPIP.S.SKT
 *--------------------------------------
 CS.END
 *--------------------------------------
@@ -502,12 +299,10 @@ IP.CHECKSUM		.BS 4
 IPCFG			.BS S.IPCFG
 ARP.CACHE		.BS K.ARPCACHE.SIZE*S.ARPCACHE
 DNS.CACHE		.BS K.DNSCACHE.SIZE*S.DNSCACHE
-UDP.TABLE		.BS K.UDPTABLE.SIZE*S.LISTENER
-TCP.TABLE		.BS K.TCPTABLE.SIZE*S.LISTENER
-DYNPORT.UDP.LAST	.BS 2
-DYNPORT.TCP.LAST	.BS 2
-DYNPORT.UDP		.BS K.DYNPORT.MAX*4
-DYNPORT.TCP		.BS K.DYNPORT.MAX*4
+SKT.TABLE		.BS K.SKTTABLE.SIZE*S.SOCKET
+hSocket			.BS 1
+bFound			.BS 1
+DYNPORT.LAST	.BS 2
 *TmpCounter		.BS 2
 TmpOffset		.BS 2
 *--------------------------------------
