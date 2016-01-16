@@ -15,9 +15,6 @@ AUTO 6
 ZPFrameBase1	.EQ ZPBIN
 ZPFrameLen1		.EQ ZPBIN+2
 ZPFramePtr1		.EQ ZPBIN+4
-ZPFrameBase2	.EQ ZPBIN+6
-ZPFrameLen2		.EQ ZPBIN+8
-ZPFramePtr2		.EQ ZPBIN+10
 ZPIPCfgPtr		.EQ ZPBIN+12
 ZPIPDevPtr		.EQ ZPBIN+14
 *--------------------------------------
@@ -40,12 +37,15 @@ CS.START		cld
 				.DA CS.DOEVENT
 				.DA	CS.QUIT
 L.LIBTCPIP		.DA LIBTCPIP
-L.MSG.HELP		.DA MSG.HELP
+L.DEVNAME		.DA DEVNAME
+L.MSG.DEV.KO	.DA MSG.DEV.KO
+L.MSG.DEV.OK	.DA MSG.DEV.OK
 L.MSG.CFG		.DA MSG.CFG
 L.MSG.CFG.KO	.DA MSG.CFG.KO
 L.MSG.CFG.OK	.DA MSG.CFG.OK
 L.HOSTNAME		.DA HOSTNAME
 L.TCPIP.CONF	.DA TCPIP.CONF
+L.HOSTS			.DA HOSTS
 L.IPCFG			.DA IPCFG
 				.DA 0
 *--------------------------------------
@@ -54,36 +54,42 @@ CS.INIT			>LDYA L.LIBTCPIP
 				bcs .99
 				sta hLIBTCPIP
 
-				ldy #S.PS.hARGS
-				lda (pPs),y
-				bne .1
-				>LDYA L.MSG.HELP
-				>SYSCALL SYS.PSTROutYA
-				lda #0
-				sec
-				rts
-
-.1				jsr CS.INIT.DEV
+				jsr CS.INIT.DEV
 				bcs .99
 				
 				jsr CFG.Read			continue even if error opening CFG file
 
-				ldx #S.IPCFG.HOSTNAME
-				lda IPCFG,x
-				bne .3
+				lda IPCFG+S.IPCFG.HOSTNAME
+				bne .4
 
 				ldy #0
 .2				lda DefaultHostName,y
-				sta IPCFG,x
 				beq .3
-				inx
+				sta IPCFG+S.IPCFG.HOSTNAME,y
 				iny
 				bne .2
 			
-.3				>PUSHW L.IPCFG
-				>PUSHBI K.PROTOID.IP
-				>SYSCALL SYS.AddNetCfg
-				bcs .99
+.3				lda A2osX.TIMER16
+				jsr A2CharAX
+				sta IPCFG+S.IPCFG.HOSTNAME,y
+				iny
+				txa
+				sta IPCFG+S.IPCFG.HOSTNAME,y
+				iny
+				
+				lda A2osX.TIMER16+1
+				jsr A2CharAX
+				sta IPCFG+S.IPCFG.HOSTNAME,y
+				iny
+				txa
+				sta IPCFG+S.IPCFG.HOSTNAME,y
+				iny
+				
+				lda #0
+				sta IPCFG+S.IPCFG.HOSTNAME,y
+				
+.4				>PUSHW L.IPCFG
+				>LIBCALL hLIBTCPIP,LIBTCPIP.SET.IPCFG
 				
 				lda (pPs)
 				ora #S.PS.F.EVENT		Now accept events
@@ -92,29 +98,36 @@ CS.INIT			>LDYA L.LIBTCPIP
 				clc
 .99				rts
 *--------------------------------------
-CS.INIT.DEV		ldy #S.PS.hARGS
-				lda (pPs),y
-				>PUSHA
-				>PUSHBI $20				Push SEP=' '
-				>PUSHBI 1				Push 1 for getting DEV
-				>SYSCALL SYS.PStrGetTkn
-				bcs .99
-				sta hDEVNAME			save DevName for discard
-				>SYSCALL SYS.GetDevByNameA
-				bcs .98
-				>STYA pNetDevJmp+1
+CS.INIT.DEV		>LDYA L.DEVNAME
+				>SYSCALL SYS.GetDevByNameYA
+				bcc .1
+				inc DEVNAME+4
+				lda DEVNAME+4
+				cmp #'8'
+				bne CS.INIT.DEV
+
+				>LDYA L.MSG.DEV.KO
+				>SYSCALL SYS.PSTROutYA
+				lda #DEVMGR.ERRDNF
+				sec
+				rts
+				
+.1				>STYA pNetDevJmp+1
 				txa
 				sta hNetDev
-				ldx #S.IPCFG.HDEV
-				sta IPCFG,x
+				sta IPCFG+S.IPCFG.HDEV
+				
+				>PUSHW L.DEVNAME
+				>LDYA L.MSG.DEV.OK
+				>SYSCALL SYS.PSTROutYA
 				
 				ldx #DEVMGR.OPEN
 				jsr pNetDevJmp
-				bcs .98
+				bcs .9
 				
 				ldx #DEVMGR.GETINFO
 				jsr pNetDevJmp
-				bcs .98
+				bcs .9
 				>STYA ZPIPDevPtr
 				
 				ldy #1
@@ -124,22 +137,17 @@ CS.INIT.DEV		ldy #S.PS.hARGS
 				iny
 				ldx #S.IPCFG.MAC
 				
-.1				lda (ZPIPDevPtr),y
+.2				lda (ZPIPDevPtr),y
 				sta IPCFG,x
 				iny
 				inx
 				cpx #S.IPCFG.MAC+6
-				bne .1
+				bne .2
 				
-				jsr .98
 				clc
 				rts
-				
-.98				pha
-				lda hDEVNAME
-				>SYSCALL SYS.FreeMemA
-				pla
-.99				sec
+
+.9				sec
 				rts				
 *--------------------------------------
 CS.RUN			clc
@@ -152,11 +160,9 @@ CS.DOEVENT		lda (pEvent)
 				ldy #S.EVT.hDEV
 				lda (pEvent),y
 				cmp hNetDev
-				beq CS.DOEVENT.NET
-.9				sec
-				rts
+				bne .9
 				
-CS.DOEVENT.NET	ldy #S.EVT.DATALO		Get Frame hMem
+				ldy #S.EVT.DATALO		Get Frame hMem
 				lda (pEvent),y
 				>SYSCALL SYS.GetMemPtrA
 				>STYA ZPFrameBase1
@@ -178,149 +184,382 @@ CS.DOEVENT.NET	ldy #S.EVT.DATALO		Get Frame hMem
 				bne .1
 				cpx /S.ETH.ETHERTYPE.ARP
 				bne .1
-				jsr ARPListener				
-				bcc .89
+				
+				>PUSHW ZPFrameLen1
+				>PUSHW ZPFrameBase1
+				>LIBCALL hLIBTCPIP,LIBTCPIP.ARP.IN			
 				rts
 				
 .1				cmp #S.ETH.ETHERTYPE.IP
-				bne .99
+				bne .9
 				cpx /S.ETH.ETHERTYPE.IP
-				bne .99
+				bne .9
 				
-				ldy #S.IP.PROTOCOL				
-				lda (ZPFrameBase1),y
-				cmp #S.IP.PROTOCOL.ICMP
-				bne .2
-				jsr ICMPListener
-				bcc .89
-				rts
-				
-.2				cmp #S.IP.PROTOCOL.UDP
-				bne .21
-				
-				ldy #S.UDP.DSTPORT
-				lda /UDP.PORT.DNS
-				cmp (ZPFrameBase1),y
-				bne .3
-				iny
-				lda #UDP.PORT.DNS
-				cmp (ZPFrameBase1),y
-				bne .3
-
-				jsr DNSListener
-				bcc .89
-				rts
-				
-.21				>PUSHW ZPFrameLen1
-				>PUSHW ZPFrameBase1
-				>LIBCALL hLIBTCPIP,LIBTCPIP.UDP.LISTENER
-				bcc .89
-				rts
-				
-.3				cmp #S.IP.PROTOCOL.TCP
-				bne .99
 				>PUSHW ZPFrameLen1
 				>PUSHW ZPFrameBase1
-				>LIBCALL hLIBTCPIP,LIBTCPIP.TCP.LISTENER
-				bcc .89
+				>LIBCALL hLIBTCPIP,LIBTCPIP.IP.IN			
 				rts
 				
-.89				clc
-				rts
-				
-.99				sec
+.9				sec
 				rts
 *--------------------------------------
-CS.QUIT			ldx #DEVMGR.CLOSE
+CS.QUIT			lda IPCFG+S.IPCFG.HDEV
+				beq .1
+				ldx #DEVMGR.CLOSE
 				jsr pNetDevJmp
 
-				lda hLIBTCPIP
+.1				lda hLIBTCPIP
 				>SYSCALL SYS.UnloadLibA
 				clc
 				rts
 *--------------------------------------
+CFG.Read		>PUSHW L.HOSTNAME
+				>LDYA L.MSG.CFG
+				>SYSCALL SYS.PSTROutYA
+
+				jsr CFG.Read.HOSTNAME
+				bcc .1
+				>PUSHA
+				>LDYA L.MSG.CFG.KO
+				>SYSCALL SYS.PSTROutYA
+				bra .2
+.1				>LDYA L.MSG.CFG.OK
+				>SYSCALL SYS.PSTROutYA
+
+.2				>PUSHW L.TCPIP.CONF
+				>LDYA L.MSG.CFG
+				>SYSCALL SYS.PSTROutYA
+
+				jsr CFG.Read.TCPIP.CONF
+				bcc .3
+				>PUSHA
+				>LDYA L.MSG.CFG.KO
+				>SYSCALL SYS.PSTROutYA
+				bra .4
+.3				>LDYA L.MSG.CFG.OK
+				>SYSCALL SYS.PSTROutYA
+				
+.4				>PUSHW L.HOSTS
+				>LDYA L.MSG.CFG
+				>SYSCALL SYS.PSTROutYA
+
+				jsr CFG.Read.HOSTS
+				bcc .5
+				>PUSHA
+				>LDYA L.MSG.CFG.KO
+				>SYSCALL SYS.PSTROutYA
+				bra .6
+.5				>LDYA L.MSG.CFG.OK
+				>SYSCALL SYS.PSTROutYA
+.6				rts
 *--------------------------------------
-*--------------------------------------
-*--------------------------------------
-GetIPCFG		>LIBCALL hLIBTCPIP,LIBTCPIP.GET.IPCFG
+CFG.Read.HOSTNAME
+				>LDYA L.HOSTNAME
+				>SYSCALL SYS.LoadFileYA
+				bcs .99
+				stx CFG.hCfgFile
+				>STYA CFG.FileLen
+				
+				txa
+				>SYSCALL SYS.GetMemPtrA
 				>STYA ZPIPCfgPtr
 				
-				ldy #S.IPCFG
+				lda CFG.FileLen+1
+				bne .2
+				ldy CFG.FileLen
+				beq .2
+				cpy #15
+				bcs .2
+
+				sta IPCFG+S.IPCFG.HOSTNAME,y
+	
 .1				dey
+				bmi .89
 				lda (ZPIPCfgPtr),y
-				sta IPCFG,y
-				tya
+				sta IPCFG+S.IPCFG.HOSTNAME,y
+				bra .1
+				
+.2				jsr .89
+				sec
+				rts
+				
+.89				lda CFG.hCfgFile
+				>SYSCALL SYS.FreeMemA
+				
+				clc
+.99				rts
+*--------------------------------------
+CFG.Read.TCPIP.CONF
+				>LDYA L.TCPIP.CONF
+				>SYSCALL SYS.LoadFileYA
+				bcs .99
+				stx CFG.hCfgFile
+				>STYA CFG.FileLen
+				txa
+				>SYSCALL SYS.GetMemPtrA
+				>STYA ZPIPCfgPtr
+				
+.1				jsr CFG.GetLine
+				bcs .89
+				
+				jsr CFG.GetKeyword
+				bcs .1
+
+				lda CFG.Keyword
+				bne .3
+				
+				ldy TmpBuffer256
+
+				lda TmpBuffer256+1,y
+				cmp #35					DOMAIN too long!!!
+				bcs .1
+				
+				sta IPCFG+S.IPCFG.DOMAIN
+				ldx #0
+				
+.2				lda TmpBuffer256+2,y
+				sta IPCFG+S.IPCFG.DOMAIN,x
+				beq .1
+				inx
+				iny
+				bne .2
+				bra .1
+				
+.3				jsr CFG.ScanIP
+				bcs .1
+				
+				ldy CFG.Keyword
+				lda CFG.Keyword.Map,y
+				tax
+				ldy #0
+				
+.4				lda CFG.IP+1,y
+				sta IPCFG,x
+				inx
+				iny
+				cpy #4
+				bne .4
+				lda CFG.Keyword
+				cmp #1
 				bne .1
-				rts
-*--------------------------------------
-MakeIPReply		>LDAXI S.IP.SRC			
-				jsr SetFramePtr1AX
-				>LDAXI S.IP.DST
-				jsr SetFramePtr2AX
-				ldy #4
-				jsr CopyFramePtr12
+				lda #S.IPCFG.STATUS.OK
+				sta IPCFG
+				bra .1
 				
-				>LDAXI S.IP.DST
-				jsr SetFramePtr1AX
-				>LDAXI S.IP.SRC
-				jsr SetFramePtr2AX
-				ldy #4
-				jsr CopyFramePtr12
+.89				lda CFG.hCfgFile
+				>SYSCALL SYS.FreeMemA
 				
-				>LDAXI S.ETH.SRCMAC			
-				jsr SetFramePtr1AX
-				>LDAXI S.ETH.DSTMAC
-				jsr SetFramePtr2AX
-				ldy #6
-				jsr CopyFramePtr12
-				rts
+				clc
+.99				rts
 *--------------------------------------
-* A,X = Frame PTR
-*--------------------------------------
-SetFramePtr1AX	clc
-				adc ZPFrameBase1
-				sta ZPFramePtr1
+CFG.Read.HOSTS	>LDYA L.HOSTS
+				>SYSCALL SYS.LoadFileYA
+				bcs .99
+				stx CFG.hCfgFile
+				>STYA CFG.FileLen
+				
 				txa
-				adc ZPFrameBase1+1
-				sta ZPFramePtr1+1
-				rts
+				>SYSCALL SYS.GetMemPtrA
+				>STYA ZPIPCfgPtr
+				
+.89				lda CFG.hCfgFile
+				>SYSCALL SYS.FreeMemA
+				clc
+.99				rts
 *--------------------------------------
-* A,X = Frame PTR
-*--------------------------------------
-SetFramePtr2AX	clc
-				adc ZPFrameBase2
-				sta ZPFramePtr2
+CFG.GetLine		stz TmpBuffer256
+				ldx #0
+				ldy #0
+				
+.1				jsr CFG.GetChar
+				bne .2					end of file?
 				txa
-				adc ZPFrameBase2+1
-				sta ZPFramePtr2+1
+				bne .8
+				sec
+				rts
+				
+.2				cmp #$0D
+				beq .8					end of line
+				inx
+				sta TmpBuffer256,x
+				cmp #'='
+				bne .3
+				txa
+				dec
+				tay
+.3				cpx #64					line too long ?
+				bne .1
+				sec
+				rts
+				
+.8				tya						= found ?
+				beq .9
+				
+				sta TmpBuffer256
+				txa
+				sec
+				sbc TmpBuffer256
+				sta TmpBuffer256+1,y
+				stz TmpBuffer256+1,x	End with 0 for ScanIP
+				clc
+				rts
+				
+.9				sec
+				rts		
+*--------------------------------------
+CFG.GetChar		lda CFG.FileLen
+				bne .1
+				lda CFG.FileLen+1
+				beq .9
+				dec CFG.FileLen+1
+.1				dec CFG.FileLen
+				lda (ZPIPCfgPtr)
+				inc ZPIPCfgPtr
+				bne .9
+				inc ZPIPCfgPtr+1		NZ
+.9				rts				
+*--------------------------------------
+CFG.GetKeyword	stz CFG.Keyword
+				
+				ldx #0
+				
+.1				phx
+				ldy #0
+				
+.2				lda CFG.Keywords,x
+				cmp TmpBuffer256,y
+				bne .3
+				cpy TmpBuffer256
+				beq .4
+				inx
+				iny
+				bne .2
+				plx
+				sec
+				rts
+				
+.3				inc CFG.Keyword
+				plx
+				txa
+				sec
+				adc CFG.Keywords,x
+				tax
+				lda CFG.Keywords,x
+				bne .1
+				sec
+				rts
+				
+.4				plx
+				clc
 				rts
 *--------------------------------------
-* Y = bytes to copy from ZPFramePtr1 to ZPFramePtr2
-*--------------------------------------
-CopyFramePtr12	dey
-				lda (ZPFramePtr1),y
-				sta (ZPFramePtr2),y
-				tya
-				bne CopyFramePtr12
+CFG.ScanIP		stz CFG.IP
+
+				ldx TmpBuffer256
+				
+.1				ldy #0
+.11				lda TmpBuffer256+2,x
+				beq .3
+				cmp #'0'
+				bcc .2
+				cmp #'9'+1
+				bcs .2
+				cpy #3
+				beq .9
+				iny
+				sta CFG.StrBuf,y
+				inx
+				bra .11
+				
+.2				cmp #'.'
+				bne .9
+				
+.3				sty CFG.StrBuf
+				lda CFG.IP
+				cmp #4
+				beq .9
+				jsr CFG.Dec2Hex
+				bcs .9
+				lda CFG.HexByte
+				inc CFG.IP
+				ldy CFG.IP
+				sta CFG.IP,y
+				inx
+				lda TmpBuffer256+1,x
+				bne .1
+				clc
 				rts
+				
+.9				sec
+				rts
+*--------------------------------------
+CFG.Dec2Hex		sec
+				ldy CFG.StrBuf
+				beq .9
+				
+				lda CFG.StrBuf+1
+				and #$0f
+				sta CFG.HexByte
+				
+				ldy #1
+				
+.1				cpy CFG.StrBuf
+				beq .8
+				iny
+				lda CFG.HexByte
+				asl CFG.HexByte
+				bcs .9
+				asl CFG.HexByte
+				bcs .9
+				adc CFG.HexByte
+				bcs .9
+				asl
+				bcs .9
+				sta CFG.HexByte
+				lda CFG.StrBuf,y
+				and #$0f
+				adc CFG.HexByte
+				sta CFG.HexByte
+				bcc .1
+.9				rts
+				
+.8				clc
+				rts
+*--------------------------------------
+A2CharAX		pha
+				lsr
+				lsr
+				lsr
+				lsr
+				and #$0F
+				ora #$30
+				cmp #'9'+1
+				bcc .1
+				adc #6
+.1				tax
+				pla
+				and #$0F
+				ora #$30
+				cmp #'9'+1
+				bcc .8
+				adc #6
+.8				rts
 *--------------------------------------
 pNetDevJmp		jmp *
-*--------------------------------------
-				.INB SBIN/TCPIP.S.CFG
-				.INB SBIN/TCPIP.S.ARP
-				.INB SBIN/TCPIP.S.DNS
-				.INB SBIN/TCPIP.S.ICMP
 *--------------------------------------
 CS.END
 *--------------------------------------
 LIBTCPIP		>PSTRING "libtcpip.o"
-MSG.HELP		>PSTRING "Usage: TCPIP ETHx\n"
+DEVNAME			>PSTRING "ETH1"
+MSG.DEV.KO		>PSTRING "TCPIP:No Device Found, exiting.\n"
+MSG.DEV.OK		>PSTRING "TCPIP:Bound To Device : %S\n"
 MSG.CFG			>PSTRING "TCPIP:Reading %S..."
 MSG.CFG.KO		>PSTRING "Failed!!! [%h]\n"
 MSG.CFG.OK		>PSTRING "OK.\n"
 HOSTNAME		>PSTRING "${A2OSX}ETC/HOSTNAME"
 TCPIP.CONF		>PSTRING "${A2OSX}ETC/TCPIP.CONF"
-DefaultHostName	>CSTRING "a2osx-host"
+HOSTS			>PSTRING "${A2OSX}ETC/HOSTS"
+DefaultHostName	>CSTRING "a2osx-"
 CFG.Keywords	>PSTRING "DOMAIN"
 				>PSTRING "IP"
 				>PSTRING "MASK"
@@ -331,13 +570,12 @@ CFG.Keyword.Map	.DA #0					End Of Keyword table and NA Keyword
 				.DA #S.IPCFG.IP
 				.DA #S.IPCFG.MASK
 				.DA #S.IPCFG.GW
-				.DA #S.IPCFG.DNS
-				.DA #S.IPCFG.DNS+4
+				.DA #S.IPCFG.DNS1
+				.DA #S.IPCFG.DNS2
 hLIBTCPIP		.BS 1
-hDEVNAME		.BS 1
 hNetDev			.BS 1
 DEVFLAGS		.BS 1
-IPCFG			.BS S.IPCFG				Get in cache for faster access with ,X
+IPCFG			.BS S.IPCFG
 CFG.hCfgFile	.BS 1
 CFG.FileLen		.BS 2
 CFG.Keyword		.BS 1
