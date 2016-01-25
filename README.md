@@ -9,7 +9,11 @@ Enh IIe (65c02 cpu) with 128k, //c, IIgs
 OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.  
 (OApple+shift+1,OApple+shift+2,OApple+shift+3 on FR keyboard)  
   
-## Supported Hardware At Kernel Level (ProDOS):
+### **** Developers WANTED ****  
+...  
+!!! Help on writing this code should be greatly appreciated !!!  
+...  
+## SYS/KM* Supported Hardware At Kernel Level (ProDOS):
 | KM.Name | Status | Comment |
 | ------- | ------ | ------- |
 | KM.NSC | Working | No-Slot-Clock |
@@ -72,7 +76,7 @@ OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
 | ASM | In Progress | S-C MASM based multi CPU assembler |
   
 ## Misc  
-###S-C MASM color scheme for Notepad++  
+### S-C MASM color scheme for Notepad++  
 ...drop _Tools/userDefineLang.xml in %APPDATA%\Notepad++  
 ;-)
 
