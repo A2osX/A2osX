@@ -37,7 +37,7 @@ OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
 | UthernetII.DRV | In Progress | |
 | LanCeGS.DRV | In Progress | |
 | Mouse.DRV | Working | |
-| DHGR.DRV | Working | |
+| DHGR.DRV | In Progress | except bitblt... |
   
 ## Internal Shell commands:  
 | Name | Status | Comment |
@@ -54,15 +54,25 @@ OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
 ## BIN,External Shell commands:  
 | Name | Status | Comment |
 | ---- | ------ | ------- |
-| LS | Working  | BUG: `ls dir` does not list dir content (`ls dir/` works) |
-| MEM | Working  | |
+| MEM | Working | |
 | LSDEV | Working | |
-| MD | Working  | |
+| PS | Working | |
+| MD | Working | |
 | RM | Working | |
-| NETINFO | Working  | |
-| PS | Working  | |
-| ARP | Working  | |
+| LS | Working  | BUG: `ls dir` does not list dir content (`ls dir/` works) |
+| CP | | |
+| ARP | Working | |
 | PING | Working | |
-| DNSINFO | | |
+| DNSINFO | In Progress | |
+| NETINFO | Working | |
+| NETSTAT | Working | |
+| RPCINFO | In Progress | |
 | EDIT | In Progress | BUG: DEL |
+| NSCUTIL | Working | Tool for setting time in NSC/DL1216E |
+| ASM | In Progress | S-C MASM based multi CPU assembler |
   
+## Misc  
+###S-C MASM color scheme for Notepad++  
+...drop _Tools/userDefineLang.xml in %APPDATA%\Notepad++  
+;-)
+
