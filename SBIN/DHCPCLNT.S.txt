@@ -1,6 +1,6 @@
 PR#3
 PREFIX /A2OSX.SRC
-NEW
+LOMEM $C00
 INC 1
 AUTO 6
 				.LIST OFF
@@ -10,8 +10,9 @@ AUTO 6
 *--------------------------------------
 				.INB INC/MACROS.I
 				.INB INC/A2OSX.I
-				.INB INC/LIBSTR.I
 				.INB INC/LIBTCPIP.I
+*--------------------------------------
+TIMEOUT.MAX		.EQ 4					4 sec.
 *--------------------------------------
 ZPFrameBase1	.EQ ZPBIN
 ZPFrameLen1		.EQ ZPBIN+2
@@ -38,9 +39,11 @@ CS.START		cld
 				.DA	CS.QUIT
 L.LIBTCPIP		.DA LIBTCPIP
 L.IPCFG			.DA IPCFG
-L.MSG.CFG		.DA MSG.CFG
+L.MSG.CFG1		.DA MSG.CFG1
+L.MSG.CFG2		.DA MSG.CFG2
 L.MSG.CFG.KO	.DA MSG.CFG.KO
 L.MSG.CFG.OK	.DA MSG.CFG.OK
+L.MSG.CFG.ND	.DA MSG.CFG.ND
 L.MSG.CFG.NA	.DA MSG.CFG.NA
 				.DA 0
 *--------------------------------------
@@ -55,6 +58,10 @@ CS.INIT			>LDYA L.LIBTCPIP
 				lda (ZPPtr1)
 				and #S.IPCFG.STATUS.OK
 				bne .99					Already Configured, exit
+				
+				ldy #S.IPCFG.HDEV
+				lda (ZPPtr1),y
+				beq .98
 				
 				ldy #0
 .1				lda (ZPPtr1),y
@@ -80,9 +87,6 @@ CS.INIT			>LDYA L.LIBTCPIP
 				dex
 				bpl .2
 				
-				lda #20
-				sta TimeOut
-				
 				lda (pPs)
 				ora #S.PS.F.EVENT		Now accept events
 				sta (pPs)
@@ -90,31 +94,44 @@ CS.INIT			>LDYA L.LIBTCPIP
 				clc
 .9				rts
 
+.98				>LDYA L.MSG.CFG.ND
+				bra .90
 .99				>LDYA L.MSG.CFG.NA
-				>SYSCALL SYS.PSTROutYA
+.90				>SYSCALL SYS.PSTROutYA
 				lda #0
 				sec
 				rts
 *--------------------------------------
-CS.RUN			>LDYA L.MSG.CFG
+CS.RUN			>LDYA L.MSG.CFG1
 				>SYSCALL SYS.PSTROutYA
 
 CS.RUN.DISC		jsr SendDHCPDiscFrame
 				bcs CS.RUN.KO
-				
+
 				lda #S.IPCFG.STATUS.SDISC
 				sta IPCFG
+
+				jsr Init.Timeout
 				
 CS.RUN.OFFER	>SYSCALL SYS.Sleep
 				lda IPCFG
 				and #S.IPCFG.STATUS.ROFFER
 				bne CS.RUN.REQ
-				lda TimeOut
-				bne CS.RUN.OFFER
+				jsr Wait.Timeout
+				bcc CS.RUN.OFFER
 				lda #1
 				bra CS.RUN.KO
 
-CS.RUN.REQ		jsr SendDHCPReqFrame
+CS.RUN.REQ		ldx #3
+
+.1				>PUSHB IPCFG+S.IPCFG.DHCPSRVR,x
+				dex
+				bpl .1
+				
+				>LDYA L.MSG.CFG2
+				>SYSCALL SYS.PSTROutYA
+
+				jsr SendDHCPReqFrame
 				bcs CS.RUN.KO
 
 				lda #S.IPCFG.STATUS.SREQ
@@ -124,10 +141,17 @@ CS.RUN.RACK		>SYSCALL SYS.Sleep
 				lda IPCFG
 				and #S.IPCFG.STATUS.RACK
 				bne CS.RUN.OK
-				lda TimeOut
-				bne CS.RUN.RACK
+				jsr Wait.Timeout
+				bcc CS.RUN.RACK
 				lda #2
-				bra CS.RUN.KO
+				
+CS.RUN.KO		pha
+				>PUSHA
+				>LDYA L.MSG.CFG.KO
+				>SYSCALL SYS.PSTROutYA
+				pla
+				sec
+				rts
 				
 CS.RUN.OK		lda #S.IPCFG.STATUS.OK
 				sta IPCFG
@@ -152,27 +176,23 @@ CS.RUN.OK		lda #S.IPCFG.STATUS.OK
 				lda #0					Leave with NO ERROR
 				sec
 				rts
-				
-CS.RUN.KO		pha
-				>PUSHA
-				>LDYA L.MSG.CFG.KO
-				>SYSCALL SYS.PSTROutYA
-				pla
-				sec
-				rts
 *--------------------------------------
 CS.DOEVENT		lda (pEvent)
-				and #S.EVT.F.TIMER		is it a TIMER event?
-				beq .1					no....
+				bpl .1					is it a TIMER event?
 
-				lda TimeOut
+				asl						One second ?
+				bpl .9
+
+				ldy #TimeOut
+				lda (pData),y
 				beq .9
 				
-				dec TimeOut
-				bra .9					do not discard TIMER event
+				dec
+				sta (pData),y
+				sec						do not discard TIMER event
+				rts
 
-.1				lda (pEvent)
-				and #S.EVT.F.NET
+.1				bit #S.EVT.F.NET
 				beq .9
 				
 				ldy #S.IPCFG.HDEV
@@ -186,11 +206,10 @@ CS.DOEVENT		lda (pEvent)
 				>SYSCALL SYS.GetMemPtrA
 				>STYA ZPFrameBase1
 				
-				ldy #S.EVT.DATAW1		Get Frame Len
-				lda (pEvent),y
+				lda (ZPFrameBase1)
 				sta ZPFrameLen1
-				iny
-				lda (pEvent),y
+				ldy #1
+				lda (ZPFrameBase1),y
 				sta ZPFrameLen1+1
 				
 				lda IPCFG
@@ -222,10 +241,6 @@ CS.QUIT			lda hLIBTCPIP
 				clc
 				rts
 *--------------------------------------
-* SendDHCPDiscFrame
-*  In:
-*  Out:
-*--------------------------------------
 SendDHCPDiscFrame
 				jsr NewDHCPFrame
 				bcs .9
@@ -246,8 +261,12 @@ SendDHCPDiscFrame
 				tya
 				bne .1
 
-				>LDYAI S.UDP+FRAME.DISC.LEN
-				>PUSHYA
+				lda #S.UDP+FRAME.DISC.LEN-2
+				sta (ZPFrameBase1)
+				ldy #1
+				lda /S.UDP+FRAME.DISC.LEN-2
+				sta (ZPFrameBase1),y
+				
 				>PUSHW ZPFrameBase1
 				>LIBCALL hLIBTCPIP,LIBTCPIP.SEND.UDP.FRAME
 				pla
@@ -376,10 +395,6 @@ GetDHCPOption.CopyIP
 				bne .2
 				rts
 *--------------------------------------
-* SendDHCPReqFrame
-*  In:
-*  Out:
-*--------------------------------------
 SendDHCPReqFrame
 				jsr NewDHCPFrame
 				bcs .9
@@ -400,8 +415,12 @@ SendDHCPReqFrame
 				tya
 				bne .1
 
-				>LDYAI S.UDP+FRAME.REQ.LEN
-				>PUSHYA
+				lda #S.UDP+FRAME.REQ.LEN-2
+				sta (ZPFrameBase1)
+				ldy #1
+				lda /S.UDP+FRAME.REQ.LEN-2
+				sta (ZPFrameBase1),y
+				
 				>PUSHW ZPFrameBase1
 				>LIBCALL hLIBTCPIP,LIBTCPIP.SEND.UDP.FRAME
 				pla
@@ -476,43 +495,60 @@ SetFramePtr1AX	clc
 				sta ZPFramePtr1+1
 				rts
 *--------------------------------------
+Init.Timeout	ldy #TimeOut
+				lda #TIMEOUT.MAX
+				sta (pData),y
+				rts
+*--------------------------------------
+Wait.TimeOut	sec
+				ldy #TimeOut
+				lda (pData),y
+				beq .9
+				ldy #bCTRLC
+				lda (pData),y
+				bmi .9
+				clc
+.9				rts
+*--------------------------------------
 CS.END
 LIBTCPIP		>PSTRING "libtcpip.o"
-MSG.CFG			>PSTRING "DHCPCLNT:Querying DHCP Server...\n"
+MSG.CFG1		>PSTRING "DHCPCLNT:Searching for DHCP servers...\n"
+MSG.CFG2		>PSTRING "DHCPCLNT:Reply from DHCP Server at %d.%d.%d.%d, requesting...\n"
 MSG.CFG.KO		>PSTRING "DHCPCLNT:Time Out [%h].\n"
 MSG.CFG.OK		>PSTRING "DHCPCLNT:Success:[IP=%d.%d.%d.%d/%d.%d.%d.%d]\n"
-MSG.CFG.NA		>PSTRING "DHCPCLNT:TCPIP Already Configured, Exiting.\n"
-*--------------------------------------
+MSG.CFG.ND		>PSTRING "DHCPCLNT:No Device, exiting.\n"
+MSG.CFG.NA		>PSTRING "DHCPCLNT:TCPIP Already configured, exiting.\n"
+hLIBTCPIP		.BS 1
+IPCFG			.BS S.IPCFG
 FRAME.DISC		.HS 01010600			OP,HTYPE,HLEN,HOPS
 FRAME.DISC.XID	.BS 4
-FRAME.DISC.SECS	.HS 0000
-FRAME.DISC.FLAGS 	.HS 0000
-FRAME.DISC.CIADDR	.HS	00000000
+				.HS 0000				SECS
+				.HS 0000				FLAGS
+				.HS	00000000			CIADDR
 FRAME.DISC.YIADDR	.HS 00000000
-FRAME.DISC.SIADDR	.HS 00000000
-FRAME.DISC.GIADDR	.HS 00000000
+				.HS 00000000			SIADDR
+				.HS 00000000			GIADDR
 FRAME.DISC.CHADDR	.HS 00000000.00000000.00000000.00000000
-FRAME.DISC.SNAME	.BS 64
-FRAME.DISC.FILE		.BS 128
-FRAME.DISC.COOKIE	.HS 63825363
-FRAME.DISC.OPT	.HS 3501
+				.BS 64					SNAME
+				.BS 128					FILE
+				.HS 63825363			COOKIE
+				.HS 3501				OPT
 				.DA #S.DHCP.OPTIONS.DHCPDiscover
 				.HS 37040103060FFF
-FRAME.DISC.LEN 	.EQ *-FRAME.DISC
-*--------------------------------------
+FRAME.DISC.LEN	.EQ *-FRAME.DISC
 FRAME.REQ		.HS 01010600			OP,HTYPE,HLEN,HOPS
 FRAME.REQ.XID	.BS 4
-FRAME.REQ.SECS	.HS 0000
-FRAME.REQ.FLAGS 	.HS 0000
-FRAME.REQ.CIADDR	.HS	00000000
+				.HS 0000				SECS
+				.HS 0000				FLAGS
+				.HS	00000000			CIADDR
 FRAME.REQ.YIADDR	.HS 00000000
-FRAME.REQ.SIADDR	.HS 00000000
-FRAME.REQ.GIADDR	.HS 00000000
+				.HS 00000000			SIADDR
+				.HS 00000000			GIADDR
 FRAME.REQ.CHADDR	.HS 00000000.00000000.00000000.00000000
-FRAME.REQ.SNAME		.BS 64
-FRAME.REQ.FILE		.BS 128
-FRAME.REQ.COOKIE	.HS 63825363
-FRAME.REQ.OPT	.HS 3501
+				.BS 64					SNAME
+				.BS 128					FILE
+				.HS 63825363			COOKIE
+				.HS 3501				OPT
 				.DA #S.DHCP.OPTIONS.DHCPRequest
 				.HS 3204
 FRAME.REQ.OPT.REQIP	.BS 4
@@ -521,13 +557,10 @@ FRAME.REQ.OPT.SVRIP	.BS 4
 				.HS	FF
 FRAME.REQ.LEN 	.EQ *-FRAME.REQ
 *--------------------------------------
-hLIBTCPIP		.BS 1
-TimeOut			.BS 1
-IPCFG			.BS S.IPCFG
-*--------------------------------------
 DS.START
+TimeOut			.BS 1
+bCTRLC			.BS 1
 DS.END
-*--------------------------------------
 MAN
 SAVE SBIN/DHCPCLNT.S
 ASM
