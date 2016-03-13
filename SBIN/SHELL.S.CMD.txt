@@ -24,9 +24,10 @@ EXEC.CMD		stz hFullCmd
 
 				ldx #0
 				stz ExecCmdIdx
+				stz	ExecCmdMode
 				
 .1				lda CMDS,x
-				beq EXEC.CMD.EXT 
+				beq .6
 				cmp (ZPPtr1)
 				bne .5
 				
@@ -48,6 +49,7 @@ EXEC.CMD		stz hFullCmd
 				bne .2
 				plx
 				
+				ldx ExecCmdIdx
 				jsr EXEC.CMD.INT
 				jmp EXEC.CMD.ClnUp
 				
@@ -59,85 +61,11 @@ EXEC.CMD		stz hFullCmd
 				inc ExecCmdIdx
 				inc ExecCmdIdx
 				bra .1
+				
+.6				jsr EXEC.CMD.EXT		
+				jmp EXEC.CMD.ClnUp
 .99				rts	
 *--------------------------------------
-* ZPPtr1 = hExecCmd
-*--------------------------------------
-EXEC.CMD.EXT	ldy #1
-				lda (ZPPtr1),y
-				cmp #'/'
-				bne .1
-				>LDYA ZPPtr1
-				>SYSCALL SYS.NewPStrYA
-				bra .10
-
-.1				>LDYA L.ENV.PATH		push ENVNAME=PATH
-				>SYSCALL SYS.GetEnvVarYA	get value for ENV=PATH
-				
-				bcc .12
-				jmp EXEC.CMD.ClnUp
-				
-.12				sta hEnvPath
-				>PUSHB hExecCmd
-				>PUSHB hEnvPath
-				>SYSCALL SYS.FileSearch
-				bcc .10
-
-				>PUSHB hExecCmd
-				ldy #S.PS.hPREFIX
-				lda (pPs),y
-				>PUSHA
-				>SYSCALL SYS.FileSearch
-
-.10				bcs EXEC.CMD.ClnUp
-
-				sta hFullCmd
-				>SYSCALL SYS.MLIGetFileInfoA
-				bcs EXEC.CMD.ClnUp
-
-				>STYA ZPPTR1
-				ldy #1					Get File Type
-				lda (ZPPTR1),y
-				cmp #$04				TXT File ?
-				bne .2
-				
-				lda hFullCmd
-				jsr OpenTxtFileA
-				bcs EXEC.CMD.ClnUp
-				
-				lda hExecArgs
-				beq .11
-				
-				>SYSCALL SYS.PStrCpyA
-				bcs EXEC.CMD.ClnUp
-.11				ldy #hInputArgs
-				sta (pData),y
-				bra EXEC.CMD.ClnUp	
-				
-.2				cmp #$06				BIN File ?
-				bne .4
-				
-				ldy #S.PS.PID
-				lda (pPs),y
-				beq .3					0, we are in kernel space
-				
-				lda hFullCmd
-				ldy hExecArgs
-				>SYSCALL SYS.ExecProcessNewEnvYA
-				bra EXEC.CMD.ClnUp
-
-.3				lda hFullCmd
-				ldy hExecArgs
-				>SYSCALL SYS.CreateProcessYA
-				bra EXEC.CMD.ClnUp
-				
-.4				cmp #$ff				SYS File ?
-				bne .5
-				
-				bra *
-				
-.5				lda #SYSMGR.ERRSYN
-				sec		
 EXEC.CMD.ClnUp	pha
 				php
 				lda hFullCmd
@@ -159,8 +87,84 @@ EXEC.CMD.ClnUp	pha
 				pla
 				rts
 *--------------------------------------
-EXEC.CMD.INT	ldx ExecCmdIdx
-				jmp (J.INTCMDS,x)
+EXEC.CMD.INT	jmp (J.INTCMDS,x)
+*--------------------------------------
+* ZPPtr1 = hExecCmd
+*--------------------------------------
+EXEC.CMD.EXT	ldy #1
+				lda (ZPPtr1),y
+				cmp #'/'
+				bne .1
+				>LDYA ZPPtr1
+				>SYSCALL SYS.NewPStrYA
+				bra .10
+
+.1				>LDYA L.ENV.PATH		push ENVNAME=PATH
+				>SYSCALL SYS.GetEnvVarYA	get value for ENV=PATH
+				
+				bcc .12
+				jmp .9
+				
+.12				sta hEnvPath
+				>PUSHB hExecCmd
+				>PUSHB hEnvPath
+				>SYSCALL SYS.FileSearch
+				bcc .10
+
+				>PUSHB hExecCmd
+				ldy #S.PS.hPREFIX
+				lda (pPs),y
+				>PUSHA
+				>SYSCALL SYS.FileSearch
+
+.10				bcs .9
+
+				sta hFullCmd
+				>SYSCALL SYS.MLIGetFileInfoA
+				bcs .9
+
+				>STYA ZPPTR1
+				ldy #1					Get File Type
+				lda (ZPPTR1),y
+				cmp #$04				TXT File ?
+				bne .2
+				
+				lda hFullCmd
+				jsr OpenTxtFileA
+				bcs .9
+				
+				lda hExecArgs
+				beq .11
+				
+				>SYSCALL SYS.PStrCpyA
+				bcs .9
+.11				ldy #hInputArgs
+				sta (pData),y
+				bra .9	
+				
+.2				cmp #$06				BIN File ?
+				bne .4
+				
+				lda hFullCmd
+				ldy hExecArgs
+
+				bit ExecCmdMode
+				bmi .3					startproc
+				
+				>SYSCALL SYS.ExecProcessNewEnvYA
+				bra .9
+
+.3				>SYSCALL SYS.CreateProcessYA
+				bra.9
+				
+.4				cmp #$ff				SYS File ?
+				bne .5
+				
+				bra *
+				
+.5				lda #SYSMGR.ERRSYN
+				sec	
+.9				rts
 *--------------------------------------
 EXEC.CMD.CD		lda hExecArgs
 				bne EXEC.CMD.CD.C
@@ -249,6 +253,36 @@ EXEC.CMD.CD.C	>SYSCALL SYS.GetMemPtrA
 				>SYSCALL SYS.FreeMemA
 				clc
 				rts
+*--------------------------------------
+EXEC.CMD.STARTPROC
+				lda hExecCmd
+				>SYSCALL SYS.FreeMemA
+				stz hExecCmd
+				
+				lda hExecArgs
+				beq .9
+				>PUSHA
+				>PUSHBI $20				Push SEP=' '
+				>PUSHBI 0				Push 0 for getting CMD & ARGS
+				>SYSCALL SYS.PStrGetTkn
+				bcs .99
+				phx
+				sta hExecCmd
+				>SYSCALL SYS.GetMemPtrA
+				>STYA ZPPTR1				
+				
+				lda hExecArgs
+				>SYSCALL SYS.FreeMemA
+				pla
+				sta hExecArgs
+
+				sec
+				ror	ExecCmdMode
+
+				jmp EXEC.CMD.EXT
+.9				lda #SYSMGR.ERRSYN
+				sec
+.99				rts
 *--------------------------------------
 EXEC.CMD.SET	lda hExecArgs
 				bne EXEC.CMD.SETVAR
