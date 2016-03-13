@@ -47,13 +47,14 @@ OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
 | Name | Status | Comment |
 | ---- | ------ | ------- |
 | CD | Working | |
-| SET | Working  | |
 | DATE | Working  | |
-| TIME | Working  | |
-| EXIT | Working  | |
-| TYPE | Working  | |
-| PAUSE | Working | |
 | ECHO | Working | |
+| EXIT | Working  | |
+| PAUSE | Working | |
+| TIME | Working  | |
+| TYPE | Working  | |
+| SET | Working  | |
+| STARTPROC | NOT Working  | |
   
 ## BIN,External Shell commands:  
 | Name | Status | Comment |
@@ -68,10 +69,10 @@ OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
 | ARP | Working | |
 | PING | Working | |
 | DNSINFO | In Progress | |
-| NETINFO | Working | |
+| IPCONFIG | Working | renamed from NETINFO |
 | NETSTAT | Working | |
-| RPCINFO | In Progress | |
-| EDIT | In Progress | BUG: DEL |
+| RPCDUMP | In Progress | tool based on UDP socket API, renamed from RPCINFO |
+| EDIT | Working | still missing : find/replace |
 | NSCUTIL | Working | Tool for setting time in NSC/DL1216E |
 | ASM | In Progress | S-C MASM based multi CPU assembler |
   
