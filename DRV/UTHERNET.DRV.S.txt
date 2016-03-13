@@ -24,16 +24,6 @@ IntStatusQueue	.EQ	$C088				Interrupt Status Queue
 PacketPagePTR	.EQ	$C08A				PacketPage Pointer
 PacketPageDATA	.EQ	$C08C				PacketPage Data (DWORD) 
 *--------------------------------------
-TxCMD.LID			.EQ	%00000000.00001001
-TxCMD.TxStart5		.EQ %00000000.00000000	00 = start after 5 Bytes
-TxCMD.TxStart381	.EQ %00000000.01000000	01 = start after 381 Bytes
-TxCMD.TxStart1021	.EQ %00000000.10000000	10 = start after 1021 Bytes
-TxCMD.TxStartFULL	.EQ %00000000.11000000	11 = start after ENTIRE Frame
-TxCMD.Force			.EQ %00000001.00000000
-TxCMD.OneColl		.EQ %00000010.00000000
-TxCMD.InhibitCRC	.EQ %00010000.00000000
-TxCMD.TxPadDis		.EQ %00100000.00000000
-*--------------------------------------
 * PacketPage Offsets & Masks
 *--------------------------------------
 PP.ID			.EQ $0000				Product ID code (RO)
@@ -53,11 +43,21 @@ PP.RxCTL.RuntA		.EQ %00100000.00000000
 PP.RxCTL.ExtradataA	.EQ %01000000.00000000
 PP.TxCFG		.EQ	$0106				Transmit Configuration (RW)
 PP.TxCMD		.EQ $0108				Receiver Control (RW)
+PP.TxCMD.LID			.EQ	%00000000.00001001
+PP.TxCMD.TxStart5		.EQ %00000000.00000000	00 = start after 5 Bytes
+PP.TxCMD.TxStart381		.EQ %00000000.01000000	01 = start after 381 Bytes
+PP.TxCMD.TxStart1021	.EQ %00000000.10000000	10 = start after 1021 Bytes
+PP.TxCMD.TxStartFULL	.EQ %00000000.11000000	11 = start after ENTIRE Frame
+PP.TxCMD.Force			.EQ %00000001.00000000
+PP.TxCMD.OneColl		.EQ %00000010.00000000
+PP.TxCMD.InhibitCRC		.EQ %00010000.00000000
+PP.TxCMD.TxPadDis		.EQ %00100000.00000000
 PP.BufCFG		.EQ $010A
 PP.LineCTL		.EQ $0112				Line Control (RW)
 PP.LineCTL.LID		.EQ	%00000000.00010011
 PP.LineCTL.SerRxOn	.EQ %00000000.01000000
 PP.LineCTL.SerTxOn	.EQ %00000000.10000000
+PP.LineCTL.10BaseT	.EQ %00000000.00000000
 PP.LineCTL.AUIonly	.EQ %00000001.00000000
 PP.LineCTL.Auto		.EQ %00000010.00000000
 PP.SelfCTL		.EQ	$0114				Self Control (RW)
@@ -284,6 +284,11 @@ OPEN			jsr Reset
 				>LDYA MAC+4
 				>STYA PacketPageDATA,x
 				
+				>LDYAI PP.TestCTL
+				>STYA PacketPagePTR,x
+				>LDYAI PP.TestCTL.LID+PP.TestCTL.FDX
+				>STYA PacketPageDATA,x
+				
 				>LDYAI PP.LineCTL
 				>STYA PacketPagePTR,x
 				>LDYAI PP.LineCTL.LID+PP.LineCTL.SerRxOn+PP.LineCTL.SerTxOn+PP.LineCTL.Auto
@@ -307,16 +312,27 @@ GETEVENT		ldx DEVSLOTx0
 				lda #ERRTNOFRAME
 				sec
 				rts
-GETEVENT.RxOK	
-				and /PP.RxEvent.Brdcast
+
+GETEVENT.RxOK	and /PP.RxEvent.Brdcast
 				beq .10
 				lda #$80
 .10				ldy #S.EVT.DATAHI
 				sta (pEvent),y		
-				>LDYA RTDATA,x			discard RxStatus 
-				>LDYA RTDATA,x			get RxLength
-				>STYA FRAMELEN
-				>PUSHYA
+				>LDYA RTDATA,x			discard RxStatus
+				
+				lda RTDATA+1,x			get RxLength
+				sta FRAMELEN+1
+				pha
+				lda RTDATA,x
+				sta FRAMELEN
+				clc
+				adc #2
+				tay
+				pla
+				bcc .11
+				inc
+				
+.11				>PUSHYA					FRAMLEN+2
 				>PUSHBI 0
 				>SYSCALL SYS.GetMem
 				bcs .99
@@ -324,31 +340,37 @@ GETEVENT.RxOK
 				txa
 				ldy #S.EVT.DATALO
 				sta (pEvent),y
-				ldy #S.EVT.DATAW1
-				lda FRAMELEN
-				sta (pEvent),y
-				iny
-				lda FRAMELEN+1
-				sta (pEvent),y
+
 				lda #S.EVT.F.NET+S.EVT.F.hMEM1
 				sta (pEvent)
-				ldy #0
-				ldx DEVSLOTx0
+								
+				lda FRAMELEN
+				sta (ZPTmpPTR)
+				ldy #1
+				lda FRAMELEN+1
+				sta (ZPTmpPTR),y
 				
-.1				lda RTDATA,x
+				iny
+				
+				ldx DEVSLOTx0
+
+.1				jsr DecFrameLen
+				beq .8
+				lda RTDATA,x
 				sta	(ZPTmpPTR),y
 				iny
 				bne .2
 				inc ZPTmpPTR+1
+				
 .2				jsr DecFrameLen
 				beq .8
 				lda RTDATA+1,x
 				sta	(ZPTmpPTR),y
 				iny
-				bne .3
-				inc ZPTmpPTR+1
-.3				jsr DecFrameLen
 				bne .1
+				inc ZPTmpPTR+1
+				bne .1
+				
 .8				clc
 				rts
 				
@@ -365,7 +387,30 @@ CLOSE			jsr Reset
 * 	CC on success
 * 	CS on error
 *--------------------------------------
-GETINFO			>LDYA L.DEVINFO
+GETINFO			lda #S.DEVINFO.NET.STATUS.10
+				sta LINK.STATUS
+
+				ldx DEVSLOTx0
+				>LDYAI PP.LineST
+				>STYA PacketPagePTR,x
+				>LDYA PacketPageDATA,x
+				tya
+				and #PP.LineST.LinkOK
+				bne .1
+				lda LINK.STATUS
+				ora #S.DEVINFO.NET.STATUS.OK
+				sta LINK.STATUS
+	
+.1				>LDYAI PP.TestCTL
+				>STYA PacketPagePTR,x
+				>LDYA PacketPageDATA,x
+				and /PP.TestCTL.FDX
+				bne .2
+				lda LINK.STATUS
+				ora #S.DEVINFO.NET.STATUS.FD
+				sta LINK.STATUS
+				
+.2				>LDYA L.DEVINFO
 				clc
 				rts
 *--------------------------------------				
@@ -377,9 +422,14 @@ GETINFO			>LDYA L.DEVINFO
 * 	CS on error
 *--------------------------------------				
 SEND			>PULLW ZPTmpPTR
-				>PULLW FRAMELEN
-
-				ldy #11					Add Src MAC Address
+				
+				lda (ZPTmpPTR)
+				sta FRAMELEN
+				ldy #1
+				lda (ZPTmpPTR),y
+				sta FRAMELEN+1
+				
+				ldy #2+6+5				Add Src MAC Address
 				ldx #5
 .10				lda MAC,x
 				sta (ZPTmpPTR),y
@@ -388,7 +438,7 @@ SEND			>PULLW ZPTmpPTR
 				bpl .10
 
 				ldx DEVSLOTx0
-				>LDYAI TxCMD.LID+TxCMD.TxStartFULL
+				>LDYAI PP.TxCMD.LID+PP.TxCMD.TxStartFULL
 				>STYA TxCMD,x
 				>LDYA FRAMELEN
 				>STYA TxLength,x
@@ -417,21 +467,25 @@ SEND			>PULLW ZPTmpPTR
 				sec
 				rts
 				
-SENDPREADY		ldy #0
-.1				lda	(ZPTmpPTR),y
+SENDPREADY		ldy #2
+
+.1				jsr DecFrameLen
+				beq .8
+				lda	(ZPTmpPTR),y
 				sta RTDATA,x
 				iny
 				bne .2
 				inc ZPTmpPTR+1
+				
 .2				jsr DecFrameLen
 				beq .8
 .3				lda	(ZPTmpPTR),y
 				sta RTDATA+1,x
 				iny
-				bne .5
-				inc ZPTmpPTR+1
-.5				jsr DecFrameLen
 				bne .1
+				inc ZPTmpPTR+1
+				bne .1
+				
 .8				clc
 				rts	
 *--------------------------------------
@@ -461,8 +515,7 @@ FRAMELEN		.BS 2
 DEVINFO			.DA #S.DEVINFO.TYPE.NET
 DEVFLAGS		.DA #0
 MAC				.BS 6
-LINK.STATUS		.BS 1
-LINK.SPEED		.BS 1					SPEED/DUPLEX
+LINK.STATUS		.BS 1					OK/DUPLEX/SPEED
 *--------------------------------------
 MAN
 SAVE DRV/UTHERNET.DRV.S
