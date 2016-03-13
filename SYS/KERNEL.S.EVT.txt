@@ -7,7 +7,13 @@ AUTO 6
 *--------------------------------------
 * S.EvtMgrInit
 *--------------------------------------
-S.EvtMgrInit	lda MACHID
+S.EvtMgrInit	lda #10
+				sta EVTMGR.10TH.CNT
+
+				lda A2osX.HZ
+				sta EVTMGR.HZ.CNT
+				
+				lda MACHID
 				and #MACHID.TYPE
 				cmp #MACHID.TYPE.IIc
 				bne .8
@@ -15,7 +21,8 @@ S.EvtMgrInit	lda MACHID
 *				sta CLRIOUDIS
 *				sta ENBVBLIIC
 				
-.8				stz EVTMGR.PENDING
+.8				lda /EvtMgr.Table
+				sta pEvent+1
 				clc
 				rts
 *--------------------------------------
@@ -26,97 +33,157 @@ S.EvtMgrInit	lda MACHID
 *   CC * event in YA
 *   (pEvent)
 *--------------------------------------
-S.GetEvent		lda EVTMGR.PENDING		Get Pending EVENT hMem if any
-				beq .1
-				jsr S.GetMemPtrA
-				>STYA pEvent
-				clc
-				rts
+S.GetEvents		stz	pEvent
+				stz EVTMGR.COUNT
 				
-.1				jsr S.CreateEvent
-				bcs .9
-
-				jsr S.GetSysEvent
-				bcc .9					got SYS event
-				jsr S.GetDevEvent
-				bcc .9					got DEV event	
-				jsr S.DestroyEvent		discard empty event
-				lda #0					error code=0
-				sec						no event
-.9				rts				
-*--------------------------------------
-S.GetSysEvent	lda VBL					get VLINE status
+				lda VBL					get VLINE status
+				tax
 				eor EVTMGR.VBLSTATE			
-				bpl .9					no change
-				
+				bpl S.GetEvents.DEV		no change,no tick
+				txa
 				sta EVTMGR.VBLSTATE		save new
-
-				dec EVTMGR.FRAMECNT
-				bne .9
-				lda #K.TIMER16RESOLUTION
-				sta EVTMGR.FRAMECNT
+				bpl S.GetEvents.DEV		Up2down transition,no tick
+				
+*				sta PDLTRIG				clr VBL (IIc)
+*				lda RDIOUDIS			clr VBL (IIc)
 				
 				inc A2osX.TIMER16
 				bne .1
 				inc A2osX.TIMER16+1
 
-.1				lda #S.EVT.F.TIMER
+.1				dec EVTMGR.HZ.CNT
+				bne S.GetEvents.DEV		not yet 100ms
+
+				ldx A2osX.HZ
+				stx EVTMGR.HZ.CNT
+
+				lda #S.EVT.F.T10TH
+
+				dec EVTMGR.10TH.CNT
+				bne .2
 				
-.8				sta (pEvent)
+				ldx #10
+				stx EVTMGR.10TH.CNT
+
+				ora #S.EVT.F.T1SEC
+				
+.2				sta (pEvent)
+				
+				lda pEvent
+				clc
+				adc #S.EVT
+				sta pEvent
+				inc EVTMGR.COUNT
+				
+S.GetEvents.DEV	>LDYAI DevMgr.Table
+				>STYA pDev
+
+				stz DevMgr.DevID
+								
+.1				ldy #S.DEV.F
+				lda (pDev),y			get S.DEV.F
+				and #S.DEV.F.EVENT
+				beq .2					EVENT enabled ?
+				
+				lda (pDev)
+				cmp #H.BIN.HEADER.DRV65
+				bne *
+				ldx #DEVMGR.GETEVENT
+				jsr pDevJmp				Call DRV GetEvent function
+				bcs .2					no event
+
+				inc EVTMGR.COUNT
+				
+				ldy #S.EVT.hDEV
+				lda DevMgr.DevID
+				sta (pEvent),y
+				
+				lda pEvent
+				adc #S.EVT				cc
+				sta pEvent
+				
+				bcs .8					Event Q is full!
+				
+.2				lda pDev
+				clc
+				adc #S.DEV.SIZE
+				sta pDev
+				bcc .3
+				inc pDev+1
+				
+.3				lda DevMgr.DevID
+				inc DevMgr.DevID
+				cmp DevMgr.LastDevID
+				bne .1
+				
+.8				lda EVTMGR.COUNT
+				sta EVTMGR.SIZE
+				beq .9
+				
+				clc
+				rts
+				
+.9				sec						error code=0,CS=no event
+				rts
+*--------------------------------------
+S.GetKeyboardEvent
+				lda KBD
+				bpl .9
+				sta KBDSTROBE
+				
+				sta A2osX.RANDOM16
+				
+				and #$7F
+				ldy #S.EVT.DATA
+				sta (pEvent),y
+				iny
+				lda	OPENAPPLE
+				asl
+				lda SOLIDAPPLE
+				ror
+				and #$C0
+				sta (pEvent),y
+				
+				lda #S.EVT.F.KEY
+				sta (pEvent)
  				clc
 				rts
 
-.9				sta PDLTRIG				clr VBL (IIc)
-*				lda RDIOUDIS			clr VBL (IIc)
-				lda #0					error code=0
-				sec						no event
-				rts
+.9				inc A2osX.RANDOM16
+				bne .99
+				inc A2osX.RANDOM16+1
+.99				sec						no event
+				rts					
 *--------------------------------------
-* S.CreateEvent
-* OUT :
-*   X = hMem
-*	Y,A = PTR to EVENT
-*--------------------------------------
-S.CreateEvent	>PUSHWI S.EVT.SIZE
-				>PUSHBI S.MEM.F.INIT0
-				jsr S.GetMem
-				bcs .9
-				>STYA pEvent
-				stx EVTMGR.PENDING
-.9				rts
-*--------------------------------------
-* S.DestroyEvent
-* IN : 
-*  A = Event hMem
-* OUT :
-*--------------------------------------
-S.DestroyEvent	lda EVTMGR.PENDING
+S.DestroyEvent	lda (pEvent)
 				beq .9
 			
-				lda (pEvent)
-				and #S.EVT.F.hMEM1
+				bit #S.EVT.F.hMEM1
 				beq .1
 				
+				pha
 				ldy #S.EVT.DATALO
 				lda (pEvent),y
 				jsr S.FreeMemA
+				pla
 				
-.1				lda (pEvent)
-				and #S.EVT.F.hMEM2
+.1				bit #S.EVT.F.hMEM2
 				beq .2
 				
 				ldy #S.EVT.DATAHI
 				lda (pEvent),y
 				jsr S.FreeMemA
 				
-.2				lda EVTMGR.PENDING
-				jsr S.FreeMemA
-				stz EVTMGR.PENDING
+.2				lda #0
+				sta (pEvent)
+				dec EVTMGR.COUNT
 .9				rts
 *--------------------------------------
 EVTMGR.VBLSTATE	.BS 1
-EVTMGR.FRAMECNT	.BS 1
-EVTMGR.PENDING	.BS 1
+EVTMGR.10TH.CNT	.BS 1
+EVTMGR.HZ.CNT	.BS 1
+EVTMGR.COUNT	.BS 1
+EVTMGR.SIZE		.BS 1
 *--------------------------------------
 MAN
 SAVE SYS/KERNEL.S.EVT
