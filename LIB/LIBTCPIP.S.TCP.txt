@@ -5,9 +5,278 @@ INC 1
 AUTO 6
 				.LIST OFF	
 *--------------------------------------
-TCP.IN			clc
+TCP.IN			ldy #S.IP.SRC+3
+				ldx #3
+				
+.1				lda (ZPFrameBase1),y
+				sta TmpSocket+S.SOCKET.DST.ADDR,x
+				dey
+				dex
+				bpl .1
+				
+				ldy #S.TCP.SRCPORT
+				lda (ZPFrameBase1),y
+				sta TmpSocket+S.SOCKET.DST.PORT+1
+				iny
+				lda (ZPFrameBase1),y
+				sta TmpSocket+S.SOCKET.DST.PORT
+				
+				ldy #S.IP.DST+3
+				ldx #3
+.2				lda (ZPFrameBase1),y
+				sta TmpSocket+S.SOCKET.SRC.ADDR,x
+				dey
+				dex
+				bpl .2
+				
+				ldy #S.TCP.DSTPORT
+				lda (ZPFrameBase1),y
+				sta TmpSocket+S.SOCKET.SRC.PORT+1
+				iny
+				lda (ZPFrameBase1),y
+				sta TmpSocket+S.SOCKET.SRC.PORT
+				
+				>LDYA L.SKT.TABLE
+				>STYA ZPPtrSKT
+				
+				ldx #0
+				
+.3				lda (ZPPtrSKT)
+				beq .7
+				cmp #S.SOCKET.SOCK.STREAM
+				bne .7
+				
+				ldy #S.SOCKET.SRC.ADDR
+				
+.4				lda TmpSocket,y
+				cmp (ZPPtrSKT),y
+				bne .7						Not for this socket...
+				iny
+				cpy #S.SOCKET.SRC.PORT+2
+				bne .4
+				
+				ldy #S.SOCKET.SO
+				lda (ZPPtrSKT),y
+				and #S.SOCKET.SO.ACCEPTCONN		Listening socket?
+				beq .5
+	
+				ldy #S.TCP.OPTIONS				yes, only accept SYN packet
+				lda (ZPFrameBase1),y
+				cmp #S.TCP.OPTIONS.SYN
+				bne .7							not for this listening socket
+				jmp TCP.IN.LISTEN.NEW
+			
+.5				ldy #S.SOCKET.DST.ADDR
+
+.6				lda TmpSocket,y			regular socket, check remote ADDR/PORT
+				cmp (ZPPtrSKT),y
+				bne .7
+				iny
+				cpy #S.SOCKET.DST.PORT+2
+				bne .6
+				
+				jmp TCP.IN.ESTABLISHED
+				
+.7				lda ZPPtrSKT
+				clc
+				adc #S.SOCKET
+				sta ZPPtrSKT
+				bcc .8
+				inc ZPPtrSKT+1
+				
+.8				inx
+				cpx #K.SKTTABLE.SIZE
+				bne .3
+				
+				clc						Discard frame
 				rts
-.9				sec
+*--------------------------------------
+TCP.IN.LISTEN.NEW
+				lda #S.SOCKET.SOCK.STREAM
+				sta TmpSocket
+				
+				stz TmpSocket+S.SOCKET.SO
+
+				ldy #S.TCP.SEQ.NUMBER+3
+				ldx #3
+				
+				sec
+.1				lda (ZPFrameBase1),y
+				adc #0
+				sta TmpSocket+S.SOCKET.SQ.ACKNUM,x
+				dey
+				dex
+				bpl .1
+				
+				ldx #3
+.2				lda A2osX.TIMER16,x
+				sta TmpSocket+S.SOCKET.SQ.SEQNUM,x
+				dex
+				bpl .2
+
+				>PUSHW L.TmpSocket
+
+				jsr SKT.NEW
+				bcs .9
+				txa
+				ldy #S.SOCKET.PARENT
+				sta (ZPPtrSKT),y
+				
+				jsr SKT.TCPSendSYNACKA
+
+				ldy #S.SOCKET.STATUS
+				lda #S.SOCKET.STATUS.SYNRCVD
+				sta (ZPPtrSKT),y
+				
+
+				clc
+.9				rts
+*--------------------------------------
+TCP.IN.ESTABLISHED
+				stx hSocket
+				ldy #S.SOCKET.STATUS
+				lda (ZPPtrSKT),y
+				cmp #S.SOCKET.STATUS.SYNRCVD	Waiting for ACK to establish?
+				bne .1
+				
+				ldy #S.TCP.OPTIONS				yes, only accept ACK packet
+				lda (ZPFrameBase1),y
+				cmp #S.TCP.OPTIONS.ACK
+				bne .8
+				
+				ldx #3
+				ldy #S.SOCKET.SQ.SEQNUM+3
+				sec
+.10				lda (ZPPtrSKT),y
+				adc #0
+				sta TmpDWord,x
+				dey
+				dex
+				bpl .10
+				
+				ldx #3
+				ldy #S.TCP.ACK.NUMBER+3
+.11				lda (ZPFrameBase1),y
+				cmp TmpDWord,x
+				bne .8
+				dey
+				dex
+				bpl .11
+				
+				ldx #3
+				ldy #S.SOCKET.SQ.SEQNUM+3
+.12				lda TmpDWord,x
+				sta (ZPPtrSKT),y
+				dey
+				dex
+				bpl .12
+				
+				ldy #S.SOCKET.STATUS
+				lda #S.SOCKET.STATUS.ESTBLSH
+				sta (ZPPtrSKT),y
+				
+				ldy #S.SOCKET.PARENT
+				lda (ZPPtrSKT),y
+				jsr SKT.GetA
+
+				lda hSocket
+				jsr SKT.AddToQueueL
+
+.8				clc
+				rts
+				
+.1				cmp #S.SOCKET.STATUS.ESTBLSH
+				bne .99
+
+
+
+
+				bra *
+.99				clc
+				rts
+*--------------------------------------
+TCP.ComputeChecksum
+				lda #0					RESET.TCP.CHECKSUM
+				ldy #S.TCP.CHECKSUM
+				sta (ZPFrameBase1),y
+				iny
+				sta (ZPFrameBase1),y
+				
+				>LDYA ZPFrameBase1
+				>STYA ZPTmpPtr1
+				
+				lda ZPFrameLen1
+				sec
+				sbc #S.IP-2
+				sta ZPDataLen
+				
+				lda ZPFrameLen1+1
+				sbc /S.IP-2
+				sta ZPDataLen+1
+				
+				clc
+				
+*				lda ZPDataLen+1
+*				adc #0					RESERVED (all zero)
+				sta IP.CHECKSUM
+
+				lda ZPDataLen
+				adc #S.IP.PROTOCOL.TCP
+				sta IP.CHECKSUM+1
+				
+				ldy #S.IP.SRC
+				
+				ldx #4					4 words for SRC & DST IP
+				
+.10				lda (ZPFrameBase1),y
+				adc IP.CHECKSUM
+				sta IP.CHECKSUM
+				iny
+				lda (ZPFrameBase1),y
+				adc IP.CHECKSUM+1
+				sta IP.CHECKSUM+1
+				iny
+				dex
+				bne .10
+				
+				ldy #S.IP
+				
+.1				jsr DecDataLen
+				beq .8
+				
+				lda (ZPTmpPtr1),y
+				adc IP.CHECKSUM
+				sta IP.CHECKSUM
+
+				iny
+				bne .20
+				inc ZPTmpPtr1+1
+				
+.20				jsr DecDataLen
+				bne .2
+				lda #0
+				bra .21
+
+.2				lda (ZPTmpPtr1),y
+
+.21				adc IP.CHECKSUM+1
+				sta IP.CHECKSUM+1
+				
+				iny
+				bne .1
+				inc ZPTmpPtr1+1
+				bra .1
+				
+.8				ldy #S.TCP.CHECKSUM
+				lda IP.CHECKSUM
+				adc #0					Don't forget to add last carry!!!
+				eor #$FF
+				sta (ZPFrameBase1),y
+				iny
+				lda IP.CHECKSUM+1
+				adc #0					Don't forget to add last carry!!!
+				eor #$FF
+				sta (ZPFrameBase1),y
 				rts
 *--------------------------------------
 MAN
