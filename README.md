@@ -12,7 +12,10 @@ OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
 ### **** Developers WANTED ****  
 ...  
 !!! Help on writing this code should be greatly appreciated !!!  
-...  
+...
+- In Progress : moving TCPIP to some soket API
+- In Progress : moving KERNEL to AuxLC Bnk1 & 2 (16k, more space for drivers)
+...
 ## SYS/KM* Supported Hardware At Kernel Level (ProDOS):
 | KM.Name | Status | Comment |
 | ------- | ------ | ------- |
@@ -54,7 +57,7 @@ OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
 | TIME | Working  | |
 | TYPE | Working  | |
 | SET | Working  | |
-| STARTPROC | NOT Working  | |
+| STARTPROC | Working  | Used in A2osX.startup |
   
 ## BIN,External Shell commands:  
 | Name | Status | Comment |
