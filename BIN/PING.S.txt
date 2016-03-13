@@ -13,7 +13,7 @@ AUTO 6
 				.INB INC/LIBSTR.I
 				.INB INC/LIBTCPIP.I
 *--------------------------------------
-PING.TIMEOUT	.EQ 40					40*100ms = 4 sec.
+TIMEOUT.MAX		.EQ 50					5 sec.
 *--------------------------------------
 ZPFrameBase1	.EQ ZPBIN
 ZPFrameLen1		.EQ ZPBIN+2
@@ -38,7 +38,6 @@ CS.START		cld
 				.DA	CS.QUIT
 L.LIBSTR		.DA LIBSTR
 L.LIBTCPIP		.DA LIBTCPIP
-L.SSCANF.IP		.DA SSCANF.IP
 L.MSG0			.DA MSG0
 L.MSG1			.DA MSG1
 L.MSG2			.DA MSG2
@@ -91,31 +90,18 @@ CS.INIT			ldy #S.PS.hARGS
 				
 .9				rts
 *--------------------------------------
-CS.RUN			>PUSHW pData			DST.IP
-				>PUSHW L.SSCANF.IP
+CS.RUN			jsr Init.Timeout
+
+.1				>PUSHW pData			DST.IP
 				ldy #S.PS.hARGS
 				lda (pPs),y
 				>SYSCALL SYS.GetMemPtrA
 				>PUSHYA
-				>LIBCALL hLIBSTR,LIBSTR.SSCANF
-				bcc CS.RUN.IPOK
-				
-				lda #PING.TIMEOUT
-				ldy #TimeOut
-				sta (pData),y
-
-CS.RUN.DNSQUERY	>PUSHW pData			DST.IP
-				ldy #S.PS.hARGS
-				lda (pPs),y
-				>SYSCALL SYS.GetMemPtrA
-				>PUSHYA
-				>LIBCALL hLIBTCPIP,LIBTCPIP.DNS.QUERY
-				bcc CS.RUN.IPOK
-
+				>LIBCALL hLIBTCPIP,LIBTCPIP.HST.GETBYNAME
+				bcc .2		
 				>SYSCALL SYS.Sleep
-				ldy #TimeOut
-				lda (pData),y
-				bne CS.RUN.DNSQUERY
+				jsr Wait.Timeout
+				bcc .1
 				
 				ldy #S.PS.hARGS
 				lda (pPs),y
@@ -123,14 +109,15 @@ CS.RUN.DNSQUERY	>PUSHW pData			DST.IP
 				>PUSHYA
 				>PUSHW L.MSG0
 				>LIBCALL hLIBSTR,LIBSTR.PRINTF
-				
+				lda #1
 				sec
-CS.RUN.RTS		rts
-				
-CS.RUN.IPOK		ldy #S.PS.hARGS
+				rts
+
+.2				ldy #S.PS.hARGS
 				lda (pPs),y
 				>SYSCALL SYS.GetMemPtrA
 				>PUSHYA
+				
 				ldy #3
 				>PUSHB (pData),y			DST.IP+3	
 				dey
@@ -142,12 +129,17 @@ CS.RUN.IPOK		ldy #S.PS.hARGS
 				>LIBCALL hLIBSTR,LIBSTR.PRINTF
 		
 CS.RUN.ECHO		>LIBCALL hLIBTCPIP,LIBTCPIP.NEW.ICMP.FRAME
-				bcs CS.RUN.RTS
 				>STYA ZPFrameBase1
 				txa
 				ldy #hFrame
  				sta (pData),y
 
+				lda #S.ICMP+32-2
+				sta (ZPFrameBase1)
+				lda /S.ICMP+32-2
+				ldy #1
+				sta (ZPFrameBase1),y
+				
 				ldx #3
 				ldy #0
 .10				lda (pData),y
@@ -200,21 +192,28 @@ CS.RUN.ECHO		>LIBCALL hLIBTCPIP,LIBTCPIP.NEW.ICMP.FRAME
 				txa
 				sta (ZPFrameBase1),y
 				
-				lda #PING.TIMEOUT
-				ldy #TimeOut
-				sta (pData),y
+				ldx #31
+				ldy #S.ICMP+31
+.21				txa
+				and #$0f
+				ora #$60
+				sta (ZPFrameBase1),y
+				dey
+				dex
+				bpl .21
 				
-.3				>PUSHWI S.ICMP+32
-				ldy #hFrame
+				jsr Init.Timeout
+				
+.3				ldy #hFrame
 				lda (pData),y
 				>SYSCALL SYS.GetMemPtrA
 				>PUSHYA
 				>LIBCALL hLIBTCPIP,LIBTCPIP.SEND.ICMP.FRAME
 				bcc .4
 				>SYSCALL SYS.Sleep
-				ldy #TimeOut
-				lda (pData),y
-				bne .3
+				
+				jsr Wait.Timeout
+				bcc .3
 
 .4				ldy #hFrame
 				lda (pData),y
@@ -223,9 +222,8 @@ CS.RUN.ECHO		>LIBCALL hLIBTCPIP,LIBTCPIP.NEW.ICMP.FRAME
 				ldy #bReply
 				lda #0
 				sta (pData),y
-				lda #PING.TIMEOUT
-				ldy #TimeOut
-				sta (pData),y
+				
+				jsr Init.Timeout
 				
 CS.RUN.WAIT		>SYSCALL SYS.Sleep
 				ldy #bReply
@@ -235,9 +233,9 @@ CS.RUN.WAIT		>SYSCALL SYS.Sleep
 				ldy #bCTRLC
 				lda (pData),y
 				bne CS.RUN.ERROR
-				ldy #TimeOut
-				lda (pData),y
-				bne CS.RUN.WAIT
+				
+				jsr Wait.Timeout
+				bcc CS.RUN.WAIT
 				
 				ldy #3
 				>PUSHB (pData),y			DST.IP+3	
@@ -265,16 +263,15 @@ CS.RUN.ERROR	sec
 				rts
 *--------------------------------------
 CS.DOEVENT		lda (pEvent)
-				and #S.EVT.F.TIMER		is it a TIMER event?
-				beq .1					no....
-
+				bpl .1					is it a TIMER event?
+				
 				ldy #TimeOut
 				lda (pData),y
-				beq .10
+				beq .9
 				
-				dec 
+				dec
 				sta (pData),y
-.10				sec					do not discard TIMER event
+				sec						do not discard TIMER event
 				rts
 				
 .1				lda (pEvent)
@@ -346,9 +343,10 @@ CS.DOEVENT		lda (pEvent)
 .9				sec
 				rts
 *--------------------------------------
-CS.EVENT.REPLY	lda #PING.TIMEOUT
+CS.EVENT.REPLY	lda #TIMEOUT.MAX
 				sec
-				sbc TimeOut
+				ldy #TimeOut
+				sbc (pData),y
 				
 				stz TimeOut.ms
 				stz TimeOut.ms+1
@@ -358,7 +356,7 @@ CS.EVENT.REPLY	lda #PING.TIMEOUT
 				
 .1				lda TimeOut.ms
 				clc 
-				adc #K.TIMER16RESOLUTION*20
+				adc #100
 				sta TimeOut.ms
 				bcc .2
 				inc TimeOut
@@ -399,10 +397,24 @@ CS.QUIT			lda hLIBTCPIP
 				clc
 				rts
 *--------------------------------------
+Init.Timeout	ldy #TimeOut
+				lda #TIMEOUT.MAX
+				sta (pData),y
+				rts
+*--------------------------------------
+Wait.TimeOut	sec
+				ldy #TimeOut
+				lda (pData),y
+				beq .9
+				ldy #bCTRLC
+				lda (pData),y
+				bmi .9
+				clc
+.9				rts
+*--------------------------------------
 CS.END
 LIBSTR			>PSTRING "libstr.o"
 LIBTCPIP		>PSTRING "libtcpip.o"
-SSCANF.IP		>PSTRING "%d.%d.%d.%d"
 MSG0			>CSTRING "%S: Unknown host\n"
 MSG1			>CSTRING "PING %d.%d.%d.%d (%S)\n"
 MSG2			>CSTRING "%d.%d.%d.%d: TimeOut/Host unreachable\n"
