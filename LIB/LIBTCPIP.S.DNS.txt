@@ -23,57 +23,37 @@ DNS.CLEAR		ldx #K.DNSCACHE.SIZE*S.DNSCACHE
 DNS.QUERY		>PULLW ZPPtrDNS			Get host string
 				>PULLW ZPPtrIP			Get IP address to fill
 				
-DNS.QUERY.I		jsr HST.PSTR2DNS.I
-				ldx #0
+DNS.QUERY.I		jsr DNS.FIND.BY.NAME
+				bcs DNS.REQUEST
 				
-.1				lda DNS.CACHE,x
-				beq .6					empty DNS cache entry?
+				lda (ZPCachePtr)		get status...
+				bpl .9					Pending...
 				
-				phx
-				lda DNS.CACHE+S.DNSCACHE.hNAME,x
-				>SYSCALL SYS.GetMemPtrA
-				>STYA ZPPtrDNS
-				plx
+				lda ZPCachePtr
+				clc
+				adc S.DNSCACHE.IP
+				sta ZPCachePtr
+				bcc .1
+				inc ZPCachePtr+1
 				
-				ldy #0
-				
-.2				lda DNSHostname,y
-				bne .21
-				lda (ZPPtrDNS),y
-				beq .22
-				
-.21				cmp (ZPPtrDNS),y
-				bne .6
-				iny
-				bne .2
-				
-.22				lda DNS.CACHE,x			get back status...
-				bpl .4					Pending...
-				
-				ldy #0
-.3				lda DNS.CACHE+S.DNSCACHE.RDATA,x
+.1				ldy #3
+.2				lda (ZPCachePtr),y
 				sta (ZPPtrIP),y
-				inx
-				iny
-				cpy #4
-				bne .3
+				dey
+				bpl .2
 				clc
 				rts
 
-.4				sec
+.9				lda #ERR.DNSPENDING
+				sec
 				rts
-				
-.6				txa
-				clc
-				adc #S.DNSCACHE
-				tax
-				cmp #K.DNSCACHE.SIZE*S.DNSCACHE
-				bne .1
 *--------------------------------------
-DNS.REQUEST		ldx #0
-				ldy #12
+DNS.REQUEST		jsr HST.PSTR2DNS.I
+
+				ldx #0
+				ldy #DNS.MSG.NAME-DNS.MSG
 				
-.1				lda DNSHostname,x
+.1				lda DNS.Hostname,x
 				sta DNS.MSG,y
 				beq .2
 				inx
@@ -104,24 +84,30 @@ DNS.REQUEST		ldx #0
 				beq .9
 
 				>LDYA A2osX.RANDOM16
-				>STYA DNS.MSG
-
+				>STYA DNS.MSG.ID
+				
+				>STYA DNS.TmpCache+S.DNSCACHE.ID
+				lda #5
+				sta DNS.TmpCache+S.DNSCACHE.TTL
+				
+				lda #S.DNSCACHE.STATUS.PENDING
+				jsr DNS.ADD.I
+				bcs .9
+				
 				>PUSHW DNS.MSG.LEN
 				>PUSHW L.DNS.MSG
 				>PUSHB hDNSSocket1
 				jsr SKT.SEND
 				
 				lda hDNSSocket2
-				beq .9
+				beq .3
 				
-				>LDYA A2osX.RANDOM16
-				>STYA DNS.MSG+S.DNS.ID
-
 				>PUSHW DNS.MSG.LEN
 				>PUSHW L.DNS.MSG
 				>PUSHB hDNSSocket2
 				jsr SKT.SEND
 				
+.3				lda #ERR.DNSPENDING
 .9				sec
 				rts
 *--------------------------------------
@@ -133,125 +119,190 @@ DNS.REQUEST		ldx #0
 DNS.ADD			>PULLW ZPPtrDNS			Get host string
 				>PULLW ZPPtrIP			Get host IP address
 				
-				jsr HST.PSTR2DNS.I
+				lda #S.DNSCACHE.STATUS.RESOLVED+S.DNSCACHE.STATUS.STATIC
+				
+DNS.ADD.I		sta DNS.TmpCache
+				
+				jsr DNS.FIND.BY.NAME
+				bcc .5					Found!!! update this entry
+			
+				jsr DNS.FIND.FREE
 
-				lda #$80
-				sta DNSHostTTL+3
-				stz DNSHostTTL+2
-				stz DNSHostTTL+1
-				stz DNSHostTTL
-				
-				lda #S.DNSCACHE.STATUS.RESOLVED
-				bra DNS.ADD.I
-
-DNS.ADD.PENDING.I
-				lda #S.DNSCACHE.STATUS.PENDING
-				
-DNS.ADD.I		sta Status
-				ldx #0
-				
-.1				lda DNS.CACHE,x
-				beq	DNS.ADD.ENTRY		free ?
-				
-				lda DNS.CACHE+S.DNSCACHE.hNAME,x
-				phx
-				>SYSCALL SYS.GetMemPtrA
-				>STYA ZPPtrDNS
-				plx
-				
-				ldy #0
-				
-.2				lda DNSHostname,y
-				cmp (ZPPtrDNS),y
-				bne .4
-				
-				and #$FF				End Of String?
-				beq DNS.UPD.ENTRY
-				
-				iny
-				bne .2
-				
-.4				txa
-				clc
-				adc #S.DNSCACHE
-				tax
-				cmp #K.DNSCACHE.SIZE*S.DNSCACHE
-				bne .1
-				
-				lda DNS.CACHE+S.DNSCACHE.hNAME		discard oldest entry hNAME
-				>SYSCALL SYS.FreeMemA
-				
-				ldx #K.DNSCACHE.SIZE*S.DNSCACHE-S.DNSCACHE
-				
-.6				lda DNS.CACHE+S.DNSCACHE-1,x
-				sta DNS.CACHE-1,x
-				dex
-				bne .6
-
-				ldx #K.DNSCACHE.SIZE*S.DNSCACHE-S.DNSCACHE				
-				
-DNS.ADD.ENTRY	phx
-
-				ldy DNSHostnameLen
-				iny						add 1 for Ending 00
+				lda (ZPPtrDNS)
+				iny						add 1 for len byte
 				lda #0
 				>PUSHYA					push PSTR len
 				>PUSHBI 0				no option
 				>SYSCALL SYS.GetMem
-				bcc .10
-				plx
-				rts
+				bcs .9
 				
-.10				>STYA ZPPtrDNS
-				txa
-				plx
-				sta DNS.CACHE+S.DNSCACHE.hNAME,x
+				>STYA ZPTmpPtr1
+				stx DNS.TmpCache+S.DNSCACHE.hNAME
 
-				ldy #0
-.1				lda DNSHostname,y
-				sta (ZPPtrDNS),y
-				iny
-				cpy DNSHostnameLen
+				lda (ZPPtrDNS)
+				sta (ZPTmpPtr1)
+				tay
+				
+.1				lda (ZPPtrDNS),y
+				sta (ZPTmpPtr1),y
+				dey
 				bne .1
-				
-				lda #0
-				sta (ZPPtrDNS),y
-	
-DNS.UPD.ENTRY	lda Status
-				sta DNS.CACHE+S.DNSCACHE.STATUS,x
-				bmi .1					pending?
-				
-*				lda DNSMessageID
-*				sta DNS.CACHE+S.DNSCACHE.ID,x
-*				lda DNSMessageID+1
-*				sta DNS.CACHE+S.DNSCACHE.ID+1,x
-				
-				bra .9
-				
-.1				lda DNSHostTTL
-				sta DNS.CACHE+S.DNSCACHE.TTL,x
-				lda DNSHostTTL+1
-				sta DNS.CACHE+S.DNSCACHE.TTL+1,x
-				lda DNSHostTTL+2
-				sta DNS.CACHE+S.DNSCACHE.TTL+2,x
-				lda DNSHostTTL+3
-				sta DNS.CACHE+S.DNSCACHE.TTL+3,x
-				
-				ldy #0
-.2				lda (ZPPtrIP),y
-				sta DNS.CACHE+S.DNSCACHE.RDATA,x
-				inx
-				iny
-				cpy #4
-				bne .2
+				 				
+				ldy #S.DNSCACHE-1
+.2				lda DNS.TmpCache,y
+				sta (ZPCachePtr),y
+				dey
+				bpl .2
 				
 				clc
 				rts
+				
+.5								
+				clc
+				rts
+				
 .9				sec
 				rts
 *--------------------------------------
 DNS.GETCACHE	>LDYA L.DNS.CACHE
 				clc
+				rts
+*--------------------------------------
+DNS.FIND.BY.NAME
+				>LDYA L.DNS.CACHE
+				>STYA ZPCachePtr
+				
+				lda #K.DNSCACHE.SIZE
+				sta TmpOffset
+				
+.1				lda (ZPCachePtr)
+				beq .6					empty DNS cache entry?
+				
+				ldy #S.DNSCACHE.hNAME
+				lda (ZPCachePtr),y
+				>SYSCALL SYS.GetMemPtrA
+				>STYA ZPTmpPtr1
+				
+				lda (ZPPtrDNS)
+				cmp (ZPTmpPtr1)
+				bne .6
+				
+				tay
+				
+.2				lda (ZPPtrDNS),y
+				cmp (ZPTmpPtr1),y
+				bne .6
+				dey
+				bne .2
+				
+				clc
+				rts
+				
+.6				lda ZPCachePtr
+				clc
+				adc #S.DNSCACHE
+				sta ZPCachePtr
+				bcc .7
+				inc ZPCachePtr+1
+				
+.7				dec TmpOffset
+				bne .1
+				sec
+				rts
+*--------------------------------------
+DNS.FIND.FREE	>LDYA L.DNS.CACHE
+				>STYA ZPCachePtr
+				
+				lda #K.DNSCACHE.SIZE
+				sta TmpOffset
+				lda #$ff
+				sta TmpDWord
+				sta TmpDWord+1
+				sta TmpDWord+2
+				sta TmpDWord+3
+				
+.1				lda (ZPCachePtr)
+				beq .8					empty DNS cache entry?
+				bpl .6					pending.....skip
+				
+				ldy #S.DNSCACHE.TTL
+				ldx #0
+				sec
+.2				lda TmpDWord,x			is save TTL greater then actual TTL?
+				sbc (ZPCachePtr),y
+				inx
+				iny
+				cpy #S.DNSCACHE.TTL+4
+				bne .2
+				bcc .6					no,
+				
+				ldy #S.DNSCACHE.TTL
+				ldx #0
+.3				lda (ZPCachePtr),y		Save new lowest TTL
+				sta TmpDWord,x
+				inx
+				iny
+				cpy #S.DNSCACHE.TTL+4
+				bne .3
+				
+				>LDYA ZPCachePtr
+				>STYA ZPTmpPtr1			save lowest TTL slot ...
+				
+.6				lda ZPCachePtr
+				clc
+				adc #S.DNSCACHE
+				sta ZPCachePtr
+				bcc .7
+				inc ZPCachePtr+1
+				
+.7				dec TmpOffset
+				bne .1					no empty slot found, discard lowest TTL
+				
+				>LDYA ZPTmpPtr1
+				>STYA ZPCachePtr
+				jmp DNS.FREE
+
+.8				clc
+				rts
+*--------------------------------------
+DNS.EXPIRE		>LDYA L.DNS.CACHE
+				>STYA ZPCachePtr
+				
+				lda #K.DNSCACHE.SIZE
+				sta TmpOffset
+				
+.1				lda (ZPCachePtr)
+				beq .7					empty DNS cache entry?
+				
+				ldy #S.DNSCACHE.TTL
+				ldx #4
+				clc
+.2				lda (ZPCachePtr),y
+				sbc #0
+				sta (ZPCachePtr),y
+				iny
+				dex
+				bne .2
+				bcs .7
+				jsr DNS.FREE
+				
+.7				lda ZPCachePtr
+				clc
+				adc #S.DNSCACHE
+				sta ZPCachePtr
+				bcc .8
+				inc ZPCachePtr+1
+				
+.8				dec TmpOffset
+				bne .1
+				clc
+				rts
+*--------------------------------------
+DNS.FREE		ldy #S.DNSCACHE.hNAME
+				lda (ZPCachePtr),y
+				>SYSCALL SYS.FreeMemA
+				lda #0
+				sta (ZPCachePtr)
 				rts
 *--------------------------------------
 DNS.SKTPOLL		lda hDNSSocket1
