@@ -5,6 +5,215 @@ INC 1
 AUTO 6
 				.LIST OFF	
 *--------------------------------------
+ARP.CLEAR		ldx #K.ARPCACHE.SIZE*S.ARPCACHE
+.1				dex
+				stz ARP.CACHE,x
+				txa
+				bne .1
+				clc
+				rts
+*--------------------------------------
+* ARP.QUERY
+*  In:
+*   PULLW PTR to IP
+*   PULLW PTR to MAC (to fill)
+*  Out:
+*   CC: hit: MAC filled
+*   CS: missed 
+*--------------------------------------
+ARP.QUERY		>PULLW ZPPtrIP			IP
+				>PULLW ZPPtrMAC			MAC
+				
+ARP.QUERY.I		jsr ARP.FIND.BY.IP
+				bcs ARP.REQUEST
+
+				lda (ZPCachePtr)		get status...
+				bpl .9					Pending...
+				
+				lda ZPCachePtr
+				clc
+				adc S.ARPCACHE.MAC
+				sta ZPCachePtr
+				bcc .1
+				inc ZPCachePtr+1
+				
+.1				ldy #5
+.2				lda (ZPCachePtr),y
+				sta (ZPPtrMAC),y
+				dey
+				bpl .2
+				clc
+				rts
+
+.9				lda #ERR.ARPPENDING
+				sec
+				rts
+*--------------------------------------
+ARP.REQUEST		ldy #3
+.1				lda (ZPPtrIP),y
+				sta ARP.REQ.TPA,y
+				sta ARP.TmpCache+S.ARPCACHE.IP,y
+				dey
+				bpl .1
+				
+				>PUSHW L.ARP.REQ
+				ldx #DEVMGR.NET.SEND
+				jsr NetDevJmp
+
+				bcs .9
+				
+				lda #S.ARPCACHE.STATUS.PENDING
+				jsr ARP.ADD.I			ZPPtrIP still pointing IP
+				
+				lda #ERR.ARPPENDING
+				sec		
+.9				rts		
+*--------------------------------------
+* ARP.ADD
+*  In:
+*   PULLW PTR to IP
+*   PULLW PTR to MAC
+*--------------------------------------
+ARP.ADD			>PULLW ZPPtrIP			IP
+				>PULLW ZPPtrMAC			MAC
+				lda #S.ARPCACHE.STATUS.RESOLVED+S.ARPCACHE.STATUS.STATIC
+				
+ARP.ADD.I		sta ARP.TmpCache
+
+				jsr ARP.FIND.BY.IP
+				bcc .5
+				jsr DNS.FIND.FREE
+				
+.1				lda ARP.CACHE,x			get	status
+				beq .7					empty ARP cache entry
+
+				phx
+				
+				ldy #0
+.2				lda (ZPPtrIP),y
+				cmp ARP.CACHE+S.ARPCACHE.IP,x
+				bne .4
+				inx
+				iny
+				cpy #4
+				bne .2
+				plx
+				bra .7					same IP,update MAC
+				
+.4				pla						get back index in ARP.CACHE
+				clc
+				adc #S.ARPCACHE
+				cmp #K.ARPCACHE.SIZE*S.ARPCACHE
+				beq .5					Cache is full ?
+				tax
+				bra .1
+				
+.5				bra *
+
+				ldx #K.ARPCACHE.SIZE*S.ARPCACHE-S.ARPCACHE
+.6				lda ARP.CACHE+S.ARPCACHE-1,x
+				sta ARP.CACHE-1,x
+				dex
+				bne .6
+				
+				ldx #K.ARPCACHE.SIZE*S.ARPCACHE-S.ARPCACHE
+				
+.7				lda Status
+				sta ARP.CACHE,x			mark ARP entry Status
+				
+				lda #K.ARP.TTL
+				sta ARP.CACHE+S.ARPCACHE.TTL,x
+				lda /K.ARP.TTL
+				sta ARP.CACHE+S.ARPCACHE.TTL+1,x
+
+				ldy #0
+				phx
+.8				lda (ZPPtrIP),y			store IP in cache
+				sta ARP.CACHE+S.ARPCACHE.IP,x
+				iny
+				inx
+				cpy #4
+				bne .8
+				plx
+				lda Status
+				bpl .82					no MAC if "pending"
+								
+				ldy #0
+.81				lda (ZPPtrMAC),y		store MAC in cache
+				sta ARP.CACHE+S.ARPCACHE.MAC,x
+				iny
+				inx
+				cpy #6
+				bne .81
+				
+.82				clc
+				rts
+*--------------------------------------
+* ARP.GETCACHE
+*  Out:
+*   Y,A = PTR to ARP.CACHE
+*--------------------------------------
+ARP.GETCACHE	>LDYA L.ARP.CACHE
+				clc
+				rts
+*--------------------------------------
+*				PRIVATE
+*--------------------------------------
+ARP.RESOLVE		ldy #S.IP.DST
+				lda (ZPFrameBase1),y
+				iny
+.1				and (ZPFrameBase1),y
+				iny
+				cpy #S.IP.DST+4
+				bne .1
+				cmp #$FF
+				bne .3					not a broadcast....
+				
+				ldy #S.ETH.DSTMAC
+.2				sta (ZPFrameBase1),y
+				iny
+				cpy #S.ETH.DSTMAC+6
+				bne .2
+				clc
+				rts
+				
+.3				ldy #S.IP.DST+3
+				ldx #3
+.4				lda (ZPFrameBase1),y
+				eor IPCFG+S.IPCFG.IP,x
+				and	IPCFG+S.IPCFG.MASK,x
+				bne .5
+				dey
+				dex
+				bpl .4
+
+				lda ZPFrameBase1		Same network, query ARP for dest IP
+				clc
+				adc #S.IP.DST
+				sta ZPPtrIP
+				lda ZPFrameBase1+1
+				adc /S.IP.DST
+				sta ZPPtrIP+1
+				bra .6
+				
+.5				lda	L.IPCFG				Not Same network, query ARP for GW
+				clc
+				adc #S.IPCFG.GW
+				sta ZPPtrIP
+				lda	L.IPCFG+1
+				adc /S.IPCFG.GW
+				sta ZPPtrIP+1
+				
+.6				lda ZPFrameBase1
+				clc
+				adc #S.ETH.DSTMAC
+				sta ZPPtrMAC
+				lda ZPFrameBase1+1
+				adc /S.ETH.DSTMAC
+				sta ZPPtrMAC+1
+*--------------------------------------
+*--------------------------------------
+*--------------------------------------
 ARP.IN			ldy #S.ARP.TPA
 				ldx #S.IPCFG.IP
 				
@@ -71,227 +280,68 @@ ARP.IN.REP		lda #S.ARP.SHA
 				clc
 				rts
 *--------------------------------------
-ARP.EXPIRE		
-
-				clc
-				rts
-*--------------------------------------
-* ARP.CLEAR
-*--------------------------------------
-ARP.CLEAR		ldx #K.ARPCACHE.SIZE*S.ARPCACHE
-.1				stz ARP.CACHE-1,x
-				dex
-				bne .1
-				clc
-				rts
-*--------------------------------------
-* ARP.QUERY
-*  In:
-*   PULLW PTR to IP
-*   PULLW PTR to MAC (to fill)
-*  Out:
-*   CC: hit: MAC filled
-*   CS: missed 
-*--------------------------------------
-ARP.QUERY		>PULLW ZPPtrIP			IP
-				>PULLW ZPPtrMAC			MAC
-				jmp ARP.QUERY.I
-*--------------------------------------
-* ARP.ADD
-*  In:
-*   PULLW PTR to IP
-*   PULLW PTR to MAC
-*--------------------------------------
-ARP.ADD			>PULLW ZPPtrIP			IP
-				>PULLW ZPPtrMAC			MAC
-				lda #S.ARPCACHE.STATUS.RESOLVED
-				jmp ARP.ADD.I
-*--------------------------------------
-* ARP.GETCACHE
-*  Out:
-*   Y,A = PTR to ARP.CACHE
-*--------------------------------------
-ARP.GETCACHE	>LDYA L.ARP.CACHE
-				clc
-				rts
-*--------------------------------------
-*				PRIVATE
-*--------------------------------------
-ARP.RESOLVE		ldy #S.IP.DST
-				lda (ZPFrameBase1),y
+ARP.EXPIRE		>LDYA L.ARP.CACHE
+				>STYA ZPCachePtr
+				
+				ldx #K.ARPCACHE.SIZE
+				
+.1				lda (ZPCachePtr)
+				beq .7
+				
+				ldy #S.ARPCACHE.TTL
+				sec
+				lda (ZPCachePtr),y
+				sbc #1
+				sta (ZPCachePtr),y
 				iny
-.1				and (ZPFrameBase1),y
-				iny
-				cpy #S.IP.DST+4
-				bne .1
-				cmp #$FF
-				bne .3					not a broadcast....
+				lda (ZPCachePtr),y
+				sbc #0
+				sta (ZPCachePtr),y
+				bcs .2
 				
-				ldy #S.ETH.DSTMAC
-.2				sta (ZPFrameBase1),y
-				iny
-				cpy #S.ETH.DSTMAC+6
-				bne .2
-				clc
-				rts
+				lda #0
+				sta (ZPCachePtr)
 				
-.3				ldy #S.IP.DST+3
-				ldx #3
-.4				lda (ZPFrameBase1),y
-				eor IPCFG+S.IPCFG.IP,x
-				and	IPCFG+S.IPCFG.MASK,x
-				bne .5
-				dey
-				dex
-				bpl .4
-
-				lda ZPFrameBase1		Same network, query ARP for dest IP
-				clc
-				adc #S.IP.DST
-				sta ZPPtrIP
-				lda ZPFrameBase1+1
-				adc /S.IP.DST
-				sta ZPPtrIP+1
-				bra .6
-				
-.5				lda	L.IPCFG				Not Same network, query ARP for GW
-				clc
-				adc #S.IPCFG.GW
-				sta ZPPtrIP
-				lda	L.IPCFG+1
-				adc /S.IPCFG.GW
-				sta ZPPtrIP+1
-				
-.6				lda ZPFrameBase1
-				clc
-				adc #S.ETH.DSTMAC
-				sta ZPPtrMAC
-				lda ZPFrameBase1+1
-				adc /S.ETH.DSTMAC
-				sta ZPPtrMAC+1
-*--------------------------------------
-ARP.QUERY.I		ldx #0
-				
-.1				phx
-				lda ARP.CACHE,x
-				beq .5					empty ARP Cache entry, try next...
-				
-				ldy #0
-.2				lda ARP.CACHE+S.ARPCACHE.IP,x
-				cmp (ZPPtrIP),y
-				bne .5					wrong IP, try next...
-				inx
-				iny
-				cpy #4
-				bne .2
-			
-				plx
-				lda ARP.CACHE,x			get back status
-				bpl .4					Pending...
-			
-				ldy #0					already resolved, get MAC
-.3				lda ARP.CACHE+S.ARPCACHE.MAC,x
-				sta (ZPPtrMAC),y
-				inx
-				iny
-				cpy #6
-				bne .3
-				clc
-				rts
-				
-.4				inc ARP.CACHE+S.ARPCACHE.RETRYCNT,x		Pending, increase Retry Count
-				bne .41
-				stz ARP.CACHE,x							reached max retry,mark as free
-.41				sec
-				rts
-				
-.5				pla
+.2				lda ZPCachePtr
 				clc
 				adc #S.ARPCACHE
-				tax
-				cmp #K.ARPCACHE.SIZE*S.ARPCACHE
+				sta ZPCachePtr
+				bcc .3
+				inc ZPCachePtr+1
+				
+.3				dex
 				bne .1
+				rts
 *--------------------------------------
-ARP.REQUEST.I	ldy #3
-.1				lda (ZPPtrIP),y
-				sta ARP.REQ.TPA,y
-				dey
-				bpl .1
-				
-				>PUSHW L.ARP.REQ
-				ldx #DEVMGR.NET.SEND
-				jsr NetDevJmp
+ARP.FIND.BY.IP	>LDYA L.ARP.CACHE
+				>STYA ZPCachePtr
 
-				bcs .9
+				lda #K.ARPCACHE.SIZE
+				sta TmpOffset
 				
-				jsr ARP.ADD.PENDING		ZPPtrIP still pointing IP
-				
-				sec		
-.9				rts		
-*--------------------------------------
-ARP.ADD.PENDING	lda #S.ARPCACHE.STATUS.PENDING
+.1				lda (ZPCachePtr)
+				beq .7
 
-ARP.ADD.I		sta Status
+				ldy #S.ARPCACHE.IP
+				lda (ZPCachePtr),y
 				
-				ldx #0
-.1				lda ARP.CACHE,x			get	status
-				beq .7					empty ARP cache entry
-
-				phx
 				
-				ldy #0
-.2				lda (ZPPtrIP),y
-				cmp ARP.CACHE+S.ARPCACHE.IP,x
-				bne .4
-				inx
-				iny
-				cpy #4
-				bne .2
-				plx
-				bra .7					same IP,update MAC
 				
-.4				pla						get back index in ARP.CACHE
+.7				lda ZPCachePtr
 				clc
 				adc #S.ARPCACHE
-				cmp #K.ARPCACHE.SIZE*S.ARPCACHE
-				beq .5					Cache is full ?
-				tax
-				bra .1
+				sta ZPCachePtr
+				bcc .8
+				inc ZPCachePtr+1
 				
-.5				ldx #K.ARPCACHE.SIZE*S.ARPCACHE-S.ARPCACHE
+.8				dec TmpOffset
+				bne .1
 
-.6				lda ARP.CACHE+S.ARPCACHE-1,x
-				sta ARP.CACHE-1,x
-				dex
-				bne .6
-				
-				ldx #K.ARPCACHE.SIZE*S.ARPCACHE-S.ARPCACHE
-				
-.7				lda Status
-				sta ARP.CACHE,x			mark ARP entry Status
-				inx
-				stz ARP.CACHE,x			Init retry count
-				inx
-				ldy #0
-.8				lda (ZPPtrIP),y			store IP in cache
-				sta ARP.CACHE,x
-				inx
-				iny
-				cpy #4
-				bne .8
-				
-				lda Status
-				bpl .82					no MAC if "pending"
-								
-				ldy #0
-.81				lda (ZPPtrMAC),y		store MAC in cache
-				sta ARP.CACHE,x
-				inx
-				iny
-				cpy #6
-				bne .81
-.82				clc
+
+				sec
 				rts
+*--------------------------------------
+ARP.FIND.FREE	
 *--------------------------------------
 MAN
 SAVE LIB/LIBTCPIP.S.ARP
