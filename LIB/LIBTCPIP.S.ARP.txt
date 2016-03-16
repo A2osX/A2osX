@@ -5,6 +5,79 @@ INC 1
 AUTO 6
 				.LIST OFF	
 *--------------------------------------
+ARP.IN			ldy #S.ARP.TPA+3
+				ldx #3
+				
+.1				lda (ZPFrameBase1),y
+				cmp IPCFG+S.IPCFG.IP,x
+				bne .9
+				dey
+				dex
+				bpl .1
+				
+				ldy #S.ARP.OPERATION+1	HI byte
+				lda (ZPFrameBase1),y
+				cmp #S.ARP.OPERATION.REQ
+				beq ARP.IN.REQ
+				
+				cmp #S.ARP.OPERATION.REP
+				beq ARP.IN.REP
+				
+.9				clc						Discard any other ARP frames
+				rts
+
+ARP.IN.REQ		ldy #S.ARP.SPA+3
+				ldx #3
+				
+.1				lda (ZPFrameBase1),y
+				sta ARP.REP.TPA,x
+				dey
+				dex
+				bpl .1
+				
+				ldy #S.ARP.SHA+5
+				ldx #5
+				
+.2				lda (ZPFrameBase1),y
+				sta ARP.REP.DSTMAC,x
+				sta ARP.REP.THA,x
+				dey
+				dex
+				bpl .2
+				
+				>PUSHW L.ARP.REP
+				ldx #DEVMGR.NET.SEND
+				jsr NetDevJmp
+
+ARP.IN.REP		lda #K.ARP.TTL
+				sta ARP.TmpCache+S.ARPCACHE.TTL
+				lda /K.ARP.TTL
+				sta ARP.TmpCache+S.ARPCACHE.TTL+1
+				
+				ldy #S.ARP.SPA+3
+				ldx #3
+				
+.1				lda (ZPFrameBase1),y
+				sta ARP.TmpCache+S.ARPCACHE.IP,x
+				dey
+				dex
+				bpl .1
+
+				ldy #S.ARP.SHA+5
+				ldx #5
+				
+.2				lda (ZPFrameBase1),y
+				sta ARP.TmpCache+S.ARPCACHE.MAC,x
+				dey
+				dex
+				bpl .2
+				
+				lda #S.ARPCACHE.STATUS.RESOLVED
+				
+				jsr ARP.ADD.I
+				clc
+				rts
+*--------------------------------------
 ARP.CLEAR		ldx #K.ARPCACHE.SIZE*S.ARPCACHE
 .1				dex
 				stz ARP.CACHE,x
@@ -25,7 +98,7 @@ ARP.QUERY		>PULLW ZPPtrIP			IP
 				>PULLW ZPPtrMAC			MAC
 				
 ARP.QUERY.I		jsr ARP.FIND.BY.IP
-				bcs ARP.REQUEST
+				bcs .3					send an ARP request
 
 				lda (ZPCachePtr)		get status...
 				bpl .9					Pending...
@@ -38,6 +111,7 @@ ARP.QUERY.I		jsr ARP.FIND.BY.IP
 				inc ZPCachePtr+1
 				
 .1				ldy #5
+
 .2				lda (ZPCachePtr),y
 				sta (ZPPtrMAC),y
 				dey
@@ -45,29 +119,30 @@ ARP.QUERY.I		jsr ARP.FIND.BY.IP
 				clc
 				rts
 
-.9				lda #ERR.ARPPENDING
-				sec
-				rts
-*--------------------------------------
-ARP.REQUEST		ldy #3
-.1				lda (ZPPtrIP),y
+.3				ldy #3
+
+.4				lda (ZPPtrIP),y
 				sta ARP.REQ.TPA,y
 				sta ARP.TmpCache+S.ARPCACHE.IP,y
 				dey
-				bpl .1
+				bpl .4
 				
 				>PUSHW L.ARP.REQ
 				ldx #DEVMGR.NET.SEND
 				jsr NetDevJmp
 
-				bcs .9
+				bcs .99
+				
+				lda #5
+				sta ARP.TmpCache+S.ARPCACHE.TTL
+				stz ARP.TmpCache+S.ARPCACHE.TTL+1
 				
 				lda #S.ARPCACHE.STATUS.PENDING
-				jsr ARP.ADD.I			ZPPtrIP still pointing IP
+				jsr ARP.ADD.I
 				
-				lda #ERR.ARPPENDING
+.9				lda #ERR.ARPPENDING
 				sec		
-.9				rts		
+.99				rts		
 *--------------------------------------
 * ARP.ADD
 *  In:
@@ -76,77 +151,37 @@ ARP.REQUEST		ldy #3
 *--------------------------------------
 ARP.ADD			>PULLW ZPPtrIP			IP
 				>PULLW ZPPtrMAC			MAC
+				
+				stz ARP.TmpCache+S.ARPCACHE.TTL
+				stz ARP.TmpCache+S.ARPCACHE.TTL+1
+
+				ldy #3
+.1				lda (ZPPtrIP),y
+				sta ARP.TmpCache+S.ARPCACHE.IP,y
+				dey
+				bpl .1
+				
+				ldy #5
+.2				lda (ZPPtrMAC),y
+				sta ARP.TmpCache+S.ARPCACHE.MAC,y
+				dey
+				bpl .2
+
 				lda #S.ARPCACHE.STATUS.RESOLVED+S.ARPCACHE.STATUS.STATIC
 				
 ARP.ADD.I		sta ARP.TmpCache
 
 				jsr ARP.FIND.BY.IP
-				bcc .5
-				jsr DNS.FIND.FREE
+				bcc .1
+				jsr ARP.FIND.FREE
 				
-.1				lda ARP.CACHE,x			get	status
-				beq .7					empty ARP cache entry
-
-				phx
+.1				ldy #S.ARPCACHE-1
+.2				lda ARP.TmpCache,y
+				sta (ZPCachePtr),y
+				dey
+				bpl .2
 				
-				ldy #0
-.2				lda (ZPPtrIP),y
-				cmp ARP.CACHE+S.ARPCACHE.IP,x
-				bne .4
-				inx
-				iny
-				cpy #4
-				bne .2
-				plx
-				bra .7					same IP,update MAC
-				
-.4				pla						get back index in ARP.CACHE
 				clc
-				adc #S.ARPCACHE
-				cmp #K.ARPCACHE.SIZE*S.ARPCACHE
-				beq .5					Cache is full ?
-				tax
-				bra .1
-				
-.5				bra *
-
-				ldx #K.ARPCACHE.SIZE*S.ARPCACHE-S.ARPCACHE
-.6				lda ARP.CACHE+S.ARPCACHE-1,x
-				sta ARP.CACHE-1,x
-				dex
-				bne .6
-				
-				ldx #K.ARPCACHE.SIZE*S.ARPCACHE-S.ARPCACHE
-				
-.7				lda Status
-				sta ARP.CACHE,x			mark ARP entry Status
-				
-				lda #K.ARP.TTL
-				sta ARP.CACHE+S.ARPCACHE.TTL,x
-				lda /K.ARP.TTL
-				sta ARP.CACHE+S.ARPCACHE.TTL+1,x
-
-				ldy #0
-				phx
-.8				lda (ZPPtrIP),y			store IP in cache
-				sta ARP.CACHE+S.ARPCACHE.IP,x
-				iny
-				inx
-				cpy #4
-				bne .8
-				plx
-				lda Status
-				bpl .82					no MAC if "pending"
-								
-				ldy #0
-.81				lda (ZPPtrMAC),y		store MAC in cache
-				sta ARP.CACHE+S.ARPCACHE.MAC,x
-				iny
-				inx
-				cpy #6
-				bne .81
-				
-.82				clc
 				rts
 *--------------------------------------
 * ARP.GETCACHE
@@ -212,72 +247,99 @@ ARP.RESOLVE		ldy #S.IP.DST
 				adc /S.ETH.DSTMAC
 				sta ZPPtrMAC+1
 *--------------------------------------
-*--------------------------------------
-*--------------------------------------
-ARP.IN			ldy #S.ARP.TPA
-				ldx #S.IPCFG.IP
+ARP.FIND.BY.IP	>LDYA L.ARP.CACHE
+				>STYA ZPCachePtr
+
+				lda #K.ARPCACHE.SIZE
+				sta TmpOffset
 				
-.1				lda (ZPFrameBase1),y
-				cmp IPCFG,x
-				bne .9
+.1				lda (ZPCachePtr)
+				beq .7
+
+				ldy #S.ARPCACHE.IP+3
+				ldx #3
+				lda (ZPCachePtr),y
+				cmp (ZPPtrIP)
+				bne .7
+				ldy #S.ARPCACHE.IP+1
+				lda (ZPCachePtr),y
+				ldy #1
+				cmp (ZPPtrIP),y
+				bne .7
+				
+				ldy #S.ARPCACHE.IP+2
+				lda (ZPCachePtr),y
+				ldy #2
+				cmp (ZPPtrIP),y
+				bne .7
+
+				ldy #S.ARPCACHE.IP+3
+				lda (ZPCachePtr),y
+				ldy #3
+				cmp (ZPPtrIP),y
+				bne .7
+				clc
+				rts
+				
+.7				lda ZPCachePtr
+				clc
+				adc #S.ARPCACHE
+				sta ZPCachePtr
+				bcc .8
+				inc ZPCachePtr+1
+				
+.8				dec TmpOffset
+				bne .1
+				sec
+				rts
+*--------------------------------------
+ARP.FIND.FREE	>LDYA L.ARP.CACHE
+				>STYA ZPCachePtr
+
+				lda #$ff
+				sta TmpDWord
+				sta TmpDWord+1
+
+				ldx #K.ARPCACHE.SIZE
+				
+.1				lda (ZPCachePtr)
+				beq .8
+				bpl .6
+				
+				ldy #S.ARPCACHE.TTL
+				lda (ZPCachePtr),y
+				sec
+				sbc TmpDWord
 				iny
-				inx
-				cpx #S.IPCFG.IP+4
+				lda (ZPCachePtr),y
+				sbc TmpDWord+1
+				bcc .6
+				
+				lda (ZPCachePtr),y
+				sta TmpDWord+1
+				dey
+				lda (ZPCachePtr),y
+				sta TmpDWord
+				
+				>LDYA ZPCachePtr
+				>STYA ZPTmpPtr1			save lowest TTL slot ...
+
+.6				lda ZPCachePtr
+				clc
+				adc #S.ARPCACHE
+				sta ZPCachePtr
+				bcc .7
+				inc ZPCachePtr+1
+				
+.7				dex
 				bne .1
 				
-				ldy #S.ARP.OPERATION+1	HI byte
-				lda (ZPFrameBase1),y
-				cmp #S.ARP.OPERATION.REQ
-				beq ARP.IN.REQ
+				>LDYA ZPTmpPtr1
+				>STYA ZPCachePtr
+				lda #0
+				sta (ZPCachePtr)
 				
-				cmp #S.ARP.OPERATION.REP
-				beq ARP.IN.REP
-				
-.9				clc						Discard any other ARP frames
-				rts
-
-ARP.IN.REQ		ldy #S.ETH.SRCMAC+5
-				ldx #5
-				
-.1				lda (ZPFrameBase1),y
-				sta ARP.REP.DSTMAC,x
-				sta ARP.REP.THA,x
-				dey
-				dex
-				bpl .1
-				
-				ldy #S.ARP.SPA+3
-				ldx #3
-				
-.2				lda (ZPFrameBase1),y
-				sta ARP.REP.TPA,x
-				dey
-				dex
-				bpl .2
-				
-				>PUSHW L.ARP.REP
-				ldx #DEVMGR.NET.SEND
-				jsr NetDevJmp
-
-ARP.IN.REP		lda #S.ARP.SHA
-				clc
-				adc ZPFrameBase1
-				sta ZPPtrMAC
-				lda ZPFrameBase1+1
-				adc /S.ARP.SHA
-				sta ZPPtrMAC+1
-				
-				lda #S.ARP.SPA
-				clc
-				adc ZPFrameBase1
-				sta ZPPtrIP
-				lda ZPFrameBase1+1
-				adc /S.ARP.SPA
-				sta ZPPtrIP+1
-				
-				lda #S.ARPCACHE.STATUS.RESOLVED
-				jsr ARP.ADD.I
-				clc
+.8				clc
 				rts
 *--------------------------------------
 ARP.EXPIRE		>LDYA L.ARP.CACHE
@@ -286,7 +348,7 @@ ARP.EXPIRE		>LDYA L.ARP.CACHE
 				ldx #K.ARPCACHE.SIZE
 				
 .1				lda (ZPCachePtr)
-				beq .7
+				beq .3
 				
 				ldy #S.ARPCACHE.TTL
 				sec
@@ -312,36 +374,6 @@ ARP.EXPIRE		>LDYA L.ARP.CACHE
 .3				dex
 				bne .1
 				rts
-*--------------------------------------
-ARP.FIND.BY.IP	>LDYA L.ARP.CACHE
-				>STYA ZPCachePtr
-
-				lda #K.ARPCACHE.SIZE
-				sta TmpOffset
-				
-.1				lda (ZPCachePtr)
-				beq .7
-
-				ldy #S.ARPCACHE.IP
-				lda (ZPCachePtr),y
-				
-				
-				
-.7				lda ZPCachePtr
-				clc
-				adc #S.ARPCACHE
-				sta ZPCachePtr
-				bcc .8
-				inc ZPCachePtr+1
-				
-.8				dec TmpOffset
-				bne .1
-
-
-				sec
-				rts
-*--------------------------------------
-ARP.FIND.FREE	
 *--------------------------------------
 MAN
 SAVE LIB/LIBTCPIP.S.ARP
