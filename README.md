@@ -3,7 +3,7 @@ Multi-Tasking OS for Apple II
 ## Requires :
 Enh IIe (65c02 cpu) with 128k, //c, IIgs
 ## General Information:
-**A2OSX.BOOT.DSK** : 140k A2osX boot disk will all binaries  
+**A2OSX.BOOT.po** : 140k A2osX boot disk will all binaries  
 **A2OSX.SRC.po** : 800k S-C MASM boot disk with all sources  
   
 OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.  
@@ -14,7 +14,7 @@ OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
 !!! Help on writing this code should be greatly appreciated !!!  
 
 ...
-In Progress : moving TCPIP to some soket API
+In Progress : moving TCPIP to socket API
 In Progress : moving KERNEL to AuxLC Bnk1 & 2 (16k, more space for drivers)
 ...
 
