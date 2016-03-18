@@ -10,7 +10,10 @@ AUTO 6
 *--------------------------------------
 				.INB INC/MACROS.I
 				.INB INC/A2OSX.I
-				.INB INC/LIBSTR.I
+*--------------------------------------
+ZPPtr1			.EQ ZPBIN
+ZPPtr2			.EQ ZPBIN+2
+ZPPtr3			.EQ ZPBIN+4
 *--------------------------------------
 *			File Header (16 Bytes)
 *--------------------------------------
@@ -25,58 +28,52 @@ CS.START		cld
 				.DA 0
 *--------------------------------------
 * Relocation Table
-*--------------------------------------				
+*--------------------------------------
 .1				.DA CS.INIT
 				.DA CS.RUN
 				.DA CS.DOEVENT		
 				.DA	CS.QUIT
-L.LIB.LIBSTR	.DA LIB.LIBSTR
-L.MSG.VOL.HEADER	.DA MSG.VOL.HEADER
-L.MSG.DIR.HEADER	.DA MSG.DIR.HEADER
-L.MSG.VOL		.DA MSG.VOL
-L.MSG.DIR		.DA MSG.DIR
-L.MSG.FILE		.DA MSG.FILE
-L.MSG.VOL.END	.DA MSG.VOL.END
-L.MSG.DIR.END	.DA MSG.DIR.END
-L.PRODOS.FT.TXT	.DA PRODOS.FT.TXT
+L.MSG.USAGE		.DA MSG.USAGE
+L.MSG.OK		.DA MSG.OK
+L.MSG.ERR		.DA MSG.ERR
+L.FullPath		.DA FullPath
+L.PRODOS.FT.TXT	.DA PRODOS.FT.TXT-1			
 				.DA 0
 *--------------------------------------
-CS.INIT			>LDYA L.LIBSTR
-				>SYSCALL SYS.LoadLibYA
-				sta hLIBSTR
-				
-				stz hDIRPATH
-				stz hS.LISTDIR
-				stz hVOLHEADER
-				stz hDIRHEADER
-				stz bSTOP
-				stz bCANCEL
-				
-				ldy #S.PS.hARGS
+CS.INIT			ldy #S.PS.hARGS
 				lda (pPs),y
-				beq .99					no arg, exit with err=0
+				beq .98
 				
 				>PUSHA
 				>PUSHBI $20				Push SEP=' '
-				>PUSHBI 1				Push 1 for getting First arg
+				>PUSHBI 0				Push 0 for getting CMD & ARGS
 				>SYSCALL SYS.PStrGetTkn
-				bcs .99					error, exit with error code
-				sta hArg
+				bcs .99
 				
+				ldy #hArg1
+				sta (pData),y
+				txa
+				beq .98
+				ldy #hArg2
+				sta (pData),y
+				
+				jsr GetHexFileTypeA
+				bcs .99
+				
+				ldy	#hArg1
+				lda (pData),y
 				>SYSCALL SYS.GetMemPtrA
-				>STYA ZPQuickPtr1
-				lda (ZPQuickPtr1)
-				beq .99
+				>STYA ZPPtr1
+				lda (ZPPtr1)
+				beq .98
 				ldy #1
-				lda (ZPQuickPtr1),y
-				cmp #'$'				is it a TYPE ?
-				bne .11
-
-
-.11				cmp #'/'
+				lda (ZPPtr1),y
+				cmp #'/'
 				bne .10
+				
 				ldy #S.PS.hARGS
-				bra .2
+				lda (pPs),y
+				bra .3
 				
 .10				ldy #S.PS.hARGS
 				lda (pPs),y
@@ -86,14 +83,11 @@ CS.INIT			>LDYA L.LIBSTR
 				>PUSHA
 				>SYSCALL SYS.PStrCat
 				sta hDIRPATH
-				bra .3
-				
-.1				ldy #S.PS.hPREFIX
-.2				lda (pPs),y
 				
 .3				>SYSCALL SYS.ListDirInitA
-				bcs .98
-				sta hS.LISTDIR
+				bcs .99
+				ldy #hS.LISTDIR
+				sta (pData),y
 				
 				lda (pPs)
 				ora #S.PS.F.EVENT		Now accept events
@@ -101,216 +95,93 @@ CS.INIT			>LDYA L.LIBSTR
 				clc
 				rts
 				
-.98				pha
-				lda hLIBSTR
-				>SYSCALL SYS.FreeMemA
-				pla
-.99				sec
+.98				>LDYA L.MSG.USAGE
+				>SYSCALL SYS.PSTRoutYA
+.99				lda #SYSMGR.ERRSYN
+				sec
 				rts
 *--------------------------------------
-CS.RUN			lda bCANCEL
-				beq .1
+CS.RUN			ldy #bCANCEL
+				lda (pData),y
+				beq .10
+
 				sec
 				rts
 				
-.1				lda bSTOP
-				beq .2
+.10				ldy #bSTOP
+				lda (pData),y
+				beq .1
 				clc
-				rts
+.99				rts
 				
-.2				lda hS.LISTDIR
+.1				ldy #hS.LISTDIR
+				lda (pData),y
 				>SYSCALL SYS.ListDirNextA
-				bcc .3
+				bcs .99
 				
-				jmp Push.Footer
-				
-.3				pha
+				pha
 				>SYSCALL SYS.GetMemPtrA
-				>STYA ZPQuickPtr1
-				lda (ZPQuickPtr1)
+				>STYA ZPPtr1
+				lda (ZPPtr1)
 				pha
 				
 				and #$0F
-				sta (ZPQuickPtr1)		Adjust Filename len
+				sta (ZPPtr1)			Adjust Filename len
 				
 				pla
 				and #$F0
-				cmp #$F0				Volume ($F) HEADER ?
-				bne .31
+				bne .8					skip VOLHeader ($f),DIRHeader ($e),DIR ($d)
 				
-				pla
-				sta hVOLHEADER
-				>PUSHW ZPQuickPtr1
-				>PUSHW L.MSG.VOL.HEADER
-				>LIBCALL hLIBSTR,LIBSTR.PRINTF
-				clc
-				rts
+				ldy #hS.LISTDIR
+				lda (pData),y
+				>SYSCALL SYS.GetMemPtrA
+				>STYA ZPPtr2
 				
-.31				cmp #$E0				Dir ($E) HEADER ?
-				bne .4
+				ldy #S.LISTDIR.hPATH
+				lda (ZPPtr2),y
+				>SYSCALL SYS.GetMemPtrA
+				>STYA ZPPtr2
 				
-				pla
-				sta hDIRHEADER
-
-				>PUSHW ZPQuickPtr1
-				>PUSHW L.MSG.DIR.HEADER
-				>LIBCALL hLIBSTR,LIBSTR.PRINTF
-				clc
-				rts
+				lda (ZPPtr2)
+				tax
+				tay
 				
-.4				cmp #$D0				Directory ?
-				bne .5
-				jsr Push.Dates
-				jsr Push.Dir
-				>PUSHW L.MSG.DIR
+.2				lda (ZPPtr2),y
+				sta FullPath,y
+				dey
+				bne .2
+				
+				ldy #0
+.3				inx
+				iny
+				lda (ZPPtr1),y
+				sta FullPath,x
+				tya
+				cmp (ZPPtr1)
+				bne .3
+				
+				stx FullPath
+				
+				>LDYA L.FullPath	
+				>SYSCALL SYS.PSTRoutYA
+				
+				>LDYA L.FullPath	
+				>SYSCALL SYS.MLIGetFileInfoYA
+				bcs .5
+				>STYA ZPPtr3
+				
+				
+				>LDYA L.MSG.OK
+				>SYSCALL SYS.PSTRoutYA
 				bra .8
 				
-.5				cmp #$C0				Volume Name ?
-				bne .6
-
-				>PUSHW ZPQuickPtr1
-				>PUSHW L.MSG.VOL
-				bra .8
+.5				>PUSHA
+				>LDYA L.MSG.ERR
+				>SYSCALL SYS.PSTRoutYA
 				
-.6				jsr Push.Dates			File
-				jsr Push.File
-				>PUSHW L.MSG.FILE
-				
-.8				>LIBCALL hLIBSTR,LIBSTR.PRINTF
-
-.9				pla
+.8				pla
 				>SYSCALL SYS.FreeMemA
 				clc
-				rts
-*--------------------------------------
-Push.Dir		ldy #$1E				get access mask
-				lda (ZPQuickPtr1),y
-				>PUSHA
-				>PUSHW ZPQuickPtr1
-				rts
-*--------------------------------------
-Push.File		>PUSHBI 0				4th byte of file len=0
-				ldy #$17				get file len (3 bytes)
-				lda (ZPQuickPtr1),y
-				>PUSHA
-				dey
-				lda (ZPQuickPtr1),y
-				>PUSHA
-				dey
-				lda (ZPQuickPtr1),y
-				>PUSHA
-				
-				ldy #$1E				get access mask
-				lda (ZPQuickPtr1),y
-				>PUSHA
-				
-				ldy #$20				get aux type
-				lda (ZPQuickPtr1),y
-				>PUSHA
-				dey
-				lda (ZPQuickPtr1),y
-				>PUSHA
-				
-				ldy #$10				get filetype
-				
-				lda L.PRODOS.FT.TXT
-				sta ZPQuickPtr2
-				lda L.PRODOS.FT.TXT+1
-				sta ZPQuickPtr2+1
-				ldx #0
-				
-.1				lda (ZPQuickPtr1),y
-				cmp PRODOS.FT.ID,x
-				beq .3
-				lda ZPQuickPtr2
-				clc
-				adc #4
-				sta ZPQuickPtr2
-				bcc .2
-				inc ZPQuickPtr2+1
-.2				inx
-				cpx PRODOS.FT.COUNT
-				bne .1
-				
-				lda (ZPQuickPtr1),y
-				lsr
-				lsr
-				lsr
-				lsr
-				tax
-				lda HEXDIGIT,x
-				sta PRODOS.FT.DFLT+2
-				lda (ZPQuickPtr1),y
-				and #$0F
-				tax
-				lda HEXDIGIT,x
-				sta PRODOS.FT.DFLT+3
-				
-.3				>PUSHW ZPQuickPtr2
-				>PUSHW ZPQuickPtr1
-				>LIBCALL hLIBSTR,LIBSTR.LCASEP
-				>PUSHW ZPQuickPtr1
-				rts
-*--------------------------------------
-Push.Dates		ldy #$24				get modification time
-				lda (ZPQuickPtr1),y
-				>PUSHA
-				dey
-				lda (ZPQuickPtr1),y
-				>PUSHA
-				ldy #$22
-				lda (ZPQuickPtr1),y
-				>PUSHA
-				dey
-				lda (ZPQuickPtr1),y
-				>PUSHA
-				ldy #$1B				get creation time
-				lda (ZPQuickPtr1),y
-				>PUSHA
-				dey
-				lda (ZPQuickPtr1),y
-				>PUSHA
-				ldy #$19
-				lda (ZPQuickPtr1),y
-				>PUSHA
-				dey
-				lda (ZPQuickPtr1),y
-				>PUSHA
-				rts					
-*--------------------------------------
-Push.Footer		lda hVOLHEADER
-				beq .20
-
-				>SYSCALL SYS.GetMemPtrA 
-				>STYA ZPQuickPtr1
-				
-				ldy #22					file_count
-				lda (ZPQuickPtr1),y
-				>PUSHA
-				dey
-				lda (ZPQuickPtr1),y
-				>PUSHA
-				
-				>PUSHW L.MSG.VOL.END
-				>LIBCALL hLIBSTR,LIBSTR.PRINTF
-				
-.20				lda hDIRHEADER
-				beq .21
-
-				>SYSCALL SYS.GetMemPtrA 
-				>STYA ZPQuickPtr1
-
-				ldy #22					file_count
-				lda (ZPQuickPtr1),y
-				>PUSHA
-				dey
-				lda (ZPQuickPtr1),y
-				>PUSHA
-
-				>PUSHW L.MSG.DIR.END
-				>LIBCALL hLIBSTR,LIBSTR.PRINTF
-				
-.21				sec
 				rts
 *--------------------------------------
 CS.DOEVENT		ldy #S.EVT.hDEV		is Event from active IN device?
@@ -318,86 +189,163 @@ CS.DOEVENT		ldy #S.EVT.hDEV		is Event from active IN device?
 				ldy #S.PS.hINDEV
 				cmp (pPs),y
 				bne .9
+
 				lda (pEvent)
 				and #S.EVT.F.KEY		is it a KEY event?
 				beq .9
+
 				ldy #S.EVT.DATAHI		is it an O or SAPPLE key ?
 				lda (pEvent),y
 				bne	.9
+
 				ldy #S.EVT.DATALO	
 				lda (pEvent),y
 				cmp #$03				Ctrl-C
 				bne .1
+
 				lda #$FF
-				sta bCANCEL
+				ldy #bCANCEL
+				sta (pData),y
 				bra .8
+				
 .1				cmp #$13				Ctrl-S
 				bne .8
-				lda bSTOP
+				
+				ldy #bSTOP
+				lda (pData),y
 				eor #$FF
-				sta bSTOP
-.8				>SYSCALL SYS.DestroyEvent
-				clc
+				sta (pData),y
+
+.8				clc
 				rts
 				
 .9				sec
 				rts
 *--------------------------------------
-CS.QUIT			lda hVOLHEADER
+CS.QUIT			ldy #hS.LISTDIR
+				lda (pData),y
 				beq .1
-				
-				>SYSCALL SYS.FreeMemA
-				
-.1				lda hDIRHEADER
-				beq .2
-				
-				>SYSCALL SYS.FreeMemA
-				
-.2				lda hS.LISTDIR
 				>SYSCALL SYS.ListDirCloseA
 				
-				lda hDIRPATH
+.1				ldy #hDIRPATH
+				lda (pData),y
+				beq .2
+				>SYSCALL SYS.FreeMemA
+				
+.2				ldy #hArg2
+				lda (pData),y
 				beq .3
 				>SYSCALL SYS.FreeMemA
 				
-.3				lda hLIBSTR
-				>SYSCALL SYS.UnloadLibA
+.3				ldy #hArg1
+				lda (pData),y
+				beq .8
+				>SYSCALL SYS.FreeMemA
 				
+.8				clc
+				rts
+*--------------------------------------
+GetHexFileTypeA	>SYSCALL SYS.GetMemPtrA
+				>STYA ZPPtr1
+				lda (ZPPtr1)
+				cmp #3
+				bne .9
+				
+				ldy #1
+				lda (ZPPtr1),y
+				cmp #'$'
+				bne .1
+				
+				iny
+				lda (ZPPtr1),y
+				cmp #'0'
+				bcc .9
+				cmp #'9'+1
+				bcs .9
+				asl
+				asl
+				asl
+				asl
+				sta Tmp
+				iny
+				lda (ZPPtr1),y
+				cmp #'0'
+				bcc .9
+				cmp #'9'+1
+				bcs .9
+				and #$F
+				ora Tmp
+				ldy #HexFileType
+				sta (pData),y
 				clc
+				rts
+
+.1				ldx #0
+				>LDYA L.PRODOS.FT.TXT
+				>STYA ZPPtr2
+				
+.2				ldy #3
+.21				lda (ZPPtr1),y
+				cmp #'a'
+				bcc .3
+				cmp #'z'+1
+				bcs .3
+				eor #$20
+				
+.3				cmp (ZPPtr2),y
+				bne .4
+				dey
+				bne .21
+				
+				lda PRODOS.FT.ID,x
+				ldy #HexFileType
+				sta (pData),y
+				clc
+				rts
+				
+.4				clc
+				lda ZPPtr2
+				adc #3
+				sta ZPPtr2
+				lda ZPPtr2+1
+				adc #0
+				sta ZPPtr2+1
+				inx
+				cpx #PRODOS.FT.COUNT
+				bne .2
+				
+.9				sec
 				rts
 *--------------------------------------
 CS.END
-LIB.LIBSTR		>PSTRING "libstr.o"
-MSG.VOL.HEADER	>CSTRING "Volume Listing Of %S\n"
-MSG.DIR.HEADER	>CSTRING "Directory Listing Of %S\n"
-MSG.VOL			>CSTRING "/%S\n"
-MSG.DIR			>CSTRING "/%15S  <dir>   %a          %T %t %T %t\n"
-MSG.FILE		>CSTRING "%15S %S $%H %a %8L %T %t %T %t\n"
-MSG.VOL.END		>CSTRING "%D Files In Volume.\n"
-MSG.DIR.END		>CSTRING "%D Files In Directory.\n"
+MSG.USAGE		>PSTRING "Usage : CHTYP [File *,? wildcards allowed] [File type : $xx or SYS,TXT....]\n"
+MSG.OK			>PSTRING " [Ok]\n"
+MSG.ERR			>PSTRING " [%h]\n"
+FullPath		.BS 64
+Tmp				.BS 1
 *--------------------------------------
-PRODOS.FT.COUNT	.HS 07
+PRODOS.FT.COUNT	.EQ 7
 PRODOS.FT.ID	.HS 0406FAFCFDE2FF
-PRODOS.FT.TXT	
-T04				>PSTRING "TXT"
-T06				>PSTRING "BIN"
-TFA				>PSTRING "S-C"
-TFC				>PSTRING "BAS"
-TFD				>PSTRING "VAR"
-TE2				>PSTRING "ATK"
-TFF				>PSTRING "SYS"
-PRODOS.FT.DFLT	>PSTRING "$  "
-HEXDIGIT		.AS '0123456789ABCDEF'
+PRODOS.FT.TXT	.AS "TXT"
+				.AS "BIN"
+				.AS "S-C"
+				.AS "BAS"
+				.AS "VAR"
+				.AS "ATK"
+				.AS "SYS"
 *--------------------------------------
+				.DUMMY
+				.OR 0
 DS.START
-hLIBSTR			.BS	1
 hDIRPATH		.BS 1
 hS.LISTDIR		.BS 1
-hVOLHEADER		.BS 1
-hDIRHEADER		.BS 1
+hArg1			.BS 1
+hArg2			.BS 1
 bSTOP			.BS 1
 bCANCEL			.BS 1
+HexFileType		.BS 1
 DS.END
+				.ED
 *--------------------------------------
 MAN
 SAVE BIN/CHTYP.S
