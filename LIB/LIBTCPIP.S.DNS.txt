@@ -31,12 +31,13 @@ DNS.QUERY.I		jsr DNS.FIND.BY.NAME
 				
 				lda ZPCachePtr
 				clc
-				adc S.DNSCACHE.IP
+				adc #S.DNSCACHE.IP
 				sta ZPCachePtr
 				bcc .1
 				inc ZPCachePtr+1
 				
 .1				ldy #3
+
 .2				lda (ZPCachePtr),y
 				sta (ZPPtrIP),y
 				dey
@@ -48,7 +49,13 @@ DNS.QUERY.I		jsr DNS.FIND.BY.NAME
 				sec
 				rts
 *--------------------------------------
-DNS.REQUEST		jsr DNS.PSTR2DNS
+DNS.REQUEST		lda hDNSSocket1
+				bne .10
+				lda #ERR.DNS.ERROR
+				sec
+				rts
+
+.10				jsr DNS.PSTR2DNS
 
 				ldx #0
 				ldy #DNS.MSG.NAME-DNS.MSG
@@ -80,15 +87,12 @@ DNS.REQUEST		jsr DNS.PSTR2DNS
 				lda #0
 				sta DNS.MSG.LEN+1
 				
-				lda hDNSSocket1
-				beq .9
-
 				>LDYA A2osX.RANDOM16
 				>STYA DNS.MSG.ID
 				
 				>STYA DNS.TmpCache+S.DNSCACHE.ID
 				
-				lda #5
+				lda #K.DNS.PENDING.TTL
 				sta DNS.TmpCache+S.DNSCACHE.TTL
 				stz DNS.TmpCache+S.DNSCACHE.TTL+1
 				stz DNS.TmpCache+S.DNSCACHE.TTL+2
@@ -140,46 +144,29 @@ DNS.ADD			>PULLW ZPPtrDNS			Get host string
 DNS.ADD.I		sta DNS.TmpCache
 				
 				jsr DNS.FIND.BY.NAME
-				bcs .1					not found, go create new
-				
-				ldy #S.DNSCACHE.hNAME
-				lda (ZPCachePtr),y
-				sta DNS.TmpCache,y
-				bra .20
+				bcc .2					Found, go update...
 
-.1				jsr DNS.FIND.FREE
+				jsr DNS.FIND.FREE
 
-				lda (ZPPtrDNS)
-				iny						add 1 for len byte
-				lda #0
-				>PUSHYA					push PSTR len
-				>PUSHBI 0				no option
-				>SYSCALL SYS.GetMem
+				>LDYA ZPPtrDNS
+				>SYSCALL SYS.NewPStrYA
 				bcs .9
 				
-				>STYA ZPTmpPtr1
-				stx DNS.TmpCache+S.DNSCACHE.hNAME
-
-				lda (ZPPtrDNS)
-				sta (ZPTmpPtr1)
-				tay
+				ldy #S.DNSCACHE.hNAME
+				sta (ZPCachePtr),y
+								 				
+.2				lda DNS.TmpCache
+				sta (ZPCachePtr)
 				
-.2				lda (ZPPtrDNS),y
-				sta (ZPTmpPtr1),y
-				dey
-				bne .2
-				 				
-.20				ldy #S.DNSCACHE-1
+				ldy #S.DNSCACHE.ID
 .3				lda DNS.TmpCache,y
 				sta (ZPCachePtr),y
-				dey
-				bpl .3
+				iny
+				cpy #S.DNSCACHE
+				bne .3
 				
 				clc
-				rts
-				
-.9				sec
-				rts
+.9				rts
 *--------------------------------------
 DNS.GETCACHE	>LDYA L.DNS.CACHE
 				clc
@@ -198,6 +185,7 @@ DNS.FIND.BY.NAME
 				ldy #S.DNSCACHE.hNAME
 				lda (ZPCachePtr),y
 				>SYSCALL SYS.GetMemPtrA
+				bcs *
 				>STYA ZPTmpPtr1
 				
 				lda (ZPPtrDNS)
@@ -235,6 +223,7 @@ DNS.UPDATE.BY.ID
 				
 .1				lda (ZPCachePtr)
 				beq .6					empty DNS cache entry?
+				bmi .6					resolved ?
 				
 				ldy #S.DNSCACHE.ID
 				lda (ZPCachePtr),y
@@ -245,14 +234,15 @@ DNS.UPDATE.BY.ID
 				cmp DNS.TmpCache+S.DNSCACHE.ID+1
 				bne .6
 
-				ldy #S.DNSCACHE-1
-.2				lda DNS.TmpCache,y
-				sta (ZPCachePtr),y
-				dey
-				cpy #S.DNSCACHE.hNAME
-				bne .2
 				lda #S.DNSCACHE.STATUS.RESOLVED
 				sta (ZPCachePtr)
+				
+				ldy #S.DNSCACHE.TTL
+.2				lda DNS.TmpCache,y
+				sta (ZPCachePtr),y
+				iny
+				cpy #S.DNSCACHE
+				bne .2
 				
 				clc
 				rts
@@ -287,7 +277,7 @@ DNS.FIND.FREE	>LDYA L.DNS.CACHE
 				ldy #S.DNSCACHE.TTL
 				ldx #3
 				sec
-.2				lda TmpDWord,x			is save TTL greater then actual TTL?
+.2				lda TmpDWord,x			is saved TTL greater then actual TTL?
 				sbc (ZPCachePtr),y
 				iny
 				dex
@@ -382,7 +372,7 @@ DNS.DecodeMsg	sta hFrame1
 				>SYSCALL SYS.GetMemPtrA
 				>STYA ZPFrameBase1
 				
-				>DEBUG
+*				>DEBUG
 				
 				ldy #S.DNS.F+1
 				lda (ZPFrameBase1),y
@@ -391,10 +381,10 @@ DNS.DecodeMsg	sta hFrame1
 
 				ldy #S.DNS.ID
 				lda (ZPFrameBase1),y
-				sta DNS.TmpCache+S.DNSCACHE.ID+1
+				sta DNS.TmpCache+S.DNSCACHE.ID
 				iny
 				lda (ZPFrameBase1),y
-				sta DNS.TmpCache+S.DNSCACHE.ID
+				sta DNS.TmpCache+S.DNSCACHE.ID+1
 				
 				ldy #S.DNS.ANCOUNT+1
 				lda (ZPFrameBase1),y
@@ -426,6 +416,8 @@ DNS.DecodeMsg	sta hFrame1
 				iny
 				iny						Skip QTYPE & QCLASS
 				iny
+				
+				iny						next pos
 				
 .21				dex						skip another QUERY ?
 				bne .1
@@ -464,6 +456,8 @@ DNS.DecodeMsg	sta hFrame1
 .40				iny						skip QCLASS
 				iny
 				
+				iny						next pos
+				
 				ldx #3
 .4				lda (ZPFrameBase1),y
 				sta DNS.TmpCache+S.DNSCACHE.TTL,x
@@ -475,9 +469,9 @@ DNS.DecodeMsg	sta hFrame1
 				iny
 				ldx #0
 				
-.5				iny
-				lda (ZPFrameBase1),y
+.5				lda (ZPFrameBase1),y
 				sta DNS.TmpCache+S.DNSCACHE.IP,x
+				iny
 				inx
 				cpx #4
 				bne .5
