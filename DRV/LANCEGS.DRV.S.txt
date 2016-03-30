@@ -15,7 +15,6 @@ AUTO 6
 ZPTmpPTR		.EQ ZPDRV
 *--------------------------------------
 DEVID			.EQ	$33
-REVID			.EQ	$46					CHIP=4,REV=6
 *--------------------------------------
 * SMSC L91C96 IO Registers
 *--------------------------------------
@@ -43,8 +42,8 @@ L91C96.1.BAR	.EQ $C082
 L91C96.1.IAR	.EQ $C084
 L91C96.1.GPR	.EQ $C08A
 L91C96.1.CTR	.EQ $C08C
+L91C96.1.CTR.DEFAULT .EQ %00000000.00000001
 L91C96.1.CTR.AUTOREL .EQ %00000000.00001000
-
 
 L91C96.2.MMUCR	.EQ $C080
 L91C96.2.MMUCR.ALLOC .EQ %00100000
@@ -58,7 +57,6 @@ L91C96.2.PTR	.EQ $C086
 L91C96.2.PTR.RCVD	.EQ %10000000.00000000
 L91C96.2.PTR.AUTOI	.EQ %01000000.00000000
 L91C96.2.PTR.READ	.EQ %00100000.00000000
-
 L91C96.2.DATA	.EQ $C088
 L91C96.2.IST	.EQ $C08C
 L91C96.2.IST.ALLOC	.EQ %00001000
@@ -100,21 +98,14 @@ Dev.Detect		sta hArgs
 				ldx #$10
 .1				lda L91C96.BSR+1,x
 				cmp #DEVID
-				bne .2
+				beq .3
 				
-				lda #3
-				sta L91C96.BSR,x
-				lda L91C96.3.REV,x
-				cmp #REVID
-				bra .3
-				
-.2				inc DEV.HEADER.NAME+4
+				inc DEV.HEADER.NAME+4
 				txa
 				clc
 				adc #$10
 				tax
-				cpx #$80
-				bne .1
+				bpl .1					not yat at $80
 				
 				>LDYA L.MSG.DETECT.KO
 				>SYSCALL SYS.PSTROutYA
@@ -222,9 +213,9 @@ OPEN			jsr Reset				will select L91C96.0
 				bne .2
 				
 .3				ldx DEVSLOTx0
-				lda #L91C96.1.CTR.AUTOREL
+				lda #L91C96.1.CTR.DEFAULT+L91C96.1.CTR.AUTOREL
 				sta L91C96.1.CTR,x
-				lda /L91C96.1.CTR.AUTOREL
+				lda /L91C96.1.CTR.DEFAULT+L91C96.1.CTR.AUTOREL
 				sta L91C96.1.CTR+1,x
 				
 				clc
@@ -252,27 +243,32 @@ GETEVENT.RxOK	lda #L91C96.2.PTR.RCVD+L91C96.2.PTR.AUTOI+L91C96.2.PTR.READ
 				lda /L91C96.2.PTR.RCVD+L91C96.2.PTR.AUTOI+L91C96.2.PTR.READ
 				sta L91C96.2.PTR+1,x 
 
-				lda L91C96.2.DATA,x
-				lda L91C96.2.DATA,x
-				pha
-				and #$60				Broadcast?
-				asl
+				lda L91C96.2.DATA,x		Get Frame Status Word (lo)
+				lda L91C96.2.DATA,x		Get Frame Status Word (HI)
+				
+				asl						#$60 = Broadcast?
 				ldy #S.EVT.DATAHI
 				sta (pEvent),y
 				
-				clc
-				pla						#$10 = odd?
-				and #$10
-				beq .1
-				sec
-.1				lda L91C96.2.DATA,x		get lo byte count
-				sbc	#3					compute FRAMELEN+2
+				asl
+				asl 					#$10 = odd?
+				asl						if odd, CS
+				
+				lda L91C96.2.DATA,x		get lo byte count
+				sbc	#5					compute FRAMELEN
 				sta FRAMELEN
 				tay
-				lda L91C96.2.DATA,x
+				lda L91C96.2.DATA,x		get hi byte count
+				sbc #0
 				sta FRAMELEN+1
 				
-				>PUSHYA					FRAMLEN+2
+				iny
+				bne .1
+				inc
+.1				iny
+				bne .11
+				inc
+.11				>PUSHYA					FRAMLEN+2
 				>PUSHBI 0
 				>SYSCALL SYS.GetMem
 				bcs .99
@@ -284,16 +280,12 @@ GETEVENT.RxOK	lda #L91C96.2.PTR.RCVD+L91C96.2.PTR.AUTOI+L91C96.2.PTR.READ
 				lda #S.EVT.F.NET+S.EVT.F.hMEM1
 				sta (pEvent)
 								
-				ldy #0
 				lda FRAMELEN
-				sbc #1					CC from SYSCALL
-				sta FRAMELEN
-				sta (ZPTmpPTR),y
-				iny
+				sta (ZPTmpPTR)
+				ldy #1
 				lda FRAMELEN+1
-				sbc #0
 				sta (ZPTmpPTR),y
-				
+
 				iny
 				
 				ldx DEVSLOTx0
@@ -323,9 +315,6 @@ GETEVENT.RxOK	lda #L91C96.2.PTR.RCVD+L91C96.2.PTR.AUTOI+L91C96.2.PTR.READ
 				rts				
 *--------------------------------------
 CLOSE			jsr Reset
-				lda #0
-				sta L91C96.0.RCR,x
-				sta L91C96.0.RCR+1,x
 				clc
 				rts
 *--------------------------------------				
@@ -339,8 +328,8 @@ GETINFO			lda #S.DEVINFO.NET.STATUS.10
 				sta LINK.STATUS
 
 				ldx DEVSLOTx0
-				lda #0
-				sta L91C96.BSR,x
+
+				stz L91C96.BSR,x
 				lda L91C96.0.EPHSR,x
 				lda L91C96.0.EPHSR+1,x
 				and /L91C96.0.EPHSR.LINK
@@ -424,16 +413,18 @@ SEND			>PULLW ZPTmpPTR
 				bpl .4
 
 				ldx DEVSLOTx0
-				stz L91C96.2.DATA,x		write fake statusword
+				stz L91C96.2.DATA,x		write fake status word
 				stz L91C96.2.DATA,x
 				
 				lda FRAMELEN
 				pha
+				eor #$01
 				lsr
 				pla
-				sbc #$fb				add 5 if odd, 6 if even
+				adc #$05				add 5 if odd, 6 if even
 				sta L91C96.2.DATA,x
 				lda FRAMELEN+1
+				adc #$00
 				sta L91C96.2.DATA,x
 				
 				ldy #2
@@ -462,9 +453,9 @@ SEND			>PULLW ZPTmpPTR
 				sta L91C96.2.DATA,x
 				bra .8
 				
-.71				lda #$40				signal an extra (odd) byte
+.71				pla
 				sta L91C96.2.DATA,x
-				pla
+				lda #%00100000			signal an extra (odd) byte
 				sta L91C96.2.DATA,x
 				
 .8				lda #L91C96.2.MMUCR.NQPKT
@@ -478,8 +469,7 @@ SEND			>PULLW ZPTmpPTR
 * 				PRIVATE
 *--------------------------------------
 Reset			ldx DEVSLOTx0
-				lda #0
-				sta L91C96.BSR,x
+				stz L91C96.BSR,x
 				
 				lda #L91C96.0.RCR.RESET
 				sta L91C96.0.RCR,x
@@ -489,8 +479,13 @@ Reset			ldx DEVSLOTx0
 				lda $C019				we can use VBL as we are not on //c
 .1				eor $C019
 				bpl .1
+				
+				lda $C019
 .2				eor $C019
 				bpl .2
+				
+				stz L91C96.0.RCR,x
+				stz L91C96.0.RCR+1,x
 				rts
 *--------------------------------------	
 DecFrameLen		lda FRAMELEN
