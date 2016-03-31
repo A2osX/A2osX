@@ -30,21 +30,21 @@ In Progress : moving KERNEL to AuxLC Bnk1 & 2 (16k, more space for drivers)
 | INSDEV | Working | |
 | GETTY | Working | |
 | LOGIN | In Progress | no auth using /etc/passd yet |
-| TCPIP | In Progress | |
-| DHCPCLNT | Working | |
-| SHELL | Working | BUG: History nav|
+| TCPIP | In Progress | New Socket API. ARP,IP,ICMP,UDP ok, TCP in progress |
+| DHCPCLNT | Working | rewritten to use new Socket API |
+| SHELL | Working | BUG: History nav |
   
 ## DRV,Drivers:  
 | Name.DRV | Status | Comment |
 | -------- | ------ | ------- |
 | Console.DRV | Working | ANSI support in Progress. |
-| PPIC.DRV | In Progress | |
+| PIC.DRV | In Progress | Apple "Parallel Interface Card" Driver, renamed from PPIC.DRV|
 | SSC.DRV | In Progress | |
 | SSC.I.DRV | In Progress | |
 | Mouse.DRV | Working | |
 | Uthernet.DRV | Working | |
 | UthernetII.DRV | In Progress | |
-| LanCeGS.DRV | In Progress | |
+| LanCeGS.DRV | Working | |
 | Mouse.DRV | Working | |
 | DHGR.DRV | In Progress | except bitblt... |
   
