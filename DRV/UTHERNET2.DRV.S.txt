@@ -129,17 +129,32 @@ Dev.Detect		sta hArgs
 .3				stx DEVSLOTx0
 				
 				lda hARGS
-				beq .4
+				bne .4
 
-				>SYSCALL SYS.GetMemPtrA
+				lda #$00
+				sta MAC
+				lda #$08
+				sta MAC+1
+				lda #$DC
+				sta MAC+2
+				lda A2osX.RANDOM16
+				eor A2osX.TIMER16
+				sta MAC+3
+				eor A2osX.RANDOM16+1
+				sta MAC+4
+				eor A2osX.TIMER16+1
+				sta MAC+5
+				bra .8
+				
+.4				>SYSCALL SYS.GetMemPtrA
 				>STYA ZPTmpPTR
 				jsr DecodeMac
-				bcc .4
+				bcc .8
 				lda #DEVMGR.ERRICL
 				sec
 				rts
 				
-.4				>LDYA L.MSG.DETECT.OK
+.8				>LDYA L.MSG.DETECT.OK
 				>SYSCALL SYS.PSTROutYA
 				>LDYA L.DEV.HEADER.NAME
 				>SYSCALL SYS.PSTROutYA
@@ -179,26 +194,15 @@ L.DEVINFO		.DA DEVINFO
 				.DA 0					end or relocation
 *--------------------------------------
 OPEN			jsr Reset
-				>AR.SELECT SHAR
-				
-				ldy	#0
-.1				lda MAC,y
-				sta W5100.DR,x
-				iny
-				cpy #6
-				bne .1
-				
+
+				lda #W5100.MR.AI+W5100.MR.IND
+				sta W5100.MR,x
+
 				>AR.SELECT RMSR
 				lda #3					8k
 				sta W5100.DR,x		...for Socket0 RX Buffer
 				sta W5100.DR,x		...for Socket0 TX Buffer
 
-				>AR.SELECT S0.MR
-				lda #3					IPRAW
-				sta W5100.DR,x		for S0.MR
-*				>AR.SELECT S0.CR
-				lda #1					OPEN
-				sta W5100.DR,x		for S0.CR
 				clc
 				rts
 *--------------------------------------
@@ -206,45 +210,59 @@ GETEVENT		ldx DEVSLOTx0
 				>AR.SELECT S0.CR
 				lda W5100.DR,x
 				bne .9
+				
 				>AR.SELECT S0.RX.RSR
 				lda W5100.DR,x		get the received size HI
-				sta RXTX.Size+1
-				lda W5100.DR,x      LO
-				sta RXTX.Size
-				ora RXTX.Size+1
+				ora W5100.DR,x      LO
 				bne GETEVENT.RxOK
 				
 .9				lda #ERR.DEV.NOFRAME
-				sec
+GETEVENT.Err	sec
 				rts
 				
-GETEVENT.RxOK	clc
+GETEVENT.RxOK	>AR.SELECT S0.RX.RD
 				lda W5100.DR,x		get the received ptr HI
+				ldy W5100.DR,x		get the received ptr LO
 				and /RXTX.MASK
-				sta RXTX.Ptr+1
-				adc /RX.BASE
-				tay
-				
-				lda W5100.DR,x      LO
-*				and #RXTX.MASK			$ff
-				sta RXTX.Ptr
-				
+				ora /RX.BASE
 				sta W5100.AR,x
 				tya
 				sta W5100.AR+1,x
-
-				lda RXTX.Size
-				clc
-				adc #S.IP
-				sta FRAMELEN
-				lda RXTX.Size+1
-				adc /S.IP
-				sta FRAMELEN+1
 				
-				>PUSHW FRAMELEN
+				lda W5100.DR,x
+				sta RX.IP
+				lda W5100.DR,x
+				sta RX.IP+1
+				lda W5100.DR,x
+				sta RX.IP+2
+				lda W5100.DR,x
+				sta RX.IP+3
+				
+				lda W5100.DR,x		get RX.Size HI
+				sta RXTX.Size+1
+				tay
+				lda W5100.DR,x		get RX.Size LO
+				sta RXTX.Size
+				
+				clc
+				adc #S.IP-2
+				sta FRAMELEN
+				pha
+				tya
+				adc /S.IP-2
+				sta FRAMELEN+1
+				ply
+				iny
+				bne .10
+				inc 
+.10				iny
+				bne .11
+				inc
+				
+.11				>PUSHYA
 				>PUSHBI 0
 				>SYSCALL SYS.GetMem
-				bcs .99
+				bcs GETEVENT.Err
 				>STYA ZPTmpPTR
 				txa
 				ldy #S.EVT.DATALO
@@ -260,49 +278,59 @@ GETEVENT.RxOK	clc
 				lda #S.EVT.F.NET+S.EVT.F.hMEM1
 				sta (pEvent)
 
+				ldy #S.IP.DST+3
+				ldx #3
+				
+.1				lda RX.IP,x
+				sta (ZPTmpPTR),y
+				dey
+				dex
+				bpl .1
+				
+				sec
+				lda #0
+				sbc RXTX.Size
+				sta Counter
+				lda #0
+				sbc RXTX.Size+1
+				sta Counter+1
+				
 				ldx DEVSLOTx0
 
-				ldy #S.IP.DST
-				
-.1				jsr GetRxByte
-				bcs .8
-				sta (ZPTmpPTR),y
-				iny
-				cpy #S.IP.DST+4
-				bne .1
-				
-				jsr GetRxByte			skip Data Size
-				bcs .8
-				jsr GetRxByte
-				bcs .8
-				
 				ldy #S.IP
-.2				jsr GetRxByte
-				bcs .8
+.2				
 				sta (ZPTmpPTR),y
 				iny
-				bne .2
+				bne .3
 				inc ZPTmpPTR+1
-				bra .2
+				
+.3				inc Counter
+				bne .2
+				inc Counter+1
+				bne .3
 				
 .8				>AR.SELECT S0.RX.RD
-				lda RXTX.Size
+				ldy W5100.DR,x			Get HI
+				lda W5100.DR,x			Get LO
 				clc
-				adc #6
-				tay
-				lda RXTX.Size+1
-				adc #0
-				sta W5100.DR,x
+				adc RXTX.Size
+				pha						save LO
 				tya
-				sta W5100.DR,x
+				adc RXTX.Size+1
+				and /RXTX.MASK
+				ora /RX.BASE
+				pha						save HI
+				
+				>AR.SELECT S0.RX.RD
+				pla
+				sta W5100.DR,x			write HI
+				pla
+				sta W5100.DR,x			write LO
 				
 				>AR.SELECT S0.CR
 				lda #$40				RECV
 				sta W5100.DR,x
 				clc
-				rts
-				
-.99				sec				
 				rts
 *--------------------------------------
 CLOSE			jsr Reset
@@ -315,24 +343,19 @@ GETINFO			>LDYA L.DEVINFO
 *--------------------------------------				
 SEND			>PULLW ZPTmpPTR
 				
-				lda (ZPTmpPTR)
-				sec
-				sbc #S.IP
-				sta RXTX.Size
-				
-				ldy #1
+				ldy #S.IP.TOTAL.LENGTH+1
 				lda (ZPTmpPTR),y
-				sbc /S.IP
 				sta RXTX.Size
+				dey
+				lda (ZPTmpPTR),y
+				sta RXTX.Size+1
 				
 				ldx DEVSLOTx0
 				>AR.SELECT S0.TX.FSR
+				
 				lda W5100.DR,x		get send size HI
-				pha
-				lda W5100.DR,x      LO
-				sec
-				sbc RXTX.Size
-				pla
+				ldy W5100.DR,x      LO
+				cpy RXTX.Size
 				sbc RXTX.Size+1
 				bcs SEND.READY
 
@@ -349,26 +372,67 @@ SEND.READY		>AR.SELECT S0.DIPR
 				cpy #S.IP.DST+4
 				bne .1
 				
+				>AR.SELECT S0.PROTO
+				ldy #S.IP.PROTOCOL
+				lda (ZPTmpPTR),y
+				sta W5100.DR,x
+				
+*				>AR.SELECT S0.TOS
+				lda #0
+				sta W5100.DR,x
+				
+*				>AR.SELECT S0.TTL
+				lda #K.IP.TTL
+				sta W5100.DR,x
+				
 				>AR.SELECT S0.TX.WR
-				lda W5100.DR,x
-				pha
-				lda W5100.DR,x
-				clc
-				adc TX.Base
-				sta RXTX.Ptr
-				pla
-				adc TX.Base+1
-				sta RXTX.Ptr+1
+				lda W5100.DR,x			Get HI
+				ldy W5100.DR,x			Get LO
+				and /RXTX.MASK
+				ora /TX.BASE
+				sta W5100.AR,x			Write HI
+				tya
+				sta W5100.AR+1,x		Write LO
+				
+				sec
+				lda #0
+				sbc RXTX.Size
+				sta Counter
+
+				lda #0
+				sbc RXTX.Size+1
+				sta Counter+1
 				
 				ldy #S.IP
 				
 .2				lda (ZPTmpPTR),y
-				jsr PutTxByte
-				bcs .8
+				sta W5100.DR,x
 				iny
-				bne .2
+				bne .3
 				inc ZPTmpPTR+1
-				bra .2
+				
+.3				inc Counter
+				bne .2
+
+				inc Counter+1
+				bne .2
+				
+				>AR.SELECT S0.TX.WR
+				ldy W5100.DR,x			Get HI
+				lda W5100.DR,x			Get LO
+				clc
+				adc RXTX.Size
+				pha						save LO
+				tya
+				adc RXTX.Size+1
+				and /RXTX.MASK
+				ora /TX.BASE
+				pha						save HI
+				>AR.SELECT S0.TX.WR
+				pla
+				sta W5100.DR,x			write HI
+				pla
+				sta W5100.DR,x			write LO
 				
 .8				>AR.SELECT S0.CR
 				lda #$20				SEND
@@ -378,9 +442,17 @@ SEND.READY		>AR.SELECT S0.DIPR
 *--------------------------------------
 SETIPCFG		>PULLW ZPTmpPTR
 				
-				>AR.SELECT GAR
-				
 				ldx DEVSLOTx0
+				
+				>AR.SELECT S0.CR
+				lda #10					CLOSE
+				sta W5100.DR,x
+
+				>AR.SELECT S0.MR
+				lda #3					IPRAW
+				sta W5100.DR,x
+
+				>AR.SELECT GAR
 				
 				ldy #S.IPCFG.GW
 .1				lda (ZPTmpPTR),y
@@ -398,15 +470,28 @@ SETIPCFG		>PULLW ZPTmpPTR
 				cpy #S.IPCFG.MASK+4
 				bne .2
 				
-				>AR.SELECT SIPR
+*				>AR.SELECT SHAR			Implicit, next to SUBR
+				
+				ldy	#0
+.3				lda MAC,y
+				sta W5100.DR,x
+				iny
+				cpy #6
+				bne .3
+				
+*				>AR.SELECT SIPR			Implicit, next to SHAR
 				
 				ldy #S.IPCFG.IP
-.3				lda (ZPTmpPTR),y
+.4				lda (ZPTmpPTR),y
 				sta W5100.DR,x
 				iny
 				cpy #S.IPCFG.IP+4
-				bne .3
+				bne .4
 				
+				>AR.SELECT S0.CR
+				lda #1					OPEN
+				sta W5100.DR,x
+
 				clc
 				rts
 *--------------------------------------
@@ -414,71 +499,13 @@ Reset			ldx DEVSLOTx0
 				lda #W5100.MR.RST
 				sta W5100.MR,x
 				rts
-*--------------------------------------	
-GetRxByte		lda RXTX.Size
-				bne .1
-				lda RXTX.Size+1
-				beq .9
-				dec RXTX.Size+1
-.1				dec RXTX.Size
-
-				lda W5100.DR,x
-				pha
-				inc RXTX.Ptr
-				bne .8
-				inc RXTX.Ptr+1
-				lda RXTX.Ptr+1
-				and /RXTX.MASK
-				bne .8
-				sta RXTX.Ptr+1
-
-				lda /RX.Base
-				sta W5100.AR,x
-				lda #RX.Base
-				sta W5100.AR+1,x
-.8				pla
-				clc
-				rts
-				
-.9				sec
-				rts				
-*--------------------------------------	
-PutTxByte		pha
-				lda RXTX.Size
-				bne .1
-				lda RXTX.Size+1
-				beq .9
-				dec RXTX.Size+1
-.1				dec RXTX.Size
-
-				pla
-				sta W5100.DR,x
-				inc RXTX.Ptr
-				bne .8
-				inc RXTX.Ptr+1
-				lda RXTX.Ptr+1
-				and /RXTX.MASK
-				bne .8
-				sta RXTX.Ptr+1
-
-				lda /TX.Base
-				sta W5100.AR,x
-				lda #TX.Base
-				sta W5100.AR+1,x
-				
-.8				clc
-				rts
-				
-.9				pla
-				sec
-				rts				
 *--------------------------------------
 DRV.CS.END
 DEVSLOTx0		.BS 1
-USERMAC			.BS 1
 FRAMELEN		.BS 2
+RX.IP			.BS 4
 RXTX.Size		.BS 2
-RXTX.Ptr		.BS 2
+Counter			.BS 2
 *--------------------------------------
 DEVINFO			.DA #S.DEVINFO.TYPE.NET
 DEVFLAGS		.DA #S.DEVINFO.NET.FLAGS.ARPOFFLOAD
