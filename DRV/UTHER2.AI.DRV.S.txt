@@ -6,7 +6,7 @@ AUTO 6
 				.LIST OFF	
 				.OP	65C02
 				.OR	$2000
-				.TF /A2OSX.BOOT/DRV/UTHERNET2.DRV
+				.TF /A2OSX.BOOT/DRV/UTHER2.AI.DRV
 *--------------------------------------
 				.INB INC/MACROS.I
 				.INB INC/A2OSX.I
@@ -189,7 +189,7 @@ DRV.CS.START	.DA OPEN
 				.DA GETINFO
 				.DA $FFFF				no IRQ
 				.DA SEND
-				.DA $FFFF				no SETIPCFG
+				.DA SETIPCFG
 L.DEVINFO		.DA DEVINFO
 				.DA 0					end or relocation
 *--------------------------------------
@@ -202,23 +202,6 @@ OPEN			jsr Reset
 				lda #3					8k
 				sta W5100.DR,x		...for Socket0 RX Buffer
 				sta W5100.DR,x		...for Socket0 TX Buffer
-
-				>AR.SELECT S0.MR
-				lda #4					MACRAW
-				sta W5100.DR,x
-
-				>AR.SELECT SHAR			Implicit, next to SUBR
-				
-				ldy	#0
-.1				lda MAC,y
-				sta W5100.DR,x
-				iny
-				cpy #6
-				bne .1
-				
-				>AR.SELECT S0.CR
-				lda #1					OPEN
-				sta W5100.DR,x
 
 				clc
 				rts
@@ -243,14 +226,29 @@ GETEVENT.RxOK	>AR.SELECT S0.RX.RD
 				tya
 				sta W5100.AR+1,x
 				
+				lda W5100.DR,x
+				sta RX.IP
+				lda W5100.DR,x
+				sta RX.IP+1
+				lda W5100.DR,x
+				sta RX.IP+2
+				lda W5100.DR,x
+				sta RX.IP+3
+				
 				lda W5100.DR,x		get RX.Size HI
 				sta RXTX.Size+1
-				pha
+				tay
 				lda W5100.DR,x		get RX.Size LO
 				sta RXTX.Size
-				tay
-				pla
 				
+				clc
+				adc #S.IP-2
+				sta FRAMELEN
+				pha
+				tya
+				adc /S.IP-2
+				sta FRAMELEN+1
+				ply
 				iny
 				bne .10
 				inc 
@@ -267,16 +265,25 @@ GETEVENT.RxOK	>AR.SELECT S0.RX.RD
 				ldy #S.EVT.DATALO
 				sta (pEvent),y
 				
-				lda RXTX.Size
+				lda FRAMELEN
 				sta (ZPTmpPTR)
 				
 				ldy #1
-				lda RXTX.Size+1
+				lda FRAMELEN+1
 				sta (ZPTmpPTR),y
 				
 				lda #S.EVT.F.NET+S.EVT.F.hMEM1
 				sta (pEvent)
 
+				ldy #S.IP.DST+3
+				ldx #3
+				
+.1				lda RX.IP,x
+				sta (ZPTmpPTR),y
+				dey
+				dex
+				bpl .1
+				
 				sec
 				lda #0
 				sbc RXTX.Size
@@ -287,7 +294,7 @@ GETEVENT.RxOK	>AR.SELECT S0.RX.RD
 				
 				ldx DEVSLOTx0
 
-				ldy #2
+				ldy #S.IP
 .2				lda W5100.DR,x
 				sta (ZPTmpPTR),y
 				iny
@@ -333,9 +340,10 @@ GETINFO			>LDYA L.DEVINFO
 *--------------------------------------				
 SEND			>PULLW ZPTmpPTR
 				
-				lda (ZPTmpPTR)
+				ldy #S.IP.TOTAL.LENGTH+1
+				lda (ZPTmpPTR),y
 				sta RXTX.Size
-				ldy #1
+				dey
 				lda (ZPTmpPTR),y
 				sta RXTX.Size+1
 				
@@ -352,7 +360,29 @@ SEND			>PULLW ZPTmpPTR
 				sec
 				rts
 				
-SEND.READY		>AR.SELECT S0.TX.WR
+SEND.READY		>AR.SELECT S0.DIPR
+				ldy #S.IP.DST
+
+.1				lda (ZPTmpPTR),y
+				sta  W5100.DR,x
+				iny
+				cpy #S.IP.DST+4
+				bne .1
+				
+				>AR.SELECT S0.PROTO
+				ldy #S.IP.PROTOCOL
+				lda (ZPTmpPTR),y
+				sta W5100.DR,x
+				
+*				>AR.SELECT S0.TOS
+				lda #0
+				sta W5100.DR,x
+				
+*				>AR.SELECT S0.TTL
+				lda #K.IP.TTL
+				sta W5100.DR,x
+				
+				>AR.SELECT S0.TX.WR
 				lda W5100.DR,x			Get HI
 				ldy W5100.DR,x			Get LO
 				and /RXTX.MASK
@@ -372,7 +402,7 @@ SEND.READY		>AR.SELECT S0.TX.WR
 				sbc RXTX.Size+1
 				sta Counter+1
 				
-				ldy #2
+				ldy #S.IP
 				
 .2				lda (ZPTmpPTR),y
 				sta W5100.DR,x
@@ -407,6 +437,61 @@ SEND.READY		>AR.SELECT S0.TX.WR
 				clc
 				rts
 *--------------------------------------
+SETIPCFG		>PULLW ZPTmpPTR
+				
+				ldx DEVSLOTx0
+				
+				>AR.SELECT S0.CR
+				lda #10					CLOSE
+				sta W5100.DR,x
+
+				>AR.SELECT S0.MR
+				lda #3					IPRAW
+				sta W5100.DR,x
+
+				>AR.SELECT GAR
+				
+				ldy #S.IPCFG.GW
+.1				lda (ZPTmpPTR),y
+				sta W5100.DR,x
+				iny
+				cpy #S.IPCFG.GW+4
+				bne .1
+				
+*				>AR.SELECT SUBR			Implicit, next to GAR
+				
+				ldy #S.IPCFG.MASK
+.2				lda (ZPTmpPTR),y
+				sta W5100.DR,x
+				iny
+				cpy #S.IPCFG.MASK+4
+				bne .2
+				
+*				>AR.SELECT SHAR			Implicit, next to SUBR
+				
+				ldy	#0
+.3				lda MAC,y
+				sta W5100.DR,x
+				iny
+				cpy #6
+				bne .3
+				
+*				>AR.SELECT SIPR			Implicit, next to SHAR
+				
+				ldy #S.IPCFG.IP
+.4				lda (ZPTmpPTR),y
+				sta W5100.DR,x
+				iny
+				cpy #S.IPCFG.IP+4
+				bne .4
+				
+				>AR.SELECT S0.CR
+				lda #1					OPEN
+				sta W5100.DR,x
+
+				clc
+				rts
+*--------------------------------------
 Reset			ldx DEVSLOTx0
 				lda #W5100.MR.RST
 				sta W5100.MR,x
@@ -414,14 +499,16 @@ Reset			ldx DEVSLOTx0
 *--------------------------------------
 DRV.CS.END
 DEVSLOTx0		.BS 1
+FRAMELEN		.BS 2
+RX.IP			.BS 4
 RXTX.Size		.BS 2
 Counter			.BS 2
 Offset			.BS 2
 *--------------------------------------
 DEVINFO			.DA #S.DEVINFO.TYPE.NET
-DEVFLAGS		.DA #0
+DEVFLAGS		.DA #S.DEVINFO.NET.FLAGS.ARPOFFLOAD
 MAC				.BS 6
 LINK.STATUS		.DA #S.DEVINFO.NET.STATUS.OK+S.DEVINFO.NET.STATUS.FD+S.DEVINFO.NET.STATUS.100
 MAN
-SAVE DRV/UTHERNET2.DRV.S
+SAVE DRV/UTHER2.AI.DRV.S
 ASM
