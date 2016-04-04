@@ -43,7 +43,8 @@ In Progress : moving KERNEL to AuxLC Bnk1 & 2 (16k, more space for drivers)
 | SSC.I.DRV | In Progress | |
 | Mouse.DRV | Working | |
 | Uthernet.DRV | Working | |
-| UthernetII.DRV | In Progress | |
+| Uthernet2.DRV | In Progress | |
+| Uther2.AI.DRV | In Progress | With ARP/IP Offloading |
 | LanCeGS.DRV | Working | |
 | Mouse.DRV | Working | |
 | DHGR.DRV | In Progress | except bitblt... |
@@ -71,12 +72,12 @@ In Progress : moving KERNEL to AuxLC Bnk1 & 2 (16k, more space for drivers)
 | RM | Working | |
 | LS | Working  | BUG: `ls dir` does not list dir content (`ls dir/` works) |
 | CP | | |
-| ARP | Working | |
+| ARP | Working | dump ARP cache, setup a static ARP entry |
 | PING | Working | |
-| DNSINFO | In Progress | |
+| DNSINFO | Working | dump DNS cache, setup a static DNS entry |
 | IPCONFIG | Working | renamed from NETINFO |
 | NETSTAT | Working | |
-| RPCDUMP | In Progress | tool based on UDP socket API, renamed from RPCINFO |
+| RPCDUMP | Working | tool based on UDP socket API, renamed from RPCINFO |
 | EDIT | Working | still missing : find/replace |
 | NSCUTIL | Working | Tool for setting time in NSC/DL1216E |
 | ASM | In Progress | S-C MASM based multi CPU assembler |
