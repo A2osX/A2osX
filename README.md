@@ -43,7 +43,7 @@ In Progress : moving KERNEL to AuxLC Bnk1 & 2 (16k, more space for drivers)
 | SSC.I.DRV | In Progress | |
 | Mouse.DRV | Working | |
 | Uthernet.DRV | Working | |
-| Uthernet2.DRV | In Progress | |
+| Uthernet2.DRV | Working | |
 | Uther2.AI.DRV | In Progress | With ARP/IP Offloading |
 | LanCeGS.DRV | Working | |
 | Mouse.DRV | Working | |
