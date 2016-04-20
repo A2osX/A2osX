@@ -46,6 +46,14 @@ W5100.AR.PMAGIC		.EQ $0029
 W5100.AR.UIPR		.EQ $002A
 W5100.AR.UPORT		.EQ $002E
 W5100.AR.S0.MR		.EQ $0400
+W5100.AR.S0.MR.MULTI	.EQ $80
+W5100.AR.S0.MR.MF		.EQ $40
+W5100.AR.S0.MR.NDMC		.EQ $20
+W5100.AR.S0.MR.TCP		.EQ $01
+W5100.AR.S0.MR.UDP		.EQ $02
+W5100.AR.S0.MR.IPRAW	.EQ $03
+W5100.AR.S0.MR.MACRAW	.EQ $04
+W5100.AR.S0.MR.PPPOE	.EQ $05
 W5100.AR.S0.CR		.EQ $0401
 W5100.AR.S0.IR		.EQ $0402
 W5100.AR.S0.SR		.EQ $0403
@@ -166,8 +174,8 @@ Dev.Detect		sta hArgs
 				.INB DRV/X.NET.DRV.S
 *--------------------------------------
 CS.END
-MSG.DETECT		>PSTRING "UtherNetII/W5100 Driver.\n"
-MSG.DETECT.OK	>PSTRING "UtherNetII/W5100 Installed As Device : "
+MSG.DETECT		>PSTRING "UtherNet2/W5100 Driver (ARP OffLoad).\n"
+MSG.DETECT.OK	>PSTRING "UtherNet2/W5100 Installed As Device : "
 MSG.DETECT.KO	>PSTRING "Hardware Not Found.\n"
 hArgs			.BS 1
 *--------------------------------------
@@ -198,10 +206,36 @@ OPEN			jsr Reset
 				lda #W5100.MR.AI+W5100.MR.IND
 				sta W5100.MR,x
 
+				>AR.SELECT GAR
+				
+				ldy #8					GAR,SUBR
+				
+.1				stz W5100.DR,x
+				dey
+				bne .1
+
+*				>AR.SELECT SHAR
+				
+				ldy	#0
+				
+.2				lda MAC,y
+				sta W5100.DR,x
+				iny
+				cpy #6
+				bne .2
+
+*				>AR.SELECT SIPR
+				
+				ldy #4
+				
+.3				stz W5100.DR,x
+				dey
+				bne .3
+
 				>AR.SELECT RMSR
-				lda #3					8k
-				sta W5100.DR,x		...for Socket0 RX Buffer
-				sta W5100.DR,x		...for Socket0 TX Buffer
+				lda #3					8k,0k,0k,0k
+				sta W5100.DR,x		...for Socket RX Buffers
+				sta W5100.DR,x		...for Socket TX Buffers
 
 				clc
 				rts
@@ -228,14 +262,12 @@ GETEVENT.RxOK	>AR.SELECT S0.RX.RD
 				tya
 				sta W5100.AR+1,x
 				
-				lda W5100.DR,x
-				sta RX.IP
-				lda W5100.DR,x
-				sta RX.IP+1
-				lda W5100.DR,x
-				sta RX.IP+2
-				lda W5100.DR,x
-				sta RX.IP+3
+				ldy #0
+.10				lda W5100.DR,x
+				sta RX.IP,y
+				iny
+				cpy #4
+				bne .10
 				
 				ldy W5100.DR,x		get RX.Size HI
 				sty RXTX.Size+1
@@ -262,15 +294,24 @@ GETEVENT.RxOK	>AR.SELECT S0.RX.RD
 				sta (pEvent)
 
 				lda RXTX.Size
+				sta (ZPTmpPTR)
 				eor #$ff
 				sta Counter
-				sta (ZPTmpPTR)
 				
 				ldy #1
 				lda RXTX.Size+1
+				sta (ZPTmpPTR),y
 				eor #$ff
 				sta Counter+1
-				sta (ZPTmpPTR),y
+				
+				lda RXTX.Size
+				clc
+				adc #6				Header Size
+				sta Offset
+				
+				lda RXTX.Size+1
+				adc #0
+				sta Offset+1
 				
 				ldy #S.IP.DST+3
 				ldx #3
@@ -284,29 +325,28 @@ GETEVENT.RxOK	>AR.SELECT S0.RX.RD
 				ldx DEVSLOTx8
 
 				ldy #S.IP
-.2				lda W5100.DR,x
+				
+.2				inc Counter
+				bne .3
+				inc Counter+1
+				beq .8
+				
+.3				lda W5100.DR,x
 				sta (ZPTmpPTR),y
 				iny
-				bne .3
-				inc ZPTmpPTR+1
-				
-.3				inc Counter
 				bne .2
-				inc Counter+1
+				inc ZPTmpPTR+1
 				bne .2
 				
 .8				>AR.SELECT S0.RX.RD
 				ldy W5100.DR,x			Get HI
 				lda W5100.DR,x			Get LO
 				clc
-				adc RXTX.Size
+				adc Offset
 				pha						save LO
 				tya
-				adc RXTX.Size+1
-				and /RXTX.MASK
-				ora /RX.BASE
-				pha						save HI
-				
+				adc Offset+1
+				pha
 				>AR.SELECT S0.RX.RD
 				pla
 				sta W5100.DR,x			write HI
@@ -316,7 +356,25 @@ GETEVENT.RxOK	>AR.SELECT S0.RX.RD
 				>AR.SELECT S0.CR
 				lda #$40				RECV
 				sta W5100.DR,x
-				clc
+				
+				ldy #S.IP.DST
+				lda (ZPTmpPTR),y
+				
+.81				iny
+				and (ZPTmpPTR),y
+				cpy #S.IP.DST+3
+				bne .81					if EQ, CS
+
+				inc						$ff = Broadcast ??
+				beq .82
+				clc						not a broadcast
+				
+.82				lda #$00
+				ror
+				ldy #S.EVT.DATAHI
+				sta (pEvent),y		
+				
+*				clc						cleared by ROR
 				rts
 *--------------------------------------
 CLOSE			jsr Reset
@@ -329,13 +387,16 @@ GETINFO			>LDYA L.DEVINFO
 *--------------------------------------				
 SEND			>PULLW ZPTmpPTR
 				
-				ldy #S.IP.TOTAL.LENGTH+1
-				lda (ZPTmpPTR),y
+				lda (ZPTmpPTR)
+				sec
+				sbc #S.IP-2
 				sta RXTX.Size
 				eor #$ff
 				sta Counter
-				dey
+				
+				ldy #1
 				lda (ZPTmpPTR),y
+				sbc /S.IP-2
 				sta RXTX.Size+1
 				eor #$ff
 				sta Counter+1
@@ -368,8 +429,7 @@ SEND.READY		>AR.SELECT S0.DIPR
 				sta W5100.DR,x
 				
 *				>AR.SELECT S0.TOS
-				lda #0
-				sta W5100.DR,x
+				stz W5100.DR,x
 				
 *				>AR.SELECT S0.TTL
 				lda #K.IP.TTL
@@ -409,8 +469,6 @@ SEND.READY		>AR.SELECT S0.DIPR
 				
 				lda Offset+1
 				adc RXTX.Size+1
-				and /RXTX.MASK
-				ora /TX.BASE
 				sta W5100.DR,x			write HI
 				pla
 				sta W5100.DR,x			write LO
@@ -421,21 +479,22 @@ SEND.READY		>AR.SELECT S0.DIPR
 				clc
 				rts
 *--------------------------------------
-SETIPCFG		>PULLW ZPTmpPTR
+SETIPCFG		>STYA ZPTmpPTR
 				
 				ldx DEVSLOTx8
 				
 				>AR.SELECT S0.CR
-				lda #10					CLOSE
+				lda #$10				CLOSE
 				sta W5100.DR,x
 
-				>AR.SELECT S0.MR
-				lda #3					IPRAW
-				sta W5100.DR,x
+.10				>AR.SELECT S0.SR
+				lda W5100.DR,x
+				bne .10					CLOSED ???
 
 				>AR.SELECT GAR
-				
+
 				ldy #S.IPCFG.GW
+				
 .1				lda (ZPTmpPTR),y
 				sta W5100.DR,x
 				iny
@@ -445,31 +504,28 @@ SETIPCFG		>PULLW ZPTmpPTR
 *				>AR.SELECT SUBR			Implicit, next to GAR
 				
 				ldy #S.IPCFG.MASK
+				
 .2				lda (ZPTmpPTR),y
 				sta W5100.DR,x
 				iny
 				cpy #S.IPCFG.MASK+4
 				bne .2
 				
-*				>AR.SELECT SHAR			Implicit, next to SUBR
-				
-				ldy	#0
-.3				lda MAC,y
-				sta W5100.DR,x
-				iny
-				cpy #6
-				bne .3
-				
-*				>AR.SELECT SIPR			Implicit, next to SHAR
+				>AR.SELECT SIPR
 				
 				ldy #S.IPCFG.IP
-.4				lda (ZPTmpPTR),y
+				
+.3				lda (ZPTmpPTR),y
 				sta W5100.DR,x
 				iny
 				cpy #S.IPCFG.IP+4
-				bne .4
+				bne .3
 				
-				>AR.SELECT S0.CR
+				>AR.SELECT S0.MR
+				lda #W5100.AR.S0.MR.IPRAW+W5100.AR.S0.MR.MF
+				sta W5100.DR,x
+
+*				>AR.SELECT S0.CR		Implicit, next to S0.MR
 				lda #1					OPEN
 				sta W5100.DR,x
 
@@ -479,6 +535,15 @@ SETIPCFG		>PULLW ZPTmpPTR
 Reset			ldx DEVSLOTx8
 				lda #W5100.MR.RST
 				sta W5100.MR,x
+				
+				lda $C019				we can use VBL as we are not on //c
+.1				eor $C019
+				bpl .1
+				
+				lda $C019
+.2				eor $C019
+				bpl .2
+				
 				rts
 *--------------------------------------
 DRV.CS.END
@@ -489,7 +554,7 @@ Counter			.BS 2
 Offset			.BS 2
 *--------------------------------------
 DEVINFO			.DA #S.DEVINFO.TYPE.NET
-DEVFLAGS		.DA #S.DEVINFO.NET.FLAGS.ARPOFFLOAD
+DEVFLAGS		.DA #S.DEVINFO.NET.FLAGS.ARPOFFLOAD+S.DEVINFO.NET.FLAGS.IPOFFLOAD
 MAC				.BS 6
 LINK.STATUS		.DA #S.DEVINFO.NET.STATUS.OK+S.DEVINFO.NET.STATUS.FD+S.DEVINFO.NET.STATUS.100
 MAN
