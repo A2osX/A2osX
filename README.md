@@ -56,9 +56,11 @@ In Progress : moving KERNEL to AuxLC Bnk1 & 2 (16k, more space for drivers)
 | DATE | Working  | |
 | ECHO | Working | |
 | EXIT | Working  | |
+| IF | | |
 | PAUSE | Working | |
-| TIME | Working  | |
-| TYPE | Working  | |
+| READ | | |
+| TIME | Working | |
+| TYPE | Working | |
 | SET | Working  | |
 | STARTPROC | Working  | Used in A2osX.startup |
   
@@ -69,9 +71,9 @@ In Progress : moving KERNEL to AuxLC Bnk1 & 2 (16k, more space for drivers)
 | LSDEV | Working | |
 | PS | Working | |
 | MD | Working | |
-| RM | Working | |
+| RM | Working | switches not yet implemented, new ArgC/Arg[] coming... |
 | LS | Working  | BUG: `ls dir` does not list dir content (`ls dir/` works) |
-| CP | | |
+| CP | Working| switches not yet implemented, new ArgC/Arg[] coming...  |
 | ARP | Working | dump ARP cache, setup a static ARP entry |
 | PING | Working | |
 | DNSINFO | Working | dump DNS cache, setup a static DNS entry |
