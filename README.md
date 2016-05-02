@@ -32,7 +32,7 @@ In Progress : moving KERNEL to AuxLC Bnk1 & 2 (16k, more space for drivers)
 | LOGIN | In Progress | no auth using /etc/passd yet |
 | TCPIP | In Progress | New Socket API. ARP,IP,ICMP,UDP ok, TCP in progress |
 | DHCPCLNT | Working | rewritten to use new Socket API |
-| SHELL | Working | BUG: History nav |
+| SHELL | Working | (See Internal Shell commands) |
   
 ## DRV,Drivers:  
 | Name.DRV | Status | Comment |
