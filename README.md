@@ -1,10 +1,12 @@
 # A2osX
 Multi-Tasking OS for Apple II
 ## Requires :
-Enh IIe (65c02 cpu) with 128k, //c, IIgs
+Enhanced IIe (65c02 cpu) with 128k, //c, IIgs
+
 ## General Information:
-**A2OSX.BOOT.po** : 140k A2osX boot disk will all binaries  
-**A2OSX.SRC.po** : 800k S-C MASM boot disk with all sources  
+**A2OSX.BOOT.po** : 140k A2osX boot disk with all binaries
+**A2OSX.DEV.po**  : 140k A2osX disk will ASM binaries & INClude files
+**A2OSX.SRC.po**  : 800k S-C MASM boot disk with all sources  
   
 OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.  
 (OApple+shift+1,OApple+shift+2,OApple+shift+3 on FR keyboard)  
