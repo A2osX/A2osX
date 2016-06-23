@@ -4,8 +4,8 @@ Multi-Tasking OS for Apple II
 Enhanced IIe (65c02 cpu) with 128k, //c, IIgs
 
 ## General Information:
-**A2OSX.BOOT.po** : 140k A2osX boot disk with all binaries
-**A2OSX.DEV.po**  : 140k A2osX disk will ASM binaries & INClude files
+**A2OSX.BOOT.po** : 140k A2osX boot disk with all binaries  
+**A2OSX.DEV.po**  : 140k A2osX disk will ASM binaries & INClude files  
 **A2OSX.SRC.po**  : 800k S-C MASM boot disk with all sources  
   
 OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.  
