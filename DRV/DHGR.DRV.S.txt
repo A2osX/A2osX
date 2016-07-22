@@ -14,9 +14,9 @@ AUTO 6
 				.INB INC/LIBGFX.I
 *--------------------------------------
 ZPBase			.EQ ZPDRV
-ZPBitBlt		.EQ ZPDRV+2
-ZPShiftLo		.EQ ZPDRV+4
-ZPShiftHi		.EQ ZPDRV+6
+ZPShiftLo		.EQ ZPDRV+2
+ZPShiftHi		.EQ ZPDRV+4
+ZPCtrlBlk		.EQ ZPDRV+8				limited to 8 bytes for now...have to modify kernel
 *--------------------------------------
 *			File Header (16 Bytes)
 *--------------------------------------
@@ -130,7 +130,7 @@ MSG.DETECT		>PSTRING "\nApple IIe/IIc DHGR Driver.\n"
 DEV.HEADER		cld
 				jmp (DRV.CS.START,x)
 				.HS 00					DevID
-				.DA #S.DEV.F.EVENT
+				.DA #0					No Flag
 				>PSTRING "GFX"			NAME
 				.HS 00					NAME must Be 5 bytes long
 				.HS 00
@@ -177,12 +177,18 @@ OPEN			ldy #S.DEV.ID
 				inc
 				sta DIV7.hi+2
 				
-				lda L.MOD7.0+1
-				sta MOD7.hi
-				inc
-				sta MOD7.hi+1
-				inc
-				sta MOD7.hi+2
+				ldy #0
+				ldx #0
+				
+.1				lda L.MOD7.0,y
+				sta MOD7.lo,x
+				iny
+				lda L.MOD7.0,y
+				sta MOD7.hi,x
+				iny
+				inx
+				cpx #3
+				bne .1
 				
 				ldx #7
 				lda L.Shift0.Lo+1
@@ -201,19 +207,7 @@ OPEN			ldy #S.DEV.ID
 .8				clc
 				rts
 *--------------------------------------
-GETEVENT		lda A2osX.ASCREEN
-				cmp #3
-				bne .9
-				
-				>SYSCALL SYS.GetKeyboardEvent
-				bcs .9
-
-				rts				
-				
-.9				lda	#0					Error = no event
-				sec
-				rts				
-*--------------------------------------
+GETEVENT		
 COUT
 IRQ				sec
 				rts
@@ -244,119 +238,91 @@ SELECT			sta CLRTEXT
 				rts
 *--------------------------------------
 * SETPIXEL
-* PULLB = Mode
-*		00000001=B/W
-*		00000010=16 colors
-*		1000000=xor (mono on 1 bit)
-* PULLW = X
-* PULLB = Y
-* PULLB = Color	(if not xor)
+*  In : YA = Ptr to CtrlBlk :
+*   0 : X
+*   2 : Y
+*   4 : Mode
+*		00000000=xor
+*		00000001=b/w (1 bit/pixel)
+*		00000100=16 colors  (4 bits/pixel)
+*		00001000=256 colors	(8 bits/pixel)
+*	5 : Color
 *--------------------------------------
-SETPIXEL		sta SET80STORE
+SETPIXEL		>STYA ZPBase
+				ldy #5
+.1				lda (ZPBase),y
+				sta ZPCtrlBlk,y
+				dey
+				bpl .1
 				
-				>PULLA					Pull Mode
-				and #$FF
-				bpl SETPIXEL.1
+				sta SET80STORE
+
+				lda ZPCtrlBlk+4
+				bit #%00000100
+				bne .7
 				
-SETPIXEL.XOR	>PULLAX					A=X.LO,X=X.HI
-				tay
-				
+				ldx ZPCtrlBlk+1			X.HI
 				lda DIV7.hi,x
-				sta .1+2
-				lda MOD7.hi,x
 				sta .2+2
-			
-.1				lda DIV7.0,y			A=Colx2
-				eor #1
 				
-				lsr						A=Col, CS=MMem, CC=XMem
-				pha 					Save Col
+				lda MOD7.lo,x
+				sta .4+1
+				lda MOD7.hi,x
+				sta .4+2
+				
+				ldx ZPCtrlBlk			X.LO
+.2				lda DIV7.0,x			A=Col*2+AuxBit
 
-				lda #CLRPAGE2>1
-				asl
-				sta .3+1
+				lsr .3+1				reset CLRPAGE2 address
+				lsr						CS=Aux
+				rol .3+1				if CS, -> SETPAGE2
+				
 .3				sta CLRPAGE2
-				
-				>PULLA					Pull Y
-				tax
-				lda BASEL,x				setup line Base Ptr
-				sta ZPBase
-				lda BASEH,x
-				sta ZPBase+1
-				
-.2				ldx MOD7.0,y			Y=X.LO
 
-				ply						get back Col
-				lda (ZPBase),y
-				eor Mono.Masks,x		x = mod 7
-				sta (ZPBase),y
+				ldy ZPCtrlBlk+2			Y.LO
+				adc BASEL,y				setup line Base Ptr (A=Col)
+				sta ZPBase
+				lda BASEH,y
+				sta ZPBase+1
+
+.4				ldy MOD7.0,x			x = X.LO		
+
+				dec ZPCtrlBlk+4			get mode
+				bne .5
+				
+				lda (ZPBase)			Mode=0, XOR
+				eor Mono.Masks,y		y = mod 7
+				sta (ZPBase)
 				
 				sta CLR80STORE
 				rts
-*--------------------------------------
-SETPIXEL.1		lsr
-				bcc SETPIXEL.COLOR
 				
-				>PULLAX					A=X.LO,X=X.HI
-				tay
+.5				lda (ZPBase)
+				ldx ZPCtrlBlk+5			mode=1, get color
+				bne .6
 				
-				lda DIV7.hi,x
-				sta .1+2
-				lda MOD7.hi,x
-				sta .2+2
-			
-.1				lda DIV7.0,y			A=Colx2
-				eor #1
-				
-				lsr						A=Col, CS=MMem, CC=XMem
-				pha 					Save Col
-
-				lda #CLRPAGE2>1
-				asl
-				sta .3+1
-.3				sta CLRPAGE2
-				
-				>PULLA					Pull Y
-				tax
-				lda BASEL,x				setup line Base Ptr
-				sta ZPBase
-				lda BASEH,x
-				sta ZPBase+1
-				
-.2				ldx MOD7.0,y			Y=X.LO
-
-				ply						get back Col
-				
-				>PULLA					Pull Color
-				lsr 
-				lda (ZPBase),y
-				bcs .6					set white pixel
-
-				and Mono.NMasks,x		includes And $7F for mono 
-				sta (ZPBase),y
+				and Mono.NMasks,y		includes And $7F for mono 
+				sta (ZPBase)
 				sta CLR80STORE
 				rts
 				
 .6				and #$7F				switch back this byte to mono
-				ora Mono.Masks,x
-				sta (ZPBase),y
-				sta CLR80STORE
+				ora Mono.Masks,y
+				sta (ZPBase)
+				sta CLR80STORE				
 				rts
-*--------------------------------------
-SETPIXEL.COLOR	>PULLW CX				Get X.LO...
-				>PULLB CY
 				
-				lda CX
-				lsr CX+1				divide by 4
+.7				lda ZPCtrlBlk			X.LO
+				lsr ZPCtrlBlk+1			divide by 4
 				ror
-				lsr CX+1
+				lsr ZPCtrlBlk+1
 				ror
 				tay						Y=CX/4 (range 0->139)
 				lda DIV7.0,y			A=CX/4/7 (range 0->19)
 				
 				asl						times 2  (range 0->38)
 				
-				ldx CY
+				ldx ZPCtrlBlk+2
 				adc BASEL,x				setup line Base Ptr (cc by asl)
 				sta ZPBase				ZPBase now point to first of...
 				lda BASEH,x
@@ -368,14 +334,14 @@ SETPIXEL.COLOR	>PULLW CX				Get X.LO...
 				asl
 				tax						set in X for Masks,NMasks
 				
-				>PULLA					get COLOR
+				lda ZPCtrlBlk+5			get COLOR
 				
 				asl						times 4 to compute index in PIXELS table
 				asl
 				tay
 
 				lda Color.Masks,x		bits in 1st byte to light?
-				beq .1
+				beq .10
 				and Color.Pixels,y		apply color
 				sta GBYTE
 				
@@ -386,11 +352,11 @@ SETPIXEL.COLOR	>PULLW CX				Get X.LO...
 				ora GBYTE
 				sta (ZPBase)
 
-.1				inx
+.10				inx
 				iny
 				
 				lda Color.Masks,x
-				beq .2
+				beq .11
 				and Color.Pixels,y		apply color
 				sta GBYTE
 				
@@ -401,12 +367,12 @@ SETPIXEL.COLOR	>PULLW CX				Get X.LO...
 				ora GBYTE
 				sta (ZPBase)
 				
-.2				inc ZPBase
+.11				inc ZPBase
 				inx
 				iny
 				
 				lda Color.Masks,x
-				beq .3
+				beq .12
 				and Color.Pixels,y		apply color
 				sta GBYTE
 				
@@ -417,11 +383,11 @@ SETPIXEL.COLOR	>PULLW CX				Get X.LO...
 				ora GBYTE
 				sta (ZPBase)
 				
-.3				inx
+.12				inx
 				iny
 				
 				lda Color.Masks,x
-				beq .8
+				beq .13
 				and Color.Pixels,y		apply color
 				sta GBYTE
 				
@@ -432,7 +398,7 @@ SETPIXEL.COLOR	>PULLW CX				Get X.LO...
 				ora GBYTE
 				sta (ZPBase)
 				
-.8				sta CLR80STORE
+.13				sta CLR80STORE
 				rts
 *--------------------------------------
 GETPIXEL		rts
@@ -444,7 +410,7 @@ VLINE			rts
 FILLREC			rts
 *--------------------------------------
 * BitBlt
-*  In : YA = Ptr to Job :
+*  In : YA = Ptr to CtrlBlk :
 *  0  : Operation
 *	%00000001 : Save
 *   %00000010 : Replace
@@ -460,8 +426,8 @@ FILLREC			rts
 *  14 : DestY
 *  16 : BM Struct
 *--------------------------------------
-BITBLT			>STYA ZPBitBlt
-				lda (ZPBitBlt)
+BITBLT			>STYA ZPCtrlBlk
+				lda (ZPCtrlBlk)
 				clc
 				rts
 *--------------------------------------	
@@ -638,6 +604,7 @@ Shift6.hi		.BS 128
 				.INB DRV/DHGR.DRV.T
 *--------------------------------------
 DIV7.hi			.BS 3
+MOD7.lo			.BS 3
 MOD7.hi			.BS 3
 Shiftlo.hi		.BS 7
 Shifthi.hi		.BS 7
