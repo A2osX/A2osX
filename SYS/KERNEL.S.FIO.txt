@@ -31,75 +31,107 @@ S.CheckPrefixYA	>STYA MLICALL.PARAMS+1
 *--------------------------------------
 * S.FileSearch
 *  in :
-*   PULLB = hMem to Search Path (PSTRING) %LIB%;/SYS/SLIB
-*   PULLB = hMem to File Name (PSTRING)		
+*   PULLW = PSTR to File Name (PSTRING)		
+*   PULLW = PSTR to Search Path (PSTRING) %LIB%;/SYS/SLIB
 *  out :
-*   A = hMem of FilePath (PSTRING)
+*   Y,A = PSTR to FilePath (PSTRING)
+*   X = hMem to FilePath
 *--------------------------------------
-S.FileSearch	>PULLA					Get Search path
-				jsr S.ExpandPStrA		Expand it
-				bcc .10
-				pha						save error code
-				>PULLA					discard file name
-				pla
-				sec
-				rts
-				
-.10				sta S.FileSearch.hSrch		Store Expanded path list to search
-				
-				>PULLB S.FileSearch.hFile	Store Filename
-				
-				lda #1
-				sta S.FileSearch.Idx		Start At Token 1
-				
-.1				>PUSHB S.FileSearch.hSrch	push expanded path list
-				>PUSHBI ';'
-				>PUSHB S.FileSearch.Idx		Push Token IDX
-				
-				jsr S.PStrGetTkn			Get token in A
-				bcs .98
-				
-				sta S.FileSearch.hPath		Store Token path
-				>PUSHB S.FileSearch.hFile	push filename
-				>PUSHB S.FileSearch.hPath	Push Token path
-				jsr S.PStrCat
-				bcs .97
-				
-				sta S.FileSearch.hFull		Store Full path (Token Path+filename)
+S.FileSearch	>PULLW ZPQuickPtr4			ZPQuickPtr1 trashed by ExpandPStrYA
+				>PULLYA						Get Search list
+				jsr S.ExpandPStrYA			Expand it
+				bcs .99
 
-				jsr S.GetMemPtrA
+				stx S.FileSearch.hSrch
+				>STYA ZPQuickPtr2		expanded search list ;
+				
+				stz S.FileSearch.Index
+			
+.1				stz KrnBuffer256		reset String
+				ldx #0
+				
+				ldy S.FileSearch.Index
+				
+.2				tya
+				cmp (ZPQuickPtr2)		end of src string ?
+				beq .3					end of string, try it....
+				iny
+				lda (ZPQuickPtr2),y
+				cmp #';'
+				beq .3
+				inx
+				sta KrnBuffer256,x
+				bra .2
+
+.3				txa
+				beq .98						String is empty....nothing to try
+
+				sty S.FileSearch.Index		save current index
+				
+				ldy #0
+				
+.4				iny
+				lda (ZPQuickPtr4),y			Append Fiename...
+				inx
+				sta KrnBuffer256,x
+				tya
+				cmp (ZPQuickPtr4)
+				bne .4
+				
+				stx KrnBuffer256			set string length
+				
+				>LDYAI KrnBuffer256
 				jsr S.MLIGetFileInfoYA
-				bcc .8
+				bcs .1						Failed...retry next path...
 				
-				lda S.FileSearch.hFull		Discard this Full Path
+				lda S.FileSearch.hSrch		Discard Expanded hSrch list
 				jsr S.FreeMemA
-				lda S.FileSearch.hPath		Discard Token path
-				jsr S.FreeMemA
-				
-				inc S.FileSearch.Idx		Try next Token
-				bne .1
-				
-				beq .98						go to discard Expanded path list
-				
-.97				lda S.FileSearch.hPath		Discard Token path
-				jsr S.FreeMemA
-				
+				>LDYAI KrnBuffer256
+				jmp S.NewPStrYA	
+
 .98				lda S.FileSearch.hSrch		Discard Expanded hSrch list
 				jsr S.FreeMemA
 				lda #SYSMGR.ERRFNF
 				sec
-				rts
-				
-.8				jsr .97						Dicard all except Full Path
-				lda S.FileSearch.hFull
-				clc
-				rts		
+.99				rts
 *--------------------------------------
+S.FileSearch.File	.BS 2
 S.FileSearch.hSrch	.BS 1
-S.FileSearch.hFile	.BS 1
-S.FileSearch.Idx	.BS 1
-S.FileSearch.hPath	.BS 1
-S.FileSearch.hFull	.BS 1
+S.FileSearch.Index	.BS 1
+*--------------------------------------
+* S.GetFullPathYA
+*  in :
+*   Y,A = Filename (PSTRING)
+* out :
+*   Y,A = FullPath (PSTRING)
+*   X = hMem of FullPath
+*--------------------------------------
+S.GetFullPathYA	>STYA ZPQuickPtr3		Ptr1 & 2 used by StrCpy
+				lda (ZPQuickPtr3)
+				beq .9
+
+				stz KrnBuffer256
+				
+				ldy #1
+				lda (ZPQuickPtr3),y
+				cmp #'/'				full path starting with '/'?
+				beq .1					yes, do not append to current prefix
+				
+				ldy #S.PS.hPREFIX
+				lda (pPs),y
+				jsr S.GetMemPtrA
+				>PUSHYA
+				>PUSHWI KrnBuffer256
+				jsr S.PStrCpy
+				
+.1				>PUSHW ZPQuickPtr3
+				>PUSHWI KrnBuffer256
+				jsr S.PStrCat
+
+				>LDYAI KrnBuffer256
+				jmp S.NewPStrYA
+.9				sec
+				rts
 *--------------------------------------
 * S.LoadFileYA
 *  in :
@@ -108,12 +140,9 @@ S.FileSearch.hFull	.BS 1
 *   Y,A = File Length
 *   X = hMem of Loaded File
 *--------------------------------------
-S.LoadFileYA	jsr S.ExpandPStrYA
-				sta S.LoadFile.hExp
-				jsr S.GetMemPtrA
-				jsr S.MLIOpenYA
+S.LoadFileYA	jsr S.MLIOpenYA
 				bcc .10
-				jmp .99
+				rts
 				
 .10				sta S.LoadFile.hRef		save ref_num
 				stx	S.LoadFile.hBuf		save Prodos Buffer for freemem
@@ -132,25 +161,16 @@ S.LoadFileYA	jsr S.ExpandPStrYA
 				jsr S.GetMem
 				bcs .98
 				
-				phy						save Ptr
-				pha
+				>STYA S.LoadFile.Mem
+				
 				stx S.LoadFile.hMem		save Segment hMem
 				>PUSHW S.LoadFile.Len	Push Length for S.MLIRead
-				pla						restore Dest PTR
-				ply
-				>PUSHYA					and push for S.MLIRead
+				>PUSHW S.LoadFile.Mem	Push PTR
 				>PUSHB S.LoadFile.hRef	Push ref_num
 				jsr S.MLIRead
 				bcs .97
 				
-				lda S.LoadFile.hRef
-				jsr S.MLICloseA
-				
-				lda S.LoadFile.hBuf			
-				jsr S.FreeMemA			Discard ProDOS IO Buffer
-				
-				lda S.LoadFile.hExp		Discard Expanded String
-				jsr S.FreeMemA
+				jsr .98					Close File....
 				
 				>LDYA S.LoadFile.Len	Return File Length...
 				ldx	S.LoadFile.hMem		...and  hMem to Caller
@@ -169,17 +189,13 @@ S.LoadFileYA	jsr S.ExpandPStrYA
 				jsr S.FreeMemA			ProDOS IO Buffer
 				pla
 				
-.99				pha
-				lda S.LoadFile.hExp
-				jsr S.FreeMemA
-				pla
-				sec
+.99				sec
 				rts
 *--------------------------------------
 S.LoadFile.hRef	.BS 1
 S.LoadFile.hBuf .BS 1
-S.LoadFile.hExp	.BS 1
 S.LoadFile.hMem	.BS 1
+S.LoadFile.Mem	.BS 2
 S.LoadFile.Len	.BS 2
 *--------------------------------------
 * S.ListDirInitYA
@@ -229,6 +245,8 @@ S.ListDirInitYA	>STYA R.BX				Store path
 				>LDYA R.BX
 				jsr S.NewPStrYA
 				bcs .99
+				
+				txa
 				ldy #S.LISTDIR.hPATH
 				sta (R.CX),y
 				

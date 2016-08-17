@@ -1,0 +1,442 @@
+PR#3
+PREFIX /A2OSX.SRC
+NEW
+INC 1
+AUTO 6
+				.LIST OFF
+*--------------------------------------
+* S.ExecProcessNewEnvYA
+* S.ExecProcessYA	(Blocking Parent PID)
+* S.CreateProcessNewEnvYA 
+* S.CreateProcessYA (Non Blocking)
+*  in :
+*   Y,A = PTR To Cmd Line
+*  out :
+*   A = Child PSID
+*--------------------------------------
+S.ExecProcessNewEnvYA
+				ldx #S.PS.F.ENV
+				.HS 2C					bit abs
+*--------------------------------------
+S.ExecProcessYA	ldx #0
+				jsr S.CreateProcess
+				bcs .9					terminated, do not set PID as HOLD
+
+				ldy #S.PS.CID
+				sta (pPs),y
+				
+				pha						Save Child PID
+				lda (pPs)
+				ora #S.PS.F.HOLD
+				sta (pPs)
+				pla						Get Back PID
+				
+				clc
+.9				rts
+*--------------------------------------
+S.CreateProcessNewEnvYA 
+				ldx #S.PS.F.ENV
+				.HS 2C					bit abs
+*--------------------------------------
+S.CreateProcessYA
+				ldx #0
+S.CreateProcess	stx S.CreateChildProcess.Flags
+
+				jsr S.ExpandPStrYA
+				bcs .99
+
+				stx S.CreateProcess.hCmdLine
+				>STYA S.CreateProcess.CmdLine
+				
+				jsr S.CreateChildProcess
+				bcs .98
+
+				sta S.CreateProcess.CPSID
+				jsr S.SelectProcessA
+				
+				jsr S.InitProcess
+				bcs .97					Init Failed or exit?
+				
+				ldy #S.PS.PID			switch back to Parent Process
+				lda (pPs),y
+				
+				jsr S.SelectProcessA
+				
+				lda S.CreateProcess.CPSID
+				clc
+				rts
+				
+.97				pha						save error code
+				ldy #S.PS.PID			switch back to Parent Process
+				lda (pPs),y
+				jsr S.SelectProcessA
+
+				lda S.CreateProcess.CPSID
+				jsr S.FreeProcessA
+				pla						get back error code
+				
+.98				pha
+				lda S.CreateProcess.hCmdLine
+				jsr S.FreeMemA
+				pla
+				
+.99				sec
+				rts
+*--------------------------------------
+S.CreateProcess.hCmdLine .BS 1
+S.CreateProcess.CmdLine	.BS 2
+S.CreateProcess.CPSID	.BS 1
+*--------------------------------------
+* S.GetPSByIDA
+*  In : 
+*	A = PID
+*  Out : 
+*   Y,A = PTR to TSKSLOT
+*--------------------------------------
+S.GetPSByIDA	sta S.GetPSByIDA.PS
+				
+				>LDYAI TskMgr.Table
+				>STYA ZPQuickPtr1
+				
+				lda S.GetPSByIDA.PS
+				beq .8
+				
+				ldx #0
+				
+.1				inx
+				lda ZPQuickPtr1
+				clc
+				adc #S.PS.SIZE
+				sta ZPQuickPtr1
+				bcc .2
+				inc ZPQuickPtr1+1
+
+.2				lda	(ZPQuickPtr1)
+				bpl .3
+				
+				ldy #S.PS.ID
+				lda	(ZPQuickPtr1),y
+				cmp S.GetPSByIDA.PS
+				beq .8
+				
+.3				cpx TSKMGR.SIZE
+				bne .1
+				
+.9				lda #TSKMGR.ERRNSP
+				sec
+				rts	
+
+.8				>LDYA ZPQuickPtr1
+				clc
+				rts
+*--------------------------------------
+S.GetPSByIDA.PS	.BS 1
+*--------------------------------------
+S.Sleep			pla						get PC LO
+				sec
+				sbc pCode
+				ldy #S.PS.PC
+				sta (pPs),y
+
+				pla						get PC HI
+				sbc pCode+1
+				iny
+				sta (pPs),y
+				lda (pPs)
+				ora #S.PS.F.SLEEP
+				sta (pPs)
+				clc						No error,
+				rts						back to Kernel
+*--------------------------------------
+*				PRIVATE
+*--------------------------------------
+* S.CreateChildProcess
+*  in :
+*  out :
+*   A = PSID
+* we cannot use ZPQuickPtrs1 & 2
+* because of calling S.NewPStrYA & S.DupEnvA
+*--------------------------------------
+S.CreateChildProcess
+				>LDYAI TskMgr.Table+S.PS.SIZE
+				>STYA ZPQuickPtr3
+				
+				ldx #0
+				
+.1				inx
+				cpx TSKMGR.SIZE
+				beq .2
+				
+				lda (ZPQuickPtr3)			Found an empty slot
+				bpl .3
+				lda ZPQuickPtr3
+				clc
+				adc #S.PS.SIZE
+				sta ZPQuickPtr3
+				bcc .1
+				inc ZPQuickPtr3+1
+				
+				bra .1
+				
+.2				cpx #K.PS.MAX
+				bne .30
+				
+				lda #TSKMGR.ERROOH
+				sec
+				rts
+
+.30				inc TSKMGR.SIZE
+
+.3				lda #S.PS.F.INUSE
+				ora S.CreateChildProcess.Flags
+				sta (ZPQuickPtr3)
+				
+.4				inc TSKMGR.LASTID		Get a PSID not alredy running
+				beq .4					not = 0
+				lda TSKMGR.LASTID
+				jsr S.GetPSByIDA
+				bcc .4
+
+				ldy #S.PS.ID
+				lda TSKMGR.LASTID
+				sta (ZPQuickPtr3),y
+				
+				lda #0
+				ldy #S.PS.hCS
+.5				sta (ZPQuickPtr3),y			Blank Everything in this S.PS
+				iny 
+				cpy #S.PS.SIZE
+				bne .5
+
+				lda S.CreateChildProcess.Flags
+				and #S.PS.F.ENV			need to create ENV & Prefix ?	
+				beq .6
+				
+				ldy #S.PS.hPREFIX		copy hPREFIX...
+				lda (pPs),y
+				jsr S.GetMemPtrA
+				jsr S.NewPStrYA
+				bcs .99
+				
+				txa
+				ldy #S.PS.hPREFIX
+				sta (ZPQuickPtr3),y
+				
+				ldy #S.PS.hENV			...and hENV from parent PS
+				lda (pPs),y
+				jsr S.DupEnvA
+				bcs .99
+				
+				ldy #S.PS.hENV
+				sta (ZPQuickPtr3),y
+				bra .8
+				
+.6				ldy #S.PS.hPREFIX		reuse same hPREFIX...
+				lda (pPs),y
+				sta (ZPQuickPtr3),y
+				
+				ldy #S.PS.hENV			...and hENV from parent PS
+				lda (pPs),y
+				sta (ZPQuickPtr3),y
+				
+.8				ldy #S.PS.hINDEV
+.81				lda (pPs),y
+				sta (ZPQuickPtr3),y
+				iny
+				cpy #S.PS.hERRDEV+1
+				bne .81
+				
+				ldy #S.PS.ID
+				lda (pPs),y
+				
+				ldy #S.PS.PID
+				sta (ZPQuickPtr3),y
+
+				lda TSKMGR.LASTID
+				clc						Exit with A=PSID
+				rts
+				
+.99				sec
+				rts	
+*--------------------------------------
+S.CreateChildProcess.Flags
+				.BS 1
+*--------------------------------------
+* S.InitProcess
+*  In : 
+*   A = hMem To Full Cmd Line  
+*--------------------------------------
+S.InitProcess	>LDYA S.CreateProcess.CmdLine
+				jsr S.PStr2StrArrayYA
+				bcs .9
+				
+				phy						save PTR to StrArray...
+				pha
+				
+				txa
+				ldy #S.PS.hCMDLINE
+				sta (pPs),y
+				
+				pla						Restore PTR...
+				ply
+				
+				jsr S.LoadBinYA			A = BinPath hMem
+				bcs .9
+				
+				>STYA pCode				save PTR to Code Segment
+				txa
+				ldy #S.PS.hCS
+				sta (pPs),y				save CS hMem in TSKSLOT
+				
+				ldy #H.BIN.BIN.DS.SIZE+1
+				lda (pCode),y			Load DS.SIZE HI
+				tax
+				dey	
+				ora (pCode),y
+				
+				beq .2					DS.SIZE=0...
+				
+				lda (pCode),y		
+				>PUSHAX					Push DS.SIZE
+				>PUSHBI S.MEM.F.INIT0	Clear DS
+				jsr S.GetMem				
+				bcs .9
+				
+				>STYA pData
+				txa
+				ldy #S.PS.hDS
+				sta (pPs),y				save DS hMem in TSKSLOT
+				
+.2				lda (pCode)
+				cmp #H.BIN.HEADER.BIN65
+				bne *
+				
+				ldx #TSKMGR.INIT
+				jsr pCodeJmp			Call INIT function
+				bcc .9
+				
+				pha						save error code
+				ldx #TSKMGR.QUIT
+				jsr pCodeJmp			Call QUIT function
+				pla						get back error code
+				sec
+.9				rts
+*--------------------------------------
+* S.SelectProcessA
+*   In : A=PSID
+*--------------------------------------
+S.SelectProcessA
+				tay
+				bne S.SelectProcessN
+S.SelectProcess0
+				>LDYAI TskMgr.Table		Make PS #0 as current process
+				>STYA pPs
+				bra S.SelectProcessDev
+S.SelectProcessN				
+				jsr S.GetPSByIDA
+				bcs *
+				>STYA pPs
+
+S.SelectProcess	ldy #S.PS.hCS
+				lda (pPs),y
+				jsr S.GetMemPtrA
+				>STYA pCode
+
+				ldy #S.PS.hDS
+				lda (pPs),y
+				beq S.SelectProcessDev
+
+				jsr S.GetMemPtrA
+				>STYA pData
+
+S.SelectProcessDev
+				ldy #S.PS.hOUTDEV
+				lda	(pPs),y
+				beq .8
+				
+				jsr S.GetDevByIDA
+				>STYA pDev
+
+.8				clc
+				rts
+*--------------------------------------
+* S.FreeProcessA
+*   In : A = PID to free
+*--------------------------------------
+S.FreeProcessA	jsr S.GetPSByIDA
+				bcs *
+				>STYA ZPQuickPtr1
+				
+				ldy #S.PS.hCMDLINE
+				lda (ZPQuickPtr1),y
+				beq .2
+				
+				jsr S.FreeMemA
+
+				lda (ZPQuickPtr1)		get S.PS.F
+				and #S.PS.F.ENV			do we have to discard duplicated env & prefix ?
+				beq .4
+				
+.2				ldy #S.PS.hENV
+				lda (ZPQuickPtr1),y
+				beq .3
+				
+				jsr S.FreeMemA
+				
+.3				ldy #S.PS.hPREFIX
+				lda (ZPQuickPtr1),y
+				beq .4
+				
+				jsr S.FreeMemA
+				
+.4				ldy #S.PS.hDS
+				lda (ZPQuickPtr1),y
+				beq .5
+				
+				jsr S.FreeMemA
+				
+.5				ldy #S.PS.hCS
+				lda (ZPQuickPtr1),y
+				beq .8
+				
+				jsr S.FreeMemA
+				
+.8				lda #0
+				sta (ZPQuickPtr1)		Mark TSKSLOT as free
+				clc
+				rts
+*--------------------------------------
+* S.DupEnvA
+*  In:
+*   A = ENV hMem To Duplicate
+*  Out:
+*   A = hMem to new ENV
+*--------------------------------------
+S.DupEnvA		jsr S.GetMemPtrA
+				>STYA ZPQuickPtr1
+				>PUSHWI K.ENV.SIZE
+				>PUSHBI 0
+				jsr S.GetMem
+				bcs .9
+				>STYA ZPQuickPtr2
+
+				ldy #0
+				
+.1				lda (ZPQuickPtr1),y
+				sta (ZPQuickPtr2),y
+				beq .8
+				
+				iny 
+				bne .1
+				inc ZPQuickPtr1+1
+				inc ZPQuickPtr2+1
+				bra .1
+				
+.8				txa
+				clc
+.9				rts
+*--------------------------------------
+MAN
+SAVE SYS/KERNEL.S.PS
+LOAD SYS/KERNEL.S
+ASM
