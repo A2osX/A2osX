@@ -5,87 +5,43 @@ INC 1
 AUTO 6
 				.LIST OFF
 *--------------------------------------
-* S.ExecProcessNewEnvYA
-* S.ExecProcessYA	(Blocking Parent PID)
-* S.CreateProcessNewEnvYA 
-* S.CreateProcessYA (Non Blocking)
-*  in :
-*   Y,A = PTR To Cmd Line
-*  out :
-*   A = Child PSID
+* S.SelectProcessA
+*   In : A=PSID
 *--------------------------------------
-S.ExecProcessNewEnvYA
-				ldx #S.PS.F.ENV
-				.HS 2C					bit abs
-*--------------------------------------
-S.ExecProcessYA	ldx #0
-				jsr S.CreateProcess
-				bcs .9					terminated, do not set PID as HOLD
+S.SelectProcessA
+				tay
+				bne S.SelectProcessN
+S.SelectProcess0
+				>LDYAI TskMgr.Table		Make PS #0 as current process
+				>STYA pPs
+				bra S.SelectProcessDev
+S.SelectProcessN				
+				jsr S.GetPSByIDA
+				bcs *
+				>STYA pPs
 
-				ldy #S.PS.CID
-				sta (pPs),y
-				
-				pha						Save Child PID
-				lda (pPs)
-				ora #S.PS.F.HOLD
-				sta (pPs)
-				pla						Get Back PID
-				
-				clc
-.9				rts
-*--------------------------------------
-S.CreateProcessNewEnvYA 
-				ldx #S.PS.F.ENV
-				.HS 2C					bit abs
-*--------------------------------------
-S.CreateProcessYA
-				ldx #0
-S.CreateProcess	stx S.CreateChildProcess.Flags
-
-				jsr S.ExpandPStrYA
-				bcs .99
-
-				stx S.CreateProcess.hCmdLine
-				>STYA S.CreateProcess.CmdLine
-				
-				jsr S.CreateChildProcess
-				bcs .98
-
-				sta S.CreateProcess.CPSID
-				jsr S.SelectProcessA
-				
-				jsr S.InitProcess
-				bcs .97					Init Failed or exit?
-				
-				ldy #S.PS.PID			switch back to Parent Process
+S.SelectProcess	ldy #S.PS.hCS
 				lda (pPs),y
-				
-				jsr S.SelectProcessA
-				
-				lda S.CreateProcess.CPSID
-				clc
-				rts
-				
-.97				pha						save error code
-				ldy #S.PS.PID			switch back to Parent Process
-				lda (pPs),y
-				jsr S.SelectProcessA
+				jsr S.GetMemPtrA
+				>STYA pCode
 
-				lda S.CreateProcess.CPSID
-				jsr S.FreeProcessA
-				pla						get back error code
+				ldy #S.PS.hDS
+				lda (pPs),y
+				beq S.SelectProcessDev
+
+				jsr S.GetMemPtrA
+				>STYA pData
+
+S.SelectProcessDev
+				ldy #S.PS.hOUTDEV
+				lda	(pPs),y
+				beq .8
 				
-.98				pha
-				lda S.CreateProcess.hCmdLine
-				jsr S.FreeMemA
-				pla
-				
-.99				sec
+				jsr S.GetDevByIDA
+				>STYA pDev
+
+.8				clc
 				rts
-*--------------------------------------
-S.CreateProcess.hCmdLine .BS 1
-S.CreateProcess.CmdLine	.BS 2
-S.CreateProcess.CPSID	.BS 1
 *--------------------------------------
 * S.GetPSByIDA
 *  In : 
@@ -148,16 +104,71 @@ S.Sleep			pla						get PC LO
 				clc						No error,
 				rts						back to Kernel
 *--------------------------------------
-*				PRIVATE
+* S.ExecProcessNewEnvYA
+* S.ExecProcessYA	(Blocking Parent PID)
+* S.CreateProcessNewEnvYA 
+* S.CreateProcessYA (Non Blocking)
+*  in :
+*   Y,A = PTR To Cmd Line
+*  out :
+*   A = Child PSID
 *--------------------------------------
-* S.CreateChildProcess
+S.ExecProcessNewEnvYA
+				ldx #S.PS.F.ENV+S.PS.F.HOLD
+				.HS 2C					bit abs
+S.ExecProcessYA	ldx #S.PS.F.HOLD
+				.HS 2C					bit abs
+S.CreateProcessNewEnvYA 
+				ldx #S.PS.F.ENV
+				.HS 2C					bit abs
+S.CreateProcessYA
+				ldx #0
+				stx S.CreateProcess.Flags
+
+				jsr S.ExpandPStrYA
+				bcs .99
+
+				stx S.CreateProcess.hCmdLine
+				>STYA S.CreateProcess.CmdLine
+				
+				jsr S.CreateProcess.Child
+				bcs .98
+
+				sta S.CreateProcess.CPSID
+				
+				jsr S.CreateProcess.Init
+				bcs .97
+				
+				lda S.CreateProcess.CPSID
+				clc
+				rts
+				
+.97				pha						save error code
+				lda S.CreateProcess.CPSID
+				jsr S.FreeProcessA
+				pla						get back error code
+				
+.98				pha
+				lda S.CreateProcess.hCmdLine
+				jsr S.FreeMemA
+				pla
+				
+.99				sec
+				rts
+*--------------------------------------
+S.CreateProcess.Flags	.BS 1
+S.CreateProcess.hCmdLine .BS 1
+S.CreateProcess.CmdLine	.BS 2
+S.CreateProcess.CPSID	.BS 1
+*--------------------------------------
+* S.CreateProcess.Child
 *  in :
 *  out :
 *   A = PSID
 * we cannot use ZPQuickPtrs1 & 2
 * because of calling S.NewPStrYA & S.DupEnvA
 *--------------------------------------
-S.CreateChildProcess
+S.CreateProcess.Child
 				>LDYAI TskMgr.Table+S.PS.SIZE
 				>STYA ZPQuickPtr3
 				
@@ -179,18 +190,14 @@ S.CreateChildProcess
 				bra .1
 				
 .2				cpx #K.PS.MAX
-				bne .30
+				bne .3
 				
 				lda #TSKMGR.ERROOH
 				sec
 				rts
 
-.30				inc TSKMGR.SIZE
+.3				inc TSKMGR.SIZE
 
-.3				lda #S.PS.F.INUSE
-				ora S.CreateChildProcess.Flags
-				sta (ZPQuickPtr3)
-				
 .4				inc TSKMGR.LASTID		Get a PSID not alredy running
 				beq .4					not = 0
 				lda TSKMGR.LASTID
@@ -203,20 +210,23 @@ S.CreateChildProcess
 				
 				lda #0
 				ldy #S.PS.hCS
+				
 .5				sta (ZPQuickPtr3),y			Blank Everything in this S.PS
 				iny 
 				cpy #S.PS.SIZE
 				bne .5
 
-				lda S.CreateChildProcess.Flags
-				and #S.PS.F.ENV			need to create ENV & Prefix ?	
-				beq .6
+				lda #S.PS.F.ENV
+				bit S.CreateProcess.Flags	need to create ENV & Prefix ?	
+				beq .6					no...
+				
+				sta (ZPQuickPtr3)		Mark this PS with ENV flag
 				
 				ldy #S.PS.hPREFIX		copy hPREFIX...
 				lda (pPs),y
 				jsr S.GetMemPtrA
 				jsr S.NewPStrYA
-				bcs .99
+				bcs .9
 				
 				txa
 				ldy #S.PS.hPREFIX
@@ -225,7 +235,7 @@ S.CreateChildProcess
 				ldy #S.PS.hENV			...and hENV from parent PS
 				lda (pPs),y
 				jsr S.DupEnvA
-				bcs .99
+				bcs .9
 				
 				ldy #S.PS.hENV
 				sta (ZPQuickPtr3),y
@@ -240,6 +250,7 @@ S.CreateChildProcess
 				sta (ZPQuickPtr3),y
 				
 .8				ldy #S.PS.hINDEV
+
 .81				lda (pPs),y
 				sta (ZPQuickPtr3),y
 				iny
@@ -252,21 +263,27 @@ S.CreateChildProcess
 				ldy #S.PS.PID
 				sta (ZPQuickPtr3),y
 
+				ldy #S.PS.CID
+				lda TSKMGR.LASTID
+				sta (pPs),y
+
+				lda #S.PS.F.HOLD
+				bit S.CreateProcess.Flags
+				beq .82
+				
+				ora (pPs)
+				sta (pPs)				HOLD parent PS if ExecProcess
+				
+.82				lda #S.PS.F.INUSE+S.PS.F.INIT
+				ora (ZPQuickPtr3)
+				sta (ZPQuickPtr3)		Make this PS Init....
+				
 				lda TSKMGR.LASTID
 				clc						Exit with A=PSID
-				rts
-				
-.99				sec
-				rts	
+.9				rts
 *--------------------------------------
-S.CreateChildProcess.Flags
-				.BS 1
-*--------------------------------------
-* S.InitProcess
-*  In : 
-*   A = hMem To Full Cmd Line  
-*--------------------------------------
-S.InitProcess	>LDYA S.CreateProcess.CmdLine
+S.CreateProcess.Init	
+				>LDYA S.CreateProcess.CmdLine
 				jsr S.PStr2StrArrayYA
 				bcs .9
 				
@@ -275,7 +292,7 @@ S.InitProcess	>LDYA S.CreateProcess.CmdLine
 				
 				txa
 				ldy #S.PS.hCMDLINE
-				sta (pPs),y
+				sta (ZPQuickPtr3),y
 				
 				pla						Restore PTR...
 				ply
@@ -283,82 +300,33 @@ S.InitProcess	>LDYA S.CreateProcess.CmdLine
 				jsr S.LoadBinYA			A = BinPath hMem
 				bcs .9
 				
-				>STYA pCode				save PTR to Code Segment
+				>STYA ZPQuickPtr4		save PTR to Code Segment
 				txa
 				ldy #S.PS.hCS
-				sta (pPs),y				save CS hMem in TSKSLOT
+				sta (ZPQuickPtr3),y		save CS hMem in TSKSLOT
 				
 				ldy #H.BIN.BIN.DS.SIZE+1
-				lda (pCode),y			Load DS.SIZE HI
+				lda (ZPQuickPtr4),y		Load DS.SIZE HI
 				tax
 				dey	
-				ora (pCode),y
+				ora (ZPQuickPtr4),y
 				
 				beq .2					DS.SIZE=0...
 				
-				lda (pCode),y		
+				lda (ZPQuickPtr4),y		
 				>PUSHAX					Push DS.SIZE
 				>PUSHBI S.MEM.F.INIT0	Clear DS
 				jsr S.GetMem				
 				bcs .9
 				
-				>STYA pData
 				txa
 				ldy #S.PS.hDS
-				sta (pPs),y				save DS hMem in TSKSLOT
+				sta (ZPQuickPtr3),y		save DS hMem in TSKSLOT
 				
-.2				lda (pCode)
-				cmp #H.BIN.HEADER.BIN65
-				bne *
-				
-				ldx #TSKMGR.INIT
-				jsr pCodeJmp			Call INIT function
-				bcc .9
-				
-				pha						save error code
-				ldx #TSKMGR.QUIT
-				jsr pCodeJmp			Call QUIT function
-				pla						get back error code
-				sec
+.2				
+
+				clc
 .9				rts
-*--------------------------------------
-* S.SelectProcessA
-*   In : A=PSID
-*--------------------------------------
-S.SelectProcessA
-				tay
-				bne S.SelectProcessN
-S.SelectProcess0
-				>LDYAI TskMgr.Table		Make PS #0 as current process
-				>STYA pPs
-				bra S.SelectProcessDev
-S.SelectProcessN				
-				jsr S.GetPSByIDA
-				bcs *
-				>STYA pPs
-
-S.SelectProcess	ldy #S.PS.hCS
-				lda (pPs),y
-				jsr S.GetMemPtrA
-				>STYA pCode
-
-				ldy #S.PS.hDS
-				lda (pPs),y
-				beq S.SelectProcessDev
-
-				jsr S.GetMemPtrA
-				>STYA pData
-
-S.SelectProcessDev
-				ldy #S.PS.hOUTDEV
-				lda	(pPs),y
-				beq .8
-				
-				jsr S.GetDevByIDA
-				>STYA pDev
-
-.8				clc
-				rts
 *--------------------------------------
 * S.FreeProcessA
 *   In : A = PID to free
