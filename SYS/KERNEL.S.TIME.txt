@@ -5,31 +5,238 @@ INC 1
 AUTO 6
 				.LIST OFF
 *--------------------------------------
-* S.TimeYA  get System Time
-*  In :
-*   Y,A = PTR to S.TIME
-*  Out :
-*   S.TIME filled with ProDOS MLI date/time
+* https://www.cise.ufl.edu/~cop4600/cgi-bin/lxr/http/source.cgi/lib/ansi/gmtime.c
 *--------------------------------------
-S.TimeYA
-				clc
-				rts
+SECSDAY			.EQ 86400				60*60*24
+CENTURY0		.EQ 19
+YEAR0			.EQ 70
+DAY0			.EQ 4					day 0 was a thursday
 *--------------------------------------
 * S.CTime2Time
 * In : 
 *  PULLW = Src CTIME DWORD
 *  PULLW = Dst PTR To S.TIME
 *--------------------------------------
-S.CTime2Time
+S.CTime2Time	>PULLW ZPQuickPtr1
+				>PULLW ZPQuickPtr2
+				
+				ldy #3
+				
+.1				lda (ZPQuickPtr1),y
+				sta S.CTime.DWORD,y
+				dey
+				bpl .1
+				
+				stz	S.CTime.DivDay
+				stz	S.CTime.DivDay+1
+				
+.2				lda S.CTime.DWORD		
+				sta S.CTime.ModDay
+				sec
+				sbc #SECSDAY
+				pha
+				
+				lda S.CTime.DWORD+1
+				sta S.CTime.ModDay+1
+				sbc /SECSDAY
+				pha
+				
+				lda S.CTime.DWORD+2
+				sta S.CTime.ModDay+2
+				sbc #0
+				pha
+
+				lda S.CTime.DWORD+3
+				sbc #0
+				bcc .3					end of DIV/MOD ?
+				
+				sta S.CTime.DWORD+3
+				pla
+				sta S.CTime.DWORD+2
+				pla
+				sta S.CTime.DWORD+1
+				pla
+				sta S.CTime.DWORD
+				
+				inc S.CTime.DivDay
+				bne .2
+				inc S.CTime.DivDay+1
+				bne .2
+				
+.3				pla
+				pla
+				pla
+				stz S.CTime.Div60
+				stz S.CTime.Div60+1
+
+.4				lda S.CTime.ModDay
+				sta S.CTime.Mod
+				sec
+				sbc #60
+				pha
+				
+				lda S.CTime.ModDay+1
+				sbc #0
+				pha
+				
+				lda S.CTime.ModDay+2
+				sbc #0
+				
+				bcc .5
+				
+				sta S.CTime.ModDay+2
+				pla
+				sta S.CTime.ModDay+1
+				pla
+				sta S.CTime.ModDay
+
+				inc S.CTime.Div60
+				bne .4
+				inc S.CTime.Div60+1
+				bne .4
+				
+.5				pla
+				pla
+				lda S.CTime.Mod
+				ldy #S.TIME.SECOND
+				sta (ZPQuickPtr2),y
+				
+				stz S.CTime.Div3600
+				
+.6				lda S.CTime.Div60				
+				sta S.CTime.Mod
+				sec
+				sbc #60
+				pha
+				
+				lda S.CTime.Div60+1
+				sbc #0
+				pha
+
+				bcc .7
+				
+				sta S.CTime.Div60+1
+				pla
+				sta S.CTime.Div60
+				
+				inc S.CTime.Div3600
+				bne .6
+				
+.7				pla
+
+				lda S.CTime.Mod
+				dey						ldy #S.TIME.MINUTE
+				sta (ZPQuickPtr2),y
+				
+				lda S.CTime.Div3600
+				dey						ldy #S.TIME.HOUR
+				sta (ZPQuickPtr2),y
+				
+				lda S.CTime.DivDay		WDAY computation : (DivDay + DAY0) mod 7
 				clc
-				rts
+				adc #DAY0
+				pha
+				lda S.CTime.DivDay+1
+				adc /DAY0
+				eor #$ff
+				tax
+				pla
+				
+.8				sta S.CTime.Mod
+				sec
+				sbc #7
+				bcs .8
+				inx
+				bne .8
+				
+				lda S.CTime.Mod
+				ldy #S.TIME.WDAY
+				sta (ZPQuickPtr2),y
+				
+				lda #CENTURY0
+				sta S.CTime.Century
+				lda #YEAR0
+				sta S.CTime.Year
+				
+*    si l'année est divisible par 4 et non divisible par 100, ou
+*    si l'année est divisible par 400.
+				
+
+S.CTime.DWORD	.BS 4				
+S.CTime.DivDay	.BS 2				
+S.CTime.ModDay	.BS 3
+S.CTime.Div60	.BS 2
+S.CTime.Div3600	.BS 1
+S.CTime.Mod		.BS 1
+S.CTime.Century	.BS 1
+S.CTime.Year	.BS 1
+*--------------------------------------
+* S.TimeYA  get System Time
+*  In :
+*   Y,A = PTR to S.TIME
+*  Out :
+*   S.TIME filled with ProDOS MLI date/time
+*--------------------------------------
+S.TimeYA		>STYA ZPQuickPtr2
+				>MLICALL MLIGETTIME
+				>LDYAI DATELO
+				>STYA ZPQuickPtr1
+				bra S.PTime2Time.1
 *--------------------------------------
 * In : 
-*  PULLW = Src PDATE
-*  PULLW = Src PTIME
+*  PULLW = Src PDATE/TIME	(DWORD)
 *  PULLW = Dst PTR To S.TIME
 *--------------------------------------
-S.PTime2Time
+S.PTime2Time	>PULLW ZPQuickPtr1
+				>PULLW ZPQuickPtr2
+				
+S.PTime2Time.1	lda (ZPQuickPtr1)		Get Year
+				lsr						C is high bit of month
+				ldy #S.TIME.YEAR
+				sta (ZPQuickPtr2),y		set year
+				pla						save it for century adjust
+				
+				ldy #1
+				lda (ZPQuickPtr1),y		Get Month/day
+				pha						save Day
+				ror
+				lsr
+				lsr
+				lsr
+				lsr
+				ldy #S.TIME.MONTH
+				sta (ZPQuickPtr2),y		set month
+				
+				pla						get back day
+				and #$1F
+				iny
+				sta (ZPQuickPtr2),y		set day
+				
+				pla						get back year
+				
+				cmp #70					if before 70's CC
+				lda #19
+				adc #0					set date before 1970 -> 20xx
+				sta (ZPQuickPtr2)		set Century
+
+				ldy #3
+				lda (ZPQuickPtr1),y		Get Min
+				tax
+				dey
+				lda (ZPQuickPtr1),y		Get Hour
+				
+				ldy #S.TIME.HOUR
+				sta (ZPQuickPtr2),y		set hour
+				iny
+				txa
+				sta (ZPQuickPtr2),y		set min
+				iny
+				lda #0
+				sta (ZPQuickPtr2),y		set seconds (ProDOS does not provide it)
+
+S.ComputeWDAY	
+
+
 				clc
 				rts
 *--------------------------------------
@@ -54,6 +261,12 @@ S.PTime2Time
 *  PULLW = Dst PSTR Buffer
 *--------------------------------------
 S.StrFTime
+				clc
+				rts
+*--------------------------------------
+*--------------------------------------
+S.IsLeapYearYA	
+
 				clc
 				rts
 *--------------------------------------
