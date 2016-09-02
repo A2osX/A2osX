@@ -74,81 +74,162 @@ hDIR			.BS 1
 S.READDIRA		jsr S.PFTCHECKDIRA
 				jsr S.GetMemPtrA
 				>STYA ZPQuickPtr1
+				
+				ldy #S.DIR.F
+				lda (ZPQuickPtr1),y
+				and #S.DIR.F.NOMORE
+				bne .9
+				
 				ldy #S.DIR.PRODOS.REF
 				lda (ZPQuickPtr1),y
 				beq S.READDIRA.ROOT
 				jmp S.READDIRA.DIR
 				
-S.READDIRA.ROOT	>PUSHWI 256				Get Buffer for ONLINE call
-				>PUSHBI 0
-				jsr S.GetMem
-				bcs .99
-				>STYA ZPQuickPtr2
-				stx hONLINE
-				stz MLICALL.PARAMS+1
-				>STYA MLICALL.PARAMS+2
-				>MLICALL MLIONLINE
-				bcs .98
+.9				lda #0
+				sec						CS,A=0 no more entry
+S.READDIRA.RTS	rts
 				
-				lda #1					Ending 0
+S.READDIRA.ROOT	stz MLICALL.PARAMS+1	All Volumes
+				>LDYAI KrnBuffer256
+				>STYA MLICALL.PARAMS+2
+				>STYA ZPQuickPtr2		For PASS #2
+				>MLICALL MLIONLINE
+				bcs S.READDIRA.RTS
+				
+				lda #1					+1 for Ending 0
 				sta	BufSize
 				stz BufSize+1
 				
 				ldy #0
 				
-.1				lda (ZPQuickPtr2),y
+.1				lda KrnBuffer256,y
 				and #$0F
 				beq .2
 				
-				sec				Add Filelen +1
+				sec						Add Filelen +1
 				adc BufSize
 				sta BufSize
-				lda #0
-				adc BufSize
-				sta BufSize
+				bcc .11
+				inc BufSize+1
 
-				lda #S.STAT
+.11				lda #S.STAT
 				adc BufSize
 				sta BufSize
-				lda /S.STAT
-				adc BufSize+1
-				sta BufSize+1
-				
-				inx
+				bcc .12
+				inc BufSize+1
+
+.12				inx
 								
 .2				tya
 				clc
 				adc #16
 				tay
-				bcc .1
+				bcc .1					loop until 256 bytes scanned
 				
 				txa
-				beq	.99		A=0, CS no more DIRENT
+				beq	S.READDIRA.RTS		A=0, CS no more DIRENT
 
+				sta EntryCount
+				
 				>PUSHW BufSize
-				>PUSHBI 0
+				>PUSHBI S.MEM.F.INIT0
 				jsr S.GetMem
-				bcs .98
+				bcs S.READDIRA.RTS
+				stx hDIRENT
 				>STYA ZPQuickPtr3
 				>STYA ZPQuickPtr4
 				
-				ldy #0
-				
-.1				lda (ZPQuickPtr2),y
+.3				lda (ZPQuickPtr2)
 				and #$0F
-				beq .2
+				beq .88
+				tay
+				tax
+				sta (ZPQuickPtr3)
+				inc
+				sta VolName			Build a string with leading / for GetFileInfo
 				
+.4				lda (ZPQuickPtr2),y
+				sta (ZPQuickPtr3),y
+				sta VolName+1,y
+				dey
+				bne .4
+				lda #'/'
+				sta VolName+1
 				
-				lda #0		A=0, CS no more DIRENT
-				
-.98				pha
-				lda hONLINE
-				jsr S.FreeMemA
-				pla
+				txa
 				sec
-.99				rts
+				adc ZPQuickPtr3
+				sta ZPQuickPtr3
+				bcc .41
+				inc ZPQuickPtr3+1
+				
+.41				>LDYAI VolName
+				>STYA MLICALL.PARAMS+1
+				>MLICALL MLIGETFILEINFO
+				bcs .80
+				
+				lda MLICALL.PARAMS+S.FILEINFO.ACCESS
+				cmp #S.FILEINFO.ACCESS.FULL
+				bne .5
+				
+				lda #S.STAT.MODE.XO+S.STAT.MODE.WO+S.STAT.MODE.RO
+				bra .6
+				
+.5				and #S.FILEINFO.ACCESS.R
+				beq .6
+				lda #S.STAT.MODE.XO+S.STAT.MODE.RO	
+				
+.6				ldy #S.STAT.MODE				
+				sta (ZPQuickPtr3),y
+
+				ldy #S.STAT.BLOCKS
+				lda MLICALL.PARAMS+S.FILEINFO.AUXTYPE
+				sta (ZPQuickPtr3),y
+				iny
+				lda MLICALL.PARAMS+S.FILEINFO.AUXTYPE
+				sta (ZPQuickPtr3),y
+				ldy #S.STAT.BLKSIZE+1
+				lda #2						Block size is $200 for ProDOS
+				sta (ZPQuickPtr3),y
+				
+.80				lda ZPQuickPtr3
+				clc
+				adc #S.STAT
+				sta ZPQuickPtr3
+				bcc .88
+				inc ZPQuickPtr3+1
+				
+.88				lda ZPQuickPtr2
+				clc
+				adc #16
+				sta ZPQuickPtr2
+				bcc .89
+				inc ZPQuickPtr2+1
+.89				dec EntryCount
+				bne .3
+
+				lda #0
+				sta (ZPQuickPtr3)			Ending 0
+				
+				ldy #S.DIR.F
+				lda #S.DIR.F.NOMORE
+				sta (ZPQuickPtr1),y
+				
+				ldx hDIRENT
+				>LDYA ZPQuickPtr4
+				clc
+				rts
 
 S.READDIRA.DIR
+				ldx #3
+				ldy #S.STAT.TYPE
+				
+.7				lda MLICALL.PARAMS+S.FILEINFO.TYPE,x
+				sta (ZPQuickPtr3),y
+				iny
+				dex
+				bne .7
+				
 				clc
 				rts
 *--------------------------------------
@@ -177,7 +258,10 @@ S.CLOSEDIRA.1	ldy #S.DIR.PRODOS.REF
 				rts
 *--------------------------------------
 hONLINE			.BS 1
+hDIRENT			.BS 1
 BufSize			.BS 2
+EntryCount		.BS 1
+VolName			.BS 17
 *--------------------------------------
 MAN
 SAVE SYS/KERNEL.S.DIR
