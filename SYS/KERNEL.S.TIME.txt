@@ -31,14 +31,14 @@ S.TimeYA		>STYA ZPQuickPtr2
 S.PTime2Time	>PULLW ZPQuickPtr1
 				>PULLW ZPQuickPtr2
 				
-S.PTime2Time.1	lda (ZPQuickPtr1)		Get Year
+S.PTime2Time.1	ldy #1
+				lda (ZPQuickPtr1),y		Get Year
 				lsr						C is high bit of month
 				ldy #S.TIME.YEAR
 				sta (ZPQuickPtr2),y		set year
-				pha						save it for century adjust
+				sta S.CTime.Year		for conputing Century/WDAY later
 				
-				ldy #1
-				lda (ZPQuickPtr1),y		Get Month/day
+				lda (ZPQuickPtr1)		Get Month/day
 				pha						save Day
 				ror
 				lsr
@@ -53,17 +53,20 @@ S.PTime2Time.1	lda (ZPQuickPtr1)		Get Year
 				iny
 				sta (ZPQuickPtr2),y		set day
 				
-				pla						get back year
+				lda S.CTime.Year		get back year
 				
-				cmp #70					if before 70's CC
-				lda #19
-				adc #0					set date before 1970 -> 20xx
+				cmp #69					if before 70 CC,if > 70, CS
+				lda #0
+				rol						get back C in bit 0
+				eor #1					toggle C
+				adc #19					set date before 1970 -> 20xx
 				sta (ZPQuickPtr2)		set Century
+				sta S.CTime.Century		for conputing WDAY later
 
-				ldy #3
+				ldy #2
 				lda (ZPQuickPtr1),y		Get Min
 				tax
-				dey
+				iny
 				lda (ZPQuickPtr1),y		Get Hour
 				
 				ldy #S.TIME.HOUR
@@ -75,9 +78,85 @@ S.PTime2Time.1	lda (ZPQuickPtr1)		Get Year
 				lda #0
 				sta (ZPQuickPtr2),y		set seconds (ProDOS does not provide it)
 
-S.ComputeWDAY	
-
-
+* 1/1/1970 was Thursday...if not leap, add one, if leap add 2
+		
+S.ComputeWDAY	lda #3					Thursday : 4 (-1 for mod 7)
+				pha
+				lda #19
+				sta S.CTime.DWORD
+				lda #70
+				sta S.CTime.DWORD+1
+				
+.1				ldy S.CTime.DWORD
+				lda S.CTime.DWORD+1
+				
+				cpy S.CTime.Century
+				bne .2
+				cmp S.CTime.Year
+				beq .4
+				
+.2				jsr S.IsLeapYearYA		CC = Leap			
+				lda #0
+				rol
+				eor #1
+				lsr
+				
+				pla
+				adc #1
+				cmp #7
+				bcc .3
+				sbc #7					MOD 7
+				
+.3				pha
+				inc S.CTime.DWORD+1
+				lda S.CTime.DWORD+1
+				cmp #100
+				bne .1
+				lda #0
+				sta S.CTime.DWORD+1
+				inc S.CTime.DWORD
+				bra .1
+				
+.4				ldy #S.TIME.MONTH
+				lda (ZPQuickPtr2),y		get month
+				tax
+				
+.5				lda S.StrFTime.MDAY-1,x	get day count in this month
+				bne	.6				february ?
+				
+				ldy S.CTime.Century
+				lda S.CTime.Year
+				jsr S.IsLeapYearYA		CC = Leap			
+				lda #0
+				rol
+				eor #1
+				lsr
+				
+.6				pla
+				adc S.StrFTime.MDAY-1,x
+				cmp #7
+				bcc .7
+				sbc #7
+				
+.7				pha
+				dex
+				bne .5
+				
+				pla
+				
+				ldy #S.TIME.DAY
+				adc (ZPQuickPtr2),y		get month (1..31)
+				dec						adjust range 0.31 for MOD 7
+				
+.8				cmp #7					MOD 7
+				bcc .80
+				sbc #7
+				bra .8
+				
+.80				inc						adjust range 1..7				
+				ldy #S.TIME.WDAY
+				sta (ZPQuickPtr2),y
+				
 				clc
 				rts
 *--------------------------------------
@@ -261,15 +340,6 @@ S.CTime2Time.Year
 				clc
 				rts
 *--------------------------------------
-S.CTime.DWORD	.BS 4				
-S.CTime.DivDay	.BS 2				
-S.CTime.ModDay	.BS 3
-S.CTime.Div60	.BS 2
-S.CTime.Div3600	.BS 1
-S.CTime.Mod		.BS 1
-S.CTime.Century	.BS 1
-S.CTime.Year	.BS 1
-*--------------------------------------
 * S.StrFTime
 * In : 
 *  PULLW = Src PTR To S.TIME
@@ -318,13 +388,13 @@ S.StrFTime		>PULLW ZPQuickPtr1
 				beq .8
 				
 				iny
-				ldx #S.StrFTime.JMPL-S.StrFTime.Table
+				ldx #S.StrFTime.JMPL-S.StrFTime.Tbl-1
 				
 .3				lda (ZPQuickPtr2),y
-				cmp S.StrFTime.Table-1,x
+				cmp S.StrFTime.Tbl,x
 				beq .4
 				dex
-				bne .3
+				bpl .3
 				beq .10
 				
 .4				lda S.StrFTime.JMPL,x
@@ -338,10 +408,53 @@ S.StrFTime		>PULLW ZPQuickPtr1
 
 .8				rts			
 *--------------------------------------
-S.StrFTime.A
-S.StrFTime.AA
-S.StrFTime.B
-S.StrFTime.BB
+S.StrFTime.A	ldx #3					Max Len
+				.HS	2C					Bit abs				
+				 
+S.StrFTime.AA	ldx #15
+				>LDYAI S.StrFTime.DAY
+				>STYA ZPQuickPtr4		
+				ldy #S.TIME.WDAY
+				bra S.StrFTime.STR
+				
+S.StrFTime.B	ldx #3
+				.HS	2C					Bit abs
+				
+S.StrFTime.BB	ldx #15
+				>LDYAI S.StrFTime.MON
+				>STYA ZPQuickPtr4		
+				ldy #S.TIME.MONTH
+				
+S.StrFTime.STR	lda (ZPQuickPtr1),y 	get required S.TIME field value
+				tay
+				beq .8					Illegal value
+				
+.1				dey						range 0..x
+				beq .2
+				lda (ZPQuickPtr4)
+				sec
+				adc ZPQuickPtr4
+				sta ZPQuickPtr4
+				bcc .1
+				inc ZPQuickPtr4+1
+				bra .1
+				
+.2				ldy #0
+
+.3				iny
+				lda (ZPQuickPtr4),y
+				phy
+				jsr S.StrFTime.addChar
+				pla
+				cmp (ZPQuickPtr4)
+				beq .8
+				
+				tay
+				dex
+				bne .3
+				
+.8				rts				
+				
 S.StrFTime.D	ldy #S.TIME.DAY
 				bra S.StrFTime.addDecPtr1Y
 S.StrFTime.HH	ldy #S.TIME.HOUR
@@ -377,14 +490,30 @@ S.StrFTime.Y	ldy #S.TIME.YEAR
 S.StrFTime.addDecPtr1Y
 				lda (ZPQuickPtr1),y
 S.StrFTime.addDecA
-				pha
+				sta S.StrFTime.BIN
+				stz S.StrFTime.DEC
+				sed
+				ldx #8
+				
+.1				asl S.StrFTime.BIN
+
+				lda S.StrFTime.DEC
+				adc S.StrFTime.DEC
+				sta S.StrFTime.DEC
+				
+				dex
+				bne .1
+				cld
+
+*				lda S.StrFTime.DEC		already in A
+
 				lsr
 				lsr
 				lsr
 				lsr
 				ora #$30
 				jsr S.StrFTime.addChar
-				pla
+				lda S.StrFTime.DEC
 				and #$0f
 				ora #$30
 *--------------------------------------
@@ -398,7 +527,7 @@ S.StrFTime.addChar
 				sta (ZPQuickPtr3),y
 				rts
 *--------------------------------------
-S.StrFTime.Table	.AS "aAbBdHImMpSwyY"
+S.StrFTime.TBL	.AS "aAbBdHImMpSwyY"
 S.StrFTime.JMPL .DA #S.StrFTime.A
 				.DA #S.StrFTime.AA
 				.DA #S.StrFTime.B
@@ -429,15 +558,7 @@ S.StrFTime.JMPH	.DA /S.StrFTime.A
 				.DA /S.StrFTime.Y
 				.DA /S.StrFTime.YY
 *--------------------------------------
-S.StrFTime.SDAY	>PSTRING "Mon"
-				>PSTRING "Tue"
-				>PSTRING "Wed"
-				>PSTRING "Thu"
-				>PSTRING "Fri"
-				>PSTRING "Sat"
-				>PSTRING "Sun"
-*--------------------------------------
-S.StrFTime.LDAY	>PSTRING "Monday"
+S.StrFTime.DAY	>PSTRING "Monday"
 				>PSTRING "Tuesday"
 				>PSTRING "Wednesday"
 				>PSTRING "Thursday"
@@ -445,20 +566,7 @@ S.StrFTime.LDAY	>PSTRING "Monday"
 				>PSTRING "Saturday"
 				>PSTRING "Sunday"
 *--------------------------------------
-S.StrFTime.SMON	>PSTRING "Jan"
-				>PSTRING "Feb"
-				>PSTRING "Mar"
-				>PSTRING "Apr"
-				>PSTRING "May"
-				>PSTRING "Jun"
-				>PSTRING "Jul"
-				>PSTRING "Aug"
-				>PSTRING "Sep"
-				>PSTRING "Oct"
-				>PSTRING "Nov"
-				>PSTRING "Dec"
-*--------------------------------------
-S.StrFTime.LMON	>PSTRING "January"
+S.StrFTime.MON	>PSTRING "January"
 				>PSTRING "February"
 				>PSTRING "March"
 				>PSTRING "April"
@@ -471,13 +579,17 @@ S.StrFTime.LMON	>PSTRING "January"
 				>PSTRING "November"
 				>PSTRING "December"
 *--------------------------------------
-* Y = Century
-* A = Year (0..99)
+* In :
+*  Y = Century
+*  A = Year (0..99)
 *    if (year mod 400 = 0)
 *      or 
 *    if  not (year mod 100 = 0) and (year mod 4 = 0)
+* Out :
+*  CC = Leap
+*  CS = Not Leap
 *--------------------------------------
-S.IsLeapYearYA	tax						Year = 00 ?
+S.IsLeapYearYA	cmp #0					Year = 00 ?
 				bne .1					no
 				
 				tya						year = 00, get century in a
@@ -493,6 +605,19 @@ S.IsLeapYearYA	tax						Year = 00 ?
 .9				clc						Leap
 				rts
 *--------------------------------------
+S.CTime.DWORD	.BS 4				
+S.CTime.DivDay	.BS 2				
+S.CTime.ModDay	.BS 3
+S.CTime.Div60	.BS 2
+S.CTime.Div3600	.BS 1
+S.CTime.Mod		.BS 1
+S.CTime.Century	.BS 1
+S.CTime.Year	.BS 1
+*--------------------------------------
+S.StrFTime.BIN	.BS 1
+S.StrFTime.DEC	.BS 1					always < 100
+*--------------------------------------
+S.StrFTime.MDAY	.DA #3,#0,#3,#2,#3,#2,#3,#3,#2,#3,#2,#3
 MAN
 SAVE SYS/KERNEL.S.TIME
 LOAD SYS/KERNEL.S
