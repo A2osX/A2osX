@@ -219,19 +219,250 @@ S.READDIRA.ROOT	stz MLICALL.PARAMS+1	All Volumes
 				>LDYA ZPQuickPtr4
 				clc
 				rts
+*--------------------------------------
+S.READDIRA.DIR  ldy #S.DIR.PRODOS.REF
+				lda (ZPQuickPtr1),y
+				sta MLICALL.PARAMS+1
 
-S.READDIRA.DIR
-				ldx #3
-				ldy #S.STAT.TYPE
+				>PUSHWI 512				Get a 512 bytes buffer for reading dir...
+				>PUSHBI 0
+				jsr S.GetMem
+				bcs .99
+				stx S.READDIRA.hMem
 				
-.7				lda MLICALL.PARAMS+S.FILEINFO.TYPE,x
-				sta (ZPQuickPtr3),y
-				iny
-				dex
-				bne .7
+				>STYA MLICALL.PARAMS+2	For reading
 				
+				pha
+				tya
+*				clc						CC from  S.GetMem
+				adc #4					Skip 4 bytes linked list		
+				tay
+				pla
+				adc #0
+				
+				>STYA ZPQuickPtr2		PTR to Buffer for PASS #1
+				>STYA ZPQuickPtr3		PTR to Buffer for PASS #2
+				
+				>LDYAI 512
+				>STYA MLICALL.PARAMS+4
+				>MLICALL MLIREAD		Read A block from directory
+				bcs .98
+				
+				ldy #S.DIR.PRODOS.EL	Check if first run....
+				lda (ZPQuickPtr1),y
+				bne .2					no, we have all we need....
+				
+				ldy #$23+3
+.1				lda (ZPQuickPtr2),y		Get EntryLength....	From Block
+				sta EntryLength-$23,y
+				dey
+				bpl .1
+				bra .4
+
+.98				pha
+				lda S.READDIRA.hMem
+				jsr S.FreeMemA
+				pla
+				sec
+.99				rts
+				
+.2				ldy #S.DIR.PRODOS.EL+3
+
+.3				lda(ZPQuickPtr1),y		get this session parameters from S.DIR
+				sta EntryLength-S.DIR.PRODOS.EL,y
+				dey
+				bpl .3
+				
+.4				ldx EntryCount
+				cpx EntryPerBlock
+
+				lda EntryCount+1
+				sbc #0
+				bcc	.5					We have less than EPB to read
+				ldx EntryPerBlock
+				
+.5				stx EntryCountIB
+				stz EntryCount2Return
+
+				lda #1					For Ending 0
+				sta BufSize
+				stz BufSize+1
+				
+* pass #1 compute BufSize.....	
+			
+.51				lda (ZPQuickPtr2)		X = EntryCount In This Block
+				beq .7					Free slot....goto next
+				
+				jsr S.READDIR.CHK
+
+.7				lda ZPQuickPtr2
+				clc
+				adc EntryLength
+				sta ZPQuickPtr2
+				bcc .71
+				inc ZPQuickPtr2+1
+				
+.71				dex
+				bne .51
+				
+* pass #2 Fill Buffer...
+				
+				>PUSHW BufSize				Get a BufSize bytes buffer for storing results
+				>PUSHBI S.MEM.F.INIT0		make sure 0 fiiled
+				jsr S.GetMem
+				bcs .98
+				stx S.READDIRA.hDIR
+				>STYA ZPQuickPtr4
+				
+.72				jsr DecEntryCount
+				bcc .80						no more file to list...
+				
+				lda (ZPQuickPtr3)
+				beq .78
+
+				jsr S.READDIRA.ADD
+
+.78				lda ZPQuickPtr3
+				clc
+				adc EntryLength
+				sta ZPQuickPtr3
+				bcc .79
+				inc ZPQuickPtr3+1	
+
+.79				dec EntryCountIB
+				beq .72
+				
+.80				
+*				lda #0					S.MEM.F.INIT0 already did this
+*				sta (ZPQuickPtr4)		Ending 0
+
+				ldy #S.DIR.PRODOS.EL+3
+.8				lda EntryLength-S.DIR.PRODOS.EL,y	Store back this session prameters to S.DIR
+				sta (ZPQuickPtr1),y
+				dey
+				bpl .8
+				
+				jsr .98					Discard READBUFFER
+				
+				lda S.READDIRA.hDIR
+				tax
+				jsr S.GetMemPtrA
 				clc
 				rts
+*--------------------------------------
+S.READDIR.CHK	tay						save LEN
+				
+				and #$F0				get storage_type
+				cmp #$E0				directory header ?
+				bne .1
+				
+				inc EntryCount2Return	yes, return 2 ".."
+				lda #S.STAT+3			add "#.." string + S.STAT
+				jsr S.READDIRA.AddBufSize
+				bra .2					go add "." Entry
+				
+				
+.1				cmp #$F0				Volume header ?
+				bne .3
+				
+.2				lda #S.STAT+2			add "#." string + S.STAT
+				bra .4
+				
+.3				tya
+				and #$F					get filename len
+				sec						Add 1 for LEN
+				adc #S.STAT
+				
+.4				jsr S.READDIRA.AddBufSize
+				inc EntryCount2Return
+				rts
+*--------------------------------------
+S.READDIRA.ADD	and #$F0
+				cmp #$F0				Volume header ?
+				bne .10
+				
+				lda #1
+				jsr S.READDIRA.AddToBuf
+				lda #'.'
+				jsr S.READDIRA.AddToBuf
+				
+				ldy #$25				total_blocks
+				lda (ZPQuickPtr3),y
+				tax
+				iny
+				lda (ZPQuickPtr3),y
+				
+				ldy #S.STAT.BLOCKS+1
+				sta (ZPQuickPtr4),y
+				dey
+				txa
+				sta (ZPQuickPtr4),y
+				
+.10				cmp #$E0				directory header ?
+				bne .20
+				
+				lda #2
+				jsr S.READDIRA.AddToBuf
+				lda #'.'
+				jsr S.READDIRA.AddToBuf
+				jsr S.READDIRA.AddToBuf
+				
+				
+				
+				
+.20				cmp #$D0				directory ?
+				bne .30
+
+				lda (ZPQuickPtr3)
+				and #$0F				get filename len
+				tax
+				jsr S.READDIRA.AddToBuf
+				ldy #1
+				
+.21				lda (ZPQuickPtr3),y			
+				jsr S.READDIRA.AddToBuf
+				iny
+				dex
+				bne .21
+				
+				
+.30				
+
+.80				lda ZPQuickPtr4
+				clc
+				adc #S.STAT
+				sta ZPQuickPtr4
+				bcc .8
+				inc ZPQuickPtr4+1
+.8				rts
+*--------------------------------------
+S.READDIRA.AddBufSize
+				clc
+				adc BufSize
+				sta BufSize
+				bcc .9
+				inc BufSize+1
+.9				rts
+*--------------------------------------
+S.READDIRA.AddToBuf
+				sta (ZPQuickPtr4)
+				inc ZPQuickPtr4
+				bne .8
+				inc ZPQuickPtr4+1
+.8				rts
+*--------------------------------------
+DecEntryCount	lda EntryCount
+				sec
+				sbc #1
+				sta EntryCount
+				bcs .9					CS, 0 or more
+				lda EntryCount+1
+				sbc #0
+				sta EntryCount+1		CC, we reached $ffff
+.9				rts				
+*--------------------------------------
+S.READDIRA.hMem	.BS 1
+S.READDIRA.hDIR	.BS 1
 *--------------------------------------
 * In : 
 *  A = hDIR
@@ -259,19 +490,24 @@ S.CLOSEDIRA.1	ldy #S.DIR.PRODOS.REF
 *--------------------------------------
 S.MKDIRYA		jsr S.PFTCHECKPATHYA
 				>STYA MLICALL.PARAMS+1
-				lda #$C3
-				sta MLICALL.PARAMS+3	Access
-				lda #$0F
-				sta MLICALL.PARAMS+4	type=Directory
-				lda #$0D				Storage=Linked List
-				sta MLICALL.PARAMS+7	
+				lda #S.FILEINFO.ACCESS.FULL
+				sta MLICALL.PARAMS+S.FILEINFO.ACCESS
+				lda #S.FILEINFO.TYPE.DIR
+				sta MLICALL.PARAMS+S.FILEINFO.TYPE
+				lda #S.FILEINFO.STORETYPE.DIR
+				sta MLICALL.PARAMS+S.FILEINFO.STORETYPE	
 				>MLICALL MLICREATE
 				rts
 *--------------------------------------
 hONLINE			.BS 1
 hDIRENT			.BS 1
 BufSize			.BS 2
-EntryCount		.BS 1
+EntryLength		.BS 1
+EntryPerBlock	.BS 1
+EntryCount		.BS 2
+EntryCountIB	.BS 1
+EntryCount2Return	.BS 1
+
 VolName			.BS 17
 *--------------------------------------
 MAN
