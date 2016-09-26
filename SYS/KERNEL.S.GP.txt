@@ -5,14 +5,16 @@ INC 1
 AUTO 6
 				.LIST OFF
 *--------------------------------------
-* A2osX.SYSCALL (AUXLC to AUXLC)
+* SYSCALL (AUXLC to AUXLC)
+* Used by user & kernel for inter bank Calls 
 * In:
 *   X = SYSfnc.Index
 *   Y,A = free for Inline param
 *--------------------------------------
-A2osX.GP.Start	jmp A2osX.SYSCALL1
+				jmp A2osX.SYSCALL1
 *--------------------------------------
 * LIBCALL (AUXLC to AUXLC)
+* Used by user 
 * In:
 *   Y = LIB.ID
 *   X = LIBfnc.Index
@@ -20,7 +22,8 @@ A2osX.GP.Start	jmp A2osX.SYSCALL1
 *--------------------------------------
 				jmp A2osX.LIBCALL1
 *--------------------------------------
-* Kernel.MLICALL (AUXLC to MAINLC)
+* MLICALL (AUXLC to MAINLC)
+* Used by Kernel
 * In:
 *   X = MLI Function
 *	A = Param Count
@@ -35,46 +38,66 @@ A2osX.GP.Start	jmp A2osX.SYSCALL1
 				jmp (pDev)				pDevJmp
 				.BS $BE20-*
 *--------------------------------------
-GO.Reset		jsr GO.AUXLC
+GO.Reset		jsr GO.A2osX
 				jmp K.KernelRun
 *--------------------------------------
-A2osX.SYSCALL1	phx
-				bit KERNEL.SYSCALL.FLAGS,x
-				bmi .2
-				ldx #RRAMWRAMBNK1
-				.HS 2C
-.2				ldx #RRAMWRAMBNK2		
-				bit $C000,x
-				bit $C000,x
-				plx
-				jmp (KERNEL.SYSCALL,x)
+*     *** MUST BE REINTRANT ***
 *--------------------------------------
-A2osX.LIBCALL1	pha
-				phx
-				tya
-				>SYSCALL SYS.GetMemPtrA
-				>STYA .1+1
-				plx
+A2osX.SYSCALL1	bit KERNEL.SYSCALL.FLAGS,x
+				bpl	.8					in $E000, no BNK change
+				
+				sta .7+1				save A		(Func Arg)
+
+				lda KERNEL.SYSCALL.FLAGS+1,x		Get Target BNK
+				
+				cmp $D000				#RRAMWRAMBNK1 or #RRAMWRAMBNK2
+				beq .7					same as actual BNK...go restore A and JMP
+				
+				stx .6+1				save X		(Func ID)
+
+				tax						set Target BNK in x
+				lda $D000				get source BNK
+				bit $C000,x				switch to Target BNK
+				bit $C000,x
+				pha						
+				
+				jsr .7					go to kernel.....
+
+				stx .5+1				save X
+				plx						get back Source BNK
+				bit $C000,x
+				bit $C000,x
+.5				ldx #$FF				Self Modified
+				rts						Unmodified Carry
+				
+.6				ldx #$FF				Self Modified
+.7				lda #$FF				Self Modified
+.8				jmp (KERNEL.SYSCALL,x)
+*--------------------------------------
+A2osX.LIBCALL1	pha						No need to save X, K.GetMemPtrA will leave it unmodified
+				tya						Get LIB hMem in A
+				jsr K.GetMemPtrA		Get LIB Code Segment (MemMgr in $E000, no BNK change)
+				>STYA pLib
 				pla
-.1				jmp $FFFF 
+				jmp (pLib)
 *--------------------------------------
-A2osX.MLICALL1	jsr GO.MAINLC
-				stx .1
+A2osX.MLICALL1	stx .1
 				sta MLICALL.PARAMS
+				jsr GO.ProDOS
 				jsr MLI
 .1				.BS 1
 				.DA MLICALL.PARAMS
-				jsr GO.AUXLC
+				jsr GO.A2osX
 				rts
 *--------------------------------------
-GO.MAINLC		asl RDLCBNK2			We re coming from AUXLC, saving bank...
-				ror A2osX.SaveLCBNK
+GO.ProDOS		lda $D000				We re coming from AUXLC, saving bank...
+				sta GO.A2osX.BNK+1
 				
 				php
 				clc
 				.HS	2C					bit abs
 				
-GO.AUXLC		php
+GO.A2osX		php
 				sec
 				
 				sei
@@ -96,7 +119,7 @@ GO.AUXLC		php
 
 				ldy pStack
 				
-				bcs .2					if CS, go AUXLC
+				bcs GO.A2osX.BNK		if CS, go AUXLC
 				
 				bit RRAMWRAMBNK1		Go MAINLC (ProDOS), always BNK1
 				bit RRAMWRAMBNK1
@@ -108,11 +131,7 @@ GO.AUXLC		php
 				sta CLRALTZP
 				bra GO.EXIT
 
-.2				bit A2osX.SaveLCBNK		Go AUXLC....Previous Go MAINLC Coming from BNK2 ?
-				bmi .3
-				ldx #RRAMWRAMBNK1		
-				.HS 2C					bit abs
-.3				ldx #RRAMWRAMBNK2
+GO.A2osX.BNK	ldx #$FF				Self Modified
 
 				bit $C000,x
 				bit $C000,x
@@ -129,9 +148,8 @@ GO.EXIT			sty pStack
 				ldx A2osX.SaveX
 				lda A2osX.SaveA
 				plp
-GO.EXIT.JMP		jmp $FFFF
+GO.EXIT.JMP		jmp $FFFF				Self Modified
 *--------------------------------------
-A2osX.SaveLCBNK	.BS 1
 A2osX.SaveA		.BS 1
 A2osX.SaveX		.BS 1
 A2osX.SaveY		.BS 1
@@ -139,14 +157,6 @@ A2osX.SaveY		.BS 1
 BrkHandler		bra *
 *--------------------------------------
 IrqHandler		bra *
-*--------------------------------------
-A2osX.GP.End	.EQ *
-*--------------------------------------
-* CONTROL SECTION :
-*--------------------------------------
-				.DO A2osX.GP.End>$BEDF
-				ERROR:GP too big
-				.FIN
 *--------------------------------------
 MAN
 SAVE SYS/KERNEL.S.GP
