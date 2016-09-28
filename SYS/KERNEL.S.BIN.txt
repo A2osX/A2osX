@@ -13,11 +13,9 @@ AUTO 6
 *   X = hMem of Code Segment
 *--------------------------------------
 BIN.LoadEXEYA	>STYA BIN.LoadExe.Filename
-				jsr K.PStrUprYA
-			
-				>LDYA BIN.LoadExe.Filename
+				jsr K.PStrUprYA			Y,A unmodified
 				jsr K.GetMemByNameYA
-				bcs .1					not already loaded
+				bcs BIN.LoadEXEYA.1		not already loaded
 
 				>STYA ZPQuickPtr1		Save base address
 				ldy #S.MEM.REFCNT
@@ -25,38 +23,56 @@ BIN.LoadEXEYA	>STYA BIN.LoadExe.Filename
 				inc
 				sta (ZPQuickPtr1),y
 				
-				ldy #S.MEM.PTR
-				lda (ZPQuickPtr1),y
-				pha						Y,A = MEM PTR...
-				iny
-				lda (ZPQuickPtr1),y
-				ply						X=hMem from K.GetMemByNameA
-				clc
-				rts
-				
-.1				>PUSHWI KrnBuf256
+				txa
+				jmp K.GetMemPtrA		X=hMem from K.GetMemByNameA
+*--------------------------------------				
+BIN.LoadEXEYA.1	>PUSHWI KrnBuf256
 				>PUSHW BIN.LoadExe.Filename
 				jsr K.STAT				Look for AUXTYPE
-				bcs .99
+				bcs .9
 				
 				>LDYA KrnBuf256+S.STAT.AUXTYPE
-				>STYA BIN.LoadExe.OldBase
+				>STYA BIN.Relocate.Start
 
-				>PUSHYA
+				>PUSHYA					Push AUXTYPE
 				>PUSHBI 6				S.FILEINFO.TYPE.BIN
 				>PUSHBI	SYS.FOPEN.R
 				>PUSHW BIN.LoadExe.Filename
 				jsr K.LoadFile
-				bcs .99					Error Loading file
+.9				bcs .99					Error Loading file
 				
-				>STYA BIN.LoadExe.SegLen
+				>STYA BIN.Relocate.SegLen
 				stx BIN.LoadExe.hMem		save hMem
 				txa
 				jsr K.GetMemPtrA
-				>STYA BIN.LoadExe.NewBase
-			
-				jsr BIN.InstallEXE
+				>STYA ZPQuickPtr1
 				
+				ldy #H.BIN.CODE.LEN+1		get Code Len
+				lda (ZPQuickPtr1),y
+				tax
+				dey
+				lda (ZPQuickPtr1),y
+				jsr BIN.Relocate.SetCodeLenAX
+			
+				lda BIN.Relocate.Start			Get AUXTYPE for actual Base Address
+				clc
+				adc BIN.Relocate.SegLen
+				sta BIN.Relocate.End				compute Range End=AUXTYPE+FILELEN
+
+				lda BIN.Relocate.Start+1
+				adc BIN.Relocate.SegLen+1
+				sta BIN.Relocate.End+1
+				
+				lda ZPQuickPtr1
+				sec
+				sbc BIN.Relocate.Start
+				sta BIN.Relocate.Offset			Offset=ZPQuickPtr1-AUXTYPE
+				
+				lda ZPQuickPtr1+1
+				sbc BIN.Relocate.Start+1
+				sta BIN.Relocate.Offset+1
+				
+				jsr Bin.RelocateEXE
 				bcs .98					relocation error, dicard Code segment
 				
 				>LDYA BIN.LoadExe.Filename	get back bin path
@@ -92,78 +108,34 @@ BIN.LoadEXEYA	>STYA BIN.LoadExe.Filename
 *--------------------------------------
 BIN.LoadExe.Filename	.BS 2
 BIN.LoadExe.hMem		.BS 1
-BIN.LoadExe.OldBase	.BS 2
-BIN.LoadExe.NewBase	.BS 2
-BIN.LoadExe.SegLen	.BS 2
 *--------------------------------------
-* BIN.InstallEXE
-*--------------------------------------
-BIN.InstallEXE	>LDYA BIN.LoadExe.NewBase
-				>STYA ZPQuickPtr1
-				
-				ldy #H.BIN.CODE.LEN		get Code Len
-				lda (ZPQuickPtr1),y
-				sta Rel.CodeLen
-				iny
-				lda (ZPQuickPtr1),y
-				sta Rel.CodeLen+1
-			
-				lda BIN.LoadExe.OldBase
-				sta Rel.Start			Get AUXTYPE for actual Base Address
-				clc
-				adc BIN.LoadExe.SegLen
-				sta Rel.End				compute Range End=AUXTYPE+FILELEN
-
-				lda BIN.LoadExe.OldBase+1
-				sta Rel.Start+1
-				adc BIN.LoadExe.SegLen+1
-				sta Rel.End+1
-				
-				lda ZPQuickPtr1
-				sec
-				sbc BIN.LoadExe.OldBase
-				sta Rel.Offset			Offset=ZPQuickPtr1-AUXTYPE	
-				lda ZPQuickPtr1+1
-				sbc BIN.LoadExe.OldBase+1
-				sta Rel.Offset+1
-				
-				jmp Bin.RelocateEXE
-*--------------------------------------
-* K.InsDrv
+* BIN.InstallDRV
 * pDrv = .DRV File Loaded Address
 *--------------------------------------
-BIN.InstallDRV	ldy #H.BIN.DRV.CODE.LEN
+BIN.InstallDRV	ldy #H.BIN.DRV.CODE.LEN+1
 				lda (pDrv),y
-				sta Rel.CodeLen
-				iny
+				tax
+				dey
 				lda (pDrv),y
-				sta Rel.CodeLen+1
+				jsr BIN.Relocate.SetCodeLenAX
 				
 				ldy #H.BIN.DRV.CODE.O
 				lda (pDrv),y
 				clc
-				adc BIN.LoadExe.OldBase
-				sta Rel.Start
+				adc BIN.Relocate.Start		Advance start From Bin code to DRV code
+				sta BIN.Relocate.Start
 				iny
 				lda (pDrv),y
-				adc BIN.LoadExe.OldBase+1
-				sta Rel.Start+1
-				
-				lda BIN.LoadExe.OldBase
-				clc
-				adc BIN.LoadExe.SegLen
-				sta Rel.End
-				lda BIN.LoadExe.OldBase+1
-				adc BIN.LoadExe.SegLen+1
-				sta Rel.End+1
+				adc BIN.Relocate.Start+1
+				sta BIN.Relocate.Start+1
 				
 				ldy #H.BIN.DRV.CODE.O
-				lda	BIN.LoadExe.SegLen
+				lda	BIN.Relocate.SegLen
 				sec
 				sbc (pDrv),y
 				sta K.InsDrv.DRVLen
 				iny
-				lda	BIN.LoadExe.SegLen+1
+				lda	BIN.Relocate.SegLen+1
 				sbc (pDrv),y
 				sta K.InsDrv.DRVLen+1	Compute DRV Len
 				
@@ -178,8 +150,7 @@ BIN.InstallDRV	ldy #H.BIN.DRV.CODE.LEN
 				bcs .98					we crossed $FFFF, out of mem
 				
 				lda K.InsDrv.DRVEnd
-				sec
-				sbc #DevMgr.HiMem
+				cmp #DevMgr.HiMem
 				lda K.InsDrv.DRVEnd+1
 				sbc /DevMgr.HiMem
 				bcs .98					No More Room to load Driver....
@@ -206,11 +177,11 @@ BIN.InstallDRV	ldy #H.BIN.DRV.CODE.LEN
 				lda DevMgr.Free
 				sec
 				sbc (ZPQuickPtr1),y
-				sta Rel.Offset
+				sta BIN.Relocate.Offset
 				lda DevMgr.Free+1
 				iny
 				sbc (ZPQuickPtr1),y
-				sta Rel.Offset+1
+				sta BIN.Relocate.Offset+1
 
 				ldy #H.BIN.DRV.CODE.O
 				lda (pDrv),y
@@ -253,11 +224,11 @@ BIN.MoveDRV		ldy	#H.BIN.DEV.HEADER.O
 				ldy #S.DEV.JMP			Relocate Main JMP
 				lda (ZPQuickPtr1),y
 				clc
-				adc Rel.Offset
+				adc BIN.Relocate.Offset
 				sta (ZPQuickPtr1),y
 				iny
 				lda (ZPQuickPtr1),y
-				adc Rel.Offset+1
+				adc BIN.Relocate.Offset+1
 				sta (ZPQuickPtr1),y
 				
 				lda DevMgr.LastDevID
@@ -267,6 +238,7 @@ BIN.MoveDRV		ldy	#H.BIN.DEV.HEADER.O
 				ldy #S.DEV.SIZE			Make sure DevMgr.Table Ends with 0
 				lda #0
 				sta (pDev),y
+				
 				dey
 				
 .1				lda (ZPQuickPtr1),y		Copy DRV.Header
@@ -293,171 +265,183 @@ BIN.MoveDRV		ldy	#H.BIN.DEV.HEADER.O
 				lda DevMgr.Free+1
 				sta ZPQuickPtr2+1		Make ZPQuickPtr2=Dest Ram Location
 				
-				ldy K.InsDrv.DrvLen
-				ldx K.InsDrv.DrvLen+1
+				lda K.InsDrv.DrvLen+1
+				eor #$ff
+				pha
+				lda K.InsDrv.DrvLen
+				eor #$ff
+				tax
 				
-.2				lda (ZPQuickPtr1)
-				sta (ZPQuickPtr2)
+				ldy #0
 				
-				inc ZPQuickPtr1
+.2				inx
 				bne .3
-				inc ZPQuickPtr1+1
-				
-.3				inc ZPQuickPtr2
-				bne .4
-				inc ZPQuickPtr2+1
-				
-.4				tya
-				bne .5
-				txa
+				pla
+				inc
 				beq .8
-				dex
+				pha
 				
-.5				dey
-				bra .2		
-.8				rts
+.3				lda (ZPQuickPtr1),y
+				sta (ZPQuickPtr2),y
+				iny
+				bne .2
+				
+				inc ZPQuickPtr1+1
+				inc ZPQuickPtr2+1
+				bra .2
+				
+.8				rts						CC from last ADC
 *--------------------------------------
 K.InsDrv.DrvLen	.BS 2
 K.InsDrv.DrvEnd	.BS 2
 *--------------------------------------
+BIN.Relocate.SetCodeLenAX
+				eor #$ff
+				sta BIN.Relocate.nCodeLen
+				txa
+				eor #$ff
+				sta BIN.Relocate.nCodeLen+1
+				rts
+*--------------------------------------
 * BIN.Relocate___ :
-* ZPQuickPtr1 = Ptr to Code
+*  In :
+*  ZPQuickPtr1 = Ptr to Code
+*--------------------------------------
+BIN.Relocate.SegLen		.BS 2			Code+Data Len
+BIN.Relocate.Start		.BS 2
+BIN.Relocate.End		.BS 2
+BIN.Relocate.Offset		.BS 2
+BIN.Relocate.nCodeLen	.BS 2			!Code length
 *--------------------------------------
 BIN.RelocateEXE	ldy #H.BIN.JMP			relocate Main JMP
 				lda (ZPQuickPtr1),y
 				clc
-				adc Rel.Offset
+				adc BIN.Relocate.Offset
 				sta (ZPQuickPtr1),y
 
 				iny
 				lda (ZPQuickPtr1),y
-				adc Rel.Offset+1
+				adc BIN.Relocate.Offset+1
 				sta (ZPQuickPtr1),y
 
 				ldy #H.BIN.RELOC.TABLE	skip Header, CS.SIZE & DS.SIZE... (16 bytes)
 				
 				.HS 2C					bit abs
-				
+*--------------------------------------					
 BIN.RelocateDRV	ldy #0
 				
 .1				lda (ZPQuickPtr1),y		Start Relocate JMP table
-				tax
+				tax						LO in X
 				iny
-				ora (ZPQuickPtr1),y
+				ora (ZPQuickPtr1),y		ORA with HI
 				beq .2					$0000 = end of table
 				
 				dey
-				txa
+				txa						get back LO
 				clc
-				adc Rel.Offset
+				adc BIN.Relocate.Offset
 				sta (ZPQuickPtr1),y
 
 				iny
 				lda (ZPQuickPtr1),y
-				adc Rel.Offset+1
+				adc BIN.Relocate.Offset+1
 				sta (ZPQuickPtr1),y
 
 				iny
 
 				bra .1
+*--------------------------------------				
+.2				tya						add current offset in Y to Ptr
 				
-.2				lda ZPQuickPtr1
-				clc
-				adc Rel.CodeLen				Make ZPQuickPtr2=End of code
-				sta ZPQuickPtr2			=ZPQuickPtr1+AX (code len)
-				lda ZPQuickPtr1+1
-				adc Rel.CodeLen+1
-				sta ZPQuickPtr2+1
-	
-				iny
-				tya						add current offset in Y to Ptr
-				clc
+				sec						+ 1 to skip last 00 from beq .2
+				
 				adc ZPQuickPtr1
 				sta ZPQuickPtr1
-				bcc .5	
+				bcc .3	
 				inc ZPQuickPtr1+1		ZPQuickPtr1=Current Code PTR
-				clc
 				
-.5				lda (ZPQuickPtr1)		get OPCODE
+.3				inc BIN.Relocate.nCodeLen
+				bne .4					nCodeLen reached 0 ?
+				inc BIN.Relocate.nCodeLen+1
+				beq .8					no, continue relocating
+				
+.4				lda (ZPQuickPtr1)		get OPCODE
+				lsr						/2
 				tax
 				lda BIN.OPCODES,x		get OPCODE definition
-				bpl .7					abs addressing?
+				bcs .5					go get LO nibble
+				lsr
+				lsr						move HI -> LO
+				lsr
+				lsr
+.5				and #$0f				
 				
-				and #3					save Opcode length...
+				bit #$8					abs addressing? 
+				beq .7					no....
+				
+				and #7					save Opcode length...
 				pha
 				
 				ldy #1
 				lda (ZPQuickPtr1),y		Get LO
-				sec
-				sbc Rel.Start
-				iny
-				lda (ZPQuickPtr1),y		Get HI
-				sbc Rel.Start+1
-				bcc .6					addr < AX, out of range
+				tax						save LO in X
 				
-				dey
-				lda (ZPQuickPtr1),y		Get LO
-				sec
-				sbc Rel.End
-				iny
+				iny						make Y point to HI
+
+				cpx BIN.Relocate.Start
 				lda (ZPQuickPtr1),y		Get HI
-				sbc Rel.End+1
-				bcs .6					addr > CX, out of range
+				sbc BIN.Relocate.Start+1
+				bcc .6					addr < BIN.Relocate.Start, out of range
 				
+				txa						Get back LO
+				cpx BIN.Relocate.End
+				lda (ZPQuickPtr1),y		Get HI
+				sbc BIN.Relocate.End+1
+				bcs .6					addr > BIN.Relocate.End, out of range
+				
+				txa						Get back LO
+*				clc						CC from bcs .6
+				adc BIN.Relocate.Offset	add Offset to abs address
 				dey
-				lda (ZPQuickPtr1),y		Get LO
-				clc
-				adc Rel.Offset				add DX to abs address
 				sta (ZPQuickPtr1),y		store relocated addr LO
 				iny
 				lda (ZPQuickPtr1),y		Get HI
-				adc Rel.Offset+1
+				adc BIN.Relocate.Offset+1
 				sta (ZPQuickPtr1),y		store relocated addr HI
 				
-.6				pla
+.6				pla						get back Opcode length...
 
 .7				clc						A = OPCODE length
 				adc ZPQuickPtr1
 				sta ZPQuickPtr1
-				bcc .8
+				bcc .3
 				inc ZPQuickPtr1+1
+				bra .3					next opcode....
 				
-.8				lda ZPQuickPtr1			is Current PTR < Code Limit ?
-				sec
-				sbc ZPQuickPtr2
-				lda ZPQuickPtr1+1
-				sbc ZPQuickPtr2+1
-				bcc .5					yes, continue relocating
-				
-				clc
+.8				clc
 				rts
 *--------------------------------------
 * 65C02 OPCODES
-* Bit 7 : 1 absolute addressing
-* Bit 1-0 : opcode + @ length
+* Bit 3 	: 1 = absolute addressing
+* Bit 2-1-0 : opcode + @ length
 *--------------------------------------
-*					x0.x1.x2.x3.x4.x5.x6.x7.x8.x9.xA.xB.xC.xD.xE.xF
-BIN.OPCODES		.HS 01.02.02.01.02.02.02.02.01.02.01.01.83.83.83.03
-				.HS 02.02.02.01.02.02.02.02.01.83.01.01.83.83.83.03
-				.HS 83.02.02.01.02.02.02.02.01.02.01.01.83.83.83.03
-				.HS 02.02.02.01.02.02.02.02.01.83.01.01.83.83.83.03
-				.HS 01.02.02.01.02.02.02.02.01.02.01.01.83.83.83.03
-				.HS 02.02.02.01.02.02.02.02.01.83.01.01.01.83.83.03
-				.HS 01.02.02.01.02.02.02.02.01.02.01.01.83.83.83.03
-				.HS 02.02.02.01.02.02.02.02.01.83.01.01.83.83.83.03
-				.HS 02.02.02.01.02.02.02.02.01.02.01.01.83.83.83.03
-				.HS 02.02.02.01.02.02.02.02.01.83.01.01.83.83.83.03
-				.HS 02.02.02.01.02.02.02.02.01.02.01.01.83.83.83.03
-				.HS 02.02.02.01.02.02.02.02.01.83.01.01.83.83.83.03
-				.HS 02.02.02.01.02.02.02.02.01.02.01.01.83.83.83.03
-				.HS 02.02.02.01.02.02.02.02.01.83.01.01.01.83.83.03
-				.HS 02.02.02.01.02.02.02.02.01.02.01.01.83.83.83.03
-				.HS 02.02.02.01.02.02.02.02.01.83.01.01.01.83.83.03
-*--------------------------------------
-Rel.CodeLen		.BS 2
-Rel.Start		.BS 2
-Rel.End			.BS 2
-Rel.Offset		.BS 2
+*					0.1.2.3.4.5.6.7.8.9.A.B.C.D.E.F
+BIN.OPCODES		.HS 1.2.2.1.2.2.2.2.1.2.1.1.B.B.B.3
+				.HS 2.2.2.1.2.2.2.2.1.B.1.1.B.B.B.3
+				.HS B.2.2.1.2.2.2.2.1.2.1.1.B.B.B.3
+				.HS 2.2.2.1.2.2.2.2.1.B.1.1.B.B.B.3
+				.HS 1.2.2.1.2.2.2.2.1.2.1.1.B.B.B.3
+				.HS 2.2.2.1.2.2.2.2.1.B.1.1.1.B.B.3
+				.HS 1.2.2.1.2.2.2.2.1.2.1.1.B.B.B.3
+				.HS 2.2.2.1.2.2.2.2.1.B.1.1.B.B.B.3
+				.HS 2.2.2.1.2.2.2.2.1.2.1.1.B.B.B.3
+				.HS 2.2.2.1.2.2.2.2.1.B.1.1.B.B.B.3
+				.HS 2.2.2.1.2.2.2.2.1.2.1.1.B.B.B.3
+				.HS 2.2.2.1.2.2.2.2.1.B.1.1.B.B.B.3
+				.HS 2.2.2.1.2.2.2.2.1.2.1.1.B.B.B.3
+				.HS 2.2.2.1.2.2.2.2.1.B.1.1.1.B.B.3
+				.HS 2.2.2.1.2.2.2.2.1.2.1.1.B.B.B.3
+				.HS 2.2.2.1.2.2.2.2.1.B.1.1.1.B.B.3
 *--------------------------------------
 MAN
 SAVE SYS/KERNEL.S.BIN
