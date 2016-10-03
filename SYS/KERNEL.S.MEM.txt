@@ -5,7 +5,6 @@ INC 1
 AUTO 6
 				.LIST OFF
 *--------------------------------------
-* !!!!!!!! DO NOT USE VCPU16 !!!!!!!!
 * !!!!!! DO NOT USE ZPQuickPTRs !!!!!
 *--------------------------------------
 ZPMemMgrSPtr 	.EQ ZPMEMMGR			Pointer To Slot selected
@@ -18,6 +17,10 @@ ZPMemMgrTmp3	.EQ ZPMEMMGR+6
 *    mapping hMem's to real memory blocks to help 
 *    Garbage collector move blocks
 *  - mem.ID=0 always used! useful to test if hMem=0
+*--------------------------------------
+MemMgr.SlotCnt	.BS 1
+MemMgr.ReqFlags	.BS 1					store requested Flags
+MemMgr.ReqSize 	.BS 2					store requested Size
 *--------------------------------------
 *               PUBLIC
 *--------------------------------------
@@ -155,26 +158,24 @@ MemMgr.AddSlot  >STYA ZPMemMgrTmp1		save req size
 				lda MemMgr.Free			Compute base PTR=FREE-REQ size
 				sec
 				sbc ZPMemMgrTmp1
-				sta ZPMemMgrTmp2		store new MemMgr.Free in ZPMemMgrTmp2
+				tay						save new MemMgr.Free LO
 				lda MemMgr.Free+1
 				sbc ZPMemMgrTmp1+1
-				sta ZPMemMgrTmp2+1
+				pha						save new MemMgr.Free HI				
 
-				lda ZPMemMgrTmp2		ensure new MemMgr.Free is not lower
-				sec						than LoMem
-				sbc MemMgr.LoMem
-				lda ZPMemMgrTmp2+1
+				cpy MemMgr.LoMem
 				sbc MemMgr.LoMem+1
 				bcc .98					ERR out of mem
 
-				jsr MemMgr.NextSlot
+				jsr MemMgr.NextSlot		X,Y unmodified
+				
+				tya						get back MemMgr.Free LO
 				
 				ldy #S.MEM.PTR
-				lda ZPMemMgrTmp2		get new MemMgr.Free
 				sta MemMgr.Free			set as system MemMgr.Free value
 				sta (ZPMemMgrSPtr),y	store is as base address of new slot
 				iny
-				lda ZPMemMgrTmp2+1
+				pla						get back MemMgr.Free HI
 				sta MemMgr.Free+1
 				sta (ZPMemMgrSPtr),y
 
@@ -189,7 +190,8 @@ MemMgr.AddSlot  >STYA ZPMemMgrTmp1		save req size
 				clc
 				rts
 				
-.98				lda #MemMgr.ERROOM
+.98				pla						discard new MemMgr.Free HI
+				lda #MemMgr.ERROOM
 				sec
 				rts
 				
@@ -199,7 +201,7 @@ MemMgr.AddSlot  >STYA ZPMemMgrTmp1		save req size
 *--------------------------------------
 MemMgr.NextSlot	lda ZPMemMgrSPtr
 				clc
-				adc #S.MEM.SIZE
+				adc #S.MEM
 				sta ZPMemMgrSPtr
 				bcc .8
 				inc ZPMemMgrSPtr+1
@@ -237,10 +239,6 @@ MemMgr.Init0	ldy #S.MEM.PTR
 				
 .8				rts
 *--------------------------------------
-MemMgr.SlotCnt	.BS 1
-MemMgr.ReqFlags	.BS 1					store requested Flags
-MemMgr.ReqSize 	.BS 2					store requested Size
-*--------------------------------------
 * K.FreeMemA
 * In:
 *  A = hMem To Free
@@ -248,13 +246,13 @@ MemMgr.ReqSize 	.BS 2					store requested Size
 *  X,Y unmodified
 *--------------------------------------
 K.FreeMemA	    phy
-				phx
-				tax
-				beq .8					Slot=0, reserved by Kernel
+				tay
 				
-				jsr K.GetMemByIDA
+				beq *					Slot=0, reserved by Kernel
+				
+				jsr K.GetMemByIDA		X unmodified
 				lda (ZPMemMgrSPtr)
-				bpl *					In use ?
+				bpl .9					In use ?
 				
 				ldy #S.MEM.REFCNT
 				lda (ZPMemMgrSPtr),y	Get count of those referencing this hMem
@@ -269,7 +267,7 @@ K.FreeMemA	    phy
 				pha						save hMem
 				>PUSHW ZPMemMgrSPtr
 				pla
-				jsr K.GetMemByIDA
+				jsr K.GetMemByIDA		X unmodified
 				lda (ZPMemMgrSPtr)
 				bpl *					***MUST BE ALLOCATED***
 				
@@ -283,7 +281,7 @@ K.FreeMemA	    phy
 .2				lda MemMgr.LastSlot
 				beq .8
 				
-				jsr K.GetMemByIDA
+				jsr K.GetMemByIDA		X unmodified
 				lda (ZPMemMgrSPtr)
 				bmi .8
 				
@@ -300,10 +298,35 @@ K.FreeMemA	    phy
 				dec	MemMgr.LastSlot		discard last slot	
 				bne .2					no slot left, exit
 
-.8				plx
-				ply
+.8				ply
 				clc
 				rts
+*--------------------------------------				
+.9				ply						discard	saved Y
+
+				lda $D000
+				sta .91+1
+				bit RRAMWRAMBNK1
+				bit RRAMWRAMBNK1
+				
+				jsr PS.Select0
+				
+				pla						Get PC and sub 2 for calling address
+				sec
+				sbc #2
+				tay
+				pla
+				sbc #0
+
+				>PUSHYA
+				
+				>LDYAI K.FreeMemA.ERR
+				jsr K.PStrOutYA
+				
+.91				ldx #$ff				
+				bit $C000,x
+				bit $C000,x
+				bra *
 *--------------------------------------
 * K.GetMemPtrA
 * In:
@@ -327,26 +350,48 @@ K.GetMemPtrA	jsr K.GetMemByIDA
 * Out:
 *	Y,A = ZPMemMgrSPtr = PTR to S.MEM
 *   X unmodified
+* *** Optimized for :
+*  MemMgr.Table is page aligned at $1800
+*  S.MEM is 8 bytes
 *--------------------------------------
-K.GetMemByIDA	stz ZPMemMgrSPtr+1
-				
-				asl
-				rol ZPMemMgrSPtr+1
-				asl
-				rol ZPMemMgrSPtr+1
-				asl
-				rol ZPMemMgrSPtr+1
-				
-*				clc						IMPLICIT
-
-				adc #MemMgr.Table
-				tay
-				lda ZPMemMgrSPtr+1
-				adc /MemMgr.Table
-				
-				sty ZPMemMgrSPtr
+				.DO MemMgr.Table=$1800
+				.ELSE
+				!!!!!WARNING!!!!!
+				.FIN
+				.DO S.MEM=8
+				.ELSE
+				!!!!!WARNING!!!!!
+				.FIN
+*--------------------------------------
+K.GetMemByIDA	sta ZPMemMgrSPtr
+				lda /MemMgr.Table/8
+				asl ZPMemMgrSPtr
+				rol
+				asl ZPMemMgrSPtr
+				rol
+				asl ZPMemMgrSPtr
+				rol
 				sta ZPMemMgrSPtr+1
+				ldy ZPMemMgrSPtr
 				rts
+*--------------------------------------
+* OLD CODE
+*--------------------------------------
+*				stz ZPMemMgrSPtr+1
+*				asl
+*				rol ZPMemMgrSPtr+1
+*				asl
+*				rol ZPMemMgrSPtr+1
+*				asl
+*				rol ZPMemMgrSPtr+1
+**				clc						IMPLICIT
+*				adc #MemMgr.Table
+*				tay
+*				lda ZPMemMgrSPtr+1
+*				adc /MemMgr.Table				
+*				sty ZPMemMgrSPtr
+*				sta ZPMemMgrSPtr+1
+*				rts
 *--------------------------------------
 * In:
 *	Y,A = BINPATH (PSTR)
@@ -355,15 +400,16 @@ K.GetMemByIDA	stz ZPMemMgrSPtr+1
 *   X = hMem
 *--------------------------------------
 K.GetMemByNameYA
+				ldx MemMgr.LastSlot
+				beq .9
+
 				>STYA ZPMemMgrTmp1		save BINPATH
 				>LDYAI MemMgr.Table
 				>STYA ZPMemMgrTmp2		
+
 				ldx #0
 				
-.1				cpx MemMgr.LastSlot
-				beq .9
-				
-				lda (ZPMemMgrTmp2)
+.1				lda (ZPMemMgrTmp2)
 				bpl .6					In Use?
 				
 				ldy #S.MEM.BIN			any BIN PATH in this slot?	
@@ -393,14 +439,14 @@ K.GetMemByNameYA
 				
 .6				lda ZPMemMgrTmp2
 				clc
-				adc #S.MEM.SIZE
+				adc #S.MEM
 				sta ZPMemMgrTmp2
-				bcc .7
+				bcc .8
 				inc ZPMemMgrTmp2+1
 				
-.7				inx
-				
-				bra .1
+.8				inx
+.81				cpx MemMgr.LastSlot
+				bne .1
 				
 .9				sec
 				rts
@@ -418,6 +464,8 @@ K.SetLoMem
 K.GarbageCollector
 				clc
 				rts
+*--------------------------------------
+K.FreeMemA.ERR	>PSTRING "***MemMgr:Attempted to Free an already freed hMem at $%H"
 *--------------------------------------
 MAN
 SAVE SYS/KERNEL.S.MEM
