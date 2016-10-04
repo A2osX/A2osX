@@ -71,6 +71,7 @@ K.LoadEXEYA.1	>PUSHWI KrnBuf256
 				jsr BIN.SetupCodeEndPtr2
 				
 				jsr BIN.RelocateEXE
+				bcs .98
 				
 				>LDYA K.LoadEXEYA.Filename	get back bin path
 				>SYSCALL SYS.NewPStrYA			make a copy of this string
@@ -106,13 +107,28 @@ K.LoadEXEYA.Filename	.BS 2
 K.LoadEXEYA.hMem		.BS 1
 *--------------------------------------
 * BIN.InstallDRV
-* pDrv = .DRV File Loaded Address
+*  In:
+*   pDrv = .DRV File Loaded Address
+* Note:
+*  K.LoadEXEYA called from K.LoadDrvYA
+*  Already setup correctly pDrv,
+*  BIN.Relocate.Start,End
 *--------------------------------------
-BIN.InstallDRV	ldy #H.BIN.DRV.CODE.O
+BIN.InstallDRV	lda DevMgr.Free				Offset = Target DRV address-AUXTYPE
+				sec
+				sbc BIN.Relocate.Start
+				sta BIN.Relocate.Offset
+				
+				lda DevMgr.Free+1
+				sbc BIN.Relocate.Start+1
+				sta BIN.Relocate.Offset+1
+				
+				ldy #H.BIN.DRV.CODE.O
 				lda (pDrv),y
 				clc
 				adc BIN.Relocate.Start		Advance start From Bin code to DRV code
 				sta BIN.Relocate.Start
+				
 				iny
 				lda (pDrv),y
 				adc BIN.Relocate.Start+1
@@ -133,127 +149,71 @@ BIN.InstallDRV	ldy #H.BIN.DRV.CODE.O
 				sta BIN.InstallDRV.DRVEnd
 				tay								Save DRVEnd LO
 				lda DevMgr.Free+1
-				sta ZPQuickPtr3+1				save it for DrvMove
 				adc BIN.InstallDRV.DRVLen+1		A = DRVEnd HI
 				sta BIN.InstallDRV.DRVEnd+1
 				
-				bcs .98					we crossed $FFFF, out of mem
+				bcs .9					we crossed $FFFF, out of mem
 				
 				cpy #DevMgr.HiMem
 				sbc /DevMgr.HiMem
-				bcs .98					No More Room to load Driver....
+				bcs .9					No More Room to load Driver....
 
 				lda DevMgr.LastDevID
 				inc
 				cmp #K.DEV.MAX
-				beq .99					No Device Handle Left
+				bne .10					No Device Handle Left
 				
-				sta DevMgr.LastDevID
-				
-				ldy	#H.BIN.DRV.DEVCTRLBLK.O
-				lda (pDrv),y
-				clc
-				adc pDrv
-				sta ZPQuickPtr1
-				iny
-				lda (pDrv),y
-				adc pDrv+1
-				sta ZPQuickPtr1+1
-
-				ldy #S.DEV.JMP
-				
-				lda DevMgr.Free
+				lda #DEVMGR.ERROOH
 				sec
-				sbc (ZPQuickPtr1),y
-				sta BIN.Relocate.Offset
-				lda DevMgr.Free+1
-				iny
-				sbc (ZPQuickPtr1),y
-				sta BIN.Relocate.Offset+1
-
-				ldy #H.BIN.DRV.CODE.O
-				lda (pDrv),y
-				clc
-				adc pDrv
-				sta ZPQuickPtr1
-				
-				iny
-				lda (pDrv),y
-				adc pDrv+1
-				sta ZPQuickPtr1+1
-				
-				ldy #H.BIN.DRV.CODE.LEN
-				jsr BIN.SetupCodeEndPtr2
-				
-				jsr BIN.RelocateDRV
-				
-				jsr BIN.MoveDRV
-				
-				>LDYA BIN.InstallDRV.DrvEnd
-				>STYA DevMgr.Free
-				clc
-				rts
-				
-.98				lda #DEVMGR.ERROOM
+				rts				
+								
+.9				lda #DEVMGR.ERROOM
 				sec
 				rts
 				
-.99				lda #DEVMGR.ERROOH
-				sec
-				rts
-*--------------------------------------
-BIN.MoveDRV		ldy	#H.BIN.DRV.DEVCTRLBLK.O
-				lda (pDrv),y
-				clc
-				adc pDrv
-				sta ZPQuickPtr1
-				iny
-				lda (pDrv),y
-				adc pDrv+1
-				sta ZPQuickPtr1+1
-
-				ldy #S.DEV.JMP			Relocate Main JMP
-				lda (ZPQuickPtr1),y
-				clc
-				adc BIN.Relocate.Offset
-				sta (ZPQuickPtr1),y
-				iny
-				lda (ZPQuickPtr1),y
-				adc BIN.Relocate.Offset+1
-				sta (ZPQuickPtr1),y
+.10				sta DevMgr.LastDevID
 				
-				lda DevMgr.LastDevID
 				jsr K.GetDevByIDA
-				>STYA pDev
+				>STYA ZPQuickPtr2		setup Ptr2 to dest HEADER
 				
-				ldy #S.DEV				Make sure DevMgr.Table Ends with 0
-				lda #0
-				sta (pDev),y
+				ldy	#H.BIN.DRV.HEADER.O
+				lda (pDrv),y
+				clc
+				adc pDrv
+				sta ZPQuickPtr1
+				iny
+				lda (pDrv),y
+				adc pDrv+1
+				sta ZPQuickPtr1+1		set Ptr1 to Src HEADER
+
+				ldy #S.DEV-1
 				
-				dey
-				
-.1				lda (ZPQuickPtr1),y		Copy DRV.Header
-				sta (pDev),y
+.1				lda (ZPQuickPtr1),y		copy header to DevMgr.Table
+				sta (ZPQuickPtr2),y
 				dey
 				bpl .1
+			
+				ldy #S.DEV.JMP			Setup Main JMP
+				lda DevMgr.Free
+				sta (ZPQuickPtr2),y
+				tax
+				iny
+				lda DevMgr.Free+1
+				sta (ZPQuickPtr2),y
 				
-				lda DevMgr.LastDevID	Save Dev.ID in the driver for SELECT
-				ldy #S.DEV.ID
-				sta (pDev),y
+				stx ZPQuickPtr2			set Ptr2 to Dest CODE
+				sta ZPQuickPtr2+1
 				
-				ldy #H.BIN.DRV.CODE.O
+				ldy	#H.BIN.DRV.CODE.O
 				lda (pDrv),y
 				clc
 				adc pDrv
 				sta ZPQuickPtr1
-				iny 
+				iny
 				lda (pDrv),y
 				adc pDrv+1
-				sta ZPQuickPtr1+1		Make ZPQuickPtr1=DRV.CODE
-				
-				>LDYA DevMgr.Free
-				>STYA ZPQuickPtr2		Make ZPQuickPtr1=Dest location in LC
-				
+				sta ZPQuickPtr1+1		set Ptr1 to Src CODE
+
 				lda BIN.InstallDRV.DrvLen+1
 				eor #$ff
 				pha
@@ -263,11 +223,11 @@ BIN.MoveDRV		ldy	#H.BIN.DRV.DEVCTRLBLK.O
 				
 				ldy #0
 				
-.2				inx
+.2				inx						Move CODE in LC
 				bne .3
 				pla
-				dec
-				beq .8
+				inc
+				beq .4
 				pha
 				
 .3				lda (ZPQuickPtr1),y
@@ -276,9 +236,27 @@ BIN.MoveDRV		ldy	#H.BIN.DRV.DEVCTRLBLK.O
 				bne .2
 				inc ZPQuickPtr1+1
 				inc ZPQuickPtr2+1
-				bra .2
+				bra .2				
+							
+.4				ldy #H.BIN.DRV.CODE.LEN
+				lda DevMgr.Free					Make Ptr1 = code start
+				sta ZPQuickPtr1
+				clc
+				adc (pDrv),y
+				sta ZPQuickPtr2
 				
-.8				rts
+				iny
+				lda DevMgr.Free+1
+				sta ZPQuickPtr1+1
+				adc (pDrv),y
+				sta ZPQuickPtr2+1				Make ZPQuickPtr2 = ZPQuickPtr1 + CodeLen
+				
+				jsr BIN.RelocateDRV
+				
+				>LDYA BIN.InstallDRV.DrvEnd
+				>STYA DevMgr.Free
+				clc
+				rts
 *--------------------------------------
 BIN.InstallDRV.DrvLen	.BS 2
 BIN.InstallDRV.DrvEnd	.BS 2
@@ -306,9 +284,15 @@ BIN.Relocate.Offset		.BS 2
 BIN.RelocateEXE	ldy #H.BIN.HEADER+1
 				lda (ZPQuickPtr1),y
 				cmp /H.BIN.HEADER.BIN65
-				bne *
+				beq .1
+				cmp /H.BIN.HEADER.DRV65
+				beq .1
 				
-				ldy #H.BIN.JMP			relocate Main JMP
+				lda #SYSMGR.ERRIBIN
+				sec
+				rts
+				
+.1				ldy #H.BIN.JMP			relocate Main JMP
 				lda (ZPQuickPtr1),y
 				clc
 				adc BIN.Relocate.Offset
