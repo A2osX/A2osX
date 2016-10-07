@@ -9,18 +9,17 @@ AUTO 6
 *--------------------------------------
 ZPMemMgrSPtr 	.EQ ZPMEMMGR			Pointer To Slot selected
 ZPMemMgrTmp1	.EQ ZPMEMMGR+2
-ZPMemMgrTmp2	.EQ ZPMEMMGR+4
-ZPMemMgrTmp3	.EQ ZPMEMMGR+6
+ZPMemMgrSrcPtr	.EQ ZPMEMMGR+4
+ZPMemMgrDstPtr	.EQ ZPMEMMGR+6
+*--------------------------------------
+MemMgr.ReqSize 	.EQ ZPMEMMGR+8			store requested Size
+MemMgr.ReqFlags	.EQ ZPMEMMGR+10			store requested Flags
 *--------------------------------------
 * TODO :
 *  - Create a 256 bytes table
 *    mapping hMem's to real memory blocks to help 
 *    Garbage collector move blocks
 *  - mem.ID=0 always used! useful to test if hMem=0
-*--------------------------------------
-MemMgr.SlotCnt	.BS 1
-MemMgr.ReqFlags	.BS 1					store requested Flags
-MemMgr.ReqSize 	.BS 2					store requested Size
 *--------------------------------------
 *               PUBLIC
 *--------------------------------------
@@ -40,11 +39,11 @@ K.GetMem		>PULLB MemMgr.ReqFlags	store requested flags
 				sta SETREADAUX			Aux Mem requested,switch to AUX
 				sta SETWRITEAUX				
 				
-.11				>PULLAX					Store requested size
-				bit #$0F
-				beq .10
+.11				>PULLAX					get requested size
+				bit #$0F				16 bytes aligned ?
+				beq .10					yes, request it	
 				
-				and #$F0
+				and #$F0				align on 16 bytes
 				clc
 				adc #$10
 				bcc .10
@@ -57,10 +56,7 @@ K.GetMem		>PULLB MemMgr.ReqFlags	store requested flags
 				
 				ldx #0					Current slot=0
 
-				lda MemMgr.LastSlot		Check if some free slot to reuse first
-				beq .41
-				
-				sta MemMgr.SlotCnt
+				bra .4					skip slot 0, Check if some free slot to reuse first
 				
 .1				inx						move to next slot
 				jsr MemMgr.NextSlot
@@ -85,10 +81,11 @@ K.GetMem		>PULLB MemMgr.ReqFlags	store requested flags
 				cmp MemMgr.ReqSize+1
 				beq .7					requested size matches slot size !!!
 				
-.4				dec MemMgr.SlotCnt		any other slot to check?
+.4				cpx MemMgr.LastSlot		any other slot to check?
 				bne .1					last one, create a new slot
+				
 *-------------- Create a New SLOT
-.41				lda MemMgr.ReqFlags
+				lda MemMgr.ReqFlags
 				and #S.MEM.F.ALIGN		is request needs a page align ?
 				beq .6
 				
@@ -105,6 +102,7 @@ K.GetMem		>PULLB MemMgr.ReqFlags	store requested flags
 .6				>LDYA MemMgr.ReqSize
 				jsr MemMgr.AddSlot		X = new slot
 				bcs .9
+				
 *-------------- Reuse this SLOT
 .7				lda MemMgr.ReqFlags		get requested flags
 				ora #S.MEM.F.INUSE		mark as in use
@@ -306,8 +304,8 @@ K.FreeMemA	    phy
 
 				lda $D000
 				sta .91+1
-				bit RRAMWRAMBNK1
-				bit RRAMWRAMBNK1
+				bit RRAMWRAMBNK2
+				bit RRAMWRAMBNK2		
 				
 				jsr PS.Select0
 				
@@ -327,6 +325,8 @@ K.FreeMemA	    phy
 				bit $C000,x
 				bit $C000,x
 				bra *
+*--------------------------------------
+K.FreeMemA.ERR	>PSTRING "***MemMgr:Attempt to Free an already freed hMem at $%H"
 *--------------------------------------
 * K.GetMemPtrA
 * In:
@@ -403,49 +403,48 @@ K.GetMemByNameYA
 				ldx MemMgr.LastSlot
 				beq .9
 
-				>STYA ZPMemMgrTmp1		save BINPATH
+				>STYA ZPMemMgrSrcPtr		save BINPATH
 				>LDYAI MemMgr.Table
-				>STYA ZPMemMgrTmp2		
+				>STYA ZPMemMgrTmp1		
 
 				ldx #0
 				
-.1				lda (ZPMemMgrTmp2)
+.1				lda (ZPMemMgrTmp1)
 				bpl .6					In Use?
 				
 				ldy #S.MEM.BIN			any BIN PATH in this slot?	
-				lda (ZPMemMgrTmp2),y
+				lda (ZPMemMgrTmp1),y
 				beq .6
 				
 				jsr K.GetMemPtrA		get pathname
-				bcs *
-				>STYA ZPMemMgrTmp3
+				>STYA ZPMemMgrDstPtr
 				
-				lda (ZPMemMgrTmp1)
-				cmp (ZPMemMgrTmp3)
+				lda (ZPMemMgrSrcPtr)
+				cmp (ZPMemMgrDstPtr)
 				bne .6
 
 				tay
 				
-.2				lda (ZPMemMgrTmp1),y
-				cmp (ZPMemMgrTmp3),y
+.2				lda (ZPMemMgrSrcPtr),y
+				cmp (ZPMemMgrDstPtr),y
 				bne .6
 				dey
 				bne .2
 				
-				>LDYA ZPMemMgrTmp2
+				>LDYA ZPMemMgrTmp1
 				
 				clc
 				rts
 				
-.6				lda ZPMemMgrTmp2
+.6				lda ZPMemMgrTmp1
 				clc
 				adc #S.MEM
-				sta ZPMemMgrTmp2
-				bcc .8
-				inc ZPMemMgrTmp2+1
+				sta ZPMemMgrTmp1
+				bcc .7
+				inc ZPMemMgrTmp1+1
 				
-.8				inx
-.81				cpx MemMgr.LastSlot
+.7				inx
+				cpx MemMgr.LastSlot
 				bne .1
 				
 .9				sec
@@ -461,11 +460,62 @@ K.SetLoMem
 				clc
 				rts
 *--------------------------------------
-K.GarbageCollector
-				clc
+K.GetMemStatYA	>STYA ZPMemMgrDstPtr
+				
+				ldy #7
+				
+.1				lda MemMgr.Table,y
+				sta (ZPMemMgrDstPtr),y
+				dey
+				bpl .1
+				
+				
+				ldx #7
+				ldy #15
+				
+				sta SETREADAUX
+				
+.2				lda MemMgr.Table,x
+				sta (ZPMemMgrDstPtr),y
+				dey
+				dex
+				bpl .2
+				
+				sta CLRREADAUX
+				
+				ldy #16
+				lda #DevMgr.LoMem
+				sta (ZPMemMgrDstPtr),y
+				
+				iny
+				lda /DevMgr.LoMem
+				sta (ZPMemMgrDstPtr),y
+				
+				iny
+				lda DevMgr.Free
+				sta (ZPMemMgrDstPtr),y
+				
+				iny
+				lda DevMgr.Free+1
+				sta (ZPMemMgrDstPtr),y
+				
+				iny
+				lda #DevMgr.HiMem
+				sta (ZPMemMgrDstPtr),y
+				
+				iny
+				lda /DevMgr.HiMem
+				sta (ZPMemMgrDstPtr),y
+				
+				iny
+				lda DevMgr.LastDevID
+				sta (ZPMemMgrDstPtr),y
+				
 				rts
 *--------------------------------------
-K.FreeMemA.ERR	>PSTRING "***MemMgr:Attempted to Free an already freed hMem at $%H"
+MEM.GarbageCollector
+				clc
+				rts
 *--------------------------------------
 MAN
 SAVE SYS/KERNEL.S.MEM
