@@ -3,9 +3,9 @@ Multi-Tasking OS for Apple II
 ## Requires :
 Enhanced IIe (65c02 cpu) with 128k, //c, IIgs
 
-## General Information:
+## General Information:  
 **A2OSX.BOOT.po** : 140k A2osX boot disk with all binaries  
-**A2OSX.DEV.po**  : 140k A2osX disk will ASM binaries & INClude files  
+**A2OSX.DEV.po**  : 140k A2osX disk with ASM binaries & INClude files  
 **A2OSX.SRC.po**  : 800k S-C MASM boot disk with all sources  
   
 OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.  
@@ -26,10 +26,10 @@ In Progress : moving KERNEL to AuxLC Bnk1 & 2 (16k, more space for drivers)
 | KM.NSC | Working | No-Slot-Clock |
 | KM.RAMWORKS | Working | AE-Ramworks I,II,III |
   
-## SBIN,Daemons:  
-| Name.DRV | Status | Comment |
-| -------- | ------ | ------- |
-| INSDEV | Working | |
+## SBIN,Daemons/Commands:  
+| Name | Status | Comment | K.Ver |
+| ---- | ------ | ------- | ----- |
+| INSDRV | Working | |
 | GETTY | Working | |
 | LOGIN | In Progress | no auth using /etc/passd yet |
 | TCPIP | In Progress | New Socket API. ARP,IP,ICMP,UDP ok, TCP in progress |
@@ -37,8 +37,8 @@ In Progress : moving KERNEL to AuxLC Bnk1 & 2 (16k, more space for drivers)
 | SHELL | Working | (See Internal Shell commands) |
   
 ## DRV,Drivers:  
-| Name.DRV | Status | Comment |
-| -------- | ------ | ------- |
+| Name | Status | Comment | K.Ver |
+| ---- | ------ | ------- | ----- |
 | Console.DRV | Working | ANSI support in Progress. |
 | PIC.DRV | In Progress | Apple "Parallel Interface Card" Driver, renamed from PPIC.DRV|
 | SSC.DRV | In Progress | |
@@ -52,8 +52,8 @@ In Progress : moving KERNEL to AuxLC Bnk1 & 2 (16k, more space for drivers)
 | DHGR.DRV | In Progress | except bitblt... |
   
 ## Internal Shell commands:  
-| Name | Status | Comment |
-| ---- | ------ | ------- |
+| Name | Status | Comment | K.Ver |
+| ---- | ------ | ------- | ----- |
 | CD | Working | |
 | DATE | Working  | |
 | ECHO | Working | |
@@ -67,24 +67,24 @@ In Progress : moving KERNEL to AuxLC Bnk1 & 2 (16k, more space for drivers)
 | STARTPROC | Working  | Used in A2osX.startup |
   
 ## BIN,External Shell commands:  
-| Name | Status | Comment |
-| ---- | ------ | ------- |
-| MEM | Working | |
-| LSDEV | Working | |
-| PS | Working | |
-| MD | Working | |
-| RM | Working | switches not yet implemented, new ArgC/Arg[] coming... |
-| LS | Working  | BUG: `ls dir` does not list dir content (`ls dir/` works) |
-| CP | Working| switches not yet implemented, new ArgC/Arg[] coming...  |
-| ARP | Working | dump ARP cache, setup a static ARP entry |
-| PING | Working | |
-| DNSINFO | Working | dump DNS cache, setup a static DNS entry |
-| IPCONFIG | Working | renamed from NETINFO |
-| NETSTAT | Working | |
-| RPCDUMP | Working | tool based on UDP socket API, renamed from RPCINFO |
-| EDIT | Working | still missing : find/replace |
-| NSCUTIL | Working | Tool for setting time in NSC/DL1216E |
-| ASM | In Progress | S-C MASM based multi CPU assembler |
+| Name | Status | Comment | K.Ver |
+| ---- | ------ | ------- | ----- |
+| MEM | Working | | |
+| LSDEV | Working | | |
+| PS | Working | | |
+| MD | Working | | |
+| RM | Working | switches not yet implemented, new ArgC/Arg[] coming... | |
+| LS | Working  | BUG: `ls dir` does not list dir content (`ls dir/` works) | |
+| CP | Working| switches not yet implemented, new ArgC/Arg[] coming...  | |
+| ARP | Working | dump ARP cache, setup a static ARP entry | |
+| PING | Working | | |
+| DNSINFO | Working | dump DNS cache, setup a static DNS entry | |
+| IPCONFIG | Working | renamed from NETINFO | |
+| NETSTAT | Working | | |
+| RPCDUMP | Working | tool based on UDP socket API, renamed from RPCINFO | |
+| EDIT | Working | still missing : find/replace | |
+| NSCUTIL | Working | Tool for setting time in NSC/DL1216E | |
+| ASM | In Progress | S-C MASM based multi CPU assembler | |
   
 ## Misc  
 ### S-C MASM color scheme for Notepad++  
