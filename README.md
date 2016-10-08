@@ -7,7 +7,7 @@ Enhanced IIe (65c02 cpu) with 128k, //c, IIgs
   
 Kernel 0.8 is out.
 It is confined in Aux LC Bank 1 & 2 to leave enough room at $EOOO for Drivers.
-Now, Network drivers, Mouse, DHGR.DRV can load and fit in Aux LC.
+Network drivers, Mouse, DHGR.DRV can load and fit in Aux LC.  
 Now it's time to make all external BINs use new API, then GUI development will resume.
   
 **A2OSX.BOOT.po** : 140k A2osX boot disk with all binaries  
@@ -74,17 +74,17 @@ In Progress : moving TCPIP to socket API
 ## BIN,External Shell commands:  
 | Name | Status | Comment | K.Ver |
 | ---- | ------ | ------- | ----- |
-| MEM | Working | | |
+| MEM | Working | Old dump behavior is now MEMDUMP, New MEM displays MEMSTAT (Main Aux & Kernel Memory | 0.8 |
 | LSDEV | Working | | 0.8 |
-| PS | Working | | |
+| PS | Working | | 0.8 |
 | MD | Working | | |
 | RM | Working | switches not yet implemented | |
 | LS | Working  | BUG: `ls dir` does not list dir content (`ls dir/` works) | |
 | CP | Working| switches not yet implemented | |
-| ARP | Working | dump ARP cache, setup a static ARP entry | |
+| ARP | Working | dump ARP cache, setup a static ARP entry | 0.8 |
 | PING | Working | | |
 | DNSINFO | Working | dump DNS cache, setup a static DNS entry | |
-| IPCONFIG | Working | renamed from NETINFO | |
+| IPCONFIG | Working | renamed from NETINFO | 0.8 |
 | NETSTAT | Working | | 0.8 |
 | EDIT | Working | still missing : find/replace | |
 | NSCUTIL | Working | Tool for setting time in NSC/DL1216E | |
