@@ -74,7 +74,7 @@ In Progress : moving TCPIP to socket API
 ## BIN,External Shell commands:  
 | Name | Status | Comment | K.Ver |
 | ---- | ------ | ------- | ----- |
-| MEM | Working | Old dump behavior is now MEMDUMP, New MEM displays MEMSTAT (Main Aux & Kernel Memory | 0.8 |
+| MEM | Working | Old dump behavior is now MEMDUMP.  New MEM command displays MEMSTAT (Main, Aux & Kernel Memory) | 0.8 |
 | LSDEV | Working | | 0.8 |
 | PS | Working | | 0.8 |
 | MD | Working | | |
@@ -94,7 +94,7 @@ In Progress : moving TCPIP to socket API
 | ---- | ------ | ------- | ----- |
 | ASM | In Progress | S-C MASM based multi CPU assembler | |
 | DEVDUMP |  | | |
-| MEMDUMP | Working | | |
+| MEMDUMP | Working | | 0.8 |
 | RPCDUMP | Working | tool based on UDP socket API, renamed from RPCINFO | |
   
 ## Misc  
