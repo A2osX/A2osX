@@ -77,7 +77,7 @@ In Progress : moving TCPIP to socket API
 | MEM | Working | Old dump behavior is now MEMDUMP.  New MEM command displays MEMSTAT (Main, Aux & Kernel Memory) | 0.8 |
 | LSDEV | Working | | 0.8 |
 | PS | Working | | 0.8 |
-| MD | Working | | |
+| MD | Working | | 0.8 |
 | RM | Working | switches not yet implemented | |
 | LS | Working  | BUG: `ls dir` does not list dir content (`ls dir/` works) | |
 | CP | Working| switches not yet implemented | |
@@ -86,8 +86,8 @@ In Progress : moving TCPIP to socket API
 | DNSINFO | Working | dump DNS cache, setup a static DNS entry | |
 | IPCONFIG | Working | renamed from NETINFO | 0.8 |
 | NETSTAT | Working | | 0.8 |
-| EDIT | Working | still missing : find/replace | |
-| NSCUTIL | Working | Tool for setting time in NSC/DL1216E | |
+| EDIT | Working | still missing : find/replace | 0.8 |
+| NSCUTIL | Working | Tool for setting time in NSC/DL1216E | 0.8 |
   
 ## BIN,External DEV Shell commands:  
 | Name | Status | Comment | K.Ver |
