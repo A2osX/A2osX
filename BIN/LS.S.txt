@@ -33,40 +33,83 @@ CS.START		cld
 				.DA CS.RUN
 				.DA CS.DOEVENT		
 				.DA	CS.QUIT
-L.LIBSTR		.DA LIBSTR
-L.MSG.VOL		.DA MSG.VOL
+L.MSG.DEV		.DA MSG.DEV
 L.MSG.DIR		.DA MSG.DIR
 L.MSG.FILE		.DA MSG.FILE
 L.PRODOS.FT.TXT	.DA PRODOS.FT.TXT
+L.STAT			.DA STAT
+L.TIME.Format	.DA TIME.Format
+L.TIME.Buffer	.DA TIME.Buffer
 				.DA 0
 *--------------------------------------
-CS.INIT			>LDYA L.LIBSTR
-				>SYSCALL SYS.LoadLibYA
-				sta hLIBSTR
-				
-				>SYSCALL SYS.GetArgC
+CS.INIT			>SYSCALL SYS.GetArgC
 				cmp #1
 				bne .1
 
 				ldy #S.PS.hPREFIX
 				lda (pPs),y
 				>SYSCALL SYS.GetMemPtrA
-				>SYSCALL SYS.NewPStrYA	no arg, go get current prefix
-				stx hFullPath
-				bra .2
+				>SYSCALL SYS.OPENDIRYA
+				bcc .8					A=hDir
+.99				rts
 				
 .1				lda #1
 				>SYSCALL SYS.GetArgA
 
 				>SYSCALL SYS.GetFullPathYA
-				stx hFullPath
-				
-.2				>SYSCALL SYS.OPENDIRYA
 				bcs .99
-				ldy #hDIR
+				stx hFullPath
+				>STYA ZPPtr1
+				
+				>PUSHW L.STAT
+				>PUSHW ZPPtr1
+				>SYSCALL SYS.STAT
+				
+				bcc .7					File exists, do not extract wildcard
+				
+				lda (ZPPtr1)
+				tay
+				
+.2				lda	(ZPPtr1),y			search backward for a /
+				cmp #'/'
+				beq .3
+				dey
+				bne .2
+				
+.3				tya
+				cmp (ZPPtr1)
+				beq .7					Make sure at least one char
+				
+				ldx #0
+				phy						save / pos to trunk string later
+				
+.4				iny
+				inx
+				lda (ZPPtr1),y
+				sta UsrBuf256,x
+				tya
+				cmp (ZPPtr1)
+				bne .4
+				
+				pla						get back / pos
+				sta (ZPPtr1)			trunk it for Opendir
+				
+				stx UsrBuf256
+				>LDYAI UsrBuf256
+				>SYSCALL SYS.NewPstrYA
+				bcs .9
+				txa
+				ldy #hFilter
+				sta (pData),y				
+				
+.7				>LDYA ZPPtr1
+				>SYSCALL SYS.OPENDIRYA
+				bcs .9
+				
+				jsr .9					Cleanup
+				
+.8				ldy #hDIR				A=hDir
 				sta (pData),y
-
-				jsr .99
 				
 				lda (pPs)
 				ora #S.PS.F.EVENT		Now accept events
@@ -75,7 +118,7 @@ CS.INIT			>LDYA L.LIBSTR
 				clc
 				rts
 				
-.99				pha
+.9				pha
 				lda hFullPath
 				>SYSCALL SYS.FreeMemA
 				pla
@@ -105,9 +148,9 @@ CS.RUN			ldy #bCANCEL
 				
 .3				lda (ZPPtr1)
 			
-				beq .8
+				beq .8					No more entry..exit
 				
-				lda ZPPtr1
+				lda ZPPtr1				set Ptr2=Ptr1+LEN-> S.STAT
 				sec
 				adc (ZPPtr1)
 				sta ZPPtr2
@@ -115,31 +158,32 @@ CS.RUN			ldy #bCANCEL
 				adc #0
 				sta ZPPtr2+1
 				
-				ldy #S.STAT.PRODOS.TYPE
-				lda (ZPPtr2),y
-				cmp #$0F				Directory ?
-				bne .31
-
+				ldy #hFilter
+				lda (pData),y
+				beq	.4					No filter....
+				
+				>SYSCALL SYS.GetMemPtrA
+				>PUSHYA
 				>PUSHW ZPPtr1
-				>LDYA L.MSG.DIR
-				>SYSCALL SYS.PrintFYA
+				>SYSCALL SYS.PStrMatch
+				bcs .7					no match, skip....
+				
+.4				ldy #S.STAT.PRODOS.DRIVE
+				lda (ZPPtr2),y			ProDOS Device ?
+				beq .5
+				
+				jsr CS.RUN.DEV
 				bra .7
 				
-.31				ldy #S.STAT.PRODOS.AUXTYPE+1
+.5				ldy #S.STAT.PRODOS.TYPE
 				lda (ZPPtr2),y
-				>PUSHA
-				dey
-				lda (ZPPtr2),y
-				>PUSHA
+				cmp #$0F				Directory ?
+				bne .6
+
+				jsr CS.RUN.DIR
+				bra .7
 				
-				dey
-				lda (ZPPtr2),y
-				jsr FileType2PSTR
-				>PUSHYA
-				
-				>PUSHW ZPPtr1
-				>LDYA L.MSG.FILE
-				>SYSCALL SYS.PrintFYA
+.6				jsr CS.RUN.FILE
 				
 .7				lda ZPPtr2
 				clc
@@ -153,6 +197,81 @@ CS.RUN			ldy #bCANCEL
 .8				pla
 				>SYSCALL SYS.FreeMemA
 				clc
+				rts
+*--------------------------------------
+CS.RUN.DEV		ldy #S.STAT.PRODOS.DEVBLOCKS+1
+				>PUSHB (ZPPtr2),y
+				dey
+				>PUSHB (ZPPtr2),y
+				ldy #S.STAT.BLOCKS+1
+				>PUSHB (ZPPtr2),y
+				dey
+				>PUSHB (ZPPtr2),y
+
+				ldy #S.STAT.PRODOS.DRIVE
+				>PUSHB (ZPPtr2),y
+				dey						SLOT
+				>PUSHB (ZPPtr2),y
+				
+				>PUSHW ZPPtr1
+				>LDYA L.MSG.DEV
+				>SYSCALL SYS.PrintFYA
+				rts
+*--------------------------------------
+CS.RUN.DIR		>PUSHW ZPPtr1
+				>LDYA L.MSG.DIR
+				>SYSCALL SYS.PrintFYA
+				rts
+*--------------------------------------
+CS.RUN.FILE		>PUSHW L.TIME.Buffer
+				>PUSHW L.TIME.Format
+				lda ZPPtr2
+				clc
+				adc #S.STAT.MTIME
+				tay
+				lda ZPPtr2+1
+				adc #0
+				>PUSHYA
+				>SYSCALL SYS.PStrFTime
+				
+				>PUSHW L.TIME.Buffer	ModTime
+				
+				>PUSHW L.TIME.Buffer
+				>PUSHW L.TIME.Format
+				lda ZPPtr2
+				clc
+				adc #S.STAT.CTIME
+				tay
+				lda ZPPtr2+1
+				adc #0
+				>PUSHYA
+				>SYSCALL SYS.PStrFTime
+				
+				>PUSHW L.TIME.Buffer	Create Time
+				
+				lda ZPPtr2
+				clc
+				adc #S.STAT.SIZE
+				tay
+				lda ZPPtr2+1
+				adc #0
+				>PUSHYA					File Size
+				
+				ldy #S.STAT.PRODOS.AUXTYPE+1
+				lda (ZPPtr2),y
+				>PUSHA
+				dey
+				lda (ZPPtr2),y
+				>PUSHA					AuxType
+				
+				dey
+				lda (ZPPtr2),y
+				jsr FileType2PSTR
+				>PUSHYA					Type
+				
+				>PUSHW ZPPtr1
+				>LDYA L.MSG.FILE
+				>SYSCALL SYS.PrintFYA
 				rts
 *--------------------------------------
 CS.DOEVENT		ldy #S.EVT.hDEV		is Event from active IN device?
@@ -198,15 +317,12 @@ CS.QUIT			ldy #hDIR
 				
 				>SYSCALL SYS.CLOSEDIRA
 				
-				ldy #hDIRPATH
+				ldy #hFilter
 				lda (pData),y
 				beq .3
 				>SYSCALL SYS.FreeMemA
 				
-.3				lda hLIBSTR
-				>SYSCALL SYS.UnloadLibA
-				
-				clc
+.3				clc
 				rts
 *--------------------------------------
 FileType2PSTR	ldy #0
@@ -243,10 +359,9 @@ FileType2PSTR	ldy #0
 				rts
 *--------------------------------------
 CS.END
-LIBSTR			>PSTRING "libstr.o"
-MSG.VOL			>CSTRING "/%S\n"
+MSG.DEV			>CSTRING "%15S S%d,D%d Blocks Used:%5D,Total:%5D\n"
 MSG.DIR			>CSTRING "/%15S  <dir>\n"
-MSG.FILE		>CSTRING "%15S %S $%H\n"
+MSG.FILE		>CSTRING "%15S %S $%H %10u %S %S\n"
 *--------------------------------------
 PRODOS.FT.HEX	.HS 0406FAFCFDE2FF
 PRODOS.FT.TXT	>PSTRING "TXT"
@@ -257,17 +372,18 @@ PRODOS.FT.TXT	>PSTRING "TXT"
 				>PSTRING "ATK"
 				>PSTRING "SYS"
 PRODOS.FT.DFLT	>PSTRING "$  "
+TIME.Format		>PSTRING "%y-%b-%b %H:%M"
+TIME.Buffer		.BS 16
 HEXDIGIT		.AS '0123456789ABCDEF'
-hLIBSTR			.BS	1
 hFullPath		.BS 1
+STAT			.BS S.STAT
 *--------------------------------------
 				.DUMMY
 				.OR 0
 DS.START
 hDIRPATH		.BS 1
 hDIR			.BS 1
-hVOLHEADER		.BS 1
-hDIRHEADER		.BS 1
+hFilter			.BS 1
 bSTOP			.BS 1
 bCANCEL			.BS 1
 DS.END
