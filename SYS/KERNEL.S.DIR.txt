@@ -22,7 +22,7 @@ K.OPENDIRYA		jsr PFT.CheckPathYA
 				bcs .9
 				
 				>STYA ZPQuickPtr1
-				stx K.OPENDIRYA.hDIR
+				stx K.READDIRA.hDir
 						
 				lda (ZPQuickPtr2)
 				cmp #1					One char ?
@@ -59,7 +59,7 @@ K.OPENDIRYA		jsr PFT.CheckPathYA
 				ldy #S.DIR.PRODOS.REF
 				sta (ZPQuickPtr1),y				
 
-.8				lda K.OPENDIRYA.hDIR
+.8				lda K.READDIRA.hDir
 				clc
 				rts
 				
@@ -69,24 +69,25 @@ K.OPENDIRYA		jsr PFT.CheckPathYA
 				sec
 .99				rts
 *--------------------------------------				
-K.OPENDIRYA.hDIR	.BS 1				
-*--------------------------------------
 * In : 
 *  A = hDIR
 * Out : 
 *  CC : X = hDIREND, Y,A = PTR to S.DIRENT
 *  CS : A = EC, A = 0 : no more entry
 *--------------------------------------
+K.READDIRA.hDir		.BS 1
 K.READDIRA.hMem		.BS 1
 K.READDIRA.hDIRENT	.BS 1
 K.READDIRA.BufSize	.BS 2
-K.READDIRA.EL		.BS 1
-K.READDIRA.EBP		.BS 1
-K.READDIRA.EC		.BS 2
 K.READDIRA.ECIB		.BS 1
 K.READDIRA.EC2Return	.BS 1
+*--S.DIR Cache ------------------------
+K.READDIRA.EL		.BS 1
+K.READDIRA.EPB		.BS 1
+K.READDIRA.EC		.BS 2
 *--------------------------------------
 K.READDIRA		jsr PFT.CheckDirA
+				sta K.READDIRA.hDir
 				jsr K.GetMemPtrA
 				>STYA ZPQuickPtr1
 				
@@ -227,9 +228,7 @@ K.READDIRA.ROOT	stz MLICALL.PARAMS+1	All Volumes
 				tax
 				jmp K.GetMemPtrA
 *--------------------------------------
-K.READDIRA.DIR  ldy #S.DIR.PRODOS.REF
-				lda (ZPQuickPtr1),y
-				sta MLICALL.PARAMS+1
+K.READDIRA.DIR  sta MLICALL.PARAMS+1	A=#S.DIR.PRODOS.REF
 
 				>PUSHWI 512				Get a 512 bytes buffer for reading dir...
 				>PUSHBI 0
@@ -284,12 +283,12 @@ K.READDIRA.DIR  ldy #S.DIR.PRODOS.REF
 				bpl .3
 				
 .4				ldx K.READDIRA.EC
-				cpx K.READDIRA.EBP
+				cpx K.READDIRA.EPB
 
 				lda K.READDIRA.EC+1
 				sbc #0
 				bcc	.5					We have less than EPB to read
-				ldx K.READDIRA.EBP
+				ldx K.READDIRA.EPB
 				
 .5				stx K.READDIRA.ECIB
 				stz K.READDIRA.EC2Return
@@ -341,15 +340,17 @@ K.READDIRA.DIR1	lda (ZPQuickPtr2)		X = EntryCount In This Block
 .8				dex
 				bne K.READDIRA.DIR1
 				
-* pass #2 Fill Buffer...
+* pass #2 Fill Buffer...(ZPQuickPtr1 & Ptr2 can now be trashed)
 K.READDIRA.DIR2	jsr K.READDIRA.GetBuf
 				bcs .98
 				
-				ldy #S.DIR.PRODOS.EL	Check if first run....
-				lda (ZPQuickPtr1),y
-				bne .73
+*				ldy #S.DIR.PRODOS.EL	Check if first run....
+*				lda (ZPQuickPtr1),y
+*				bne .73
 				
-				lda (ZPQuickPtr3)
+.71				lda (ZPQuickPtr3)
+				beq .78					Empty slot, skip
+
 				and #$F0
 				cmp #$F0				Vol Header ?
 				bne .72
@@ -362,20 +363,20 @@ K.READDIRA.DIR2	jsr K.READDIRA.GetBuf
 				jsr K.READDIRA.ADD..
 				bra .78
 				
-.73				lda K.READDIRA.EC
+.73				lda K.READDIRA.EC		Regular FILE/DIR
 				sec
 				sbc #1
 				sta K.READDIRA.EC
-				bcs .74
 				
 				lda K.READDIRA.EC+1
 				sbc #0
 				sta K.READDIRA.EC+1		CC, we reached $ffff
 				bcc .80					no more file to list...
 				
-.74				lda (ZPQuickPtr3)
-				beq .78
+				jsr K.READDIRA.AddFNToBuf
+				jsr K.READDIRA.ClrStat
 
+				lda (ZPQuickPtr3)
 				and #$F0
 				cmp #$D0					Directory ?
 				bne .75
@@ -392,12 +393,16 @@ K.READDIRA.DIR2	jsr K.READDIRA.GetBuf
 				inc ZPQuickPtr3+1	
 
 .79				dec K.READDIRA.ECIB
-				bne .72
+				bne .71
 				
 .80				
 *				lda #0					S.MEM.F.INIT0 already did this
 *				sta (ZPQuickPtr4)		Ending 0
 
+				lda K.READDIRA.hDir		Restore ZPQuickPtr1 trashed by STR API calls
+				jsr K.GetMemPtrA
+				>STYA ZPQuickPtr1
+				
 				ldx #3
 				ldy #S.DIR.PRODOS.EL+3
 				
@@ -437,17 +442,14 @@ K.READDIRA.ADD. ldx #1					filename="1."
 K.READDIRA.ADD..
 				ldx #2					filename="2.."
 				txa
-				jsr K.READDIRA.AddToBuf
-				lda #'.'				filename="1."
+				jsr K.READDIRA.AddToBuf	Add LEN
+				lda #'.'
 				
-.1				jsr K.READDIRA.AddToBuf
+.1				jsr K.READDIRA.AddToBuf		Add X dot(s)
 				dex
 				bne .1
 				
 				jsr K.READDIRA.ClrStat
-				
-				lda #$0F
-				sta KrnBuf256+S.STAT.PRODOS.TYPE
 				
 *				ldy #$25				total_blocks
 *				lda (ZPQuickPtr3),y
@@ -455,30 +457,20 @@ K.READDIRA.ADD..
 *				iny
 *				lda (ZPQuickPtr3),y
 *				sta KrnBuf256+S.STAT.BLOCKS+1
-				
-				bra K.READDIRA.ADDSTAT
 *--------------------------------------
-K.READDIRA.ADDD	jsr K.READDIRA.AddFNToBuf
-
-				jsr K.READDIRA.ClrStat
-
-				lda #$0F
+K.READDIRA.ADDD	lda #$0F
 				sta KrnBuf256+S.STAT.PRODOS.TYPE
 
 				bra K.READDIRA.ADDSTAT
 *--------------------------------------
-K.READDIRA.ADDF jsr K.READDIRA.AddFNToBuf
-
-				jsr K.READDIRA.ClrStat
-
-				ldx #ADDF.DST-ADDF.SRC
+K.READDIRA.ADDF	ldx #ADDF.DST-ADDF.SRC
 .1				ldy ADDF.SRC-1,x
 				lda (ZPQuickPtr3),y
 				ldy ADDF.DST-1,x
 				sta KrnBuf256,y
 				dex
 				bpl .1
-				
+
 				>PUSHWI KrnBuf256+S.STAT.CTIME
 				lda #$18				creation Date/time
 				jsr K.READDIRA.ConvertTime
@@ -540,7 +532,7 @@ K.READDIRA.ConvertTime
 				lda ZPQuickPtr3+1
 				adc #0
 				>PUSHYA
-				jmp K.PTime2Time
+				jmp K.PTime2Time		Will destroy Ptr1 & Ptr2 !!!!
 *--------------------------------------
 ADDF.SRC		.HS 1013141516171f20
 ADDF.DST		.DA #S.STAT.PRODOS.TYPE,#S.STAT.BLOCKS,#S.STAT.BLOCKS+1
@@ -551,7 +543,7 @@ ADDF.DST		.DA #S.STAT.PRODOS.TYPE,#S.STAT.BLOCKS,#S.STAT.BLOCKS+1
 *  A = hDIR
 *--------------------------------------
 K.CLOSEDIRA		jsr PFT.CheckDirA
-				sta K.OPENDIRYA.hDIR
+				sta K.READDIRA.hDir	
 				jsr K.GetMemPtrA
 				>STYA ZPQuickPtr1
 
@@ -561,12 +553,12 @@ K.CLOSEDIRA.1	ldy #S.DIR.PRODOS.REF
 				sta MLICALL.PARAMS+1
 				>MLICALL MLICLOSE
 				
-.1				ldy #S.DIR.PRODOS.IOBUF				
+.1				ldy #S.DIR.PRODOS.IOBUF
 				lda (ZPQuickPtr1),y
 				beq .2
 				jsr K.FreeMemA
 				
-.2				lda K.OPENDIRYA.hDIR
+.2				ldaK.READDIRA.hDir
 				jsr K.FreeMemA
 				clc
 				rts
