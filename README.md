@@ -42,20 +42,6 @@ In Progress : moving TCPIP to socket API
 | DHCPCLNT | Working | rewritten to use new Socket API | 0.8 |
 | SHELL | Working | (See Internal Shell commands) | 0.8 |
   
-## DRV,Drivers:  
-| Name | Status | Comment | K.Ver |
-| ---- | ------ | ------- | ----- |
-| Console.DRV | Working | ANSI support in Progress. | 0.8 |
-| PIC.DRV | In Progress | Apple "Parallel Interface Card" Driver, renamed from PPIC.DRV|
-| SSC.DRV | In Progress | |
-| SSC.I.DRV | In Progress | |
-| Mouse.DRV | Working | | 0.8 |
-| Uthernet.DRV | Working | | 0.8 |
-| Uthernet2.DRV | Working | |
-| Uther2.AI.DRV | In Progress | With ARP/IP Offloading |
-| LanCeGS.DRV | Working | |
-| DHGR.DRV | In Progress | except bitblt... | 0.8 |
-  
 ## Internal Shell commands:  
 | Name | Status | Comment |
 | ---- | ------ | ------- |
@@ -71,6 +57,20 @@ In Progress : moving TCPIP to socket API
 | SET | Working  | |
 | STARTPROC | Working  | Used in A2osX.startup |
   
+## DRV,Drivers:  
+| Name | Status | Comment | K.Ver |
+| ---- | ------ | ------- | ----- |
+| Console.DRV | Working | ANSI support in Progress. | 0.8 |
+| PIC.DRV | In Progress | Apple "Parallel Interface Card" Driver, renamed from PPIC.DRV | 0.8 |
+| SSC.DRV | In Progress | | 0.8 |
+| SSC.I.DRV | In Progress | | 0.8 |
+| Mouse.DRV | Working | | 0.8 |
+| Uthernet.DRV | Working | | 0.8 |
+| Uthernet2.DRV | Working | | 0.8 |
+| Uther2.AI.DRV | In Progress | With ARP/IP Offloading | 0.8 | 
+| LanCeGS.DRV | Working | | 0.8 |
+| DHGR.DRV | In Progress | except bitblt... | 0.8 |
+  
 ## BIN,External Shell commands:  
 | Name | Status | Comment | K.Ver |
 | ---- | ------ | ------- | ----- |
@@ -79,11 +79,11 @@ In Progress : moving TCPIP to socket API
 | PS | Working | | 0.8 |
 | MD | Working | | 0.8 |
 | RM | Working | switches not yet implemented | |
-| LS | Working  | BUG: `ls dir` does not list dir content (`ls dir/` works) | |
-| CP | Working| switches not yet implemented | |
+| LS | Working | switches not yet implemented | 0.8 |
+| CP | Working | switches not yet implemented | |
 | ARP | Working | dump ARP cache, setup a static ARP entry | 0.8 |
 | PING | Working | | |
-| DNSINFO | Working | dump DNS cache, setup a static DNS entry | |
+| DNSINFO | Working | dump DNS cache, setup a static DNS entry | | 0.8 |
 | IPCONFIG | Working | renamed from NETINFO | 0.8 |
 | NETSTAT | Working | | 0.8 |
 | EDIT | Working | still missing : find/replace | 0.8 |
@@ -93,9 +93,9 @@ In Progress : moving TCPIP to socket API
 | Name | Status | Comment | K.Ver |
 | ---- | ------ | ------- | ----- |
 | ASM | In Progress | S-C MASM based multi CPU assembler | |
-| DEVDUMP |  | | |
+| DEVDUMP |  | | 0.8 |
 | MEMDUMP | Working | | 0.8 |
-| RPCDUMP | Working | tool based on UDP socket API, renamed from RPCINFO | |
+| RPCDUMP | Working | tool based on UDP socket API, renamed from RPCINFO | 0.8 |
   
 ## Misc  
 ### S-C MASM color scheme for Notepad++  
