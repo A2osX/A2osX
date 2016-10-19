@@ -11,6 +11,9 @@ AUTO 6
 				.INB INC/MACROS.I
 				.INB INC/A2OSX.I
 *--------------------------------------
+MAX.COL			.EQ 4
+MAX.RECURSE		.EQ 8
+*--------------------------------------
 ZPPtr1			.EQ ZPBIN
 ZPPtr2			.EQ ZPBIN+2
 *--------------------------------------
@@ -34,7 +37,9 @@ CS.START		cld
 				.DA	CS.QUIT
 L.MSG.DEV		.DA MSG.DEV
 L.MSG.DIR		.DA MSG.DIR
+L.MSG.DIREXT	.DA MSG.DIREXT
 L.MSG.FILE		.DA MSG.FILE
+L.MSG.FILEEXT	.DA MSG.FILEEXT
 L.PRODOS.FT.TXT	.DA PRODOS.FT.TXT
 L.STAT			.DA STAT
 L.TIME.Format	.DA TIME.Format
@@ -54,25 +59,35 @@ CS.INIT			>SYSCALL SYS.GetArgC
 				
 				lda (ZPPtr1)
 				cmp #2
-				bcc .7
+				bne .7
 				
 				ldy #1
 				lda (ZPPtr1),y
 				cmp #'-'
 				bne .7
+				
 				iny 
 				lda (ZPPtr1),y
-				cmp #'R'
-				bne .90 
-				ldy bRecurse
+
+				ldx OptionList
+				
+.2				cmp OptionList,x
+				beq .3
+				dex
+				bne .2
+				beq .90					Syntax error
+				
+.3				ldy OptionVars-1,x
 				lda #$80
 				sta (pData),y
 				bra .1
 				
 .7				>LDYA ZPPtr1
 				jsr CS.INIT.OPENDIR
-				bcc .1
 				bcs .99
+				ldy #hDIR				A=hDir
+				sta (pData),y
+				bra .1
 				
 .8				ldy #hDIR
 				lda (pData),y
@@ -100,7 +115,7 @@ CS.INIT			>SYSCALL SYS.GetArgC
 *--------------------------------------
 CS.INIT.OPENDIR	>SYSCALL SYS.GetFullPathYA
 				bcs .99
-				stx hFullPath
+				stx .90+1
 				>STYA ZPPtr1
 				
 				>PUSHW L.STAT
@@ -147,8 +162,6 @@ CS.INIT.OPENDIR	>SYSCALL SYS.GetFullPathYA
 .7				>LDYA ZPPtr1
 				>SYSCALL SYS.OPENDIRYA
 				bcs .9
-				ldy #hDIR				A=hDir
-				sta (pData),y
 				
 				jsr .9					Cleanup
 				clc
@@ -156,7 +169,7 @@ CS.INIT.OPENDIR	>SYSCALL SYS.GetFullPathYA
 
 				
 .9				pha
-				lda hFullPath
+.90				lda #$ff
 				>SYSCALL SYS.FreeMemA
 				pla
 				sec
@@ -178,6 +191,20 @@ CS.RUN			ldy #bCANCEL
 				lda (pData),y
 				>SYSCALL SYS.READDIRA
 				bcc .20
+				
+				ldy #bLong
+				lda (pData),y
+				bmi .89
+
+				ldy #ColCount
+				lda (pData),y
+				beq .89
+				
+				lda #13
+				>SYSCALL SYS.COutA
+
+.89				lda #0
+				sec
 				rts
 				
 .20				phx						Save hDIRENT
@@ -186,7 +213,7 @@ CS.RUN			ldy #bCANCEL
 .3				lda (ZPPtr1)
 			
 				beq .8					No more entry..exit
-				
+								
 				lda ZPPtr1				set Ptr2=Ptr1+LEN-> S.STAT
 				sec
 				adc (ZPPtr1)
@@ -231,8 +258,9 @@ CS.RUN			ldy #bCANCEL
 				sta ZPPtr1+1
 				bra .3
 				
-.8				pla
+.8				pla						Discard hDIRENT
 				>SYSCALL SYS.FreeMemA
+				
 				clc
 				rts
 *--------------------------------------
@@ -255,7 +283,28 @@ CS.RUN.DEV		ldy #S.STAT.PRODOS.DEVBLOCKS+1
 				>SYSCALL SYS.PrintFYA
 				rts
 *--------------------------------------
-CS.RUN.DIR		jsr CS.RUN.PUSHDATES
+CS.RUN.DIR		ldy #bLong
+				lda (pData),y
+				bmi .8
+
+				>PUSHW ZPPtr1
+				>LDYA L.MSG.DIR
+				>SYSCALL SYS.PrintFYA
+				
+				ldy #ColCount
+				lda (pData),y
+				inc
+				sta (pData),y
+				cmp #MAX.COL
+				bne .7
+	
+				lda #0
+				sta (pData),y
+				lda #13
+				>SYSCALL SYS.COutA
+.7				rts
+				
+.8				jsr CS.RUN.PUSHEXTRA
 
 				ldy #S.STAT.MODE+1
 				lda (ZPPtr2),y
@@ -265,11 +314,53 @@ CS.RUN.DIR		jsr CS.RUN.PUSHDATES
 				>PUSHA					File Mode
 				
 				>PUSHW ZPPtr1
-				>LDYA L.MSG.DIR
+				>LDYA L.MSG.DIREXT
 				>SYSCALL SYS.PrintFYA
+				
 				rts
 *--------------------------------------
-CS.RUN.FILE		jsr CS.RUN.PUSHDATES
+CS.RUN.FILE		ldy #bLong
+				lda (pData),y
+				bmi .8
+				
+				ldy #S.STAT.PRODOS.TYPE
+				lda (ZPPtr2),y
+				jsr FileType2PSTR
+				>PUSHYA					Type
+				
+				>PUSHW ZPPtr1
+				>LDYA L.MSG.FILE
+				>SYSCALL SYS.PrintFYA
+				
+				ldy #ColCount
+				lda (pData),y
+				inc
+				sta (pData),y
+				cmp #MAX.COL
+				bne .7
+	
+				lda #0
+				sta (pData),y
+				lda #13
+				>SYSCALL SYS.COutA
+				rts
+				
+.7				lda #80/MAX.COL-5
+				sec
+				sbc (ZPPtr1)
+				beq .71
+				tax
+				
+.70				lda #' '
+				phx
+				>SYSCALL SYS.COutA
+				plx
+				dex
+				bne .70
+				
+.71				rts				
+				
+.8				jsr CS.RUN.PUSHEXTRA
 				
 				lda ZPPtr2
 				clc
@@ -299,11 +390,11 @@ CS.RUN.FILE		jsr CS.RUN.PUSHDATES
 				>PUSHYA					Type
 				
 				>PUSHW ZPPtr1
-				>LDYA L.MSG.FILE
+				>LDYA L.MSG.FILEEXT
 				>SYSCALL SYS.PrintFYA
 				rts
 *--------------------------------------
-CS.RUN.PUSHDATES
+CS.RUN.PUSHEXTRA
 				>PUSHW L.TIME.Mod
 				>PUSHW L.TIME.Format
 				lda ZPPtr2
@@ -416,13 +507,14 @@ FileType2PSTR	ldy #0
 *--------------------------------------
 CS.END
 *--------------------------------------
-hFullPath		.BS 1
-STAT			.BS S.STAT
-ArgCount		.BS 1
+OptionList		>PSTRING "LR"
+OptionVars		.DA #bLong,bRecurse
 *--------------------------------------
 MSG.DEV			>CSTRING "%15S S%d,D%d Blocks Used:%5D,Total:%5D\n"
-MSG.DIR			>CSTRING "/%15S  <dir>   %a            %S %S\n"
-MSG.FILE		>CSTRING "%15S %S $%H %a %10u %S %S\n"
+MSG.DIR			>CSTRING "/%18S"
+MSG.DIREXT		>CSTRING "/%15S  <dir>   %a            %S %S\n"
+MSG.FILE		>CSTRING "%S.%S"
+MSG.FILEEXT		>CSTRING "%15S %S $%H %a %10u %S %S\n"
 *--------------------------------------
 PRODOS.FT.HEX	.HS 0406FAFCFDE2FF
 PRODOS.FT.TXT	>PSTRING "TXT"
@@ -437,16 +529,20 @@ TIME.Format		>PSTRING "%d-%b-%y %H:%M"
 TIME.Create		.BS 20
 TIME.Mod		.BS 20
 HEXDIGIT		.AS '0123456789ABCDEF'
+STAT			.BS S.STAT
+ArgCount		.BS 1
 *--------------------------------------
 				.DUMMY
 				.OR 0
 DS.START
-hDIRPATH		.BS 1
 hDIR			.BS 1
+hDIRs			.BS MAX.RECURSE+1
 hFilter			.BS 1
 bSTOP			.BS 1
 bCANCEL			.BS 1
+bLong			.BS 1
 bRecurse		.BS 1
+ColCount		.BS 1
 DS.END
 				.ED
 *--------------------------------------
