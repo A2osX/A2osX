@@ -13,7 +13,8 @@ Open a file
 + PUSHW = PATH (PSTR)  
 ##Out :  
 + CC : A = hFILE  
-+ CS : A = EC  
++ CS : A = EC
+
 #FCloseA  
 Close a file  
 ##In :  
