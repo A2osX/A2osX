@@ -11,6 +11,7 @@ Open a file
  + SYS.FOPEN.T	 : Open/Append in Text mode
  + SYS.FOPEN.X	 : Create if not exists
 + PUSHW = PATH (PSTR)
+
 ##Out : 
 + CC : A = hFILE
 + CS : A = EC
