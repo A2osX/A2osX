@@ -39,7 +39,8 @@ for /f %%F in ('dir /b /ogn %~dp0..\SYS\KERNEL.S*.txt') do (
      if "!line:~0,4!" EQU "*   " set LINE= + !LINE:~4!
      if "!line:~0,3!" EQU "*  " set LINE=+ !LINE:~3!
      if "!line:~0,2!" EQU "* " set LINE=!LINE:~2!
-     echo !LINE!  >>!DOCFILE!
+	 if "!line:~0,1!" EQU "#" echo.>>!DOCFILE!
+     (echo !LINE!)>>!DOCFILE!
      )
     )
    )
