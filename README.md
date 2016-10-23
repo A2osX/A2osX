@@ -1,6 +1,7 @@
 # A2osX
 Multi-Tasking OS for Apple II  
 ![](https://github.com/burniouf/A2osX/blob/master/ScreenShot.LS.bmp)
+![](https://github.com/burniouf/A2osX/blob/master/ScreenShot.EDIT.bmp)
 ## Requires :
 Enhanced IIe (65c02 cpu) with 128k, //c, IIgs
 
