@@ -18,7 +18,18 @@
  + Y,A = PStr To Arg[A]
 + CS : Out Of Bound
 
-#PrintFYA :
+#SScanF
+Scan a PStr (in progress)
+
+##In:
++ PUSHW PTR to target buffer
++ PUSHW PString pattern	(ex: "%d.%d.%d.%d")
+ + %d : byte
++ PUSHW PString to scan (ex: "192.168.1.5")
+
+##Out:
+
+#PrintFYA
 Prints C-Style String
 
 ##In:
@@ -51,6 +62,8 @@ Prints C-Style String
  + %11s   'ABCDEFGH   '	
  + %011s  'ABCDEFGH000'
  + %2f		'3.14'
+
+##Out:
 
 #OpenDirYA
 
@@ -182,6 +195,48 @@ Return information about a file
 + PUSHW = PTR to Filename (PSTR)
 
 ##Out :
+
+#GetMem
+
+##In: 
++ PUSHW = Size Requested
++ PUSHB = Options
+ + S.MEM.F.INIT0 : init memory with 00
+ + S.MEM.F.ALIGN : page aligned
+
+##Out:
++ CC : success
+ + YA = PTR to Mem
+*	X = hMem
++ CS :
+ + A = EC
+
+#FreeMemA
+
+##In:
++ A = hMem To Free
+
+##Out:
++ none.
++ (X,Y unmodified)
+
+#GetMemPtrA
+
+##In:
++ A = hMem
+
+##Out:
++ Y,A = PTR to MemBlock
++ (X unmodified)
+
+#GetMemByIDA
+
+##In:
++ A = hMem
+
+##Out:
++ Y,A = ZPMemMgrSPtr = PTR to S.MEM
++ X unmodified
 
 #NewPStrYA
 Create a new copy of PSTR
