@@ -47,7 +47,7 @@ In Progress : moving TCPIP to socket API
 ## Internal Shell commands:  
 | Name | Status | Comment |
 | ---- | ------ | ------- |
-| CD | Working | |
+| CD | Working | Improved syntax : now, 'CD ../BIN' works |
 | DATE | Working  | |
 | ECHO | Working | |
 | EXIT | Working  | |

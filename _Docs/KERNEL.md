@@ -52,6 +52,38 @@ Prints C-Style String
  + %011s  'ABCDEFGH000'
  + %2f		'3.14'
 
+#OpenDirYA
+
+##In:
++ Y,A = PATH (PSTR)
+
+##Out : 
++ CC : success
+ + Y,A = PTR to S.DIR
++ CS : error
+ + A = EC
+
+#ReadDirA
+
+##In: 
++ A = hDIR
+
+##Out : 
++ CC : success
+ + X = hDIRENT
+ + Y,A = PTR to S.DIRENT
++ CS : error
+ + A = EC
+ + note : A = 0 means no more entry
+
+#CloseDirA
+
+##In: 
++ A = hDIR
+
+##Out:
++ none, always succeed. 
+
 #FOpen
 Open a file
 
