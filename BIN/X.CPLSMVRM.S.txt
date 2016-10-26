@@ -80,18 +80,16 @@ InitSrcDirYA	>SYSCALL GetFullPathYA
 				>SYSCALL PStrCpy
 				
 				>LDYA ZPPtr1
-				>SYSCALL OPENDIRYA
+				>SYSCALL OpenDirYA
+				
 				bcs .9
 				
-				pha
 				ldy #hDIRs
-				tya
-				inc
-				sta (pData),y
+				sta (pData),y			set hDIRs[1] = Src Hdir
 				
-				iny						set hDIRs[1] = Src Hdir
-				pla
-				sta (pData),y			set hDIRs index=hDIRs[1]
+				ldy #index
+				lda #1
+				sta (pData),y			index=hDIRs[1]
 				
 				jsr .9					Cleanup
 				
@@ -105,58 +103,175 @@ InitSrcDirYA	>SYSCALL GetFullPathYA
 				sec
 				rts	
 *--------------------------------------
-GetNextEntry	ldy #hDIRs
+GetNextEntry	ldy #index
 				lda (pData),y
+				tax						keep index for later
+				clc
+				adc #hDIRENTs-1
+				tay
+				lda (pData),y
+				bne .1					we have a buffer to scan
+				
+				txa						get back index....
+				clc
+				adc #hDIRs-1
 				tay
 				lda (pData),y
 				
-				>SYSCALL READDIRA
+				>SYSCALL ReadDirA
+				bcs .9
+				>STYA ZPPtr1
 				
+				ldy #index
+				lda (pData),y
+				pha						save index for later
+				clc
+				adc #hDIRENTs-1
+				tay
+				txa
+				sta (pData),y
 				
+				pla						get back index
+				asl
+				adc #oDIRENTs-1			and reset offset for this buffer
+				tay
+				lda #0
+				sta (pData),y
+				iny
+				sta (pData),y
+
+				bra .2
 				
-				rts
+.1				>SYSCALL GetMemPtrA
+				>STYA ZPPtr1		
+				
+				ldy #index
+				lda (pData),y
+				asl
+				adc #oDIRENTs-1
+				tay
+				
+				lda ZPPtr1
+*				clc						from ADC
+				adc (pData),y
+				sta ZPPtr1
+				
+				lda ZPPtr1+1
+				iny
+				adc (pData),y
+				sta ZPPtr1+1
+				
+.2				lda (ZPPtr1)			first/next DIRENT
+				bne .8
+
+				sta (pData),y			reset offset...
+				dey
+				sta (pData),y
+				
+				ldy #index
+				lda (pData),y
+				clc
+				adc #hDIRENTs-1
+				tay
+				lda (pData),y
+				pha
+				lda #0
+				sta (pData),y			reset hDIRENT
+				pla
+				>SYSCALL FreeMemA		discard hDIRENT
+				
+				bra GetNextEntry		...startover
+
+.8				ldy #index
+				lda (pData),y
+				asl
+				adc #oDIRENTs-1
+				tay
+				lda (pData),y
+				sec
+				adc (ZPPtr1)
+				adc #S.STAT
+				sta (pData),y
+				iny
+				lda (pData),y
+				adc #0
+				sta (pData),y
+				
+				clc
+.9				rts
 *--------------------------------------
 EnterSubDirYA	>STYA ZPPtr2			save SUBDIR for StrCat
 
-				ldy #hDIRs
+				ldy #index
 				lda (pData),y
-				cmp #hDIRs+MAX.RECURSE+1
-				beq .99
+				cmp #MAX.RECURSE
+				beq .9
 
 				ldy #hBasePath
 				lda (pData),y
 				>SYSCALL GetMemPtrA
 				
 				>STYA ZPPtr1			save full path
-				>PUSHW ZPPtr1			push Src for StrCat
+				
 				>PUSHW ZPPtr2
+				>PUSHW ZPPtr1
 				>SYSCALL PStrCat
 
+				lda (ZPPtr1)
+				inc
+				tay
+				sta (ZPPtr1)
+				lda #'/'
+				sta (ZPPtr1),y
+				
+				>PUSHW ZPPtr1
+				>LDYA L.MSG.ENTER
+				>SYSCALL PrintFYA
+				
 				>LDYA ZPPtr1
-				>SYSCALL OPENDIRYA
+				>SYSCALL OpenDirYA
 
-				bcs .99
+				bcs .9
 				pha
 				
-				ldy #hDIRs
+				ldy #index
 				lda (pData),y
 				inc
 				sta (pData),y
+				tax
+*				clc						from BCS
+				adc #hDIRs-1
 				tay
-
 				pla
 				sta (pData),y
 				
-
-				clc
-.99				rts
+				txa						make sure hDIRENTs[i] is closed
+				adc #hDIRENTs-1
+				tay
+				lda #0
+				sta (pData),y
+				
+.9				rts
 *--------------------------------------
-LeaveSubDir		ldy #hDIRs
+LeaveSubDir		ldy #index
 				lda (pData),y
+				beq .9
+				clc
+				adc #hDIRs-1
 				tay
 				lda (pData),y
-				>SYSCALL CLOSEDIRA
+				pha
+				lda #0
+				sta (pData),y
+				pla
+				>SYSCALL CloseDirA
 
+				ldy #index
+				lda (pData),y
+				dec
+				sta (pData),y
+				beq .9
+				
 				ldy #hBasePath
 				lda (pData),y
 				>SYSCALL GetMemPtrA
@@ -174,16 +289,15 @@ LeaveSubDir		ldy #hDIRs
 				tya
 				sta (ZPPtr1)			cut DIR2/ from /dir1/DIR2/
 
+				>PUSHW ZPPtr1
+				>LDYA L.MSG.ENTER
+				>SYSCALL PrintFYA
+				rts
 				
-				ldy #hDIRs
-				lda (pData),y
-				dec
-				sta (pData),y
-				cmp #hDIRs
-				beq .9					CS
-				
-				clc
-.9				rts
+.9				sec
+				rts
 *--------------------------------------
 MAN
 SAVE BIN/X.CPLSMVRM.S
+LOAD BIN/LS.S
+ASM
