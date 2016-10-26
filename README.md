@@ -47,7 +47,7 @@ In Progress : moving TCPIP to socket API
 ## Internal Shell commands:  
 | Name | Status | Comment |
 | ---- | ------ | ------- |
-| CD | Working | Improved syntax : now, 'CD ../BIN' works |
+| CD/PWD | Working | Improved syntax : now, 'CD ../BIN' works |
 | DATE | Working  | |
 | ECHO | Working | |
 | EXIT | Working  | |
@@ -81,7 +81,8 @@ In Progress : moving TCPIP to socket API
 | PS | Working | | 0.8 |
 | MD | Working | | 0.8 |
 | RM | Working | switches not yet implemented | |
-| LS | Working | switches not yet implemented | 0.8 |
+| LS | Working | -L long listing with size/date | 0.8 |
+| | | -R Recurse subdirectories | |
 | CP | Working | switches not yet implemented | |
 | ARP | Working | dump ARP cache, setup a static ARP entry | 0.8 |
 | PING | Working | | |
