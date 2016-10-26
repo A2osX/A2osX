@@ -37,6 +37,7 @@ CS.START		cld
 				.DA	CS.QUIT
 L.MSG.DEV		.DA MSG.DEV
 L.MSG.DIR		.DA MSG.DIR
+L.MSG.ENTER		.DA MSG.ENTER
 L.MSG.DIREXT	.DA MSG.DIREXT
 L.MSG.FILE		.DA MSG.FILE
 L.MSG.FILEEXT	.DA MSG.FILEEXT
@@ -91,7 +92,7 @@ CS.INIT			>SYSCALL GetArgC
 				
 				bra .1					scan for any other args
 				
-.5				ldy #hDIRs
+.5				ldy #index
 				lda (pData),y
 				bne .8
 				
@@ -110,46 +111,15 @@ CS.INIT			>SYSCALL GetArgC
 *--------------------------------------
 CS.RUN			ldy #bCANCEL
 				lda (pData),y
-				beq .1
-				sec
-				rts
+				bmi .99
 				
-.1				ldy #bSTOP
+				ldy #bSTOP
 				lda (pData),y
-				beq .2
-				clc
-				rts
+				bmi .8
 				
-.2				ldy #hDIRs
-				lda (pData),y
-				tay
-				lda (pData),y
+				jsr GetNextEntry
+				bcs .9
 				
-				>SYSCALL READDIRA
-				bcc .20
-				
-				ldy #bLong
-				lda (pData),y
-				bmi .89
-
-				ldy #ColCount
-				lda (pData),y
-				beq .89
-				
-				lda #13
-				>SYSCALL COutA
-
-.89				lda #0
-				sec
-				rts
-				
-.20				phx						Save hDIRENT
-				>STYA ZPPtr1
-				
-.3				lda (ZPPtr1)
-			
-				beq .8					No more entry..exit
-								
 				lda ZPPtr1				set Ptr2=Ptr1+LEN-> S.STAT
 				sec
 				adc (ZPPtr1)
@@ -166,39 +136,41 @@ CS.RUN			ldy #bCANCEL
 				>PUSHYA
 				>PUSHW ZPPtr1
 				>SYSCALL PStrMatch
-				bcs .7					no match, skip....
+				bcs .8					no match, skip....
 				
 .4				ldy #S.STAT.PRODOS.DRIVE
 				lda (ZPPtr2),y			ProDOS Device ?
-				beq .5
+				bne .5
 				
-				jsr CS.RUN.DEV
-				bra .7
-				
-.5				ldy #S.STAT.PRODOS.TYPE
+				ldy #S.STAT.PRODOS.TYPE
 				lda (ZPPtr2),y
 				cmp #$0F				Directory ?
 				bne .6
 
-				jsr CS.RUN.DIR
-				bra .7
+				jmp CS.RUN.DIR
+.5				jmp CS.RUN.DEV
+.6				jmp CS.RUN.FILE
 				
-.6				jsr CS.RUN.FILE
+.9				ldy #bLong
+				lda (pData),y
+				bmi .91
+
+				ldy #ColCount
+				lda (pData),y
+				beq .91
 				
-.7				lda ZPPtr2
-				clc
-				adc #S.STAT
-				sta ZPPtr1
-				lda ZPPtr2+1
-				adc #0
-				sta ZPPtr1+1
-				bra .3
-				
-.8				pla						Discard hDIRENT
-				>SYSCALL FreeMemA
-				
-				clc
+				lda #13
+				>SYSCALL COutA
+
+.91				jsr LeaveSubDir
+				bcs .99
+.8				clc
 				rts
+				
+.99				lda #0
+				sec
+				rts
+				
 *--------------------------------------
 CS.RUN.DEV		ldy #S.STAT.PRODOS.DEVBLOCKS+1
 				>PUSHB (ZPPtr2),y
@@ -221,11 +193,12 @@ CS.RUN.DEV		ldy #S.STAT.PRODOS.DEVBLOCKS+1
 *--------------------------------------
 CS.RUN.DIR		ldy #bLong
 				lda (pData),y
-				bmi .8
+				bmi .4
 
 				>PUSHW ZPPtr1
 				>LDYA L.MSG.DIR
 				>SYSCALL PrintFYA
+				bcs .9
 				
 				lda #80/MAX.COL-2
 				sec
@@ -245,15 +218,16 @@ CS.RUN.DIR		ldy #bLong
 				inc
 				sta (pData),y
 				cmp #MAX.COL
-				bne .7
+				bne .5
 	
 				lda #0
 				sta (pData),y
 				lda #13
 				>SYSCALL COutA
-.7				rts
+				bcc .5
+				rts
 				
-.8				jsr CS.RUN.PUSHEXTRA
+.4				jsr CS.RUN.PUSHEXTRA
 
 				ldy #S.STAT.MODE+1
 				lda (ZPPtr2),y
@@ -265,17 +239,26 @@ CS.RUN.DIR		ldy #bLong
 				>PUSHW ZPPtr1
 				>LDYA L.MSG.DIREXT
 				>SYSCALL PrintFYA
+				bcs .9
 				
-				rts
+.5				ldy #bRecurse
+				lda (pData),y
+				bpl .8
+				
+				ldy #1
+				lda (ZPPtr1),y
+				cmp #'.'
+				beq .8
+				
+				>LDYA ZPPtr1
+				jmp EnterSubDirYA
+				
+.8				clc
+.9				rts
 *--------------------------------------
 CS.RUN.FILE		ldy #bLong
 				lda (pData),y
 				bmi .8
-				
-				ldy #S.STAT.PRODOS.TYPE
-				lda (ZPPtr2),y
-				jsr FileType2PSTR
-				>PUSHYA					Type
 				
 				>PUSHW ZPPtr1
 				>LDYA L.MSG.FILE
@@ -294,20 +277,9 @@ CS.RUN.FILE		ldy #bLong
 				>SYSCALL COutA
 				rts
 				
-.7				lda #80/MAX.COL-5
-				sec
-				sbc (ZPPtr1)
-				beq .71
-				tax
-				
-.70				lda #' '
-				phx
+.7				lda #' '
 				>SYSCALL COutA
-				plx
-				dex
-				bne .70
-				
-.71				rts				
+				rts				
 				
 .8				jsr CS.RUN.PUSHEXTRA
 				
@@ -461,8 +433,9 @@ OptionVars		.DA #bLong,bRecurse
 *--------------------------------------
 MSG.DEV			>CSTR "%15S S%d,D%d Blocks Used:%5D,Total:%5D\n"
 MSG.DIR			>CSTR "%S/"
+MSG.ENTER		>CSTR "\nDirectory:%S...\n"
 MSG.DIREXT		>CSTR "%16S  <dir>   %a            %S %S\n"
-MSG.FILE		>CSTR "%S.%S"
+MSG.FILE		>CSTR "%18S"
 MSG.FILEEXT		>CSTR "%15S %S $%H %a %10u %S %S\n"
 *--------------------------------------
 PRODOS.FT.HEX	.HS 0406FAFCFDE2FF
@@ -484,7 +457,10 @@ ArgCount		.BS 1
 				.DUMMY
 				.OR 0
 DS.START
-hDIRs			.BS MAX.RECURSE+1
+Index			.BS 1
+hDIRs			.BS MAX.RECURSE
+hDIRENTs		.BS MAX.RECURSE
+oDIRENTs		.BS MAX.RECURSE*2
 hBasePath		.BS 1
 hFilter			.BS 1
 bSTOP			.BS 1
