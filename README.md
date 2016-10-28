@@ -19,6 +19,11 @@ Now it's time to make all external BINs use new API, then GUI development will r
 OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.  
 (OApple+shift+1,OApple+shift+2,OApple+shift+3 on FR keyboard)  
   
+### **** Documentation WANTED ****  
+
+Is there anybody who could provide "appletalk programmer's guide for the apple ii" ?  
+(Needed for KM.ATLK and AT commands development)   
+
 ### **** Developers WANTED ****  
 
 !!! Help on writing this code should be greatly appreciated !!!  
@@ -81,8 +86,9 @@ In Progress : moving TCPIP to socket API
 | PS | Working | | 0.8 |
 | MD | Working | | 0.8 |
 | RM | Working | switches not yet implemented | |
-| LS | Working | -L long listing with size/date | 0.8 |
-| | | -R Recurse subdirectories | |
+| LS | Working | -A : Do Not Print . & .. | 0.8 |
+| | | -L : long listing with size/date | 0.8 |
+| | | -R : Recurse subdirectories | |
 | CP | Working | switches not yet implemented | |
 | ARP | Working | dump ARP cache, setup a static ARP entry | 0.8 |
 | PING | Working | | |
