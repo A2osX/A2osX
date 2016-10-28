@@ -52,19 +52,21 @@ Prints C-Style String
  + %N : pull 1 byte to Print high Nibble HEX
  + %s : pull 2 bytes ptr to C-Style String
  + %S : pull 2 bytes ptr to P-Style String
- + \e Print 'ESC' ($1B,27)
- + \n Print CR=13
- + \\ Print \
- + \% Print %
+ + \e : Print 'ESC' ($1B,27)
+ + \n : Print CR=13
+ + \\ : Print \
+ + \% : Print %
 + Modifiers for len and padding : 
- + %d	   '9'  '12'
- + %2d	   ' 9' '12'   				
- + %02d   '09' '12'
- + %11s   'ABCDEFGH   '	
- + %011s  'ABCDEFGH000'
- + %2f		'3.14'
+ + %d	  : '9'  '12'
+ + %2d	  : ' 9' '12'   				
+ + %02d  : '09' '12'
+ + %11s  : 'ABCDEFGH   '	
+ + %011s : 'ABCDEFGH000'
+ + %2f	  :	'3.14'
 
 ##Out:
++ CC : success
++ CS : I/O error from COut
 
 #GetDevByIDA
 
