@@ -24,9 +24,9 @@ Scan a PStr (in progress)
 
 ##In:
 + PUSHW PTR to target buffer
-+ PUSHW PString pattern	(ex: "%d.%d.%d.%d")
++ PUSHW PSTR pattern	(ex: "%d.%d.%d.%d")
  + %d : byte
-+ PUSHW PString to scan (ex: "192.168.1.5")
++ PUSHW PSTR to scan (ex: "192.168.1.5")
 
 ##Out:
 
@@ -139,6 +139,58 @@ Prints C-Style String
 + CS : error
  + A = EC
 
+#ExpandPStrYA
+
+##In:
++ Y,A = PTR to String to Expand (PSTR)
+
+##Out:
++ X = hMem to Expanded String (PSTR)
++ Y,A = PTR to Expanded String 
+
+#PutEnvYA
+
+##In:
++ Y,A = PTR to String NAME=VALUE (PSTR)
+
+##Out:
+
+#SetEnv
+
+##In:
++ PUSHW = PTR To Value (PSTR)
++ PUSHW = PTR To Name (PSTR)
+
+##Out:
+
+#GetEnvYA
+
+##In:
++ Y,A = PTR to NAME (PSTR)
+
+##Out:
++ CC : Y,A = PTR to VALUE (PSTR)
++ CS : not found
+*--------------------------------------
+K.GetEnvYA		>STYA ZPQuickPtr2
+jsr ENV.CheckSysVarPtr2
+bcc .9
+jsr ENV.FindVarPtr2
+bcs .9
+jsr ENV.NextEnvPtr1		Skip NAME
+>LDYA ZPQuickPtr1
+clc						just in case ADC in NextEnvPtr1 disturb CC
+rts
+.9				>LDYAI EmptyPSTR
+rts
+
+#UnsetEnvYA
+
+##In:
++ Y,A = PTR To Name (PSTR)
+
+##Out:
+
 #FOpen
 Open a file
 
@@ -169,9 +221,9 @@ Close a file
 Read bytes from file
 
 ##In :
-+ PULLB = hFILE
-+ PULLW = Bytes To Read
-+ PULLW = Dest Ptr
++ PUSHW = Dest Ptr
++ PUSHW = Bytes To Read
++ PUSHB = hFILE
 
 ##Out :
 + Y,A = Bytes Read
@@ -179,9 +231,9 @@ Read bytes from file
 #FWrite
 
 ##In:
-+ PULLB = hFILE
-+ PULLW = Bytes To Write
-+ PULLW = Src Ptr
++ PUSHW = Src Ptr
++ PUSHW = Bytes To Write
++ PUSHB = hFILE
 
 #Out:
 + Y,A = Bytes Written
@@ -241,20 +293,20 @@ Return information about a file
 #FileSearch
 
 ##In:
-+ PUSHW = PSTR to Search Path (PSTRING) %LIB%;/SYS/SLIB
-+ PUSHW = PSTR to File Name (PSTRING)		
++ PUSHW = Ptr to Search Path (PSTR) %LIB%;/SYS/SLIB
++ PUSHW = Ptr to File Name (PSTR)		
 
 #Out:
-+ Y,A = PSTR to FilePath (PSTRING)
++ Y,A = PSTR to FilePath (PSTR)
 + X = hMem to FilePath
 
 #GetFullPathYA
 
 ##In :
-+ Y,A = Filename (PSTRING)
++ Y,A = Filename (PSTR)
 
 #Out :
-+ Y,A = FullPath (PSTRING)
++ Y,A = FullPath (PSTR)
 + X = hMem of FullPath
 
 #LoadFile
@@ -330,7 +382,7 @@ Create a new copy of PSTR
 ##Out:
 + CC : success 
  + Y,A = PTR to String
- + X = hMem (PSTRING)
+ + X = hMem (PSTR)
 + CS : error
  + A = SYS error code
 
@@ -349,7 +401,7 @@ Compare a String against pattern
 Convert string to UPPERCASE/lowercase
 
 ##In:
- + Y,A = PTR to String (PSTRING)
+ + Y,A = PTR to String (PSTR)
 
 ##Out:
  + Uppercased/lowercased String in Buffer
