@@ -108,6 +108,7 @@ note : '$VAR' does NOT expand Variable
 | | | -Y : Dont't Prompt For Override | |
 | MV | In Progress | -C : Continue On Error | |
 | | | -R : Recurse subdirectories | |
+| | | -Y : Dont't Prompt For Override | |
 | ARP | Working | dump ARP cache, setup a static ARP entry | 0.8 |
 | PING | Working | | 0.8 |
 | DNSINFO | Working | dump DNS cache, setup a static DNS entry | | 0.8 |
