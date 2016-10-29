@@ -61,8 +61,8 @@ In Progress : moving TCPIP to socket API
 | READ | | |
 | TIME | Working | |
 | TYPE | Working | |
-| SET | Working  | |
-| STARTPROC | Working  | Used in A2osX.startup |
+| SET | Working | |
+| STARTPROC | Working | Used in A2osX.startup |
   
 ## Shell variables:  
 | Name | Status | Comment |
@@ -98,13 +98,18 @@ note : '$VAR' does NOT expand Variable
 | LSDEV | Working | | 0.8 |
 | PS | Working | | 0.8 |
 | MD | Working | | 0.8 |
-| RM | Working | switches not yet implemented | |
 | LS | Working | -A : Do Not Print . & .. | 0.8 |
-| | | -L : long listing with size/date | 0.8 |
+| | | -L : long listing with size/date... | 0.8 |
 | | | -R : Recurse subdirectories | |
-| CP | Working | switches not yet implemented | |
+| RM | In Progress | -C : Continue On Error | |
+| | | -R : Recurse subdirectories | |
+| CP | In Progress | -C : Continue On Error | |
+| | | -R : Recurse subdirectories | |
+| | | -Y : Dont't Prompt For Override | |
+| MV | In Progress | -C : Continue On Error | |
+| | | -R : Recurse subdirectories | |
 | ARP | Working | dump ARP cache, setup a static ARP entry | 0.8 |
-| PING | Working | | |
+| PING | Working | | 0.8 |
 | DNSINFO | Working | dump DNS cache, setup a static DNS entry | | 0.8 |
 | IPCONFIG | Working | renamed from NETINFO | 0.8 |
 | NETSTAT | Working | | 0.8 |
