@@ -171,18 +171,6 @@ Prints C-Style String
 ##Out:
 + CC : Y,A = PTR to VALUE (PSTR)
 + CS : not found
-*--------------------------------------
-K.GetEnvYA		>STYA ZPQuickPtr2
-jsr ENV.CheckSysVarPtr2
-bcc .9
-jsr ENV.FindVarPtr2
-bcs .9
-jsr ENV.NextEnvPtr1		Skip NAME
->LDYA ZPQuickPtr1
-clc						just in case ADC in NextEnvPtr1 disturb CC
-rts
-.9				>LDYAI EmptyPSTR
-rts
 
 #UnsetEnvYA
 

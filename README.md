@@ -64,6 +64,19 @@ In Progress : moving TCPIP to socket API
 | SET | Working  | |
 | STARTPROC | Working  | Used in A2osX.startup |
   
+## Shell variables:  
+| Name | Status | Comment |
+| ---- | ------ | ------- |
+| $PWD | Working | 'Working Directory' |
+| $* |  | All Args |
+| $1-$9 | Working | Arg[n] |
+| $# | Working | Arg Count |
+| $? | Working | Return Code |
+| $$ | Working | PID |
+| $! | Working | Child PID |  
+
+note : '$VAR' does NOT expand Variable  
+
 ## DRV,Drivers:  
 | Name | Status | Comment | K.Ver |
 | ---- | ------ | ------- | ----- |
