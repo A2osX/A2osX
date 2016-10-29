@@ -3,6 +3,9 @@ title Kernel DOC generator
 COLOR 2A
 prompt ]
 SETLOCAL ENABLEEXTENSIONS ENABLEDELAYEDEXPANSION
+
+for /f %%a in ('copy /Z "%~f0" nul') do set "CR=%%a"
+
 mode con:cols=40 lines=24
 
 cls
@@ -17,10 +20,12 @@ echo.
 echo Scanning KERNEL Src Files...
 echo.
 
+set /a c=0
 
 for /f %%F in ('dir /b /ogn %~dp0..\SYS\KERNEL.S*.txt') do (
  set FN=%%F
- set /p "=!FN!, " <NUL
+ set /a c+=1
+ set /p "=!c! - !FN!             !CR!" <NUL
  set bInDoc=0
  for /F "tokens=*" %%L in (%~dp0..\SYS\!FN!) do (
   set LINE=%%L
@@ -48,7 +53,8 @@ for /f %%F in ('dir /b /ogn %~dp0..\SYS\KERNEL.S*.txt') do (
  )
 echo.
 echo.
-echo All done.
+echo All done : !c! Files scanned.
 echo.
 echo (I know, this batch is stupid ;-)
 echo.
+pause

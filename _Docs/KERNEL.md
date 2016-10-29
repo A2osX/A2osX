@@ -386,6 +386,26 @@ Create a new copy of PSTR
 + CS : error
  + A = SYS error code
 
+#PStrCpy
+Copy string
+
+##In: 
++ PUSHW = Ptr to SRC (PSTR)
++ PUSHW = Ptr to DST (PSTR)
+
+##Out: 
++ DST = SRC (PSTR)
+
+#PStrCat
+Append SRC to DST
+
+##In: 
++ PUSHW = Ptr to SRC (PSTR)
++ PUSHW = Ptr to DST (PSTR)
+
+##Out: 
++ DST = DST+SRC (PSTR)
+
 #PStrMatch
 Compare a String against pattern
 
