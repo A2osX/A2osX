@@ -101,7 +101,7 @@ note : '$VAR' does NOT expand Variable
 | LS | Working | -A : Do Not Print . & .. | 0.8 |
 | | | -L : long listing with size/date... | 0.8 |
 | | | -R : Recurse subdirectories | |
-| RM | In Progress | -C : Continue On Error | |
+| RM | Working | -C : Continue On Error | |
 | | | -R : Recurse subdirectories | |
 | CP | In Progress | -C : Continue On Error | |
 | | | -R : Recurse subdirectories | |

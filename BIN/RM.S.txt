@@ -11,6 +11,9 @@ AUTO 6
 				.INB /A2OSX.DEV/INC/MACROS.I
 				.INB /A2OSX.DEV/INC/A2OSX.I
 *--------------------------------------
+MAX.RECURSE		.EQ 8
+X.MSG.ENTER		.EQ 0
+*--------------------------------------
 ZPPtr1			.EQ ZPBIN
 ZPPtr2			.EQ ZPBIN+2
 *--------------------------------------
@@ -27,133 +30,241 @@ CS.START		cld
 				.DA 0
 *--------------------------------------
 * Relocation Table
-*--------------------------------------
+*--------------------------------------				
 .1				.DA CS.INIT
 				.DA CS.RUN
 				.DA CS.DOEVENT		
 				.DA	CS.QUIT
 L.MSG.USAGE		.DA MSG.USAGE
+L.MSG.DIR		.DA MSG.DIR
+L.MSG.FILE		.DA MSG.FILE
 L.MSG.OK		.DA MSG.OK
 L.MSG.ERR		.DA MSG.ERR
-L.FullPath		.DA FullPath				
+L.STAT			.DA STAT
 				.DA 0
 *--------------------------------------
 CS.INIT			>SYSCALL GetArgC
+				sta ArgCount
 				cmp #1
-				bne .99
-
-				lda #1
+				beq .99
+				
+.1				dec ArgCount
+				beq .5
+				
+				lda ArgCount
 				>SYSCALL GetArgA
-				>SYSCALL GetFullPathYA
-				stx hFullPath
+				>STYA ZPPtr1
 				
-				>SYSCALL ListDirInitYA
-				bcs .98
-				ldy #hS.LISTDIR
-				sta (pData),y
+				lda (ZPPtr1)
+				cmp #2
+				bne .4
 				
-				jsr .98
+				ldy #1
+				lda (ZPPtr1),y
+				cmp #'-'
+				bne .4
 				
-				lda (pPs)
-				ora #S.PS.F.EVENT		Now accept events
-				sta (pPs)
-				clc
-				rts
+				iny 
+				lda (ZPPtr1),y
+
+				ldx OptionList
 				
-.98				pha
-				lda hFullPath
-				>SYSCALL FreeMemA
-				pla
-				sec
-				rts
+.2				cmp OptionList,x
+				beq .3
+				dex
+				bne .2
 				
-.99				>LDYA L.MSG.USAGE
-				>SYSCALL PStrOutYA
 				lda #SYSMGR.ERRSYN
 				sec
 				rts
+				
+.3				ldy OptionVars-1,x
+				lda #$80
+				sta (pData),y
+				bra .1
+				
+.4				>LDYA ZPPtr1
+				jsr InitSrcDirYA
+				bcs .9
+				
+				bra .1					scan for any other args
+				
+.5				ldy #index
+				lda (pData),y
+				beq .99
+				
+.8				lda (pPs)
+				ora #S.PS.F.EVENT		Now accept events
+				sta (pPs)
+				
+				clc
+				rts
+
+.99				>LDYA L.MSG.USAGE
+				>SYSCALL PrintFYA
+				lda #SYSMGR.ERRSYN
+				sec
+.9				rts
 *--------------------------------------
 CS.RUN			ldy #bCANCEL
 				lda (pData),y
-				beq .10
+				bmi .99
+				
+				ldy #bSTOP
+				lda (pData),y
+				bmi .8
 
-				sec
-				rts
+				jsr GetNextEntry
+				bcs .9
 				
-.10				ldy #bSTOP
+				ldy #hFilter
 				lda (pData),y
-				beq .1
-				clc
-.99				rts
+				beq	.4					No filter....
 				
-.1				ldy #hS.LISTDIR
-				lda (pData),y
-				>SYSCALL ListDirNextA
+				>SYSCALL GetMemPtrA
+				>PUSHYA
+				>PUSHW ZPPtr1
+				>SYSCALL PStrMatch
+				bcs .8					no match, skip....
+				
+.4				ldy #S.STAT.PRODOS.DRIVE
+				lda (ZPPtr2),y			ProDOS Device ?
+				bne .5
+				
+				ldy #S.STAT.PRODOS.TYPE
+				lda (ZPPtr2),y
+				cmp #$0F				Directory ?
+				bne .6
+
+				jmp CS.RUN.DIR
+.5				jmp CS.RUN.DEV
+.6				jmp CS.RUN.FILE
+				
+.9				jsr LeaveSubDir
 				bcs .99
 				
-				pha
-				>SYSCALL GetMemPtrA
-				>STYA ZPPtr1
-				lda (ZPPtr1)
-				pha
+				ldy #bRecurse
+				lda (pData),y
+				bpl .8
 				
-				and #$0F
-				sta (ZPPtr1)			Adjust Filename len
 				
-				pla
-				and #$F0
-				cmp #$F0				Volume ($F) HEADER ?
-				beq .8
-				cmp #$E0				Dir ($E) HEADER ?
-				beq .8
-				
-				ldy #hS.LISTDIR
+				ldy #hBasePath
 				lda (pData),y
 				>SYSCALL GetMemPtrA
-				>STYA ZPPtr2
+				>PUSHYA
+				>LDYA L.MSG.DIR
+				>SYSCALL PrintFYA
 				
-				ldy #S.LISTDIR.hPATH
-				lda (ZPPtr2),y
-				>SYSCALL GetMemPtrA
-				>STYA ZPPtr2
+				jsr CS.RUN.DELETE.DIR
+				jsr CS.RUN.PRINT.RC
 				
-				lda (ZPPtr2)
-				tax
-				tay
+				jsr BasePath..
 				
-.2				lda (ZPPtr2),y
-				sta FullPath,y
-				dey
-				bne .2
+.8				clc
+				rts
 				
-				ldy #0
-.3				inx
-				iny
+.99				lda #0
+				sec
+				rts
+*--------------------------------------
+CS.RUN.DEV		>PUSHW ZPPtr1
+				>LDYA L.MSG.FILE
+				>SYSCALL PrintFYA
+				bcs .9
+
+				ldy #bRecurse
+				lda (pData),y
+				bpl .8
+				
+				jsr CS.RUN.PRINT.FILE
+				bcs .9
+
+				lda #0
+				clc
+				jsr CS.RUN.PRINT.RC
+				
+				>LDYA ZPPtr1
+				jmp EnterSubDirYA
+				
+.8				clc				
+.9				rts
+*--------------------------------------
+CS.RUN.DIR		ldy #bRecurse
+				lda (pData),y
+				bpl .8
+				
+				ldy #1
 				lda (ZPPtr1),y
-				sta FullPath,x
-				tya
-				cmp (ZPPtr1)
-				bne .3
+				cmp #'.'
+				beq .8
 				
-				stx FullPath
+				>LDYA ZPPtr1
+				jmp EnterSubDirYA
 				
-				>LDYA L.FullPath	
-				>SYSCALL PStrOutYA
+.8				clc
+.9				rts
+*--------------------------------------
+CS.RUN.FILE		jsr CS.RUN.PRINT.FILE
+				bcs .9
+				jsr CS.RUN.DELETE.FILE
+				jsr CS.RUN.PRINT.RC
+.9				rts
+*--------------------------------------
+CS.RUN.PRINT.FILE
+				>PUSHW ZPPtr1
+				ldy #hBasePath
+				lda (pData),y
+				>SYSCALL GetMemPtrA
+				>PUSHYA
 				
-				>LDYA L.FullPath	
-				>SYSCALL MLIDestroyYA
-				bcs .5
+				>LDYA L.MSG.FILE
+				>SYSCALL PrintFYA
+				rts
+*--------------------------------------
+CS.RUN.DELETE.DIR
+				jsr CS.RUN.GET.BASE.PATH
+				bra CS.RUN.DELETE
+*--------------------------------------
+CS.RUN.DELETE.FILE
+				jsr CS.RUN.GET.BASE.PATH
+				>PUSHW ZPPtr1
+				>PUSHWI UsrBuf256
+				>SYSCALL PStrCat
+				
+CS.RUN.DELETE	>LDYAI UsrBuf256
+				>SYSCALL RemoveYA
+				rts
+*--------------------------------------
+CS.RUN.GET.BASE.PATH
+				ldy #hBasePath
+				lda (pData),y
+				>SYSCALL GetMemPtrA
+				>PUSHYA
+				>PUSHWI UsrBuf256
+				>SYSCALL PStrCpy
+				rts
+*--------------------------------------
+CS.RUN.PRINT.RC	pha
+				php
+				bcs .1
 				>LDYA L.MSG.OK
-				>SYSCALL PStrOutYA
 				bra .8
 				
-.5				>PUSHA
+.1				>PUSHA
 				>LDYA L.MSG.ERR
-				>SYSCALL PStrOutYA
 				
-.8				pla
-				>SYSCALL FreeMemA
-				clc
+.8				>SYSCALL PrintFYA
+				bcs .9
+				plp
+				ldy #bContinue
+				lda (pData),y
+				eor #$80
+				asl
+				pla
+				rts
+				
+.9				plx
+				plx
 				rts
 *--------------------------------------
 CS.DOEVENT		ldy #S.EVT.hDEV		is Event from active IN device?
@@ -194,34 +305,46 @@ CS.DOEVENT		ldy #S.EVT.hDEV		is Event from active IN device?
 .9				sec
 				rts
 *--------------------------------------
-CS.QUIT			ldy #hS.LISTDIR
-				lda (pData),y
-				beq .1
+CS.QUIT			jsr LeaveSubDir
+				bcc CS.QUIT
 				
-				>SYSCALL ListDirCloseA
-				
-.1				ldy #hDirPath
+				ldy #hFilter
 				lda (pData),y
-				beq .2
+				beq .3
 				>SYSCALL FreeMemA
 				
-.2				clc
+.3				clc
 				rts
 *--------------------------------------
+				.INB BIN/X.CPLSMVRM.S
+*--------------------------------------
 CS.END
-MSG.USAGE		>PSTR "Usage : RM [file/Dir, *,? wildcards allowed]\n"
-MSG.OK			>PSTR " [Ok]\n"
-MSG.ERR			>PSTR " [%h]\n"
-hFullPath		.BS 1
-FullPath		.BS 64
+*--------------------------------------
+OptionList		>PSTR "CR"
+OptionVars		.DA #bContinue,#bRecurse
+*--------------------------------------
+MSG.USAGE		>CSTR "Usage : RM [File/Dir, *,? wildcards allowed]\n   -C : Continue on error\n   -R : Recurse subdirectories\n"
+MSG.DIR			>CSTR "RM Dir :%S..."
+MSG.FILE		>CSTR "RM File:%S%S..."
+MSG.OK			>CSTR "[OK]\n"
+MSG.ERR			>CSTR "[%h]\n"
+*--------------------------------------
+STAT			.BS S.STAT
+ArgCount		.BS 1
 *--------------------------------------
 				.DUMMY
 				.OR 0
 DS.START
-hDirPath		.BS 1
-hS.LISTDIR		.BS 1
-bSTOP			.BS 1
+Index			.BS 1
+hDIRs			.BS MAX.RECURSE
+hDIRENTs		.BS MAX.RECURSE
+oDIRENTs		.BS MAX.RECURSE*2
+hBasePath		.BS 1
+hFilter			.BS 1
 bCANCEL			.BS 1
+bSTOP			.BS 1
+bContinue		.BS 1
+bRecurse		.BS 1
 DS.END
 				.ED
 *--------------------------------------
