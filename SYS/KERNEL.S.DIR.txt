@@ -283,17 +283,22 @@ K.ReadDirA.DIR  sta MLICALL.PARAMS+1	A=#S.DIR.PRODOS.REF
 				dex
 				bpl .3
 				
-.4				ldx K.ReadDirA.EC
-				cpx K.ReadDirA.EPB
+.4				lda K.ReadDirA.EC
+				eor #$ff
+				tax
 
 				lda K.ReadDirA.EC+1
-				sbc #0
-				bcc	.5					We have less than EPB to read
-				ldx K.ReadDirA.EPB
-				
-.5				stx K.ReadDirA.ECIB
+				eor #$ff
+				tay
 
+				inx						Any entry remaining ?
+				bne .5
+				iny
+				beq .98					no...exit
+				
 * pass #1 compute BufSize...
+.5				lda K.ReadDirA.EPB
+				sta K.ReadDirA.ECIB
 
 				lda #1					For Ending 0
 				sta K.ReadDirA.BufSize
@@ -302,8 +307,6 @@ K.ReadDirA.DIR  sta MLICALL.PARAMS+1	A=#S.DIR.PRODOS.REF
 K.ReadDirA.DIR1	lda (ZPQuickPtr2)		X = EntryCount In This Block
 				beq .7					Free slot....goto next
 				
-				tay						save LEN
-				
 				and #$F0				get storage_type
 				cmp #$F0				Volume header ?
 				beq .1
@@ -311,7 +314,7 @@ K.ReadDirA.DIR1	lda (ZPQuickPtr2)		X = EntryCount In This Block
 				cmp #$E0				directory header ?
 				beq .2
 				
-				tya						regular DIR or File, get back LEN
+				lda (ZPQuickPtr2)		regular DIR or File, get LEN
 				
 				and #$F					compute filename len
 				sec						add "#<filename>" + S.STAT
@@ -327,8 +330,13 @@ K.ReadDirA.DIR1	lda (ZPQuickPtr2)		X = EntryCount In This Block
 				clc
 				adc K.ReadDirA.BufSize
 				sta K.ReadDirA.BufSize
-				bcc .7
+				bcc .3
 				inc K.ReadDirA.BufSize+1
+				
+.3				inx
+				bne .7
+				iny
+				bra K.ReadDirA.DIR2		we reached last entry in whole DIR
 				
 .7				lda ZPQuickPtr2
 				clc
@@ -337,61 +345,70 @@ K.ReadDirA.DIR1	lda (ZPQuickPtr2)		X = EntryCount In This Block
 				bcc .8
 				inc ZPQuickPtr2+1
 				
-.8				dex
+.8				dec K.ReadDirA.ECIB
 				bne K.ReadDirA.DIR1
 				
 * pass #2 Fill Buffer...(ZPQuickPtr1 & Ptr2 can now be trashed)
 K.ReadDirA.DIR2	jsr K.ReadDirA.GetBuf
-				bcs .98
+				bcs .9
 				
-.71				lda (ZPQuickPtr3)
-				beq .78					Empty slot, skip
+				lda K.ReadDirA.EPB
+				sta K.ReadDirA.ECIB
+				
+.1				lda (ZPQuickPtr3)
+				beq .7					Empty slot, skip
 
 				and #$F0
 				cmp #$F0				Vol Header ?
-				bne .72
+				bne .2
 				jsr K.ReadDirA.ADD.
-				bra .78
+				bra .6
 				
-.72				cmp #$E0				Dir Header ?
-				bne .73
+.2				cmp #$E0				Dir Header ?
+				bne .3
 				jsr K.ReadDirA.ADD.
 				jsr K.ReadDirA.ADD..
-				bra .78
+				bra .6
 				
-.73				lda K.ReadDirA.EC		Regular FILE/DIR
+.3				jsr K.ReadDirA.AddFNToBuf
+				jsr K.ReadDirA.ClrStat
+
+				lda (ZPQuickPtr3)
+				and #$F0
+				cmp #$D0					Directory ?
+				bne .5
+				jsr K.ReadDirA.ADDD
+				bra .6
+				
+.5				jsr K.ReadDirA.ADDF
+
+.6				lda K.ReadDirA.EC			decrease global counter...
 				sec
 				sbc #1
 				sta K.ReadDirA.EC
 				
 				lda K.ReadDirA.EC+1
 				sbc #0
-				sta K.ReadDirA.EC+1		CC, we reached $ffff
-				bcc .80					no more file to list...
+				sta K.ReadDirA.EC+1
+				ora K.ReadDirA.EC
+				beq .8						0! no more files in DIR
 				
-				jsr K.ReadDirA.AddFNToBuf
-				jsr K.ReadDirA.ClrStat
+.7				dec K.ReadDirA.ECIB			0! no more file in block
+				beq .8
 
-				lda (ZPQuickPtr3)
-				and #$F0
-				cmp #$D0					Directory ?
-				bne .75
-				jsr K.ReadDirA.ADDD
-				bra .78
-				
-.75				jsr K.ReadDirA.ADDF
-
-.78				lda ZPQuickPtr3
+				lda ZPQuickPtr3
 				clc
 				adc K.ReadDirA.EL
 				sta ZPQuickPtr3
-				bcc .79
+				bcc .1
 				inc ZPQuickPtr3+1	
-
-.79				dec K.ReadDirA.ECIB
-				bne .71
+				bra .1
 				
-.80				
+.9				jsr K.ReadDirA.CLN
+				sec
+				rts
+				
+.8				
 *				lda #0					S.MEM.F.INIT0 already did this
 *				sta (ZPQuickPtr4)		Ending 0
 
@@ -402,21 +419,17 @@ K.ReadDirA.DIR2	jsr K.ReadDirA.GetBuf
 				ldx #3
 				ldy #S.DIR.PRODOS.EL+3
 				
-.8				lda K.ReadDirA.EL,x		Store back this session prameters to S.DIR
+.81				lda K.ReadDirA.EL,x		Store back this session prameters to S.DIR
 				sta (ZPQuickPtr1),y
 				dey
 				dex
-				bpl .8
+				bpl .81
 				
 				jsr K.ReadDirA.CLN		Discard READBUFFER
 				
 				lda K.ReadDirA.hDIRENT
 				tax
 				jmp K.GetMemPtrA
-				
-.98				jsr K.ReadDirA.CLN
-				sec
-				rts
 *--------------------------------------
 K.ReadDirA.CLN	pha
 				lda K.ReadDirA.hMem
