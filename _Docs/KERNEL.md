@@ -279,14 +279,18 @@ Return information about a file
 ##Out :
 
 #FileSearch
+Search a file in the provided PATH list
+And return, if found, the full path to it.
 
 ##In:
 + PUSHW = Ptr to Search Path (PSTR) %LIB%;/SYS/SLIB
 + PUSHW = Ptr to File Name (PSTR)		
 
-#Out:
-+ Y,A = PSTR to FilePath (PSTR)
-+ X = hMem to FilePath
+##Out:
++ CC : success
+ + Y,A = PSTR to FilePath (PSTR)
+ + X = hMem to FilePath
++ CS : A = Error Code
 
 #GetFullPathYA
 
