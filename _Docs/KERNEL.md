@@ -361,6 +361,37 @@ Return information about a file
 + Y,A = ZPMemMgrSPtr = PTR to S.MEM
 + X unmodified
 
+#ExecProcessNewEnvYA
+
+#ExecProcessYA	(Blocking Parent PID)
+
+#CreateProcessNewEnvYA 
+
+#CreateProcessYA (Non Blocking)
+
+##In:
+ + Y,A = PTR To Cmd Line
+
+##Out:
+ + A = Child PSID
+
+#GetPSByIDA
+
+##In : 
++ A = PID
+
+##Out : 
++ Y,A = PTR to TSKSLOT
+
+#Sleep
+Make current process suspend until next RUN
+
+##In : 
++ (none)
+
+##Out : 
++ (none)
+
 #NewPStrYA
 Create a new copy of PSTR
 

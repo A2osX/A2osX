@@ -11,11 +11,12 @@ TSK.TskMgrRun	>LDYAI TskMgr.Table+S.PS		skip PS 0
 				>STYA pPs
 				
 				lda TSKMGR.SIZE
-				dec						skip PS 0
 				sta TSKMGR.COUNT
-				beq .8					no process....
 				
-.1				lda (pPs)				get S.PS.F
+.1				dec TSKMGR.COUNT		skip PS 0
+				beq .8
+				
+				lda (pPs)				get S.PS.F
 				bit #S.PS.F.INUSE		In use ?
 				beq .7
 				
@@ -35,59 +36,74 @@ TSK.TskMgrRun	>LDYAI TskMgr.Table+S.PS		skip PS 0
 
 				lda (pPS)
 				bit #S.PS.F.INIT
-				beq .20
+				bne .30
 
-				and #$FF^S.PS.F.INIT	unmark as INIT
+				bit #S.PS.F.SLEEP		Is this PS sleeping?
+				beq .3					no, call TSKMGR.RUN
+				
+				jsr TASK.PSWakeUp
+				bra .4
+				
+.30				and #$FF^S.PS.F.INIT	unmark as INIT
 				sta (pPS)
 				
 				ldx #TSKMGR.INIT
-				bra .31
-				
-.20				bit #S.PS.F.SLEEP		Is this PS sleeping?
-				beq .3					no, call TSKMGR.RUN
-				
-				and #$FF^S.PS.F.SLEEP	unmark as SLEEP
-				sta (pPS)
-				
-				ldy #S.PS.PC
-				lda (pPs),y
-				sec						Advance PC by one as it was saved by a JSR
-				adc pCode
-				sta .21+1
-				iny
-				lda (pPs),y
-				adc pCode+1
-				sta .21+2
-				
-.21				jsr $FFFF
-				bra .4
-				
+				.HS 2C					BIT abs
 .3				ldx #TSKMGR.RUN
 
 .31				jsr pCodeJmp			Call INIT/RUN function
 
 .4				bcc .7					INIT/RUN said CS=QUIT?
+
+				pha						save RC
+				ldy #S.PS.PPID			Notify Parent Process for exit code...
+				lda (pPs),y
+				jsr K.GetPSByIDA		will set ZPQuickPtr1 if success
+				bcs .5					parent is dead.....skipping...
 				
-				ldx #TSKMGR.QUIT		yes, quit this process
+				lda (ZPQuickPtr1)		Parent PS is HOLD? 
+				and #S.PS.F.HOLD
+				beq .5					no...
+				
+				pla						yes, probably waiting for this PS to terminate....
+				ldy #S.PS.RC
+				sta (ZPQuickPtr1),y
+				
+				.HS B0					BCS
+.5				pla
+				
+.6				ldx #TSKMGR.QUIT		yes, quit this process
 				jsr pCodeJmp			Call QUIT function
 				
 				ldy #S.PS.PID
 				lda (pPs),y
 				jsr PS.FreeA
-				bcs *
 				
 .7				lda pPs
 				clc
 				adc #S.PS
 				sta pPs
-				bcc .71
+				bcc .1
 				inc pPs+1
+				bcs .1					Always
 				
-.71				dec TSKMGR.COUNT			
-				bne .1
-
 .8				clc
 				rts
+*--------------------------------------
+TASK.PSWakeUp	and #$FF^S.PS.F.SLEEP	unmark as SLEEP
+				sta (pPS)
+				
+				ldy #S.PS.PC
+				lda (pPs),y
+				sec						Advance PC by one as it was saved by a JSR
+				adc pCode				setup by PS.Select
+				sta .1+1
+				iny
+				lda (pPs),y
+				adc pCode+1
+				sta .1+2
+				
+.1				jmp $FFFF
 *--------------------------------------
 * TSK.DispatchEvents
 *  IN: 

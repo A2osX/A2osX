@@ -99,16 +99,19 @@ note : '$VAR' does NOT expand Variable
 | PS | Working | | 0.8 |
 | MD | Working | | 0.8 |
 | LS | Working | -A : Do Not Print . & .. | 0.8 |
-| | | -L : long listing with size/date... | 0.8 |
+| | | -L : long listing with size/date... | |
 | | | -R : Recurse subdirectories | |
-| RM | Working | -C : Continue On Error | |
+| RM | Working | -C : Continue On Error | 0.8 |
 | | | -R : Recurse subdirectories | |
-| CP | In Progress | -C : Continue On Error | |
-| | | -R : Recurse subdirectories | |
-| | | -Y : Dont't Prompt For Override | |
-| MV | In Progress | -C : Continue On Error | |
+| CP | In Progress | -C : Continue On Error | 0.8 |
 | | | -R : Recurse subdirectories | |
 | | | -Y : Dont't Prompt For Override | |
+| MV | In Progress | -C : Continue On Error | 0.8 |
+| | | -R : Recurse subdirectories | |
+| | | -Y : Dont't Prompt For Override | |
+| CAT | In Progress | -A : Show All non printable caracters | 0.8 |
+| | | -N : Number all output lines | |
+| | | -S : Suppress repeated empty output lines | |
 | ARP | Working | dump ARP cache, setup a static ARP entry | 0.8 |
 | PING | Working | | 0.8 |
 | DNSINFO | Working | dump DNS cache, setup a static DNS entry | | 0.8 |
