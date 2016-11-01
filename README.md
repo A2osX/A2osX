@@ -60,7 +60,6 @@ In Progress : moving TCPIP to socket API
 | PAUSE | Working | |
 | READ | | |
 | TIME | Working | |
-| TYPE | Working | |
 | SET | Working | |
 | STARTPROC | Working | Used in A2osX.startup |
   
@@ -109,7 +108,7 @@ note : '$VAR' does NOT expand Variable
 | MV | In Progress | -C : Continue On Error | 0.8 |
 | | | -R : Recurse subdirectories | |
 | | | -Y : Dont't Prompt For Override | |
-| CAT | In Progress | -A : Show All non printable caracters | 0.8 |
+| CAT | Working | -A : Show All non printable caracters | 0.8 |
 | | | -N : Number all output lines | |
 | | | -S : Suppress repeated empty output lines | |
 | ARP | Working | dump ARP cache, setup a static ARP entry | 0.8 |

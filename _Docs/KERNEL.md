@@ -290,16 +290,18 @@ And return, if found, the full path to it.
 + CC : success
  + Y,A = PSTR to FilePath (PSTR)
  + X = hMem to FilePath
-+ CS : A = Error Code
++ CS : not found
 
 #GetFullPathYA
 
 ##In :
 + Y,A = Filename (PSTR)
 
-#Out :
-+ Y,A = FullPath (PSTR)
-+ X = hMem of FullPath
+##Out :
++ CC : success
+ + Y,A = FullPath (PSTR)
+ + X = hMem of FullPath
++ CS : A = Error Code
 
 #LoadFile
 
