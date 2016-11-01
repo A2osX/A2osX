@@ -367,6 +367,14 @@ And return, if found, the full path to it.
 + Y,A = ZPMemMgrSPtr = PTR to S.MEM
 + X unmodified
 
+#GetMemStatYA
+
+##In:
++ Y,A = 24 bytes buffer
+
+##Out:
++ Buffer filled with memory stats
+
 #ExecProcessNewEnvYA
 
 #ExecProcessYA	(Blocking Parent PID)
