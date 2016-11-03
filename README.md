@@ -54,7 +54,7 @@ In Progress : moving TCPIP to socket API
 | ---- | ------ | ------- |
 | CD/PWD | Working | Improved syntax : now, 'CD ../BIN' works |
 | DATE | Working  | |
-| ECHO | Working | |
+| ECHO | Working | \b,\e,\f,\n,\\ and \% supported |
 | EXIT | Working  | |
 | IF | | |
 | PAUSE | Working | |

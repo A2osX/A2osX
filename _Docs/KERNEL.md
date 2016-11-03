@@ -30,11 +30,11 @@ Scan a PStr (in progress)
 
 ##Out:
 
-#PrintFYA
-Prints C-Style String
+#PPrintFYA/CPrintFYA
+Prints P-Stype/C-Style String
 
 ##In:
-+ Y,A = PTR to CStr
++ Y,A = PTR to PStr/CStr
  + %a : pull 2 bytes to Print Access right String 'drwxrwxrwx'
  + %b : pull 1 byte to Print BIN 
  + %B : pull 2 bytes to Print BIN
