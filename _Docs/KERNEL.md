@@ -31,7 +31,7 @@ Scan a PStr (in progress)
 ##Out:
 
 #PPrintFYA/CPrintFYA
-Prints P-Stype/C-Style String
+Prints Pascal/C-Style String
 
 ##In:
 + Y,A = PTR to PStr/CStr
@@ -52,9 +52,11 @@ Prints P-Stype/C-Style String
  + %N : pull 1 byte to Print high Nibble HEX
  + %s : pull 2 bytes ptr to C-Style String
  + %S : pull 2 bytes ptr to P-Style String
+ + \b : Print 'BS' (08)
  + \e : Print 'ESC' ($1B,27)
- + \n : Print CR=13
- + \\ : Print \
+ + \f : Print 'FF' ($0C,12)
+ + \n : Print 'CR' ($0D,13)
+ + \\\\ : Print \
  + \% : Print %
 + Modifiers for len and padding : 
  + %d	  : '9'  '12'
