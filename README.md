@@ -1,8 +1,38 @@
-# A2osX
+# A2osX  
 Multi-Tasking OS for Apple II  
-![](https://github.com/burniouf/A2osX/blob/master/ScreenShot.LS.bmp)
-![](https://github.com/burniouf/A2osX/blob/master/ScreenShot.EDIT.bmp)
-## Requires :
+  
+## Introduction...  
+A2osX is a cooperative, event-driven multitasking kernel (meaning it is applications that are responsible to give back control to kernel)  
+Its principal goal is to collect all "genius" pieces of 65c02 code in the same environment that were written here and there but never put all together  
+(IP Stack, GUI, hardware support....)  
+  
+A2osX is designed to work on any "stock" 128k Apple //e with no hardware modification. As VBL signal is NOT available as an IRQ on //e (it is on //c & IIgs)  
+it makes preemptive multitasking impossible.  
+(Well, GSosX, 16 bits equivalent for IIgs, another project which is "cooking" in my mind, could do it!)  
+Kernel, loading in Aux LC on top of ProDOS provide API inspired from Linux/Unix World to allow writing applications & command line tools o top of it.  
+This kernel provides an advanced memory manager able to relocate 65c02 code,  
+event manager makes TCPIP stack able to listen on several ports, manage ARP,DNS...cache expiration,  
+task manager is responsible to "distribute" CPU time to several loaded processes.  
+Device manager handles event collected from builtin devices as well as devices added by loadable drivers.  
+  
+If you're 65c02 code writer, how to contribute ?  
+  
+Several subprojects are now indentified :  
+  
++ Hardware Support : adding drivers to support more & more hardware (RAM cards, storage....)  
++ TCPIP stack : TCP still missing!  
++ AppleTalk Support  
++ GUI & Printing  
++ Disk Image transfer tools (ADT client!)  
++ Pascal or C Compiler?
++ ...sure there is some more!  
+  
+## Screenshots  
+  
+![](https://github.com/burniouf/A2osX/blob/master/ScreenShot.LS.bmp)  
+![](https://github.com/burniouf/A2osX/blob/master/ScreenShot.EDIT.bmp)  
+  
+## Requires :  
 Enhanced IIe (65c02 cpu) with 128k, //c, IIgs
 
 ## General Information:  
@@ -12,22 +42,22 @@ It is confined in Aux LC Bank 1 & 2 to leave enough room at $EOOO for Drivers.
 Network drivers, Mouse, DHGR.DRV can load and fit in Aux LC.  
 Now it's time to make all external BINs use new API, then GUI development will resume.
   
-**A2OSX.BOOT.po** : 140k A2osX boot disk with all binaries  
-**A2OSX.DEV.po**  : 140k A2osX disk with ASM binaries, Debug Tools & INClude files  
-**A2OSX.SRC.po**  : 800k S-C MASM boot disk with all sources  
+**A2OSX.BOOT.po** : 140k BOOT disk image with all binaries  
+**A2OSX.DEV.po**  : 140k disk image with ASM binaries, Debug Tools & INClude files  
+**A2OSX.SRC.po**  : 800k S-C MASM boot disk image with all sources  
   
 OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.  
 (OApple+shift+1,OApple+shift+2,OApple+shift+3 on FR keyboard)  
   
 ### **** Documentation WANTED ****  
-
-Is there anybody who could provide "appletalk programmer's guide for the apple ii" ?  
-(Needed for KM.ATLK and AT commands development)   
-
+  
+Is there anybody who could provide "appletalk programmer's guide for the apple II" ?  
+(Needed for KM.ATLK and AT commands development)  
+  
 ### **** Developers WANTED ****  
-
+  
 !!! Help on writing this code should be greatly appreciated !!!  
-
+  
 ...  
 In Progress : Document API...  
 In Progress : moving TCPIP to socket API  
