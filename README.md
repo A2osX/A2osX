@@ -1,6 +1,8 @@
 # A2osX  
 Multi-Tasking OS for Apple II  
   
+## Requires :  
+Enhanced IIe (65c02 cpu) with 128k, //c, IIgs  
 ## Introduction...  
 A2osX is a cooperative, event-driven multitasking kernel (meaning it is applications that are responsible to give back control to kernel)  
 Its principal goal is to collect all "genius" pieces of 65c02 code in the same environment that were written here and there but never put all together  
@@ -9,22 +11,23 @@ Its principal goal is to collect all "genius" pieces of 65c02 code in the same e
 A2osX is designed to work on any "stock" 128k Apple //e with no hardware modification. As VBL signal is NOT available as an IRQ on //e (it is on //c & IIgs)  
 it makes preemptive multitasking impossible.  
 (Well, GSosX, 16 bits equivalent for IIgs, another project which is "cooking" in my mind, could do it!)  
-Kernel, loading in Aux LC on top of ProDOS provide API inspired from Linux/Unix World to allow writing applications & command line tools o top of it.  
-This kernel provides an advanced memory manager able to relocate 65c02 code,  
-event manager makes TCPIP stack able to listen on several ports, manage ARP,DNS...cache expiration,  
-task manager is responsible to "distribute" CPU time to several loaded processes.  
-Device manager handles event collected from builtin devices as well as devices added by loadable drivers.  
+Kernel, loading in Aux LC on top of ProDOS provide API inspired from Linux/Unix World to allow writing applications & command line tools on top of it.  
+This kernel provides an advanced "Memory Manager" able to relocate 65c02 code.  
+"Event Manager" makes TCPIP stack able to listen on several ports, manage ARP,DNS...cache expiration and any background processes.  
+"Task Manager" is responsible to "distribute" CPU time to several loaded processes.  
+"Device Manager" handles event collected from builtin devices as well as devices added by loadable drivers.  
   
-If you're 65c02 code writer, how to contribute ?  
+If you're 65c02 or Z80 code writer, how to contribute ?  
   
 Several subprojects are now indentified :  
   
 + Hardware Support : adding drivers to support more & more hardware (RAM cards, storage....)  
++ Z80 support : Kernel could pass control to any Z80 detected on the system.
 + TCPIP stack : TCP still missing!  
 + AppleTalk Support  
 + GUI & Printing  
 + Disk Image transfer tools (ADT client!)  
-+ Pascal or C Compiler?
++ Question : Pascal or C Compiler?  
 + ...sure there is some more!  
   
 ## Screenshots  
@@ -32,12 +35,10 @@ Several subprojects are now indentified :
 ![](https://github.com/burniouf/A2osX/blob/master/ScreenShot.LS.bmp)  
 ![](https://github.com/burniouf/A2osX/blob/master/ScreenShot.EDIT.bmp)  
   
-## Requires :  
-Enhanced IIe (65c02 cpu) with 128k, //c, IIgs
 
 ## General Information:  
   
-Kernel 0.8 is out.
+Kernel 0.8 is out.  
 It is confined in Aux LC Bank 1 & 2 to leave enough room at $EOOO for Drivers.
 Network drivers, Mouse, DHGR.DRV can load and fit in Aux LC.  
 Now it's time to make all external BINs use new API, then GUI development will resume.
