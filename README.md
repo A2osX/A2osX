@@ -5,8 +5,9 @@ Multi-Tasking OS for Apple II
 Enhanced IIe (65c02 cpu) with 128k, //c, IIgs  
 ## Introduction...  
 A2osX is a cooperative, event-driven multitasking kernel (meaning it is applications that are responsible to give back control to kernel)  
-Its principal goal is to collect all "genius" pieces of 65c02 code in the same environment that were written here and there but never put all together  
-(IP Stack, GUI, hardware support....)  
+Its principal goal is to collect all "genius" 65c02 pieces of code ever written here and there, concentrated in the same environment.  
+(including IP Stack & HTTPD/TELNETD..., GUI & graphical tools...)  
+"Complete working place", no needing any more to reboot to switch between tons of diskettes!!!  
   
 A2osX is designed to work on any "stock" 128k Apple //e with no hardware modification. As VBL signal is NOT available as an IRQ on //e (it is on //c & IIgs)  
 it makes preemptive multitasking impossible.  
@@ -26,7 +27,7 @@ Several subprojects are now indentified :
 + TCPIP stack : TCP still missing!  
 + AppleTalk Support  
 + GUI & Printing  
-+ Disk Image transfer tools (ADT client!)  
++ Archive, Disk Image transfer tools (ADT client!)...  
 + Question : Pascal or C Compiler?  
 + ...sure there is some more!  
   
