@@ -9,11 +9,11 @@ AUTO 6
 				.TF /A2OSX.BOOT/BIN/LSDEV
 *--------------------------------------
 				.INB /A2OSX.DEV/INC/MACROS.I
+				.INB /A2OSX.DEV/INC/PRODOS.I
 				.INB /A2OSX.DEV/INC/A2OSX.I
 *--------------------------------------
 ZPPTR1			.EQ ZPBIN
-ZPPTR2			.EQ ZPBIN+2
-ZPPTR3			.EQ ZPBIN+4
+BlkDevCmd		.EQ ZPBIN+2				$42
 *--------------------------------------
 *			File Header (16 Bytes)
 *--------------------------------------
@@ -35,15 +35,30 @@ CS.START		cld
 				.DA	CS.QUIT
 L.MSG0			.DA MSG0
 L.MSG1			.DA MSG1
+L.MSG2			.DA MSG2
+L.MSG3			.DA MSG3
+L.RAM			.DA RAM
+L.DISK2			.DA DISK2
+L.GENERIC		.DA GENERIC
 				.DA 0
 *--------------------------------------
-CS.INIT			>LDYAI DevMgr.Table
-				>STYA ZPPTR1
-				stz DEV.ID
-
-				>LDYA L.MSG0
+CS.INIT			jsr DumpA2osXDev	
+				bcs .9
+				
+				jsr DumpProDOSDev
+				bcs .9
+				
+				lda #0					tell TSKMGR that all done ok, but 
+.9				sec						we do not want to stay in memory
+				rts
+*--------------------------------------
+DumpA2osXDev	>LDYA L.MSG0
 				>SYSCALL CPrintFYA
 
+				>LDYAI DevMgr.Table
+				>STYA ZPPTR1
+				stz DEV.ID
+				
 .2				lda (ZPPTR1)
 				cmp #$D8
 				bne .8
@@ -79,9 +94,163 @@ CS.INIT			>LDYAI DevMgr.Table
 				lda DEV.ID
 				cmp #K.DEV.MAX
 				bne .2
+				
+.8				clc				
+				rts
+*--------------------------------------
+DumpProDOSDev	>LDYA L.MSG2
+				>SYSCALL CPrintFYA
 
-.8				lda #0					tell TSKMGR that all done ok, but 
-.9				sec						we do not want to stay in memory
+				stz DEV.ID
+
+.1				ldx DEV.ID
+				inc DEV.ID
+				
+				cpx DEVCNT
+				bne .11
+				
+				clc
+				rts
+				
+.11				lda #1
+				sta Drive
+				
+				lda DEVLST,x
+				bpl .2
+				
+				inc Drive
+				
+.2				and #$F0
+				lsr
+				lsr
+				lsr
+				tay						Y = DSSS*2
+				
+				lsr
+				and #$7
+				sta Slot
+				
+*				lda DEVPTRS,y
+*				sta ZPPTR1
+				stz ZPPTR1
+				lda DEVPTRS+1,y
+				sta ZPPTR1+1
+				
+				cmp #$C1
+				bcc .1					3rd Party Driver loaded in RAM...
+				
+				cmp #$C8
+				bcs .4					In ProDOS Space.../RAM or DisK II
+				
+				ldx #SmartPort.SIG-SmartPort.OFS
+				
+.3				ldy SmartPort.OFS-1,x	Check if there is a smartport firmware
+				lda (ZPPTR1),y
+				cmp SmartPort.SIG-1,x
+				bne .6					not a smartport...go check $CnFE
+				dex
+				bne .3
+				
+				jsr GO.SmartPort		Perform a Smartpot STATUS call
+				bcs .1
+ 
+				jsr PrintDevStatus
+
+				jmp .1
+				
+.4				cmp #$ff				RAM ?
+				bne .5
+				>LDYA L.RAM
+				bra .7
+			
+.5				>LDYA L.DISK2
+				bra .7
+				
+.6				>LDYA L.GENERIC
+								
+.7				>STYA .71+1
+				ldy #16
+.71				lda $ffff,y
+				sta UsrBuf256+S.SPSTAT.NAME,y
+				dey
+				bpl .71
+
+				>DEBUG
+				
+*				jsr GO.BlockDev	
+				bcs .8
+				stx UsrBuf256+S.SPSTAT.BLKNUM
+				sty UsrBuf256+S.SPSTAT.BLKNUM+1
+				stz UsrBuf256+S.SPSTAT.BLKNUM+2
+				
+				jsr PrintDevStatus
+
+.8				jmp .1				
+*--------------------------------------
+S.SPSTAT.STATUS	.EQ 0
+S.SPSTAT.STATUS.BLK	.EQ %10000000
+S.SPSTAT.STATUS.WRT	.EQ %01000000
+S.SPSTAT.STATUS.RD	.EQ %00100000
+S.SPSTAT.STATUS.ONL	.EQ %00010000
+S.SPSTAT.STATUS.FMT	.EQ %00001000
+S.SPSTAT.STATUS.WRP	.EQ %00000100
+S.SPSTAT.STATUS.IRQ	.EQ %00000010
+S.SPSTAT.STATUS.OPN	.EQ %00000001
+S.SPSTAT.BLKNUM	.EQ 1
+S.SPSTAT.NAME	.EQ 4
+S.SPSTAT.TYPE	.EQ 21
+S.SPSTAT.SUBTYP	.EQ 22
+S.SPSTAT.VER	.EQ 23
+S.SPSTAT		.EQ 25
+*--------------------------------------
+GO.BlockDev		stz	BlkDevCmd
+				jmp (ZPPTR1)
+*--------------------------------------
+GO.SmartPort	ldy #$ff
+				lda (ZPPTR1),y
+
+				inc
+				inc
+				inc						
+				sta .2+1				Entrypoint Offset=+3
+				
+				lda ZPPTR1+1			Get $Cn
+				sta .2+2
+				
+				and #$0f
+				cmp Slot				Driver Slot match Dev Slot ?
+				beq .1					yes...
+				
+				inc Slot
+				inc Slot
+				inc Slot
+				inc Drive				no...
+				inc Drive				Must have been remapped by ProDOS
+				
+.1				stz .3					CMD=Status
+				lda Drive
+				sta SMP.Params+1		UnitNum
+				
+.2				jsr $ffff
+.3				lda SMP.Params			will be relocated
+				rts
+*--------------------------------------
+PrintDevStatus	
+				ldy #S.SPSTAT.BLKNUM
+				lda /UsrBuf256
+				>PUSHYA
+				
+				ldy #S.SPSTAT.NAME
+				lda /UsrBuf256
+				>PUSHYA
+				
+				>PUSHB Drive
+				>PUSHB Slot
+				>PUSHB UsrBuf256		STATUS
+				>PUSHB Dev.ID 
+ 
+				>LDYA L.MSG3
+				>SYSCALL CPrintFYA
 				rts
 *--------------------------------------
 CS.RUN
@@ -89,10 +258,27 @@ CS.EVENT
 CS.QUIT			clc
 				rts
 *--------------------------------------
-CS.END			
+CS.END
+SmartPort.OFS	.HS 01030507
+SmartPort.SIG	.HS 20000300
+DiskII.OFS		.HS 010305FF
+DiskII.SIG		.HS 20000300
 MSG0			>CSTR "ID  Flags    Name Address\n"
 MSG1			>CSTR "%03d %b %4S $%H\n"
+MSG2			>CSTR "ID  Flags    Name Description       Size\n"
+MSG3			>CSTR "%03d	%b S%dD%d %S %L\n"
+RAM				>PSTR "ProDOS Ram Disk "
+DISK2			>PSTR "Apple Disk ][   "
+GENERIC			>PSTR "Generic Blk Dev "
+*--------------------------------------
+SMP.Params		.DA #3					Param Count
+				.BS 1					unitNumber
+				.DA UsrBuf256			
+				.DA #3					Return DIB
+*--------------------------------------
 DEV.ID			.BS 1
+Slot			.BS 1
+Drive			.BS 1
 MAN
 SAVE BIN/LSDEV.S
 ASM
