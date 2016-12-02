@@ -1,0 +1,506 @@
+PR#3
+PREFIX /A2OSX.SRC
+NEW
+INC 1
+AUTO 6
+				.LIST OFF	
+				.OP	65C02
+				.OR	$2000
+				.TF /A2OSX.BOOT/LIB/LIBBLKDEV.O
+*--------------------------------------
+				.INB /A2OSX.DEV/INC/MACROS.I
+				.INB /A2OSX.DEV/INC/A2OSX.I
+				.INB /A2OSX.DEV/INC/PRODOS.I
+				.INB /A2OSX.DEV/INC/LIBBLKDEV.I
+*--------------------------------------
+* NIBBLE track len = $1A00 (6656) bytes:
+* 
+*--------------------------------------
+GAP1			.EQ 48
+GAP2			.EQ 6
+GAP3			.EQ 27
+*--------------------------------------
+Status.PrvDrvOff	.EQ $80					Waiting old drive stop spining
+Status.DrvOn		.EQ $81					Waiting target drive spin
+Status.seek			.EQ $82					targetdrive seeking
+*--------------------------------------
+D2Ph0Off		.EQ $C080
+D2Ph0On			.EQ $C081
+D2Ph1Off		.EQ $C082
+D2Ph1On			.EQ $C083
+D2Ph2Off		.EQ $C084
+D2Ph2On			.EQ $C085
+D2Ph3Off		.EQ $C086
+D2Ph3On			.EQ $C087
+D2DrvOff		.EQ $C088
+D2DrvOn			.EQ $C089
+D2DrvSel1		.EQ $C08A
+D2DrvSel2		.EQ $C08B
+
+D2WShift		.EQ $C08C				W
+D2WLoad			.EQ $C08D				W
+D2RData			.EQ $C08C				R
+D2ReadProt		.EQ $C08D				R
+
+D2ReadMode		.EQ $C08E				R
+D2WriteMode		.EQ $C08F				W
+*--------------------------------------
+ZPPtr1			.EQ ZPLIB
+ZPPtr2			.EQ ZPLIB+2
+ZPPtr3			.EQ ZPLIB+4
+*--------------------------------------
+*			File Header (16 Bytes)
+*--------------------------------------
+CS.START		cld
+				jmp (.1,x)
+				.DA #$61				6502,Level 1 (65c02)
+				.DA #1					BIN Layout Version 1
+				.DA 0
+				.DA CS.END-CS.START
+				.DA 0
+				.DA 0
+				.DA 0
+*--------------------------------------
+* Relocation Table
+*--------------------------------------
+.1				.DA LIB.LOAD
+				.DA LIB.UNLOAD
+				.DA	GetProDOSCatSize
+				.DA	BuildProDOSCat
+				.DA D2TrkR16s
+				.DA D2TrkRNIB
+				.DA D2TrkW16s
+				.DA D2TrkWNIB
+L.TrkWriter		.DA TrkWriter				
+L.ProDOS.Boot	.DA ProDOS.Boot				
+				.DA 0
+*/--------------------------------------
+* In PUSHW = DevSize (in 512b blocks)
+* Out: X=BlockCount (max 22)
+*	   A=PageCount  (max 44)
+*\--------------------------------------
+GetProDOSCatSize
+				>PULLAX					A=DevSizeLo
+				
+GetProDOSCatSizeAX				
+				clc						for now, no partial bitmap blk to add
+				
+				tay						DevSize is xxxxxxxx00000000 ?
+				beq .1					
+				sec
+				
+.1				txa						Get DevSizeHI
+				bit #$0f				DevSize is xxxx000000000000 ?
+				beq .2
+				sec
+				
+.2				php
+				lsr
+				lsr
+				lsr
+				lsr
+				plp
+				adc #6					at least, 1(ProDOS)+1(SOS)+4(VolDir)
+				tax						X = Total blocks needed for header (used)
+				asl						A = Total pages needed to build catalog.
+				rts
+*/--------------------------------------
+* BuildProDOSCat
+* In:  PUSHW = DevSize (in 512b blocks)
+*	   PUSHW = VolName (PSTR)
+*      PUSHW = DstBuf	(Zero filled)
+* Blk0 : ProDOS.BootBlk
+* Blk1 : SOS.BootBlk
+* Blk2,3,4,5 : Volume Directory
+* Blk6....   : Volume Bitmap (4096/Blk)
+* max devSize = 65535 ->  max 16 Bitmap Blk
+* absolute MAX DstBuf size=
+*  7 for Disk II(280blk),3.5(1600),3.5HD(2880)
+*  22 for 32mb Hardisk...
+*\--------------------------------------
+BuildProDOSCat	>PULLW ZPPtr1			DstBuf
+				>PULLW ZPPtr2			VolName
+				>PULLW VolDirHdr.TB
+				
+				ldx #3
+.10				lda DATELO,x
+				sta VolDirHdr.CT,x
+				dex
+				bpl .10
+				
+* Boot Code				
+				>LDYA L.ProDOS.Boot
+				>STYA ZPPtr3
+				
+				ldy #0
+.1				lda (ZPPtr3),y
+				sta (ZPPtr1),y
+				iny
+				bne .1
+				
+				inc ZPPtr3
+				inc ZPPtr1
+				
+.2				lda (ZPPtr3),y
+				sta (ZPPtr1),y
+				iny
+				bne .2
+				
+				inc ZPPtr1				Blk 1
+				inc ZPPtr1
+				
+				inc ZPPtr1				Blk 2
+				
+* Directory Blocks
+			
+				lda (ZPPtr2)			VolName Len
+				and #$0f				make sure 15 bytes max
+				tay
+				ora #$F0				Volume Directory Header
+				sta VolDirHdr.Name
+				
+.3				lda (ZPPtr2),y
+				sta VolDirHdr.Name,y
+				dey
+				bpl .3
+				
+				ldy #VolDirHdr.size
+				
+.4				lda VolDirHdr,y
+				sta (ZPPtr1),y
+				dey
+				bpl .4
+				
+				inc ZPPtr1
+				inc ZPPtr1				Blk 3
+				
+				lda #2
+				sta (ZPPtr1)
+				lda #4
+				ldy #2
+				sta (ZPPtr1),y
+				
+				inc ZPPtr1
+				inc ZPPtr1				Blk 4
+				
+				lda #3
+				sta (ZPPtr1)
+				lda #5
+				ldy #2
+				sta (ZPPtr1),y
+
+				inc ZPPtr1
+				inc ZPPtr1				Blk 5
+				
+				lda #4
+				sta (ZPPtr1)
+				
+				inc ZPPtr1
+				inc ZPPtr1				Blk 6
+				
+* BitMap Blocks : 0=Used 1=free
+
+				>LDAX VolDirHdr.TB+1
+				jsr GetProDOSCatSizeAX	X=blk used for boot/dir/bitmap
+				
+				lda VolDirHdr.TB
+				eor #$ff
+				sta Count
+				lda VolDirHdr.TB+1
+				eor #$ff
+				sta Count+1
+				txa
+				clc
+				adc VolDirHdr.TB
+				sta VolDirHdr.TB
+				bcc .51
+				inc Count+1
+				
+.51				ldy #0
+				
+.5				lda #%10000000
+.6				dex
+				bmi .8
+
+				asl
+				bne .6
+				iny
+				bne .5
+				
+.7				lda #%10000000
+
+.8				inc Count
+				bne .81
+				inc Count+1
+				beq .88
+
+.81				pha
+				eor (ZPPtr1),y
+				sta (ZPPtr1),y
+				pla
+				asl
+				bne .8
+				iny
+				bne .7
+				inc ZPPtr1+1
+				bra .7
+				
+.88				rts				
+*/--------------------------------------
+*\--------------------------------------
+D2TrkRNIB
+*/--------------------------------------
+*\--------------------------------------
+D2TrkR16s
+*/--------------------------------------
+* #TrkW16s
+* Write a track (16 sectors)
+* ##In:
+*  PUSHW = Ptr to 16*256 buffer
+*  PUSHB = TrackNum * 4	: 0->140+	
+*  PUSHB = DSSS0000
+* ##Out:
+*  CC : success
+*  CS : A = Error
+*       A=0, currently starting/seeking...
+*\--------------------------------------
+D2TrkW16s
+
+				clc
+				rts
+*/--------------------------------------
+* #TrkWNIB
+* Write a track (NIBBLE)
+* ##In:
+*  PUSHW = Ptr to NIBBLE buffer (0 ended)
+*  PUSHB = TrackNum * 4	: 0->140+	
+*  PUSHB = DSSS0000
+* ##Out:
+*  CC : success
+*  CS : A = Error
+*       A=0, currently starting/seeking...
+*\--------------------------------------
+D2TrkWNIB		>PULLB DrvSlt
+				>PULLB TrkNum
+				>PULLW ZPPtr1
+
+				lda Status				Lib is busy....?
+				beq .10
+				
+				lda DrvSlt
+				cmp DrvSltInUse			resume previous access ?
+				
+				
+.10				lda DEVNUM				last drive accessed by ProDOS
+				and #$F0				only DSSS
+				pha
+				jsr CheckDiskII			was it a DISK II ?
+				bcs .1					no, no need to check if spinning
+				
+				pla
+				pha
+				jsr DrvSpinCheck
+				bcc .1					not spinning....continue
+				pla
+				sta D2DrvOff,x
+				
+				lda #Status.PrvDrvOff
+				jmp SetStatusAndExit
+				
+.1				pla
+				
+				cmp DrvSlt
+*				beq
+				
+				lda DrvSlt
+				jsr DrvTrkSelect
+				bcs .9
+				
+				ldy #TrkWriter.Size
+				
+.7				lda TrkWriter,y
+				sta UsrBuf256,y
+				dey
+				bne .7
+				jmp UsrBuf256
+				
+				
+				clc
+.9				rts
+
+*--------------------------------------
+SetStatusAndExit	
+				sta Status
+				ldy DrvSlt
+				sty DrvSltInUse
+				clc
+				rts
+*--------------------------------------
+LIB.LOAD
+LIB.UNLOAD		clc
+				rts
+*--------------------------------------
+* A=DSSS0000
+* Y=target Track Number * 4
+*--------------------------------------
+DrvTrkSelect	jsr DrvSelect
+				
+
+				
+*--------------------------------------
+* A=DSSS0000
+*--------------------------------------
+CheckDiskII		and #$70				only 0SSS
+				lsr
+				lsr
+				lsr
+				ora #$C0				make Cn
+				sta .2+2
+				
+				ldx #3					4 bytes to check
+				
+.1				ldy DiskII.OFS,x
+.2				lda $C000,y				Self Modified				
+				cmp DiskII.SIG,x
+				bne .9
+				dex
+				bpl .1
+				clc						all bytes match, Disk II
+				rts
+				
+.9				sec
+				rts
+*--------------------------------------
+* A=DSSS0000
+*--------------------------------------
+DrvSpinCheck	jsr DrvSelect
+				
+				ldy #0
+
+				lda D2RData,x
+				
+.1				cmp D2RData,x
+				bne .8					spinning
+				dey
+				bne .1
+				
+				clc						CC:not spinning
+				rts
+				
+.8				sec
+				rts
+*--------------------------------------
+* A=DSSS0000
+*--------------------------------------
+DrvSelect		pha
+				and #$70
+				tax
+				pla
+				asl
+				adc #D2DrvSel1
+				sta .1+1
+				
+.1				lda D2DrvSel1,x			Drv 1/2 select
+
+				lda D2ReadMode,x		Make sure readmode
+				rts
+*--------------------------------------
+CS.END
+DiskII.OFS		.HS 010305FF
+DiskII.SIG		.HS 20000300
+
+DrvSlt			.BS 1
+TrkNum			.BS 1
+*--------------------------------------
+Status			.BS 1
+DrvSltInUse		.BS 1
+Count			.BS 2
+*--------------------------------------
+* TrkWriter
+* X = Slot Cn
+* ZPPtr1 = Ptr To NibbleBuf
+*--------------------------------------
+TrkWriter		.PH $200
+
+TrkWriter.Start	lda D2ReadMode,x
+				lda D2ReadProt,x
+				bmi .9					Write protected
+
+				php
+				sei
+
+				ldy #0
+			
+.1				lda (ZPPtr1),y			(5) as NibbleBuf is page alligned, no page crossing
+				beq	.8					(2)(3 if Z) END OF TRACK
+				
+*				nobody will never try to write 00000000, right?
+				
+				cmp	#$80				(2) if CC, it is a sync byte
+				
+				ora #$80				(2) make sure Bit7 high
+				
+				sta D2WriteMode,x		(5)
+				ora D2WShift,x			(4) keep C unmodified
+				
+				iny						(2)
+				bne .2					(2)(3 if nz)
+				
+				inc ZPPtr1+1			(5)
+		
+				bcs .1					(2)(3 if cs) regular 32us byte
+
+* 32us Byte,next page :	5+2 (beq failed) +2+2+5+4+2+2 (bne failed) + 5 + 3 (bcs succeeded) = 32
+				
+				nop						(2) Sync 40us byte : add 8 cycles
+				nop						(2)
+				nop						(2)
+				bra .1					(3)
+
+* 40us Byte,next page :	5+2 (beq failed) +2+2+5+4+2+2 (bne failed) + 5 + 2 (bcs failed) +2+2+2+3 = 40
+				
+.2				nop						(2)
+				nop						(2)
+
+				bcs .1					(2)(3 if cs) regular 32us byte
+	
+* 32us Byte,same page :	5+2 (beq failed) +2+2+5+4+2+3 (bne succeeded) + 2 +2 + 3 (bcs succeeded) = 32
+
+				nop						(2) Sync 40us byte : add 8 cycles
+				nop						(2)
+				nop						(2)
+				bra .1					(3)
+
+* 40us Byte,same page :	5+2 (beq failed) +2+2+5+4+2+2 (bne failed) + 5 + 2 (bcs failed) +2+2+2+3 = 40
+
+.8				pha						(3) make sure 32us elapsed before switching to read mode (beq(3)+pha(3)=beq(2)+cmp(2)+ora(2))
+				lda D2ReadMode,x		close write mode
+				lda D2RData,x
+				pla						from pha (3) 
+				plp
+				clc
+				rts
+				
+.9				lda #$2B				Write Protected
+				sec
+				rts
+				
+TrkWriter.Size	.EQ *-TrkWriter.Start
+				.EP
+*--------------------------------------
+ProDOS.Boot		.BS 512
+*--------------------------------------
+VolDirHdr		.DA 0					pointer to previous block
+				.DA 3					pointer to next block
+VolDirHdr.Name	.BS 16				
+				.HS 0000000000000000
+VolDirHdr.CT	.BS 4					Creation time
+				.HS 0100C3270D			version/min version/access/EL/EPB
+				.DA 0					File Count
+				.DA 6					bitmap pointer (Block 2..5 are Volume directory)
+VolDirHdr.TB	.BS 2					Total Blocks
+VolDirHdr.size	.EQ *-VolDirHdr
+*--------------------------------------
+MAN
+SAVE LIB/LIBBLKDEV.S
+ASM
