@@ -99,10 +99,11 @@ In Progress : moving TCPIP to socket API
 | Name | Status | Comment |
 | ---- | ------ | ------- |
 | $PWD | Working | 'Working Directory' |
-| $* |  | All Args |
+| $* | Working | All Args |
 | $1-$9 | Working | Arg[n] |
 | $# | Working | Arg Count |
 | $? | Working | Return Code |
+| $@ | Working | Parent PID |
 | $$ | Working | PID |
 | $! | Working | Child PID |  
 
