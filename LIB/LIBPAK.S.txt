@@ -1,0 +1,615 @@
+PR#3
+PREFIX /A2OSX.SRC
+NEW
+INC 1
+AUTO 6
+				.LIST OFF	
+				.OP	65C02
+				.OR	$2000
+				.TF /A2OSX.BOOT/LIB/LIBPAK.O
+*--------------------------------------
+				.INB /A2OSX.DEV/INC/MACROS.I
+				.INB /A2OSX.DEV/INC/A2OSX.I
+*--------------------------------------
+S.Pak.SrcPtr	.EQ ZPLIB
+S.Pak.SrcBlPtr	.EQ ZPLIB+2
+S.Pak.SrcBlPtrT	.EQ ZPLIB+4
+S.Pak.DstPtr	.EQ ZPLIB+6
+*--------------------------------------
+*			File Header (16 Bytes)
+*--------------------------------------
+CS.START		cld
+				jmp (.1,x)
+				.DA #$61				6502,Level 1 (65c02)
+				.DA #1					BIN Layout Version 1
+				.DA 0
+				.DA CS.END-CS.START
+				.DA 0
+				.DA 0
+				.DA 0
+*--------------------------------------
+* Relocation Table
+*--------------------------------------
+.1				.DA LIB.LOAD
+				.DA LIB.UNLOAD
+				.DA Pak
+				.DA Unpak
+				.DA 0
+*--------------------------------------
+LIB.LOAD
+LIB.UNLOAD		clc
+				rts
+*--------------------------------------
+* UNPACK code as short as possible
+* For Self Extract 
+*--------------------------------------
+* File Header :
+* SFX : 
+*  - BIN must begin with CLD (QCODE)
+*  - BIN must be relocatable
+*  - BIN must overwrite itself
+* (well, best way is moving CODE to $200)
+*--------------------------------------
+* Shunk Header : 
+*  WORD : !Target Length
+*   USED TO STOP UNPACK 
+*    !!!NO EOF TOKEN!!!
+* Short4 : [0..15]
+* Short3 : [0..7]
+*--------------------------------------
+S.PAK.LEN		.EQ 0
+S.PAK.SHORT4	.EQ 2
+S.PAK.SHORT3	.EQ 18
+S.PAK			.EQ 26
+*--------------------------------------
+* BITSTREAM :
+*  0 = STORE : 
+*  00 : 1 byte follow (10 bits)
+*  01 = 2 + n (4 bits count)
+*--------------
+*  1 = CMD :
+*---SHORT4 --- (3)+4=7 bits --------
+*  100 : SHORT4
+*   xxxx = index in Short4 Table
+*---SHORT3 --- (3)+3=6 bits --------
+*  101 : SHORT3
+*   xxx = index in Short3 Table
+*--- BACKLINK : (3)+8+5=16 bits ----
+*  110 : BackLink
+*    9 bits : Offset (LO8,HI1)
+*    4 bits : 3 + n (4 bits count) (18 max)
+*--- REP : (3)+1, (3)+1+4 =4/8 bits ----
+*  111 : REP
+*     0 : repeat last byte
+*     1 : repeat  2 + n (4 bits count)
+*--------------------------------------
+* In : 
+*  PULLW = Src PTR 
+*  PULLW = Src LEN 
+*  PULLW = Dst PTR Compressed Buffer
+*--------------------------------------
+PIPELEN			.EQ 18
+STATS.SIZE		.EQ 0
+STATS.BL		.EQ 2
+STATS.REP		.EQ 4
+STATS.S3		.EQ 6
+STATS.S4		.EQ 8
+*--------------------------------------
+S.Pak			>PULLYA
+				>STYA S.Pak.Src			Init for pass #1
+				>STYA S.Pak.SrcPtr
+				>PULLA					Get Src Len LO
+				eor #$ff
+				sta S.Pak.SrcCnt
+				sta S.Pak.Cnt			Init for pass #1
+				tax
+
+				>PULLA					Get Src Len HI
+				eor #$ff
+				sta S.Pak.SrcCnt+1
+				sta S.Pak.Cnt+1			Init for pass #1
+				tay
+				
+				>PULLW S.Pak.DstPtr
+				txa
+				jsr S.Pak.PutByte
+				tya
+				jsr S.Pak.PutByte				
+				
+				ldx #9
+.1				stz S.Pak.Stat.Size,x	Reset Stats
+				dex
+				bpl .1
+				
+* PASS #1 : Count occurence for each value...
+
+S.Pak.1			ldx #0
+.1				stz	S.Pak.CntL,x
+				stz S.Pak.CntH,x
+				inx
+				bne .1
+				
+				ldy #0
+				
+.2				inc S.Pak.Cnt
+				bne .3
+				inc S.Pak.Cnt+1
+				beq .5
+				
+.3				lda (S.Pak.SrcPtr),y
+				tax
+				inc S.Pak.CntL,x
+				bne .4
+				inc S.Pak.CntH,x
+.4				iny
+				bne .2
+				inc S.Pak.SrcPtr+1
+				bra .2
+
+* ...Search for Top 24
+.5				ldy #23
+
+.6				stz S.Pak.Cnt			Init best score to 0
+				stz S.Pak.Cnt+1
+				
+				stz S.Pak.Byte
+				ldx #0
+				
+.7				lda S.Pak.CntL,x		is it better at X
+				cmp S.Pak.Cnt
+				lda S.Pak.CntH,x
+				sbc S.Pak.Cnt+1
+				bcs .8					not better
+				
+				stx S.Pak.Byte
+				lda S.Pak.CntL,x
+				sta S.Pak.Cnt
+				lda S.Pak.CntH,x
+				sta S.Pak.Cnt+1
+				
+.8				inx
+				bne .7
+				
+				lda S.Pak.Byte
+				sta S.Pak.Short,y		
+				stz S.Pak.CntL,x		Discard this entry
+				stz S.Pak.CntH,x
+				dey
+				bpl .6
+				
+				ldx #15
+				
+.9				lda S.Pak.Short4,x		Store SHORT4 in reverse order
+				jsr S.Pak.PutByte
+				dex
+				bpl .9
+
+				ldx #7
+
+.10				lda S.Pak.Short3,x		Store SHORT3 in reverse order
+				jsr S.Pak.PutByte
+				dex
+				bpl .10
+				
+				>LDYAI S.PAK			Total Header Size				
+				>STYA S.Pak.Stat.Size
+* PASS #2 : 	
+S.Pak.2			>LDYA S.Pak.Src			Init for pass #2
+				>STYA S.Pak.SrcPtr
+				>STYA S.Pak.SrcBlPtr
+				
+				>LDYA S.Pak.SrcCnt
+				>STYA S.Pak.Cnt						
+
+				lda #8
+				sta S.Pak.PutBit+1		Initialize properly for first "PutBit" Call
+				stz S.Pak.Byte
+				
+				stz S.Pak.PipeLen
+				
+S.Pak.2.LOOP	ldx S.Pak.PipeLen		Always fill Bytes in the PIPE until full
+				
+.1				jsr S.Pak.GetByte		Load PIPE....
+				bcs .2					end of Buffer ?
+				sta S.Pak.Pipe,x
+				inx
+				cpx #PIPELEN			PIPE Full ?
+				bne .1
+				clc
+				
+.2				stx S.Pak.PipeLen
+
+				txa						PIPE empty ....exit
+				beq .99
+
+* try finding REPeating same bytes.....
+S.Pak.2.REP		dex
+				beq S.Pak.2.SHORT		Only one char in PIPE...
+				
+				ldx #0
+				
+.1				lda S.Pak.Pipe,x
+				cmp S.Pak.Pipe+1,x
+				bne .2
+				inx
+				cpx S.Pak.PipeLen
+				bne .1
+
+.2				dex						if one char.....no REP
+				beq .S.Pak.2.BL
+				dex						if 2, -> REP ONE (not 2)
+				phx						REP 1 + 0 or more....save REP count for later....
+				
+				jsr S.Pak.2.STORE1		a = byte to store
+				
+				lda #%11100000
+				plx
+				phx
+				beq .3
+				ora #%00010000
+				ldy #4
+				jsr S.Pak.PutYBits
+				txa
+				beq .4					if not REP 2 or more no extra count
+				ldy #4
+				jsr S.Pak.PutYBits
+				
+.4				pla
+				clc
+				adc #2
+				tay
+				jsr S.Pak.StripPipe		Remove REP bytes from PIPE
+				
+				ldy #STATS.REP
+				jsr S.Pak.UpdateStats
+				jmp S.Pak.2.LOOP				
+S.Pak.2.BL				
+* Try finding best matching BackLink between SrcBlPtr and SrcPtr (max 512)			
+.4				lda S.Pak.SrcPtr
+				sec
+				sbc S.Pak.PipeLen
+				sta S.Pak.Limit			setup Limit to SrcPtr-PIPE
+				lda S.Pak.SrcPtr+1
+				sbc #0
+				sta S.Pak.Limit+1
+				
+.40				lda S.Pak.SrcBlPtr
+				sta S.Pak.SrcBlPtrT
+				lda S.Pak.SrcBlPtr+1
+				sta S.Pak.SrcBlPtrT+1
+
+.5				txa						Get PIPE Len
+				
+				clc						make sure SrcBlPtrT+PIPE < Limit
+				adc S.Pak.SrcBlPtrT
+				tay
+				lda S.Pak.SrcBlPtrT+1
+				adc #0
+				cpy S.Pak.Limit
+				sbc S.Pak.Limit+1
+				bcc .10					not enough room
+				
+				txa
+				dec
+				tay
+.8				lda (S.Pak.SrcBlPtrT),y
+				cmp S.Pak.Pipe,y
+				bne .9
+				dey
+				bpl .8
+				
+* Found a BL at S.Pak.SrcBlPtrT, Store it and remove X bytes from PIPE
+				phx						save BL length
+				
+				lda #%1100000
+				ldy #3
+				jsr S.Pak.PutYBits
+				
+				lda S.Pak.Limit
+				sec
+				sbc S.Pak.SrcBlPtrT
+				php						save C
+				
+				ldy #8
+				jsr S.Pak.PutYBits
+				
+				plp
+				lda S.Pak.Limit+1
+				sec
+				sbc S.Pak.SrcBlPtrT+1
+				
+				jsr S.Pak.PutBit
+				
+				ply						Get back BL len
+				phy
+				
+				jsr S.Pak.StripPipe		Remove LEN bytes from PIPE
+				
+				pla						Get back BL len
+				sec
+				sbc #3					Adjust Range..3-18 to 0->15
+				asl
+				asl
+				asl
+				asl
+				ldy #4					store 4 bits len
+				jsr S.Pak.PutYBits
+				ldy #STATS.BL
+				jsr S.Pak.UpdateStats
+				jmp S.Pak.2.LOOP
+				
+* No match...try starting at next byte
+.9				inc	S.Pak.SrcBlPtrT
+				bne .5
+				inc	S.Pak.SrcBlPtrT+1
+				bra .5
+.10				dex						reduce PIPE
+				cpx #2					2 bytes remaining? no need to BL, a BL is 16bits wide.....
+				bne .40					and start over from BLPtr
+				
+* NO Bl Found, STORE
+S.Pak.STORE		lda S.Pak.Pipe
+				jsr S.Pak.2.STORE1
+				ldy #1
+				jsr S.Pak.StripPipe
+				jmp S.Pak.2.LOOP
+*--------------------------------------
+S.Pak.2.STORE1
+				rts
+*--------------------------------------
+S.Pak.GetByte	inc	S.UnPak.Cnt
+				bne .1
+				inc S.UnPak.Cnt+1
+.1				beq .9 
+				lda (S.Pak.SrcPtr)
+				pha
+				inc S.Pak.SrcPtr
+				bne .2
+				inc S.Pak.SrcPtr+1
+.2				clc
+				rts
+.9				sec
+				rts
+*--------------------------------------
+S.Pak.PutYBits	asl
+				jsr S.Pak.PutBit
+				dey
+				bne S.Pak.PutYBits
+				rts
+*--------------------------------------
+* S.Pak.PutBit (bit in C)
+*--------------------------------------
+S.Pak.PutBit	ldx #$ff
+				pha
+				bne .1
+				lda S.Pak.Byte
+				jsr S.Pak.PutByte
+				stz S.Pak.Byte
+				ldx #8
+				
+.1				dex
+				stx S.Pak.PutBit+1
+				bcc .8					Nothing to "light up"
+				
+				lda S.Pak.Byte
+				lda S.Pak.BitMask,x
+				sta S.Pak.Byte
+.8				pla
+				rts				
+*--------------------------------------
+S.Pak.PutByte	sta (S.UnPak.DstPtr)
+				inc S.UnPak.DstPtr
+				bne .1
+				inc S.UnPak.DstPtr+1
+				
+.1				inc S.Pak.Stat.Size
+				bne .2
+				inc S.Pak.Stat.Size+1
+.2				
+				rts
+*--------------------------------------
+* Y = count to remove from PIPE
+*--------------------------------------
+S.Pak.StripPipe	ldx S.Pak.PipeLen
+				beq .9
+				
+				ldx #0
+				
+.1				lda S.Pak.Pipe+1,x
+				sta S.Pak.Pipe,x
+				inx
+				cpx S.Pak.PipeLen
+				bne .1
+				dec S.Pak.PipeLen
+				dey
+				bne S.Pak.StripPipe
+				
+.9				rts				
+*--------------------------------------
+S.Pak.UpdateStats
+				inc S.Pak.Stat.Size,y
+				bne .8
+				inc S.Pak.Stat.Size+1,y
+.8				rts
+*--------------------------------------
+S.Pak.BitMask	.HS 0102040810204080
+S.Pak.Src		.BS 2
+S.Pak.SrcCnt	.BS 2
+S.Pak.Cnt		.BS 2
+S.Pak.CntL		.BS 256
+S.Pak.CntH		.BS 256
+S.Pak.Short4	.BS 16
+S.Pak.Short3	.BS 8
+S.Pak.Byte		.BS 1
+S.Pak.Limit		.BS 2
+S.Pak.PipeLen	.BS 1
+S.Pak.Pipe		.BS 18
+*--------------------------------------
+S.Pak.Stat.Size	.BS 2
+S.Pak.Stat.BL	.BS 2
+S.Pak.Stat.REP	.BS 2
+S.Pak.Stat.S3	.BS 2
+S.Pak.Stat.S4	.BS 2
+*--------------------------------------
+* S.UnPak
+* In : 
+*  PULLW = Src PTR Compressed Buffer
+*  PULLW = Dst PTR
+*--------------------------------------
+S.UnPak.SrcPtr	.EQ ZPLIB
+S.UnPak.DstPtr	.EQ ZPLIB+2
+S.UnPak.ShrtTbl	.EQ ZPLIB+4
+S.UnPak.Cnt		.EQ ZPLIB+6
+*--------------------------------------
+S.UnPak			>PULLW S.UnPak.SrcPtr
+				>PULLA					Get Dst PTR LO
+				sec
+				sbc #1					
+				sta	S.UnPak.DstPtr
+				>PULLA					Get Dst PTR HI
+				sbc #0
+				sta	S.UnPak.DstPtr+1	setup Dst PTR-1 
+				
+				jsr S.UnPak.GetByte		Get !LEN for counting up to $0000
+				sta S.UnPak.Cnt
+				
+				jsr S.UnPak.GetByte
+				sta S.UnPak.Cnt+1
+				
+				>LDYA S.UnPak.SrcPtr	Get PTR to Short Table.....
+				>STYA S.UnPak.ShrtTbl	and save it for SHORTx
+				
+				lda #8
+				sta S.UnPak.GetBit+1	Initialize properly for first "GetBit" Call
+				
+.1				inc	S.UnPak.Cnt
+				bne .2
+				inc S.UnPak.Cnt+1
+				beq .99
+				
+.2				jsr S.UnPak.GetBit
+				bcs .4					CMD....
+*---- STORE
+				jsr S.UnPak.GetBit
+				ldx #1
+				bcc	.3					if CC one byte
+				jsr S.UnPak.Get4Bits	CC
+				adc #2					range is 2->17
+				tax
+				
+.3				jsr S.UnPak.Get8Bits
+				jsr S.UnPak.PutByte
+				dex
+				bne .3
+				bra .1
+.99				rts				
+*---- CMD
+.4				jsr S.UnPak.GetBit
+				bcs .6					BACKLINK or REP...
+*---- CMD : SHORT		
+				lda #0
+				ldy #4
+								
+				jsr S.UnPak.GetBit		if CS short3
+				rol						make offset 00000001
+				asl						....00000010
+				beq .5
+				
+				dey						if short3, only 3 bits
+				
+.5				jsr S.UnPak.GetBit
+				rol
+				dey
+				bne .5	
+				
+				tay						if s3, offset is 00010xxx
+				lda (S.UnPak.ShrtTbl),y	if s4, offset is 0000xxxx
+				jsr S.UnPak.PutByte
+				bra .1
+*---- CMD : BACKLINK or REP
+.6				jsr S.UnPak.GetBit
+				bcs .8					if CS -> REP	
+*---- CMD : BACKLINK
+				jsr S.UnPak.Get8Bits	get Offset LO, (CC)
+				eor #$ff				!offset LO
+				adc S.UnPak.DstPtr		equiv. SUB offset
+				sta .7+1				PTR to Backlink LO
+				lda S.UnPak.DstPtr+1
+				bcs .61					if ADC sets C, no need to dec HI
+				dec
+.61				jsr S.UnPak.GetBit		get Offset HI in C
+				bcc .62
+				dec
+.62				sta .7+2				PTR to Backlink HI
+				
+				jsr S.UnPak.Get4Bits	CC
+				adc #3					Backlink are ate least 3 bytes...
+				tax
+				ldy #0
+				
+.7				lda $ffff,y				Self Modified code : PTR to Backlink			
+				jsr S.UnPak.PutByte
+				iny
+				dex
+				bne .7
+				beq .1
+*---- CMD : REP				
+.8				jsr S.UnPak.GetBit
+				ldx #1
+				bcc .9					REP 1
+				
+				jsr S.UnPak.Get4Bits	REP xxxx, CC
+				adc #2					range is 2->17
+				tax
+				
+.9				lda (S.UnPak.DstPtr)	Get Last Byte
+				jsr S.UnPak.PutByte
+				dex
+				bne .9
+				beq .1
+*--------------------------------------
+S.UnPak.Get8Bits
+				ldy #8
+				.HS 2C					bit abs
+S.UnPak.Get4Bits
+				ldy #4
+				lda #0					make sure to reset A before reading less than 8 bits only	
+.1				jsr S.UnPak.GetBit		and to exit with CC if even if 8 bits read
+				rol
+				dey
+				bne .1
+				rts						always CC
+*--------------------------------------
+S.UnPak.GetBit	ldx #$ff				Self Modified code
+				bne .1
+				jsr S.UnPak.NxtByte
+				
+				ldx #8
+				
+.1				dex				
+				stx S.UnPak.GetBit+1
+				
+				pha						Don't trash A
+				lda (S.UnPak.SrcPtr)
+				and S.UnPak.BitMask,x
+				cmp #1					if 0:CC, i>0 CS
+				
+				pla
+				rts						Bit is in C				
+*--------------------------------------
+S.UnPak.GetByte	lda (S.UnPak.SrcPtr)
+S.UnPak.NxtByte	inc S.UnPak.SrcPtr
+				bne .8
+				inc S.UnPak.SrcPtr+1
+.8				rts
+*--------------------------------------
+S.UnPak.PutByte	inc S.UnPak.DstPtr
+				bne .8
+				inc S.UnPak.DstPtr+1
+.8				sta (S.UnPak.DstPtr)
+				rts
+*--------------------------------------
+S.UnPak.BitMask	.HS 8040201008040201
+MAN
+SAVE LIB/LIBPAK.S
+ASM

@@ -70,6 +70,27 @@ Prints Pascal/C-Style String
 + CC : success
 + CS : I/O error from COut
 
+#FPutCAY
+Print A (char) to File
+
+##In:
++ A : char to print
++ Y = hFILE
++ none.
+
+##Out: 
++ CC = success
+
+#PutCA
+Print A (char) to StdOut
+
+##In:
++ A : char to print
++ none.
+
+##Out: 
++ CC = success
+
 #GetDevByIDA
 
 ##IN: 
@@ -77,7 +98,7 @@ Prints Pascal/C-Style String
 
 ##OUT:
 + CC = OK, CS = ERROR
-+ Y,A = devslot
++ Y,A = DEVSLOT
 + note: X Unmodified
 
 #GetDevIDByNameYA
@@ -88,7 +109,7 @@ Prints Pascal/C-Style String
 ##OUT:
 + CC = OK, CS = ERROR
 + X = DEVID
-+ Y,A = pDev
++ Y,A = DEVSLOT
 
 #GetDevInfoA
 
@@ -98,6 +119,25 @@ Prints Pascal/C-Style String
 ##OUT:
 + CC = OK, CS = ERROR
 + Y,A = Ptr to S.DEVINFO
+
+#MkNodYA
+return a S.FILE from a given Device
+
+##IN: 
++ Y,A=DevName
+
+##OUT:
++ CC = OK, CS = ERROR
++ A = hFILE
+
+#MKFIFO
+return a S.FILE to a new FIFO
+
+##IN: 
+
+##OUT:
++ CC = OK, CS = ERROR
++ A = hFILE
 
 #OpenDirYA
 
@@ -206,6 +246,24 @@ Close a file
 + A = hFILE
 
 ##Out :
+
+#FReadA
+Read ONE byte from file
+
+##In :
++ A = hFILE
+
+##Out :
++ A = Byte Read
+
+#FWriteAY
+
+##In:
++ A = hFILE
++ Y = char
+
+#Out:
++ Y,A = Bytes Written
 
 #FRead
 Read bytes from file

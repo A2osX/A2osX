@@ -1,0 +1,231 @@
+PR#3
+PREFIX /A2OSX.SRC
+NEW
+INC 1
+AUTO 6
+				.LIST OFF
+				.OP	65C02
+				.OR	$2000
+				.TF /A2OSX.BOOT/SBIN/NFSD
+*--------------------------------------
+				.INB /A2OSX.DEV/INC/MACROS.I
+				.INB /A2OSX.DEV/INC/A2OSX.I
+				.INB /A2OSX.DEV/INC/LIBTCPIP.I
+*--------------------------------------
+TIMEOUT.MAX		.EQ 30					30 sec.
+*--------------------------------------
+ZPIPCfgPtr		.EQ ZPBIN
+ZPSktPtr		.EQ ZPBIN+2
+*--------------------------------------
+*			File Header (16 Bytes)
+*--------------------------------------
+CS.START		cld
+				jmp (.1,x)
+				.DA #$61				6502,Level 1 (65c02)
+				.DA #1					BIN Layout Version 1
+				.DA 0
+				.DA CS.END-CS.START		Code Length To Relocate
+				.DA DS.END-DS.START		Data Segment to Allocate
+				.DA 0
+				.DA 0
+*--------------------------------------
+* Relocation Table
+*--------------------------------------				
+.1				.DA CS.INIT
+				.DA CS.RUN
+				.DA CS.DOEVENT
+				.DA	CS.QUIT
+				.DA CS.HOOK
+L.LIBTCPIP		.DA LIBTCPIP
+L.Socket		.DA Socket
+L.MSG.TCPWAIT	.DA MSG.TCPWAIT
+L.MSG.INITOK	.DA MSG.INITOK
+L.MSG.TCPIPERR	.DA MSG.TCPIPERR
+L.MSG.SKTERR	.DA MSG.SKTERR
+L.MSG.ABORT		.DA MSG.ABORT
+L.MSG.INCOMING	.DA MSG.INCOMING
+				.DA 0				
+*--------------------------------------
+CS.INIT			>LDYA L.LIBTCPIP
+				>SYSCALL LoadLibYA
+				sta hLIBTCPIP
+
+				lda (pPs)
+				ora #S.PS.F.EVENT		Now accept events
+				sta (pPs)
+				clc
+				rts
+*--------------------------------------
+CS.RUN			jsr Init.Timeout
+
+				>LDYA L.MSG.TCPWAIT
+				>SYSCALL PSTROutYA
+				
+.1				>LIBCALL hLIBTCPIP,LIBTCPIP.GET.IPCFG	is TCPIP loaded ?
+				bcs .99
+				>STYA ZPIPCfgPtr
+				
+				lda (ZPIPCfgPtr)		Configured ?
+				bmi CS.RUN.INIT
+				
+				>SYSCALL Sleep
+				jsr Wait.Timeout
+				bcc .1
+				
+.99				>LDYA L.MSG.TCPIPERR
+				>SYSCALL PSTROutYA
+				lda #SYSMGR.ERRSYN
+				sec	
+				rts
+				
+CS.RUN.INIT		ldx #3
+				ldy #S.IPCFG.IP+3
+.1				lda (ZPIPCfgPtr),y
+				sta Socket.Src.Addr,x
+				dey
+				dex
+				bpl .1
+				
+				>PUSHW L.Socket
+				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.NEW
+				bcs .9
+				txa
+				ldy #hSocket
+				sta (pData),y
+				
+				>LDYA L.MSG.INITOK
+				>SYSCALL PSTROutYA
+
+.11				>SYSCALL Sleep
+				ldy #bCTRLC
+				lda (pData),y
+				bmi .99
+				bra .11
+				
+				ldy #hSocket
+				lda (pData),y
+				
+				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.ACCEPTA
+				bcs .11
+				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.GETA
+				>STYA ZPSktPtr
+				
+				ldx #3
+				ldy #S.SOCKET.DST.ADDR+3
+				
+.2				>PUSHB (ZPSktPtr),y
+				dey
+				dex
+				bpl .2
+				
+				>LDYA L.MSG.INCOMING
+				>SYSCALL PSTROutYA
+				bra .11
+				
+.9				>LDYA L.MSG.SKTERR
+				>SYSCALL PSTROutYA
+				lda #SYSMGR.ERRSYN
+				sec	
+				rts
+				
+.99				>LDYA L.MSG.ABORT
+				>SYSCALL PSTROutYA
+				lda #0
+				sec	
+				rts
+*--------------------------------------
+CS.DOEVENT		lda (pEvent)
+				bpl .1					is it a TIMER event?
+
+				asl						One second ?
+				bpl .9
+				
+				ldy #TimeOut
+				lda (pData),y
+				beq .9
+				
+				dec
+				sta (pData),y
+				sec						do not discard TIMER event
+				rts
+
+.1				bit #S.EVT.F.KEY		is it a KEY event?
+				beq .9
+
+				ldy #S.EVT.DATAHI		is it an O or SAPPLE key ?
+				lda (pEvent),y
+				bne	.9
+
+				ldy #S.EVT.DATALO	
+				lda (pEvent),y
+				cmp #$03				Ctrl-C
+				bne .9
+
+				lda #$FF
+				ldy #bCTRLC
+				sta (pData),y
+				clc
+				rts
+				
+.9				sec
+				rts
+*--------------------------------------
+CS.QUIT			ldy #hSocket
+				lda (pData),y
+				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.CLOSEA
+				
+				lda hLIBTCPIP
+				>SYSCALL UnloadLibA
+				clc
+				rts
+*--------------------------------------
+CS.HOOK			
+*--------------------------------------
+Init.Timeout	ldy #TimeOut
+				lda #TIMEOUT.MAX
+				sta (pData),y
+				rts
+*--------------------------------------
+Wait.TimeOut	sec
+				ldy #TimeOut
+				lda (pData),y
+				beq .9
+				ldy #bCTRLC
+				lda (pData),y
+				bmi .9
+				clc
+.9				rts
+*--------------------------------------
+CS.END
+*--------------------------------------
+LIBTCPIP		>PSTR "libtcpip.o"
+MSG.TCPWAIT		>PSTR "NFSD:Waiting for TCP/IP initializing...\n"
+MSG.INITOK		>PSTR "NFSD:Init Ok, Listening.\n"
+MSG.TCPIPERR	>PSTR "NFSD:TCP/IP Not initialized properly\n"
+MSG.SKTERR		>PSTR "NFSD:Listen Error\n"
+MSG.ABORT		>PSTR "NFSD:User Aborted\n"
+MSG.INCOMING	>PSTR "NFSD:Incoming Connection From : %d.%d.%d.%d\n"	
+hLIBTCPIP		.BS 1
+*--------------------------------------
+Socket			.DA #S.SOCKET.SOCK.DGRAM	
+				.DA #S.SOCKET.SO.ACCEPTCONN
+				.DA #S.SOCKET.STATUS.LISTEN
+				.BS 1
+Socket.Src.Addr	.BS 4
+Socket.Src.Port	.DA 2049
+Socket.Dst.Addr	.BS 4
+Socket.Dst.Port	.BS 2
+				.BS 16
+*--------------------------------------
+				.DUMMY
+				.OR 0
+DS.START
+TimeOut			.BS 1
+bCTRLC			.BS 1
+hSocket			.BS 1
+DS.END
+				.ED
+*--------------------------------------
+MAN
+SAVE SBIN/NFSD.S
+ASM
