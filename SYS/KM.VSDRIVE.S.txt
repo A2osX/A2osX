@@ -1,0 +1,248 @@
+PR#3
+PREFIX /A2OSX.SRC
+NEW
+INC 1
+AUTO 6
+				.LIST OFF
+				.OP	65C02
+				.OR	$2000
+				.TF /A2OSX.BOOT/SYS/KM.VSDRIVE
+*--------------------------------------
+				.INB /A2OSX.DEV/INC/MACROS.I
+				.INB /A2OSX.DEV/INC/IO.I
+				.INB /A2OSX.DEV/INC/MONITOR.I
+				.INB /A2OSX.DEV/INC/PRODOS.I
+*--------------------------------------
+TmpPtr1			.EQ	$0
+TmpPtr2			.EQ	$2
+*--------------------------------------
+				.INB DRV/X.SER.6551.S
+*--------------------------------------
+VSDRIVE.Init	>LDAXI VSDRIVE.MSG0
+				jsr VSDRIVE.Print
+
+				jsr VSDRIVE.Check
+				bcc .1
+	
+				>LDAXI VSDRIVE.MSG1
+				jsr VSDRIVE.Print
+				rts
+				
+.1				jsr VSDRIVE.Detect
+				bcc .2
+
+				>LDAXI VSDRIVE.MSG2
+				jsr VSDRIVE.Print
+				rts
+
+.2				jsr VSDRIVE.Install
+				
+				>LDAXI VSDRIVE.MSG3
+				jsr VSDRIVE.Print
+				
+				>DEBUG
+				rts
+*--------------------------------------
+VSDRIVE.Check
+
+				clc
+				rts
+*--------------------------------------
+VSDRIVE.Detect	
+				
+
+				
+.9				clc
+				rts
+*--------------------------------------
+*--------------------------------------
+VSDRIVE.Install	
+				rts
+*--------------------------------------
+VSDRIVE.Print	>STAX TmpPtr1
+				ldy #0
+				
+.1				lda (TmpPtr1),y
+				beq .9
+				ora #$80
+				jsr COUT
+				iny
+				bne .1
+.9				jmp CROUT
+*--------------------------------------
+VSDRIVE.MSG0	>CSTR "VSDRIVE ('Vitual Serial Hard Drive') Driver For A2osX"
+VSDRIVE.MSG1	>CSTR "VSDRIVE Already Installed."
+VSDRIVE.MSG2	>CSTR "SSC Not Detected."
+VSDRIVE.MSG3	>CSTR "VSDRIVE Driver Successfully Installed."
+*--------------------------------------
+* Driver
+*--------------------------------------
+* OP = 2 : Write drv1
+* OP = 3 : Read  drv1
+* OP = 4 : Write drv2
+* OP = 5 : Read  drv2
+* CMD = $CE+OP+BLKLO+BLKHI+CHKSUM
+*--------------------------------------
+DRV.A2L			.EQ $3E
+DRV.A2H			.EQ $3F
+DRV.COMMAND 	.EQ $42
+DRV.UNITNUM		.EQ $43
+DRV.BUFF		.EQ $44        
+DRV.BLKNUM		.EQ $46
+*--------------------------------------
+DRV				.EQ *
+				.PH	$D001				Main LC Bnk 1 $D001->$DFFF
+				cld
+DRV.Slotn0		ldx #$ff				Self Modified
+				lda DRV.COMMAND
+				beq .8					Status
+				cmp #3
+				beq .81					Format ....
+				bcs .9					 more....IO error
+
+				eor	#$ff				exchange W=1,R=2
+				inc						W=2,R=3
+				ldx DRV.UNITNUM		
+				bpl .1
+				adc #2
+				
+.1				jsr DRV.DO.CMD		
+				bcs .9
+				
+.8				ldx #$ff				return Status
+				ldy #$ff
+.81				lda #0					
+				clc
+				rts
+				
+.9				lda #MLI.ERR.IO				
+				rts
+*--------------------------------------
+DRV.DO.CMD		sta DRVDRV.CmdBuf.Cmd	store cmd
+				eor #$CE
+				sta DRV.CmdBuf.Sum
+
+				lda DRV.BLKNUM
+				sta DRV.CmdBuf.Blk
+				eor DRV.CmdBuf.Sum
+				sta DRV.CmdBuf.Sum
+
+				lda DRV.BLKNUM+1
+				sta DRV.CmdBuf.Blk+1
+				eor DRV.CmdBuf.Sum
+				sta DRV.CmdBuf.Sum
+				
+				stz SSC.RESET,x 
+				
+				lda #SSC.CTL.B115200+SSC.CTL.8D+SSC.CTL.1S+SSC.CMD.NOP
+				sta SSC.CTL,x
+				
+				lda #SSC.CMD.RIRQDIS
+				sta SSC.CMD,x
+* send CMD+CS
+				ldy #0
+				
+.1				lda DRV.CmdBuf,y
+				jsr DRV.SSCSend
+				bcs .9
+				
+				iny
+				cpy #5
+				bne .1
+* read back CMD				
+				ldy #0
+				
+.2				jsr DRV.SSCGet
+				bcs .9
+				cmp DRV.CmdBuf,y
+				bne .9
+				iny
+				cpy #4
+				bne .2
+* skip CS				
+				iny
+				
+.3				jsr DRV.SSCGet
+				bcs .9
+				sta DRV.CmdBuf,y
+				eor DRV.CmdBuf.Sum
+				sta DRV.CmdBuf.Sum
+				iny
+				cpy #9
+				bne .3
+				
+				jsr DRV.SSCGet
+				bcs .9
+				cmp DRV.CmdBuf.Sum
+				bne .9
+				
+				clc
+				rts
+				
+.9				sec
+				rts
+*--------------------------------------
+DRV.CmdBuf		.HS $CE
+DRV.CmdBuf.Cmd	.BS 1
+DRV.CmdBuf.Blk	.BS 2
+DRV.CmdBuf.Sum	.BS 1
+DRV.CmdBuf.Time	.BS 4			
+*--------------------------------------
+DRV.BufCheckSum	lda DRV.BUFF
+				sta DRV.A2L
+				lda DRV.BUFF+1
+				inc
+				sta DRV.A2H	
+				
+				lda #0
+				tay
+				
+.1				eor (DRV.BUFF),y
+				eor (DRV.A2L),y
+				iny
+				bne .1
+				rts
+*--------------------------------------
+DRV.SSCSend
+.1				lda SSC.STATUS,x
+				bit #SSC.STATUS.DCD+SSC.STATUS.DSR
+				beq .9
+								
+				and #SSC.STATUS.TDRE	Outgoing char?
+				bne .1
+				
+				pla
+				sta SSC.DATA,x
+				
+				clc
+				rts
+				
+.9				pla
+				sec
+				rts
+*--------------------------------------
+DRV.SSCGet
+.1				lda SSC.STATUS,x
+
+				and #SSC.STATUS.RDRF	incoming char?
+				beq	.1
+				
+				lda SSC.DATA,x
+				clc
+				rts
+*--------------------------------------				
+				.BS 4					Time,Date
+				.EP
+
+*--------------------------------------
+DRV.SIZE		.EQ *-DRV
+*--------------------------------------
+* CONTROL SECTION :
+*--------------------------------------
+				.DO DRV.SIZE>255
+				ERROR:DRV.SIZE too big
+				.FIN
+*--------------------------------------
+MAN
+SAVE SYS/KM.VSDRIVE.S
+ASM
