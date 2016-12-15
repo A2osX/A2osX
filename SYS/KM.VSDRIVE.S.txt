@@ -97,6 +97,17 @@ SSC.Detect		stz TmpPtr1
 				asl
 				asl
 				asl
+				tax
+							
+				stz SSC.RESET,x 
+				
+				lda #SSC.CTL.B115200+SSC.CTL.8D+SSC.CTL.1S+SSC.CMD.NOP
+				sta SSC.CTL,x
+				
+				lda #SSC.CMD.RIRQDIS
+				sta SSC.CMD,x				
+				txa
+				
 				clc
 				rts
 				
@@ -235,7 +246,7 @@ DRV.Slotn0		ldx #$ff				Self Modified
 				inc						W=2,R=3
 				ldx DRV.UNITNUM		
 				bpl .1
-				adc #2
+				adc #2					CC from bcs .9
 				
 .1				jsr DRV.DO.CMD		
 				bcs .9
@@ -251,16 +262,15 @@ DRV.Slotn0		ldx #$ff				Self Modified
 *--------------------------------------
 DRV.DO.CMD		sta DRV.CmdBuf.Cmd		store cmd
 				eor #VS.CMD
-				sta DRV.CmdBuf.Sum
+				eor DRV.BLKNUM
+				eor DRV.BLKNUM+1
+				
+				ldy DRV.BLKNUM
+				sty DRV.CmdBuf.Blk
 
-				lda DRV.BLKNUM
-				sta DRV.CmdBuf.Blk
-				eor DRV.CmdBuf.Sum
-				sta DRV.CmdBuf.Sum
-
-				lda DRV.BLKNUM+1
-				sta DRV.CmdBuf.Blk+1
-				eor DRV.CmdBuf.Sum
+				ldy DRV.BLKNUM+1
+				sty DRV.CmdBuf.Blk+1
+				
 				sta DRV.CmdBuf.Sum
 				
 				lda DRV.BUFF
@@ -268,14 +278,7 @@ DRV.DO.CMD		sta DRV.CmdBuf.Cmd		store cmd
 				lda DRV.BUFF+1
 				inc
 				sta DRV.A2H	
-				
-				stz SSC.RESET,x 
-				
-				lda #SSC.CTL.B115200+SSC.CTL.8D+SSC.CTL.1S+SSC.CMD.NOP
-				sta SSC.CTL,x
-				
-				lda #SSC.CMD.RIRQDIS
-				sta SSC.CMD,x
+
 * send CMD+CS
 				ldy #0
 				
@@ -303,16 +306,15 @@ DRV.DO.CMD		sta DRV.CmdBuf.Cmd		store cmd
 				cmp #1
 				bne .6
 
-* Read block				
-				iny						Skip Checksum
+* Read block		
+				ldy #4					Read 4 bytes
 				
 .3				jsr DRV.SSCGet
 				bcs .9
-				sta DRV.CmdBuf,y
+
 				eor DRV.CmdBuf.Sum
 				sta DRV.CmdBuf.Sum
-				iny
-				cpy #9
+				dey
 				bne .3
 
 * recieve Header CS and check
@@ -323,6 +325,7 @@ DRV.DO.CMD		sta DRV.CmdBuf.Cmd		store cmd
 				bne .9
 				
 				ldy #0
+				
 .4				jsr DRV.SSCGet
 				bcs .9
 				sta (DRV.BUFF),y
@@ -346,13 +349,28 @@ DRV.DO.CMD		sta DRV.CmdBuf.Cmd		store cmd
 				rts
 
 * Write Block				
-.6				
+.6				ldy #0
+
+.7				lda (DRV.BUFF),y
+				jsr DRV.SSCSend
+				bcs .9
+				iny
+				bne .7
 				
+.8				lda (DRV.A2L),y
+				jsr DRV.SSCSend
+				bcs .9
+				iny
+				bne .8
 				
-				clc
+				jsr DRV.BufCheckSum
+				jsr DRV.SSCSend
+				bcs .9
+
 				rts
 				
-.9				sec
+.9
+DRV.CS			sec
 				rts
 *--------------------------------------
 DRV.CmdBuf		.DA #VS.CMD
@@ -369,27 +387,25 @@ DRV.BufCheckSum	lda #0
 				bne .1
 				rts
 *--------------------------------------
-DRV.SSCSend		pha
+DRV.SSCSend		sta .2+1
 .1				lda SSC.STATUS,x
 				bit #SSC.STATUS.DCD+SSC.STATUS.DSR
-				beq .9
+				beq DRV.CS
 								
 				and #SSC.STATUS.TDRE	Outgoing char?
 				beq .1
 				
-				pla
+.2				lda #$ff
 				sta SSC.DATA,x
 				
 				clc
 				rts
-				
-.9				pla
-				sec
-				rts
 *--------------------------------------
 DRV.SSCGet
 .1				lda SSC.STATUS,x
-
+				bit #SSC.STATUS.DCD+SSC.STATUS.DSR
+				beq DRV.CS
+				
 				and #SSC.STATUS.RDRF	incoming char?
 				beq	.1
 				
@@ -399,12 +415,14 @@ DRV.SSCGet
 *--------------------------------------				
 				.EP
 *--------------------------------------
+				.LIST ON
 DRV.SIZE		.EQ *-DRV
+				.LIST OFF
 *--------------------------------------
 * CONTROL SECTION :
 *--------------------------------------
 				.DO DRV.SIZE>255
-				ERROR:DRV.SIZE too big
+*				ERROR:DRV.SIZE too big
 				.FIN
 *--------------------------------------
 MAN
