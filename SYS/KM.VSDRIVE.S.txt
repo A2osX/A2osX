@@ -217,7 +217,7 @@ ProDOS.PATCH	.PH DRV.EntryPoint
 * OP = 3 : Read  drv1
 * OP = 4 : Write drv2
 * OP = 5 : Read  drv2
-* CMD = $CE+OP+BLKLO+BLKHI+CHKSUM
+* CMD = $C5+OP+BLKLO+BLKHI+CHKSUM
 * DO NOT trash DRV.COMMAND...DRV.BLKNUM as ProDOS 
 * reuses them after Block operation
 * A1,A2 are used by Disk II Driver, 
@@ -236,14 +236,13 @@ DRV				.EQ *
 				.PH	$D001				Main LC Bnk 2 $D001->$DFFF
 				cld
 DRV.Slotn0		ldx #$ff				Self Modified
-				lda DRV.COMMAND
+				lda DRV.COMMAND			S=0,R=1,W=2,F=3
 				beq .8					Status
 				cmp #3
 				beq .81					Format ....
 				bcs .9					 more....IO error
 
-				eor	#$ff				exchange W=1,R=2
-				inc						W=2,R=3
+				ora	#2					W=2,R=3
 				ldx DRV.UNITNUM		
 				bpl .1
 				adc #2					CC from bcs .9
@@ -264,49 +263,46 @@ DRV.DO.CMD		sta DRV.CmdBuf.Cmd		store cmd
 				eor #VS.CMD
 				eor DRV.BLKNUM
 				eor DRV.BLKNUM+1
+				sta DRV.CmdBuf.Sum		Compute & store CheckSum
 				
-				ldy DRV.BLKNUM
-				sty DRV.CmdBuf.Blk
+				lda DRV.BLKNUM
+				sta DRV.CmdBuf.BlkLo
 
-				ldy DRV.BLKNUM+1
-				sty DRV.CmdBuf.Blk+1
-				
-				sta DRV.CmdBuf.Sum
+				lda DRV.BLKNUM+1
+				sta DRV.CmdBuf.BlkHi
 				
 				lda DRV.BUFF
-				sta DRV.A2L
+				sta DRV.A1L
 				lda DRV.BUFF+1
 				inc
-				sta DRV.A2H	
+				sta DRV.A1H	
 
 * send CMD+CS
-				ldy #0
+				ldy #4					Send 5 bytes including Sum
 				
-.1				lda DRV.CmdBuf,y
+.1				lda DRV.CmdBuf.Sum,y
 				jsr DRV.SSCSend
 				bcs .9
-				
-				iny
-				cpy #5
-				bne .1
+				dey
+				bpl .1
 * read back CMD				
-				ldy #0
+				ldy #3					Read Back and check 4 bytes
 				
 .2				jsr DRV.SSCGet
 				bcs .9
-				cmp DRV.CmdBuf,y
+				cmp DRV.CmdBuf.BlkHi,y
 				bne .9
-				iny
-				cpy #4
-				bne .2
+				dey
+				bpl .2
 				
 * Get ProDOS Date/time send from server	if READ (3 or 5)
 
 				lda DRV.COMMAND
-				cmp #1
-				bne .6
+				dec						1-1=0 if read
+				bne .6					go write
 
-* Read block		
+* Read block : Discard ProDOS time recieved from Server (4 bytes)
+	
 				ldy #4					Read 4 bytes
 				
 .3				jsr DRV.SSCGet
@@ -317,14 +313,14 @@ DRV.DO.CMD		sta DRV.CmdBuf.Cmd		store cmd
 				dey
 				bne .3
 
-* recieve Header CS and check
+* recieve Header Sum and check
 		
 				jsr DRV.SSCGet
 				bcs .9
-				cmp DRV.CmdBuf.Sum
+				eor DRV.CmdBuf.Sum
 				bne .9
 				
-				ldy #0
+*				tay						Y=0 from dey/bne
 				
 .4				jsr DRV.SSCGet
 				bcs .9
@@ -334,7 +330,7 @@ DRV.DO.CMD		sta DRV.CmdBuf.Cmd		store cmd
 				
 .5				jsr DRV.SSCGet
 				bcs .9
-				sta (DRV.A2L),y
+				sta (DRV.A1L),y
 				iny
 				bne .5
 				
@@ -343,10 +339,9 @@ DRV.DO.CMD		sta DRV.CmdBuf.Cmd		store cmd
 				jsr DRV.SSCGet
 				bcs .9
 				
-				cmp DRV.CmdBuf.Sum
+				eor DRV.CmdBuf.Sum
 				bne .9
-				clc
-				rts
+				rts						A=0,CC from bcs .9
 
 * Write Block				
 .6				ldy #0
@@ -357,26 +352,38 @@ DRV.DO.CMD		sta DRV.CmdBuf.Cmd		store cmd
 				iny
 				bne .7
 				
-.8				lda (DRV.A2L),y
+.8				lda (DRV.A1L),y
 				jsr DRV.SSCSend
 				bcs .9
 				iny
 				bne .8
 				
 				jsr DRV.BufCheckSum
+				sta DRV.CmdBuf.Sum		Save Block CheckSum for comparing later
 				jsr DRV.SSCSend
 				bcs .9
 
+				ldy #4					Read 5 bytes (echo from server)
+				
+.81				jsr DRV.SSCGet
+				bcs .9
+
+				eor DRV.CmdBuf.Sum,y	Check 5 bytes (including block Sum)
+				bne .9
+				dey
+				bpl .81
+				
 				rts
 				
 .9
 DRV.CS			sec
 				rts
 *--------------------------------------
-DRV.CmdBuf		.DA #VS.CMD
+DRV.CmdBuf.Sum	.BS 1					Reverse order for dey 
+DRV.CmdBuf.BlkHi	.BS 1
+DRV.CmdBuf.BlkLo	.BS 1
 DRV.CmdBuf.Cmd	.BS 1
-DRV.CmdBuf.Blk	.BS 2
-DRV.CmdBuf.Sum	.BS 1	
+DRV.CmdBuf.Env	.DA #VS.CMD
 *--------------------------------------
 DRV.BufCheckSum	lda #0
 				tay
