@@ -11,8 +11,19 @@ AUTO 6
 				.INB /A2OSX.DEV/INC/MACROS.I
 				.INB /A2OSX.DEV/INC/A2OSX.I
 				.INB /A2OSX.DEV/INC/LIBTCPIP.I
+				.INB /A2OSX.DEV/INC/PRODOS.I
 *--------------------------------------
 ZPTmpPTR		.EQ ZPDRV
+*--------------------------------------
+*S.DEVINFO.NET.FLAGS.ARPOFFLOAD	.EQ %00000001
+*S.DEVINFO.NET.FLAGS.IPOFFLOAD	.EQ %00000010
+*S.DEVINFO.NET.MAC		.EQ 2
+*S.DEVINFO.NET.STATUS	.EQ 8
+*S.DEVINFO.NET.STATUS.OK	.EQ $80
+*S.DEVINFO.NET.STATUS.FD	.EQ $40
+*S.DEVINFO.NET.STATUS.10		.EQ $01
+*S.DEVINFO.NET.STATUS.100	.EQ $02
+*S.DEVINFO.NET.STATUS.1000	.EQ $03
 *--------------------------------------
 				.INB DRV/X.NET.8900A.S
 *--------------------------------------
@@ -60,7 +71,7 @@ Dev.Detect		>STYA ARGS
 				>LDYA L.MSG.DETECT.KO
 				>SYSCALL CPrintFYA
 
-				lda #DEVMGR.ERRNOHW
+				lda #MLI.ERR.NODEV
 				sec
 				rts
 				
@@ -108,67 +119,68 @@ ARGS			.BS 2
 *--------------------------------------
 *			Device Header (16 Bytes)
 *--------------------------------------
-DEV.HEADER		cld
-				jmp (DRV.CS.START,x)
-				.HS 00
-				.DA #S.DEV.F.SHARE+S.DEV.F.EVENT
-DEV.HEADER.NAME	>PSTR "ETH1"			NAME
-				.HS 00
-				.HS 00.00.00.00
+DEV.HEADER		.DA DRV.CS.START
+				.DA #S.DEV.S.BLOCK+S.DEV.S.WRITE+S.DEV.S.READ
+DEV.HEADER.NAME	.DA #4
+				.AS "ETHx"				NAME
 *--------------------------------------
 *			Driver Code
 *--------------------------------------
-DRV.CS.START	.DA OPEN
-				.DA GETEVENT
-				.DA COUT
+DRV.CS.START	.DA STATUS
+				.DA READBLOCK
+				.DA WRITEBLOCK
+				.DA BADCALL
+				.DA BADCALL
+				.DA BADCALL
+				.DA OPEN
 				.DA CLOSE
-				.DA GETINFO
-				.DA IRQ
-				.DA SEND
-				.DA SETIPCFG
-L.DEVINFO		.DA DEVINFO
+				.DA BADCALL
+				.DA BADCALL
+L.DEVSTAT		.DA DEVSTAT
 				.DA 0					end or relocation
 *--------------------------------------
-OPEN			jsr Reset
-				>LDYAI PP.RxCTL
-				>STYA PacketPagePTR,x
-				>LDYAI PP.RxCTL.LID+PP.RxCTL.RxOKA+PP.RxCTL.IA+PP.RxCTL.BroadcastA
-				>STYA PacketPageDATA,x
+BADCALL			lda #MLI.ERR.BADCALL
+				sec
+				rts
+*--------------------------------------
+STATUS			lda #S.DEVINFO.NET.STATUS.10
+				sta LINK.STATUS
 
-				>LDYAI PP.MAC
+				ldx DEVSLOTx0
+				>LDYAI PP.LineST
 				>STYA PacketPagePTR,x
-				>LDYA MAC
-				>STYA PacketPageDATA,x
-				>LDYAI PP.MAC+2
+				>LDYA PacketPageDATA,x
+				tya
+				and #PP.LineST.LinkOK
+				bne .1
+				lda LINK.STATUS
+				ora #S.DEVINFO.NET.STATUS.OK
+				sta LINK.STATUS
+	
+.1				>LDYAI PP.TestCTL
 				>STYA PacketPagePTR,x
-				>LDYA MAC+2
-				>STYA PacketPageDATA,x
-				>LDYAI PP.MAC+4
-				>STYA PacketPagePTR,x
-				>LDYA MAC+4
-				>STYA PacketPageDATA,x
+				>LDYA PacketPageDATA,x
+				and /PP.TestCTL.FDX
+				bne .2
+				lda LINK.STATUS
+				ora #S.DEVINFO.NET.STATUS.FD
+				sta LINK.STATUS
 				
-				>LDYAI PP.LineCTL
-				>STYA PacketPagePTR,x
-				>LDYAI PP.LineCTL.LID+PP.LineCTL.SerRxOn+PP.LineCTL.SerTxOn+PP.LineCTL.Auto
-				>STYA PacketPageDATA,x
+.2				>LDYA L.DEVSTAT
 				clc
 				rts
 *--------------------------------------
-GETEVENT		ldx DEVSLOTx0
+READBLOCK		ldx DEVSLOTx0
 				>LDYAI PP.RxEvent
 				>STYA PacketPagePTR,x
 				>LDYA PacketPageDATA,x
 				and /PP.RxEvent.RxOK+PP.RxEvent.Brdcast+PP.RxEvent.IA
-				bne GETEVENT.RxOK
+				bne READBLOCK.RxOK
 				lda #ERR.DEV.NOFRAME
-COUT
-IRQ
-SETIPCFG
-GETEVENT.Err	sec
+READBLOCK.Err	sec
 				rts
 
-GETEVENT.RxOK	and /PP.RxEvent.Brdcast
+READBLOCK.RxOK	and /PP.RxEvent.Brdcast
 				beq .10
 				lda #$80
 .10				ldy #S.EVT.DATAHI
@@ -190,7 +202,7 @@ GETEVENT.RxOK	and /PP.RxEvent.Brdcast
 .11				>PUSHYA					Size+2
 				>PUSHBI 0
 				>SYSCALL GetMem
-				bcs GETEVENT.Err
+				bcs READBLOCK.Err
 				>STYA ZPTmpPTR
 				txa
 				ldy #S.EVT.DATALO
@@ -239,38 +251,7 @@ GETEVENT.RxOK	and /PP.RxEvent.Brdcast
 .8				clc
 				rts
 *--------------------------------------
-CLOSE			jsr Reset
-				clc
-				rts
-*--------------------------------------
-GETINFO			lda #S.DEVINFO.NET.STATUS.10
-				sta LINK.STATUS
-
-				ldx DEVSLOTx0
-				>LDYAI PP.LineST
-				>STYA PacketPagePTR,x
-				>LDYA PacketPageDATA,x
-				tya
-				and #PP.LineST.LinkOK
-				bne .1
-				lda LINK.STATUS
-				ora #S.DEVINFO.NET.STATUS.OK
-				sta LINK.STATUS
-	
-.1				>LDYAI PP.TestCTL
-				>STYA PacketPagePTR,x
-				>LDYA PacketPageDATA,x
-				and /PP.TestCTL.FDX
-				bne .2
-				lda LINK.STATUS
-				ora #S.DEVINFO.NET.STATUS.FD
-				sta LINK.STATUS
-				
-.2				>LDYA L.DEVINFO
-				clc
-				rts
-*--------------------------------------
-SEND			>PULLW ZPTmpPTR
+WRITEBLOCK		>PULLW ZPTmpPTR
 				
 				lda (ZPTmpPTR)
 				sta Size
@@ -296,7 +277,7 @@ SEND			>PULLW ZPTmpPTR
 				bne .9
 				lda	PacketPageDATA+1,x
 				and /PP.BusST.Rdy4TxNOW
-				bne SENDPREADY
+				bne WRITEBLOCK.1
 				lda	#0
 				
 .2				dec
@@ -309,7 +290,7 @@ SEND			>PULLW ZPTmpPTR
 				sec
 				rts
 				
-SENDPREADY		ldy #S.ETH.SRCMAC+5
+WRITEBLOCK.1	ldy #S.ETH.SRCMAC+5
 				ldx #5
 .10				lda MAC,x
 				sta (ZPTmpPTR),y
@@ -346,6 +327,36 @@ SENDPREADY		ldy #S.ETH.SRCMAC+5
 .8				clc
 				rts	
 *--------------------------------------
+OPEN			jsr Reset
+				>LDYAI PP.RxCTL
+				>STYA PacketPagePTR,x
+				>LDYAI PP.RxCTL.LID+PP.RxCTL.RxOKA+PP.RxCTL.IA+PP.RxCTL.BroadcastA
+				>STYA PacketPageDATA,x
+
+				>LDYAI PP.MAC
+				>STYA PacketPagePTR,x
+				>LDYA MAC
+				>STYA PacketPageDATA,x
+				>LDYAI PP.MAC+2
+				>STYA PacketPagePTR,x
+				>LDYA MAC+2
+				>STYA PacketPageDATA,x
+				>LDYAI PP.MAC+4
+				>STYA PacketPagePTR,x
+				>LDYA MAC+4
+				>STYA PacketPageDATA,x
+				
+				>LDYAI PP.LineCTL
+				>STYA PacketPagePTR,x
+				>LDYAI PP.LineCTL.LID+PP.LineCTL.SerRxOn+PP.LineCTL.SerTxOn+PP.LineCTL.Auto
+				>STYA PacketPageDATA,x
+				clc
+				rts
+*--------------------------------------
+CLOSE			jsr Reset
+				clc
+				rts
+*--------------------------------------
 Reset			ldx DEVSLOTx0
 				>LDYAI PP.SelfCTL
 				>STYA PacketPagePTR,x
@@ -357,8 +368,7 @@ DRV.CS.END
 DEVSLOTx0		.BS 1
 Size			.BS 2
 Counter			.BS 2
-DEVINFO			.DA #S.DEVINFO.TYPE.NET
-DEVFLAGS		.DA #0
+DEVSTAT			.BS S.DEVSTAT
 MAC				.BS 6
 LINK.STATUS		.BS 1					OK/DUPLEX/SPEED
 MAN

@@ -19,6 +19,64 @@ Returns argument count in the process command line.
  + Y,A = PStr To Arg[A]
 + CS : Out Of Bound
 
+#FPutCAY
+Print A (char) to File
+
+##In:
++ A : char to print
++ Y = hFILE
+
+##Out: 
++ CC = success
+
+#PutCA
+Print A (char) to StdOut
+
+##In:
++ A : char to print
+
+##Out: 
++ CC = success
+
+#FGetCA
+Get char from File
+
+##In:
++ A = hFILE
+
+##Out: 
++ CC = success
+ + A = char
+
+#GetC
+Get char from StdIn
+
+##In:
++ none.
+
+##Out: 
++ CC = success
+ + A = char
+
+#FPutCS
+Print String to FILE
+
+##In:
++ PUSHW : CPtr 
++ PUSHB : hFILE
+
+##Out: 
++ CC = success
+
+#PutCSYA
+Print String to StdOut
+
+##In:
++ Y,A : CPtr 
+
+##Out: 
++ CC = success
+
 #SScanF
 Scan a PStr (in progress)
 
@@ -70,27 +128,6 @@ Prints Pascal/C-Style String
 + CC : success
 + CS : I/O error from COut
 
-#FPutCAY
-Print A (char) to File
-
-##In:
-+ A : char to print
-+ Y = hFILE
-+ none.
-
-##Out: 
-+ CC = success
-
-#PutCA
-Print A (char) to StdOut
-
-##In:
-+ A : char to print
-+ none.
-
-##Out: 
-+ CC = success
-
 #GetDevByIDA
 
 ##IN: 
@@ -101,7 +138,7 @@ Print A (char) to StdOut
 + Y,A = DEVSLOT
 + note: X Unmodified
 
-#GetDevIDByNameYA
+#GetDevByNameYA
 
 ##IN: 
 + Y,A = Ptr to device name (PStr)
@@ -111,7 +148,7 @@ Print A (char) to StdOut
 + X = DEVID
 + Y,A = DEVSLOT
 
-#GetDevInfoA
+#GetDevStatusA
 
 ##IN: 
 + A = DevID
@@ -121,7 +158,7 @@ Print A (char) to StdOut
 + Y,A = Ptr to S.DEVINFO
 
 #MkNodYA
-return a S.FILE from a given Device
+return a S.FILE for a given Device NAME
 
 ##IN: 
 + Y,A=DevName
@@ -228,11 +265,11 @@ Open a file
 + PUSHW = AUXTYPE
 + PUSHB = TYPE
 + PUSHB = MODE
- + SYS.FOPEN.R : if R and exists -> ERROR
- + SYS.FOPEN.W : if W and exists -> CREATE
- + SYS.FOPEN.A : Append
- + SYS.FOPEN.T : Open/Append in Text mode
- + SYS.FOPEN.X : Create if not exists
+ + SYS.FOpen.R : if R and exists -> ERROR
+ + SYS.FOpen.W : if W and exists -> CREATE
+ + SYS.FOpen.A : Append
+ + SYS.FOpen.T : Open/Append in Text mode
+ + SYS.FOpen.X : Create if not exists
 + PUSHW = PATH (PSTR)
 
 ##Out : 
@@ -369,7 +406,7 @@ And return, if found, the full path to it.
 + PUSHW = AUXTYPE (Handled by....
 + PUSHB = TYPE  ...
 + PUSHB = MODE  ...
-+ PUSHW = PATH ...FOPEN)
++ PUSHW = PATH ...FOpen)
 
 ##Out:
 + Y,A = File Length
@@ -383,7 +420,7 @@ And return, if found, the full path to it.
 + PUSHW = AUXTYPE (Handled by....
 + PUSHB = TYPE  ...
 + PUSHB = MODE  ...
-+ PUSHW = PATH ...FOPEN)
++ PUSHW = PATH ...FOpen)
 
 #GetMem
 

@@ -237,9 +237,19 @@ DRV				.EQ *
 				cld
 DRV.Slotn0		ldx #$ff				Self Modified
 				lda DRV.COMMAND			S=0,R=1,W=2,F=3
-				beq .8					Status
-				cmp #3
-				beq .81					Format ....
+				bne .1
+				
+				ldx #$ff				return Status
+				ldy #$ff
+.8				lda #0					
+				clc
+				rts
+				
+.9				lda #MLI.ERR.IO				
+				rts
+				
+.1				cmp #3
+				beq .8					Format ....
 				bcs .9					 more....IO error
 
 				ora	#2					W=2,R=3
@@ -247,19 +257,7 @@ DRV.Slotn0		ldx #$ff				Self Modified
 				bpl .1
 				adc #2					CC from bcs .9
 				
-.1				jsr DRV.DO.CMD		
-				bcs .9
-				
-.8				ldx #$ff				return Status
-				ldy #$ff
-.81				lda #0					
-				clc
-				rts
-				
-.9				lda #MLI.ERR.IO				
-				rts
-*--------------------------------------
-DRV.DO.CMD		sta DRV.CmdBuf.Cmd		store cmd
+				sta DRV.CmdBuf.Cmd		store cmd
 				eor #VS.CMD
 				eor DRV.BLKNUM
 				eor DRV.BLKNUM+1
@@ -280,103 +278,89 @@ DRV.DO.CMD		sta DRV.CmdBuf.Cmd		store cmd
 * send CMD+CS
 				ldy #4					Send 5 bytes including Sum
 				
-.1				lda DRV.CmdBuf.Sum,y
+.2				lda DRV.CmdBuf.Sum,y
 				jsr DRV.SSCSend
-				bcs .9
 				dey
-				bpl .1
+				bpl .2
 * read back CMD				
 				ldy #3					Read Back and check 4 bytes
 				
-.2				jsr DRV.SSCGet
-				bcs .9
-				cmp DRV.CmdBuf.BlkHi,y
-				bne .9
+.3				jsr DRV.SSCGet
+				eor DRV.CmdBuf.BlkHi,y
+				bne DRV.DO.CMD.ERR
 				dey
-				bpl .2
+				bpl .3
 				
 * Get ProDOS Date/time send from server	if READ (3 or 5)
 
 				lda DRV.COMMAND
 				dec						1-1=0 if read
-				bne .6					go write
-
+				bne DRV.DO.CMD.W		go write
+*--------------------------------------
 * Read block : Discard ProDOS time recieved from Server (4 bytes)
-	
-				ldy #4					Read 4 bytes
+*--------------------------------------
+DRV.DO.CMD.R	ldy #4					Read 4 bytes
 				
-.3				jsr DRV.SSCGet
-				bcs .9
+.1				jsr DRV.SSCGet
 
 				eor DRV.CmdBuf.Sum
 				sta DRV.CmdBuf.Sum
 				dey
-				bne .3
+				bne .1
 
 * recieve Header Sum and check
 		
 				jsr DRV.SSCGet
-				bcs .9
 				eor DRV.CmdBuf.Sum
-				bne .9
+				bne DRV.DO.CMD.ERR
 				
 *				tay						Y=0 from dey/bne
 				
-.4				jsr DRV.SSCGet
-				bcs .9
+.2				jsr DRV.SSCGet
 				sta (DRV.BUFF),y
 				iny
-				bne .4
+				bne .2
 				
-.5				jsr DRV.SSCGet
-				bcs .9
+.3				jsr DRV.SSCGet
 				sta (DRV.A1L),y
 				iny
-				bne .5
+				bne .3
 				
 				jsr DRV.BufCheckSum
-				sta DRV.CmdBuf.Sum
 				jsr DRV.SSCGet
-				bcs .9
 				
 				eor DRV.CmdBuf.Sum
-				bne .9
-				rts						A=0,CC from bcs .9
-
-* Write Block				
-.6				ldy #0
-
-.7				lda (DRV.BUFF),y
-				jsr DRV.SSCSend
-				bcs .9
-				iny
-				bne .7
+				bne DRV.DO.CMD.ERR
+.9				rts						A=0,CC from bcs .9
 				
-.8				lda (DRV.A1L),y
+DRV.DO.CMD.ERR	sec
+DRV.DO.CMD.RTS	rts
+*--------------------------------------
+* Write Block				
+*--------------------------------------
+DRV.DO.CMD.W	ldy #0
+
+.1				lda (DRV.BUFF),y
 				jsr DRV.SSCSend
-				bcs .9
 				iny
-				bne .8
+				bne .1
+				
+.2				lda (DRV.A1L),y
+				jsr DRV.SSCSend
+				iny
+				bne .2
 				
 				jsr DRV.BufCheckSum
-				sta DRV.CmdBuf.Sum		Save Block CheckSum for comparing later
 				jsr DRV.SSCSend
-				bcs .9
 
 				ldy #4					Read 5 bytes (echo from server)
 				
-.81				jsr DRV.SSCGet
-				bcs .9
+.3				jsr DRV.SSCGet
 
 				eor DRV.CmdBuf.Sum,y	Check 5 bytes (including block Sum)
-				bne .9
+				bne DRV.DO.CMD.ERR
 				dey
-				bpl .81
-				
-				rts
-				
-.9
-DRV.CS			sec
+				bpl .3
 				rts
 *--------------------------------------
 DRV.CmdBuf.Sum	.BS 1					Reverse order for dey 
@@ -389,37 +373,42 @@ DRV.BufCheckSum	lda #0
 				tay
 				
 .1				eor (DRV.BUFF),y
-				eor (DRV.A2L),y
+				eor (DRV.A1L),y
 				iny
 				bne .1
+				sta DRV.CmdBuf.Sum
 				rts
 *--------------------------------------
 DRV.SSCSend		sta .2+1
+				
 .1				lda SSC.STATUS,x
 				bit #SSC.STATUS.DCD+SSC.STATUS.DSR
-				beq DRV.CS
-								
+				beq DRV.IOERR
+				
 				and #SSC.STATUS.TDRE	Outgoing char?
 				beq .1
 				
 .2				lda #$ff
 				sta SSC.DATA,x
 				
-				clc
 				rts
 *--------------------------------------
-DRV.SSCGet
-.1				lda SSC.STATUS,x
+DRV.SSCGet		lda SSC.STATUS,x
 				bit #SSC.STATUS.DCD+SSC.STATUS.DSR
-				beq DRV.CS
+				beq DRV.IOERR
 				
 				and #SSC.STATUS.RDRF	incoming char?
-				beq	.1
+				beq	DRV.SSCGet
 				
 				lda SSC.DATA,x
-				clc
 				rts
-*--------------------------------------				
+*--------------------------------------
+DRV.IOERR	    pla
+				pla
+				lda #MLI.ERR.IO
+				sec
+				rts
+*--------------------------------------
 				.EP
 *--------------------------------------
 				.LIST ON
