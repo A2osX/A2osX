@@ -1,4 +1,4 @@
-# A2osX  
+# A2osX  (0.9)
 Multi-Tasking OS for Apple II  
   
 ## Requires :  
@@ -38,8 +38,10 @@ Several subprojects are now indentified :
   
 
 ## General Information:  
-  
-Kernel 0.8 is out.  
+ 
+** Kernel 0.9 complete rewrite in progress **  
+ 
+(Kernel 0.8 has been archived)  
 It is confined in Aux LC Bank 1 & 2 to leave enough room at $EOOO for Drivers.
 Network drivers, Mouse, DHGR.DRV can load and fit in Aux LC.  
 Now it's time to make all external BINs use new API, then GUI development will resume.

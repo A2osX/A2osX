@@ -58,7 +58,7 @@ Get char from StdIn
 + CC = success
  + A = char
 
-#FPutCS
+#FPutS
 Print String to FILE
 
 ##In:
@@ -68,7 +68,7 @@ Print String to FILE
 ##Out: 
 + CC = success
 
-#PutCSYA
+#PutSYA
 Print String to StdOut
 
 ##In:
@@ -162,6 +162,16 @@ return a S.FILE for a given Device NAME
 
 ##IN: 
 + Y,A=DevName
+
+##OUT:
++ CC = OK, CS = ERROR
++ A = hFILE
+
+#MkNodA
+return a S.FILE for a given Socket
+
+##IN: 
++ A=hSocket
 
 ##OUT:
 + CC = OK, CS = ERROR
