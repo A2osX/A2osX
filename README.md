@@ -53,11 +53,6 @@ Now it's time to make all external BINs use new API, then GUI development will r
 OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.  
 (OApple+shift+1,OApple+shift+2,OApple+shift+3 on FR keyboard)  
   
-### **** Documentation WANTED ****  
-  
-Is there anybody who could provide "appletalk programmer's guide for the apple II" ?  
-(Needed for KM.ATLK and AT commands development)  
-  
 ### **** Developers WANTED ****  
   
 !!! Help on writing this code should be greatly appreciated !!!  
@@ -76,9 +71,9 @@ In Progress : moving TCPIP to socket API
 ## SBIN,Daemons/Commands:  
 | Name | Status | Comment | K.Ver |
 | ---- | ------ | ------- | ----- |
-| INSDRV | Working | | 0.8 |
-| GETTY | Working | | 0.8 |
-| LOGIN | In Progress | no auth using /etc/passd yet | 0.8 |
+| INSDRV | Working | | 0.9 |
+| GETTY | Working | | 0.9 |
+| LOGIN | In Progress | no auth using /etc/passd yet | 0.9 |
 | TCPIP | In Progress | New Socket API. ARP,IP,ICMP,UDP ok, TCP in progress | 0.8 |
 | DHCPCLNT | Working | rewritten to use new Socket API | 0.8 |
 | SHELL | Working | (See Internal Shell commands) | 0.8 |
@@ -89,7 +84,7 @@ In Progress : moving TCPIP to socket API
 | CD/PWD | Working | Improved syntax : now, 'CD ../BIN' works |
 | DATE | Working  | |
 | ECHO | Working | \b,\e,\f,\n,\\ and \% supported |
-| EXIT | Working  | |
+| EXIT | Working | |
 | IF | | |
 | PAUSE | Working | |
 | READ | | |
@@ -128,11 +123,11 @@ note : '$VAR' does NOT expand Variable
 ## BIN,External Shell commands:  
 | Name | Status | Comment | K.Ver |
 | ---- | ------ | ------- | ----- |
-| MEM | Working | Old dump behavior is now MEMDUMP.  New MEM command displays MEMSTAT (Main, Aux & Kernel Memory) | 0.8 |
-| LSDEV | Working | | 0.8 |
-| PS | Working | | 0.8 |
-| MD | Working | | 0.8 |
-| LS | Working | -A : Do Not Print . & .. | 0.8 |
+| MEM | Working | Old dump behavior is now MEMDUMP.  New MEM command displays MEMSTAT (Main, Aux & Kernel Memory) | 0.9 |
+| LSDEV | Working | | 0.9 |
+| PS | Working | | 0.9 |
+| MD | Working | | 0.9 |
+| LS | Working | -A : Do Not Print . & .. | 0.9 |
 | | | -L : long listing with size/date... | |
 | | | -R : Recurse subdirectories | |
 | RM | Working | -C : Continue On Error | 0.8 |
@@ -143,7 +138,7 @@ note : '$VAR' does NOT expand Variable
 | MV | In Progress | -C : Continue On Error | 0.8 |
 | | | -R : Recurse subdirectories | |
 | | | -Y : Dont't Prompt For Override | |
-| CAT | Working | -A : Show All non printable caracters | 0.8 |
+| CAT | Working | -A : Show All non printable caracters | 0.9 |
 | | | -N : Number all output lines | |
 | | | -S : Suppress repeated empty output lines | |
 | ARP | Working | dump ARP cache, setup a static ARP entry | 0.8 |
