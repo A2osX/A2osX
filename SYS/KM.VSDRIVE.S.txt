@@ -26,14 +26,14 @@ VSDRIVE.Init	>LDAXI VSDRIVE.MSG0
 				jsr VSDRIVE.Check
 				bcc .1
 	
-				>LDAXI VSDRIVE.MSG1
+				>LDAXI VSDRIVE.DRVKO
 				jsr PrintCStrAX
 				rts
 				
 .1				jsr SSC.Detect
 				bcc .2
 
-				>LDAXI VSDRIVE.MSG2
+				>LDAXI VSDRIVE.SSCKO
 				jsr PrintCStrAX
 				rts
 
@@ -43,23 +43,34 @@ VSDRIVE.Init	>LDAXI VSDRIVE.MSG0
 				lsr
 				lsr
 				pha
-				>LDAXI VSDRIVE.MSG3
+				>LDAXI VSDRIVE.SSCOK
 				jsr PrintCStrAX
 
-				jsr VSDRIVE.SetSlot
+				jsr VSDRIVE.Ping
 				bcc .3
-				>LDAXI VSDRIVE.MSG4
+				
+				>LDAXI VSDRIVE.SRVKO
+				jsr PrintCStrAX
+				rts
+
+.3				>LDAXI VSDRIVE.SRVOK
+				jsr PrintCStrAX
+				
+				jsr VSDRIVE.SetSlot
+				bcc .4
+				
+				>LDAXI VSDRIVE.NOSLOT
 				jsr PrintCStrAX
 				rts
 				
-.3				pha						save slot
+.4				pha						save slot
 				pha						2 times
-				>LDAXI VSDRIVE.MSG5
+				>LDAXI VSDRIVE.DEVOK
 				jsr PrintCStrAX
 				
 				jsr VSDRIVE.Install
 				
-				>LDAXI VSDRIVE.MSG6
+				>LDAXI VSDRIVE.OK
 				jsr PrintCStrAX
 				
 				rts
@@ -118,9 +129,37 @@ SSC.Detect		stz TmpPtr1
 .9				sec
 				rts
 *--------------------------------------
-VSDRIVE.Ping
+VSDRIVE.Ping	ldx DRV+2				DRV.Slotn0
+				
+.10				lda #$C4				Send "D"  (DIR)
+				sta SSC.DATA,x
+				
+.1				inc VSDRIVE.Ping.TO
+				bne .2
+				inc VSDRIVE.Ping.TO+1
+				beq .9
+				
+.2				lda SSC.STATUS,x
+				and #SSC.STATUS.RDRF	incoming char?
+				bne .1
+				
+				lda SSC.DATA,x
+				bne .2					end of string ?
+				
+.3				lda SSC.STATUS,x
+				and #SSC.STATUS.RDRF	incoming char?
+				bne .3
+
+				lda SSC.DATA,x
+				bne .10					end of list ?
+				
 				clc
 				rts
+				
+.9				sec
+				rts
+				
+VSDRIVE.Ping.TO	.DA 0				
 *--------------------------------------
 * Find 2 free slots in DEVPTRS (D1 & D2)
 *--------------------------------------
@@ -196,13 +235,15 @@ VSDRIVE.Install	ldx #PATCH.SIZE
 *--------------------------------------
 DEVSIG.Offset	.HS 05070B0C
 DEVSIG.Value	.HS 38180131
-VSDRIVE.MSG0	>CSTR "VSDRIVE (ADT Vitual Serial Hard Drive) Driver For A2osX\n"
-VSDRIVE.MSG1	>CSTR "VSDRIVE (Or other custom Driver) Already Installed.\n"
-VSDRIVE.MSG2	>CSTR "SSC Not Detected.\n"
-VSDRIVE.MSG3	>CSTR "SCC Found At Slot %d.\n"
-VSDRIVE.MSG4	>CSTR "No ProDOS device slot available.\n"
-VSDRIVE.MSG5	>CSTR "VSDRIVE Installed 2 devices at S%dD1 & S%dD2.\n"
-VSDRIVE.MSG6	>CSTR "VSDRIVE Driver Successfully Installed.\n"
+VSDRIVE.MSG0	>CSTR "VSDRIVE (ADTPro Vitual Serial HD) Driver For A2osX\n"
+VSDRIVE.DRVKO	>CSTR "VSDRIVE (Or other custom Driver) Already Installed.\n"
+VSDRIVE.SSCKO	>CSTR "SSC Not Detected.\n"
+VSDRIVE.SSCOK	>CSTR "SCC Found At Slot %d.\n"
+VSDRIVE.SRVKO	>CSTR "No Response From ADTPro Server.\n"
+VSDRIVE.SRVOK	>CSTR "ADTPro Server Is Online.\n"
+VSDRIVE.NOSLOT	>CSTR "No ProDOS device slot available.\n"
+VSDRIVE.DEVOK	>CSTR "VSDRIVE Installed 2 devices at S%d,D1 & S%d,D2.\n"
+VSDRIVE.OK		>CSTR "VSDRIVE Driver Successfully Installed.\n"
 *--------------------------------------
 * ProDOS $BE41->$BE4B Patch for switching to BANK2 (10 bytes)
 *--------------------------------------
@@ -277,14 +318,6 @@ DRV.Slotn0		ldx #$ff				Self Modified
 				jsr DRV.SSCSend
 				dey
 				bpl .3
-* read back CMD				
-				ldy #3					Read Back and check 4 bytes
-				
-.4				jsr DRV.SSCGet
-				eor DRV.CmdBuf.BlkHi,y
-				bne DRV.DO.CMD.ERR
-				dey
-				bpl .4
 				
 				ldy #8
 
@@ -293,28 +326,34 @@ DRV.Slotn0		ldx #$ff				Self Modified
 				dey
 				bpl .5
 
+*--------------------------------------
 				lda DRV.COMMAND
 				dec						1-1=0 if read
 				bne DRV.DO.CMD.W		go write
 *--------------------------------------
-* Read block : Discard ProDOS time recieved from Server (4 bytes)
+* Read block
 *--------------------------------------
-DRV.DO.CMD.R	ldy #4					Read 4 bytes
+DRV.DO.CMD.R	ldy #3					Read Back and check 4 bytes
 				
 .1				jsr DRV.SSCGet
+				eor DRV.CmdBuf.BlkHi,y
+				bne DRV.DO.CMD.ERR
+				dey
+				bpl .1
+				
+				ldy #4					Read 4 bytes DATE/TIME + 1 Byte Checksum
+				
+.2				jsr DRV.SSCGet
 
 				eor DRV.CmdBuf.Sum
 				sta DRV.CmdBuf.Sum
 				dey
-				bne .1
+				bpl .2
 
-* recieve Header Sum and check
-		
-				jsr DRV.SSCGet
-				eor DRV.CmdBuf.Sum
+				tay						Last EOR was with Checksum, must be 0
 				bne DRV.DO.CMD.ERR
 				
-* Y=0 from dey/bne
+* Y=0 from TAY
 
 				stz DRV.CmdBuf.Sum
 				sec
@@ -355,7 +394,7 @@ DRV.DO.CMD.W	lda #$B1				lda (),y
 				ldy #0
 
 				stz DRV.CmdBuf.Sum
-				
+
 				sec
 				
 .1				jsr $100
@@ -377,6 +416,8 @@ DRV.DO.CMD.W	lda #$B1				lda (),y
 
 				jsr DRV.SSCSend
 
+* read back CMD				
+
 				ldy #4					Read 5 bytes (echo from server)
 				
 .3				jsr DRV.SSCGet
@@ -386,12 +427,6 @@ DRV.DO.CMD.W	lda #$B1				lda (),y
 				dey
 				bpl .3
 				rts
-*--------------------------------------
-DRV.CmdBuf.Sum	.BS 1					Reverse order for dey 
-DRV.CmdBuf.BlkHi	.BS 1
-DRV.CmdBuf.BlkLo	.BS 1
-DRV.CmdBuf.Cmd	.BS 1
-DRV.CmdBuf.Env	.DA #VS.CMD
 *--------------------------------------
 DRV.SSCSend		sta .2+1
 				
@@ -421,6 +456,12 @@ DRV.READWRITE	bit RRAMWRAMBNK1
 				sta (DRV.BUFF),y
 				bit RRAMWRAMBNK2
 				rts 
+*--------------------------------------
+DRV.CmdBuf.Sum	.BS 1					Reverse order for dey 
+DRV.CmdBuf.BlkHi	.BS 1
+DRV.CmdBuf.BlkLo	.BS 1
+DRV.CmdBuf.Cmd	.BS 1
+DRV.CmdBuf.Env	.DA #VS.CMD
 *--------------------------------------
 				.EP
 *--------------------------------------

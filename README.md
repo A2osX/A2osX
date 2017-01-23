@@ -67,6 +67,8 @@ In Progress : moving TCPIP to socket API
 | ------- | ------ | ------- |
 | KM.NSC | Working | No-Slot-Clock |
 | KM.RAMWORKS | Working | AE-Ramworks I,II,III |
+| KM.VSDRIVE | Working | AdtPRO Virtual Drive |
+| KM.APPLETALK | Working | AppleTalk Support for ProDOS |
   
 ## SBIN,Daemons/Commands:  
 | Name | Status | Comment | K.Ver |
