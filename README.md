@@ -118,7 +118,7 @@ note : '$VAR' does NOT expand Variable
 | Mouse.DRV | Working | | 0.8 |
 | DHGR.DRV | In Progress | except bitblt... | 0.8 |
 | LanCeGS.DRV | Working | | 0.8 |
-| Uthernet.DRV | Working | | 0.8 |
+| Uthernet.DRV | Working | | 0.9 |
 | Uthernet2.DRV | Working | | 0.8 |
 | Uther2.AI.DRV | In Progress | With ARP/IP Offloading | 0.8 | 
   
