@@ -65,9 +65,9 @@ In Progress : moving TCPIP to socket API
 ## SYS/KM* Supported Hardware At Kernel Level (ProDOS):
 | KM.Name | Status | Comment |
 | ------- | ------ | ------- |
-| KM.NSC | Working | No-Slot-Clock |
+| KM.NSC | Working | No-Slot-Clock/DS1216E |
 | KM.RAMWORKS | Working | AE-Ramworks I,II,III |
-| KM.VSDRIVE | Working | AdtPRO Virtual Drive |
+| KM.VSDRIVE | Working | ADTPro Virtual Drive for SSC |
 | KM.APPLETALK | Working | AppleTalk Support for ProDOS |
   
 ## SBIN,Daemons/Commands:  
@@ -78,7 +78,7 @@ In Progress : moving TCPIP to socket API
 | LOGIN | In Progress | no auth using /etc/passd yet | 0.9 |
 | TCPIP | In Progress | New Socket API. ARP,IP,ICMP,UDP ok, TCP in progress | 0.8 |
 | DHCPCLNT | Working | rewritten to use new Socket API | 0.8 |
-| SHELL | Working | (See Internal Shell commands) | 0.8 |
+| SHELL | Working | (See Internal Shell commands) | 0.9 |
   
 ## Internal Shell commands:  
 | Name | Status | Comment |
@@ -111,16 +111,16 @@ note : '$VAR' does NOT expand Variable
 ## DRV,Drivers:  
 | Name | Status | Comment | K.Ver |
 | ---- | ------ | ------- | ----- |
-| Console.DRV | Working | ANSI support in Progress. | 0.8 |
+| Console.DRV | Working | ANSI support in Progress. | 0.9 |
 | PIC.DRV | In Progress | Apple "Parallel Interface Card" Driver, renamed from PPIC.DRV | 0.8 |
-| SSC.DRV | In Progress | | 0.8 |
-| SSC.I.DRV | In Progress | | 0.8 |
+| SSC.DRV | In Progress | Apple "Super Serial Card" Driver | 0.8 |
+| SSC.I.DRV | In Progress | Apple "Super Serial Card" Driver (IRQ enabled) | 0.8 |
 | Mouse.DRV | Working | | 0.8 |
+| DHGR.DRV | In Progress | except bitblt... | 0.8 |
+| LanCeGS.DRV | Working | | 0.8 |
 | Uthernet.DRV | Working | | 0.8 |
 | Uthernet2.DRV | Working | | 0.8 |
 | Uther2.AI.DRV | In Progress | With ARP/IP Offloading | 0.8 | 
-| LanCeGS.DRV | Working | | 0.8 |
-| DHGR.DRV | In Progress | except bitblt... | 0.8 |
   
 ## BIN,External Shell commands:  
 | Name | Status | Comment | K.Ver |
@@ -143,13 +143,13 @@ note : '$VAR' does NOT expand Variable
 | CAT | Working | -A : Show All non printable caracters | 0.9 |
 | | | -N : Number all output lines | |
 | | | -S : Suppress repeated empty output lines | |
+| EDIT | Working | still missing : find/replace | 0.9 |
+| NSCUTIL | Working | Tool for setting time in NSC/DL1216E | 0.8 |
 | ARP | Working | dump ARP cache, setup a static ARP entry | 0.8 |
 | PING | Working | | 0.8 |
 | DNSINFO | Working | dump DNS cache, setup a static DNS entry | | 0.8 |
 | IPCONFIG | Working | renamed from NETINFO | 0.8 |
 | NETSTAT | Working | | 0.8 |
-| EDIT | Working | still missing : find/replace | 0.8 |
-| NSCUTIL | Working | Tool for setting time in NSC/DL1216E | 0.8 |
   
 ## BIN,External DEV Shell commands:  
 | Name | Status | Comment | K.Ver |
