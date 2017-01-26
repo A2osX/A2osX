@@ -89,7 +89,8 @@ In Progress : moving TCPIP to socket API
 | EXIT | Working | |
 | IF | | |
 | PAUSE | Working | |
-| READ | | |
+| READ | Working | -S no echo (password) |
+| | | -P "prompt message" |
 | TIME | Working | |
 | SET | Working | |
 | STARTPROC | Working | Used in A2osX.startup |

@@ -16,7 +16,8 @@ ZPPTR1			.EQ ZPBIN
 ZPPTR2			.EQ ZPBIN+2
 ZPPTR3			.EQ ZPBIN+4
 *--------------------------------------
-CmdBuffer.MAX	.EQ 127
+CmdLine.MAX		.EQ 127
+VarLen.MAX		.EQ 15
 *--------------------------------------
 *			File Header (16 Bytes)
 *--------------------------------------
@@ -98,27 +99,28 @@ CS.INIT.INTERACTIVE
 				clc
 .9				rts				
 *--------------------------------------
-CS.RUN			lda #0
+CS.RUN			ldy #bPause
+				lda (pData),y
+				bmi .8
+
+				ldy #VarBuffer			READ Command ?
+				lda (pData),y
+				bne CS.RUN.READ
+				
+				ldy #hInputFile			batch mode ?
+				lda (pData),y
+				beq .10
+				
+				jmp CS.RUN.BATCH
+				
+.10				lda #0
 				sta (pData)
 				
-.11				ldy #bPause
-				lda (pData),y
-				bpl .10
-				clc
-				rts
-
-.10				ldy #S.PS.RC
-				lda (pPs),y
-				beq .12
-				
-				jsr ERR.Print
-					
-.12				ldy #hInputFile			batch mode ?
-				lda (pData),y
-				bne .2
+				ldy #bSecureRead
+				sta (pData),y
 				
 				jsr PrintPrompt
-				bcs .99
+				bcs CS.RUN.EXIT.RTS
 				
 .1				>SYSCALL Sleep
 				>SYSCALL GetC
@@ -131,46 +133,94 @@ CS.RUN			lda #0
 				
 				and #$7F
 				sta (pData)
-				bra .3
 
-.2				jsr	TXT.ReadFile
-				bcs .81
-				
-.3				jsr CmdBuffer.Normalize
+				jsr CmdBuffer.Normalize
 				lda (pData)
-				beq .11					Empty line
+				beq .8					Empty line
 
-				ldy #hInputFile			if batch mode, do not add to cmd history
-				lda (pData),y
-				bne .4
-				
 				jsr HIS.Add
 
-.4				>LDYA pData
+				>LDYA pData
 				jsr Cmd.ExecYA
+				ldy #S.PS.RC
+				sta (pPs),y
 				bcc .8
 				tay
 				beq .8
 				
-				pha
 				jsr ERR.Print
-				pla
-				bcs .99
+				bcs CS.RUN.EXIT.RTS
 				
 .8				ldy	#bEXIT
 				lda (pData),y
-				bne .99
+				bne CS.RUN.EXIT
 				
 				clc
 				rts
 
-.81				jsr TXT.CloseFile
+CS.RUN.EXIT		lda #0
+CS.RUN.EXIT.ERR	sec
+CS.RUN.EXIT.RTS	rts	
+*--------------------------------------
+CS.RUN.READ		lda #0
+				sta (pData)
+				
+.1				>SYSCALL Sleep
+				>SYSCALL GetC
+				bcs .1					no char
+				
+				jsr CS.CHARIN
+
+				lda (pData)
+				bpl .1
+				
+				and #$7F
+				sta (pData)
+				
+				>PUSHW pData
+				
+				lda #VarBuffer
+				clc
+				adc pData
+				tay
+				lda pData+1
+				adc #0
+				>PUSHYA
+				>SYSCALL SetEnv
+				php
+				pha
+				
+				ldy #VarBuffer
+				lda #0
+				sta (pData),y
+				
+				pla
+				plp
+				rts
+*--------------------------------------
+CS.RUN.BATCH	jsr	TXT.ReadFile
+				bcs .9
+				
+				jsr CmdBuffer.Normalize
+				lda (pData)
+				beq .8					Empty line
+
+				jsr HIS.Add
+
+				>LDYA pData
+				jsr Cmd.ExecYA
+				ldy #S.PS.RC
+				sta (pPs),y
+				clc
+				rts
+
+.9				jsr TXT.CloseFile
 				ldy #bExitOnEOF
 				lda (pData),y
-				beq .8
-				lda #0
-.99				sec
-				rts	
+				bne CS.RUN.EXIT
+				
+.8				clc
+				rts
 *--------------------------------------
 CS.DOEVENT		sec
 				rts
@@ -235,7 +285,7 @@ CS.CHARIN		tax
 
 .2				lda (pData)				CmdBuffer
 				
-				cmp #CmdBuffer.MAX
+				cmp #CmdLine.MAX
 				beq .8
 				
 				inc
@@ -244,6 +294,12 @@ CS.CHARIN		tax
 				txa
 				sta (pData),y
 
+				tax
+				ldy #bSecureRead
+				lda (pData),y
+				bne .8
+				
+				txa
 				>SYSCALL PutCA
 				
 .8				clc
@@ -459,11 +515,13 @@ hTextFile		.BS 1
 				.DUMMY
 				.OR 0
 DS.START
-CmdBuffer		.BS CmdBuffer.MAX+1		(pData)
+CmdBuffer		.BS CmdLine.MAX+1		(pData)
+VarBuffer		.BS VarLen.MAX+1
 bEscMode		.BS 1
 bPause			.BS 1
 bExit			.BS 1
 bEcho			.BS 1
+bSecureRead		.BS 1
 bExitOnEOF		.BS 1
 hCmdHistory		.BS 1
 CmdHistory.IDX	.BS 1
