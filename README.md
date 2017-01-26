@@ -76,9 +76,11 @@ In Progress : moving TCPIP to socket API
 | INSDRV | Working | | 0.9 |
 | GETTY | Working | | 0.9 |
 | LOGIN | In Progress | no auth using /etc/passd yet | 0.9 |
-| TCPIP | In Progress | New Socket API. ARP,IP,ICMP,UDP ok, TCP in progress | 0.8 |
-| DHCPCLNT | Working | rewritten to use new Socket API | 0.8 |
+| TCPIP | In Progress | New Socket API. ARP,IP,ICMP,UDP ok, TCP in progress | 0.9 |
+| DHCPCLNT | Working | rewritten to use new Socket API | 0.9 |
 | SHELL | Working | (See Internal Shell commands) | 0.9 |
+| TELNETD |  |  |  |
+| HTTPD |  |  |  |
   
 ## Internal Shell commands:  
 | Name | Status | Comment |
@@ -89,8 +91,8 @@ In Progress : moving TCPIP to socket API
 | EXIT | Working | |
 | IF | | |
 | PAUSE | Working | |
-| READ | Working | -S no echo (password) |
-| | | -P "prompt message" |
+| READ | Working | -S : no echo (password) |
+| | | -P : "prompt message" |
 | TIME | Working | |
 | SET | Working | |
 | STARTPROC | Working | Used in A2osX.startup |
