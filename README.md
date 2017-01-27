@@ -76,9 +76,9 @@ In Progress : moving TCPIP to socket API
 | INSDRV | Working | | 0.9 |
 | GETTY | Working | | 0.9 |
 | LOGIN | In Progress | no auth using /etc/passd yet | 0.9 |
+| SHELL | Working | (See Internal Shell commands) | 0.9 |
 | TCPIP | In Progress | New Socket API. ARP,IP,ICMP,UDP ok, TCP in progress | 0.9 |
 | DHCPCLNT | Working | rewritten to use new Socket API | 0.9 |
-| SHELL | Working | (See Internal Shell commands) | 0.9 |
 | TELNETD |  |  |  |
 | HTTPD |  |  |  |
   
@@ -118,12 +118,12 @@ note : '$VAR' does NOT expand Variable
 | PIC.DRV | In Progress | Apple "Parallel Interface Card" Driver, renamed from PPIC.DRV | 0.8 |
 | SSC.DRV | In Progress | Apple "Super Serial Card" Driver | 0.8 |
 | SSC.I.DRV | In Progress | Apple "Super Serial Card" Driver (IRQ enabled) | 0.8 |
-| Mouse.DRV | Working | | 0.8 |
+| Mouse.DRV | Working | Apple Mouse Card,//c Mouse Port | 0.9 |
 | DHGR.DRV | In Progress | except bitblt... | 0.8 |
-| LanCeGS.DRV | Working | | 0.8 |
 | Uthernet.DRV | Working | | 0.9 |
 | Uthernet2.DRV | Working | | 0.8 |
 | Uther2.AI.DRV | In Progress | With ARP/IP Offloading | 0.8 | 
+| LanCeGS.DRV | Working | | 0.8 |
   
 ## BIN,External Shell commands:  
 | Name | Status | Comment | K.Ver |

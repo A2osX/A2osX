@@ -9,8 +9,8 @@ AUTO 6
 				.TF /A2OSX.BOOT/DRV/MOUSE.DRV
 *--------------------------------------
 				.INB /A2OSX.DEV/INC/MACROS.I
-				.INB /A2OSX.DEV/INC/IO.I
 				.INB /A2OSX.DEV/INC/A2OSX.I
+				.INB /A2OSX.DEV/INC/PRODOS.I
 *--------------------------------------
 ZPGoMouse		.EQ ZPDRV
 ZPTmpPtr1		.EQ ZPDRV+2
@@ -38,10 +38,20 @@ MOUSEXLOx		.EQ $0478
 MOUSEYLOx		.EQ $04F8
 MOUSEXHIx		.EQ $0578
 MOUSEYHIx		.EQ $05F8
+*				.EQ $0678
+*				.EQ $06F8
 MOUSESTSx		.EQ $0778
-MOUSESTSx.DOWN	.EQ %10000000
-MOUSESTSx.LDOWN	.EQ %01000000
-MOUSESTSx.MOVED	.EQ %00100000
+MOUSESTSx.DOWN		.EQ %10000000
+MOUSESTSx.LDOWN		.EQ %01000000
+MOUSESTSx.MOVED		.EQ %00100000
+MOUSESTSx.INTVBL	.EQ %00001000
+MOUSESTSx.INTBUT	.EQ %00000100
+MOUSESTSx.INTMOVE	.EQ %00000010
+MOUSEMODx		.EQ $07F8
+MOUSEMODx.INTVBL	.EQ %00001000
+MOUSEMODx.INTBUT	.EQ %00000100
+MOUSEMODx.INTMOVE	.EQ %00000010
+MOUSEMODx.ACTIVE	.EQ %00000001
 *--------------------------------------
 *			File Header (16 Bytes)
 *--------------------------------------
@@ -70,7 +80,7 @@ Dev.Detect		>LDYA L.MSG.DETECT
 				lda #$C1
 				sta ZPTmpPtr1+1
 				
-.1				ldx #DEVSIG.Length-1
+.1				ldx #DEVSIG.Value-DEVSIG.Offset-1
 
 .2				ldy DEVSIG.Offset,x
 				lda (ZPTmpPtr1),y
@@ -88,7 +98,7 @@ Dev.Detect		>LDYA L.MSG.DETECT
 				>LDYA L.MSG.DETECT.KO
 				>SYSCALL CPrintFYA
 
-				lda #DEVMGR.ERRNOHW		Not Found in any slot, exiting
+				lda #MLI.ERR.NODEV
 				sec
 				rts	
 				
@@ -116,36 +126,46 @@ MSG.DETECT.OK	>CSTR "Mouse Installed As Device : %S\n"
 MSG.DETECT.KO	>CSTR "No Mouse Found.\n"
 DEVSIG.Offset	.HS 05070B0CFB
 DEVSIG.Value	.HS 38180120D6
-DEVSIG.Length	.EQ DEVSIG.Value-DEVSIG.Offset
 *--------------------------------------
 *			Device Header (16 Bytes)
 *--------------------------------------
-DEV.HEADER		cld
-				jmp (DRV.CS.START,x)
-				.HS 00					DevID
-				.DA #S.DEV.F.EVENT
-DEV.HEADER.NAME	>PSTR "MOU1"			NAME
-				.HS 00
-				.HS 00.00.00.00
+DEV.HEADER		.DA DRV.CS.START
+				.DA #0
+DEV.HEADER.NAME	>PSTR "MOUx"
 *--------------------------------------
 *			Driver Code
 *--------------------------------------
-DRV.CS.START	.DA OPEN
-				.DA GETEVENT
-				.DA COUT
+DRV.CS.START	cld
+				jmp (.1,x)
+.1				.DA STATUS
+				.DA READBLOCK
+				.DA BADCALL
+				.DA BADCALL
+				.DA BADCALL
+				.DA BADCALL
+				.DA OPEN
 				.DA CLOSE
-				.DA GETINFO
-				.DA IRQ
-				.DA SELECT
-L.DEVINFO		.DA DEVINFO
+				.DA BADCALL
+				.DA BADCALL
+L.DEVSTAT		.DA DEVSTAT
+L.READBLOCK.FLAGS	.DA READBLOCK.FLAGS
 				.DA 0					end or relocation
 *--------------------------------------
-OPEN			
-*				bit RROMBNK2			Renable ROM to allow MOUSE II firmware
-						
-				php						to read  IIe ROM ID bytes
+BADCALL			lda #MLI.ERR.BADCALL
+				sec
+				rts
+*--------------------------------------
+STATUS			>LDYA L.DEVSTAT
+				clc
+				rts
+*--------------------------------------
+OPEN			php						to read  IIe ROM ID bytes
 				sei
-				lda #1					Enable, Polling mode
+				
+				ldx DEVSLOT0n
+				lda MOUSEMODx,x			keep if VBLInt already activated by kernel
+				and #MOUSEMODx.INTVBL
+				ora #MOUSEMODx.ACTIVE	Enable, Polling mode
 				ldy #SETMOUSE
 				jsr GOMOUSE
 				
@@ -182,18 +202,15 @@ OPEN
 				clc
 				rts
 *--------------------------------------
-GETEVENT		lda A2osX.ASCREEN
-				cmp #3					is DHGR screen active?
-				bne .9
-				
-				php
+READBLOCK		php
 				sei
 
 				ldy #READMOUSE
 				jsr GOMOUSE
 				
+				stz READBLOCK.FLAGS
+				
 				ldx DEVSLOT0n
-				ldy #S.EVT.DATALO
 				
 				lda MOUSESTSx,x
 				and #MOUSESTSx.DOWN+MOUSESTSx.LDOWN
@@ -209,61 +226,50 @@ GETEVENT		lda A2osX.ASCREEN
 				
 .1				lda #EVENT.MOUSEDOWN
 
-.2				sta (pEvent),y
+.2				sta READBLOCK.FLAGS
 				
 .3				lda MOUSESTSx,x
 				and #MOUSESTSx.MOVED
 				beq .4
 				
-				lda (pEvent),y
+				lda READBLOCK.FLAGS
 				ora #EVENT.MOUSEMOVE
-				sta (pEvent),y
+				sta READBLOCK.FLAGS
 				
-.4				ldy #S.EVT.DATAW1
-				lda MOUSEXLOx,x
-				sta (pEvent),y
-				iny
+.4				lda MOUSEXLOx,x
+				sta READBLOCK.XY
 				lda MOUSEXHIx,x
-				sta (pEvent),y
-				iny
+				sta READBLOCK.XY+1
 				lda MOUSEYLOx,x
-				sta (pEvent),y
-				iny
+				sta READBLOCK.XY+2
 				lda MOUSEYHIx,x
-				sta (pEvent),y
-			
+				sta READBLOCK.XY+3
+				
 				plp
-				ldy #S.EVT.DATALO
-				lda (pEvent),y
+
+				
+				lda READBLOCK.FLAGS
 				beq .9
 				
-				lda #S.EVT.F.MOUSE
-				sta (pEvent)
 				clc
 				rts
 
-.9				lda	#0					Error = no event
+.9				lda	#MLI.ERR.EOF
 				sec
 				rts				
 *--------------------------------------
-COUT
-IRQ
-SELECT			lda #DEVMGR.ERRUNSUP
-				sec
-				rts
-*--------------------------------------
 CLOSE			php
 				sei
-				lda #0					Disable
+				ldx DEVSLOT0n
+				lda MOUSEMODx,x			keep if VBLInt already activated by kernel
+				and #MOUSEMODx.INTVBL	Disable ALL but VBLInt if previously active
 				ldy #SETMOUSE
 				jsr GOMOUSE
 				plp
 				clc
 				rts
 *--------------------------------------
-GETINFO			>LDYA L.DEVINFO
-				clc
-				rts
+* PRIVATE
 *--------------------------------------
 GOMOUSE			pha
 				stz ZPGoMouse
@@ -280,7 +286,17 @@ DEVSLOT0n		.BS 1
 DEVSLOTn0		.BS 1
 DEVSLOTCn		.BS 1
 *--------------------------------------
-DEVINFO			.DA #S.DEVINFO.TYPE.XY
+DEVSTAT			.DA #0
+				.DA #0,#0,#0			size
+				>PSTR "Apple II Mouse"
+				.BS 2
+				.DA #S.DEVSTAT.TYPE.XY
+				.DA #0
+				.DA $0900
+*--------------------------------------
+READBLOCK.FLAGS	.BS 1
+READBLOCK.XY	.BS 4
+*--------------------------------------
 MAN
 SAVE DRV/MOUSE.DRV.S
 ASM
