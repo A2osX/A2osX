@@ -14,7 +14,7 @@ AUTO 6
 *--------------------------------------
 ZPIPCfgPtr		.EQ ZPBIN
 ZPDevPtr		.EQ ZPBIN+2
-ZPDevInfoPtr	.EQ ZPBIN+4
+ZPDevStatPtr	.EQ ZPBIN+4
 *--------------------------------------
 *			File Header (16 Bytes)
 *--------------------------------------
@@ -55,13 +55,17 @@ L.MSG2.IP		.DA MSG2.IP
 L.MSG2.GW		.DA MSG2.GW
 L.MSG2.DNS		.DA MSG2.DNS
 L.MSG2.HOSTNAME	.DA MSG2.HOSTNAME
+L.DevName		.DA DevName
 				.DA 0
 *--------------------------------------
 CS.INIT			>LDYA L.LIBTCPIP
 				>SYSCALL LoadLibYA
+				bcs .9
 				sta hLIBTCPIP
-
-				>LDYA L.MSG0
+				clc
+.9				rts
+*--------------------------------------
+CS.RUN			>LDYA L.MSG0
 				>SYSCALL CPrintFYA
 				
 				>LIBCALL hLIBTCPIP,LIBTCPIP.GET.IPCFG
@@ -69,44 +73,58 @@ CS.INIT			>LDYA L.LIBTCPIP
 
 				ldy #S.IPCFG.HDEV
 				lda (ZPIPCfgPtr),y
-				bne CS.INIT.DUMPDEV
+				bne CS.RUN.DUMPDEV
 				
 				>LDYA L.MSG0.NL
 				>SYSCALL CPrintFYA
-				jmp CS.INIT.DONE
+				jmp CS.RUN.DONE
 				
-CS.INIT.DUMPDEV	sta DevID
+CS.RUN.DUMPDEV	sta DevID
 				>SYSCALL GetDevByIDA
 				>STYA ZPDevPtr
 				
-				lda DevID
-				>SYSCALL GetDevInfoA
-				>STYA ZPDevInfoPtr
-
+				ldy #S.DEV.JMP
+				lda (ZPDevPtr),y
+				sta NetDevJmp+1
+				iny
+				lda (ZPDevPtr),y
+				sta NetDevJmp+2
+				
+				ldx #DEVMGR.STATUS
+				jsr NetDevJmp
+				>STYA ZPDevStatPtr
+				
 				>LDYA L.MSG0.L
 				>SYSCALL CPrintFYA
 
-				ldy #S.DEVSTAT.NET.MAC+6
-.1				dey
-				>PUSHB (ZPDevInfoPtr),y
-				cpy #S.DEVSTAT.NET.MAC
+				ldy #S.DEVSTAT.NET.MAC+5
+				
+.1				>PUSHB (ZPDevStatPtr),y
+				dey
+				cpy #S.DEVSTAT.NET.MAC-1
 				bne .1
 
-				lda ZPDevPtr
-				clc
-				adc #S.DEV.NAME
-				tay
-				lda ZPDevPtr+1
-				adc #0
-				>PUSHYA
+				ldy #S.DEV.F
+				lda (ZPDevPtr),y
+				and #S.DEV.F.LEN
+				sta DevName
+				tax
+				
+.10				iny
+				lda (ZPDevPtr),y
+				sta DevName-S.DEV.NAME,y
+				dex
+				bne .10
+				
+				>PUSHW L.DevName
 				
 				>PUSHB DevID
 				
 				>LDYA L.MSG1.DEV
 				>SYSCALL CPrintFYA
 				
-				ldy #S.DEVSTAT.FLAGS
-				lda (ZPDevInfoPtr),y
+				ldy #S.DEVSTAT.NET.FLAGS
+				lda (ZPDevStatPtr),y
 				and #S.DEVSTAT.NET.FLAGS.ARPOFFLOAD
 				beq .2
 				lda #1
@@ -114,8 +132,8 @@ CS.INIT.DUMPDEV	sta DevID
 				>LDYA L.MSG1.DEV.ARP
 				>SYSCALL CPrintFYA
 				
-				ldy #S.DEVSTAT.FLAGS
-				lda (ZPDevInfoPtr),y
+				ldy #S.DEVSTAT.NET.FLAGS
+				lda (ZPDevStatPtr),y
 				and #S.DEVSTAT.NET.FLAGS.IPOFFLOAD
 				beq .3
 				lda #1
@@ -124,15 +142,15 @@ CS.INIT.DUMPDEV	sta DevID
 				>SYSCALL CPrintFYA
 				
 				ldy #S.DEVSTAT.NET.STATUS
-				lda (ZPDevInfoPtr),y
+				lda (ZPDevStatPtr),y
 				and #S.DEVSTAT.NET.STATUS.OK
-				bne CS.INIT.LINK
+				bne CS.RUN.LINK
 				>PUSHW L.MSG1.LINK.KO
 				>LDYA L.MSG1.LINK
 				>SYSCALL CPrintFYA
-				bra CS.INIT.DUMPIP
+				bra CS.RUN.DUMPIP
 				
-CS.INIT.LINK	>PUSHW L.MSG1.LINK.OK
+CS.RUN.LINK		>PUSHW L.MSG1.LINK.OK
 				>LDYA L.MSG1.LINK
 				>SYSCALL CPrintFYA
 				
@@ -140,7 +158,7 @@ CS.INIT.LINK	>PUSHW L.MSG1.LINK.OK
 				>SYSCALL CPrintFYA
 				
 				ldy #S.DEVSTAT.NET.STATUS
-				lda (ZPDevInfoPtr),y
+				lda (ZPDevStatPtr),y
 				and #$0F
 				tax
 				
@@ -152,7 +170,7 @@ CS.INIT.LINK	>PUSHW L.MSG1.LINK.OK
 				bne .4
 				
 				ldy #S.DEVSTAT.NET.STATUS
-				lda (ZPDevInfoPtr),y
+				lda (ZPDevStatPtr),y
 				and #S.DEVSTAT.NET.STATUS.FD
 				bne .5
 				>LDYA L.MSG1.DPLX.HD
@@ -160,7 +178,7 @@ CS.INIT.LINK	>PUSHW L.MSG1.LINK.OK
 .5				>LDYA L.MSG1.DPLX.FD
 .6				>SYSCALL CPrintFYA
 
-CS.INIT.DUMPIP	>LDYA L.MSG2
+CS.RUN.DUMPIP	>LDYA L.MSG2
 				>SYSCALL CPrintFYA
 				lda (ZPIPCfgPtr)
 				and #S.IPCFG.STATUS.OK
@@ -226,18 +244,21 @@ CS.INIT.DUMPIP	>LDYA L.MSG2
 				>LDYA L.MSG2.HOSTNAME
 				>SYSCALL CPrintFYA
 				
-CS.INIT.DONE	lda #0					tell TSKMGR that all done ok, but 
+CS.RUN.DONE		lda #0					tell TSKMGR that all done ok, but 
 				sec						we do not want to stay in memory
 				rts
 *--------------------------------------
-CS.RUN
-CS.DOEVENT		clc
+CS.DOEVENT		sec
 				rts
 *--------------------------------------
 CS.QUIT			lda hLIBTCPIP
+				beq .8
 				>SYSCALL FreeMemA
-				clc
+				
+.8				clc
 				rts
+*--------------------------------------
+NetDevJmp		jmp *
 *--------------------------------------
 CS.END
 LIBTCPIP		>PSTR "libtcpip.o"
@@ -266,6 +287,7 @@ MSG2.DNS		>CSTR " DNS         : %d.%d.%d.%d,%d.%d.%d.%d\n"
 MSG2.HOSTNAME	>CSTR " Hostname    : %S.%S\n"
 hLIBTCPIP		.BS	1
 DevID			.BS 1
+DevName			.BS 5
 MAN
 SAVE BIN/IPCONFIG.S
 ASM

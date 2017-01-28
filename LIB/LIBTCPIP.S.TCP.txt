@@ -1,6 +1,6 @@
 PR#3
 PREFIX /A2OSX.SRC
-NEW
+LOMEM $A00
 INC 1
 AUTO 6
 				.LIST OFF	
@@ -75,7 +75,7 @@ TCP.IN			ldy #S.IP.SRC+3
 				cpy #S.SOCKET.DST.PORT+2
 				bne .6
 				
-				jmp TCP.IN.ESTABLISHED
+				jmp TCP.IN.REGULAR
 				
 .7				lda ZPPtrSKT
 				clc
@@ -101,6 +101,7 @@ TCP.IN.LISTEN.NEW
 				ldx #3
 				
 				sec
+				
 .1				lda (ZPFrameBase1),y
 				adc #0
 				sta TmpSocket+S.SOCKET.SQ.ACKNUM,x
@@ -143,14 +144,21 @@ TCP.IN.LISTEN.NEW
 				
 				jmp TCP.SendSYNACK
 *--------------------------------------
-TCP.IN.ESTABLISHED
-				stx hSocket
+TCP.IN.REGULAR	stx hSocket
 				ldy #S.SOCKET.STATUS
 				lda (ZPPtrSKT),y
-				cmp #S.SOCKET.STATUS.SYNRCVD	Waiting for ACK to establish?
-				bne .1
-				
-				ldy #S.TCP.OPTIONS				yes, only accept ACK packet
+				asl
+				tax
+				jmp (L.TCP.IN.JMP,x)
+*--------------------------------------
+TCP.IN.JMP.CLOSED
+TCP.IN.JMP.LISTEN
+TCP.IN.JMP.SYNSENT
+				clc
+				rts
+*--------------------------------------
+TCP.IN.JMP.SYNRCVD
+				ldy #S.TCP.OPTIONS				only accept ACK packet
 				lda (ZPFrameBase1),y
 				cmp #S.TCP.OPTIONS.ACK
 				bne .8
@@ -206,18 +214,100 @@ TCP.IN.ESTABLISHED
 				
 .8				clc
 				rts
+*--------------------------------------
+TCP.IN.JMP.ESTBLSH
+				ldy #S.TCP.OPTIONS
+				lda (ZPFrameBase1),y
+				cmp #S.TCP.OPTIONS.ACK
+				bne .3
 				
-.1				cmp #S.SOCKET.STATUS.ESTBLSH
-				bne .99
-
-
-
-
-				bra *
-.99				clc
+				jsr TCP.UpdateAck
+				
+.3				lda ZPFrameBase1
+				clc
+				adc #S.TCP
+				sta ZPDataPtr
+				lda ZPFrameBase1+1
+				adc /S.TCP
+				sta ZPDataPtr+1
+				
+				ldy #S.TCP.DATAOFFSET
+				lda (ZPFrameBase1),y
+				lsr
+				lsr
+				clc
+				adc ZPDataPtr
+				sta ZPDataPtr
+				lda ZPDataPtr+1
+				adc ZPDataPtr+1
+				sta ZPDataPtr+1
+				
+				lda ZPDataPtr
+				sec
+				sbc ZPFrameBase1
+				sta ZPDataLen
+				lda ZPDataPtr+1
+				sbc ZPFrameBase1+1
+				sta ZPDataLen+1
+				
+				ldy #S.SOCKET.SQ.ACKNUM+3
+				lda (ZPPtrSKT),y
+				clc
+				adc ZPDataLen
+				sta (ZPPtrSKT),y
+				dey
+				lda (ZPPtrSKT),y
+				adc ZPDataLen+1
+				sta (ZPPtrSKT),y
+				dey
+				lda (ZPPtrSKT),y
+				adc #0
+				sta (ZPPtrSKT),y
+				dey
+				lda (ZPPtrSKT),y
+				adc #0
+				sta (ZPPtrSKT),y
+				
+				jsr TCP.SendACK
+				
+				clc
 				rts
 *--------------------------------------
-TCP.SendSYNACK	ldy #S.SOCKET.SRC.ADDR+3
+TCP.IN.JMP.CLWAIT
+TCP.IN.JMP.LASTACK
+TCP.IN.JMP.FINWT1
+TCP.IN.JMP.FINWT2
+TCP.IN.JMP.CLOSING
+TCP.IN.JMP.TIMEWT
+				clc
+				rts
+*--------------------------------------
+TCP.UpdateAck	ldy #S.TCP.ACK.NUMBER
+				ldx #4
+				
+.1				lda (ZPFrameBase1),y
+				pha
+				iny
+				dex
+				bne .1
+				
+				ldy #S.SOCKET.SQ.ACKNUM+3
+				ldx #4
+				
+.2				pla
+				sta (ZPPtrSKT),y
+				dey
+				dex
+				bne .2
+				rts
+*--------------------------------------
+TCP.SendACK		lda #S.TCP.OPTIONS.ACK
+				bra TCP.SendMSG
+TCP.SendSYNACK	lda #S.TCP.OPTIONS.SYN+S.TCP.OPTIONS.ACK
+				
+TCP.SendMSG		sta TCP.MSG+S.TCP.OPTIONS
+				
+				ldy #S.SOCKET.SRC.ADDR+3
 				ldx #3
 .1				lda (ZPPtrSKT),y
 				sta TCP.MSG+S.IP.SRC,x
@@ -254,9 +344,6 @@ TCP.SendSYNACK	ldy #S.SOCKET.SRC.ADDR+3
 				dey
 				dex
 				bpl .3
-				
-				lda #S.TCP.OPTIONS.SYN+S.TCP.OPTIONS.ACK
-				sta TCP.MSG+S.TCP.OPTIONS
 				
 				>PUSHW L.TCP.MSG
 				jsr SEND.TCP.FRAME

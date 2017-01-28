@@ -151,15 +151,15 @@ note : '$VAR' does NOT expand Variable
 | ARP | Working | dump ARP cache, setup a static ARP entry | 0.8 |
 | PING | Working | | 0.8 |
 | DNSINFO | Working | dump DNS cache, setup a static DNS entry | | 0.8 |
-| IPCONFIG | Working | renamed from NETINFO | 0.8 |
-| NETSTAT | Working | | 0.8 |
+| IPCONFIG | Working | renamed from NETINFO | 0.9 |
+| NETSTAT | Working | | 0.9 |
   
 ## BIN,External DEV Shell commands:  
 | Name | Status | Comment | K.Ver |
 | ---- | ------ | ------- | ----- |
 | ASM | In Progress | S-C MASM based multi CPU assembler | |
 | DEVDUMP |  | | 0.8 |
-| MEMDUMP | Working | | 0.8 |
+| MEMDUMP | Working | | 0.9 |
 | RPCDUMP | Working | tool based on UDP socket API, renamed from RPCINFO | 0.8 |
   
 ## Misc  
