@@ -148,9 +148,9 @@ note : '$VAR' does NOT expand Variable
 | | | -S : Suppress repeated empty output lines | |
 | EDIT | Working | still missing : find/replace | 0.9 |
 | NSCUTIL | Working | Tool for setting time in NSC/DL1216E | 0.8 |
-| ARP | Working | dump ARP cache, setup a static ARP entry | 0.8 |
+| ARP | Working | dump ARP cache, setup a static ARP entry | 0.9 |
 | PING | Working | | 0.8 |
-| DNSINFO | Working | dump DNS cache, setup a static DNS entry | | 0.8 |
+| DNSINFO | Working | dump DNS cache, setup a static DNS entry | | 0.9 |
 | IPCONFIG | Working | renamed from NETINFO | 0.9 |
 | NETSTAT | Working | | 0.9 |
   
@@ -160,7 +160,7 @@ note : '$VAR' does NOT expand Variable
 | ASM | In Progress | S-C MASM based multi CPU assembler | |
 | DEVDUMP |  | | 0.8 |
 | MEMDUMP | Working | | 0.9 |
-| RPCDUMP | Working | tool based on UDP socket API, renamed from RPCINFO | 0.8 |
+| RPCDUMP | Working | tool based on UDP socket API, renamed from RPCINFO | 0.9 |
   
 ## Misc  
 ### S-C MASM color scheme for Notepad++  
