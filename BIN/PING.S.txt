@@ -37,12 +37,14 @@ CS.START		cld
 				.DA	CS.QUIT
 L.LIBTCPIP		.DA LIBTCPIP
 L.Socket		.DA Socket
+L.ICMP.Request	.DA ICMP.Request
 L.MSG.IPKO		.DA MSG.IPKO
 L.MSG.USAGE		.DA MSG.USAGE
 L.MSG.UNKNOWN	.DA MSG.UNKNOWN
 L.MSG.HOSTOK	.DA MSG.HOSTOK
-L.MSG2			.DA MSG2
-L.MSG3			.DA MSG3
+L.MSG.SKTKO		.DA MSG.SKTKO
+L.MSG.REPLY		.DA MSG.REPLY
+L.MSG.UNREACH	.DA MSG.UNREACH
 				.DA 0
 *--------------------------------------
 CS.INIT			>LDYA L.LIBTCPIP
@@ -103,13 +105,14 @@ CS.RUN.HOSTOK	lda #1
 				>PUSHYA
 				
 				ldy #DST.IP+3
-				>PUSHB (pData),y			DST.IP+3	
+				ldx #3
+				
+.1				lda (pData),y
+				sta Socket.Dst.Addr,x
+				>PUSHA
 				dey
-				>PUSHB (pData),y			DST.IP+2
-				dey
-				>PUSHB (pData),y			DST.IP+1
-				dey
-				>PUSHB (pData),y			DST.IP
+				dex
+				bpl .1
 				
 				>LDYA L.MSG.HOSTOK
 				>SYSCALL CPrintFYA
@@ -123,96 +126,58 @@ CS.RUN.OPENSKT	ldx #3
 				dex
 				bpl .1
 				
+				ldy #Identifier
 				lda A2OSX.RANDOM16
 				sta Socket.Src.Port
+				sta (pData),y
+				iny
 				lda A2OSX.RANDOM16+1
 				sta Socket.Src.Port+1
-
+				sta (pData),y
+				
 				lda #0
 				ldy #Sequence
 				sta (pData),y
 				iny
 				sta (pData),y
 				
-				ldy #S.ICMP.SEQUENCE
-				sta (ZPFrameBase),y
-				iny
-				txa
-				sta (ZPFrameBase),y
-				
 				>PUSHW L.Socket
 				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.NEW
-				bcs .99
+				bcc .2
 				
-				txa
+				>LDYA L.MSG.SKTKO
+				>SYSCALL CPrintFYA
+				lda #SYSMGR.ERRSYN
+				sec				
+				rts
+				
+.2				txa
 				ldy #hSocket
 				sta (pData),y
-				
-				ldy #Identifier
-				lda (pData),y
-				tax
-				iny
-				lda (pData),y
-				
-				ldy #S.ICMP.IDENTIFIER+1
-				sta (ZPFrameBase),y
-				dey
-				txa
-				sta (ZPFrameBase),y
-				
-				ldy #Sequence+1
-				lda (pData),y
-				tax		
-				dey
-				lda (pData),y 
-				inc
-				sta (pData),y
-				bne .2
-				pha
-				inx
-				txa
-				sta (pData),y
-				pla
-				
-.2				ldy #S.ICMP.SEQUENCE
-				sta (ZPFrameBase),y
-				iny
-				txa
-				sta (ZPFrameBase),y
-				
-				ldx #31
-				ldy #S.ICMP+31
-.21				txa
-				and #$0f
-				ora #$60
-				sta (ZPFrameBase),y
-				dey
-				dex
-				bpl .21
 
 CS.RUN.SEND.ECHO				
+				ldy #Identifier
+				lda (pData),y
+				sta ICMP.Request.ID
+				iny
+				lda (pData),y
+				sta ICMP.Request.ID+1
+				
 				jsr Init.Timeout
 				
-.3				ldy #hSocket
+				>PUSHWI ICMP.RequestLen
+				>PUSHW L.ICMP.Request
+				
+				ldy #hSocket
 				>PUSHB (pData),y
 				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.SEND
-				
-				bcc .4
-				>SYSCALL Sleep
-				
-				jsr Wait.Timeout
-				bcc .3
-
-				
-				ldy #bReply
-				lda #0
-				sta (pData),y
+				bcs CS.RUN.ERR
 				
 				jsr Init.Timeout
 				
 CS.RUN.WAIT.REPLY
 				>SYSCALL Sleep
-				>SYSCALL GetA
+				>SYSCALL GetC
 				bcs .1
 				cmp #3					Ctrl-C
 				beq .9
@@ -227,30 +192,24 @@ CS.RUN.WAIT.REPLY
 				>SYSCALL GetMemPtrA
 				>STYA ZPFrameBase
 				jsr CS.Print.REPLY
+				bcs CS.RUN.ERR
+
 				bra CS.RUN.SEND.ECHO
 				
 .2				jsr Wait.Timeout
 				bcc CS.RUN.WAIT.REPLY
 				
-				ldy #DST.IP+3
-				>PUSHB (pData),y			DST.IP+3	
-				dey
-				>PUSHB (pData),y			DST.IP+2
-				dey
-				>PUSHB (pData),y			DST.IP+1
-				dey
-				>PUSHB (pData),y			DST.IP
-				>LDYA L.MSG.UNREACH
-				>SYSCALL CPrintFYA
+				jsr CS.Print.UNREACH
+				bcs CS.RUN.ERR
 
-				jmp CS.RUN.SEND.ECHO
+				bra CS.RUN.SEND.ECHO
 				
 .9				lda #0
 				sec
-				rts
+CS.RUN.ERR		rts
 *--------------------------------------
 CS.DOEVENT		lda (pEvent)
-				bpl .1					is it a TIMER event?
+				bpl .9					is it a TIMER event?
 				
 				ldy #TimeOut
 				lda (pData),y
@@ -262,7 +221,18 @@ CS.DOEVENT		lda (pEvent)
 .9				sec						do not discard TIMER event
 				rts
 *--------------------------------------
-
+CS.Print.UNREACH
+				ldy #DST.IP+3
+				>PUSHB (pData),y			DST.IP+3	
+				dey
+				>PUSHB (pData),y			DST.IP+2
+				dey
+				>PUSHB (pData),y			DST.IP+1
+				dey
+				>PUSHB (pData),y			DST.IP
+				>LDYA L.MSG.UNREACH
+				>SYSCALL CPrintFYA
+				rts
 *--------------------------------------
 CS.Print.REPLY	lda #TIMEOUT.MAX
 				sec
@@ -304,14 +274,16 @@ CS.Print.REPLY	lda #TIMEOUT.MAX
 				
 				>LDYA L.MSG.REPLY
 				>SYSCALL CPrintFYA
-				
-				ldy #bReply
-				lda (pData),y
-				inc
-				sta (pData),y
 				rts
 *--------------------------------------
-CS.QUIT			lda hLIBTCPIP
+CS.QUIT			ldy #hSocket
+				>DEBUG
+				lda (pData),y
+				beq .1
+				
+				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.CLOSEA
+				
+.1				lda hLIBTCPIP
 				>SYSCALL UnloadLibA
 				clc
 				rts
@@ -335,13 +307,14 @@ MSG.IPKO		>CSTR "TCP/IP Not Loaded/Configured.\n"
 MSG.USAGE		>CSTR "Usage : PING <ip|host>\n"
 MSG.UNKNOWN		>CSTR "%S: Unknown host\n"
 MSG.HOSTOK		>CSTR "PING %d.%d.%d.%d (%S)\n"
+MSG.SKTKO		>CSTR "Failed to Open Socket.\n"
 MSG.UNREACH		>CSTR "%d.%d.%d.%d: TimeOut/Host unreachable\n"
 MSG.REPLY		>CSTR "32 bytes from %d.%d.%d.%d, icmp_seq=%D, ttl=%d, time=%D ms\n"
 hLIBTCPIP		.BS 1
 TimeOut.ms		.BS 2
 Socket			.DA #S.SOCKET.SOCK.RAW
 				.BS 2
-				.BS #S.IP.PROTOCOL.ICMP
+				.DA #S.IP.PROTOCOL.ICMP
 Socket.Src.Addr	.BS 4
 Socket.Src.Port	.BS 2					Identifier
 Socket.Dst.Addr	.BS 4
@@ -355,11 +328,15 @@ ICMP.Request.ID	.BS 2
 ICMP.Request.SQ	.BS 2		
 				.AS "ABCDEFGHIJKLMNOP"
 				.AS "QRSTUVWXYZ012345"
+ICMP.RequestLen		.EQ *-ICMP.Request
 *--------------------------------------
 				.DUMMY
 				.OR 0
 DS.START
 DST.IP			.BS 4
+hSocket			.BS 1
+hFrame			.BS 1
+Identifier		.BS 2
 Sequence		.BS 2
 TimeOut			.BS 1
 DS.END
