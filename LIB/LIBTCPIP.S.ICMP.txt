@@ -1,23 +1,26 @@
 PR#3
 PREFIX /A2OSX.SRC
-NEW
+LOMEM $A00
 INC 1
 AUTO 6
 				.LIST OFF	
 *--------------------------------------
 ICMP.IN			ldy #S.ICMP.TYPE
 				lda (ZPFrameBase),y
+				cmp #S.ICMP.TYPE.ECHOREP
+				beq ICMP.IN.ECHOREP
+				
 				cmp #S.ICMP.TYPE.ECHOREQ
-				bne .9
+				bne ICMP.IN.EXIT
 
-				ldy #S.IP.DST
-				ldx #S.IPCFG.IP
+ICMP.IN.ECHOREQ	ldy #S.IP.DST+3
+				ldx #3
+				
 .1				lda (ZPFrameBase),y
-				cmp IPCFG,x
-				bne .9
-				iny
-				inx
-				cpx #S.IPCFG.IP+4
+				cmp IPCFG+S.IPCFG.IP,x
+				bne ICMP.IN.EXIT
+				dey
+				dex
 				bne .1
 				
 				ldy #S.ICMP.TYPE
@@ -59,10 +62,65 @@ ICMP.IN			ldy #S.ICMP.TYPE
 				lda #S.ARPCACHE.STATUS.RESOLVED
 				jsr ARP.ADD.I
 				
-				stz	hFrameOut				DO NOT QUEUE/DISCARD this frame,it is SOURCE frame!!!
-				jmp SEND.ICMP.FRAME.I
-.9				sec
+				lda hFrameIn
+				sta	hFrameOut				DO NOT DISCARD this frame,it is SOURCE frame!!!
+				jmp FRM.SendICMP
+				
+ICMP.IN.EXIT	lda hFrameIn
+				>SYSCALL FreeMemA
 				rts
+*--------------------------------------
+ICMP.IN.ECHOREP	jsr IP.FillTmpSocketSrcDst
+				
+				lda #S.IP.PROTOCOL.ICMP
+				sta TmpSocket+S.SOCKET.RAW.PROTO
+				
+				ldy #S.ICMP.IDENTIFIER
+				lda (ZPFrameBase),y
+				sta TmpSocket+S.SOCKET.SRC.PORT+1
+				iny
+				lda (ZPFrameBase),y
+				sta TmpSocket+S.SOCKET.SRC.PORT
+
+				>LDYA L.SKT.TABLE
+				>STYA ZPPtrSKT
+				
+				ldx #0
+				
+.3				lda (ZPPtrSKT)
+				beq .7
+				cmp #S.SOCKET.SOCK.RAW
+				bne .7
+				
+				ldy #S.SOCKET.SRC.ADDR
+				
+.4				lda (ZPPtrSKT),y
+				cmp TmpSocket,y
+				bne .7
+				iny
+				cpy #S.SOCKET.DST.PORT	Compare SRC.ADDR,SRC.PORT,DST.ADDR
+				bne .4
+					
+				lda hFrameIn
+				jsr SKT.AddToQueueA
+				bcs .9					Q full, discard...
+				
+				rts						DO NOT Discard this queued frame
+				
+.7				lda ZPPtrSKT
+				clc
+				adc #S.SOCKET
+				sta ZPPtrSKT
+				bcc .8
+				inc ZPPtrSKT+1
+				
+.8				inx
+				cpx #K.SKTTABLE.SIZE
+				bne .3
+				
+.9				lda hFrameIn
+				>SYSCALL FreeMemA
+				rts			
 *--------------------------------------
 MAN
 SAVE LIB/LIBTCPIP.S.ICMP

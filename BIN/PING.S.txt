@@ -14,7 +14,7 @@ AUTO 6
 *--------------------------------------
 TIMEOUT.MAX		.EQ 20					2 sec.
 *--------------------------------------
-ZPFrameBase	.EQ ZPBIN
+ZPFrameBase		.EQ ZPBIN
 ZPFrameLen		.EQ ZPBIN+2
 ZPFramePtr1		.EQ ZPBIN+4
 ZPIPCfgPtr		.EQ ZPBIN+6
@@ -36,41 +36,96 @@ CS.START		cld
 				.DA CS.DOEVENT		
 				.DA	CS.QUIT
 L.LIBTCPIP		.DA LIBTCPIP
-L.MSG0			.DA MSG0
-L.MSG1			.DA MSG1
+L.Socket		.DA Socket
+L.MSG.IPKO		.DA MSG.IPKO
+L.MSG.USAGE		.DA MSG.USAGE
+L.MSG.UNKNOWN	.DA MSG.UNKNOWN
+L.MSG.HOSTOK	.DA MSG.HOSTOK
 L.MSG2			.DA MSG2
 L.MSG3			.DA MSG3
 				.DA 0
 *--------------------------------------
-CS.INIT			>SYSCALL GetArgC
-				cmp #1
-				bne .1
-				
-				lda #SYSMGR.ERRSYN
-				sec
-				rts
-				
-.1				>LDYA L.LIBTCPIP
+CS.INIT			>LDYA L.LIBTCPIP
 				>SYSCALL LoadLibYA
+				bcs .9
 				sta hLIBTCPIP
 
-				>LIBCALL hLIBTCPIP,LIBTCPIP.GET.IPCFG	is TCPIP loaded ?
-				bcs .9
+				lda (pPs)
+				ora #S.PS.F.EVENT		Now accept events
+				sta (pPs)
+				
+				clc
+
+.9				rts
+*--------------------------------------
+CS.RUN			>LIBCALL hLIBTCPIP,LIBTCPIP.GET.IPCFG	is TCPIP loaded ?
 				>STYA ZPIPCfgPtr
 				
 				lda (ZPIPCfgPtr)		Configured ?
-				bpl .9
+				bmi CS.RUN.IPOK
 				
-				ldy #S.IPCFG.HDEV
-				lda (ZPIPCfgPtr),y
-				sta hDev
+				>LDYA L.MSG.IPKO
+				>SYSCALL CPrintFYA
+				lda #SYSMGR.ERRSYN
+				sec				
+				rts
+*--------------------------------------				
+CS.RUN.IPOK		>SYSCALL GetArgC
+				cmp #1
+				beq .9
+				
+				jsr Init.Timeout
+
+.2				>PUSHW pData			DST.IP
+				lda #1
+				>SYSCALL GetArgA
+				>PUSHYA
+				>LIBCALL hLIBTCPIP,LIBTCPIP.HST.GETBYNAME
+				bcc CS.RUN.HOSTOK	
+				>SYSCALL Sleep
+				jsr Wait.Timeout
+				bcc .2
+
+				lda #1
+				>SYSCALL GetArgA
+				>PUSHYA
+				>LDYA L.MSG.UNKNOWN
+				bra .99
+				
+.9				>LDYA L.MSG.USAGE
+.99				>SYSCALL CPrintFYA
+				lda #SYSMGR.ERRSYN
+				sec				
+				rts
+*--------------------------------------				
+CS.RUN.HOSTOK	lda #1
+				>SYSCALL GetArgA
+				>PUSHYA
+				
+				ldy #DST.IP+3
+				>PUSHB (pData),y			DST.IP+3	
+				dey
+				>PUSHB (pData),y			DST.IP+2
+				dey
+				>PUSHB (pData),y			DST.IP+1
+				dey
+				>PUSHB (pData),y			DST.IP
+				
+				>LDYA L.MSG.HOSTOK
+				>SYSCALL CPrintFYA
+		
+CS.RUN.ECHO		ldx #3
+				ldy #S.IPCFG.IP+3
+.1				lda (ZPIPCfgPtr),y
+				sta Socket.Src.Addr,x
+				dey
+				dex
+				bpl .1
 				
 				lda A2OSX.RANDOM16
-				ldy #Identifier
-				sta (pData),y
+				sta Socket.Src.Port
 				lda A2OSX.RANDOM16+1
-				iny
-				sta (pData),y
+				sta Socket.Src.Port+1
 
 				lda #0
 				ldy #Sequence
@@ -78,80 +133,20 @@ CS.INIT			>SYSCALL GetArgC
 				iny
 				sta (pData),y
 				
-				lda (pPs)
-				ora #S.PS.F.EVENT		Now accept events
-				sta (pPs)
-				clc
-				
-.9				sec
-				rts
-*--------------------------------------
-CS.RUN			jsr Init.Timeout
-
-.1				>PUSHW pData			DST.IP
-				lda #1
-				>SYSCALL GetArgA
-				>PUSHYA
-				>LIBCALL hLIBTCPIP,LIBTCPIP.HST.GETBYNAME
-				bcc .2		
-				>SYSCALL Sleep
-				jsr Wait.Timeout
-				bcc .1
-				
-				lda #1
-				>SYSCALL GetArgA
-				>PUSHYA
-				>LDYA L.MSG0
-				>SYSCALL CPrintFYA
-				lda #1
-				sec
-				rts
-
-.2				lda #1
-				>SYSCALL GetArgA
-				>PUSHYA
-				
-				ldy #3
-				>PUSHB (pData),y			DST.IP+3	
-				dey
-				>PUSHB (pData),y			DST.IP+2
-				dey
-				>PUSHB (pData),y			DST.IP+1
-				>PUSHB (pData)				DST.IP
-				>LDYA L.MSG1
-				>SYSCALL CPrintFYA
-		
-CS.RUN.ECHO		>LIBCALL hLIBTCPIP,LIBTCPIP.NEW.ICMP.FRAME
-				>STYA ZPFrameBase
-				txa
-				ldy #hFrame
- 				sta (pData),y
-
-				lda #S.ICMP+32-2
-				sta (ZPFrameBase)
-				lda /S.ICMP+32-2
-				ldy #1
+				ldy #S.ICMP.SEQUENCE
 				sta (ZPFrameBase),y
-				
-				ldx #3
-				ldy #0
-.10				lda (pData),y
-				pha
 				iny
-				dex
-				bpl .10
-				
-				ldx #3
-				ldy #S.IP.DST+3
-.1				pla
+				txa
 				sta (ZPFrameBase),y
-				dey
-				dex
-				bpl .1
 				
-				ldy #S.ICMP.TYPE
-				lda #S.ICMP.TYPE.ECHOREQ
-				sta (ZPFrameBase),y
+				>PUSHW L.Socket
+				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.NEW
+				bcs .99
+				
+				txa
+				ldy #hSocket
+				sta (pData),y
+				
 				
 				ldy #Identifier
 				lda (pData),y
@@ -264,47 +259,11 @@ CS.DOEVENT		lda (pEvent)
 				
 				dec
 				sta (pData),y
+				
 .9				sec						do not discard TIMER event
 				rts
 *--------------------------------------
-				
-				ldy #S.EVT.DATALO		Get Frame hMem
-				lda (pEvent),y
-				>SYSCALL GetMemPtrA
-				>STYA ZPFrameBase
-				
-				ldy #S.IP.PROTOCOL
-				lda (ZPFrameBase),y
-				cmp #S.IP.PROTOCOL.ICMP
-				
-				bne .9
-				
-				ldy #S.ICMP.TYPE
-				lda (ZPFrameBase),y
-				cmp #S.ICMP.TYPE.ECHOREP
-				bne .9
-				
-				ldy #S.ICMP.IDENTIFIER
-				lda (ZPFrameBase),y
-				tax
-				iny
-				lda (ZPFrameBase),y
-				ldy #Identifier+1 
-				cmp (pData),y
-				bne .9
-				dey
-				txa
-				cmp (pData),y
-				bne .9
-				
-				jsr CS.EVENT.REPLY
-.8				clc
-				rts	
-				
-.9				sec
-				rts
-*--------------------------------------
-CS.EVENT.REPLY	lda #TIMEOUT.MAX
+CS.Print.REPLY	lda #TIMEOUT.MAX
 				sec
 				ldy #TimeOut
 				sbc (pData),y
@@ -371,23 +330,37 @@ Wait.TimeOut	sec
 *--------------------------------------
 CS.END
 LIBTCPIP		>PSTR "libtcpip.o"
-MSG0			>CSTR "%S: Unknown host\n"
-MSG1			>CSTR "PING %d.%d.%d.%d (%S)\n"
+MSG.IPKO		>CSTR "TCP/IP Not Loaded/Configured.\n"
+MSG.USAGE		>CSTR "Usage : PING <ip|host>\n"
+MSG.UNKNOWN		>CSTR "%S: Unknown host\n"
+MSG.HOSTOK		>CSTR "PING %d.%d.%d.%d (%S)\n"
 MSG2			>CSTR "%d.%d.%d.%d: TimeOut/Host unreachable\n"
 MSG3			>CSTR "32 bytes from %d.%d.%d.%d, icmp_seq=%D, ttl=%d, time=%D ms\n"
 hLIBTCPIP		.BS 1
-hDev			.BS 1
 TimeOut.ms		.BS 2
+Socket			.DA #S.SOCKET.SOCK.RAW
+				.BS 2
+				.BS #S.IP.PROTOCOL.ICMP
+Socket.Src.Addr	.BS 4
+Socket.Src.Port	.BS 2					Identifier
+Socket.Dst.Addr	.BS 4
+Socket.Dst.Port	.DA 0					not used
+				.BS 16
+*--------------------------------------
+ICMP.Request	.DA #S.ICMP.TYPE.ECHOREQ
+				.DA #0					CODE
+				.DA 0					CHECKSUM
+ICMP.Request.ID	.BS 2
+ICMP.Request.SQ	.BS 2		
+				.AS "ABCDEFGHIJKLMNOP"
+				.AS "QRSTUVWXYZ012345"
 *--------------------------------------
 				.DUMMY
 				.OR 0
 DS.START
 DST.IP			.BS 4
-hFrame			.BS 1
-TimeOut			.BS 1
-Identifier		.BS 2
 Sequence		.BS 2
-bReply			.BS 1
+TimeOut			.BS 1
 DS.END
 				.ED
 *--------------------------------------
