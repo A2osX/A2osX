@@ -8,3 +8,12 @@
 ##Out:
 *	Y,A = Frame PTR
 *	X = hMem
+
+#SKT.New
+
+##In : 
++ PUSHW = PTR to S.SOCKET template
+
+##Out : 
++ YA = PTR to new S.SOCKET
++ X = hSocket
