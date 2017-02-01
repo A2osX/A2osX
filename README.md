@@ -149,7 +149,7 @@ note : '$VAR' does NOT expand Variable
 | EDIT | Working | still missing : find/replace | 0.9 |
 | NSCUTIL | Working | Tool for setting time in NSC/DL1216E | 0.8 |
 | ARP | Working | dump ARP cache, setup a static ARP entry | 0.9 |
-| PING | Working | | 0.8 |
+| PING | Working | | 0.9 |
 | DNSINFO | Working | dump DNS cache, setup a static DNS entry | 0.9 |
 | IPCONFIG | Working | renamed from NETINFO | 0.9 |
 | NETSTAT | Working | | 0.9 |
