@@ -115,9 +115,9 @@ note : '$VAR' does NOT expand Variable
 | Name | Status | Comment | K.Ver |
 | ---- | ------ | ------- | ----- |
 | Console.DRV | Working | ANSI support in Progress. | 0.9 |
+| SSC.DRV | Working | Apple "Super Serial Card" Driver | 0.9 |
+| SSC.I.DRV | Working | Apple "Super Serial Card" Driver (IRQ enabled) | 0.9 |
 | PIC.DRV | In Progress | Apple "Parallel Interface Card" Driver, renamed from PPIC.DRV | 0.8 |
-| SSC.DRV | In Progress | Apple "Super Serial Card" Driver | 0.8 |
-| SSC.I.DRV | In Progress | Apple "Super Serial Card" Driver (IRQ enabled) | 0.8 |
 | Mouse.DRV | Working | Apple Mouse Card,//c Mouse Port | 0.9 |
 | DHGR.DRV | In Progress | except bitblt... | 0.8 |
 | Uthernet.DRV | Working | | 0.9 |

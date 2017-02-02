@@ -10,6 +10,7 @@ AUTO 6
 *--------------------------------------
 				.INB /A2OSX.DEV/INC/MACROS.I
 				.INB /A2OSX.DEV/INC/A2OSX.I
+				.INB /A2OSX.DEV/INC/PRODOS.I
 *--------------------------------------
 BUF.SIZE		.EQ $20
 BUF.MASK		.EQ $1F
@@ -17,10 +18,6 @@ BUF.MASK		.EQ $1F
 ZPTmpPtr1		.EQ ZPDRV
 *--------------------------------------
 				.INB DRV/X.SER.6551.S
-*--------------------------------------
-* see this :
-* http://mirrors.apple2.org.za/apple.cabi.net/Applications/Telcom/SSC.DRIVER/SSC.DRIVER.TXT
-* About False read issue in SSC
 *--------------------------------------
 *			File Header (16 Bytes)
 *--------------------------------------
@@ -68,7 +65,7 @@ Dev.Detect		sta hArgs
 				>LDYA L.MSG.DETECT.KO
 				>SYSCALL CPrintFYA
 
-				lda #DEVMGR.ERRNOHW		Not Found in any slot, exiting
+				lda #MLI.ERR.NODEV		Not Found in any slot, exiting
 				sec
 				rts	
 
@@ -104,24 +101,38 @@ hArgs			.BS 1
 *--------------------------------------
 *			Device Header (16 Bytes)
 *--------------------------------------
-DEV.HEADER		cld
-				jmp (DRV.CS.START,x)
-				.HS 00					DevID
-				.DA #S.DEV.F.IRQ+S.DEV.F.EVENT+S.DEV.F.COUT+S.DEV.F.CHAR
+DEV.HEADER		.DA DRV.CS.START
+				.DA #S.DEV.S.WRITE+S.DEV.S.READ+S.DEV.S.IRQ
 DEV.HEADER.NAME	>PSTR "COM1"			NAME
-				.HS 00
-				.HS 00.00.00.00
 *--------------------------------------
 *			Driver Code
 *--------------------------------------
-DRV.CS.START	.DA OPEN
-				.DA GETEVENT
-				.DA COUT
+DRV.CS.START	cld
+				jmp (.1,x)
+.1				.DA STATUS
+				.DA BADCALL
+				.DA BADCALL
+				.DA BADCALL
+				.DA CONTROL
+				.DA BADCALL
+				.DA OPEN
 				.DA CLOSE
-				.DA GETINFO
+				.DA READ
+				.DA WRITE
 				.DA IRQ
-L.DEVINFO		.DA DEVINFO
+L.STAT			.DA STAT
 				.DA 0					end or relocation
+*--------------------------------------
+BADCALL			lda #MLI.ERR.BADCALL
+				sec
+				rts
+*--------------------------------------
+STATUS			>LDYA L.STAT
+				clc
+				rts
+*--------------------------------------
+CONTROL			clc
+				rts
 *--------------------------------------
 OPEN			php
 				sei
@@ -137,7 +148,7 @@ OPEN			php
 				lda #SSC.CTL.CLKINT+SSC.CTL.B9600
 				sta SSC.CTL,x
 				
-				lda #SSC.CMD.TE+SSC.CMD.DTR
+				lda #SSC.CMD.TEIRQ+SSC.CMD.TE+SSC.CMD.DTR
 				sta SSC.CMD,x
 				
 				lda SSC.DATA,x		discard any garbage byte
@@ -147,31 +158,30 @@ OPEN			php
 				clc
 				rts
 *--------------------------------------
-GETEVENT		php
+CLOSE			php
+				sei
+				ldx DEVSLOTn0
+				stz SSC.RESET,x 
+				plp
+				clc
+				rts
+*--------------------------------------
+READ			php
 				sei
 				lda INBUF.CNT
 				
 				beq .9
 				
 				ldx INBUF.PTR
-				lda INBUF,x
-				
-				ldy #S.EVT.DATA
-				sta (pEvent),y
-
-				iny
-				lda #0
-				sta (pEvent),y
-				
-				lda #S.EVT.F.KEY
-				sta (pEvent)
-				
+				ldy INBUF,x
+								
 				txa
 				inc
 				and #BUF.MASK
 				sta INBUF.PTR
 				dec INBUF.CNT
 				
+				tya
 				plp
 				clc
 				rts
@@ -181,31 +191,34 @@ GETEVENT		php
 				sec
 				rts
 *--------------------------------------
-COUT			php
+WRITE			php
 				sei
 				tay						save char in Y
+				
+*				ldx DEVSLOTn0
+*				lda SSC.STATUS,x
+*				bit #SSC.STATUS.DCD+SSC.STATUS.DSR		true when 0
+*				bne .9
+				
+				ldx OUTBUF.CNT			Buffer Empty?
+				bne .11					not empty, queue char
 
 				ldx DEVSLOTn0
 				lda SSC.STATUS,x
 				
-				bit #SSC.STATUS.DCD+SSC.STATUS.DSR		true when 0
-				bne .9
-				
-				ldx OUTBUF.CNT			Buffer Empty?
-				bne .10					not empty, queue char
-
-				and #SSC.STATUS.TDRE Register Empty ?
+				and #SSC.STATUS.TDRE 	Register Empty ?
 				beq .10					not empty, queue char
 				
 				tya						yes, write directly to ACIA
-				ldx DEV.DATA.BFFF
-				sta $BFFF,x
+				sta SSC.DATA,x
 				
 				plp
 				clc
 				rts
 	
-.10				cpx #BUF.SIZE
+.10				ldx OUTBUF.CNT
+				
+.11				cpx #BUF.SIZE
 				beq .9					Buffer Full!!
 
 				lda OUTBUF.PTR
@@ -220,8 +233,8 @@ COUT			php
 				inc OUTBUF.CNT
 				
 *				ldx DEVSLOTn0
-				lda #SSC.CMD.TEIRQ+SSC.CMD.DTR
-				sta SSC.CMD,x
+*				lda #SSC.CMD.TEIRQ+SSC.CMD.DTR
+*				sta SSC.CMD,x
 				plp
 				clc
 				rts
@@ -230,35 +243,25 @@ COUT			php
 				sec
 				rts
 *--------------------------------------
-CLOSE			php
-				sei
-				ldx DEVSLOTn0
-				stz SSC.RESET,x 
-				plp
-				clc
-				rts
-*--------------------------------------
-GETINFO			>LDYA L.DEVINFO
-				clc
-				rts
-*--------------------------------------
 * IRQ Handler
 * on exit, CC if handled
 *--------------------------------------
-IRQ				ldx DEVSLOTn0
-				lda SSC.STATUS,x	IRQ from this device ?
-*				bpl .9					no, exit !!!!Applewin bug #308!!!!
+IRQ				stz .8+1
+
+.1				ldx DEVSLOTn0
+				lda SSC.STATUS,x
+*				bpl .9					IRQ from this device ? no, exit !!!!Applewin bug #308!!!!
 
 				bit #SSC.STATUS.RDRF	incoming char?
-				beq .1					
+				beq .3					
 
 *------------ IRQ In
 
-				ldy SSC.DATA,x		read data to clear IRQ
+				ldy SSC.DATA,x			read data to clear IRQ
 
 				lda INBUF.CNT
 				cmp #BUF.SIZE
-				beq .8					buffer full, discard
+				beq .8					buffer full, discard and exit
 				
 				clc
 				adc INBUF.PTR
@@ -268,39 +271,39 @@ IRQ				ldx DEVSLOTn0
 				sta INBUF,x
 
 				inc INBUF.CNT
-				bra IRQ					start over if 
+				
+				lda #$ff
+				sta	.8+1
+				
+				bra .1
 				
 *------------ IRQ Out
 
-.1				bit #SSC.STATUS.TDRE
-				beq .2					no transmit, no recieve, CTS changed!
+.2				ldx DEVSLOTn0
+				lda SSC.STATUS,x
+				
+.3				bit #SSC.STATUS.TDRE
+				beq .8					no transmition possible....
 
 				lda OUTBUF.CNT			something to transmit ?
-				beq .11					no, disable IRQ and exit
+				beq .8
 				
-				ldx OUTBUF.PTR
-				lda OUTBUF,x
-				ldy DEV.DATA.BFFF
-				sta $BFFF,y
+				ldy OUTBUF.PTR
+				lda OUTBUF,y
+				
+				sta SSC.DATA,x
 				
 				dec OUTBUF.CNT
-				txa						get back OUTBUF.PTR
+				tya						get back OUTBUF.PTR
 				inc
 				and #BUF.MASK
 				sta OUTBUF.PTR
-				clc
-				rts
 				
-.11				lda #SSC.CMD.TE+SSC.CMD.DTR
-				sta SSC.CMD,x
+				bra .2			
+
+.8				lda #$ff				did we finally handle and IRQ condtion ?
+				beq .9
 				clc
-				rts
-
-*------------ IRQ CTS High
-
-.2				
-
-.8				clc
 				rts
 				
 .9				sec
@@ -317,8 +320,14 @@ OUTBUF.PTR		.BS 1
 OUTBUF.CNT		.BS 1
 INBUF			.BS BUF.SIZE
 OUTBUF			.BS BUF.SIZE
-DEVINFO			.DA #S.DEVINFO.TYPE.CHAR
+*--------------------------------------
+STAT			.DA #S.DEVSTAT.S.WRITE+S.DEVSTAT.S.READ+S.DEV.S.IRQ
+				.DA #0,#0,#0
+				>PSTR "Serial Card/Port"
+				.DA #S.DEVSTAT.TYPE.CHAR
 				.DA #0
+				.DA $0900
+
 *--------------------------------------
 MAN
 SAVE DRV/SSC.DRV.I.S
