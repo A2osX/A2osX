@@ -169,12 +169,9 @@ SKT.AcceptA		jsr SKT.GetA.I
 *--------------------------------------
 * SKT.Send
 *--------------------------------------
-SKT.Send		>PULLB hSocket
-				pha
+SKT.Send		>PULLW ZPDataInLen
 				>PULLW ZPDataInPtr
-				>PULLW ZPDataInLen
-				
-				pla
+				>PULLB hSocket
 				jsr SKT.GetA.I
 				bcs .9
 				and #S.SOCKET.SOCK.MASK
@@ -394,24 +391,169 @@ SKT.RcvdA		jsr SKT.GetA.I
 .99				sec
 .9				rts
 */--------------------------------------
-* #SKT.Rcvd (STREAM)
-* ##In : 
-*  PULLB = hSocket
-*  PULLW = pBuf
-*  PULLW = len
-* ##Out :
-*  Y,A = bytes read
-*\--------------------------------------
-SKT.Rcvd 		sec
-				rts
-*/--------------------------------------
 * #SKT.GetCA (STREAM)
+*  Read a Char From Stream in A
 * ##In : 
 *  A = hSocket
 * ##Out : 
 *  A = char
 *\--------------------------------------
-SKT.GetCA
+SKT.GetCA		sec
+				rts
+*/--------------------------------------
+* #SKT.GetS (STREAM)
+*  Read a CR terminated Line in pBuf
+* ##In : 
+*  PUSHB = hSocket
+*  PUSHW = pBuf
+*  PUSHW = len
+* ##Out :
+*  Y,A = bytes read
+*\--------------------------------------
+SKT.GetS		sec
+				.HS 90					bcc
+*/--------------------------------------
+* #SKT.Rcvd (STREAM)
+*  Read data in pBuf
+* ##In : 
+*  PUSHB = hSocket
+*  PUSHW = pBuf
+*  PUSHW = len
+* ##Out :
+*  Y,A = bytes transfered
+*\--------------------------------------
+SKT.Rcvd 		clc
+				ror TmpDWord
+				>PULLA
+				eor #$FF
+				sta ZPDataOutLen
+				>PULLA
+				eor #$FF
+				sta ZPDataOutLen+1
+				
+				>PULLW ZPDataOutPtr
+				>PULLB hSocket
+				
+				jsr SKT.GetA.I
+				bcs .99
+				and #S.SOCKET.SOCK.MASK
+				cmp #S.SOCKET.SOCK.STREAM
+				bne .9
+				
+				ldy #S.SOCKET.SO
+				lda (ZPPtrSKT),y
+				and #S.SOCKET.SO.ACCEPTCONN
+				beq SKT.Rcvd.1
+				
+.9				lda #ERR.SKT.BAD
+				sec
+.99				rts
+				
+SKT.Rcvd.1		jsr SKT.GetCopy 
+
+				lda SKT.TmpCache+S.SOCKET.STREAM.hOutMem
+				>SYSCALL GetMemPtrA
+				>STYA ZPTmpPtr1			Make ZPTmpPtr1=buffer base
+
+				lda ZPTmpPtr1
+				clc
+				adc SKT.TmpCache+S.SOCKET.SQ.INTAIL
+				sta ZPTmpPtr2
+
+				lda ZPTmpPtr1+1
+				adc SKT.TmpCache+S.SOCKET.SQ.INTAIL+1
+				sta ZPTmpPtr2+1
+				
+				stz TmpOffset			Reset Data Counter
+				stz TmpOffset+1
+				
+				ldy #0
+				
+.2				inc ZPDataOutLen		Room left in dest buffer ?
+				bne .3
+				inc ZPDataOutLen+1
+				beq .8
+				
+.3				lda SKT.TmpCache+S.SOCKET.SQ.INTAIL
+				eor SKT.TmpCache+S.SOCKET.SQ.INHEAD
+				bne .4
+				lda SKT.TmpCache+S.SOCKET.SQ.INTAIL+1
+				eor SKT.TmpCache+S.SOCKET.SQ.INHEAD+1
+				beq .8					no more data....
+				
+.4				lda (ZPTmpPtr2)
+				
+				inc SKT.TmpCache+S.SOCKET.SQ.INTAIL
+				bne .6
+				
+				inc SKT.TmpCache+S.SOCKET.SQ.INTAIL+1
+				ldx SKT.TmpCache+S.SOCKET.SQ.INTAIL+1
+				cpx /K.TCP.WSIZE
+				bne .5
+				
+				stz SKT.TmpCache+S.SOCKET.SQ.INTAIL+1
+				ldx ZPTmpPtr1
+				stx ZPTmpPtr2
+				ldx ZPTmpPtr1+1
+				stx ZPTmpPtr2+1
+				bra .6
+				
+.5				inc ZPTmpPtr2
+				bne .6
+				inc ZPTmpPtr2+1
+				
+.6				bit TmpDWord			do we need to check CR ?
+				bpl .7
+				
+				cmp #13
+				beq .80
+				
+.7				sta (ZPDataOutPtr),y
+				iny
+				bne .2
+				inc ZPDataOutPtr+1
+				bra .2
+				
+.8				lda TmpDWord			CR mode ?
+				bne .90					
+				
+.80				lda TmpOffset
+				eor TmpOffset+1
+				beq .9
+				
+				lda S.SOCKET.SQ.INFREE
+				clc
+				adc TmpOffset
+				sta S.SOCKET.SQ.INFREE
+				
+				lda S.SOCKET.SQ.INFREE+1
+				adc TmpOffset+1
+				sta S.SOCKET.SQ.INFREE+1				
+				
+				lda SKT.TmpCache+S.SOCKET.SQ.ACKNUM
+				clc
+				adc TmpOffset
+				sta SKT.TmpCache+S.SOCKET.SQ.ACKNUM
+
+				lda SKT.TmpCache+S.SOCKET.SQ.ACKNUM+1
+				adc TmpOffset+1
+				sta SKT.TmpCache+S.SOCKET.SQ.ACKNUM+1
+				bcc .81
+				inc SKT.TmpCache+S.SOCKET.SQ.ACKNUM+2
+				bne .81
+				inc SKT.TmpCache+S.SOCKET.SQ.ACKNUM+3
+				
+.81				lda #S.SOCKET.SOCK.ACK
+				tsb	SKT.TmpCache+S.SOCKET.SOCK		
+				
+				jsr SKT.PutCopy
+				>LDYA TmpOffset
+				clc
+				rts
+				
+.90				lda #0				
+.9				sec						A=0, no data
+				rts
 *--------------------------------------
 SKT.CLOSEA		cmp #K.SKTTABLE.SIZE 
 				bcs SKT.GetA.9
@@ -516,6 +658,20 @@ SKT.AddToQueueS
 				rts
 				
 .9				sec
+				rts
+*--------------------------------------
+SKT.GetCopy 	ldy #S.SOCKET-1
+.1				lda (ZPPtrSKT),y
+				sta SKT.TmpCache
+				dey
+				bpl .1
+				rts
+*--------------------------------------
+SKT.PutCopy 	ldy #S.SOCKET-1
+.1				lda SKT.TmpCache
+				sta (ZPPtrSKT),y
+				dey
+				bpl .1
 				rts
 *--------------------------------------
 SKT.SetFrameOutLenAX
