@@ -5,25 +5,86 @@ INC 1
 AUTO 6
 				.LIST OFF	
 *--------------------------------------
-* #FRM.NewA
-* ##In:
-*  A = S.IP.PROTOCOL.???
-* ##Out:
-*	Y,A = Frame PTR
-*	X = hMem
+* FRM.New
+*  In:
+*  Y,A = DataLen
+*  X = S.IP.PROTOCOL.xxx
+* Out:
+*  Y,A = Frame PTR
+*  X = hMem
 *--------------------------------------
-FRM.NewA		sta	.2+1
-				>PUSHWI K.ETH.FRAME.LEN
-				>PUSHBI S.MEM.F.INIT0
+FRM.NewIP		stx	.8+1
+				>STYA ZPDataOutLen
+				cpx #S.IP.PROTOCOL.ICMP
+				bne .1
+				lda #S.IP-2
+				bra .4
+				
+.1				cpx #S.IP.PROTOCOL.UDP
+				bne .2
+				lda #S.UDP-2
+				bra .4
+				
+.2				cpx #S.IP.PROTOCOL.TCP
+				bne *
+
+				lda #S.TCP-2
+				bra .4
+				
+.4				sta	.5+1 					save Header len for reset later
+				clc
+				adc ZPDataOutLen
+				sta ZPFrameOutLen
+				pha
+				
+				lda #0
+				adc ZPDataOutLen+1
+				sta ZPFrameOutLen+1
+				tax
+				
+				pla
+				adc #2
+				tay
+				txa
+				adc #0
+				
+				>PUSHYA
+				>PUSHBI 0
 				>SYSCALL GetMem
 				bcs .9
 				
 				stx hFrameOut
 				>STYA ZPFrameOutPtr
 
+				lda ZPFrameOutLen
+				sta (ZPFrameOutPtr)
+				ldy #1
+				lda ZPFrameOutLen+1
+				sta (ZPFrameOutPtr),y
+				
+				iny
+				
+.5				ldx #$ff				Self Modified, header length
+				
+				lda #0
+
+.6				sta (ZPFrameOutPtr),y
+				iny
+				dex
+				bne .6
+				
+				tya
+*				clc
+				adc ZPFrameOutPtr
+				sta ZPDataOutPtr
+				
+				lda #0
+				adc ZPFrameOutPtr+1
+				sta ZPDataOutPtr+1
+				
 				lda DevFlags
 				and #S.DEVSTAT.NET.FLAGS.IPOFFLOAD
-				bne .1
+				bne .7
 				
 				ldy #S.ETH.ETHERTYPE
 				lda /S.ETH.ETHERTYPE.IP
@@ -39,47 +100,41 @@ FRM.NewA		sta	.2+1
 *				iny
 *				lda #$0
 *				sta (ZPFrameOutPtr),y
-				
-*				ldy #S.IP.IDENTIFICATION
-*				sta (ZPFrameOutPtr),y
-*				inc
-*				iny
-*				sta (ZPFrameOutPtr),y
-*				dec
+
 *				ldy #S.IP.FRAGMENT.FLAGS 
 *				sta (ZPFrameOutPtr),y
 *				iny
 *				sta (ZPFrameOutPtr),y
+				
+				ldy #S.IP.IDENTIFICATION+1
+				
+				lda IP.ID
+				ldx IP.ID+1
+				inc
+				bne .61
+				inx
+				stx IP.ID+1
+				
+.61				sta IP.ID
+				
+				sta (ZPFrameOutPtr),y
+				dey
+				txa
+				sta (ZPFrameOutPtr),y
 
 				ldy #S.IP.TTL
 				lda #K.IP.TTL
 				sta (ZPFrameOutPtr),y
 		
-.1				ldy #S.IP.PROTOCOL
-.2				lda #$ff
+.7				ldy #S.IP.PROTOCOL
+
+.8				lda #$ff
 				sta (ZPFrameOutPtr),y
-				
 				
 .9				rts
 *--------------------------------------
-FRM.SendICMP	>PUSHW ZPFrameOutLen
-				>PUSHWI S.ICMP.TYPE-2
+FRM.SendICMP	
 
-				ldy #S.ICMP.CHECKSUM
-				lda #0
-				sta (ZPFrameOutPtr),y
-				iny
-				sta (ZPFrameOutPtr),y
-
-				jsr IP.ComputeChecksum
-
-				phy
-				ldy #S.ICMP.CHECKSUM
-				sta (ZPFrameOutPtr),y
-				iny
-				pla
-				sta (ZPFrameOutPtr),y
-				
 				bra FRM.SendIP
 *--------------------------------------
 FRM.SendTCP
@@ -164,20 +219,25 @@ FRM.SendIP		ldx #3					Copy SRC.IP even if IP offload
 				cmp #S.IP.PROTOCOL.TCP
 				bne .3
 				jsr TCP.ComputeChecksum
-				bra .4
+				bra .5
 				
 .3				cmp #S.IP.PROTOCOL.UDP
 				bne .4
 				jsr UDP.ComputeChecksum
+				bra .5
 				
-.4				lda DevFlags
-				and #S.DEVSTAT.NET.FLAGS.ARPOFFLOAD
+.4				cmp #S.IP.PROTOCOL.ICMP
 				bne .5
+				jsr ICMP.ComputeChecksum
+				
+.5				lda DevFlags
+				and #S.DEVSTAT.NET.FLAGS.ARPOFFLOAD
+				bne .6
 
 				jsr IP.SetDestMAC
 				bcs FRM.Queue
 				
-.5				>LDYA ZPFrameOutPtr
+.6				>LDYA ZPFrameOutPtr
 				ldx #DEVMGR.WRITEBLOCK
 				jsr NetDevJmp
 				bcs FRM.Queue

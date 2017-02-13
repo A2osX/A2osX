@@ -6,6 +6,7 @@ AUTO 6
 				.LIST OFF	
 */--------------------------------------
 * #SKT.New
+*  Create a new socket
 * ##In : 
 *  PUSHW = PTR to S.SOCKET template
 * ##Out : 
@@ -13,7 +14,6 @@ AUTO 6
 *  X = hSocket
 *\--------------------------------------
 SKT.New			>PULLW ZPTmpPtr1
-
 				ldy #S.SOCKET.SRC.PORT+1
 				lda (ZPTmpPtr1),y
 				dey
@@ -74,7 +74,8 @@ SKT.New			>PULLW ZPTmpPtr1
 				lda TmpOffset			Did we found an empty slot ?
 				bmi .9
 				
-				ldy #S.SOCKET-1
+				ldy #S.SOCKET.TEMPLATE-1
+				
 .7				lda (ZPTmpPtr1),y
 				sta (ZPTmpPtr3),y
 				dey
@@ -115,6 +116,17 @@ SKT.New.TCP		ldy #S.SOCKET.SQ.INFREE
 				iny
 				lda /K.TCP.WSIZE
 				sta (ZPTmpPtr3),y
+				
+				lda #0
+				ldy #S.SOCKET.SQ.INUSED
+				sta (ZPTmpPtr3),y
+				iny
+				sta (ZPTmpPtr3),y
+				
+				ldy #S.SOCKET.SQ.OUTUSED
+				sta (ZPTmpPtr3),y
+				iny
+				sta (ZPTmpPtr3),y
 
 				>PUSHW K.TCP.WSIZE
 				>PUSHBI 0
@@ -136,7 +148,14 @@ SKT.New.TCP		ldy #S.SOCKET.SQ.INFREE
 
 				clc
 .9				rts
-*--------------------------------------
+*/--------------------------------------
+* #SKT.AcceptA
+*  Check for an incoming connection
+* ##In : 
+*  A = hListeningSocket
+* ##Out : 
+*  A = hSocket
+*\--------------------------------------
 SKT.AcceptA		jsr SKT.GetA.I
 				bcs .9
 				ldy #S.SOCKET.SO
@@ -149,11 +168,14 @@ SKT.AcceptA		jsr SKT.GetA.I
 				ldy #S.SOCKET.HQ.TAIL
 				cmp (ZPPtrSKT),y		Queue Empty
 				beq .9					CC
+				
 				pha
 				inc
 				cmp #S.SOCKET.HQ.MAX
 				bne .1
+				
 				lda #0
+				
 .1				sta (ZPPtrSKT),y
 				pla
 				clc
@@ -166,48 +188,80 @@ SKT.AcceptA		jsr SKT.GetA.I
 .99				lda #ERR.SKT.BAD
 				sec
 .9				rts
-*--------------------------------------
-* SKT.Send
-*--------------------------------------
+*/--------------------------------------
+* #SKT.Send (DGRAM,STREAM,RAW)
+*  Send block of data
+* ##In : 
+*  PUSHB = hSocket
+*  PUSHW = pBuf
+*  PUSHW = len
+* ##Out : 
+*  A = hFrame
+*\--------------------------------------
 SKT.Send		>PULLW ZPDataInLen
 				>PULLW ZPDataInPtr
 				>PULLB hSocket
+
 				jsr SKT.GetA.I
 				bcs .9
+
 				and #S.SOCKET.SOCK.MASK
 				cmp #S.SOCKET.SOCK.DGRAM
 				beq SKT.SEND.UDP
-				
+			
 				cmp #S.SOCKET.SOCK.STREAM
 				bne .1
-				jmp SKT.SEND.TCP
 				
+				ldy #S.SOCKET.SO
+				lda (ZPPtrSKT),y
+				and #S.SOCKET.SO.ACCEPTCONN
+				bne .99
+				jmp SKT.SEND.TCP
+			
 .1				cmp #S.SOCKET.SOCK.RAW
 				bne .99
 				jmp SKT.SEND.RAW
 				
-.99				sec
+.99				lda #ERR.SKT.BAD
+				sec
 .9				rts
 *--------------------------------------
-SKT.SEND.UDP	lda #S.IP.PROTOCOL.UDP
-				jsr FRM.NewA
+SKT.SEND.UDP	ldx #S.IP.PROTOCOL.UDP
+				>LDYA ZPDataInLen
+				jsr FRM.NewIP
 				bcs .9
 				
-				>LDAXI S.UDP-2
-				jsr SKT.SetFrameOutLenAX
-				
-				>LDAXI S.UDP
-				jsr SKT.SetDataOutPtrAX
-
 				jsr SKT.SetFrameOutDstIP
 				
 				jsr SKT.SetFrameOutPorts
-								
+
 				jsr SKT.CopyDataInToOut				
 
 				jmp FRM.SendUDP
 
 .9				rts
+*--------------------------------------
+SKT.SEND.RAW	ldy #S.SOCKET.RAW.PROTO
+				lda (ZPPtrSKT),y
+
+				tax
+				>LDYA ZPDataInLen
+				jsr FRM.NewIP
+				bcs .9
+				
+				jsr SKT.SetFrameOutDstIP
+				
+				jsr SKT.CopyDataInToOut
+								
+				ldy #S.SOCKET.RAW.PROTO
+				lda (ZPPtrSKT),y
+				cmp #S.IP.PROTOCOL.ICMP
+				bne .1
+				jmp FRM.SendICMP
+.1				jmp FRM.SendIP
+				
+.9				sec
+				rts
 *--------------------------------------
 SKT.SEND.TCP	ldy #S.SOCKET.STATUS	
 				lda (ZPPtrSKT),y
@@ -327,32 +381,6 @@ SKT.SEND.TCP	ldy #S.SOCKET.STATUS
 				
 .91				lda #MLI.ERR.VOLFULL
 				sec
-				rts
-*--------------------------------------
-SKT.SEND.RAW	ldy #S.SOCKET.RAW.PROTO
-				lda (ZPPtrSKT),y
-
-				jsr FRM.NewA
-				bcs .9
-				
-				>LDAXI S.IP-2
-				jsr SKT.SetFrameOutLenAX
-				
-				>LDAXI S.IP
-				jsr SKT.SetDataOutPtrAX
-				
-				jsr SKT.SetFrameOutDstIP
-				
-				jsr SKT.CopyDataInToOut
-								
-				ldy #S.SOCKET.RAW.PROTO
-				lda (ZPPtrSKT),y
-				cmp #S.IP.PROTOCOL.ICMP
-				bne .1
-				jmp FRM.SendICMP
-.1				jmp FRM.SendIP
-				
-.9				sec
 				rts
 */--------------------------------------
 * #SKT.RcvdA (DGRAM,RAW)
@@ -554,8 +582,14 @@ SKT.Rcvd.1		jsr SKT.GetCopy
 .90				lda #0				
 .9				sec						A=0, no data
 				rts
-*--------------------------------------
-SKT.CLOSEA		cmp #K.SKTTABLE.SIZE 
+*/--------------------------------------
+* #SKT.CloseA
+*  Close socket
+* ##In : 
+*  A = hSocket
+* ##Out : 
+*\--------------------------------------
+SKT.CloseA		cmp #K.SKTTABLE.SIZE 
 				bcs SKT.GetA.9
 				
 				jsr SKT.GetA.I
@@ -579,7 +613,14 @@ SKT.CLOSEA		cmp #K.SKTTABLE.SIZE
 				sta (ZPPtrSKT)
 				clc
 .9				rts
-*--------------------------------------
+*/--------------------------------------
+* #SKT.GetA
+*  Get Ptr to socket
+* ##In : 
+*  A = hSocket
+* ##Out : 
+*  Y,A = pS.SOCKET
+*\--------------------------------------
 SKT.GetA		cmp #K.SKTTABLE.SIZE 
 				bcs SKT.GetA.9
 				
@@ -609,13 +650,25 @@ SKT.GetA.I		pha
 .2				dex
 				bne .1
 				
-				lda (ZPPtrSKT)
+.8				lda (ZPPtrSKT)
 				beq SKT.GetA.9
 
-.8				rts						CC
+				clc
+				rts
 				
 SKT.GetA.9		lda #ERR.SKT.BAD
 				sec
+				rts
+*/--------------------------------------
+* #SKT.GetTable
+*  Get socket table
+* ##In : 
+* ##Out : 
+*  Y,A = pS.SOCKET
+*\--------------------------------------
+SKT.GetTable	lda hSocketTable
+				>SYSCALL GetMemPtrA
+				clc
 				rts
 *--------------------------------------
 * ZPPtrSKT -> actual socket
@@ -648,11 +701,6 @@ SKT.AddToQueueA sta .2+1
 .9				sec
 				rts
 *--------------------------------------
-SKT.GETTABLE	lda hSocketTable
-				>SYSCALL GetMemPtrA
-				clc
-				rts
-*--------------------------------------
 SKT.AddToQueueS
 				clc
 				rts
@@ -672,28 +720,6 @@ SKT.PutCopy 	ldy #S.SOCKET-1
 				sta (ZPPtrSKT),y
 				dey
 				bpl .1
-				rts
-*--------------------------------------
-SKT.SetFrameOutLenAX
-				clc
-				adc ZPDataInLen
-				sta (ZPFrameOutPtr)
-				sta ZPFrameOutLen
-				
-				txa
-				adc ZPDataInLen+1
-				ldy #1
-				sta (ZPFrameOutPtr),y
-				sta ZPFrameOutLen+1
-				rts
-*--------------------------------------
-SKT.SetDataOutPtrAX
-				clc
-				adc ZPFrameOutPtr
-				sta ZPDataOutPtr
-				txa
-				adc ZPFrameOutPtr+1
-				sta ZPDataOutPtr+1
 				rts
 *--------------------------------------
 SKT.SetFrameOutDstIP
@@ -738,21 +764,29 @@ SKT.SetFrameOutPorts
 				iny
 				txa
 				sta (ZPFrameOutPtr),y
+				rts
 *--------------------------------------
 SKT.CopyDataInToOut
+				lda ZPDataInPtr+1
+				pha
+				lda ZPDataOutPtr+1
+				pha
+				
 				lda ZPDataInLen
 				eor #$ff
-				sta ZPDataInLen
+				tax
 				lda ZPDataInLen+1
 				eor #$ff
-				tax
+				pha
 
 				ldy #0
 				
-.1				inc ZPDataInLen
+.1				inx
 				bne .2
-				inx
+				pla
+				inc
 				beq .9
+				pha
 				
 .2				lda (ZPDataInPtr),y
 				sta (ZPDataOutPtr),y
@@ -761,8 +795,13 @@ SKT.CopyDataInToOut
 				inc ZPDataInPtr+1
 				inc ZPDataOutPtr+1
 				bne .1
-.9				rts
-
+				
+.9				pla
+				sta ZPDataOutPtr+1
+				pla
+				sta ZPDataInPtr+1
+				rts
+*--------------------------------------
 MAN
 SAVE LIB/LIBTCPIP.S.SKT
 LOAD LIB/LIBTCPIP.S
