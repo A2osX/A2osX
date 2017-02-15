@@ -52,6 +52,7 @@ TCP.IN			ldy #S.IP.SRC+3
 .4				lda TmpSocket,y
 				cmp (ZPPtrSKT),y
 				bne .7						Not for this socket...
+				
 				iny
 				cpy #S.SOCKET.SRC.PORT+2
 				bne .4
@@ -139,14 +140,14 @@ TCP.IN.LISTEN.NEW
 				lda #ERR.SKT.OOS
 .9				rts
 				
-.3				ldy #S.SOCKET.STATUS
-				lda #S.SOCKET.STATUS.SYNRCVD
+.3				ldy #S.SOCKET.TCP.STATUS
+				lda #S.SOCKET.TCP.STATUS.SYNRCVD
 				sta (ZPPtrSKT),y
 				
 				jmp TCP.SendSYNACK
 *--------------------------------------
 TCP.IN.REGULAR	stx hSocket
-				ldy #S.SOCKET.STATUS
+				ldy #S.SOCKET.TCP.STATUS
 				lda (ZPPtrSKT),y
 				asl
 				tax
@@ -191,8 +192,8 @@ TCP.IN.JMP.SYNRCVD
 				dex
 				bpl .12
 				
-				ldy #S.SOCKET.STATUS
-				lda #S.SOCKET.STATUS.ESTBLSH
+				ldy #S.SOCKET.TCP.STATUS
+				lda #S.SOCKET.TCP.STATUS.ESTBLSH
 				sta (ZPPtrSKT),y
 				
 								
@@ -208,7 +209,7 @@ TCP.IN.JMP.ESTBLSH
 				jsr TCP.UpdateSktAckNum
 				
 .1				jsr TCP.SetDataInPtrAndLen
-				jsr TCP.AddDataToSkt
+				jsr SKT.AddDataToSktIn
 				
 				
 				clc
@@ -223,12 +224,18 @@ TCP.IN.JMP.TIMEWT
 				clc
 				rts
 *--------------------------------------
-TCP.OUT			jsr SKT.GetCopy
+TCP.OUT			ldy #S.SOCKET.SQ.OUTUSED
+				lda (ZPPtrSKT),y
 				
-				lda SKT.TmpCache+S.SOCKET.SQ.OUTUSED+1
+				pha
+				
+				iny
+				lda (ZPPtrSKT),y
+				ply
 				bne .1
-				ldy SKT.TmpCache+S.SOCKET.SQ.OUTUSED
-				beq .8					nothing to send....go check if ACK pending
+				
+				tax
+				beq .2					Y,A=0 : nothing to send....
 				
 .1				cpy #K.TCP.MSS
 				pha
@@ -236,15 +243,75 @@ TCP.OUT			jsr SKT.GetCopy
 				pla
 				bcs .2					no....get data len
 
-				>LDYAI K.TCP.MSS			yes gert only MSS
+				>LDYAI K.TCP.MSS		yes get only MSS
 				
-.2				>STYA ZPDataOutLen				
+.2				>STYA TmpOffset
+
+				ldx #S.IP.PROTOCOL.TCP
+				jsr FRM.NewIP
+				bcs .9
+
+				jsr SKT.GetDataFromSktOut
 				
+				ldy #S.SOCKET.SQ.SEQNUM	compute new SEQ.NUM
+				lda (ZPPtrSKT),y
+				clc
+				adc TmpOffset
+				sta TmpDWord
 				
-				jmp FRM.SendTCP
+				iny
+				lda (ZPPtrSKT),y
+				adc TmpOffset+1
+				sta TmpDWord+1
+				
+				iny
+				lda (ZPPtrSKT),y
+				adc #0
+				sta TmpDWord+2
+				
+				iny
+				lda (ZPPtrSKT),y
+				adc #0
+				sta TmpDWord+3
+				
+				ldy #S.TCP.SEQ.NUMBER+3
+				ldx #3
+				
+.3				lda TmpDWord,x
+				sta (ZPFrameOutPtr),y
+				dey
+				dex
+				bpl .3
+				
+				ldy #S.SOCKET.TCP.OPTIONS
+				lda (ZPPtrSKT),y
+				bit #S.TCP.OPTIONS.ACK
+				beq .7
+				
+				ldy #S.TCP.OPTIONS
+				lda (ZPFrameOutPtr),y
+				ora #S.TCP.OPTIONS.ACK
+				sta (ZPFrameOutPtr),y
+				
+.7				jsr FRM.SendIP
+				bcs .9
+				
+				ldy #S.SOCKET.SOCK
+				lda (ZPPtrSKT),y
+				and #$ff^S.TCP.OPTIONS.ACK
+				sta (ZPPtrSKT),y
+				
+				ldx #3
+				ldy #S.SOCKET.SQ.SEQNUM+3
+				
+.71				lda TmpDWord,x
+				sta (ZPPtrSKT),y
+				dey
+				dex
+				bpl .71
 				
 .8				clc
-				rts
+.9				rts
 *--------------------------------------
 TCP.UpdateSktAckNum
 				ldy #S.SOCKET.SQ.ACKNUM+3
@@ -318,83 +385,9 @@ TCP.SetDataInPtrAndLen
 				sta ZPDataInLen+1
 				rts
 *--------------------------------------
-TCP.AddDataToSkt
-				ldy #S.SOCKET.STREAM.hInMem
-				lda (ZPPtrSKT),y
-				>SYSCALL GetMemPtrA
-				>STYA ZPTmpPtr1			Make ZPTmpPtr1=buffer base
-				
-				ldy #S.SOCKET.SQ.INHEAD
-				lda (ZPPtrSKT),y
-				tax						save LO for compare later
-				clc
-				adc ZPTmpPtr1
-				sta ZPTmpPtr2			Make ZPTmpPtr2=actual head
-				iny
-				lda (ZPPtrSKT),y
-				pha						save HI for compare later
-				adc ZPTmpPtr1+1
-				sta ZPTmpPtr2+1
-				
-				lda ZPDataInLen
-				eor #$ff
-				sta ZPTmpPtr3			Make ZPTmpPtr3=!count
-				lda ZPDataInLen+1
-				eor #$ff
-				sta ZPTmpPtr3+1
-				
-				ldy #0
-				
-.1				inc	ZPTmpPtr3
-				bne .2
-				inc ZPTmpPtr3+1
-				beq .9
-				
-.2				lda (ZPDataInPtr),y
-				sta (ZPTmpPtr2)
-				
-				iny
-				bne .3
-				inc ZPDataInPtr+1
-
-.3				inc ZPTmpPtr2
-				bne .4
-				inc ZPTmpPtr2+1
-
-.4				pla
-				inx
-				bne .5
-				inc
-.5				pha
-				cpx #K.TCP.WSIZE
-				sbc /K.TCP.WSIZE
-				bcc .1
-				
-.6				inc	ZPTmpPtr3
-				bne .7
-				inc ZPTmpPtr3+1
-				beq .9
-				
-.7				lda (ZPDataInPtr),y
-				sta (ZPTmpPtr1)
-				
-				iny
-				bne .8
-				inc ZPDataInPtr+1
-
-.8				inc ZPTmpPtr1
-				bne .6
-				inc ZPTmpPtr1+1
-				bra .6
-				
-.9				pla
-				rts				
-*--------------------------------------
-TCP.SendACK		lda #S.TCP.OPTIONS.ACK
-				bra TCP.SendMSG
 TCP.SendSYNACK	lda #S.TCP.OPTIONS.SYN+S.TCP.OPTIONS.ACK
 				
-TCP.SendMSG		sta TCP.MSG+S.TCP.OPTIONS
+				sta TCP.MSG+S.TCP.OPTIONS
 				
 				ldy #S.SOCKET.SRC.ADDR+3
 				ldx #3
