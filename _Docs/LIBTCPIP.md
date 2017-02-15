@@ -110,7 +110,7 @@
 ##Out : 
 + A = hSocket
 
-#SKT.Send (DGRAM,STREAM,RAW)
+#SKT.Write (DGRAM,STREAM,RAW)
 + Send block of data
 
 ##In : 
@@ -121,7 +121,7 @@
 ##Out : 
 + A = hFrame
 
-#SKT.RcvdA (DGRAM,RAW)
+#SKT.ReadA (DGRAM,RAW)
 
 ##In : 
 + A = hSocket
