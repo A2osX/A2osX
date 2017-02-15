@@ -51,7 +51,7 @@
  + CC: hit: IP filled with address
  + CS: missed 
 
-#DNS.ADD
+#DNS.Add
 + Add a static DNS record
 
 ##In:
