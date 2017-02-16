@@ -5,21 +5,21 @@ INC 1
 AUTO 6
 				.LIST OFF	
 *--------------------------------------
-TCP.IN			jsr IP.FillTmpSocketSrcDst
+TCP.IN			jsr IP.FillSKT.TemplateSrcDst
 				
 				ldy #S.TCP.SRCPORT
 				lda (ZPFrameInPtr),y
-				sta TmpSocket+S.SOCKET.DST.PORT+1
+				sta SKT.Template+S.SOCKET.DST.PORT+1
 				iny
 				lda (ZPFrameInPtr),y
-				sta TmpSocket+S.SOCKET.DST.PORT
+				sta SKT.Template+S.SOCKET.DST.PORT
 				
 				ldy #S.TCP.DSTPORT
 				lda (ZPFrameInPtr),y
-				sta TmpSocket+S.SOCKET.SRC.PORT+1
+				sta SKT.Template+S.SOCKET.SRC.PORT+1
 				iny
 				lda (ZPFrameInPtr),y
-				sta TmpSocket+S.SOCKET.SRC.PORT
+				sta SKT.Template+S.SOCKET.SRC.PORT
 				
 				lda hSocketTable
 				>SYSCALL GetMemPtrA
@@ -34,7 +34,7 @@ TCP.IN			jsr IP.FillTmpSocketSrcDst
 				
 				ldy #S.SOCKET.SRC.ADDR
 				
-.4				lda TmpSocket,y
+.4				lda SKT.Template,y
 				cmp (ZPPtrSKT),y
 				bne .7						Not for this socket...
 				
@@ -45,25 +45,31 @@ TCP.IN			jsr IP.FillTmpSocketSrcDst
 				ldy #S.SOCKET.SO
 				lda (ZPPtrSKT),y
 				and #S.SOCKET.SO.ACCEPTCONN		Listening socket?
-				beq .5
+				beq .5					no, go check if Dst Match
 	
-				ldy #S.TCP.OPTIONS				yes, only accept SYN packet
+				ldy #S.TCP.OPTIONS		yes, only accept SYN packet
 				lda (ZPFrameInPtr),y
 
-				cmp #S.TCP.OPTIONS.SYN
-				bne .7							not for this listening socket
-				jmp TCP.IN.LISTEN.NEW
+				and #S.TCP.OPTIONS.SYN
+				beq .7					maybe a regular frame for a regular socket
+				
+				jmp TCP.IN.JMP.LISTEN
 			
 .5				ldy #S.SOCKET.DST.ADDR
 
-.6				lda TmpSocket,y			regular socket, check remote ADDR/PORT
+.6				lda SKT.Template,y			regular socket, check remote ADDR/PORT
 				cmp (ZPPtrSKT),y
 				bne .7
 				iny
 				cpy #S.SOCKET.DST.PORT+2
 				bne .6
 				
-				jmp TCP.IN.REGULAR
+				stx hSocket
+				ldy #S.SOCKET.TCP.STATUS
+				lda (ZPPtrSKT),y
+				asl
+				tax
+				jmp (L.TCP.IN.JMP,x)
 				
 .7				lda ZPPtrSKT
 				clc
@@ -76,28 +82,32 @@ TCP.IN			jsr IP.FillTmpSocketSrcDst
 				cpx #K.SKTTABLE.SIZE
 				bne .3
 				
-				clc						Discard frame
+.9				clc						Discard frame
 				rts
 *--------------------------------------
-TCP.IN.LISTEN.NEW
+TCP.IN.JMP.CLOSED
+				clc
+				rts
+*--------------------------------------
+TCP.IN.JMP.LISTEN
 				lda #S.SOCKET.SOCK.STREAM
-				sta TmpSocket
+				sta SKT.Template+S.SOCKET.SOCK
 
-				stz TmpSocket+S.SOCKET.SO
+				stz SKT.Template+S.SOCKET.SO
 
 				ldy #S.TCP.SEQ.NUMBER+3
 				ldx #3
 				
 				sec
 				
-.1				lda (ZPFrameInPtr),y
+.1				lda (ZPFrameInPtr),y	Save ACK +1 for new socket...
 				adc #0
-				sta TmpSocket+S.SOCKET.SQ.ACKNUM,x
+				sta TmpDWord,x
 				dey
 				dex
 				bpl .1
 				
-				>PUSHW L.TmpSocket
+				>PUSHW L.SKT.Template
 
 				jsr SKT.New
 				bcs .9
@@ -120,24 +130,34 @@ TCP.IN.LISTEN.NEW
 				lda #ERR.SKT.OOS
 .9				rts
 				
-.3				ldy #S.SOCKET.TCP.STATUS
+.3				ldx #3
+				ldy #S.SOCKET.SQ.ACKNUM+3
+				
+.4				lda TmpDWord,x			Update new socket with ACK number
+				sta (ZPPtrSKT),y
+				dey
+				dex
+				bpl .4
+				
+				ldy #S.SOCKET.TCP.STATUS
 				lda #S.SOCKET.TCP.STATUS.SYNRCVD
 				sta (ZPPtrSKT),y
 				
 				ldy #S.SOCKET.TCP.OPTIONS
 				lda #S.TCP.OPTIONS.SYN+S.TCP.OPTIONS.ACK
 				sta (ZPPtrSKT),y
-				jmp TCP.Out
-*--------------------------------------
-TCP.IN.REGULAR	stx hSocket
+				
+				jsr TCP.Out
+				bcs .9
+				
 				ldy #S.SOCKET.TCP.STATUS
-				lda (ZPPtrSKT),y
-				asl
-				tax
-				jmp (L.TCP.IN.JMP,x)
+				lda #S.SOCKET.TCP.STATUS.SYNSENT
+				sta (ZPPtrSKT),y
+				
+				
+				clc
+				rts
 *--------------------------------------
-TCP.IN.JMP.CLOSED
-TCP.IN.JMP.LISTEN
 TCP.IN.JMP.SYNSENT
 				clc
 				rts
@@ -186,8 +206,8 @@ TCP.IN.JMP.SYNRCVD
 TCP.IN.JMP.ESTBLSH
 				ldy #S.TCP.OPTIONS
 				lda (ZPFrameInPtr),y
-				cmp #S.TCP.OPTIONS.ACK
-				bne .1
+				bit #S.TCP.OPTIONS.ACK
+				beq .1
 				
 				jsr TCP.UpdateSktAckNum
 				
@@ -207,7 +227,35 @@ TCP.IN.JMP.TIMEWT
 				clc
 				rts
 *--------------------------------------
-TCP.OUT			ldy #S.SOCKET.SQ.OUTUSED
+TCP.OUT			ldy #S.SOCKET.TCP.OPTIONS
+				lda (ZPPtrSKT),y
+				bit #S.TCP.OPTIONS.SYN
+				beq TCP.OUT.ESTBLSH
+				
+				>LDYAI 0
+				jsr TCP.NewFrame
+				bcs .9				
+				
+				ldy #S.TCP.OPTIONS
+				lda (ZPFrameOutPtr),y
+				ora #S.TCP.OPTIONS.SYN+S.TCP.OPTIONS.ACK
+				sta (ZPFrameOutPtr),y	
+
+				jsr FRM.SendIP
+				bcs .9
+				
+				ldy #S.TCP.OPTIONS
+				lda #0
+				sta (ZPFrameOutPtr),y	
+
+				ldy #S.SOCKET.TCP.STATUS
+				lda #S.SOCKET.TCP.STATUS.SYNSENT
+				sta (ZPFrameOutPtr),y	
+				
+				clc
+.9				rts
+*--------------------------------------
+TCP.OUT.ESTBLSH	ldy #S.SOCKET.SQ.OUTUSED
 				lda (ZPPtrSKT),y
 				
 				pha
@@ -230,8 +278,7 @@ TCP.OUT			ldy #S.SOCKET.SQ.OUTUSED
 				
 .2				>STYA TmpOffset
 
-				ldx #S.IP.PROTOCOL.TCP
-				jsr FRM.NewIP
+				jsr TCP.NewFrame
 				bcs .9
 
 				jsr SKT.GetDataFromSktOut
@@ -296,6 +343,26 @@ TCP.OUT			ldy #S.SOCKET.SQ.OUTUSED
 .8				clc
 .9				rts
 *--------------------------------------
+TCP.GetSktAckNum
+				ldy #S.TCP.ACK.NUMBER
+				ldx #4
+				
+.1				lda (ZPFrameInPtr),y
+				pha
+				iny
+				dex
+				bne .1
+				
+				ldy #S.SOCKET.SQ.ACKNUM+3
+				ldx #4
+				
+.2				pla
+				sta (ZPPtrSKT),y
+				dey
+				dex
+				bne .2
+				rts
+*--------------------------------------
 TCP.UpdateSktAckNum
 				ldy #S.SOCKET.SQ.ACKNUM+3
 				lda (ZPPtrSKT),y
@@ -314,25 +381,6 @@ TCP.UpdateSktAckNum
 				lda (ZPPtrSKT),y
 				adc #0
 				sta (ZPPtrSKT),y
-				rts
-*--------------------------------------
-				ldy #S.TCP.ACK.NUMBER
-				ldx #4
-				
-.1				lda (ZPFrameInPtr),y
-				pha
-				iny
-				dex
-				bne .1
-				
-				ldy #S.SOCKET.SQ.ACKNUM+3
-				ldx #4
-				
-.2				pla
-				sta (ZPPtrSKT),y
-				dey
-				dex
-				bne .2
 				rts
 *--------------------------------------
 TCP.SetDataInPtrAndLen
@@ -368,53 +416,35 @@ TCP.SetDataInPtrAndLen
 				sta ZPDataInLen+1
 				rts
 *--------------------------------------
-TCP.SendSYNACK	lda #S.TCP.OPTIONS.SYN+S.TCP.OPTIONS.ACK
+TCP.NewFrame	ldx #S.IP.PROTOCOL.TCP
+				jsr FRM.NewIP
+				bcs .9
 				
-				sta TCP.MSG+S.TCP.OPTIONS
-				
-				ldy #S.SOCKET.SRC.ADDR+3
-				ldx #3
-.1				lda (ZPPtrSKT),y
-				sta TCP.MSG+S.IP.SRC,x
-				dey
-				dex
-				bpl .1
-	
+				jsr SKT.SetFrameOutDstIP
+
 				ldy #S.SOCKET.SRC.PORT
 				lda (ZPPtrSKT),y
-				sta TCP.MSG+S.TCP.SRCPORT+1
+				tax
 				iny
 				lda (ZPPtrSKT),y
-				sta TCP.MSG+S.TCP.SRCPORT
+ 				ldy #S.TCP.SRCPORT
+				sta (ZPFrameOutPtr),y
+				iny
+				txa
+				sta (ZPFrameOutPtr),y
 				
-				ldy #S.SOCKET.DST.ADDR+3
-				ldx #3
-.2				lda (ZPPtrSKT),y
-				sta TCP.MSG+S.IP.DST,x
-				dey
-				dex
-				bpl .2
-
 				ldy #S.SOCKET.DST.PORT
 				lda (ZPPtrSKT),y
-				sta TCP.MSG+S.TCP.DSTPORT+1
+				tax
 				iny
 				lda (ZPPtrSKT),y
-				sta TCP.MSG+S.TCP.DSTPORT
-				
-				ldy #S.SOCKET.SQ.SEQNUM+7
-				ldx #7
-.3				lda (ZPPtrSKT),y
-				sta TCP.MSG+S.TCP.SEQ.NUMBER,x
-				dey
-				dex
-				bpl .3
-				
-				>PUSHW L.TCP.MSG
-*				jsr FRM.SendTCP
-				
+ 				ldy #S.TCP.DSTPORT
+				sta (ZPFrameOutPtr),y
+				iny
+				txa
+				sta (ZPFrameOutPtr),y
 				clc
-				rts
+.9				rts
 *--------------------------------------
 TCP.ComputeChecksum
 				lda #0					RESET.TCP.CHECKSUM
