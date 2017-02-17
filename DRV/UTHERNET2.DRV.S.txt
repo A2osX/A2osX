@@ -10,11 +10,10 @@ AUTO 6
 *--------------------------------------
 				.INB /A2OSX.DEV/INC/MACROS.I
 				.INB /A2OSX.DEV/INC/A2OSX.I
+				.INB /A2OSX.DEV/INC/NET.W5100.I
 				.INB /A2OSX.DEV/INC/LIBTCPIP.I
 *--------------------------------------
 ZPTmpPTR		.EQ ZPDRV
-*--------------------------------------
-				.INB DRV/X.NET.W5100.S
 *--------------------------------------
 *			File Header (16 Bytes)
 *--------------------------------------
@@ -40,8 +39,19 @@ Dev.Detect		>STYA Args
 				>LDYA L.MSG.DETECT
 				>SYSCALL CPrintFYA
 				
-				ldx #$10+$88
-.1				lda #W5100.MR.RST
+				ldx #$70
+				
+.1				txa						IO based detection, avoid scanning in Disk Controller IO!!!!
+				lsr
+				lsr
+				lsr
+				lsr
+				tay
+				
+				lda A2osX.SLOTS,y
+				bne .2
+				
+				lda #W5100.MR.RST
 				sta W5100.MR,x
 
 				lda #W5100.MR.AI+W5100.MR.IND
@@ -60,21 +70,29 @@ Dev.Detect		>STYA Args
 				cmp #2000
 				beq	.3
 				
-.2				inc DEV.HEADER.NAME+4
+.2				dec DEV.HEADER.NAME+4
 				txa
-				clc
-				adc #$10
+				sec
+				sbc #$10
 				tax
-				bcc .1				#$108 ?
+				bne .1
 				
 				>LDYA L.MSG.DETECT.KO
 				>SYSCALL CPrintFYA
 
-				lda #DEVMGR.ERRNOHW
+				lda #$28				MLI.ERR.NODEV
 				sec
 				rts
 				
-.3				stx DEVSLOTx8
+.3				stx DEVSLOTx0
+				txa
+				lsr
+				lsr
+				lsr
+				lsr
+				tay
+				lda #A2osX.SLOTS.NET
+				sta A2osX.SLOTS,y
 				
 				>LDYA ARGS
 				>STYA ZPTmpPTR
@@ -120,28 +138,218 @@ Args			.BS 2
 *--------------------------------------
 *			Device Header (16 Bytes)
 *--------------------------------------
-DEV.HEADER		cld
-				jmp (DRV.CS.START,x)
-				.HS 00
-				.DA #S.DEV.F.SHARE+S.DEV.F.EVENT
+DEV.HEADER		.DA DRV.CS.START
+				.DA #S.DEV.S.BLOCK+S.DEV.S.WRITE+S.DEV.S.READ
 DEV.HEADER.NAME	>PSTR "ETH1"			NAME			
-				.HS 00
-				.HS 00.00.00.00
 *--------------------------------------
 *			Driver Code
 *--------------------------------------
-DRV.CS.START	.DA OPEN
-				.DA GETEVENT
-				.DA COUT
+DRV.CS.START	cld
+				jmp (.1,x)
+.1				.DA STATUS
+				.DA READBLOCK
+				.DA WRITEBLOCK
+				.DA BADCALL
+				.DA BADCALL
+				.DA BADCALL
+				.DA OPEN
 				.DA CLOSE
-				.DA GETINFO
-				.DA IRQ
-				.DA SEND
-				.DA SETIPCFG
-L.DEVINFO		.DA DEVINFO
+				.DA BADCALL
+				.DA BADCALL
+L.DEVSTAT		.DA DEVSTAT
 				.DA 0					end or relocation
 *--------------------------------------
-OPEN			jsr Reset
+BADCALL			lda #1					MLI.ERR.BADCALL
+				sec
+				rts
+*--------------------------------------
+STATUS			>LDYA L.DEVSTAT
+				clc
+				rts
+*--------------------------------------
+READBLOCK		ldx DEVSLOTx0
+
+				>AR.SELECT S0.RX.RSR
+				lda W5100.DR,x		get the received size HI
+				ora W5100.DR,x      LO
+				bne READBLOCK.RxOK
+				
+				lda #ERR.DEV.NOFRAME
+				
+READBLOCK.Err	sec
+				rts
+				
+READBLOCK.RxOK	>AR.SELECT S0.RX.RD
+				lda W5100.DR,x		get the received ptr HI
+				ldy W5100.DR,x		get the received ptr LO
+				and /RXTX.MASK
+				ora /RX.BASE
+				sta W5100.AR,x
+				tya
+				sta W5100.AR+1,x
+				
+				lda W5100.DR,x		get RX.Size HI
+				sta Offset+1
+				>PUSHA				for SYS.GetMem
+				tay
+				lda W5100.DR,x		get RX.Size LO
+				sta Offset
+				>PUSHA				for SYS.GetMem
+				
+				sec
+				sbc #2
+				sta RXTX.Size
+				bcs .1
+				dey
+.1				sty RXTX.Size+1
+			
+*				>PUSHYA				Already pushed....
+				>PUSHBI 0
+				>SYSCALL GetMem
+				bcs READBLOCK.Err
+				>STYA ZPTmpPTR
+				stx .8+1
+				sty .8+3
+				sta .8+5
+
+				lda RXTX.Size
+				sta (ZPTmpPTR)
+				eor #$ff
+				sta Counter
+				
+				ldy #1
+				
+				lda RXTX.Size+1
+				sta (ZPTmpPTR),y
+				eor #$ff
+				sta Counter+1
+				
+				ldx DEVSLOTx0
+
+				iny
+				
+.2				inc Counter
+				bne .3
+				inc Counter+1
+				beq .4
+				
+.3				lda W5100.DR,x
+				sta (ZPTmpPTR),y
+				iny
+				bne .2
+				inc ZPTmpPTR+1
+				bne .2
+				
+.4				>AR.SELECT S0.RX.RD
+				ldy W5100.DR,x			Get HI
+				lda W5100.DR,x			Get LO
+				clc
+				adc Offset
+				pha						save LO
+				tya
+				adc Offset+1
+				pha
+				>AR.SELECT S0.RX.RD
+				pla
+				sta W5100.DR,x			write HI
+				pla
+				sta W5100.DR,x			write LO
+				
+				>AR.SELECT S0.CR
+				lda #$40				RECV
+				sta W5100.DR,x
+				
+.8				ldx	#$ff				hMem
+				ldy	#$ff				PtrLO
+				lda #$ff				PtrHI
+				clc
+				rts
+*--------------------------------------				
+WRITEBLOCK		>PULLW ZPTmpPTR
+				
+				lda (ZPTmpPTR)
+				sta RXTX.Size
+				eor #$ff
+				sta Counter
+
+				ldy #1
+				lda (ZPTmpPTR),y
+				sta RXTX.Size+1
+				eor #$ff
+				sta Counter+1
+				
+				ldx DEVSLOTx0
+				>AR.SELECT S0.TX.FSR
+				
+				lda W5100.DR,x		get send size HI
+				ldy W5100.DR,x      LO
+				cpy RXTX.Size
+				sbc RXTX.Size+1
+				bcs WRITEBLOCK.1
+
+				lda #ERR.DEV.NOBUFFER
+				sec
+				rts
+				
+WRITEBLOCK.1	ldy #S.ETH.SRCMAC+5
+				ldx #5
+.1				lda MAC,x
+				sta (ZPTmpPTR),y
+				dey
+				dex
+				bpl .1
+
+				ldx DEVSLOTx0
+				
+				>AR.SELECT S0.TX.WR
+				lda W5100.DR,x			Get HI
+				ldy W5100.DR,x			Get LO
+				and /RXTX.MASK
+				ora /TX.BASE
+				sta W5100.AR,x			Write HI
+				sta Offset+1
+				tya
+				sta W5100.AR+1,x		Write LO
+				sta Offset
+				
+				ldy #2
+				
+.2				inc Counter
+				bne .3
+
+				inc Counter+1
+				beq .4
+				
+.3				lda (ZPTmpPTR),y
+				sta W5100.DR,x
+				iny
+				bne .2
+				inc ZPTmpPTR+1
+				bne .2
+				
+.4				>AR.SELECT S0.TX.WR
+				
+				clc
+				lda Offset
+				adc RXTX.Size
+				pha						save LO
+				
+				lda Offset+1
+				adc RXTX.Size+1
+*				and /RXTX.MASK
+*				ora /TX.BASE
+				sta W5100.DR,x			write HI
+				pla
+				sta W5100.DR,x			write LO
+				
+				>AR.SELECT S0.CR
+				lda #$20				SEND
+				sta W5100.DR,x
+				
+				clc
+				rts
+*--------------------------------------
+OPEN			jsr CLOSE
 
 				lda #W5100.MR.AI+W5100.MR.IND
 				sta W5100.MR,x
@@ -172,229 +380,28 @@ OPEN			jsr Reset
 				clc
 				rts
 *--------------------------------------
-GETEVENT		ldx DEVSLOTx8
-
-				>AR.SELECT S0.RX.RSR
-				lda W5100.DR,x		get the received size HI
-				ora W5100.DR,x      LO
-				bne GETEVENT.RxOK
-				
-				lda #ERR.DEV.NOFRAME
-COUT
-IRQ
-SETIPCFG
-GETEVENT.Err	sec
-				rts
-				
-GETEVENT.RxOK	>AR.SELECT S0.RX.RD
-				lda W5100.DR,x		get the received ptr HI
-				ldy W5100.DR,x		get the received ptr LO
-				and /RXTX.MASK
-				ora /RX.BASE
-				sta W5100.AR,x
-				tya
-				sta W5100.AR+1,x
-				
-				lda W5100.DR,x		get RX.Size HI
-				sta Offset+1
-				>PUSHA				for SYS.GetMem
-				tay
-				lda W5100.DR,x		get RX.Size LO
-				sta Offset
-				>PUSHA				for SYS.GetMem
-				
-				sec
-				sbc #2
-				sta RXTX.Size
-				bcs .1
-				dey
-.1				sty RXTX.Size+1
-			
-*				>PUSHYA				Already pushed....
-				>PUSHBI 0
-				>SYSCALL GetMem
-				bcs GETEVENT.Err
-				>STYA ZPTmpPTR
-				txa
-				ldy #S.EVT.DATALO
-				sta (pEvent),y
-				
-				lda #S.EVT.F.NET+S.EVT.F.hMEM1
-				sta (pEvent)
-
-				lda RXTX.Size
-				sta (ZPTmpPTR)
-				eor #$ff
-				sta Counter
-				
-				ldy #1
-				
-				lda RXTX.Size+1
-				sta (ZPTmpPTR),y
-				eor #$ff
-				sta Counter+1
-				
-				ldx DEVSLOTx8
-
-				iny
-				
-.2				inc Counter
-				bne .3
-				inc Counter+1
-				beq .8
-				
-.3				lda W5100.DR,x
-				sta (ZPTmpPTR),y
-				iny
-				bne .2
-				inc ZPTmpPTR+1
-				bne .2
-				
-.8				>AR.SELECT S0.RX.RD
-				ldy W5100.DR,x			Get HI
-				lda W5100.DR,x			Get LO
-				clc
-				adc Offset
-				pha						save LO
-				tya
-				adc Offset+1
-				pha
-				>AR.SELECT S0.RX.RD
-				pla
-				sta W5100.DR,x			write HI
-				pla
-				sta W5100.DR,x			write LO
-				
-				>AR.SELECT S0.CR
-				lda #$40				RECV
-				sta W5100.DR,x
-				
-				ldy #S.ETH.DSTMAC
-				lda (ZPTmpPTR),y
-				
-.81				iny
-				and (ZPTmpPTR),y
-				cpy #S.ETH.DSTMAC+5
-				bne .81					if EQ, CS
-
-				inc						$ff = Broadcast ??
-				beq .82
-				clc						not a broadcast
-				
-.82				lda #$00
-				ror
-				ldy #S.EVT.DATAHI
-				sta (pEvent),y		
-				
-*				clc						cleared by ROR
-				rts
-*--------------------------------------
-CLOSE			jsr Reset
-				clc
-				rts
-*--------------------------------------				
-GETINFO			>LDYA L.DEVINFO
-				clc
-				rts
-*--------------------------------------				
-SEND			>PULLW ZPTmpPTR
-				
-				lda (ZPTmpPTR)
-				sta RXTX.Size
-				eor #$ff
-				sta Counter
-
-				ldy #1
-				lda (ZPTmpPTR),y
-				sta RXTX.Size+1
-				eor #$ff
-				sta Counter+1
-				
-				ldx DEVSLOTx8
-				>AR.SELECT S0.TX.FSR
-				
-				lda W5100.DR,x		get send size HI
-				ldy W5100.DR,x      LO
-				cpy RXTX.Size
-				sbc RXTX.Size+1
-				bcs SEND.READY
-
-				lda #ERR.DEV.NOBUFFER
-				sec
-				rts
-				
-SEND.READY		ldy #S.ETH.SRCMAC+5
-				ldx #5
-.1				lda MAC,x
-				sta (ZPTmpPTR),y
-				dey
-				dex
-				bpl .1
-
-				ldx DEVSLOTx8
-				
-				>AR.SELECT S0.TX.WR
-				lda W5100.DR,x			Get HI
-				ldy W5100.DR,x			Get LO
-				and /RXTX.MASK
-				ora /TX.BASE
-				sta W5100.AR,x			Write HI
-				sta Offset+1
-				tya
-				sta W5100.AR+1,x		Write LO
-				sta Offset
-				
-				ldy #2
-				
-.2				inc Counter
-				bne .3
-
-				inc Counter+1
-				beq .8
-				
-.3				lda (ZPTmpPTR),y
-				sta W5100.DR,x
-				iny
-				bne .2
-				inc ZPTmpPTR+1
-				bne .2
-				
-.8				>AR.SELECT S0.TX.WR
-				
-				clc
-				lda Offset
-				adc RXTX.Size
-				pha						save LO
-				
-				lda Offset+1
-				adc RXTX.Size+1
-*				and /RXTX.MASK
-*				ora /TX.BASE
-				sta W5100.DR,x			write HI
-				pla
-				sta W5100.DR,x			write LO
-				
-				>AR.SELECT S0.CR
-				lda #$20				SEND
-				sta W5100.DR,x
-				clc
-				rts
-*--------------------------------------
-Reset			ldx DEVSLOTx8
+CLOSE			ldx DEVSLOTx0
 				lda #W5100.MR.RST
 				sta W5100.MR,x
+				clc
 				rts
 *--------------------------------------
 DRV.CS.END
-DEVSLOTx8		.BS 1
+DEVSLOTx0		.BS 1
 RXTX.Size		.BS 2
 Counter			.BS 2
 Offset			.BS 2
 *--------------------------------------
-DEVINFO			.DA #S.DEVINFO.TYPE.NET
-DEVFLAGS		.DA #0
+DEVSTAT			.DA #S.DEV.S.BLOCK+S.DEV.S.WRITE+S.DEV.S.READ
+				.BS 3					size
+				>PSTR "UtherNetII/W5100"
+				.DA #S.DEVSTAT.TYPE.NET
+				.BS 1					Subtype
+				.BS 2					Version
+*--------------------------------------
+FLAGS			.DA #0
+LINK.STATUS		.DA #S.DEVSTAT.NET.STATUS.OK+S.DEVSTAT.NET.STATUS.FD+S.DEVSTAT.NET.STATUS.100
 MAC				.BS 6
-LINK.STATUS		.DA #S.DEVINFO.NET.STATUS.OK+S.DEVINFO.NET.STATUS.FD+S.DEVINFO.NET.STATUS.100
 MAN
 SAVE DRV/UTHERNET2.DRV.S
 ASM
