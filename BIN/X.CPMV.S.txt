@@ -118,15 +118,22 @@ CS.INIT			>SYSCALL GetArgC
 				clc
 				rts
 *--------------------------------------
-CS.RUN			ldy #bCANCEL
-				lda (pData),y
-				bmi .99
+CS.RUN			>SYSCALL GetC
+				bcs .1					no char
 				
-				ldy #bSTOP
-				lda (pData),y
-				bmi .8
+				cmp #$03				Ctrl-C
+				beq .99					Abort....
+				
+				cmp #$13				Ctrl-S
+				bne .1
 
-				jsr GetNextEntry
+				ldy #bPause
+				lda (pData),y
+				eor	#$ff
+				sta (pData),y
+				bne .8
+				
+.1				jsr GetNextEntry
 				bcs .9
 				
 				ldy #hFilter
@@ -146,11 +153,13 @@ CS.RUN			ldy #bCANCEL
 				ldy #S.STAT.P.TYPE
 				lda (ZPPtr2),y
 				cmp #$0F				Directory ?
-				bne .6
+				beq .6
 
-				jmp CS.RUN.DIR
+				jmp CS.RUN.FILE
+
 .5				jmp CS.RUN.DEV
-.6				jmp CS.RUN.FILE
+
+.6				jmp CS.RUN.DIR
 				
 .9				jsr LeaveSubDir
 				bcs .99
@@ -183,12 +192,12 @@ CS.RUN.DEV		>PUSHW ZPPtr1
 				lda (pData),y
 				bpl .8
 				
-				jsr CS.RUN.PRINT.FILE
+				jsr CS.RUN.PrintFile
 				bcs .9
 
 				lda #0
 				clc
-				jsr CS.RUN.PRINT.RC
+				jsr CS.RUN.PrintErr
 				
 				>LDYA ZPPtr1
 				jmp EnterSubDirYA
@@ -205,45 +214,51 @@ CS.RUN.DIR		ldy #bRecurse
 				cmp #'.'
 				beq .8
 				
-				jsr CS.RUN.PRINT.DIR
+				jsr CS.RUN.PrintDir
 				bcs .9
 				
-				jsr CS.RUN.COPY.DIR
-				jsr CS.RUN.PRINT.RC
+				jsr CS.RUN.CopyDir
 				bcs .9
 
 				>LDYA ZPPtr1
 				jmp EnterSubDirYA
-				
+
 .8				clc
-.9				rts
+				rts
+				
+.9				jsr CS.RUN.PrintErr
+				rts
 *--------------------------------------
-CS.RUN.FILE		jsr CS.RUN.PRINT.FILE
+CS.RUN.FILE		jsr CS.RUN.PrintFile
 				bcs .9
-				jsr CS.RUN.COPY.FILE
-				jsr CS.RUN.PRINT.RC
+				jsr CS.RUN.CopyFile
 				bcs .9
 				
 				.DO X.DELETE.SOURCE=1
-				jsr CS.RUN.DELETE.FILE
-				jsr CS.RUN.PRINT.RC
+				jsr CS.RUN.DelFile
 				bcs .9
 				.FIN
 
-.9				rts
-*--------------------------------------
-CS.RUN.PRINT.DIR
-				jsr CS.RUN.GET.SRC.DST
-				>LDYA L.MSG.DIR
-				bra CS.RUN.PRINT
-CS.RUN.PRINT.FILE
-				jsr CS.RUN.GET.SRC.DST
-				>LDYA L.MSG.FILE
-				
-CS.RUN.PRINT	>SYSCALL CPrintFYA
+.9				jsr CS.RUN.PrintErr
 				rts
-
-CS.RUN.GET.SRC.DST
+*--------------------------------------
+CS.RUN.PrintDir	ldy #hDstBasePath
+				lda (pData),y
+				>SYSCALL GetMemPtrA
+				>PUSHYA
+				
+				>PUSHW ZPPtr1
+				
+				ldy #hSrcBasePath
+				lda (pData),y
+				>SYSCALL GetMemPtrA
+				>PUSHYA
+				
+				>LDYA L.MSG.DIR
+				>SYSCALL CPrintFYA
+				rts
+*--------------------------------------
+CS.RUN.PrintFile
 				ldy #hDstBasePath
 				lda (pData),y
 				>SYSCALL GetMemPtrA
@@ -255,72 +270,106 @@ CS.RUN.GET.SRC.DST
 				lda (pData),y
 				>SYSCALL GetMemPtrA
 				>PUSHYA
+				
+				>LDYA L.MSG.FILE
+				>SYSCALL CPrintFYA
 				rts
 *--------------------------------------
-CS.RUN.COPY.DIR	ldy #hDstBasePath
-				lda (pData),y
-				>SYSCALL GetMemPtrA
-				>PUSHYA
-				>PUSHWI UsrBuf256
-				>SYSCALL PStrCpy
+CS.RUN.CopyDir	ldy #hDstBasePath
+				jsr CS.RUN.GetFilePath
 				
-				>PUSHW ZPPtr1
-				>PUSHWI UsrBuf256
-				>SYSCALL PStrCat
 				>LDYAI UsrBuf256 
 				>SYSCALL MKDirYA
 				rts
 *--------------------------------------
-CS.RUN.COPY.FILE
-				jsr CS.RUN.MAKE.SRC
+CS.RUN.CopyFile	ldy #S.STAT.P.AUXTYPE
+				>PUSHB (ZPPtr2),y
+				iny
+				>PUSHB (ZPPtr2),y			
+				ldy #S.STAT.P.TYPE
+				>PUSHB (ZPPtr2),y
+				>PUSHBI SYS.FOpen.R
+				ldy #hSrcBasePath
+				jsr CS.RUN.GetFilePath
+				
+				>PUSHWI UsrBuf256
+				
+				>SYSCALL FOpen
+				bcs .9
+				
+				ldy #hSrcFile
+				sta (pData),y
+				
+				ldy #S.STAT.P.AUXTYPE
+				>PUSHB (ZPPtr2),y
+				iny
+				>PUSHB (ZPPtr2),y
+				ldy #S.STAT.P.TYPE
+				>PUSHB (ZPPtr2),y
+				>PUSHBI SYS.FOpen.W+SYS.FOpen.X
+				ldy #hDstBasePath
+				jsr CS.RUN.GetFilePath
+				
+				>PUSHWI UsrBuf256
+				
+				>SYSCALL FOpen
+				bcs .9
+
+				ldy #hDstFile
+				sta (pData),y
+				
+
+				
+				
+				
+				
+				
+				
+				
+				ldy #hDstFile
+				sta (pData),y
+				>SYSCALL FCloseA
+				
+				
+				ldy #hSrcFile
+				sta (pData),y
+				>SYSCALL FCloseA
+				
 				
 				clc
-				rts
+.9				rts
 *--------------------------------------
 				.DO X.DELETE.SOURCE=1
 *--------------------------------------
-CS.RUN.DELETE.DIR
-				jsr CS.RUN.GET.BASE.PATH
-				bra CS.RUN.DELETE
+CS.RUN.DelDir	ldy #hSrcBasePath
+				jsr CS.RUN.GetBasePath
+				>SYSCALL RemoveYA
+				rts
 *--------------------------------------
-CS.RUN.DELETE.FILE
-				jsr CS.RUN.GET.BASE.PATH
-				>PUSHW ZPPtr1
-				>PUSHWI UsrBuf256
-				>SYSCALL PStrCat
-				
-CS.RUN.DELETE	>LDYAI UsrBuf256
-*				>SYSCALL RemoveYA
-				clc
+CS.RUN.DelFile	ldy #hSrcBasePath
+				jsr CS.RUN.GetFilePath
+				>SYSCALL RemoveYA
 				rts
 *--------------------------------------
 				.FIN
 *--------------------------------------
-CS.RUN.GET.BASE.PATH
-				ldy #hSrcBasePath
-				lda (pData),y
-				>SYSCALL GetMemPtrA
-				>PUSHYA
-				>PUSHWI UsrBuf256
-				>SYSCALL PStrCpy
-				rts
-*--------------------------------------
-CS.RUN.MAKE.SRC ldy #hSrcBasePath
-				.HS 2C					bit abs
-CS.RUN.MAKE.DST	ldy #hDstBasePath
-				lda (pData),y
-				>SYSCALL GetMemPtrA
-				>PUSHYA
-				>PUSHWI UsrBuf256
-				>SYSCALL PStrCpy
+CS.RUN.GetFilePath
+				jsr CS.RUN.GetBasePath
 				
 				>PUSHW ZPPtr1
 				>PUSHWI UsrBuf256
 				>SYSCALL PStrCat
-				>LDYAI UsrBuf256
 				rts
 *--------------------------------------
-CS.RUN.PRINT.RC	pha
+CS.RUN.GetBasePath
+				lda (pData),y
+				>SYSCALL GetMemPtrA
+				>PUSHYA
+				>PUSHWI UsrBuf256
+				>SYSCALL PStrCpy
+				rts
+*--------------------------------------
+CS.RUN.PrintErr	pha
 				php
 				bcs .1
 				>LDYA L.MSG.OK
@@ -344,42 +393,7 @@ CS.RUN.PRINT.RC	pha
 				plx
 				rts
 *--------------------------------------
-CS.DOEVENT		ldy #S.EVT.hDEV		is Event from active IN device?
-				lda (pEvent),y
-				ldy #S.PS.hStdIn
-				cmp (pPs),y
-				bne .9
-
-				lda (pEvent)
-				and #S.EVT.F.KEY		is it a KEY event?
-				beq .9
-
-				ldy #S.EVT.DATAHI		is it an O or SAPPLE key ?
-				lda (pEvent),y
-				bne	.9
-
-				ldy #S.EVT.DATALO	
-				lda (pEvent),y
-				cmp #$03				Ctrl-C
-				bne .1
-
-				lda #$FF
-				ldy #bCANCEL
-				sta (pData),y
-				bra .8
-				
-.1				cmp #$13				Ctrl-S
-				bne .8
-				
-				ldy #bSTOP
-				lda (pData),y
-				eor #$FF
-				sta (pData),y
-
-.8				clc
-				rts
-				
-.9				sec
+CS.DOEVENT		sec
 				rts
 *--------------------------------------
 CS.QUIT			jsr LeaveSubDir
@@ -387,10 +401,10 @@ CS.QUIT			jsr LeaveSubDir
 				
 				ldy #hFilter
 				lda (pData),y
-				beq .3
+				beq .8
 				>SYSCALL FreeMemA
 				
-.3				clc
+.8				clc
 				rts
 *--------------------------------------
 MAN
