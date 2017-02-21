@@ -5,6 +5,8 @@ INC 1
 AUTO 6
 				.LIST OFF
 *--------------------------------------
+COPY.BUF.SIZE	.EQ 4096
+*--------------------------------------
 ZPPtr1			.EQ ZPBIN
 ZPPtr2			.EQ ZPBIN+2
 *--------------------------------------
@@ -133,7 +135,14 @@ CS.RUN			>SYSCALL GetC
 				sta (pData),y
 				bne .8
 				
-.1				jsr GetNextEntry
+.1				.DO X.COPY.TO.DEST=1
+				ldy #bCopy
+				lda (pData),y
+				bpl .2
+				jmp CS.RUN.Copy
+				.FIN
+				
+.2				jsr GetNextEntry		Ptr1=NAME, Ptr2=STAT
 				bcs .9
 				
 				ldy #hFilter
@@ -217,27 +226,35 @@ CS.RUN.DIR		ldy #bRecurse
 				jsr CS.RUN.PrintDir
 				bcs .9
 				
-				jsr CS.RUN.CopyDir
-				bcs .9
+				.DO X.COPY.TO.DEST=1
+				ldy #hDstBasePath
+				jsr CS.RUN.GetFilePath
+				
+				>LDYAI UsrBuf256 
+				>SYSCALL MKDirYA
 
+				jsr CS.RUN.PrintErr
+				bcs .9
+				.FIN
+				
 				>LDYA ZPPtr1
 				jmp EnterSubDirYA
 
 .8				clc
 				rts
 				
-.9				jsr CS.RUN.PrintErr
-				rts
+.9				rts
 *--------------------------------------
 CS.RUN.FILE		jsr CS.RUN.PrintFile
 				bcs .9
-				jsr CS.RUN.CopyFile
+				jsr CS.RUN.CopyStart
 				bcs .9
+				rts
 				
-				.DO X.DELETE.SOURCE=1
-				jsr CS.RUN.DelFile
-				bcs .9
-				.FIN
+*				.DO X.DELETE.SOURCE=1
+*				jsr CS.RUN.DelFile
+*				bcs .9
+*				.FIN
 
 .9				jsr CS.RUN.PrintErr
 				rts
@@ -275,14 +292,11 @@ CS.RUN.PrintFile
 				>SYSCALL CPrintFYA
 				rts
 *--------------------------------------
-CS.RUN.CopyDir	ldy #hDstBasePath
-				jsr CS.RUN.GetFilePath
-				
-				>LDYAI UsrBuf256 
-				>SYSCALL MKDirYA
-				rts
+				.DO X.COPY.TO.DEST=1
 *--------------------------------------
-CS.RUN.CopyFile	ldy #S.STAT.P.AUXTYPE
+*--------------------------------------
+CS.RUN.CopyStart
+				ldy #S.STAT.P.AUXTYPE
 				>PUSHB (ZPPtr2),y
 				iny
 				>PUSHB (ZPPtr2),y			
@@ -313,31 +327,106 @@ CS.RUN.CopyFile	ldy #S.STAT.P.AUXTYPE
 				>PUSHWI UsrBuf256
 				
 				>SYSCALL FOpen
-				bcs .9
-
-				ldy #hDstFile
-				sta (pData),y
+				bcc .1
 				
-
-				
-				
-				
-				
-				
-				
-				
-				ldy #hDstFile
+				pha
+				ldy #hSrcFile
 				lda (pData),y
 				>SYSCALL FCloseA
+				pla
+				sec
+				rts
+
+.1				ldy #hDstFile
+				sta (pData),y
 				
+				ldy #bCopy
+				lda #$ff
+				sta (pData),y
+				clc
+.9				rts
+*--------------------------------------
+CS.RUN.Copy		stz .90+1
+				>PUSHWI COPY.BUF.SIZE
+				>PUSHBI 0
+				>SYSCALL GetMem
+				bcs .9
+
+				>STYA ZPPtr1
+				stx .90+1
 				
+				>PUSHW ZPPtr1			Dst Ptr
+				>PUSHWI COPY.BUF.SIZE	Bytes To Read
+				ldy #hSrcFile
+				>PUSHB (pData),y
+				>SYSCALL FRead
+				bcc .1
+				eor #MLI.ERR.EOF
+				beq .9
+				
+.1				>STYA ZPPtr2
+				
+				>PUSHW ZPPtr1			Src Ptr
+				>PUSHW ZPPtr2			Bytes To Write
+				ldy #hDstFile
+				>PUSHB (pData),y
+				>SYSCALL FWrite
+				bcs .9
+				
+				lda #'.'
+				>SYSCALL PutCA
+				rts			
+	
+.9				ldy #CopyRC
+				sta (pData),y
+				
+.90				lda #$00
+				beq CS.RUN.CopyEnd
+				>SYSCALL FreeMemA	
+*--------------------------------------
+CS.RUN.CopyEnd	ldy #hDstFile
+				lda (pData),y
+				>SYSCALL FCloseA
+						
 				ldy #hSrcFile
 				lda (pData),y
 				>SYSCALL FCloseA
 				
-				
+				ldy #bCopy
+				lda #$0
+				sta (pData),y
+
 				clc
-.9				rts
+				ldy #CopyRC
+				lda (pData),y
+				beq CS.RUN.PrintErr
+				sec
+*--------------------------------------
+				.FIN
+*--------------------------------------
+CS.RUN.PrintErr	pha
+				php
+				bcs .1
+				>LDYA L.MSG.OK
+				bra .8
+				
+.1				>PUSHA
+				>LDYA L.MSG.ERR
+				
+.8				>SYSCALL CPrintFYA
+				bcs .9
+				plp
+				bcc .81
+				ldy #bContinue
+				lda (pData),y
+				eor #$80
+				asl
+.81				pla
+				rts
+				
+.9				plx
+				plx
+				rts
 *--------------------------------------
 				.DO X.DELETE.SOURCE=1
 *--------------------------------------
@@ -367,30 +456,6 @@ CS.RUN.GetBasePath
 				>PUSHYA
 				>PUSHWI UsrBuf256
 				>SYSCALL PStrCpy
-				rts
-*--------------------------------------
-CS.RUN.PrintErr	pha
-				php
-				bcs .1
-				>LDYA L.MSG.OK
-				bra .8
-				
-.1				>PUSHA
-				>LDYA L.MSG.ERR
-				
-.8				>SYSCALL CPrintFYA
-				bcs .9
-				plp
-				bcc .81
-				ldy #bContinue
-				lda (pData),y
-				eor #$80
-				asl
-.81				pla
-				rts
-				
-.9				plx
-				plx
 				rts
 *--------------------------------------
 CS.DOEVENT		sec

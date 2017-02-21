@@ -147,7 +147,7 @@ note : '$VAR' does NOT expand Variable
 | | | -N : Number all output lines | |
 | | | -S : Suppress repeated empty output lines | |
 | EDIT | Working | still missing : find/replace | 0.9 |
-| NSCUTIL | Working | Tool for setting time in NSC/DL1216E | 0.8 |
+| NSCUTIL | Working | Tool for setting time in NSC/DL1216E | 0.9 |
 | ARP | Working | dump ARP cache, setup a static ARP entry | 0.9 |
 | PING | Working | | 0.9 |
 | DNSINFO | Working | dump DNS cache, setup a static DNS entry | 0.9 |
