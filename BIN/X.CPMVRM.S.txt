@@ -39,7 +39,7 @@ L.STAT			.DA STAT
 CS.INIT			>SYSCALL GetArgC
 				sta ArgCount
 				cmp #1
-				beq  .99
+				beq .99
 
 				stz ArgIndex
 				
@@ -83,13 +83,21 @@ CS.INIT			>SYSCALL GetArgC
 				
 .4				ldy #index
 				lda (pData),y
+*--------------------------------------
+				.DO X.COPY.TO.DEST=1
+*--------------------------------------	
 				bne .5					Already have a Src dir...
-				
+				.ELSE
+				bne .99
+				.FIN
+*--------------------------------------				
 				>LDYA ZPPtr1
 				jsr InitSrcDirYA
 				bcc .1					success, scan for any other args
 				rts
-				
+*--------------------------------------
+				.DO X.COPY.TO.DEST=1
+*--------------------------------------	
 .5				ldy #hDstBasePath				
 				lda (pData),y
 				bne .99					we already have a second arg....error!
@@ -98,11 +106,14 @@ CS.INIT			>SYSCALL GetArgC
 				jsr InitDstDirYA
 				bcc .1					success, scan for any other args
 				rts
-				
+				.FIN
+*--------------------------------------
 .7				ldy #index				processed all args
 				lda (pData),y
 				beq .99					, no src ? ERROR
-				
+*--------------------------------------
+				.DO X.COPY.TO.DEST=1
+*--------------------------------------	
 				ldy #hDstBasePath				
 				lda (pData),y
 				bne .8					we also have a Dst folder
@@ -112,7 +123,8 @@ CS.INIT			>SYSCALL GetArgC
 				>SYSCALL GetMemPtrA
 				jsr InitDstDirYA
 				bcs .99
-				
+				.FIN
+*--------------------------------------
 .8				lda (pPs)
 				ora #S.PS.F.EVENT		Now accept events
 				sta (pPs)
@@ -121,28 +133,42 @@ CS.INIT			>SYSCALL GetArgC
 				rts
 *--------------------------------------
 CS.RUN			>SYSCALL GetC
-				bcs .1					no char
+				bcs .11					no char
 				
 				cmp #$03				Ctrl-C
-				beq .99					Abort....
+				bne .10
+				sec
+				rts						Abort....
 				
-				cmp #$13				Ctrl-S
-				bne .1
+.10				cmp #$13				Ctrl-S
+				bne .11
 
 				ldy #bPause
 				lda (pData),y
 				eor	#$ff
 				sta (pData),y
-				bne .8
 				
+.11				ldy #bPause
+				lda (pData),y
+				bmi .8
+*--------------------------------------				
 .1				.DO X.COPY.TO.DEST=1
+*--------------------------------------
 				ldy #bCopy
 				lda (pData),y
 				bpl .2
 				jmp CS.RUN.Copy
 				.FIN
-				
-.2				jsr GetNextEntry		Ptr1=NAME, Ptr2=STAT
+*--------------------------------------
+.2				.DO X.DELETE.SOURCE
+*--------------------------------------
+				ldy #hToDelete
+				lda (pData),y
+				beq .3
+				jmp CS.RUN.Delete
+				.FIN
+*--------------------------------------
+.3				jsr GetNextEntry		Ptr1=NAME, Ptr2=STAT
 				bcs .9
 				
 				ldy #hFilter
@@ -175,14 +201,17 @@ CS.RUN			>SYSCALL GetC
 				
 				ldy #bRecurse
 				lda (pData),y
-				bpl .8
-				
+				bpl .8		
+*--------------------------------------
 				.DO X.DELETE.SOURCE=1
-				jsr CS.RUN.DELETE.DIR
-				jsr CS.RUN.PRINT.RC
+*--------------------------------------
+				ldy #hSrcBasePath
+				jsr CS.RUN.GetBasePath
+				>SYSCALL RemoveYA
+				jsr CS.RUN.CheckErr
 				bcs .99
 				.FIN
-
+*--------------------------------------
 				jsr BasePath..
 				
 .8				clc
@@ -206,7 +235,7 @@ CS.RUN.DEV		>PUSHW ZPPtr1
 
 				lda #0
 				clc
-				jsr CS.RUN.PrintErr
+				jsr CS.RUN.CheckErr
 				
 				>LDYA ZPPtr1
 				jmp EnterSubDirYA
@@ -224,41 +253,48 @@ CS.RUN.DIR		ldy #bRecurse
 				beq .8
 				
 				jsr CS.RUN.PrintDir
-				bcs .9
-				
+				bcs .9			
+*--------------------------------------
 				.DO X.COPY.TO.DEST=1
+*--------------------------------------
 				ldy #hDstBasePath
 				jsr CS.RUN.GetFilePath
 				
 				>LDYAI UsrBuf256 
 				>SYSCALL MKDirYA
-
-				jsr CS.RUN.PrintErr
-				bcc .1
-				cmp #MLI.ERR.DUPFILE
-				beq .1
+				jsr CS.RUN.CheckErr
 				.FIN
-				
+*--------------------------------------
 .1				>LDYA ZPPtr1
 				jmp EnterSubDirYA
 
 .8				clc
-				rts
-				
 .9				rts
 *--------------------------------------
 CS.RUN.FILE		jsr CS.RUN.PrintFile
 				bcs .9
+*--------------------------------------
+				.DO X.COPY.TO.DEST=1
+*--------------------------------------
 				jsr CS.RUN.CopyStart
 				bcs .9
 				rts
-				
-*				.DO X.DELETE.SOURCE=1
-*				jsr CS.RUN.DelFile
-*				bcs .9
-*				.FIN
+				.FIN
+*--------------------------------------
+				.DO X.DELETE.SOURCE=1
+*--------------------------------------
+				ldy #hSrcBasePath
+				jsr CS.RUN.GetFilePath
+				>LDYAI UsrBuf256
+				>SYSCALL NewPStrYA
+				bcs .9
+				txa
+				ldy #hToDelete
+				sta (pData),y
 
-.9				jsr CS.RUN.PrintErr
+				.FIN
+*--------------------------------------
+.9				jsr CS.RUN.CheckErr
 				rts
 *--------------------------------------
 CS.RUN.PrintDir	ldy #hDstBasePath
@@ -329,7 +365,6 @@ CS.RUN.CopyStart
 				
 				>SYSCALL FOpen
 				bcc .1
-				>DEBUG
 				pha
 				ldy #hSrcFile
 				lda (pData),y
@@ -390,63 +425,66 @@ CS.RUN.Copy		stz .90+1
 				beq CS.RUN.CopyEnd
 				>SYSCALL FreeMemA
 *--------------------------------------
-CS.RUN.CopyEnd	ldy #hDstFile
+CS.RUN.CopyEnd	ldy #hSrcFile
 				lda (pData),y
 				>SYSCALL FCloseA
-						
-				ldy #hSrcFile
-				lda (pData),y
-				>SYSCALL FCloseA
+				bcc .1
 				
-				ldy #bCopy
+				jsr CS.RUN.CheckErr
+						
+.1				ldy #hDstFile
+				lda (pData),y
+				>SYSCALL FCloseA
+				bcc .2
+				
+				jsr CS.RUN.CheckErr
+
+.2				ldy #bCopy
 				lda #$0
 				sta (pData),y
 
 				clc
 				ldy #CopyRC
 				lda (pData),y
-				beq CS.RUN.PrintErr
+				beq CS.RUN.CheckErr
 				sec
+				jmp CS.RUN.CheckErr
 *--------------------------------------
 				.FIN
-*--------------------------------------
-CS.RUN.PrintErr	pha
-				php
-				bcs .1
-				>LDYA L.MSG.OK
-				bra .8
-				
-.1				>PUSHA
-				>LDYA L.MSG.ERR
-				
-.8				>SYSCALL CPrintFYA
-				bcs .9
-				plp
-				bcc .81
-				ldy #bContinue
-				lda (pData),y
-				eor #$80
-				asl
-.81				pla
-				rts
-				
-.9				plx
-				plx
-				rts
 *--------------------------------------
 				.DO X.DELETE.SOURCE=1
 *--------------------------------------
-CS.RUN.DelDir	ldy #hSrcBasePath
-				jsr CS.RUN.GetBasePath
+CS.RUN.Delete	pha
+				lda #0
+				sta (pData),y
+				pla
+				>SYSCALL GetMemPtrA
 				>SYSCALL RemoveYA
-				rts
-*--------------------------------------
-CS.RUN.DelFile	ldy #hSrcBasePath
-				jsr CS.RUN.GetFilePath
-				>SYSCALL RemoveYA
-				rts
+				jmp CS.RUN.CheckErr
 *--------------------------------------
 				.FIN
+*--------------------------------------
+CS.RUN.CheckErr	bcs .1
+				>LDYA L.MSG.OK
+				>SYSCALL CPrintFYA
+				rts
+				
+.1				sta .2+1
+				>PUSHA
+				>LDYA L.MSG.ERR
+				
+				>SYSCALL CPrintFYA
+				bcs .9
+				
+				ldy #bContinue
+				lda (pData),y
+				bmi .9					CC
+				
+.2				lda #$ff
+				sec
+				rts
+				
+.9				rts
 *--------------------------------------
 CS.RUN.GetFilePath
 				jsr CS.RUN.GetBasePath
@@ -479,6 +517,6 @@ CS.QUIT			jsr LeaveSubDir
 				rts
 *--------------------------------------
 MAN
-SAVE BIN/X.CPMV.S
+SAVE BIN/X.CPMVRM.S
 LOAD BIN/CP.S
 ASM

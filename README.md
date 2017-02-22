@@ -137,12 +137,12 @@ note : '$VAR' does NOT expand Variable
 | LS | Working | -A : Do Not Print . & .. | 0.9 |
 | | | -L : long listing with size/date... | |
 | | | -R : Recurse subdirectories | |
-| RM | Working | -C : Continue On Error | 0.8 |
+| RM | Working | -C : Continue On Error | 0.9 |
 | | | -R : Recurse subdirectories | |
-| CP | In Progress | -C : Continue On Error | 0.8 |
+| CP | In Progress | -C : Continue On Error | 0.9 |
 | | | -R : Recurse subdirectories | |
 | | | -Y : Dont't Prompt For Override | |
-| MV | In Progress | -C : Continue On Error | 0.8 |
+| MV | In Progress | -C : Continue On Error | 0.9 |
 | | | -R : Recurse subdirectories | |
 | | | -Y : Dont't Prompt For Override | |
 | CAT | Working | -A : Show All non printable caracters | 0.9 |
