@@ -129,6 +129,8 @@ CS.INIT			>SYSCALL GetArgC
 				clc
 				rts
 *--------------------------------------
+* CS.RUN
+*--------------------------------------
 CS.RUN			>SYSCALL GetC
 				bcs .11					no char
 				
@@ -147,7 +149,9 @@ CS.RUN			>SYSCALL GetC
 				
 .11				ldy #bPause
 				lda (pData),y
-				bmi .8
+				bpl .1
+				clc
+				rts
 *--------------------------------------				
 .1				.DO X.COPY.TO.DEST=1
 				ldy #bCopy
@@ -160,7 +164,21 @@ CS.RUN			>SYSCALL GetC
 				ldy #hToDelete
 				lda (pData),y
 				beq .3
-				jmp CS.RUN.Delete
+				
+				>SYSCALL GetMemPtrA
+				>SYSCALL RemoveYA
+				php
+				pha
+				ldy #hToDelete
+				lda (pData),y
+				>SYSCALL FreeMemA
+
+				ldy #hToDelete
+				lda #0
+				sta (pData),y
+				pla
+				plp
+				jmp CS.RUN.CheckErr
 				.FIN
 *--------------------------------------
 .3				jsr GetNextEntry		Ptr1=NAME, Ptr2=STAT
@@ -178,46 +196,51 @@ CS.RUN			>SYSCALL GetC
 				
 .4				ldy #S.STAT.P.DRIVE
 				lda (ZPPtr2),y			ProDOS Device ?
-				bne .5
+				bne .6
 				
 				ldy #S.STAT.P.TYPE
 				lda (ZPPtr2),y
 				cmp #$0F				Directory ?
-				beq .6
+				bne .5
 
-				jmp CS.RUN.FILE
-
-.5				jmp CS.RUN.DEV
-
-.6				jmp CS.RUN.DIR
+				ldy #bRecurse
+				lda (pData),y
+				bpl .8
+				jmp CS.RUN.DIR
 				
-.9				jsr LeaveSubDir
-				bcs .99
+.5				jmp CS.RUN.FILE
+				
+.6				lda #MLI.ERR.UNSUPSS
+				sec
+				rts
 *--------------------------------------
+.9				jsr LeaveSubDir			exit this sub dir....
+				bcs .99					base, we are done, exit
+				
 				.DO X.DELETE.SOURCE=1
+				.DO X.COPY.TO.DEST=0
 				ldy #hSrcBasePath
 				jsr CS.RUN.GetBasePath
+
+				>PUSHWI UsrBuf256
+				>LDYA L.MSG.DIR
+				>SYSCALL CPrintFYA
+				bcs .9			
+
+				>LDYAI UsrBuf256 
 				>SYSCALL RemoveYA
 				jsr CS.RUN.CheckErr
 				bcs .99
 				.FIN
+				.FIN
 *--------------------------------------
-				ldy #bRecurse
-				lda (pData),y
-				bpl .8		
-
 				jsr BasePath..
-				
 .8				clc
 				rts
 				
 .99				lda #0
 				sec
 				rts
-*--------------------------------------
-CS.RUN.DEV		
-.8				clc				
-.9				rts
 *--------------------------------------
 CS.RUN.DIR		ldy #1
 				lda (ZPPtr1),y
@@ -229,7 +252,6 @@ CS.RUN.DIR		ldy #1
 				lda (pData),y
 				>SYSCALL GetMemPtrA
 				>PUSHYA
-				.FIN
 				
 				>PUSHW ZPPtr1			Filename
 				
@@ -241,8 +263,7 @@ CS.RUN.DIR		ldy #1
 				>LDYA L.MSG.DIR
 				>SYSCALL CPrintFYA
 				bcs .9			
-*--------------------------------------
-				.DO X.COPY.TO.DEST=1
+
 				ldy #hDstBasePath
 				jsr CS.RUN.GetFilePath
 				
@@ -252,21 +273,8 @@ CS.RUN.DIR		ldy #1
 				bcs .9
 				.FIN
 *--------------------------------------
-				ldy #bRecurse
-				lda (pData),y
-				bpl .1
-
 				>LDYA ZPPtr1
 				jmp EnterSubDirYA
-*--------------------------------------
-.1				.DO X.DELETE.SOURCE=1
-				ldy #hSrcBasePath
-				jsr CS.RUN.GetFilePath
-				>LDYAI UsrBuf256 
-				>SYSCALL RemoveYA
-				jsr CS.RUN.CheckErr
-				bcs .9
-				.FIN
 *--------------------------------------
 .8				clc
 .9				rts
@@ -291,10 +299,12 @@ CS.RUN.FILE		.DO X.COPY.TO.DEST=1
 *--------------------------------------
 				.DO X.COPY.TO.DEST=1
 				jsr CS.RUN.CopyStart
-				bcs .9
+				bcc .1
+				jsr CS.RUN.CheckErr
+				rts
 				.FIN
 *--------------------------------------
-				.DO X.DELETE.SOURCE=1
+.1				.DO X.DELETE.SOURCE=1
 				ldy #hSrcBasePath
 				jsr CS.RUN.GetFilePath
 				>LDYAI UsrBuf256
@@ -322,7 +332,7 @@ CS.RUN.CopyStart
 				>PUSHWI UsrBuf256
 				
 				>SYSCALL FOpen
-				bcs .9
+				bcs .99
 				
 				ldy #hSrcFile
 				sta (pData),y
@@ -340,23 +350,24 @@ CS.RUN.CopyStart
 				>PUSHWI UsrBuf256
 				
 				>SYSCALL FOpen
-				bcc .1
-				pha
-				ldy #hSrcFile
-				lda (pData),y
-				>SYSCALL FCloseA
-				pla
-				sec
-				rts
+				bcs .9
 
-.1				ldy #hDstFile
+				ldy #hDstFile
 				sta (pData),y
 				
 				ldy #bCopy
 				lda #$ff
 				sta (pData),y
 				clc
-.9				rts
+				rts
+				
+.9				pha
+				ldy #hSrcFile
+				lda (pData),y
+				>SYSCALL FCloseA
+				pla
+				sec
+.99				rts
 *--------------------------------------
 CS.RUN.Copy		stz .90+1
 				>PUSHWI COPY.BUF.SIZE
@@ -424,16 +435,6 @@ CS.RUN.CopyEnd	ldy #hSrcFile
 				lda (pData),y
 				beq CS.RUN.CheckErr
 				sec
-				bra CS.RUN.CheckErr
-				.FIN
-*--------------------------------------
-				.DO X.DELETE.SOURCE=1
-CS.RUN.Delete	pha
-				lda #0
-				sta (pData),y
-				pla
-				>SYSCALL GetMemPtrA
-				>SYSCALL RemoveYA
 				bra CS.RUN.CheckErr
 				.FIN
 *--------------------------------------
