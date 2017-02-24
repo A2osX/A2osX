@@ -5,10 +5,12 @@ INC 1
 AUTO 6
 				.LIST OFF
 *--------------------------------------
-COPY.BUF.SIZE	.EQ 4096
+X.COPY.BUF.SIZE	.EQ 4096
 *--------------------------------------
 ZPPtr1			.EQ ZPBIN
 ZPPtr2			.EQ ZPBIN+2
+ZPFileName		.EQ ZPBIN+4
+ZPFileStat		.EQ ZPBIN+6
 *--------------------------------------
 *			File Header (16 Bytes)
 *--------------------------------------
@@ -31,6 +33,9 @@ CS.START		cld
 L.MSG.USAGE		.DA MSG.USAGE
 L.MSG.DIR		.DA MSG.DIR
 L.MSG.FILE		.DA MSG.FILE
+				.DO X.COPY.TO.DEST=1
+L.MSG.OVERWRTE	.DA MSG.OVERWRTE
+				.FIN
 L.MSG.OK		.DA MSG.OK
 L.MSG.ERR		.DA MSG.ERR
 L.STAT			.DA STAT
@@ -83,18 +88,18 @@ CS.INIT			>SYSCALL GetArgC
 				
 .4				ldy #index
 				lda (pData),y
-*--------------------------------------
+
 				.DO X.COPY.TO.DEST=1
 				bne .5					Already have a Src dir...
 				.ELSE
 				bne .99
 				.FIN
-*--------------------------------------				
+			
 				>LDYA ZPPtr1
 				jsr InitSrcDirPatYA
 				bcc .1					success, scan for any other args
 				rts
-*--------------------------------------
+
 				.DO X.COPY.TO.DEST=1
 .5				ldy #hDstBasePath				
 				lda (pData),y
@@ -105,11 +110,11 @@ CS.INIT			>SYSCALL GetArgC
 				bcc .1					success, scan for any other args
 				rts
 				.FIN
-*--------------------------------------
+
 .7				ldy #index				processed all args
 				lda (pData),y
 				beq .99					, no src ? ERROR
-*--------------------------------------
+
 				.DO X.COPY.TO.DEST=1
 				ldy #hDstBasePath				
 				lda (pData),y
@@ -121,15 +126,13 @@ CS.INIT			>SYSCALL GetArgC
 				jsr InitDstDirYA
 				bcs .99
 				.FIN
-*--------------------------------------
+
 .8				lda (pPs)
 				ora #S.PS.F.EVENT		Now accept events
 				sta (pPs)
 				
 				clc
 				rts
-*--------------------------------------
-* CS.RUN
 *--------------------------------------
 CS.RUN			>SYSCALL GetC
 				bcs .11					no char
@@ -152,14 +155,14 @@ CS.RUN			>SYSCALL GetC
 				bpl .1
 				clc
 				rts
-*--------------------------------------				
+			
 .1				.DO X.COPY.TO.DEST=1
 				ldy #bCopy
 				lda (pData),y
 				bpl .2
 				jmp CS.RUN.Copy
 				.FIN
-*--------------------------------------
+
 .2				.DO X.DELETE.SOURCE=1
 				ldy #hToDelete
 				lda (pData),y
@@ -180,9 +183,9 @@ CS.RUN			>SYSCALL GetC
 				plp
 				jmp CS.RUN.CheckErr
 				.FIN
-*--------------------------------------
-.3				jsr GetNextEntry		Ptr1=NAME, Ptr2=STAT
-				bcs .9
+
+.3				jsr GetNextEntry
+				bcs CS.RUN.LEAVE
 				
 				ldy #hFilter
 				lda (pData),y
@@ -190,22 +193,28 @@ CS.RUN			>SYSCALL GetC
 				
 				>SYSCALL GetMemPtrA
 				>PUSHYA
-				>PUSHW ZPPtr1
+				>PUSHW ZPFileName
 				>SYSCALL PStrMatch
 				bcs .8					no match, skip....
 				
 .4				ldy #S.STAT.P.DRIVE
-				lda (ZPPtr2),y			ProDOS Device ?
+				lda (ZPFileStat),y		ProDOS Device ?
 				bne .6
 				
 				ldy #S.STAT.P.TYPE
-				lda (ZPPtr2),y
+				lda (ZPFileStat),y
 				cmp #$0F				Directory ?
 				bne .5
 
 				ldy #bRecurse
 				lda (pData),y
 				bpl .8
+				
+				ldy #1
+				lda (ZPFileName),y
+				cmp #'.'
+				beq .8					Skip "." & ".."
+
 				jmp CS.RUN.DIR
 				
 .5				jmp CS.RUN.FILE
@@ -213,8 +222,11 @@ CS.RUN			>SYSCALL GetC
 .6				lda #MLI.ERR.UNSUPSS
 				sec
 				rts
+				
+.8				clc
+.9				rts
 *--------------------------------------
-.9				jsr LeaveSubDir			exit this sub dir....
+CS.RUN.LEAVE 	jsr LeaveSubDir			exit this sub dir....
 				bcs .99					base, we are done, exit
 				
 				.DO X.DELETE.SOURCE=1
@@ -233,27 +245,22 @@ CS.RUN			>SYSCALL GetC
 				bcs .99
 				.FIN
 				.FIN
-*--------------------------------------
+
 				jsr BasePath..
-.8				clc
+				clc
 				rts
 				
 .99				lda #0
 				sec
-				rts
+.9				rts
 *--------------------------------------
-CS.RUN.DIR		ldy #1
-				lda (ZPPtr1),y
-				cmp #'.'
-				beq .8
-
-				.DO X.COPY.TO.DEST=1
-				ldy #hDstBasePath
-				lda (pData),y
-				>SYSCALL GetMemPtrA
-				>PUSHYA
+CS.RUN.DIR		.DO X.COPY.TO.DEST=1
 				
-				>PUSHW ZPPtr1			Filename
+				ldy #hDstBasePath
+				jsr CS.RUN.GetFilePath
+				>PUSHWI UsrBuf256 
+				
+				>PUSHW ZPFileName		Filename
 				
 				ldy #hSrcBasePath
 				lda (pData),y
@@ -264,20 +271,62 @@ CS.RUN.DIR		ldy #1
 				>SYSCALL CPrintFYA
 				bcs .9			
 
-				ldy #hDstBasePath
-				jsr CS.RUN.GetFilePath
+				>PUSHW L.STAT
+				>PUSHWI UsrBuf256 
+				>SYSCALL Stat
+				bcs .2					File Not exists...go create
 				
-				>LDYAI UsrBuf256 
+				ldy #bNoConfirm
+				lda (pData),y
+				bmi .12					no prompt, nothing to create, enter subdir
+				
+				>LDYA L.MSG.OVERWRTE
+				>SYSCALL CPrintFYA
+				bcs .9
+				
+.1				>SYSCALL Sleep
+				>SYSCALL GetC
+				bcs .1
+				cmp #3
+				beq .99					abort
+				
+				cmp #'N'
+				bne .11
+				
+				lda #13
+				>SYSCALL PutCA
+				rts						no overwrite, nothing to do, no recurse
+				
+.11				cmp #'Y'
+				beq .12					no create, but recurse
+				
+				cmp #'A'
+				bne .1
+				
+				ldy #bNoConfirm
+				lda #$ff
+				sta (pData),y
+				
+.12				lda #0
+				clc
+				bra .3
+				
+.2				>LDYAI UsrBuf256 
 				>SYSCALL MKDirYA
-				jsr CS.RUN.CheckErr
+				
+.3				jsr CS.RUN.CheckErr
 				bcs .9
 				.FIN
-*--------------------------------------
-				>LDYA ZPPtr1
+
+.7				>LDYA ZPFileName
 				jmp EnterSubDirYA
-*--------------------------------------
+
 .8				clc
 .9				rts
+
+.99				lda #0
+				sec
+				rts
 *--------------------------------------
 CS.RUN.FILE		.DO X.COPY.TO.DEST=1
 				ldy #hDstBasePath
@@ -286,7 +335,7 @@ CS.RUN.FILE		.DO X.COPY.TO.DEST=1
 				>PUSHYA
 				.FIN
 				
-				>PUSHW ZPPtr1
+				>PUSHW ZPFileName
 				
 				ldy #hSrcBasePath
 				lda (pData),y
@@ -296,15 +345,55 @@ CS.RUN.FILE		.DO X.COPY.TO.DEST=1
 				>LDYA L.MSG.FILE
 				>SYSCALL CPrintFYA
 				bcs .9
-*--------------------------------------
+
 				.DO X.COPY.TO.DEST=1
-				jsr CS.RUN.CopyStart
-				bcc .1
+				
+				>PUSHW L.STAT
+				>PUSHWI UsrBuf256 
+				>SYSCALL Stat
+				bcs .2					File Not exists...go create
+				
+				ldy #bNoConfirm
+				lda (pData),y
+				bmi .2					no prompt, ovverwrite
+				
+				>LDYA L.MSG.OVERWRTE
+				>SYSCALL CPrintFYA
+				bcs .9
+				
+.1				>SYSCALL Sleep
+				>SYSCALL GetC
+				bcs .1
+				cmp #3
+				beq .99					abort
+				
+				cmp #'N'
+				bne .11
+				
+				lda #13
+				>SYSCALL PutCA
+				rts						no overwrite exit
+				
+.11				cmp #'Y'
+				beq .12					copy
+				
+				cmp #'A'
+				bne .1
+				
+				ldy #bNoConfirm
+				lda #$ff
+				sta (pData),y
+				
+.12				
+*				jsr GetEntry			get back current entry corrupted by SLEEP		
+				
+.2				jsr CS.RUN.CopyStart
+				bcc .4
 				jsr CS.RUN.CheckErr
 				rts
 				.FIN
-*--------------------------------------
-.1				.DO X.DELETE.SOURCE=1
+
+.4				.DO X.DELETE.SOURCE=1
 				ldy #hSrcBasePath
 				jsr CS.RUN.GetFilePath
 				>LDYAI UsrBuf256
@@ -314,17 +403,20 @@ CS.RUN.FILE		.DO X.COPY.TO.DEST=1
 				ldy #hToDelete
 				sta (pData),y
 				.FIN
-*--------------------------------------
+
 .9				rts
+.99				lda #0
+				sec
+				rts
 *--------------------------------------
 				.DO X.COPY.TO.DEST=1
 CS.RUN.CopyStart
 				ldy #S.STAT.P.AUXTYPE+1
-				>PUSHB (ZPPtr2),y
+				>PUSHB (ZPFileStat),y
 				dey
-				>PUSHB (ZPPtr2),y			
+				>PUSHB (ZPFileStat),y			
 				ldy #S.STAT.P.TYPE
-				>PUSHB (ZPPtr2),y
+				>PUSHB (ZPFileStat),y
 				>PUSHBI SYS.FOpen.R
 				ldy #hSrcBasePath
 				jsr CS.RUN.GetFilePath
@@ -338,11 +430,11 @@ CS.RUN.CopyStart
 				sta (pData),y
 				
 				ldy #S.STAT.P.AUXTYPE+1
-				>PUSHB (ZPPtr2),y
+				>PUSHB (ZPFileStat),y
 				dey
-				>PUSHB (ZPPtr2),y
+				>PUSHB (ZPFileStat),y
 				ldy #S.STAT.P.TYPE
-				>PUSHB (ZPPtr2),y
+				>PUSHB (ZPFileStat),y
 				>PUSHBI SYS.FOpen.W+SYS.FOpen.X
 				ldy #hDstBasePath
 				jsr CS.RUN.GetFilePath
@@ -370,7 +462,7 @@ CS.RUN.CopyStart
 .99				rts
 *--------------------------------------
 CS.RUN.Copy		stz .90+1
-				>PUSHWI COPY.BUF.SIZE
+				>PUSHWI X.COPY.BUF.SIZE
 				>PUSHBI 0
 				>SYSCALL GetMem
 				bcs .9
@@ -379,7 +471,7 @@ CS.RUN.Copy		stz .90+1
 				stx .90+1
 				
 				>PUSHW ZPPtr1			Dst Ptr
-				>PUSHWI COPY.BUF.SIZE	Bytes To Read
+				>PUSHWI X.COPY.BUF.SIZE	Bytes To Read
 				ldy #hSrcFile
 				>PUSHB (pData),y
 				>SYSCALL FRead
@@ -467,7 +559,7 @@ CS.RUN.CheckErr	bcs .1
 *--------------------------------------
 CS.RUN.GetFilePath
 				jsr CS.RUN.GetBasePath
-				>PUSHW ZPPtr1
+				>PUSHW ZPFileName
 				>PUSHWI UsrBuf256
 				>SYSCALL PStrCat
 				rts
