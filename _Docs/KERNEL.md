@@ -113,7 +113,8 @@ Prints Pascal/C-Style String
  + \b : Print 'BS' (08)
  + \e : Print 'ESC' ($1B,27)
  + \f : Print 'FF' ($0C,12)
- + \n : Print 'CR' ($0D,13)
+ + \n : Print 'LF' ($0A,10)
+ + \r : Print 'CR' ($0D,13)
  + \\\\ : Print \
  + \% : Print %
 + Modifiers for len and padding : 
