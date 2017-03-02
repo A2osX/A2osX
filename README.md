@@ -34,9 +34,11 @@ Several subprojects are now indentified :
 ## Screenshots  
   
 ![](https://github.com/burniouf/A2osX/blob/master/ScreenShot.LS.bmp)  
-![](https://github.com/burniouf/A2osX/blob/master/ScreenShot.EDIT.bmp)  
   
-
+![](https://github.com/burniouf/A2osX/blob/master/ScreenShot.EDIT.bmp)  
+    
+![](https://github.com/burniouf/A2osX/blob/master/PuTTY.png)  
+  
 ## General Information:  
  
 ** Kernel 0.9 complete rewrite in progress **  
