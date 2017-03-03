@@ -12,6 +12,8 @@ AUTO 6
 				.INB /A2OSX.DEV/INC/A2OSX.I
 				.INB /A2OSX.DEV/INC/NET.TELNET.I
 *--------------------------------------
+TIMEOUT.MAX		.EQ 10					1 sec.
+*--------------------------------------
 ZPTmp1			.EQ ZPBIN
 *--------------------------------------
 *			File Header (16 Bytes)
@@ -33,7 +35,7 @@ CS.START		cld
 				.DA CS.DOEVENT
 				.DA	CS.QUIT
 L.MSG.USAGE		.DA MSG.USAGE
-L.MSG.TELNETOPT	.DA MSG.TELNETOPT
+L.MSG.TELNET.OPT	.DA MSG.TELNET.OPT
 L.MSG.GREETINGS .DA MSG.GREETINGS
 L.TERM			.DA TERM
 				.DA 0					End Of Reloc Table
@@ -72,55 +74,124 @@ CS.INIT			>SYSCALL GetArgC
 				
 				ldy #hBinName
 				sta (pData),y
+
+				lda (pPs)
+				ora #S.PS.F.EVENT		Now accept events
+				sta (pPs)
+
 				clc
 .9				rts
 *--------------------------------------
-CS.RUN			
-				>LDYA L.MSG.TELNETOPT
-				>SYSCALL CPrintFYA
-				bcs *
-				
-				lda #$83
-				jsr PRINT.DEBUG
-								
-.1				>SYSCALL Sleep
+CS.RUN			jsr Init.Timeout
+
+.66				>SYSCALL Sleep
 				>SYSCALL GetC
-				bcs .2	
-					
-				jsr PRINT.DEBUG
-				bra .1
+				bcc .1
+				bcs .66
+*				jsr Wait.Timeout
+*				bcc .66
+
+*				jmp .2
+
 				
-.2				lda #5					Ctrl-E
-				>SYSCALL PutCA
-				bcs *
-				
-				lda #$84
-				jsr PRINT.DEBUG
-								
-.3				>SYSCALL Sleep
+.10				>SYSCALL Sleep
 				>SYSCALL GetC
-				bcs .4
+				bcs .1
+
 				
-				jsr PRINT.DEBUG
 				
-				tax
-				lda (pData)
-				cmp #63
-				beq .4
-				inc
-				sta (pData)
-				tay
-				txa
+.1				cmp #IAC
+				beq .11
+				
+				jmp .2
+				
+.11				>SYSCALL Sleep
+				>SYSCALL GetC
+				bcs .11
+
+				ldy #IAC.VERB
 				sta (pData),y
-				bra .3
 				
-.4				lda (pData)
+*				jsr PRINT.DEBUG				
+				
+.12				>SYSCALL Sleep
+				>SYSCALL GetC
+				bcs .12
+				
+				ldy #IAC.OPT
+				sta (pData),y
+				
+*				jsr PRINT.DEBUG
+				
+				ldy #IAC.VERB
+				lda (pData),y
+				cmp #SB
+				bne .10
+				
+				ldy #IAC.OPT
+				lda (pData),y
+				cmp #TELOPT.TTYPE
+				bne .15					only interested in Term Type, go get IAC,SE
+				
+.13				>SYSCALL Sleep
+				>SYSCALL GetC
+				bcs .13			
+				
+				cmp #SB.IS				not a valid reply, go get IAC,SE
+				bne .15
+				
+				lda #0
+				sta (pData)				reset IAC.TERM
+				
+.14				>SYSCALL Sleep
+				>SYSCALL GetC
+				bcs .14			
+				
+				cmp #IAC
+				beq .16					end of DATA, go wait SE
+				
+				pha
+				lda (pData)
+				inc
+				tay
+				sta (pData)
+				pla
+				
+				sta (pData),y
+				bra .14
+				
+.15				>SYSCALL Sleep
+				>SYSCALL GetC
+				bcs .15
+				
+				cmp #IAC
+				bne .15
+				
+.16				>SYSCALL Sleep
+				>SYSCALL GetC
+				bcs .16
+				
+				cmp #SE
+				bne .16
+				
+				
+				jmp .10
+				
+.2				
+				
+				lda (pData)
 				beq .5
-				>PUSHW pdata
+				>PUSHW pData
 				>PUSHW L.TERM
 				>SYSCALL SetEnv
 				
-.5				>LDYA L.MSG.GREETINGS
+.5				
+
+				>LDYA L.MSG.TELNET.OPT
+				>SYSCALL CPrintFYA
+				bcs *
+
+				>LDYA L.MSG.GREETINGS
 				>SYSCALL CPrintFYA
 				
 				bcs .8					unable to send greetings...loop..
@@ -134,8 +205,18 @@ CS.RUN
 .8				clc
 				rts
 *--------------------------------------
-CS.DOEVENT		sec
-				rts		
+CS.DOEVENT		lda (pEvent)
+				bpl .9					is it a TIMER event?
+
+				ldy #TimeOut
+				lda (pData),y
+				beq .9
+				
+				dec 
+				sta (pData),y
+				
+.9				sec						do not discard TIMER event
+				rts	
 *--------------------------------------
 CS.QUIT			ldy #hBinName
 				lda (pData),y
@@ -198,18 +279,33 @@ PRINT.DEBUG		phx
 				rts
 PRINT.DEBUG.JMP	jmp $ffff				
 *--------------------------------------
+Init.Timeout	ldy #TimeOut
+				lda #TIMEOUT.MAX
+				sta (pData),y
+				rts
+*--------------------------------------
+Wait.TimeOut	sec
+				ldy #TimeOut
+				lda (pData),y
+				beq .9
+				clc
+.9				rts
+*--------------------------------------
 CS.END
 PRINT.DEBUG.CHAR	.AS "0123456789ABCDEF"
 MSG.USAGE		>CSTR "GETTY <DEV> <PROGRAM>\r\n"
-MSG.TELNETOPT	
+MSG.TELNET.OPT	
+*				.DA #IAC,#WILL,#TELOPT.BINARY
 *				.DA #IAC,#DO,#TELOPT.LINEMODE
 *				.DA #IAC,#SB,#TELOPT.LINEMODE,#1,#0,#IAC,#SE
-				.DA #IAC,#WILL,#TELOPT.BINARY
+				.DA #IAC,#DONT,#TELOPT.ECHO
 				.DA #IAC,#WILL,#TELOPT.ECHO
-*				.DA #IAC,#WILL,#TELOPT.SGA
+				.DA #IAC,#WILL,#TELOPT.SGA
+				.DA #IAC,#DO,#TELOPT.SGA
 *				.DA #IAC,#DO,#TELOPT.NAWS
-				.DA #IAC,#DO,TELOPT.TTYPE
-				.DA #13,#10,#0
+				.DA #IAC,#DO,#TELOPT.TTYPE
+				.DA #IAC,#SB,#TELOPT.TTYPE,#SB.SEND,#IAC,#SE
+				.DA #0
 MSG.GREETINGS	>CSTR "\r\nA2osX-GeTTY\r\n"
 TERM			>PSTR "TERM"
 * \e[12h
@@ -217,8 +313,11 @@ TERM			>PSTR "TERM"
 				.DUMMY
 				.OR 0
 DS.START
-InBuf			.BS 64				
+IAC.TERM		.BS 64				
 hBinName		.BS 1
+TimeOut			.BS 1
+IAC.VERB		.BS 1
+IAC.OPT			.BS 1
 DS.END			.ED
 MAN
 SAVE SBIN/GETTY.S
