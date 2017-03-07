@@ -159,7 +159,7 @@ Prints Pascal/C-Style String
 + Y,A = Ptr to S.DEVINFO
 
 #MkNodYA
-return a S.FILE for a given Device NAME
+return a hFile for a given Device Name
 
 ##IN: 
 + Y,A=DevName
@@ -169,7 +169,7 @@ return a S.FILE for a given Device NAME
 + A = hFILE
 
 #MkNodA
-return a S.FILE for a given Socket
+return a hFile for a given Socket
 
 ##IN: 
 + A=hSocket

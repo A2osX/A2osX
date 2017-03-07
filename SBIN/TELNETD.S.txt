@@ -12,6 +12,12 @@ AUTO 6
 				.INB /A2OSX.DEV/INC/A2OSX.I
 				.INB /A2OSX.DEV/INC/LIBTCPIP.I
 *--------------------------------------
+TIMEOUT.MAX		.EQ 30					30 sec.
+CONN.MAX		.EQ 16
+*--------------------------------------
+ZPIPCfgPtr		.EQ ZPBIN
+ZPSktPtr		.EQ ZPBIN+2
+*--------------------------------------
 *			File Header (16 Bytes)
 *--------------------------------------
 CS.START		cld
@@ -20,7 +26,7 @@ CS.START		cld
 				.DA #1					BIN Layout Version 1
 				.DA 0
 				.DA CS.END-CS.START		Code Length To Relocate
-				.DA 0
+				.DA DS.END-DS.START		Data Segment to Allocate
 				.DA 0
 				.DA 0
 *--------------------------------------
@@ -31,52 +37,236 @@ CS.START		cld
 				.DA CS.DOEVENT
 				.DA	CS.QUIT
 L.LIBTCPIP		.DA LIBTCPIP
+L.Socket		.DA Socket
+L.MSG.TCPWAIT	.DA MSG.TCPWAIT
+L.MSG.INITOK	.DA MSG.INITOK
+L.MSG.TCPIPERR	.DA MSG.TCPIPERR
+L.MSG.SKTERR	.DA MSG.SKTERR
+L.MSG.ABORT		.DA MSG.ABORT
+L.MSG.INCOMING	.DA MSG.INCOMING
 				.DA 0				
 *--------------------------------------
 CS.INIT			>LDYA L.LIBTCPIP
 				>SYSCALL LoadLibYA
-				bcs .99
-
 				sta hLIBTCPIP
 
-				>PUSHWI S.IP.PROTOCOL.TCP
-				>PUSHWI TCP.PORT.TELNET
-				>LIBCALL hLIBTCPIP,LIBTCPIP.NewSrvSocket
-				bcs .99
-				sta hSrvSocket
-				
-				clc	
-.99				rts
+				lda (pPs)
+				ora #S.PS.F.EVENT		Now accept events
+				sta (pPs)
+				clc
+				rts
 *--------------------------------------
-CS.RUN			>PUSHB hSrvSocket
-				>LIBCALL hLIBTCPIP,LIBTCPIP.SrvSocketAccept
+CS.RUN			jsr Init.Timeout
+
+				>LDYA L.MSG.TCPWAIT
+				>SYSCALL CPrintFYA
+				
+.1				>LIBCALL hLIBTCPIP,LIBTCPIP.GET.IPCFG	is TCPIP loaded ?
+				bcs .99
+				>STYA ZPIPCfgPtr
+				
+				lda (ZPIPCfgPtr)		Configured ?
+				bmi CS.RUN.INIT
+				
+				>SYSCALL Sleep
+				jsr Wait.Timeout
+				bcc .1
+				>SYSCALL GetC
+				bcs .1
+				cmp #$03
+				bne .1
+				jmp CS.RUN.ABORT
+				
+.99				>LDYA L.MSG.TCPIPERR
+				>SYSCALL CPrintFYA
+				lda #SYSMGR.ERRSYN
+				sec	
+				rts
+				
+CS.RUN.INIT		ldx #3
+				ldy #S.IPCFG.IP+3
+.1				lda (ZPIPCfgPtr),y
+				sta Socket.Src.Addr,x
+				dey
+				dex
+				bpl .1
+				
+				>PUSHW L.Socket
+				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.New
+				bcs .9
+				txa
+				ldy #hSrvSocket
+				sta (pData),y
+				
+				>LDYA L.MSG.INITOK
+				>SYSCALL CPrintFYA
+
+.2				>SYSCALL Sleep
+				jsr CS.RUN.SERVER
+				bcs CS.RUN.ERR
+				
+				ldy #SktIndex
+				lda (pData),y
+				tay
+				lda (pData),y			hSockets
+				
+				beq .3
+				
+*				jsr CS.RUN.CLIENT
+				
+.3				ldy #SktIndex
+				lda (pData),y
+				inc
+				cmp #CONN.MAX
+				bne .4
+				lda #0
+				
+.4				sta (pData),y		
+				
+				bra .2
+				
+.9				>LDYA L.MSG.SKTERR
+				>SYSCALL CPrintFYA
+				lda #SYSMGR.ERRSYN
+				sec	
+				rts
+				
+CS.RUN.ABORT	>LDYA L.MSG.ABORT
+				>SYSCALL CPrintFYA
+				lda #0
+				
+CS.RUN.ERR		sec	
+				rts
+*--------------------------------------
+CS.RUN.SERVER	ldy #hSrvSocket
+				lda (pData),y
+				
+				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.AcceptA
 				bcs .8
-	
+				pha
 				
-	
+				ldy #hSockets
+				ldx #CONN.MAX
 				
+.1				lda (pData),y
+				beq .2
+				iny
+				dex
+				bne .1
+				
+				pla
+				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.CloseA
+				bra .8
+				
+.2				pla
+				sta (pData),y
+				
+				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.GetA
+				>STYA ZPSktPtr
+
+				ldx #3
+				ldy #S.SOCKET.DST.ADDR+3
+				
+.3				>PUSHB (ZPSktPtr),y
+				dey
+				dex
+				bpl .3
+				
+				>LDYA L.MSG.INCOMING
+				>SYSCALL CPrintFYA
+.8				clc
+.9				rts
+*--------------------------------------
+CS.RUN.CLIENT	>PUSHA					hSocket
+				sta .1+1
+				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.GetCA
+				bcs .8
+				sta .2+1
+				
+				>SYSCALL PutCA
+				
+				
+.1				lda #$ff
+				>PUSHA
+				
+.2				lda #$ff
+				>PUSHA
+
+				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.PutC
+
 .8				clc
 				rts
 *--------------------------------------
-CS.DOEVENT		clc
+CS.DOEVENT		sec
 				rts
 *--------------------------------------
-CS.QUIT			>PUSHB hSrvSocket
-				>LIBCALL hLIBTCPIP,LIBTCPIP.CloseSocket
+CS.QUIT			ldx #CONN.MAX
+				ldy #hSockets
 				
-
+.1				lda (pData),y
+				beq .2
+				
+				phx
+				phy
+				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.CLOSEA
+				ply
+				plx
+				
+.2				iny
+				dex
+				bne .1
+				
+				ldy #hSrvSocket
+				lda (pData),y
+				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.CLOSEA
+				
 				lda hLIBTCPIP
 				>SYSCALL UnloadLibA
 				clc
 				rts
 *--------------------------------------
+Init.Timeout	ldy #TimeOut
+				lda #TIMEOUT.MAX
+				sta (pData),y
+				rts
+*--------------------------------------
+Wait.TimeOut	sec
+				ldy #TimeOut
+				lda (pData),y
+				beq .9
+				clc
+.9				rts
+*--------------------------------------
 CS.END
 *--------------------------------------
 LIBTCPIP		>PSTR "libtcpip.o"
+MSG.TCPWAIT		>CSTR "TELNETD:Waiting for TCP/IP initializing...\r\n"
+MSG.INITOK		>CSTR "TELNETD:Init Ok, Listening.\r\n"
+MSG.TCPIPERR	>CSTR "TELNETD:TCP/IP Not initialized properly\r\n"
+MSG.SKTERR		>CSTR "TELNETD:Listen Error\r\n"
+MSG.ABORT		>CSTR "TELNETD:User Aborted\r\n"
+MSG.INCOMING	>CSTR "TELNETD:Incoming Connection From : %d.%d.%d.%d\r\n"
 hLIBTCPIP		.BS 1
-hSrvSocket		.BS 1
 *--------------------------------------
-
+Socket			.DA #S.SOCKET.SOCK.STREAM
+				.DA #S.SOCKET.SO.ACCEPTCONN
+				.DA #S.SOCKET.TCP.STATUS.LISTEN
+				.BS 1
+Socket.Src.Addr	.BS 4
+Socket.Src.Port	.DA 23
+Socket.Dst.Addr	.BS 4
+Socket.Dst.Port	.BS 2
+*--------------------------------------
+				.DUMMY
+				.OR 0
+DS.START
+hSockets		.BS	CONN.MAX			pData
+SktIndex		.BS 1
+hSrvSocket		.BS 1
+TimeOut			.BS 1
+DS.END
+				.ED
+*--------------------------------------
 MAN
 SAVE SBIN/TELNETD.S
 ASM

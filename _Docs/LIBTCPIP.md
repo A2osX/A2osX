@@ -110,6 +110,15 @@
 ##Out : 
 + A = hSocket
 
+#SKT.MkNodA
++ Create a new file from TCP socket
+
+##In : 
++ A = hSocket
+
+##Out : 
++ A = hFile
+
 #SKT.Write (DGRAM,STREAM,RAW)
 + Send block of data
 
@@ -119,7 +128,6 @@
 + PUSHW = len
 
 ##Out : 
-+ A = hFrame
 
 #SKT.ReadA (DGRAM,RAW)
 
@@ -137,7 +145,6 @@
 + PUSHB = Char
 
 ##Out : 
-+ A = char
 
 #SKT.PutS (STREAM)
 + Write Line in pBuf
