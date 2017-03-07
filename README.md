@@ -37,6 +37,10 @@ Several subprojects are now indentified :
   
 ![](https://github.com/burniouf/A2osX/blob/master/ScreenShot.EDIT.bmp)  
     
+![](https://github.com/burniouf/A2osX/blob/master/ScreenShot.IP1.bmp)  
+  
+![](https://github.com/burniouf/A2osX/blob/master/ScreenShot.IP2.bmp)  
+    
 ![](https://github.com/burniouf/A2osX/blob/master/PuTTY.png)  
   
 ## General Information:  
