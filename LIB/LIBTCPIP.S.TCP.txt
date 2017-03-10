@@ -131,34 +131,29 @@ TCP.IN.JMP.LISTEN
 				lda #ERR.SKT.OOS
 .9				rts
 				
-.3				jsr ARP.AddFromFrameInPtr
+.3				jsr SKT.GetTCB
 
-				ldy #S.TCP.SEQ.NUMBER+3
+				ldy #S.TCP.SEQ.NUMBER
 				ldx #3
 				
 				sec
 				
 .1				lda (ZPFrameInPtr),y	Set ACK=SEQ+1 for new socket...
 				adc #0
-				sta TmpDWord,x
-				dey
+				sta SKT.TCBCache+S.TCB.ACKNUM,x
+				iny
 				dex
 				bpl .1
 				
-				ldx #3
-				ldy #S.TCB.ACKNUM+3
+				jsr SKT.StoreTCB
 				
-.4				lda TmpDWord,x			Update new socket with ACK number
-				sta (ZPPtrSKT),y
-				dey
-				dex
-				bpl .4
-				
+				jsr ARP.AddFromFrameInPtr
+
 				jsr TCP.OUT.SYNACK
 				bcs .9
 				
 				ldy #S.SOCKET.TCP.STATUS
-				lda #S.SOCKET.TCP.STATUS.SYNSENT
+				lda #S.SOCKET.TCP.STATUS.SYNRCVD
 				sta (ZPPtrSKT),y
 				
 				
@@ -166,144 +161,161 @@ TCP.IN.JMP.LISTEN
 				rts
 *--------------------------------------
 TCP.IN.JMP.SYNSENT
+				ldy #S.TCP.OPTIONS				only accept SYN.ACK packet
+				lda (ZPFrameInPtr),y
+				cmp #S.TCP.OPTIONS.SYN+S.TCP.OPTIONS.ACK
+				bne .8
+
+
+
+
+				
+				ldy #S.SOCKET.TCP.STATUS
+				lda #S.SOCKET.TCP.STATUS.ESTBLSH
+				sta (ZPPtrSKT),y				
+				
+.8				clc
+				rts
+*--------------------------------------
+TCP.IN.JMP.SYNRCVD
 				ldy #S.TCP.OPTIONS				only accept ACK packet
 				lda (ZPFrameInPtr),y
 				cmp #S.TCP.OPTIONS.ACK
 				bne .8
 				
+				jsr SKT.GetTCB
+			
 				ldx #3
-				ldy #S.TCB.SEQNUM+3
-				
+				ldy #S.TCP.ACK.NUMBER
+
 				sec
 				
-.10				lda (ZPPtrSKT),y
+.1				lda SKT.TCBCache+S.TCB.SEQNUM,x
 				adc #0
-				sta TmpDWord,x
-				dey
-				dex
-				bpl .10
-				
-				ldx #3
-				ldy #S.TCP.ACK.NUMBER+3
-.11				lda (ZPFrameInPtr),y
-				cmp TmpDWord,x
+				sta	SKT.TCBCache+S.TCB.SEQNUM,x 
+				eor (ZPFrameInPtr),y
 				bne .8
-				dey
+				iny
 				dex
-				bpl .11
+				bpl .1
 				
-				ldx #3
-				ldy #S.TCB.SEQNUM+3
-.12				lda TmpDWord,x
-				sta (ZPPtrSKT),y
-				dey
-				dex
-				bpl .12
+				jsr SKT.StoreTCB
 				
 				ldy #S.SOCKET.TCP.STATUS
 				lda #S.SOCKET.TCP.STATUS.ESTBLSH
-				sta (ZPPtrSKT),y
-				
+				sta (ZPPtrSKT),y	
 								
 .8				clc
 				rts
 *--------------------------------------
-TCP.IN.JMP.SYNRCVD
-				clc
-				rts
-*--------------------------------------
 TCP.IN.JMP.ESTBLSH
+				jsr SKT.GetTCB
+
 				ldy #S.TCP.OPTIONS
 				lda (ZPFrameInPtr),y
 				bit #S.TCP.OPTIONS.ACK
-				beq .2
+				beq .1
 				
-				ldy #S.TCP.ACK.NUMBER+3	Get new ACK number from FrameIn...
-				ldx #3
-				
-.1				lda (ZPFrameInPtr),y
-				sta TmpDWord,x
-				dey
-				dex
-				bpl .1
-				
-				ldy #S.TCB.ACKNUM Substract old Ack from socket
-				sec
-				lda (ZPPtrSKT),y
-				sbc TmpDWord
-				pha						save result LO for FreeData
+				jsr SKT.AckDataToSktOut
 
-				lda TmpDWord
-				sta (ZPPtrSKT),y		and store new ACK in skt
-				
-				iny
-				lda (ZPPtrSKT),y
-				sbc TmpDWord+1
-				
-				tax						save result HI for FreeData
-				
-				lda TmpDWord+1			we stop here, will never be more than K.TCP.WSIZE
-				sta (ZPPtrSKT),y
-			
-				iny
-				lda TmpDWord+2
-				sta (ZPPtrSKT),y
-
-				iny
-				lda TmpDWord+3
-				sta (ZPPtrSKT),y
-				
-				pla
-				jsr SKT.FreeDataFromSktOutAX
-*----------
-.2				lda ZPDataInLen
+.1				lda ZPDataInLen
 				ora ZPDataInLen+1
-				beq .8					No data in this incoming frame...
-				
-				ldy #S.TCP.SEQ.NUMBER+3
-				ldx #3
-
-.3				lda (ZPFrameInPtr),y
-				sta TmpDWord,x
-				dey
-				dex
-				bpl .3
+				beq .2					No data in this incoming frame...
 				
 				jsr TCP.SetDataInPtrAndLen
 				
 				jsr SKT.AddDataToSktIn
+				bcs .9
 				
+.2				ldy #S.TCP.OPTIONS
+				lda (ZPFrameInPtr),y
+				bit #S.TCP.OPTIONS.FIN
+				beq .1
+				
+				ldy #S.SOCKET.TCP.STATUS
+				lda #S.SOCKET.TCP.STATUS.CLWAIT
+				sta (ZPPtrSKT),y
+				
+				ldy #S.SOCKET.TCP.OPTIONS
+				lda (ZPPtrSKT),y
+				ora #S.TCP.OPTIONS.ACK
+				sta (ZPPtrSKT),y
+				
+.8				jsr SKT.StoreTCB
+
+				clc
+.9				rts
+*--------------------------------------
+TCP.IN.JMP.CLWAIT
+
+				clc
+				rts
+*--------------------------------------
+TCP.IN.JMP.LASTACK
+				ldy #S.TCP.OPTIONS				only accept ACK packet
+				lda (ZPFrameInPtr),y
+				cmp #S.TCP.OPTIONS.ACK
+				bne .8
+				
+				ldy #S.SOCKET.SQ.hOutMem
+				lda (ZPPtrSKT),y
+				beq .1
+				>SYSCALL FreeMemA
+				
+.1				ldy #S.SOCKET.SQ.hInMem
+				lda (ZPPtrSKT),y
+				beq .2
+				>SYSCALL FreeMemA
+				
+.2				ldy #S.SOCKET.SQ.hTCB
+				lda (ZPPtrSKT),y
+				beq .3
+				>SYSCALL FreeMemA				
+
+.3				lda #0
+				sta (ZPPtrSKT)
 				
 .8				clc
 				rts
 *--------------------------------------
-TCP.IN.JMP.CLWAIT
-TCP.IN.JMP.LASTACK
 TCP.IN.JMP.FINWT1
+*--------------------------------------
 TCP.IN.JMP.FINWT2
+*--------------------------------------
 TCP.IN.JMP.CLOSING
+*--------------------------------------
 TCP.IN.JMP.TIMEWT
 				clc
 				rts
 *--------------------------------------
-TCP.OUT.SYNACK	>LDYAI 0
+TCP.OUT.SYN		>LDYAI 0
 				jsr TCP.NewFrame
 				bcs .9				
 				
 				ldx #3
-				ldy #S.TCP.ACK.NUMBER+3
+				ldy #S.TCP.SEQ.NUMBER
 				
-.1				lda TmpDWord,x
+.1				lda SKT.TCBCache+S.TCB.SEQNUM,x
 				sta (ZPFrameOutPtr),y
-				dey
+				iny
 				dex
 				bpl .1
 				
 				ldy #S.TCP.OPTIONS
-				lda #S.TCP.OPTIONS.SYN+S.TCP.OPTIONS.ACK
+				lda #S.TCP.OPTIONS.SYN
 				sta (ZPFrameOutPtr),y
 
-				jsr TCP.SendFrame
+				iny 					S.TCP.WINDOW
+				lda /K.TCP.WSIZE
+				sta (ZPFrameOutPtr),y
+				iny
+				lda #K.TCP.WSIZE
+				sta (ZPFrameOutPtr),y
+
+				ldy #S.TCP.SEQ.NUMBER
+				ldx #3
+
+				jsr FRM.SendIP
 				bcs .9
 				
 				ldy #S.SOCKET.TCP.OPTIONS
@@ -317,14 +329,58 @@ TCP.OUT.SYNACK	>LDYAI 0
 				clc
 .9				rts
 *--------------------------------------
-TCP.OUT.ESTBLSH	ldy #S.TCB.OUTUSED
-				lda (ZPPtrSKT),y
+TCP.OUT.SYNACK	>LDYAI 0
+				jsr TCP.NewFrame
+				bcs .9				
 				
-				pha
+				ldx #3
+				ldy #S.TCP.SEQ.NUMBER
 				
+.1				lda SKT.TCBCache+S.TCB.SEQNUM,x
+				sta (ZPFrameOutPtr),y
 				iny
-				lda (ZPPtrSKT),y
-				ply
+				dex
+				bpl .1
+				
+				ldy #S.TCP.ACK.NUMBER
+				ldx #3
+				
+.3				lda SKT.TCBCache+S.TCB.ACKNUM,x
+				sta (ZPFrameOutPtr),y
+				iny
+				dex
+				bpl .3
+
+				ldy #S.TCP.OPTIONS
+				lda #S.TCP.OPTIONS.SYN+S.TCP.OPTIONS.ACK
+				sta (ZPFrameOutPtr),y
+
+				iny 					S.TCP.WINDOW
+				lda /K.TCP.WSIZE
+				sta (ZPFrameOutPtr),y
+				iny
+				lda #K.TCP.WSIZE
+				sta (ZPFrameOutPtr),y
+
+				jsr FRM.SendIP
+				bcs .9
+				
+				ldy #S.SOCKET.TCP.OPTIONS
+				lda #0
+				sta (ZPPtrSKT),y	
+
+				ldy #S.SOCKET.TCP.STATUS
+				lda #S.SOCKET.TCP.STATUS.SYNSENT
+				sta (ZPPtrSKT),y	
+				
+				clc
+.9				rts
+*--------------------------------------
+TCP.OUT			jsr SKT.GetTCB 
+
+				lda SKT.TCBCache+S.TCB.OUTUSED+1
+				ldy SKT.TCBCache+S.TCB.OUTUSED
+				
 				bne .1
 				
 				tax
@@ -344,109 +400,31 @@ TCP.OUT.ESTBLSH	ldy #S.TCB.OUTUSED
 				bcs .9
 
 				jsr SKT.GetDataFromSktOut
-				
-				ldy #S.TCB.SEQNUM	compute new SEQ.NUM
-				lda (ZPPtrSKT),y
-				clc
-				adc TmpOffset
-				sta TmpDWord
-				
-				iny
-				lda (ZPPtrSKT),y
-				adc TmpOffset+1
-				sta TmpDWord+1
-				
-				iny
-				lda (ZPPtrSKT),y
-				adc #0
-				sta TmpDWord+2
-				
-				iny
-				lda (ZPPtrSKT),y
-				adc #0
-				sta TmpDWord+3
-				
-				ldy #S.TCP.SEQ.NUMBER+3
-				ldx #3
-				
-.3				lda TmpDWord,x
-				sta (ZPFrameOutPtr),y
-				dey
-				dex
-				bpl .3
-				
+								
 				ldy #S.SOCKET.TCP.OPTIONS
 				lda (ZPPtrSKT),y
 				ldy #S.TCP.OPTIONS
 				sta (ZPFrameOutPtr),y
 				
-.7				jsr TCP.SendFrame
+.7				jsr FRM.SendIP
 				bcs .9
 				
 				ldy #S.SOCKET.TCP.OPTIONS
 				lda (ZPPtrSKT),y
 				bit #S.TCP.OPTIONS.FIN
-				beq .70
+				beq .8
 				
 				ldy #S.SOCKET.TCP.STATUS
 				lda #S.SOCKET.TCP.STATUS.FINWT1
 				sta (ZPPtrSKT),y
 
-.70				ldy #S.SOCKET.TCP.OPTIONS
+.8				ldy #S.SOCKET.TCP.OPTIONS
 				lda #0
 				sta (ZPPtrSKT),y
 				
-				ldx #3
-				ldy #S.TCB.SEQNUM+3
+				jmp SKT.StoreTCB
 				
-.71				lda TmpDWord,x
-				sta (ZPPtrSKT),y
-				dey
-				dex
-				bpl .71
-				
-.8				clc
 .9				rts
-*--------------------------------------
-TCP.GetSktAckNum
-				ldy #S.TCP.ACK.NUMBER
-				ldx #4
-				
-.1				lda (ZPFrameInPtr),y
-				pha
-				iny
-				dex
-				bne .1
-				
-				ldy #S.TCB.ACKNUM+3
-				ldx #4
-				
-.2				pla
-				sta (ZPPtrSKT),y
-				dey
-				dex
-				bne .2
-				rts
-*--------------------------------------
-TCP.UpdateSktAckNum
-				ldy #S.TCB.ACKNUM+3
-				lda (ZPPtrSKT),y
-				clc
-				adc ZPDataInLen
-				sta (ZPPtrSKT),y
-				dey
-				lda (ZPPtrSKT),y
-				adc ZPDataInLen+1
-				sta (ZPPtrSKT),y
-				dey
-				lda (ZPPtrSKT),y
-				adc #0
-				sta (ZPPtrSKT),y
-				dey
-				lda (ZPPtrSKT),y
-				adc #0
-				sta (ZPPtrSKT),y
-				rts
 *--------------------------------------
 TCP.SetDataInPtrAndLen
 				ldy #S.TCP.DATAOFFSET
@@ -528,25 +506,6 @@ TCP.NewFrame	ldx #S.IP.PROTOCOL.TCP
 				
 				clc
 .9				rts
-*--------------------------------------
-TCP.SendFrame	ldy #S.TCB.SEQNUM+7
-				ldx #7
-				
-.1				lda (ZPPtrSKT),y
-				pha
-				dey
-				dex
-				bpl .1
-				
-				ldy #S.TCP.SEQ.NUMBER
-				
-.2				pla
-				sta (ZPFrameOutPtr),y
-				iny
-				cpy #S.TCP.SEQ.NUMBER+8
-				bne .2
-				
-				jmp FRM.SendIP
 *--------------------------------------
 TCP.ComputeChecksum
 				lda #0					RESET.TCP.CHECKSUM
