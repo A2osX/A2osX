@@ -9,7 +9,8 @@
 ##Out : 
 + X=BlockCount (max 22)
 + A=PageCount  (max 44)
-BuildProDOSCat
+
+#BuildProDOSCat
 
 ##In :
 + PUSHW = DevSize (in 512b blocks)
