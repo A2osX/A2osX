@@ -50,10 +50,8 @@ TCP.IN			jsr IP.FillSKT.TemplateSrcDst
 				ldy #S.TCP.OPTIONS		yes, only accept SYN packet
 				lda (ZPFrameInPtr),y
 
-				and #S.TCP.OPTIONS.SYN
-				beq .7					maybe a regular frame for a regular socket
-				
-				jmp TCP.IN.JMP.LISTEN
+				cmp #S.TCP.OPTIONS.SYN	SYN only, if SYN.ACK, pass to regular socket
+				beq TCP.IN.JMP.LISTEN
 			
 .5				ldy #S.SOCKET.DST.ADDR
 
@@ -96,10 +94,6 @@ TCP.IN			jsr IP.FillSKT.TemplateSrcDst
 *--------------------------------------
 TCP.IN.RST		lda #0
 				sta (ZPPtrSKT)
-				clc
-				rts
-*--------------------------------------
-TCP.IN.JMP.CLOSED
 				clc
 				rts
 *--------------------------------------
@@ -159,27 +153,43 @@ TCP.IN.JMP.LISTEN
 .99				rts
 *--------------------------------------
 TCP.IN.JMP.SYNSENT
-				clv
-				bra *
-
-				ldy #S.TCP.OPTIONS				only accept SYN.ACK packet
+				ldy #S.TCP.OPTIONS		SYN Stend, only accept SYN.ACK packet, then Send ACK 
 				lda (ZPFrameInPtr),y
 				cmp #S.TCP.OPTIONS.SYN+S.TCP.OPTIONS.ACK
 				bne .8
 
+				jsr SKT.GetTCB
+				
+				ldx #3
+				ldy #S.TCP.SEQ.NUMBER+3
 
+				sec				
 
+.1				lda SKT.TCBCache+S.TCB.ACKNUM,x
+				adc #0
+				sta	SKT.TCBCache+S.TCB.ACKNUM,x 
+				eor (ZPFrameInPtr),y
+				bne .8
+				dey
+				dex
+				bpl .1
 
+				ldy #S.SOCKET.TCP.OPTIONS
+				lda #S.TCP.OPTIONS.ACK
+				sta (ZPPtrSKT),y
+
+				jsr TCP.OUT.I
+				bcs .9
 				
 				ldy #S.SOCKET.TCP.STATUS
 				lda #S.SOCKET.TCP.STATUS.ESTBLSH
 				sta (ZPPtrSKT),y				
 				
 .8				clc
-				rts
+.9				rts
 *--------------------------------------
 TCP.IN.JMP.SYNRCVD
-				ldy #S.TCP.OPTIONS				only accept ACK packet
+				ldy #S.TCP.OPTIONS		SYN Recieved, SYN.ACK Sent, only accept ACK packet
 				lda (ZPFrameInPtr),y
 				cmp #S.TCP.OPTIONS.ACK
 				bne .8
@@ -219,7 +229,7 @@ TCP.IN.JMP.ESTBLSH
 				
 				jsr SKT.AckDataToSktOut
 
-.1				jsr TCP.SetDataInPtrAndLen
+.1				jsr TCP.IN.SetDataInPtrAndLen
 				
 				lda ZPDataInLen
 				ora ZPDataInLen+1
@@ -251,7 +261,7 @@ TCP.IN.JMP.CLWAIT
 				rts
 *--------------------------------------
 TCP.IN.JMP.LASTACK
-				ldy #S.TCP.OPTIONS				only accept ACK packet
+				ldy #S.TCP.OPTIONS		only accept ACK packet
 				lda (ZPFrameInPtr),y
 				cmp #S.TCP.OPTIONS.ACK
 				bne .8
@@ -284,7 +294,42 @@ TCP.IN.JMP.FINWT2
 TCP.IN.JMP.CLOSING
 *--------------------------------------
 TCP.IN.JMP.TIMEWT
+*--------------------------------------
+TCP.IN.JMP.CLOSED
 				clc
+				rts
+*--------------------------------------
+TCP.IN.SetDataInPtrAndLen
+				ldy #S.TCP.DATAOFFSET
+				lda (ZPFrameInPtr),y
+				and #$F0
+				lsr
+				lsr		
+				adc #S.TCP
+				sta TmpOffset
+				
+				lda #0
+*				clc				
+				adc /S.TCP
+				sta TmpOffset+1			TmpOffset=Data Offset in Frame
+
+				lda ZPFrameInPtr
+*				clc				
+				adc TmpOffset
+				sta ZPDataInPtr
+				
+				lda ZPFrameInPtr+1
+				adc #0
+				sta ZPDataInPtr+1
+				
+				lda ZPFrameInLen
+				sec
+				sbc TmpOffset
+				sta ZPDataInLen
+				
+				lda ZPFrameInLen+1
+				sbc TmpOffset+1
+				sta ZPDataInLen+1
 				rts
 *--------------------------------------
 TCP.OUT.SYN		>LDYAI 0
@@ -311,15 +356,12 @@ TCP.OUT.SYN		>LDYAI 0
 				lda #K.TCP.WSIZE
 				sta (ZPFrameOutPtr),y
 
-				ldy #S.TCP.SEQ.NUMBER
-				ldx #3
-
 				jsr FRM.SendIP
 				bcs .9
 				
 				ldy #S.SOCKET.TCP.OPTIONS
 				lda #0
-				sta (ZPPtrSKT),y	
+				sta (ZPPtrSKT),y
 
 				clc
 .9				rts
@@ -388,6 +430,15 @@ TCP.OUT.I		lda SKT.TCBCache+S.TCB.OUTUSED+1
 				ldy #S.TCP.OPTIONS
 				sta (ZPFrameOutPtr),y
 				
+				ldx #7
+				ldy #S.TCP.SEQ.NUMBER+7
+				
+.3				lda SKT.TCBCache+S.TCB.SEQNUM,x
+				sta (ZPFrameOutPtr),y
+				dey
+				dex
+				bpl .3			
+				
 .7				jsr FRM.SendIP
 				bcs .9
 				
@@ -407,39 +458,6 @@ TCP.OUT.I		lda SKT.TCBCache+S.TCB.OUTUSED+1
 				jmp SKT.StoreTCB
 				
 .9				rts
-*--------------------------------------
-TCP.SetDataInPtrAndLen
-				ldy #S.TCP.DATAOFFSET
-				lda (ZPFrameInPtr),y
-				and #$F0
-				lsr
-				lsr		
-				adc #S.TCP
-				sta TmpOffset
-				
-				lda #0
-*				clc				
-				adc /S.TCP
-				sta TmpOffset+1			TmpOffset=Data Offset in Frame
-
-				lda ZPFrameInPtr
-*				clc				
-				adc TmpOffset
-				sta ZPDataInPtr
-				
-				lda ZPFrameInPtr+1
-				adc #0
-				sta ZPDataInPtr+1
-				
-				lda ZPFrameInLen
-				sec
-				sbc TmpOffset
-				sta ZPDataInLen
-				
-				lda ZPFrameInLen+1
-				sbc TmpOffset+1
-				sta ZPDataInLen+1
-				rts
 *--------------------------------------
 TCP.NewFrame	ldx #S.IP.PROTOCOL.TCP
 				jsr FRM.NewIP
