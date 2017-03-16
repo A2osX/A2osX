@@ -145,10 +145,10 @@ note : '$VAR' does NOT expand Variable
 | | | -R : Recurse subdirectories | |
 | RM | Working | -C : Continue On Error | 0.9 |
 | | | -R : Recurse subdirectories | |
-| CP | In Progress | -C : Continue On Error | 0.9 |
+| CP | Working | -C : Continue On Error | 0.9 |
 | | | -R : Recurse subdirectories | |
 | | | -Y : Dont't Prompt For Override | |
-| MV | In Progress | -C : Continue On Error | 0.9 |
+| MV | Working | -C : Continue On Error | 0.9 |
 | | | -R : Recurse subdirectories | |
 | | | -Y : Dont't Prompt For Override | |
 | CAT | Working | -A : Show All non printable caracters | 0.9 |
