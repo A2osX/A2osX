@@ -10,10 +10,13 @@ AUTO 6
 *--------------------------------------
 				.INB /A2OSX.DEV/INC/MACROS.I
 				.INB /A2OSX.DEV/INC/A2OSX.I
+				.INB /A2OSX.DEV/INC/MLI.ERR.I
 				.INB /A2OSX.DEV/INC/NET.8900A.I
 				.INB /A2OSX.DEV/INC/LIBTCPIP.I
 *--------------------------------------
 ZPTmpPTR		.EQ ZPDRV
+Size			.EQ ZPDRV+2
+Counter			.EQ ZPDRV+4
 *--------------------------------------
 *			File Header (16 Bytes)
 *--------------------------------------
@@ -52,9 +55,9 @@ Dev.Detect		>STYA ARGS
 				bne .2
 				
 				lda /PP.ID
-				sta PacketPagePTR,x
-				lda #PP.ID
 				sta PacketPagePTR+1,x
+				lda #PP.ID
+				sta PacketPagePTR,x
 
 				lda PacketPageDATA,x
 				cmp	/DEVID
@@ -74,7 +77,7 @@ Dev.Detect		>STYA ARGS
 				>LDYA L.MSG.DETECT.KO
 				>SYSCALL CPrintFYA
 
-				lda #$28				MLI.ERR.NODEV
+				lda #MLI.ERR.NODEV
 				sec
 				rts
 				
@@ -88,15 +91,15 @@ Dev.Detect		>STYA ARGS
 				lda #A2osX.SLOTS.NET
 				sta A2osX.SLOTS,y
 				
-				lda #PP.ID+2			Get Revision# of ths chip...
-				sta PacketPagePTR,x
-				lda /PP.ID+2
+				lda /PP.ID+2			Get Revision# of ths chip...
 				sta PacketPagePTR+1,x
+				lda #PP.ID+2
+				sta PacketPagePTR,x
 				
 				lda PacketPageDATA,x
-				sta DEVSTAT+S.DEVSTAT.VERSION	set Hardware version
+				sta DEVSTAT+S.DEVSTAT.VERSION
 				lda PacketPageDATA+1,x
-				sta DEVSTAT+S.DEVSTAT.VERSION+1
+				sta DEVSTAT+S.DEVSTAT.VERSION+1	set Hardware version
 				
 				>LDYA ARGS
 				>STYA ZPTmpPTR
@@ -161,7 +164,7 @@ DRV.CS.START	.DA STATUS
 L.DEVSTAT		.DA DEVSTAT
 				.DA 0					end or relocation
 *--------------------------------------
-BADCALL			lda #1					MLI.ERR.BADCALL
+BADCALL			lda #MLI.ERR.BADCALL
 				sec
 				rts
 *--------------------------------------
@@ -169,21 +172,29 @@ STATUS			lda #S.DEVSTAT.NET.STATUS.10
 				sta LINK.STATUS
 
 				ldx DEVSLOTx0
-				>LDYAI PP.LineST
-				>STYA PacketPagePTR,x
-				>LDYA PacketPageDATA,x
-				tya
+				
+				lda /PP.LineST
+				sta PacketPagePTR+1,x
+				lda #PP.LineST
+				sta PacketPagePTR,x
+
+				lda PacketPageDATA,x
 				and #PP.LineST.LinkOK
-				bne .1
+				beq .1
+				
 				lda LINK.STATUS
 				ora #S.DEVSTAT.NET.STATUS.OK
 				sta LINK.STATUS
 	
-.1				>LDYAI PP.TestCTL
-				>STYA PacketPagePTR,x
-				>LDYA PacketPageDATA,x
+.1				lda /PP.TestCTL
+				sta PacketPagePTR+1,x
+				lda #PP.TestCTL
+				sta PacketPagePTR,x
+				
+				lda PacketPageDATA+1,x
 				and /PP.TestCTL.FDX
-				bne .2
+				beq .2
+				
 				lda LINK.STATUS
 				ora #S.DEVSTAT.NET.STATUS.FD
 				sta LINK.STATUS
@@ -192,39 +203,41 @@ STATUS			lda #S.DEVSTAT.NET.STATUS.10
 				clc
 				rts
 *--------------------------------------
-READBLOCK		ldx DEVSLOTx0
-				>LDYAI PP.RxEvent
-				>STYA PacketPagePTR,x
-				>LDYA PacketPageDATA,x
+READBLOCK		php
+				sei
+
+				ldx DEVSLOTx0
+				
+				lda /PP.RxEvent
+				sta PacketPagePTR+1,x
+				lda #PP.RxEvent
+				sta PacketPagePTR,x
+
+				lda PacketPageDATA+1,x
+			ldy PacketPageDATA,x
 				and /PP.RxEvent.RxOK+PP.RxEvent.Brdcast+PP.RxEvent.IA
-				bne READBLOCK.RxOK
-				lda #ERR.DEV.NOFRAME
-READBLOCK.Err	sec
-				rts
+				beq .9
 
-READBLOCK.RxOK	and /PP.RxEvent.Brdcast
-				beq .10
-				lda #$80
+				lda RTDATA+1,x			discard RxStatus
+				lda RTDATA,x
 				
-.10				sta .8+3
+				ldy RTDATA+1,x			get RxLength
+				sty Size+1
 
-				>LDYA RTDATA,x			discard RxStatus
-				
-				lda RTDATA+1,x			get RxLength
-				sta Size+1
-				pha
 				lda RTDATA,x
 				sta Size
 				clc
 				adc #2
-				tay
-				pla
-				adc #0
+				bcc .1
+				iny
 				
-				>PUSHYA					Size+2
+.1				>PUSHA					Size+2
+				tya
+				>PUSHA
 				>PUSHBI 0
 				>SYSCALL GetMem
-				bcs READBLOCK.Err
+				bcs .99
+				
 				>STYA ZPTmpPTR
 				stx .8+1
 				sty .8+3
@@ -244,37 +257,56 @@ READBLOCK.RxOK	and /PP.RxEvent.Brdcast
 				
 				ldx DEVSLOTx0
 
-.1				inc Counter
-				bne .12
+.2				inc Counter
+				bne .3
 				inc Counter+1
 				beq .8
 				
-.12				lda RTDATA,x
+.3				lda RTDATA,x
+				sta	(ZPTmpPTR),y
+				iny
+				bne .4
+				inc ZPTmpPTR+1
+				
+.4				inc Counter
+				bne .5
+				inc Counter+1
+				beq .8
+				
+.5				lda RTDATA+1,x
 				sta	(ZPTmpPTR),y
 				iny
 				bne .2
 				inc ZPTmpPTR+1
-				
-.2				inc Counter
-				bne .21
-				inc Counter+1
-				beq .8
-				
-.21				lda RTDATA+1,x
-				sta	(ZPTmpPTR),y
-				iny
-				bne .1
-				inc ZPTmpPTR+1
-				bne .1
+				bne .2
 				
 .8				ldx	#$ff				hMem
 				ldy	#$ff				PtrLO
 				lda #$ff				PtrHI
+				
+				plp
 				clc
 				rts
-*--------------------------------------
-WRITEBLOCK		>STYA ZPTmpPTR
 				
+.9				lda #ERR.DEV.NOFRAME
+
+.99				plp
+				sec
+				rts
+*--------------------------------------
+WRITEBLOCK		php
+				sei
+				>STYA ZPTmpPTR
+				
+				ldx #5
+				ldy #S.ETH.SRCMAC+5
+				
+.10				lda MAC,x
+				sta (ZPTmpPTR),y
+				dey
+				dex
+				bpl .10
+
 				lda (ZPTmpPTR)
 				sta Size
 				eor #$ff
@@ -286,67 +318,67 @@ WRITEBLOCK		>STYA ZPTmpPTR
 				sta Counter+1
 				
 				ldx DEVSLOTx0
-				>LDYAI PP.TxCMD.LID+PP.TxCMD.TxStartFULL
-				>STYA TxCMD,x
-				>LDYA Size
-				>STYA TxLength,x
-				>LDYAI PP.BusST		
-				>STYA PacketPagePTR,x
 				
+				lda /PP.TxCMD.LID+PP.TxCMD.TxStartFULL
+				sta TxCMD+1,x
+				lda #PP.TxCMD.LID+PP.TxCMD.TxStartFULL
+				sta TxCMD,x
+				
+				lda Size+1
+				sta TxLength+1,x
+				lda Size
+				sta TxLength,x
+				
+				lda /PP.BusST		
+				sta PacketPagePTR+1,x
+				lda #PP.BusST		
+				sta PacketPagePTR,x
+
 				ldy #16
+				
 .1				lda	PacketPageDATA,x
 				and #PP.BusST.TxBidErr
 				bne .9
+				
 				lda	PacketPageDATA+1,x
 				and /PP.BusST.Rdy4TxNOW
 				bne WRITEBLOCK.1
-				lda	#0
-				
-.2				dec
-				bne	.2
 				
 				dey
 				bne	.1
 				
 .9				lda #ERR.DEV.NOBUFFER
+				plp
 				sec
 				rts
 				
-WRITEBLOCK.1	ldy #S.ETH.SRCMAC+5
-				ldx #5
-.10				lda MAC,x
-				sta (ZPTmpPTR),y
-				dey
-				dex
-				bpl .10
-
-				ldx DEVSLOTx0
-				ldy #2
+WRITEBLOCK.1	ldy #2
 
 .1				inc Counter
-				bne .11
+				bne .2
 				inc Counter+1
 				beq .8
 				
-.11				lda	(ZPTmpPTR),y
+.2				lda	(ZPTmpPTR),y
 				sta RTDATA,x
 				iny
-				bne .2
+				bne .3
 				inc ZPTmpPTR+1
 				
-.2				inc Counter
-				bne .21
+.3				inc Counter
+				bne .4
 				inc Counter+1
 				beq .8
 				
-.21				lda	(ZPTmpPTR),y
+.4				lda	(ZPTmpPTR),y
 				sta RTDATA+1,x
 				iny
 				bne .1
 				inc ZPTmpPTR+1
 				bne .1
 				
-.8				clc
+.8				plp
+				clc
 				rts	
 *--------------------------------------
 OPEN			jsr CLOSE
@@ -376,29 +408,41 @@ OPEN			jsr CLOSE
 				rts
 *--------------------------------------
 CLOSE			ldx DEVSLOTx0
-				>LDYAI PP.SelfCTL
-				>STYA PacketPagePTR,x
-				>LDYAI PP.SelfCTL.LID+PP.SelfCTL.RESET
-				>STYA PacketPageDATA,x
 				
-				lda #0
-.1				dec
+				lda /PP.SelfCTL
+				sta PacketPagePTR+1,x
+				lda #PP.SelfCTL
+				sta PacketPagePTR,x
+				
+				lda /PP.SelfCTL.LID+PP.SelfCTL.RESET
+				sta PacketPageDATA+1,x
+
+				lda #PP.SelfCTL.LID+PP.SelfCTL.RESET
+				sta PacketPageDATA,x
+				
+				ldy #0
+				
+.1				lda /PP.SelfST
+				sta PacketPagePTR+1,x
+				lda #PP.SelfST
+				sta PacketPagePTR,x
+				
+				lda PacketPageDATA+1,x
+				lda PacketPageDATA,x
+				and #PP.SelfST.InitDone
+				
+				bne .8
+				
+				iny
 				bne .1
 				
-				>LDYAI PP.SelfCTL
-				>STYA PacketPagePTR,x
-				>LDYAI PP.SelfCTL.LID
-				>STYA PacketPageDATA,x
-				
-				clc
+.8				clc
 				rts
 *--------------------------------------
 DRV.CS.END
 DEVSLOTx0		.BS 1
-Size			.BS 2
-Counter			.BS 2
 *--------------------------------------
-DEVSTAT			.DA #S.DEV.S.BLOCK+S.DEV.S.WRITE+S.DEV.S.READ
+DEVSTAT			.DA #0
 				.BS 3					size
 				>PSTR "Uthernet/CS8900A"
 				.DA #S.DEVSTAT.TYPE.NET
