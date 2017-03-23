@@ -132,7 +132,8 @@ TCP.IN.JMP.LISTEN
 				
 				jsr ARP.AddFromFrameInPtr
 
-				jsr TCP.OUT.SYNACK
+				lda #S.TCP.OPTIONS.SYN+S.TCP.OPTIONS.ACK
+				jsr TCP.OUT.A
 				bcs .9
 
 				ldy #S.SOCKET.TCP.STATUS
@@ -319,120 +320,72 @@ TCP.IN.SetDataInPtrAndLen
 				stx ZPDataInPtr+1
 				rts
 *--------------------------------------
-TCP.OUT.SYN		>LDYAI 0
-				jsr TCP.NewFrame
-				bcs .9				
-				
-				ldx #3
-				ldy #S.TCP.SEQ.NUMBER+3
-				
-.1				lda SKT.TCBCache+S.TCB.SEQNUM,x
-				sta (ZPFrameOutPtr),y
-				dey
-				dex
-				bpl .1
-				
-				ldy #S.TCP.OPTIONS
-				lda #S.TCP.OPTIONS.SYN
-				sta (ZPFrameOutPtr),y
-
-				iny 					S.TCP.WINDOW
-				lda /K.TCP.WSIZE
-				sta (ZPFrameOutPtr),y
-				iny
-				lda #K.TCP.WSIZE
-				sta (ZPFrameOutPtr),y
-
-				jsr FRM.SendIP
-				bcs .9
-				
-				ldy #S.SOCKET.TCP.OPTIONS
-				lda #0
-				sta (ZPPtrSKT),y
-
-				clc
-.9				rts
-*--------------------------------------
-TCP.OUT.SYNACK	>LDYAI 0
-				jsr TCP.NewFrame
-				bcs .9				
-				
-				ldx #7
-				ldy #S.TCP.SEQ.NUMBER+7
-				
-.1				lda SKT.TCBCache+S.TCB.SEQNUM,x
-				sta (ZPFrameOutPtr),y
-				dey
-				dex
-				bpl .1
-				
-				ldy #S.TCP.OPTIONS
-				lda #S.TCP.OPTIONS.SYN+S.TCP.OPTIONS.ACK
-				sta (ZPFrameOutPtr),y
-
-				iny 					S.TCP.WINDOW
-				lda /K.TCP.WSIZE
-				sta (ZPFrameOutPtr),y
-				iny
-				lda #K.TCP.WSIZE
-				sta (ZPFrameOutPtr),y
-
-				jsr FRM.SendIP
-				bcs .9
-				
-				ldy #S.SOCKET.TCP.OPTIONS
-				lda #0
-				sta (ZPPtrSKT),y	
-
-				clc
-.9				rts
-*--------------------------------------
 TCP.OUT			jsr SKT.GetTCB 
 
-TCP.OUT.I		ldy SKT.TCBCache+S.TCB.OUTUSED
-				lda SKT.TCBCache+S.TCB.OUTUSED+1
+TCP.OUT.I		lda SKT.TCBCache+S.TCB.OUTUSED+1
+				ldy SKT.TCBCache+S.TCB.OUTUSED
 				
 				bne .1
 			
 				tax
-				bne .1					Y,A=0 : nothing to send		
+				bne .1					Y,A=0 : no data to send		
 		
 				ldy #S.SOCKET.TCP.OPTIONS
 				lda (ZPPtrSKT),y
-				beq .88					No, data, no flag....exit
-				
-				txa						a least one flag to send
-				tay
-				bra .2					go send a O len frame
-				
+				bne TCP.OUT.A			a least an option...
+				clc						No, data, no flag....exit
+				rts
+						
 .1				cpy #K.TCP.MSS
 				pha
 				sbc /K.TCP.MSS			OUTDATA > MSS ?
 				pla
-				bcs .2					no....get data len
+				bcs .2					no....keep data len
 
 				>LDYAI K.TCP.MSS		yes get only MSS
 				
 .2				jsr TCP.NewFrame
-				bcs .9
+				bcs TCP.OUT.9
 
 				jsr SKT.GetDataFromSktOut
 								
 				ldy #S.SOCKET.TCP.OPTIONS
 				lda (ZPPtrSKT),y
 				ldy #S.TCP.OPTIONS
-				sta (ZPFrameOutPtr),y
+				sta (ZPFrameOutPtr),y		
 				
-				ldx #7
+.7				jsr TCP.OUT.SEND
+				bcs TCP.OUT.9
+				jmp SKT.StoreTCB
+TCP.OUT.9		rts
+*--------------------------------------
+TCP.OUT.A		sta .1+1
+				>LDYAI 0
+				jsr TCP.NewFrame
+				bcs TCP.OUT.9				
+				
+				ldy #S.TCP.OPTIONS
+				
+.1				lda #$ff
+				sta (ZPFrameOutPtr),y
+
+TCP.OUT.SEND	ldx #7
 				ldy #S.TCP.SEQ.NUMBER+7
 				
-.3				lda SKT.TCBCache+S.TCB.SEQNUM,x
+.2				lda SKT.TCBCache+S.TCB.SEQNUM,x
 				sta (ZPFrameOutPtr),y
 				dey
 				dex
-				bpl .3			
+				bpl .2
 				
-.7				jsr FRM.SendIP
+				ldy #S.TCP.WINDOW
+				lda SKT.TCBCache+S.TCB.INFREE+1
+				sta (ZPFrameOutPtr),y
+				iny
+				lda SKT.TCBCache+S.TCB.INFREE
+				sta (ZPFrameOutPtr),y
+
+				jsr FRM.SendIP
 				bcs .9
 				
 				ldy #S.SOCKET.TCP.OPTIONS
@@ -447,9 +400,8 @@ TCP.OUT.I		ldy SKT.TCBCache+S.TCB.OUTUSED
 .8				ldy #S.SOCKET.TCP.OPTIONS
 				lda #0
 				sta (ZPPtrSKT),y
-				
-				jmp SKT.StoreTCB
-.88				clc				
+
+				clc
 .9				rts
 *--------------------------------------
 TCP.NewFrame	ldx #S.IP.PROTOCOL.TCP
@@ -540,10 +492,23 @@ TCP.ComputeChecksum
 				
 				ldy #S.IP
 				
-.1				jsr DecDataInLen
+				lda ZPDataInLen
+				eor #$ff
+				tax
+				lda ZPDataInLen+1
+				eor #$ff
+				
+				pha
+				
+.1				inx
+				bne .11
+				pla
+				inc
 				beq .8
 				
-				lda (ZPTmpPtr1),y
+				pha
+				
+.11				lda (ZPTmpPtr1),y
 				adc IP.CHECKSUM
 				sta IP.CHECKSUM
 
@@ -551,20 +516,26 @@ TCP.ComputeChecksum
 				bne .20
 				inc ZPTmpPtr1+1
 				
-.20				jsr DecDataInLen
+.20				inx
 				bne .2
-				lda #0
-				bra .21
+				pla
+				inc
+				beq .7
+				
+				pha
 
 .2				lda (ZPTmpPtr1),y
 
-.21				adc IP.CHECKSUM+1
+				adc IP.CHECKSUM+1
 				sta IP.CHECKSUM+1
 				
 				iny
 				bne .1
 				inc ZPTmpPtr1+1
 				bra .1
+				
+.7				adc IP.CHECKSUM+1		A=0 from beq .7
+				sta IP.CHECKSUM+1
 				
 .8				ldy #S.TCP.CHECKSUM
 				lda IP.CHECKSUM
