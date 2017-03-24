@@ -133,7 +133,7 @@ TCP.IN.JMP.LISTEN
 				jsr ARP.AddFromFrameInPtr
 
 				lda #S.TCP.OPTIONS.SYN+S.TCP.OPTIONS.ACK
-				jsr TCP.OUT.A
+				jsr TCP.OUT.SendOpt
 				bcs .9
 
 				ldy #S.SOCKET.TCP.STATUS
@@ -170,11 +170,8 @@ TCP.IN.JMP.SYNSENT
 				dex
 				bpl .1
 
-				ldy #S.SOCKET.TCP.OPTIONS
 				lda #S.TCP.OPTIONS.ACK
-				sta (ZPPtrSKT),y
-
-				jsr TCP.OUT.I
+				jsr TCP.OUT.SendOpt
 				bcs .9
 				
 				ldy #S.SOCKET.TCP.STATUS
@@ -207,13 +204,14 @@ TCP.IN.JMP.SYNRCVD
 				bpl .1
 				
 				jsr SKT.StoreTCB
+				bcs .9
 				
 				ldy #S.SOCKET.TCP.STATUS
 				lda #S.SOCKET.TCP.STATUS.ESTBLSH
 				sta (ZPPtrSKT),y	
 			
 .8				clc
-				rts
+.9				rts
 *--------------------------------------
 TCP.IN.JMP.ESTBLSH
 				jsr SKT.GetTCB
@@ -223,7 +221,7 @@ TCP.IN.JMP.ESTBLSH
 				bit #S.TCP.OPTIONS.ACK	Remote side ACKed data ?
 				beq .1
 				
-				jsr SKT.AckDataToSktOut			Yes, Discard sent data
+				jsr SKT.AckDataToSktOut	(will call SKT.GetTCB) 	Yes, Discard sent data
 
 .1				jsr TCP.IN.SetDataInPtrAndLen
 				
@@ -238,16 +236,20 @@ TCP.IN.JMP.ESTBLSH
 				bit #S.TCP.OPTIONS.FIN
 				beq .8
 				
+				ldy #S.TCP.OPTIONS
+				lda (ZPFrameInPtr),y
+				ora #S.TCP.OPTIONS.ACK		ACK the FIN....
+				sta (ZPFrameInPtr),y
+				
 				ldy #S.SOCKET.TCP.STATUS
 				lda #S.SOCKET.TCP.STATUS.CLWAIT
 				sta (ZPPtrSKT),y
 
-.8				jmp TCP.OUT.I
+.8				jmp TCP.OUT.I			SKT.GetTCB called try to ACK
 .9				rts
 *--------------------------------------
 TCP.IN.JMP.CLWAIT
-
-				clc
+				clc						Wait for SKT.CloseA from Daemon
 				rts
 *--------------------------------------
 TCP.IN.JMP.LASTACK
@@ -262,10 +264,68 @@ TCP.IN.JMP.LASTACK
 				rts
 *--------------------------------------
 TCP.IN.JMP.FINWT1
+				ldy #S.TCP.OPTIONS		only accept ACK packet
+				lda (ZPFrameInPtr),y
+				cmp #S.TCP.OPTIONS.ACK
+				bne .1
+				
+				ldy #S.SOCKET.TCP.STATUS
+				lda #S.SOCKET.TCP.STATUS.FINWT2
+				sta (ZPPtrSKT),y
+				clc
+				rts
+				
+.1				cmp #S.TCP.OPTIONS.FIN
+				bne .8
+				
+				ldy #S.SOCKET.TCP.OPTIONS
+				lda (ZPPtrSKT),y
+				ora #S.TCP.OPTIONS.ACK	
+				sta (ZPPtrSKT),y
+				
+				jsr TCP.OUT
+				bcs .9
+
+				ldy #S.SOCKET.TCP.STATUS
+				lda #S.SOCKET.TCP.STATUS.CLOSING
+				sta (ZPPtrSKT),y
+								
+.8				clc
+.9				rts
 *--------------------------------------
 TCP.IN.JMP.FINWT2
+				ldy #S.TCP.OPTIONS		only accept FIN packet
+				lda (ZPFrameInPtr),y
+				cmp #S.TCP.OPTIONS.FIN
+				bne .8
+				
+				ldy #S.SOCKET.TCP.OPTIONS
+				lda (ZPPtrSKT),y
+				ora #S.TCP.OPTIONS.ACK	
+				sta (ZPPtrSKT),y
+				
+				jsr TCP.OUT
+				bcs .9
+
+				ldy #S.SOCKET.TCP.STATUS
+				lda #S.SOCKET.TCP.STATUS.TIMEWT
+				sta (ZPPtrSKT),y
+				
+.8				clc
+.9				rts
 *--------------------------------------
 TCP.IN.JMP.CLOSING
+				ldy #S.TCP.OPTIONS		only accept ACK packet
+				lda (ZPFrameInPtr),y
+				cmp #S.TCP.OPTIONS.ACK
+				bne .1
+				
+				ldy #S.SOCKET.TCP.STATUS
+				lda #S.SOCKET.TCP.STATUS.TIMEWT
+				sta (ZPPtrSKT),y
+				
+.1				clc
+				rts
 *--------------------------------------
 TCP.IN.JMP.TIMEWT
 *--------------------------------------
@@ -332,7 +392,7 @@ TCP.OUT.I		lda SKT.TCBCache+S.TCB.OUTUSED+1
 		
 				ldy #S.SOCKET.TCP.OPTIONS
 				lda (ZPPtrSKT),y
-				bne TCP.OUT.A			a least an option...
+				bne TCP.OUT.SendOpt		a least an option...
 				clc						No, data, no flag....exit
 				rts
 						
@@ -355,12 +415,12 @@ TCP.OUT.I		lda SKT.TCBCache+S.TCB.OUTUSED+1
 				ldy #S.TCP.OPTIONS
 				sta (ZPFrameOutPtr),y		
 				
-.7				jsr TCP.OUT.SEND
+.7				jsr TCP.OUT.Send
 				bcs TCP.OUT.9
 				jmp SKT.StoreTCB
 TCP.OUT.9		rts
 *--------------------------------------
-TCP.OUT.A		sta .1+1
+TCP.OUT.SendOpt	sta .1+1
 				>LDYAI 0
 				jsr TCP.NewFrame
 				bcs TCP.OUT.9				
@@ -370,7 +430,7 @@ TCP.OUT.A		sta .1+1
 .1				lda #$ff
 				sta (ZPFrameOutPtr),y
 
-TCP.OUT.SEND	ldx #7
+TCP.OUT.Send	ldx #7
 				ldy #S.TCP.SEQ.NUMBER+7
 				
 .2				lda SKT.TCBCache+S.TCB.SEQNUM,x
