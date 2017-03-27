@@ -100,7 +100,7 @@ TCP.IN.JMP.LISTEN
 				
 				>PUSHW L.SKT.Template
 
-				jsr SKT.New.Listen
+				jsr SKT.New.Listen		Assign SEQNUM
 				bcs .99
 				
 				sty .1+1
@@ -116,7 +116,7 @@ TCP.IN.JMP.LISTEN
 .2				lda #$ff
 				sta ZPPtrSKT+1
 
-				ldy #S.TCP.SEQ.NUMBER+3
+				ldy #S.TCP.SEQ.NUMBER+3	Get Remote SEQ
 				ldx #3
 				
 				sec
@@ -124,6 +124,7 @@ TCP.IN.JMP.LISTEN
 .3				lda (ZPFrameInPtr),y	Set ACK=SEQ+1 for new socket...
 				adc #0
 				sta SKT.TCBCache+S.TCB.ACKNUM,x
+				sta SKT.TCBCache+S.TCB.LASTSEQ,x
 				dey
 				dex
 				bpl .3
@@ -133,7 +134,7 @@ TCP.IN.JMP.LISTEN
 				jsr ARP.AddFromFrameInPtr
 
 				lda #S.TCP.OPTIONS.SYN+S.TCP.OPTIONS.ACK
-				jsr TCP.OUT.SendOpt
+				jsr TCP.OUT.SendOpt		Send SYN.ACK
 				bcs .9
 
 				ldy #S.SOCKET.TCP.STATUS
@@ -157,9 +158,9 @@ TCP.IN.JMP.SYNSENT
 				jsr SKT.GetTCB
 				
 				ldx #3
-				ldy #S.TCP.SEQ.NUMBER+3
+				ldy #S.TCP.ACK.NUMBER+3
 
-				sec				
+				sec						Check if ACK=my SEQ+1
 
 .1				lda SKT.TCBCache+S.TCB.ACKNUM,x
 				adc #0
@@ -192,11 +193,8 @@ TCP.IN.JMP.SYNRCVD
 				ldx #3
 				ldy #S.TCP.ACK.NUMBER+3
 
-				sec
-				
-.1				lda SKT.TCBCache+S.TCB.SEQNUM,x
-				adc #0
-				sta	SKT.TCBCache+S.TCB.SEQNUM,x 
+.1				lda	SKT.TCBCache+S.TCB.NEXTSEQ,x 	Check if ACK=my SEQ+1
+				sta SKT.TCBCache+S.TCB.SEQNUM,x
 				eor (ZPFrameInPtr),y
 				bne .8
 				dey
@@ -218,10 +216,11 @@ TCP.IN.JMP.ESTBLSH
 
 				ldy #S.TCP.OPTIONS
 				lda (ZPFrameInPtr),y
-				bit #S.TCP.OPTIONS.ACK	Remote side ACKed data ?
+				and #S.TCP.OPTIONS.ACK	Remote side ACKed data ?
 				beq .1
 				
-				jsr SKT.AckDataToSktOut	(will call SKT.GetTCB) 	Yes, Discard sent data
+				jsr SKT.AckDataToSktOut	Yes, Discard sent data
+				jsr SKT.StoreTCB		and update SKT
 
 .1				jsr TCP.IN.SetDataInPtrAndLen
 				
@@ -233,19 +232,22 @@ TCP.IN.JMP.ESTBLSH
 								
 .2				ldy #S.TCP.OPTIONS
 				lda (ZPFrameInPtr),y
-				bit #S.TCP.OPTIONS.FIN
+				and #S.TCP.OPTIONS.FIN
 				beq .8
 				
 				ldy #S.TCP.OPTIONS
-				lda (ZPFrameInPtr),y
+				lda (ZPPtrSKT),y
 				ora #S.TCP.OPTIONS.ACK		ACK the FIN....
-				sta (ZPFrameInPtr),y
+				sta (ZPPtrSKT),y
+				
+				jsr TCP.OUT.I			SKT.GetTCB called, try to ACK the FIN
+				bcs .9
 				
 				ldy #S.SOCKET.TCP.STATUS
 				lda #S.SOCKET.TCP.STATUS.CLWAIT
 				sta (ZPPtrSKT),y
 
-.8				jmp TCP.OUT.I			SKT.GetTCB called try to ACK
+.8				clc
 .9				rts
 *--------------------------------------
 TCP.IN.JMP.CLWAIT
@@ -388,7 +390,7 @@ TCP.OUT.I		lda SKT.TCBCache+S.TCB.OUTUSED+1
 				bne .1
 			
 				tax
-				bne .1					Y,A=0 : no data to send		
+				beq .1					Y,A=0 : no data to send		
 		
 				ldy #S.SOCKET.TCP.OPTIONS
 				lda (ZPPtrSKT),y
@@ -411,11 +413,8 @@ TCP.OUT.I		lda SKT.TCBCache+S.TCB.OUTUSED+1
 								
 				ldy #S.SOCKET.TCP.OPTIONS
 				lda (ZPPtrSKT),y
-				ora #S.TCP.OPTIONS.ACK	
-				ldy #S.TCP.OPTIONS
-				sta (ZPFrameOutPtr),y		
+				jsr TCP.OUT.Send
 				
-.7				jsr TCP.OUT.Send
 				bcs TCP.OUT.9
 				jmp SKT.StoreTCB
 TCP.OUT.9		rts
@@ -425,12 +424,11 @@ TCP.OUT.SendOpt	sta .1+1
 				jsr TCP.NewFrame
 				bcs TCP.OUT.9				
 				
-				ldy #S.TCP.OPTIONS
-				
 .1				lda #$ff
-				sta (ZPFrameOutPtr),y
 
-TCP.OUT.Send	ldx #7
+TCP.OUT.Send	ldy #S.TCP.OPTIONS
+				sta (ZPFrameOutPtr),y
+				ldx #7
 				ldy #S.TCP.SEQ.NUMBER+7
 				
 .2				lda SKT.TCBCache+S.TCB.SEQNUM,x
