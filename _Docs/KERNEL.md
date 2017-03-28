@@ -59,7 +59,7 @@ Get char from StdIn
  + A = char
 
 #FPutS
-Print String to FILE
+Write String to FILE
 
 ##In:
 + PUSHW : CPtr 
@@ -69,7 +69,26 @@ Print String to FILE
 + CC = success
 
 #PutSYA
-Print String to StdOut
+Write String to StdOut
+
+##In:
++ Y,A : CPtr 
+
+##Out: 
++ CC = success
+
+#FGetS
+Read String From FILE
+
+##In:
++ PUSHW : CPtr 
++ PUSHB : hFILE
+
+##Out: 
++ CC = success
+
+#GetSYA
+Read String From StdIn
 
 ##In:
 + Y,A : CPtr 
