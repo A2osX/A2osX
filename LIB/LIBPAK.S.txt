@@ -1,15 +1,64 @@
 PR#3
-PREFIX /A2OSX.SRC
+PREFIX /A2OSX.BUILD
 NEW
 INC 1
 AUTO 6
 				.LIST OFF	
 				.OP	65C02
 				.OR	$2000
-				.TF /A2OSX.BOOT/LIB/LIBPAK.O
+				.TF /A2OSX.BUILD/LIB/LIBPAK.O
 *--------------------------------------
-				.INB /A2OSX.DEV/INC/MACROS.I
-				.INB /A2OSX.DEV/INC/A2OSX.I
+* File Header :
+* SFX : 
+*  - BIN must begin with CLD (QCODE)
+*  - BIN must be relocatable
+*  - BIN must overwrite itself
+* (well, best way is moving CODE to $200)
+*--------------------------------------
+* Shunk Header : 
+*  WORD : !Target Length
+*   USED TO STOP UNPACK 
+*    !!!NO EOF TOKEN!!!
+* Short4 : [0..15]
+* Short3 : [0..7]
+*--------------------------------------
+S.PAKHDR.LEN	.EQ 0
+S.PAKHDR.SHORT4	.EQ 2
+S.PAKHDR.SHORT3	.EQ 18
+*
+S.PAKHDR		.EQ 26
+*--------------------------------------
+S.PAKSTAT.BL	.EQ 0
+S.PAKSTAT.REP	.EQ 2
+S.PAKSTAT.S3	.EQ 4
+S.PAKSTAT.S4	.EQ 6
+S.PAKSTAT.STORE	.EQ 8
+*
+S.PAKSTAT		.EQ 10
+*--------------------------------------
+PIPELEN			.EQ 18
+*--------------------------------------
+* BITSTREAM :
+*  0 = STORE : 1 byte follow (9 bits)
+*--------------
+*  1 = CMD :
+*---SHORT4 --- (3)+4=7 bits --------
+*  100 : SHORT4
+*   xxxx = index in Short4 Table
+*---SHORT3 --- (3)+3=6 bits --------
+*  101 : SHORT3
+*   xxx = index in Short3 Table
+*--- BACKLINK : (3)+9+4=16 bits ----
+*  110 : BackLink
+*    9 bits : Offset (LO8,HI1)
+*    4 bits : 3 + n (4 bits count) (18 max)
+*--- REP : (3)+1, (3)+1+4 =4/8 bits ----
+*  111 : REP
+*     0 : repeat last byte
+*     1 : repeat  2 + n (4 bits count)
+*--------------------------------------
+				.INB /A2OSX.BUILD/INC/MACROS.I
+				.INB /A2OSX.BUILD/INC/A2OSX.I
 *--------------------------------------
 Pak.SrcPtr		.EQ ZPLIB
 Pak.SrcBlPtr	.EQ ZPLIB+2
@@ -40,60 +89,10 @@ LIB.LOAD
 LIB.UNLOAD		clc
 				rts
 *--------------------------------------
-* UNPACK code as short as possible
-* For Self Extract 
-*--------------------------------------
-* File Header :
-* SFX : 
-*  - BIN must begin with CLD (QCODE)
-*  - BIN must be relocatable
-*  - BIN must overwrite itself
-* (well, best way is moving CODE to $200)
-*--------------------------------------
-* Shunk Header : 
-*  WORD : !Target Length
-*   USED TO STOP UNPACK 
-*    !!!NO EOF TOKEN!!!
-* Short4 : [0..15]
-* Short3 : [0..7]
-*--------------------------------------
-S.PAK.LEN		.EQ 0
-S.PAK.SHORT4	.EQ 2
-S.PAK.SHORT3	.EQ 18
-S.PAK			.EQ 26
-*--------------------------------------
-* BITSTREAM :
-*  0 = STORE : 
-*  00 : 1 byte follow (10 bits)
-*  01 = 2 + n (4 bits count)
-*--------------
-*  1 = CMD :
-*---SHORT4 --- (3)+4=7 bits --------
-*  100 : SHORT4
-*   xxxx = index in Short4 Table
-*---SHORT3 --- (3)+3=6 bits --------
-*  101 : SHORT3
-*   xxx = index in Short3 Table
-*--- BACKLINK : (3)+8+5=16 bits ----
-*  110 : BackLink
-*    9 bits : Offset (LO8,HI1)
-*    4 bits : 3 + n (4 bits count) (18 max)
-*--- REP : (3)+1, (3)+1+4 =4/8 bits ----
-*  111 : REP
-*     0 : repeat last byte
-*     1 : repeat  2 + n (4 bits count)
-*--------------------------------------
 * In : 
 *  PULLW = Src PTR 
 *  PULLW = Src LEN 
 *  PULLW = Dst PTR Compressed Buffer
-*--------------------------------------
-PIPELEN			.EQ 18
-STATS.SIZE		.EQ 0
-STATS.BL		.EQ 2
-STATS.REP		.EQ 4
-STATS.S3		.EQ 6
-STATS.S4		.EQ 8
 *--------------------------------------
 Pak				>PULLYA
 				>STYA Pak.Src			Init for pass #1
@@ -116,8 +115,8 @@ Pak				>PULLYA
 				tya
 				jsr Pak.PutByte				
 				
-				ldx #9
-.1				stz Pak.Stat.Size,x		Reset Stats
+				ldx #S.PAKSTAT-1
+.1				stz PakStat,x			Reset Stats
 				dex
 				bpl .1
 				
@@ -171,7 +170,7 @@ Pak.1			ldx #0
 				bne .7
 				
 				lda Pak.Byte
-				sta Pak.Short,y		
+				sta PakHdr+S.PAKHDR.SHORT4,y		
 				stz Pak.CntL,x			Discard this entry
 				stz Pak.CntH,x
 				dey
@@ -179,20 +178,20 @@ Pak.1			ldx #0
 				
 				ldx #15
 				
-.9				lda Pak.Short4,x		Store SHORT4 in reverse order
+.9				lda PakHdr+S.PAKHDR.SHORT4,x		Store SHORT4 in reverse order
 				jsr Pak.PutByte
 				dex
 				bpl .9
 
 				ldx #7
 
-.10				lda Pak.Short3,x		Store SHORT3 in reverse order
+.10				lda PakHdr+S.PAKHDR.SHORT3,x		Store SHORT3 in reverse order
 				jsr Pak.PutByte
 				dex
 				bpl .10
 				
-				>LDYAI S.PAK			Total Header Size				
-				>STYA Pak.Stat.Size
+				>LDYAI S.PAKHDR			Total Header Size				
+				>STYA PakHdr+S.PAKHDR.LEN
 * PASS #2 : 	
 Pak.2			>LDYA Pak.Src			Init for pass #2
 				>STYA Pak.SrcPtr
@@ -215,21 +214,24 @@ Pak.2.LOOP		ldx Pak.PipeLen			Always fill Bytes in the PIPE until full
 				inx
 				cpx #PIPELEN			PIPE Full ?
 				bne .1
-				clc
 				
 .2				stx Pak.PipeLen
 
-				txa						PIPE empty ....exit
-				beq .99
+				txa
+				beq Pak.2.EXIT			PIPE empty ....exit
+				dex
+				bne Pak.2.REP			more than one char in PIPE...REP?
+				
+				jmp	Pak.2.Store			only one....store it
+				
+Pak.2.EXIT		clc
+				rts
 
 * try finding REPeating same bytes.....
-Pak.2.REP		dex
-				beq Pak.2.SHORT			Only one char in PIPE...
+Pak.2.REP		ldx #0
+				lda Pak.Pipe
 				
-				ldx #0
-				
-.1				lda Pak.Pipe,x
-				cmp Pak.Pipe+1,x
+.1				cmp Pak.Pipe+1,x
 				bne .2
 				inx
 				cpx Pak.PipeLen
@@ -240,14 +242,16 @@ Pak.2.REP		dex
 				dex						if 2, -> REP ONE (not 2)
 				phx						REP 1 + 0 or more....save REP count for later....
 				
-				jsr Pak.2.STORE1		a = byte to store
+				jsr Pak.PutA			a = byte to store
 				
 				lda #%11100000
 				plx
 				phx
 				beq .3
+				
 				ora #%00010000
-				ldy #4
+				
+.3				ldy #4
 				jsr Pak.PutYBits
 				txa
 				beq .4					if not REP 2 or more no extra count
@@ -260,7 +264,7 @@ Pak.2.REP		dex
 				tay
 				jsr Pak.StripPipe		Remove REP bytes from PIPE
 				
-				ldx #STATS.REP
+				ldx #S.PAKSTAT.REP
 				jsr Pak.UpdateStats
 				jmp Pak.2.LOOP				
 Pak.2.BL				
@@ -334,7 +338,7 @@ Pak.2.BL
 				asl
 				ldy #4					store 4 bits len
 				jsr Pak.PutYBits
-				ldx #STATS.BL
+				ldx #S.PAKSTAT.BL
 				jsr Pak.UpdateStats
 				jmp Pak.2.LOOP
 				
@@ -348,28 +352,49 @@ Pak.2.BL
 				bne .40					and start over from BLPtr
 				
 * NO Bl Found, STORE
-Pak.STORE		lda Pak.Pipe
-				jsr Pak.2.STORE1
+Pak.2.Store		lda Pak.Pipe
+				ldx #23
+				
+.1				cmp PakHdr+S.PAKHDR.SHORT4,x
+				beq .2
+				dex
+				bpl .1
+				
+				lda #0
+				ldy #1
+				jsr Pak.PutYBits		write 0
+				
+				lda Pak.Pipe			...and byte
+				jsr Pak.PutA
+				
+				ldy #1
+				jsr Pak.StripPipe
+				jmp Pak.2.LOOP
+				
+.2				cpx #16					16-23 -> SHORT3
+				bcs .3 
+				
+				txa						0-15, SHORT4
+				asl						move to BIT 000xxxx0
+				
+				ora #10000000			SHORT4
+				ldy #7
+				bra .8
+				
+.3				txa
+				and #7					make it xxx
+				asl
+				asl						and 000xxx00
+				ora #10100000			SHORT3
+				ldy #6
+				
+.8				jsr Pak.PutYBits		write 100xxxx
+				
 				ldy #1
 				jsr Pak.StripPipe
 				jmp Pak.2.LOOP
 *--------------------------------------
-Pak.2.STORE1
-				rts
-*--------------------------------------
-Pak.GetByte		inc	UnPak.Cnt
-				bne .1
-				inc UnPak.Cnt+1
-.1				beq .9 
-				lda (Pak.SrcPtr)
-				pha
-				inc Pak.SrcPtr
-				bne .2
-				inc Pak.SrcPtr+1
-.2				clc
-				rts
-.9				sec
-				rts
+Pak.PutA		ldy #8
 *--------------------------------------
 Pak.PutYBits	asl
 				jsr Pak.PutBit
@@ -402,9 +427,9 @@ Pak.PutByte		sta (Pak.DstPtr)
 				bne .1
 				inc Pak.DstPtr+1
 				
-.1				inc Pak.Stat.Size
+.1				inc PakHdr+S.PAKHDR.LEN
 				bne .2
-				inc Pak.Stat.Size+1
+				inc PakHdr+S.PAKHDR.LEN+1
 .2				
 				rts
 *--------------------------------------
@@ -426,29 +451,30 @@ Pak.StripPipe	ldx Pak.PipeLen
 				
 .9				rts				
 *--------------------------------------
-Pak.UpdateStats	inc Pak.Stat.Size,x
+Pak.UpdateStats	inc PakStat,x
 				bne .8
-				inc Pak.Stat.Size+1,x
+				inc PakStat+1,x
 .8				rts
 *--------------------------------------
-Pak.BitMask		.HS 0102040810204080
-Pak.Src			.BS 2
-Pak.SrcCnt		.BS 2
-Pak.Cnt			.BS 2
-Pak.CntL		.BS 256
-Pak.CntH		.BS 256
-Pak.Short4		.BS 16
-Pak.Short3		.BS 8
-Pak.Byte		.BS 1
-Pak.Limit		.BS 2
-Pak.PipeLen		.BS 1
-Pak.Pipe		.BS 18
+Pak.GetByte		inc	UnPak.Cnt
+				bne .1
+				inc UnPak.Cnt+1
+				beq .9
+
+.1				lda (Pak.SrcPtr)
+
+				inc Pak.SrcPtr
+				bne .2
+				inc Pak.SrcPtr+1
+				
+.2				clc
+				rts
+				
+.9				sec
+				rts
 *--------------------------------------
-Pak.Stat.Size	.BS 2
-Pak.Stat.BL		.BS 2
-Pak.Stat.REP	.BS 2
-Pak.Stat.S3		.BS 2
-Pak.Stat.S4		.BS 2
+* UNPACK code as short as possible
+* For Self Extract 
 *--------------------------------------
 * UnPak
 * In : 
@@ -605,6 +631,21 @@ UnPak.PutByte	inc UnPak.DstPtr
 				inc UnPak.DstPtr+1
 .8				sta (UnPak.DstPtr)
 				rts
+*--------------------------------------
+CS.END
+Pak.Src			.BS 2
+Pak.SrcCnt		.BS 2
+Pak.Cnt			.BS 2
+Pak.CntL		.BS 256
+Pak.CntH		.BS 256
+Pak.Byte		.BS 1
+Pak.Limit		.BS 2
+Pak.PipeLen		.BS 1
+Pak.Pipe		.BS 18
+Pak.BitMask		.HS 0102040810204080
+*--------------------------------------
+PakHdr			.BS S.PAKHDR
+PakStat			.BS S.PAKSTAT
 *--------------------------------------
 UnPak.BitMask	.HS 8040201008040201
 MAN

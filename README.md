@@ -48,25 +48,17 @@ Several subprojects are now indentified :
 ** Kernel 0.9 complete rewrite in progress **  
  
 (Kernel 0.8 has been archived)  
-It is confined in Aux LC Bank 1 & 2 to leave enough room at $EOOO for Drivers.
+It is confined in Aux LC Bank 1 & 2 to leave enough room at $EOOO for Drivers.  
 Network drivers, Mouse, DHGR.DRV can load and fit in Aux LC.  
-Now it's time to make all external BINs use new API, then GUI development will resume.
+Now it's time to make all external BINs use new API, then GUI development will resume.  
   
-**A2OSX.BOOT.po** : 140k BOOT disk image with all binaries  
-**A2OSX.DEV.po**  : 140k disk image with ASM binaries, Debug Tools & INClude files  
-**A2OSX.SRC.po**  : 800k S-C MASM boot disk image with all sources  
+**A2OSX.BOOT.po**   : 140k BOOT disk image with all binaries  
+**A2OSX.DEV.po**    : 140k disk image with ASM binaries, Debug Tools & INClude files  
+**A2OSX.BUILD.po**  : 800k S-C MASM boot disk image with all sources  
+**A2OSX.SRC.po**    : 800k disk image with all sources  
   
 OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.  
 (OApple+shift+1,OApple+shift+2,OApple+shift+3 on FR keyboard)  
-  
-### **** Developers WANTED ****  
-  
-!!! Help on writing this code should be greatly appreciated !!!  
-  
-...  
-In Progress : Document API...  
-In Progress : moving TCPIP to socket API  
-...  
 
 ## SYS/KM* Supported Hardware At Kernel Level (ProDOS):
 | KM.Name | Status | Comment |
