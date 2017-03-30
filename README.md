@@ -146,6 +146,7 @@ note : '$VAR' does NOT expand Variable
 | CAT | Working | -A : Show All non printable caracters | 0.9 |
 | | | -N : Number all output lines | |
 | | | -S : Suppress repeated empty output lines | |
+| FORMAT | In Progress | -L : Low-Level Format | 0.9 |
 | EDIT | Working | still missing : find/replace | 0.9 |
 | NSCUTIL | Working | Tool for setting time in NSC/DL1216E | 0.9 |
 | ---- | ------ | ------- | ----- |

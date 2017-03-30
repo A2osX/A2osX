@@ -34,7 +34,11 @@ CS.START		cld
 				.DA CS.DOEVENT		
 				.DA	CS.QUIT
 L.LIBBLKDEV		.DA LIBBLKDEV
-L.MSG.USAGE		.DA MSG.USAGE			
+L.BlkParams.Ptr	.DA BlkParams.Ptr
+L.MSG.USAGE		.DA MSG.USAGE
+L.MSG.INIT		.DA MSG.INIT		
+L.MSG.OK		.DA MSG.OK
+L.MSG.ERR		.DA MSG.ERR
 				.DA 0
 *--------------------------------------
 CS.INIT			>SYSCALL GetArgC
@@ -82,27 +86,58 @@ CS.INIT			>SYSCALL GetArgC
 				sta (pData),y
 				bra .1
 				
-.4				lda (pData)
-				bne .99					Already have a vol name...syntax error
+.4				ldy #hDev
+				lda (pData),y
+				bne .5					Already have a dev name...go get VolName
 				
 				lda (ZPPtr1)
+				cmp #4
+				bne .99					DevName must be DxDy
+				
+				>LDYA ZPPtr1
+				>SYSCALL GetDevByNameYA		
+				bcs .99
+				txa
+				ldy #hDev
+				sta (pData),y
+				bra .1
+				
+.5				lda (ZPPtr1)
 				cmp #16
-				bcc .5
-				lda #15
-.5				sta (ZPPtr1)
+				bcs .99					VolName too long
+				
 				tay
 				
 .6				lda (ZPPtr1),y
 				sta (pData),y
 				dey
-				bne .6
-				bra .1					success, scan for any other args
+				bpl .6
 				
-
+				bra .1					success, scan for any other args
 				
 .7				lda (pData)
 				bne .8					Volume name ok
 				
+				lda A2osX.TIMER16
+				jsr A2CharAX
+				sta DefaultVolName+6
+				stx DefaultVolName+7
+				
+				lda A2osX.TIMER16+1
+				jsr A2CharAX
+				sta DefaultVolName+8
+				stx DefaultVolName+9
+				
+				lda A2osX.RANDOM16
+				jsr A2CharAX
+				sta DefaultVolName+10
+				stx DefaultVolName+11
+				
+				lda A2osX.RANDOM16+1
+				jsr A2CharAX
+				sta DefaultVolName+12
+				stx DefaultVolName+13
+
 				ldy DefaultVolName
 				
 .71				lda DefaultVolName,y
@@ -121,29 +156,138 @@ CS.INIT			>SYSCALL GetArgC
 				clc
 				rts
 *--------------------------------------
-CS.RUN			ldy #bCANCEL
-				lda (pData),y
-				bmi .99
+CS.RUN			jsr CS.RUN.BuildCat
+				bcs .9
 				
+				jsr CS.RUN.WriteCat
+				bcs .9
 				
-				
-.8				clc
-				rts
-				
-.99				lda #0
+				>LDYA L.MSG.OK
+				>SYSCALL CPrintFYA
+				lda #0
 				sec
 				rts
+				
+.9				pha
+				>PUSHA
+				>LDYA L.MSG.ERR
+				>SYSCALL CPrintFYA
+				pla
+				sec
+				rts
+*--------------------------------------
+CS.RUN.BuildCat	ldy #hDev
+				lda (pData),y
+				>SYSCALL GetDevStatusA
+				
+				bcs .99
+				>STYA ZPPtr1
+				ldy #S.DEVSTAT.SIZE
+				lda (ZPPtr1),y
+				sta BlockSize
+				iny
+				lda (ZPPtr1),y
+				sta BlockSize+1
+				
+				ldy #hDev
+				lda (pData),y
+				>SYSCALL GetDevByIDA
+				bcs .99
+				
+				pha
+				tya
+				adc #S.DEV.NAME
+				sta ZPPtr2
+				pla
+				adc /S.DEV.NAME
+				sta ZPPtr2+1
+								
+				>PUSHW pData
+				>PUSHW BlockSize
+				>PUSHW ZPPtr2
+				
+				>LDYA L.MSG.INIT
+				>SYSCALL CPrintFYA
+				bcs .9
+				
+				>PUSHW BlockSize
+				>LIBCALL hLIBBLKDEV,LIBBLKDEV.GetProDOSCatSize
+				
+.99				bcs .9
+				stx BlkCnt
+				
+				>PUSHYA					BufferSize
+				>PUSHBI S.MEM.F.INIT0
+				>SYSCALL GetMem
+				bcs .9
+				>STYA BlkParams.Ptr
+				txa
+				ldy #hBuf
+				sta (pData),y
+				
+				>PUSHW BlockSize
+				>PUSHW pData
+				>PUSHW BlkParams.Ptr
+				
+				>LIBCALL hLIBBLKDEV,LIBBLKDEV.BuildProDOSCat
+.9				rts
+*--------------------------------------
+CS.RUN.WriteCat	stz BlkParams.Num
+				stz BlkParams.Num+1
+				
+				ldy #hDev
+				lda (pData),y
+				>SYSCALL GetDevByIDA
+				bcs .9
+				>STYA pDev			
+				
+.1				>LDYA L.BlkParams.Ptr
+				ldx #DEVMGR.WRITEBLOCK
+				
+				>DEBUG
+				jsr pDevJmp
+				bcs .9
+				inc BlkParams.Ptr+1
+				inc BlkParams.Ptr+1
+				inc BlkParams.Num
+				dec BlkCnt
+				bne .1
+.9				rts
 *--------------------------------------
 CS.DOEVENT		sec
 				rts
 *--------------------------------------
-CS.QUIT			lda hLIBBLKDEV
+CS.QUIT			ldy #hBuf
+				lda (pData),y
+				beq .1
+				>SYSCALL FreeMemA
+					
+.1				lda hLIBBLKDEV
 				beq .8
 				
 				>SYSCALL UnloadLibA
 				
 .8				clc
 				rts
+*--------------------------------------
+A2CharAX		pha
+				lsr
+				lsr
+				lsr
+				lsr
+				and #$0F
+				ora #$30
+				cmp #'9'+1
+				bcc .1
+				adc #6
+.1				tax
+				pla
+				and #$0F
+				ora #$30
+				cmp #'9'+1
+				bcc .8
+				adc #6
+.8				rts
 *--------------------------------------
 CS.END
 *--------------------------------------
@@ -153,19 +297,24 @@ OptionVars		.DA #bLL
 MSG.USAGE		>CSTR "Usage : FORMAT <BLOCKDEV> [VOLUME.NAME]\r\n   -L : Low-Level Format\r\n"
 MSG.OK			>CSTR "[OK]\r\n"
 MSG.ERR			>CSTR "[%h]\r\n"
+MSG.INIT		>CSTR "Formatting %S (%D Blks),Volname:%S..."
 *--------------------------------------
 LIBBLKDEV		>PSTR "libblkdev.o"
-DefaultVolName	>PSTR "BLANK"
+DefaultVolName	>PSTR "BLANKXXXXXXXX"
 ArgCount		.BS 1
 ArgIndex		.BS 1
 hLIBBLKDEV		.BS 1
+BlockSize		.BS 2
+hBuf			.BS 1
+BlkCnt			.BS 1
+BlkParams.Ptr	.BS 2
+BlkParams.Num	.BS 2
 *--------------------------------------
 				.DUMMY
 				.OR 0
 DS.START
 VolName			.BS 16
-DevName			.BS 4
-bCANCEL			.BS 1
+hDev			.BS 5
 bLL				.BS 1
 DS.END
 				.ED

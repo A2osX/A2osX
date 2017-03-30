@@ -8,7 +8,7 @@
 
 ## Out : 
 + X=BlockCount (max 22)
-+ A=PageCount  (max 44)
++ Y,A=BufSize  (max $4400)
 
 # BuildProDOSCat
 
