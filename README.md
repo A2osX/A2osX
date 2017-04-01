@@ -100,8 +100,9 @@ OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
 | Name | Status | Comment |
 | ---- | ------ | ------- |
 | $PWD | Working | 'Working Directory' |
-| $* | Working | All Args |
+| $0 | Working | Command Full Path |
 | $1-$9 | Working | Arg[n] |
+| $* | Working | All Args |
 | $# | Working | Arg Count |
 | $? | Working | Return Code |
 | $@ | Working | Parent PID |
