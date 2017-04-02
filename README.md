@@ -30,23 +30,23 @@ Several subprojects are now indentified :
 + Archive, Disk Image transfer tools (ADT client!)...  
 + Question : Pascal or C Compiler?  
 + ...sure there is some more!  
-  
-## Screenshots  
-  
-![](https://github.com/burniouf/A2osX/blob/master/ScreenShot.LS.bmp)  
-  
-![](https://github.com/burniouf/A2osX/blob/master/ScreenShot.EDIT.bmp)  
-    
-![](https://github.com/burniouf/A2osX/blob/master/ScreenShot.IP1.bmp)  
-  
-![](https://github.com/burniouf/A2osX/blob/master/ScreenShot.IP2.bmp)  
-    
-![](https://github.com/burniouf/A2osX/blob/master/PuTTY.png)  
-  
-## General Information:  
- 
-** Kernel 0.9 complete rewrite in progress **  
- 
+
+## Screen shots
+
+![](./.screen-shots/ScreenShot.LS.png)
+
+![](./.screen-shots/ScreenShot.EDIT.png)
+
+![](./.screen-shots/ScreenShot.IP1.png)
+
+![](./.screen-shots/ScreenShot.IP2.png)
+
+![](./.screen-shots/PuTTY.png)
+
+## General Information:
+
+** Kernel 0.9 complete rewrite in progress **
+
 (Kernel 0.8 has been archived)  
 It is confined in Aux LC Bank 1 & 2 to leave enough room at $EOOO for Drivers.  
 Network drivers, Mouse, DHGR.DRV can load and fit in Aux LC.  
