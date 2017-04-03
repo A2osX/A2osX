@@ -452,6 +452,30 @@ And return, if found, the full path to it.
 + PUSHB = MODE  ...
 + PUSHW = PATH ...FOpen)
 
+# ChTyp
+
+## In:
++ PUSHB = TYPE  ...
++ PUSHW = PATH ...FOpen)
+
+# ChMod
+
+## In:
++ PUSHW = MODE  ...
++ PUSHW = PATH ...FOpen)
+
+# ChOwn
+
+## In:
++ PUSHW = UID  ...
++ PUSHW = PATH ...FOpen)
+
+# ChGrp
+
+## In:
++ PUSHW = GID  ...
++ PUSHW = PATH ...FOpen)
+
 # GetMem
 
 ## In: 

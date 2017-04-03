@@ -155,6 +155,14 @@ note : '$VAR' does NOT expand Variable
 | CAT | Working | -A : Show All non printable caracters | 0.9 |
 | | | -N : Number all output lines | |
 | | | -S : Suppress repeated empty output lines | |
+| CHTYP | In Progress | -C : Continue On Error | 0.9 |
+| | | -R : Recurse subdirectories | |
+| CHMOD | In Progress | -C : Continue On Error | 0.9 |
+| | | -R : Recurse subdirectories | |
+| CHOWN | In Progress | -C : Continue On Error | 0.9 |
+| | | -R : Recurse subdirectories | |
+| CHGRP | In Progress | -C : Continue On Error | 0.9 |
+| | | -R : Recurse subdirectories | |
 | FORMAT | In Progress | -L : Low-Level Format | 0.9 |
 | EDIT | Working | still missing : find/replace | 0.9 |
 | NSCUTIL | Working | Tool for setting time in NSC/DL1216E | 0.9 |
