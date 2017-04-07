@@ -92,9 +92,8 @@ OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
 | CD        | Working | Improved syntax : now, 'CD ../BIN' works |
 | PWD       | Working | |
 | DATE      | Working | |
-| ECHO      | Working | \b,\e,\f,\n,\\ and \% supported |
+| ECHO      | Working | \b,\e,\f,\n,\\\ and \\% supported |
 | EXIT      | Working | |
-| IF        | | |
 | PAUSE     | Working | |
 | READ      | Working | -S : no echo (password) |
 |           |         | -P : "prompt message"   |
