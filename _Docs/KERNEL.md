@@ -195,7 +195,8 @@ return a hFile for a given Socket
 
 ## OUT:
 + CC = OK, CS = ERROR
-+ A = hFILE
++ X = hFILE
++ Y,A = pFILE
 
 # MKFIFO
 return a S.FILE to a new FIFO
@@ -455,26 +456,26 @@ And return, if found, the full path to it.
 # ChTyp
 
 ## In:
-+ PUSHB = TYPE  ...
-+ PUSHW = PATH ...FOpen)
++ PUSHB = TYPE
++ PUSHW = PATH
 
 # ChMod
 
 ## In:
-+ PUSHW = MODE  ...
-+ PUSHW = PATH ...FOpen)
++ PUSHW = MODE
++ PUSHW = PATH
 
 # ChOwn
 
 ## In:
-+ PUSHW = UID  ...
-+ PUSHW = PATH ...FOpen)
++ PUSHW = UID
++ PUSHW = PATH
 
 # ChGrp
 
 ## In:
-+ PUSHW = GID  ...
-+ PUSHW = PATH ...FOpen)
++ PUSHW = GID
++ PUSHW = PATH
 
 # GetMem
 
