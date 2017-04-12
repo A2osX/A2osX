@@ -446,8 +446,8 @@ And return, if found, the full path to it.
 # SaveFile
 
 ## In:
-+ PUSHW = SrcLen
 + PUSHW = SrcPtr
++ PUSHW = SrcLen
 + PUSHW = AUXTYPE (Handled by....
 + PUSHB = TYPE  ...
 + PUSHB = MODE  ...
