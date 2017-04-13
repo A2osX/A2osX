@@ -27,7 +27,7 @@ Several subprojects are now indentified :
 
 + Hardware Support : adding drivers to support more & more hardware (RAM cards, storage....)
 + Z80 support : Kernel could pass control to any Z80 detected on the system.
-+ TCPIP stack : TCP still missing!
++ TCP/IP stack
 + AppleTalk Support
 + GUI & Printing
 + Archive, Disk Image transfer tools (ADT client!)...
@@ -79,11 +79,13 @@ OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
 | INSDRV  | Working     |         | 0.9 |
 | GETTY   | Working     |         | 0.9 |
 | LOGIN   | In Progress | no auth using /etc/passd yet | 0.9 |
-| SHELL   | Working     | (See Internal Shell commands) | 0.9 |
-| TCPIP   | In Progress | New Socket API. ARP,IP,ICMP,UDP ok, TCP in progress | 0.9 |
+| SHELL   | Working     | Kernel Configuration Utility | 0.9 |
+| KCONFIG | Working     | (See Internal Shell commands) | 0.9 |
+| ----    | ------      | ------- | -----:|
+| TCPIP   | Working     | Socket API.ARP,IP,ICMP,UDP & TCP ok | 0.9 |
 | DHCPCLNT| Working     | rewritten to use new Socket API | 0.9 |
-| TELNETD |  |  |  |
-| HTTPD   |  |  |  |
+| TELNETD | In Progress |  | 0.9 |
+| HTTPD   | In Progress |  | 0.9 |
 
 ## Internal Shell commands:
 
