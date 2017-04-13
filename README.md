@@ -55,10 +55,10 @@ It is confined in Aux LC Bank 1 & 2 to leave enough room at $EOOO for Drivers.
 Network drivers, Mouse, DHGR.DRV can load and fit in Aux LC.
 Now it's time to make all external BINs use new API, then GUI development will resume.
 
-**A2OSX.BOOT.po**   : 140k BOOT disk image with all binaries
-**A2OSX.DEV.po**    : 140k disk image with ASM binaries, Debug Tools & INClude files
-**A2OSX.BUILD.po**  : 800k S-C MASM boot disk image with all sources
-**A2OSX.SRC.po**    : 800k disk image with all sources
++ **A2OSX.BOOT.po**   : 140k BOOT disk image with all binaries  
++ **A2OSX.DEV.po**    : 140k disk image with ASM binaries, Debug Tools & INClude files  
++ **A2OSX.BUILD.po**  : 800k S-C MASM boot disk image with all sources  
++ **A2OSX.SRC.po**    : 800k disk image with all sources  
 
 OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
 (OApple+shift+1,OApple+shift+2,OApple+shift+3 on FR keyboard)
@@ -79,8 +79,8 @@ OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
 | INSDRV  | Working     |         | 0.9 |
 | GETTY   | Working     |         | 0.9 |
 | LOGIN   | In Progress | no auth using /etc/passd yet | 0.9 |
-| SHELL   | Working     | Kernel Configuration Utility | 0.9 |
-| KCONFIG | Working     | (See Internal Shell commands) | 0.9 |
+| SHELL   | Working     | (See Internal Shell commands) | 0.9 |
+| KCONFIG | Working     | Kernel Configuration Utility | 0.9 |
 | ----    | ------      | ------- | -----:|
 | TCPIP   | Working     | Socket API.ARP,IP,ICMP,UDP & TCP ok | 0.9 |
 | DHCPCLNT| Working     | rewritten to use new Socket API | 0.9 |
