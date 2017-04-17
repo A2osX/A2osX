@@ -81,7 +81,7 @@ OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
 | LOGIN   | In Progress | no auth using /etc/passd yet | 0.9 |
 | SHELL   | Working     | (See Internal Shell commands) | 0.9 |
 | KCONFIG | Working     | Kernel Configuration Utility | 0.9 |
-| ----    | ------      | ------- | -----:|
+| ----    | ------      | ------- | ----- |
 | TCPIP   | Working     | Socket API.ARP,IP,ICMP,UDP & TCP ok | 0.9 |
 | DHCPCLNT| Working     | rewritten to use new Socket API | 0.9 |
 | TELNETD | In Progress |  | 0.9 |
@@ -126,14 +126,14 @@ note : '$VAR' does NOT expand Variable
 | Console.DRV | Working | ANSI support in Progress. | 0.9 |
 | SSC.DRV     | Working | Apple "Super Serial Card" Driver | 0.9 |
 | SSC.I.DRV   | Working | Apple "Super Serial Card" Driver (IRQ enabled) | 0.9 |
-| PIC.DRV | In Progress | Apple "Parallel Interface Card" Driver, renamed from PPIC.DRV | 0.8 |
+| PIC.DRV | In Progress | Apple "Parallel Interface Card" Driver, renamed from PPIC.DRV | 0.9 |
 | Mouse.DRV | Working | Apple Mouse Card,//c Mouse Port | 0.9 |
 | DHGR.DRV | In Progress | except bitblt... | 0.8 |
 | ---- | ------ | ------- | ----- |
+| LanCeGS.DRV | Working | | 0.9 |
 | Uthernet.DRV  | Working | | 0.9 |
 | Uthernet2.DRV | Working | | 0.9 |
-| Uther2.AI.DRV | In Progress | With ARP/IP Offloading | 0.8 |
-| LanCeGS.DRV | Working | | 0.8 |
+| Uther2.AI.DRV | In Progress | With ARP/IP Offloading | 0.9 |
 
 ## BIN,External Shell commands:
 | Name | Status | Comment | K.Ver |
