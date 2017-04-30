@@ -38,11 +38,13 @@ Several subprojects are now indentified :
 
 ![](./.screen-shots/ScreenShot.LS.png)
 
-![](./.screen-shots/ScreenShot.EDIT.png)
-
 ![](./.screen-shots/ScreenShot.IP1.png)
 
 ![](./.screen-shots/ScreenShot.IP2.png)
+
+![](./.screen-shots/ScreenShot.EDIT.png)
+
+![](./.screen-shots/ScreenShot.KCONFIG.png)
 
 ![](./.screen-shots/PuTTY.png)
 
