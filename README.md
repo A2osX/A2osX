@@ -59,7 +59,7 @@ Now it's time to make all external BINs use new API, then GUI development will r
 
 + **A2OSX.BOOT.po**   : 140k BOOT disk image with all binaries  
 + **A2OSX.DEV.po**    : 140k disk image with ASM binaries, Debug Tools & INClude files  
-+ **A2OSX.BUILD.po**  : 800k S-C MASM boot disk image with all sources  
++ **A2OSX.BUILD.po**  : 800k BOOT disk image with S-C MASM 2.0 and all binaries (BOOT+DEV)  
 + **A2OSX.SRC.po**    : 800k disk image with all sources  
 
 OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
