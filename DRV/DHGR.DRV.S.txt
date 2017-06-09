@@ -17,7 +17,6 @@ AUTO 6
 ZPBase			.EQ ZPDRV
 ZPShiftLo		.EQ ZPDRV+2
 ZPShiftHi		.EQ ZPDRV+4
-ZPCtrlBlk		.EQ ZPDRV+8
 *--------------------------------------
 *			File Header (16 Bytes)
 *--------------------------------------
@@ -153,12 +152,8 @@ DRV.CS.START	.DA STATUS
 				.DA GETPIXEL
 				.DA HLINE
 				.DA VLINE
+				.DA FILLRECT
 				.DA BITBLT
-				.DA FILLREC
-				.DA SETCURPOS
-				.DA SETCUR
-				.DA HIDECUR
-				.DA SHOWCUR
 *--------------------------------------
 L.STAT			.DA STAT
 L.DIV7.0		.DA DIV7.0
@@ -241,29 +236,26 @@ CLOSE			clc
 *--------------------------------------
 * SETPIXEL
 *  In : YA = Ptr to CtrlBlk :
-*   0 : X
-*   2 : Y
-*   4 : Mode
-*		00000000=xor
-*		00000001=b/w (1 bit/pixel)
-*		00000100=16 colors  (4 bits/pixel)
-*		00001000=256 colors	(8 bits/pixel)
-*	5 : Color
+*	1 : OP (XOR only)
+*   2 : Mode
+*	3 : Color
+*   4 : SrcX1
+*   6 : SrcY1
 *--------------------------------------
 SETPIXEL		>STYA ZPBase
-				ldy #5
+				ldy #S.CB.Y1			Skip S.CB.Y1+1.....always 0
 .1				lda (ZPBase),y
-				sta ZPCtrlBlk,y
+				sta CB.Cache,y
 				dey
 				bpl .1
 				
 				sta SET80STORE
 
-				lda ZPCtrlBlk+4
-				bit #%00000100
-				bne .7
-*-----B&W -----------------------------
-				ldx ZPCtrlBlk+1			X.HI
+				lda CB.Cache+S.CB.MODE
+				bit #S.CB.MODE.C16
+				bne SETPIXEL.C16
+*---- MONO ----------------------------
+				ldx CB.Cache+S.CB.X1+1
 				lda DIV7.hi,x
 				sta .2+2
 				
@@ -272,7 +264,7 @@ SETPIXEL		>STYA ZPBase
 				lda MOD7.hi,x
 				sta .4+2
 				
-				ldx ZPCtrlBlk			X.LO
+				ldx CB.Cache+S.CB.X1
 .2				lda DIV7.0,x			A=Col*2+AuxBit
 
 				eor #1					toggle last bit : 0=Aux, 1=Main
@@ -281,6 +273,8 @@ SETPIXEL		>STYA ZPBase
 				rol .3+1				if CS, -> SETPAGE2
 .3				sta CLRPAGE2
 
+				ldy CB.Cache+S.CB.Y1
+				
 				adc BASEL,y				setup line Base Ptr (A=Col)
 				sta ZPBase
 				lda BASEH,y
@@ -288,10 +282,10 @@ SETPIXEL		>STYA ZPBase
 
 .4				ldy MOD7.0,x			x = X.LO		
 
-				dec ZPCtrlBlk+4			get mode
-				bne .5
+				lda CB.Cache+S.CB.OP
+				beq .5
 				
-				lda (ZPBase)			Mode=0, XOR
+				lda (ZPBase)			XOR
 				eor Mono.Masks,y		y = mod 7
 				sta (ZPBase)
 				
@@ -299,7 +293,7 @@ SETPIXEL		>STYA ZPBase
 				rts
 				
 .5				lda (ZPBase)
-				ldx ZPCtrlBlk+5			mode=1, get color
+				ldx CB.Cache+S.CB.COLOR	get color
 				bne .6
 				
 				and Mono.NMasks,y		includes And $7F for mono 
@@ -313,17 +307,17 @@ SETPIXEL		>STYA ZPBase
 				sta CLR80STORE	
 				rts
 *-----16 Colors -----------------------		
-.7				lda ZPCtrlBlk			X.LO
-				lsr ZPCtrlBlk+1			divide by 4
+SETPIXEL.C16	lda CB.Cache+S.CB.X1
+				lsr CB.Cache+S.CB.X1+1			divide by 4
 				ror
-				lsr ZPCtrlBlk+1
+				lsr CB.Cache+S.CB.X1+1
 				ror
 				tay						Y=CX/4 (range 0->139)
 				lda DIV7.0,y			A=CX/4/7 (range 0->19)
 				
 				asl						times 2  (range 0->38)
 				
-				ldx ZPCtrlBlk+2
+				ldx CB.Cache+S.CB.Y1
 				adc BASEL,x				setup line Base Ptr (cc by asl)
 				sta ZPBase				ZPBase now point to first of...
 				lda BASEH,x
@@ -335,7 +329,7 @@ SETPIXEL		>STYA ZPBase
 				asl
 				tax						set in X for Masks,NMasks
 				
-				lda ZPCtrlBlk+5			get COLOR
+				lda CB.Cache+S.CB.COLOR
 				
 				asl						times 4 to compute index in PIXELS table
 				asl
@@ -402,187 +396,86 @@ SETPIXEL		>STYA ZPBase
 .13				sta CLR80STORE
 				rts
 *--------------------------------------
+* GETPIXEL
+*--------------------------------------
 GETPIXEL		rts
 *--------------------------------------
-HLINE			rts
+* HLINE X1,X2 at Y1
 *--------------------------------------
-VLINE			rts
+HLINE			>STYA ZPBase
+				ldy #S.CB.X2+1
+
+.1				lda (ZPBase),y
+				sta CB.Cache,y
+				dey
+				bpl .1
+
+				lda CB.Cache+S.CB.MODE
+				bit #S.CB.MODE.C16
+				bne HLINE.C16
+*----- MONO ---------------------------		
+
+
+
+HLINE.C16				
+				rts
 *--------------------------------------
-FILLREC			rts
+* VLINE Y1,Y2 at X1
+*--------------------------------------
+VLINE			>STYA ZPBase
+				ldy #S.CB.Y2
+
+.1				lda (ZPBase),y
+				sta CB.Cache,y
+				dey
+				bpl .1
+				
+VLINE.I				
+				
+				rts
+*--------------------------------------
+* FILLRECT
+*   2 : Mode
+*	3 : Color
+*   4 : SrcX1
+*   6 : SrcY1
+*   8 : SrcX2
+*  10 : SrcY2
+*--------------------------------------
+FILLRECT		>STYA ZPBase
+				ldy #S.CB.Y2
+
+.1				lda (ZPBase),y
+				sta CB.Cache,y
+				dey
+				bpl .1
+
+				
+.2				jsr VLINE.I
+
+				lda CB.Cache+S.CB.Y1
+				cmp CB.Cache+S.CB.Y2
+				beq .8
+				
+				inc CB.Cache+S.CB.Y1
+				bra .2
+.8				rts
 *--------------------------------------
 * BitBlt
 *  In : YA = Ptr to CtrlBlk :
-*  0  : Operation
-*	%00000001 : Save
-*   %00000010 : Replace
-*   %00000100 : AND with Src BitMask
-*	%00001000 : ORA with Src BitMap
-*	%00010000 : XOR
-*  2  : SavePTR 
-*  4  : SrcAX
-*  6  : SrcAY
-*  8  : SrcBX
-*  10 : SrcBY
+*  1  : OP
+*  4  : SrcX1
+*  6  : SrcY1
+*  8  : SrcX2
+*  10 : SrcY2
 *  12 : DestX
 *  14 : DestY
-*  16 : BM Struct
+*  16 : BM Struct Ptr
+*  18 : Save Ptr 
 *--------------------------------------
-BITBLT			>STYA ZPCtrlBlk
-				lda (ZPCtrlBlk)
-				clc
-				rts
-*--------------------------------------	
-* Y,A = pPoint
-*--------------------------------------	
-SETCURPOS		>STYA ZPBase
-
-				ldy #3
-.1				lda (ZPBase),y
-				sta CUR.X,y
-				dey
-				bpl .1
-				
-				bit CUR.State
-				bpl .2
-				jsr HIDECUR.I		
-				jsr SHOWCUR.I
-.2				clc
-				rts
-*--------------------------------------
-* Y,A = pCur
-*--------------------------------------	
-SETCUR			>STYA ZPBase
-				ldy #S.CUR-1
-.1				lda (ZPBase),y
-				sta CUR.Buf,y
-				dey
-				bpl .1
-				
-				bit CUR.State
-				bpl .2
-				jsr HIDECUR.I
-				jsr SHOWCUR.I
-.2				clc
-				rts				
-*--------------------------------------
-SHOWCUR			bit CUR.State
-				bpl SHOWCUR.I
-				clc
-				rts
-				
-SHOWCUR.I		sta SET80STORE
-	
-				ldx CUR.X+1
-				lda DIV7.hi,x
-				sta .71+2
-				lda MOD7.hi,x
-				sta .72+2
-				
-				ldx CUR.X
-				
-.71				lda DIV7.0,x
-				lsr
-				sta SB.StartCol
-				lda #0
-				sbc #0
-				sta SB.StartPage
-				
-.72				ldy MOD7.0,x
-				lda Shiftlo.Hi,y
-				sta ZPShiftLo+1
-				lda ShiftHi.Hi,y
-				sta ZPShiftHi+1
-
-				lda L.Shift0.Lo
-				sta ZPShiftLo
-				lda L.Shift0.hi
-				sta ZPShifthi
-				
-				lda CUR.Y
-				sta CY
-				
-				ldx #0					index to CUR data/mask
-				
-.1				ldy CY
-				lda BaseL,y
-				clc
-				adc SB.StartCol
-				sta ZPBase
-				
-				lda BaseH,y
-				sta ZPBase+1
-				
-				lda SB.StartPage
-				sta SB.Page
-				
-				lda	SB.Page	
-				tay
-				eor #1
-				sta SB.Page
-				sta CLRPAGE2,y
-
+BITBLT			>STYA ZPBase
 				lda (ZPBase)
-				ldy CUR.Buf+S.CUR.MASK,x
-				and (ZPShiftLo),y
-				ldy CUR.Buf+S.CUR.DATA,x
-				ora (ZPShiftLo),y
-				sta (ZPBase)
-
-				lda	SB.Page	
-				tay
-				eor #1
-				sta SB.Page
-				sta CLRPAGE2,y
-				beq .3
-				inc ZPBase
-				
-.3				lda (ZPBase)
-				ldy CUR.Buf+S.CUR.MASK,x
-				and (ZPShiftHi),y
-				ldy CUR.Buf+S.CUR.DATA,x
-				ora (ZPShiftHi),y
-				inx
-				ldy CUR.Buf+S.CUR.MASK,x
-				and (ZPShiftLo),y
-				ldy CUR.Buf+S.CUR.DATA,x
-				ora (ZPShiftLo),y
-				sta (ZPBase)
-
-				lda	SB.Page	
-				tay
-				eor #1
-				sta SB.Page
-				sta CLRPAGE2,y
-				beq .4
-				inc ZPBase
-				
-.4				lda (ZPBase)
-				ldy CUR.Buf+S.CUR.MASK,x
-				and (ZPShiftHi),y
-				ldy CUR.Buf+S.CUR.DATA,x
-				ora (ZPShiftHi),y
-				sta (ZPBase)
-				
-				inx
-				cpx #32
-				bne .1
-				
-				sta CLR80STORE
-				sec
-				ror	CUR.State
-				
-SHOWCUR.RTS		clc
-				rts
-*--------------------------------------
-HIDECUR			bit CUR.State
-				bpl HIDECUR.RTS
-
-HIDECUR.I		
-
-		
 				clc
-				ror	CUR.State
-HIDECUR.RTS		clc
 				rts
 *--------------------------------------
 DRV.CS.END
@@ -610,22 +503,13 @@ MOD7.hi			.BS 3
 Shiftlo.hi		.BS 7
 Shifthi.hi		.BS 7
 *--------------------------------------
+CB.Cache		.BS S.CB
+*--------------------------------------
 CX				.BS 2
 CY				.BS 1
 COL				.BS 1
 GBYTE			.BS 1
 *--------------------------------------
-CUR.State		.BS 1
-CUR.X			.BS 2
-CUR.Xdiv7		.BS 1
-CUR.Xmod7		.BS 1
-CUR.Y			.BS 2
-CUR.Buf			.BS S.CUR
-CUR.SaveCol		.BS 1
-CUR.SaveColCnt	.BS 1
-CUR.SaveRow		.BS 1
-CUR.SaveRowCnt	.BS 1
-CUR.SaveBuf		.BS 3*16				MAX 3 bytes*16 rows
 SB.StartPage	.BS 1
 SB.Page			.BS 1
 SB.StartCol		.BS 1
@@ -639,7 +523,7 @@ STAT			.DA #0
 				.DA #0
 				.DA $0900
 *--------------------------------------
-DEVSTAT.MODES	.DA #%10000011			XOR,16 & B/W
+DEVSTAT.MODES	.DA #S.CB.MODE.MONO+S.CB.MODE.C16
 DEVSTAT.W		.DA 560					X.SIZE
 DEVSTAT.H		.DA 192					Y.SIZE
 *--------------------------------------
