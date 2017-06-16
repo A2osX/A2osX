@@ -179,7 +179,7 @@ note : '$VAR' does NOT expand Variable
 ## BIN,External DEV Shell commands:
 | Name | Status | Comment | K.Ver |
 | ---- | ------ | ------- | ----- |
-| ASM | In Progress | S-C MASM based multi CPU assembler | |
+| ASM | In Progress | S-C MASM based multi CPU assembler | 0.9 |
 | DEVDUMP |  | | 0.8 |
 | MEMDUMP | Working | | 0.9 |
 | RPCDUMP | Working | tool based on UDP socket API, renamed from RPCINFO | 0.9 |

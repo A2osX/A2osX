@@ -13,17 +13,19 @@ echo                                 Apple //e
 
 set /a c=0
 
-set DOCFILE=%~dp0..\_Docs\KERNEL.md
+if not exist "%~dp0..\.Docs" md "%~dp0..\.Docs"
+
+set DOCFILE=%~dp0..\.Docs\KERNEL.md
 set SRCDIR=%~dp0..\SYS
 set FILTER=KERNEL.S*.txt
 Call :SCAN
 
-set DOCFILE=%~dp0..\_Docs\LIBTCPIP.md
+set DOCFILE=%~dp0..\.Docs\LIBTCPIP.md
 set SRCDIR=%~dp0..\LIB
 set FILTER=LIBTCPIP.S*.txt
 Call :SCAN
 
-set DOCFILE=%~dp0..\_Docs\LIBBLKDEV.md
+set DOCFILE=%~dp0..\.Docs\LIBBLKDEV.md
 set SRCDIR=%~dp0..\LIB
 set FILTER=LIBBLKDEV.S*.txt
 Call :SCAN
