@@ -130,7 +130,7 @@ note : '$VAR' does NOT expand Variable
 | SSC.I.DRV   | Working | Apple "Super Serial Card" Driver (IRQ enabled) | 0.9 |
 | PIC.DRV | In Progress | Apple "Parallel Interface Card" Driver, renamed from PPIC.DRV | 0.9 |
 | Mouse.DRV | Working | Apple Mouse Card,//c Mouse Port | 0.9 |
-| DHGR.DRV | In Progress | except bitblt... | 0.8 |
+| DHGR.DRV | In Progress | except bitblt... | 0.9 |
 | ---- | ------ | ------- | ----- |
 | LanCeGS.DRV | Working | | 0.9 |
 | Uthernet.DRV  | Working | | 0.9 |
@@ -148,11 +148,14 @@ note : '$VAR' does NOT expand Variable
 | | | -L : long listing with size/date... | |
 | | | -R : Recurse subdirectories | |
 | RM | Working | -C : Continue On Error | 0.9 |
+| | | -Q : Quiet | |
 | | | -R : Recurse subdirectories | |
 | CP | Working | -C : Continue On Error | 0.9 |
+| | | -Q : Quiet | |
 | | | -R : Recurse subdirectories | |
 | | | -Y : Dont't Prompt For Override | |
 | MV | Working | -C : Continue On Error | 0.9 |
+| | | -Q : Quiet | |
 | | | -R : Recurse subdirectories | |
 | | | -Y : Dont't Prompt For Override | |
 | CAT | Working | -A : Show All non printable caracters | 0.9 |
