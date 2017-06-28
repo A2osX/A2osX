@@ -492,6 +492,18 @@ And return, if found, the full path to it.
 + CS :
  + A = EC
 
+# GetMemYA
+
+## In: 
++ Y,A = Size Requested
+
+## Out:
++ CC : success
+ + YA = PTR to Mem (Uninitialised)
+*	X = hMem
++ CS :
+ + A = EC
+
 # FreeMemA
 
 ## In:

@@ -98,10 +98,10 @@ CS.INIT			>SYSCALL GetArgC
 				bne .99
 				.FIN
 			
-				jsr CS.INIT.Check.Wildcard
+*				jsr CS.INIT.Check.Wildcard
 				
 				>LDYA ZPPtr1
-				jsr InitSrcDirYA
+				jsr InitSrcDirPatYA
 				bcc .1					success, scan for any other args
 .9				rts
 
@@ -132,18 +132,16 @@ CS.INIT			>SYSCALL GetArgC
 				bcs .99
 				.FIN
 
-.8				>PUSHWI 256
-				>PUSHBI 0
-				>SYSCALL GetMem
+.8				>LDYAI 256
+				>SYSCALL GetMemYA
 				bcs .9
 				txa
 				ldy #hSrcFullPath
 				sta (pData),y
 				
 				.DO X.COPY.TO.DEST=1
-				>PUSHWI 256
-				>PUSHBI 0
-				>SYSCALL GetMem
+				>LDYAI 256
+				>SYSCALL GetMemYA
 				bcs .9
 				txa
 				ldy #hDstFullPath
@@ -199,14 +197,33 @@ CS.RUN			>SYSCALL GetC
 .11				ldy #bPause
 				lda (pData),y
 				bpl .1
-				clc
+.8				clc
 				rts
 			
 .1				.DO X.COPY.TO.DEST=1
 				ldy #bCopy
 				lda (pData),y
-				bpl .2
-				jmp CS.RUN.Copy
+				bne .2
+				
+				jsr CS.RUN.Copy
+				
+				ldy #bCopy				Copy completed ?
+				lda (pData),y
+				bne .8
+				
+				ldy #bCopy	
+				lda (pData),y
+				beq .2					non copy error
+				
+				sec
+				jsr CS.RUN.CheckErr		we have an error....
+				bcs .9
+				
+				.DO X.DELETE.SOURCE=1
+				ldy #hToDelete
+				lda #0	
+				sta (pData),y			Cancel delete if any
+				.FIN
 				.FIN
 
 .2				.DO X.DELETE.SOURCE=1
@@ -214,20 +231,15 @@ CS.RUN			>SYSCALL GetC
 				lda (pData),y
 				beq .3
 				
-				>SYSCALL GetMemPtrA
-				>SYSCALL RemoveYA
-				php
-				pha
-				ldy #hToDelete
-				lda (pData),y
 				pha
 				lda #0
 				sta (pData),y
 				pla
-				>SYSCALL FreeMemA
-				pla
-				plp
-				jsr CS.RUN.CheckErr
+
+				>SYSCALL GetMemPtrA
+				>SYSCALL RemoveYA
+				
+.20				jsr CS.RUN.CheckErr
 				bcs .9
 				jmp CS.RUN.NEXT
 				.FIN
@@ -290,6 +302,8 @@ CS.RUN.LEAVE 	jsr LeaveSubDir			exit this sub dir....
 
 				jsr GetEntry
 				bcs *
+				
+				jsr CS.RUN.BuildFilePath
 				
 				ldy #hSrcFullPath
 				lda (pData),y
@@ -490,11 +504,6 @@ CS.RUN.FILE		ldy #bQuiet
 
 				ldy #hSrcFullPath
 				lda (pData),y
-				>SYSCALL GetMemPtrA
-
-				>SYSCALL NewPStrYA
-				bcs .9
-				txa
 				ldy #hToDelete
 				sta (pData),y
 				.FIN
@@ -560,39 +569,19 @@ CS.RUN.Rename	ldy #hDstFullPath
 *--------------------------------------
 				.DO X.COPY.TO.DEST=1
 CS.RUN.CopyStart
-				ldy #S.STAT.P.AUXTYPE+1
-				>PUSHB (ZPFileStat),y
-				dey
-				>PUSHB (ZPFileStat),y			
-				ldy #S.STAT.P.TYPE
-				>PUSHB (ZPFileStat),y
-				>PUSHBI SYS.FOpen.R
-
 				ldy #hSrcFullPath
-				lda (pData),y
-				>SYSCALL GetMemPtrA
-
-				>PUSHYA
-				>SYSCALL FOpen
+				lda #SYS.FOpen.R
+				
+				jsr CS.RUN.Open
 				bcs .99
 
 				ldy #hSrcFile
 				sta (pData),y
 				
-				ldy #S.STAT.P.AUXTYPE+1
-				>PUSHB (ZPFileStat),y
-				dey
-				>PUSHB (ZPFileStat),y
-				ldy #S.STAT.P.TYPE
-				>PUSHB (ZPFileStat),y
-				>PUSHBI SYS.FOpen.W+SYS.FOpen.X
-
 				ldy #hDstFullPath
-				lda (pData),y
-				>SYSCALL GetMemPtrA
-
-				>PUSHYA
-				>SYSCALL FOpen
+				lda #SYS.FOpen.W+SYS.FOpen.X
+				
+				jsr CS.RUN.Open
 				bcs .9
 
 				ldy #hDstFile
@@ -600,6 +589,9 @@ CS.RUN.CopyStart
 				
 				ldy #bCopy
 				lda #$ff
+				sta (pData),y
+				inc
+				ldy #CopyRC				Reset RC
 				sta (pData),y
 				clc
 				rts
@@ -609,13 +601,37 @@ CS.RUN.CopyStart
 				lda (pData),y
 				>SYSCALL FCloseA
 				pla
+				
+				ldy #CopyRC
+				sta (pData),y
+				
 				sec
 .99				rts
 *--------------------------------------
+CS.RUN.Open		phy						Save Filename
+				pha						Save open mode
+				
+				ldy #S.STAT.P.AUXTYPE+1
+				>PUSHB (ZPFileStat),y
+				dey
+				>PUSHB (ZPFileStat),y			
+				ldy #S.STAT.P.TYPE
+				>PUSHB (ZPFileStat),y
+				
+				pla
+				>PUSHA
+
+				ply
+				lda (pData),y
+				>SYSCALL GetMemPtrA
+
+				>PUSHYA
+				>SYSCALL FOpen
+				rts
+*--------------------------------------
 CS.RUN.Copy		stz .90+1
-				>PUSHWI X.COPY.BUF.SIZE
-				>PUSHBI 0
-				>SYSCALL GetMem
+				>LDYAI X.COPY.BUF.SIZE
+				>SYSCALL GetMemYA
 				bcs .9
 
 				>STYA ZPPtr1
@@ -665,45 +681,21 @@ CS.RUN.Copy		stz .90+1
 CS.RUN.CopyEnd	ldy #hSrcFile
 				lda (pData),y
 				>SYSCALL FCloseA
-				bcc .1
-				
-				jsr CS.RUN.CheckErr
-						
-.1				ldy #hDstFile
+
+				ldy #hDstFile
 				lda (pData),y
 				>SYSCALL FCloseA
-				bcc .2
-				
-				jsr CS.RUN.CheckErr
 
-.2				ldy #bCopy
+				ldy #bCopy
 				lda #$0
 				sta (pData),y
-
 				clc
-				ldy #CopyRC
-				lda (pData),y
-				beq .3
-				sec
-.3				jsr CS.RUN.CheckErr
-				bcs .9
-				
-				jmp CS.RUN.NEXT
-.9				rts				
+				rts				
 				.FIN
 *--------------------------------------
 CS.RUN.CheckErr	bcs .1
-				ldy #Count
-				lda (pData),y
-				inc
-				sta (pData),y
-				bne .10
-				iny
-				lda (pData),y
-				inc
-				sta (pData),y
 				
-.10				ldy #bQuiet
+				ldy #bQuiet
 				lda (pData),y
 				bmi .8
 				
@@ -785,6 +777,17 @@ CS.RUN.BuildFilePath
 				.FIN
 				rts
 *--------------------------------------
+CS.RUN.IncCount	ldy #Count
+				lda (pData),y
+				inc
+				sta (pData),y
+				bne .9
+				iny
+				lda (pData),y
+				inc
+				sta (pData),y
+.9				rts
+*--------------------------------------
 CS.DOEVENT		sec
 				rts
 *--------------------------------------
@@ -810,12 +813,6 @@ CS.QUIT			jsr LeaveSubDir
 				jsr CS.QUIT.FREE
 				
 				.FIN
-				
-				ldy #hToDelete
-				jsr CS.QUIT.FREE
-				
-				ldy #hFilter
-				jsr CS.QUIT.FREE
 				
 				ldy #hSrcFullPath
 				jsr CS.QUIT.FREE
