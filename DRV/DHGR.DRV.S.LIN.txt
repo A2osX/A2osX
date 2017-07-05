@@ -1,0 +1,288 @@
+PR#3
+PREFIX /A2OSX.BUILD
+LOMEM $A00
+INC 1
+AUTO 6
+				.LIST OFF	
+*--------------------------------------
+* HLINE X1,X2 at Y1
+*--------------------------------------
+HLINE			>STYA ZPBase
+				ldy #S.CB.X2+1
+
+.1				lda (ZPBase),y
+				sta CB.Cache,y
+				dey
+				bpl .1
+
+HLINE.I			lda CB.Cache+S.CB.MODE
+				bit #S.CB.MODE.C16
+				bne HLINE.C16
+	
+HLINE.MONO		lda CB.Cache+S.CB.X2	Count=X2-X1 
+				sec
+				sbc CB.Cache+S.CB.X1
+				sta ZPCount
+				tay
+				
+				lda CB.Cache+S.CB.X2+1
+				sbc CB.Cache+S.CB.X1+1
+				sta ZPCount+1
+				tax
+				jsr DIVMOD7YX
+				
+				ldy CB.Cache+S.CB.X1
+				ldx CB.Cache+S.CB.X1+1
+			
+				jsr DIVMOD7YX			A=X1 DIV 7, X=MOD 7
+				
+				
+				pha						save X DIV 7
+				lsr
+				ldy CB.Cache+S.CB.Y1
+				clc
+				adc BASEL,y				setup line Base Ptr (A=Col)
+				sta ZPBase
+				lda BASEH,y
+				sta ZPBase+1
+				ply
+				lda COL.BANK,y
+				tay
+				sta $c000,y
+
+
+								
+				
+				
+				
+				
+				
+				
+HLINE.C16				
+				rts
+*--------------------------------------
+HLINE.DIVMOD7	ldx CB.Cache+S.CB.X1+1	Get X Hi byte....
+
+				lda DIV7.lo,x
+				sta .1+1
+				lda DIV7.hi,x
+				sta .1+2
+				
+				lda MOD7.lo,x
+				sta .2+1
+				lda MOD7.hi,x
+				sta .2+2
+				
+				lda DIV7.BASE,x
+				ldx CB.Cache+S.CB.X1
+				
+				clc
+.1				adc $ffff,x				DIV7 : x = X.LO, a = X DIV 7
+				sta XDIV7
+.2				ldy $ffff,x				MOD7 : x = X.LO, y = X MOD 7		
+				sta XMOD7
+				rts
+*--------------------------------------
+* VLINE Y1,Y2 at X1
+*--------------------------------------
+VLINE			>STYA ZPBase
+				ldy #S.CB.Y2
+
+.1				lda (ZPBase),y
+				sta CB.Cache,y
+				dey
+				bpl .1
+				
+				sta SET80STORE			
+
+				lda CB.Cache+S.CB.OP
+				beq VLINE.OP0
+			
+VLINE.XOR		jsr VLINE.DIVMOD7
+				
+				ldy XMOD7
+				lda Mono.Masks,y
+				sta .2+1
+				
+				ldy XCOL7
+				
+				ldx CB.Cache+S.CB.Y1
+				
+.1				lda BASEL,x
+				sta ZPBase
+				lda BASEH,x
+				sta ZPBase+1
+				
+				lda (ZPBase),y			XOR
+.2				eor #$ff
+				sta (ZPBase),y
+				
+				inx
+				cpx CB.Cache+S.CB.Y2
+				bcc .1
+				beq .1
+				
+				sta CLR80STORE	
+				rts
+				
+VLINE.OP0		lda CB.Cache+S.CB.MODE
+				dec
+				bne VLINE.C16
+				
+VLINE.MONO		jsr VLINE.DIVMOD7
+
+				ldy XMOD7
+				lda Mono.NMasks,y		includes And $7F for mono
+				sta .3+1
+				
+				lda CB.Cache+S.CB.COLOR	get color
+				beq .1
+				lda Mono.Masks,y
+.1				sta .4+1			
+				
+				ldy XCOL7
+				
+				ldx CB.Cache+S.CB.Y1
+				
+.2				lda BASEL,x
+				sta ZPBase
+				lda BASEH,x
+				sta ZPBase+1
+				
+				lda (ZPBase),y
+.3				and #$ff
+.4				ora #$ff
+				sta (ZPBase),y
+				
+				inx
+				cpx CB.Cache+S.CB.Y2
+				bcc .2
+				beq .2
+				
+				sta CLR80STORE	
+				rts
+	
+VLINE.C16		lda CB.Cache+S.CB.X1
+				lsr CB.Cache+S.CB.X1+1			divide by 4
+				ror
+				lsr CB.Cache+S.CB.X1+1
+				ror
+				tay						Y=X/4 (range 0->139)
+				lda DIV7.0,y			A=X/4/7 (range 0->19)
+				
+				asl						times 2  (range 0->38)
+				
+				ldx CB.Cache+S.CB.Y1
+				adc BASEL,x				setup line Base Ptr (cc by asl)
+				sta ZPBase				ZPBase now point to first of...
+				lda BASEH,x
+				sta ZPBase+1			...the 4 columns
+
+				lda MOD7.0,y			get MOD
+				
+				asl						times 4 to compute index in MASK tables
+				asl
+				tax						set in X for Masks,NMasks
+				
+				lda CB.Cache+S.CB.COLOR
+				
+				asl						times 4 to compute index in PIXELS table
+				asl
+				tay
+
+				lda Color.Masks,x		bits in 1st byte to light?
+				beq .10
+				and Color.Pixels,y		apply color
+				sta GBYTE
+				
+				sta SETPAGE2
+				
+				lda (ZPBase)
+				and Color.NMasks,x		reset existing pixel, 
+				ora GBYTE
+				sta (ZPBase)
+
+.10				inx
+				iny
+				
+				lda Color.Masks,x
+				beq .11
+				and Color.Pixels,y		apply color
+				sta GBYTE
+				
+				sta CLRPAGE2
+
+				lda (ZPBase)
+				and Color.NMasks,x		reset existing pixel, 
+				ora GBYTE
+				sta (ZPBase)
+				
+.11				inc ZPBase
+				inx
+				iny
+				
+				lda Color.Masks,x
+				beq .12
+				and Color.Pixels,y		apply color
+				sta GBYTE
+				
+				sta SETPAGE2
+				
+				lda (ZPBase)
+				and Color.NMasks,x		reset existing pixel, 
+				ora GBYTE
+				sta (ZPBase)
+				
+.12				inx
+				iny
+				
+				lda Color.Masks,x
+				beq .13
+				and Color.Pixels,y		apply color
+				sta GBYTE
+				
+				sta CLRPAGE2
+				
+				lda (ZPBase)
+				and Color.NMasks,x		reset existing pixel, 
+				ora GBYTE
+				sta (ZPBase)
+				
+.13				sta CLR80STORE
+				rts
+*--------------------------------------
+VLINE.DIVMOD7	ldx CB.Cache+S.CB.X1+1	Get X HI byte....
+
+				lda DIV7.lo,x
+				sta .2+1
+				lda DIV7.hi,x
+				sta .2+2
+				
+				lda MOD7.lo,x
+				sta .3+1
+				lda MOD7.hi,x
+				sta .3+2
+				
+				lda DIV7.BASE,x
+				ldx CB.Cache+S.CB.X1	Get X LO byte....
+				
+				clc
+				
+.2				adc $ffff,x				DIV7 : x = X.LO, a = X DIV 7
+				sta XDIV7				save X DIV 7
+
+				tay
+				lsr
+				sta XCOL7
+				ldx COL.BANK,y
+				sta $C000,x
+				
+.3				lda $ffff,x				MOD7 : x = X.LO, y = X MOD 7		
+				sta XMOD7
+				rts
+
+*--------------------------------------
+MAN
+SAVE /A2OSX.SRC/DRV/DHGR.DRV.S.LIN
+LOAD /A2OSX.SRC/DRV/DHGR.DRV.S
+ASM
