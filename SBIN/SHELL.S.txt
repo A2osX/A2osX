@@ -18,10 +18,14 @@ ZPPTR3			.EQ ZPBIN+4
 ZPBufBase		.EQ ZPBIN+8
 ZPBufPtr		.EQ ZPBIN+10
 ZPBufEnd		.EQ ZPBIN+12
+ZPCSHStack		.EQ ZPBIN+14
 *--------------------------------------
 CmdLine.MAX		.EQ 127
 VarLen.MAX		.EQ 15
 CSH.Stack.MAX	.EQ 15
+CSHERR.SYNTAX	.EQ $7F		
+CSHERR.SOVERFLW	.EQ $7E
+CSHERR.NOVERFLW	.EQ $7D
 *--------------------------------------
 *			File Header (16 Bytes)
 *--------------------------------------
@@ -47,6 +51,7 @@ L.MSG.PROMPT	.DA MSG.PROMPT
 L.MSG.ECHO		.DA MSG.ECHO
 L.MSG.ERROR		.DA MSG.ERROR
 L.MSG.PRINTENV	.DA MSG.PRINTENV
+L.MSG.CSHERR	.DA MSG.CSHERR
 L.ENV.PATH		.DA ENV.PATH
 L.ENV.PWD		.DA ENV.PWD
 L.ENV.PS1		.DA ENV.PS1
@@ -67,18 +72,27 @@ J.INTCMDS		.DA Cmd.Exec.CD
 				.DA Cmd.Exec.SET
 				.DA Cmd.Exec.STARTPROC
 				.DA Cmd.Exec.TIME
-L.TXTCMDS		.DA TXTCMDS
-J.TXTCMDS		.DA TXT.Exec.IF
+L.CSHCMDS		.DA CSHCMDS
+J.CSHCMDS		.DA CSH.IF
+				.DA CSH.WHILE
+				.DA CSH.BREAK
+				.DA CSH.CONTINUE
+J.CSHCMDS.END	.DA CSH.IF.END
+				.DA CSH.WHILE.END
 L.ERR.Codes		.DA ERR.Codes
 L.ERR.Messages	.DA ERR.Messages
 				.DA 0
 *--------------------------------------
 CS.INIT			jsr SetPWD
 
+*				lda (pPs)
+*				ora #S.PS.F.EVENT		Now accept events
+*				sta (pPs)
+								
 				>SYSCALL GetArgC
 				cmp #1
 
-				beq CS.INIT.INTERACTIVE	no arg, continue starting interactive
+				beq .1					no arg, continue starting interactive
 
 				>PUSHWI 0				Aux type
 				>PUSHBI 4				S.FILEINFO.TYPE.TXT
@@ -91,37 +105,29 @@ CS.INIT			jsr SetPWD
 				bcs .9
 				
 				phy
-				ldy #BatchFileLen+1
+				ldy #CSH.BufLen+1
 				sta (pData),y
 				dey
 				pla
 				sta (pData),y
 				
 				txa
-				ldy #hBatchFile
+				ldy #CSH.hBuf
 				sta (pData),y
 				
 				ldy #bExitOnEOF
 				lda #$FF
 				sta (pData),y
 				
-				jsr TXT.Reset
+				jmp CSH.Reset
 				
-				clc
-.9				rts
-*--------------------------------------
-CS.INIT.INTERACTIVE
-				jsr HIS.Init
+.1				jsr HIS.Init
 				bcs .9
 				
 				>LDYA L.MSG.GREETINGS
 				>SYSCALL PPrintFYA
 				
-				lda (pPs)
-				ora #S.PS.F.EVENT		Now accept events
-				sta (pPs)
-								
-				clc
+*				clc
 .9				rts				
 *--------------------------------------
 CS.RUN			ldy #bPause
@@ -139,7 +145,7 @@ CS.RUN			ldy #bPause
 				jsr ERR.Print
 				bcs CS.RUN.EXIT.RTS
 				
-.11				ldy #hBatchFile			batch mode ?
+.11				ldy #CSH.hBuf			batch mode ?
 				lda (pData),y
 				beq .10
 				
@@ -225,7 +231,7 @@ CS.RUN.READ		lda #0
 				plp
 				rts
 *--------------------------------------
-CS.RUN.BATCH	jsr	TXT.Exec
+CS.RUN.BATCH	jsr	CSH.Exec
 				bcs .9
 				
 				jsr CmdBuffer.Normalize
@@ -241,25 +247,50 @@ CS.RUN.BATCH	jsr	TXT.Exec
 				rts
 
 .9				cmp #MLI.ERR.EOF
-				bne .8
+				beq .98
 				
-				lda #0
+				pha
+				
+				ldy #CSH.BufPtr+1
+				>PUSHB (pData),y
+				dey
+				>PUSHB (pData),y
+				
+				>LDYA L.MSG.CSHERR
+				>SYSCALL PPrintFYA
+				
+.90				jsr CSH.GetChar
+				bcs .91
+				>SYSCALL PutCA
+				
+				jsr CSH.GetNextChar
+				bcs .91
+				cmp #13
+				beq .91
+				>SYSCALL PutCA
+				bra .90
+				
+.91				pla
+				bra .99
+				
+.98				lda #0
 
-				ldy #S.PS.RC
+.99				ldy #S.PS.RC
 				sta (pPs),y
+				pha
 				
 				ldy #bExitOnEOF
 				lda (pData),y
 				asl						CS if bExitOnEOF
-				lda #0
 				
+				pla
 				rts
 *--------------------------------------
 CS.DOEVENT		sec
 				rts
 *--------------------------------------
 CS.CHARIN		tax
-				ldy #hBatchFile			Batch mode ?
+				ldy #CSH.hBuf			Batch mode ?
 				lda (pData),y
 				beq .10
 * Batch Mode			
@@ -397,12 +428,17 @@ CS.CHARIN.CTRL	cpx #13					CR
 *--------------------------------------
 CS.QUIT			jsr HIS.Quit
 
-				ldy #hBatchFile
+				ldy #CSH.hBuf
 				lda (pData),y
 				beq .1
 				>SYSCALL FreeMemA
 
-.1								
+.1				ldy #CSH.hStack
+
+				lda (pData),y
+				beq .8
+				>SYSCALL FreeMemA
+				
 .8				clc
 				rts
 *--------------------------------------
@@ -501,9 +537,9 @@ CmdBuffer.DEL	lda (pData)
 .9				rts
 *--------------------------------------
 				.INB /A2OSX.SRC/SBIN/SHELL.S.CMD
+				.INB /A2OSX.SRC/SBIN/SHELL.S.CSH
 				.INB /A2OSX.SRC/SBIN/SHELL.S.ERR
 				.INB /A2OSX.SRC/SBIN/SHELL.S.HIS
-				.INB /A2OSX.SRC/SBIN/SHELL.S.TXT
 *--------------------------------------
 CS.END
 *--------------------------------------
@@ -521,7 +557,7 @@ INTCMDS			>PSTR "CD"
 				>PSTR "STARTPROC"
 				>PSTR "TIME"
 				.HS 00
-TXTCMDS			>PSTR "IF"
+CSHCMDS			>PSTR "IF"
 				>PSTR "WHILE"
 				>PSTR "BREAK"
 				>PSTR "CONTINUE"
@@ -532,6 +568,7 @@ MSG.PROMPT		>PSTR "%S$ "
 MSG.ECHO		>PSTR ">%S\r\n"
 MSG.ERROR		>PSTR "Err:%S [%h]\r\n"
 MSG.PRINTENV	>PSTR "%S=%S\r\n"
+MSG.CSHERR		>PSTR "Pos %D:"
 FMT.DATE		>PSTR "%A, %B %d %Y"
 FMT.TIME		>PSTR "%H:%M:%S (%I:%M:%S%p)"
 *--------------------------------------
@@ -561,11 +598,14 @@ bExitOnEOF		.BS 1
 hCmdHistory		.BS 1
 CmdHistory.IDX	.BS 1
 CmdHistory.END	.BS 1
-hBatchFile		.BS 1
-BatchFilePtr	.BS 2
-BatchFileLen	.BS 2
-CSH.SavePtr		.BS 2
-CSH.SEPStack	.BS CSH.Stack.MAX+1
+CSH.hBuf		.BS 1
+CSH.BufPtr		.BS 2
+CSH.BufLen		.BS 2
+CSH.CmdSave		.BS 1
+CSH.SepSave		.BS 1
+CSH.BufPtrSave	.BS 2
+CSH.hStack		.BS 1
+CSH.StackPtr	.BS 1
 DS.END			.ED
 *--------------------------------------
 MAN

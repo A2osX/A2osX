@@ -5,19 +5,46 @@ INC 1
 AUTO 6
 				.LIST OFF	
 *--------------------------------------
-TXT.Reset		ldy #CSH.SEPStack
-				tya
+CSH.Reset		ldy #CSH.hStack
+				lda (pData),y
+				bne .1
+				
+				>LDYAI 256
+				>SYSCALL GetMemYA
+				bcs .9
+				txa
+				ldy #CSH.hStack
 				sta (pData),y
-				rts
+				
+.1				lda #0
+				ldy #CSH.StackPtr
+				sta (pData),y
+*				clc
+.9				rts
 *--------------------------------------
-TXT.Exec		jsr TXT.GetBuffer
+CSH.Exec		jsr CSH.GetBuffer
 
+				ldy #CSH.hStack
+				lda (pData),y
+				>SYSCALL GetMemPtrA
+				>STYA ZPCSHStack
+				
 				ldy #0
 				
-				jsr TXT.GetCharNB
+				jsr CSH.GetCharNB
 				bcs .9
 				
-				jsr TXT.SavePtr			Save Ptr, in case of while,for....
+				cmp #'}'				End of block ?
+				bne .10
+
+				jsr CSH.CheckStack		must be on stack....
+				bcs .9
+				
+				jsr CSH.Pop				was expected, get stacked Cmd...
+				tax
+				jmp (J.CSHCMDS.END,x) 
+				
+.10				jsr CSH.SavePtr			Save Ptr, in case of while,for....
 				
 				cmp #$0D
 				beq .6					empty line...skip...
@@ -26,50 +53,51 @@ TXT.Exec		jsr TXT.GetBuffer
 				sta (pData),y				
 				
 				cpy #CmdLine.MAX
-				beq .7					Buffer full, try execute...
+				beq .8					Buffer full, try execute...
 				
-				jsr TXT.GetNextChar
-				bcs .7					EOF, try execute...
+				jsr CSH.GetNextChar
+				bcs .8					EOF, try execute...
 				
 				cmp #$0D				EOL, skip CR and exec...
 				beq .6
 
-				jsr TXT.CheckCharNB
+				jsr CSH.CheckCharNB
 				bcc .1					still in keyword....loop
 				
 				tya
 				sta (pData)
 				
-				jsr TXT.CheckKeyword
+				jsr CSH.CheckKeyword
 				bcs .5					not an internal SCRipt keyword....
 				
 				lda #0
 				sta (pData)				Reset Cmdline
 				
-				jmp (J.TXTCMDS,x)			
+				stx CSH.CmdSave
+				jmp (J.CSHCMDS,x)			
 				
 .5				lda (ZPBufPtr)			restore char....				
 				bra .1
 				
-.6				jsr TXT.GetNextChar		Skip last char...
+.6				jsr CSH.GetNextChar		Skip last char...
 				
-.7				tya
-				beq .8					empty line....nothing to do..
+.8				tya
+				beq .80					empty line....nothing to do..
 				sta (pData)
 				
 				ldy #bEcho
 				lda (pData),y
-				beq .8
+				beq .80
 
 				>PUSHW pData
 				>LDYA L.MSG.ECHO
 				>SYSCALL PPrintFYA
-.8				clc
+.80				clc
 .9				rts
 *--------------------------------------
-TXT.CheckKeyword
+CSH.CheckKeyword
 				phy
-				>LDYA L.TXTCMDS
+				>LDYA L.CSHCMDS
 				>STYA ZPPtr2
 				
 				ldx #0
@@ -114,12 +142,12 @@ TXT.CheckKeyword
 				sec
 				rts
 *--------------------------------------
-TXT.GetBuffer	ldy #hBatchFile
+CSH.GetBuffer	ldy #CSH.hBuf
 				lda (pData),y
 				>SYSCALL GetMemPtrA
 				>STYA ZPBufBase
 				
-				ldy #BatchFileLen
+				ldy #CSH.BufLen
 				lda (pData),y
 				clc
 				adc ZPBufBase
@@ -130,7 +158,7 @@ TXT.GetBuffer	ldy #hBatchFile
 				adc ZPBufBase+1
 				sta ZPBufEnd+1
 				
-TXT.SetBufPtr	ldy #BatchFilePtr
+CSH.SetBufPtr	ldy #CSH.BufPtr
 				lda (pData),y
 				clc
 				adc ZPBufBase
@@ -142,28 +170,202 @@ TXT.SetBufPtr	ldy #BatchFilePtr
 				sta ZPBufPtr+1
 				rts
 *--------------------------------------
-TXT.SavePtr		ldx ZPBufPtr
-				stx CSH.SavePtr
+CSH.SavePtr		ldx ZPBufPtr
+				stx CSH.BufPtrSave
 				ldx ZPBufPtr+1
-				stx CSH.SavePtr+1
+				stx CSH.BufPtrSave+1
 				rts
 *--------------------------------------
-TXT.PushPtr		rts
+CSH.WHILE
+CSH.IF			jsr CSH.GetCharNB
+				bcs .9
+				cmp #'('
+				bne .9
+				
+				jsr CSH.GetNextCharNB
+				bcs .9
+				
+				jsr CSH.ExpEval
+				bcs .99
+				
+				jsr CSH.GetCharNB
+				bcs .99
+				cmp #')'
+				bne .9
+				
+				jsr CSH.GetNextCharNB
+				bcs .99
+				cmp #'{'
+				bne .9
+				
+				lda CSH.ACC
+				ora CSH.ACC+1
+				ora CSH.ACC+2
+				ora CSH.ACC+3
+				beq .6					eval returned false, skip {{....}}
+				
+				jsr CSH.GetNextCharNB	Skip '{'
+
+				lda CSH.CmdSave			Push "IF" or "WHILE"
+				beq .1					if "IF", no need to push Saved Ptr
+				
+				pha
+				lda CSH.BufPtrSave+1	WHILE : push loop address...
+				jsr CSH.Push
+				lda CSH.BufPtrSave
+				jsr CSH.Push		
+				pla
+				
+.1				jsr CSH.Push
+				bcs .99
+				
+				lda #'}'				Tell '}' is expected at the end of block
+				jsr CSH.Push
+				bcs .99
+	
+				rts
+				
+.6				ldx #1					expecting 1 '}' for now....
+
+.7				jsr CSH.GetNextChar
+				bcs .9
+				cmp #'{'
+				bne .71
+				inx
+				bra .7
+				
+.71				cmp #'}'
+				bne .7
+				txa
+				beq .9
+				dex
+				bne .7
+				
+				jsr CSH.GetNextChar
+				
+				clc
+				rts
+				
+.9				lda #CSHERR.SYNTAX
+				sec
+.99				rts
 *--------------------------------------
-TXT.GetCharNB	jsr TXT.GetChar
-				bcs TXT.GetNextCharNB.RTS
-				jsr TXT.CheckCharNB
-				bcc TXT.GetNextCharNB.RTS		
-*--------------------------------------
-TXT.GetNextCharNB
-				jsr TXT.GetNextChar
-				bcs TXT.GetNextCharNB.RTS
-				jsr TXT.CheckCharNB
-				bcs TXT.GetNextCharNB
-TXT.GetNextCharNB.RTS
+CSH.IF.END		jsr CSH.GetNextChar		just skip ending '}'
+				clc
 				rts
 *--------------------------------------
-TXT.CheckCharNB	cmp #32					SPACE
+CSH.WHILE.END	jsr CSH.Pop
+				ldy #CSH.BufPtr
+				sta (pData),y
+				jsr CSH.Pop
+				ldy #CSH.BufPtr+1
+				sta (pData),y
+				clc
+				rts
+*--------------------------------------
+CSH.BREAK
+*--------------------------------------
+CSH.CONTINUE
+
+				lda #CSHERR.SYNTAX
+				sec
+				rts
+*--------------------------------------
+CSH.Push		pha
+				ldy #CSH.StackPtr
+				lda (pData),y
+				tay
+				
+				pla
+				sta (ZPCSHStack),y
+				iny
+				beq .9
+				tya
+				ldy #CSH.StackPtr
+				sta (pData),y
+				clc
+				rts
+	
+.9				lda #CSHERR.SOVERFLW
+				sec
+				rts
+*--------------------------------------
+CSH.Pop			ldy #CSH.StackPtr
+				lda (pData),y
+				beq .9
+				dec
+				tay
+				sta (pData),y
+				lda (ZPCSHStack),y
+				clc
+				rts
+
+.9				lda #CSHERR.SYNTAX
+				sec
+				rts				
+*--------------------------------------
+CSH.CheckStack	pha
+				ldy #CSH.StackPtr
+				lda (pData),y
+				beq .9
+				dec
+				tay
+				pla
+				cmp (ZPCSHStack),y
+				bne .9
+				
+				tya
+				ldy #CSH.StackPtr
+				sta (pData),y
+				
+				clc
+				rts
+				
+.9				lda #CSHERR.SYNTAX
+				sec
+				rts						
+*--------------------------------------
+CSH.ExpEval		stz CSH.ACC
+				stz CSH.ACC+1
+				stz CSH.ACC+2
+				stz CSH.ACC+3
+				
+				jsr CSH.GetCharNB
+				bcs .9
+				cmp #')'
+				beq .8
+				
+				jsr CSH.IsLetter		Fnc or Var ?
+				bne .1
+				
+				
+.1								
+				
+.8				clc
+				rts
+				
+.9				lda #CSHERR.SYNTAX
+				sec
+				rts	
+*---------------------------------------
+CSH.IsLetterOrDigit
+				jsr CSH.IsDigit
+				bcc CSH.IsLetterRTS
+*--------------------------------------
+CSH.GetCharNB	jsr CSH.GetChar
+				bcs CSH.GetNextCharNB.RTS
+				jsr CSH.CheckCharNB
+				bcc CSH.GetNextCharNB.RTS		
+*--------------------------------------
+CSH.GetNextCharNB
+				jsr CSH.GetNextChar
+				bcs CSH.GetNextCharNB.RTS
+				jsr CSH.CheckCharNB
+				bcs CSH.GetNextCharNB
+CSH.GetNextCharNB.RTS
+				rts
+*--------------------------------------
+CSH.CheckCharNB	cmp #32					SPACE
 				beq .9
 				cmp #13					CR
 				beq .9
@@ -174,8 +376,8 @@ TXT.CheckCharNB	cmp #32					SPACE
 				clc
 .9				rts				
 *--------------------------------------
-TXT.GetNextChar	phy
-				ldy #BatchFilePtr
+CSH.GetNextChar	phy
+				ldy #CSH.BufPtr
 				lda (pData),y
 				inc
 				sta (pData),y
@@ -189,10 +391,10 @@ TXT.GetNextChar	phy
 .1				ply
 
 				inc ZPBufPtr
-				bne TXT.GetChar
+				bne CSH.GetChar
 				inc ZPBufPtr+1
 *--------------------------------------
-TXT.GetChar		lda ZPBufPtr
+CSH.GetChar		lda ZPBufPtr
 				eor ZPBufEnd
 				bne .1
 				
@@ -208,15 +410,11 @@ TXT.GetChar		lda ZPBufPtr
 				clc
 				rts
 *---------------------------------------
-TXT.IsLetterOrDigit
-				jsr TXT.IsDigit
-				bcc TXT.IsLetterRTS
-*---------------------------------------
-TXT.IsLetter	cmp #'A'
+CSH.IsLetter	cmp #'A'
 				bcc .9
 				
 				cmp #'Z'+1
-				bcc TXT.IsLetterRTS
+				bcc CSH.IsLetterRTS
 
 				cmp #'a'
 				bcc .9
@@ -225,9 +423,9 @@ TXT.IsLetter	cmp #'A'
 
 .9				sec
 				
-TXT.IsLetterRTS	rts					
+CSH.IsLetterRTS	rts					
 *---------------------------------------
-TXT.IsDigit		cmp #'0'
+CSH.IsDigit		cmp #'0'
 				bcc .9
 				cmp #'9'+1
 				rts						cc if ok, cs if not
@@ -235,117 +433,7 @@ TXT.IsDigit		cmp #'0'
 .9				sec
 				rts
 *--------------------------------------
-TXT.Exec.IF		jsr TXT.GetCharNB
-				bcs .9
-				cmp #'('
-				bne .9
-				
-				jsr TXT.ExpEval
-				bcs .99
-				
-				jsr TXT.GetCharNB
-				bcs .99
-				cmp #')'
-				bne .9
-				
-				jsr TXT.GetNextCharNB
-				bcs .99
-				cmp #'{'
-				bne .9
-				
-				lda CSH.ACC
-				ora CSH.ACC+1
-				ora CSH.ACC+2
-				ora CSH.ACC+3
-				beq .6					eval returned false, skip {{....}}
-				
-				jsr TXT.GetNextCharNB	Skip '{'
-
-				lda #'}'				Tell '}' is expected at the end of block
-				jsr TXT.PushSEP
-				bcs .99
-				
-				
-				rts
-				
-.6				ldx #1					expecting 1 '}'
-
-.7				jsr TXT.GetNextChar
-				bcs .9
-				cmp #'{'
-				bne .71
-				inx
-				bra .7
-				
-.71				cmp #'}'
-				bne .7
-				dex
-				bne .7
-				
-				clc
-				rts
-				
-.9				lda #SYSMGR.ERRSYN
-				sec
-.99				rts
-*--------------------------------------
-TXT.PushSEP		tax
-				ldy #CSH.SEPStack
-				lda (pData),y
-				cmp #CSH.SEPStack+CSH.Stack.MAX
-				beq .9
-				
-				pha
-				inc
-				sta (pData),y
-				ply
-				txa
-				sta (pData),y
-				clc
-				rts
-	
-.9				lda #SYSMGR.ERRSYN
-				sec
-				rts
-*--------------------------------------
-TXT.PopSEP		ldy #CSH.SEPStack
-				lda (pData),y
-				cmp #CSH.SEPStack
-				beq .9
-				dec
-				sta (pData),y
-				clc
-				rts
-
-.9				lda #SYSMGR.ERRSYN
-				sec
-				rts				
-*--------------------------------------
-TXT.CheckSEP	tax
-				ldy #CSH.SEPStack
-				lda (pData),y
-				cmp #CSH.SEPStack
-				beq .9
-				tay
-				txa
-				cmp (pData),y
-				bne .9
-				clc
-				rts
-				
-.9				lda #SYSMGR.ERRSYN
-				sec
-				rts
-*--------------------------------------
-TXT.ExpEval		jsr TXT.GetNextCharNB
-				bcs .9
-				
-				lda #1
-				sta CSH.ACC
-				clc
-.9				rts
-*--------------------------------------
 MAN
-SAVE /A2OSX.SRC/SBIN/SHELL.S.TXT
+SAVE /A2OSX.SRC/SBIN/SHELL.S.CSH
 LOAD /A2OSX.SRC/SBIN/SHELL.S
 ASM
