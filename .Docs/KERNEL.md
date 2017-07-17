@@ -148,6 +148,15 @@ Prints Pascal/C-Style String
 + CC : success
 + CS : I/O error from COut
 
+# AToI
+Convert String to 32 bit int
+
+## In:
++ PUSHW PTR to target buffer DWORD
++ PUSHW Source String (PSTR)
+
+## Out:
+
 # GetDevByIDA
 
 ## IN: 
