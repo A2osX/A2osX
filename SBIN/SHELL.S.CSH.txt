@@ -5,9 +5,32 @@ INC 1
 AUTO 6
 				.LIST OFF	
 *--------------------------------------
-CSH.Reset		ldy #CSH.hStack
-				lda (pData),y
-				bne .1
+CSH.TYPE.CHAR	.EQ 1
+CSH.TYPE.INT	.EQ 2
+CSH.TYPE.LONG	.EQ 3
+CSH.TYPE.FLOAT	.EQ 4
+*--------------------------------------
+CSH.Init		>LDYAI 256
+				>SYSCALL GetMemYA
+				bcs .9
+				txa
+				ldy #CSH.hSymbols
+				sta (pData),y
+				
+				lda #0
+				ldy #CSH.SymbolsPtr
+				sta (pData),y
+				
+				>LDYAI 256
+				>SYSCALL GetMemYA
+				bcs .9
+				txa
+				ldy #CSH.hData
+				sta (pData),y
+				
+				lda #0
+				ldy #CSH.DataPtr
+				sta (pData),y
 				
 				>LDYAI 256
 				>SYSCALL GetMemYA
@@ -16,18 +39,16 @@ CSH.Reset		ldy #CSH.hStack
 				ldy #CSH.hStack
 				sta (pData),y
 				
-.1				lda #0
+				lda #0
 				ldy #CSH.StackPtr
 				sta (pData),y
+				
 *				clc
 .9				rts
 *--------------------------------------
-CSH.Exec		jsr CSH.GetBuffer
+CSH.Run			jsr CSH.GetBuf
 
-				ldy #CSH.hStack
-				lda (pData),y
-				>SYSCALL GetMemPtrA
-				>STYA ZPCSHStack
+				jsr CSH.GetPtrs
 				
 				ldy #0
 				
@@ -68,7 +89,7 @@ CSH.Exec		jsr CSH.GetBuffer
 				sta (pData)
 				
 				jsr CSH.CheckKeyword
-				bcs .5					not an internal SCRipt keyword....
+				bcs .5					not an internal CSH keyword....
 				
 				lda #0
 				sta (pData)				Reset Cmdline
@@ -94,6 +115,81 @@ CSH.Exec		jsr CSH.GetBuffer
 				>SYSCALL PPrintFYA
 .80				clc
 .9				rts
+*--------------------------------------
+CSH.Quit		ldy #CSH.hBuf
+				lda (pData),y
+				beq .1
+				>SYSCALL FreeMemA
+
+.1				ldy #CSH.hStack
+
+				lda (pData),y
+				beq .2
+				>SYSCALL FreeMemA
+				
+.2				ldy #CSH.hData
+
+				lda (pData),y
+				beq .3
+				>SYSCALL FreeMemA
+				
+.3				ldy #CSH.hSymbols
+
+				lda (pData),y
+				beq .8
+				>SYSCALL FreeMemA
+				
+.8				rts
+*--------------------------------------
+CSH.GetBuf		ldy #CSH.hBuf
+				lda (pData),y
+				>SYSCALL GetMemPtrA
+				>STYA ZPBufBase
+				
+				ldy #CSH.BufLen
+				lda (pData),y
+				clc
+				adc ZPBufBase
+				sta CSH.GetChar.LO+1
+
+				iny
+				lda (pData),y
+				adc ZPBufBase+1
+				sta CSH.GetChar.HI+1
+				
+CSH.SetBufPtr	ldy #CSH.BufPtr
+				lda (pData),y
+				clc
+				adc ZPBufBase
+				sta ZPBufPtr
+				
+				iny
+				lda (pData),y
+				adc ZPBufBase+1
+				sta ZPBufPtr+1
+				rts
+*--------------------------------------
+CSH.GetPtrs		ldy #CSH.hSymbols
+				lda (pData),y
+				>SYSCALL GetMemPtrA
+				>STYA ZPCSHSymbols
+
+				ldy #CSH.hData
+				lda (pData),y
+				>SYSCALL GetMemPtrA
+				>STYA ZPCSHData
+				
+				ldy #CSH.hStack
+				lda (pData),y
+				>SYSCALL GetMemPtrA
+				>STYA ZPCSHStack
+				rts
+*--------------------------------------
+CSH.SavePtr		ldx ZPBufPtr
+				stx CSH.BufPtrSave
+				ldx ZPBufPtr+1
+				stx CSH.BufPtrSave+1
+				rts
 *--------------------------------------
 CSH.CheckKeyword
 				phy
@@ -140,40 +236,6 @@ CSH.CheckKeyword
 				
 .9				ply
 				sec
-				rts
-*--------------------------------------
-CSH.GetBuffer	ldy #CSH.hBuf
-				lda (pData),y
-				>SYSCALL GetMemPtrA
-				>STYA ZPBufBase
-				
-				ldy #CSH.BufLen
-				lda (pData),y
-				clc
-				adc ZPBufBase
-				sta ZPBufEnd
-				
-				iny
-				lda (pData),y
-				adc ZPBufBase+1
-				sta ZPBufEnd+1
-				
-CSH.SetBufPtr	ldy #CSH.BufPtr
-				lda (pData),y
-				clc
-				adc ZPBufBase
-				sta ZPBufPtr
-				
-				iny
-				lda (pData),y
-				adc ZPBufBase+1
-				sta ZPBufPtr+1
-				rts
-*--------------------------------------
-CSH.SavePtr		ldx ZPBufPtr
-				stx CSH.BufPtrSave
-				ldx ZPBufPtr+1
-				stx CSH.BufPtrSave+1
 				rts
 *--------------------------------------
 CSH.WHILE
@@ -271,17 +333,68 @@ CSH.CONTINUE
 				sec
 				rts
 *--------------------------------------
-CSH.ExpEval		stz CSH.ACC
-				stz CSH.ACC+1
-				stz CSH.ACC+2
-				stz CSH.ACC+3
+CSH.CHAR		lda #CSH.TYPE.CHAR
+				bra CSH.TYPE
+CSH.INT			lda #CSH.TYPE.INT
+				bra CSH.TYPE
+CSH.LONG		lda #CSH.TYPE.LONG
+				bra CSH.TYPE
+CSH.FLOAT		lda #CSH.TYPE.FLOAT
+
+CSH.TYPE		sta CSH.ACCT
+				
+				jsr CSH.GetChar
+				bcs .9
+				cmp #' '
+				bne .9
+				
+				jsr CSH.GetIdentInCMD
+				bcs .9
+				
+				jsr CSH.GetCharNB
+				bcs .9
+				cmp #';'
+				beq .8					end of declaration, no value...
+				
+				cmp #'='
+				bne .9
+				
+				jsr CSH.GetNextCharNB
+				bcs .9
+				
+				jsr CSH.ExpEval
+				bcs .9
+				
+				jsr CSH.GetChar
+				bcs .9
+				cmp #';'
+				bne .9
+				
+.8				jsr CSH.AddVar
+				bcs .99
+				
+				jsr CSH.GetNextCharNB	Skip ;
+				clc
+				rts
+				
+.9				lda #CSHERR.SYNTAX
+				sec
+.99				rts
+*--------------------------------------
+
+				lda #CSHERR.SYNTAX
+				sec
+				rts
+*--------------------------------------
+CSH.ExpEval		jsr CSH.ZeroACC
 				
 				ldy #0
 				
 				jsr CSH.GetCharNB
-				>DEBUG
 				bcs .9
 				cmp #')'
+				beq .8
+				cmp #';'
 				beq .8
 				
 				jsr CSH.IsLetter		Fnc or Var ?
@@ -303,24 +416,46 @@ CSH.ExpEval		stz CSH.ACC
 				sec
 .99				rts	
 *--------------------------------------
+CSH.GetIdentInCMD
+				ldy #0
+				
+				jsr CSH.GetNextCharNB
+				bcs .9
+				jsr CSH.IsLetter
+				bcs .9
+				
+.1				iny
+				sta CMD,y
+				jsr CSH.GetNextChar
+				bcs .8
+				
+				jsr CSH.IsLetterOrDigit
+				bcc .1
+				
+.8				sty CMD
+				clc
+				rts
+				
+.9				lda #CSHERR.SYNTAX
+				sec
+				rts					
+*--------------------------------------
 CSH.GetNumInACC	ldy #0
 
 .1				iny
 				cpy #10
 				beq .9
 				
-				sta (pData),y
-				
-				jsr CSH.GetNextChar			
+				sta ARGS,y
+				jsr CSH.GetNextChar
 				bcs .8
 				jsr CSH.IsDigit
 				bcc .1
 				
-.8				tya
-				sta (pData)
+.8				sty ARGS
 				
-				>PUSHW pData
 				>PUSHW L.CSH.ACC
+				>PUSHW L.ARGS
 				>SYSCALL AToI
 				bcs .9
 				rts
@@ -328,6 +463,156 @@ CSH.GetNumInACC	ldy #0
 .9				lda #CSHERR.SYNTAX
 				sec
 				rts	
+*--------------------------------------
+CSH.ZeroACC		stz CSH.ACC
+				stz CSH.ACC+1
+				stz CSH.ACC+2
+				stz CSH.ACC+3
+				rts
+*--------------------------------------
+* Vars...
+*--------------------------------------
+CSH.AddVar		jsr CSH.FindVar
+				bcc .97
+
+				ldy #CSH.SymbolsPtr
+				lda (pData),y
+				
+				sec
+				adc ARGS
+				bcs .99
+				
+				adc #2					TYPE + OFS
+				bcs .99
+				
+				ldy #CSH.DataPtr
+				lda (pData),y
+				pha
+				
+				ldx CSH.ACCT
+*				clc
+				adc CSH.TSIZE,x
+				bcs .98
+
+				ldx #$ff
+
+				ldy #CSH.SymbolsPtr
+				lda (pData),y
+				tay
+				
+.10				inx
+				lda CMD,x
+				sta (ZPCSHSymbols),y
+				iny
+				cpx CMD
+				bne .10
+				
+				lda CSH.ACCT
+				sta (ZPCSHSymbols),y
+				
+				iny
+				pla						Get Back Data OFS				
+				pha
+				sta (ZPCSHSymbols),y
+				iny
+				
+				tya
+				ldy #CSH.SymbolsPtr
+				sta (pData),y
+				
+				ply						Get Back Data OFS again
+				
+				ldx CSH.ACCT
+				lda CSH.TSIZE,x
+				
+				ldx #0
+				
+.1				pha
+				lda CSH.ACC,x
+				sta (ZPCSHData),y
+				iny
+				inx
+				pla
+				dec
+				bne .1
+				
+				tya
+				ldy #CSH.DataPtr
+				sta (pData),y
+				
+				clc
+				rts
+				
+.97				lda #CSHERR.DUP
+				sec
+				rts
+			
+.98				pla
+.99				lda #CSHERR.OOM
+				sec
+				rts
+*--------------------------------------
+CSH.SetVar
+
+				clc
+				rts
+*--------------------------------------
+CSH.GetVar
+
+				clc
+				rts
+*--------------------------------------
+CSH.FindVar		>LDYA ZPCSHSymbols
+				>STYA ZPPTR1
+				
+.1				ldy #0
+
+				lda (ZPPTR1),y
+				beq .9
+				
+				cmp CMD
+				bne .4
+				
+				pha						Save Name len...
+				
+				ldx #0
+				
+.2				iny
+				inx
+				lda (ZPPTR1),y
+				cmp CMD,x
+				bne .3
+				
+				cpx CMD
+				bne .2
+				
+				pla
+				sec
+				adc ZPPTR1
+				sta ZPPTR1
+				bcc .8
+				inc ZPPTR1+1
+				
+				clc
+.8				rts
+							
+.3				pla
+.4				sec
+				adc ZPPTR1
+				bcc .5
+				inc ZPPTR1+1
+				clc
+				
+.5				adc #2					Skip Type+OFS
+				sta ZPPTR1
+				bcc .1
+				inc ZPPTR1+1
+				bra .1
+				
+.9				sec
+				rts
+*--------------------------------------
+* Stack
 *--------------------------------------
 CSH.Push		pha
 				ldy #CSH.StackPtr
@@ -383,6 +668,8 @@ CSH.CheckStack	pha
 				sec
 				rts						
 *--------------------------------------
+* CHAR related Subs.....
+*--------------------------------------
 CSH.GetCharNB	jsr CSH.GetChar
 				bcs CSH.GetNextCharNB.RTS
 				jsr CSH.CheckCharNB
@@ -426,18 +713,18 @@ CSH.GetNextChar	phy
 				inc ZPBufPtr+1
 *--------------------------------------
 CSH.GetChar		lda ZPBufPtr
-				eor ZPBufEnd
-				bne .1
+CSH.GetChar.LO	eor #$ff				Self Modified
+				bne CSH.GetChar.8
 				
 				lda ZPBufPtr+1
-				eor ZPBufEnd+1
-				bne .1
+CSH.GetChar.HI	eor #$ff				Self Modified
+				bne CSH.GetChar.8
 				
 				lda #MLI.ERR.EOF
 				sec
 				rts
 				
-.1				lda (ZPBufPtr)
+CSH.GetChar.8	lda (ZPBufPtr)
 				clc
 				rts
 *---------------------------------------
