@@ -5,6 +5,8 @@ INC 1
 AUTO 6
 				.LIST OFF	
 *--------------------------------------
+
+*--------------------------------------
 CSH.TYPE.CHAR	.EQ 1
 CSH.TYPE.INT	.EQ 2
 CSH.TYPE.LONG	.EQ 3
@@ -50,13 +52,14 @@ CSH.Run			jsr CSH.GetBuf
 
 				jsr CSH.GetPtrs
 				
-				ldy #0
+				lda #0
+				sta (pData)				Reset Cmdline
 				
 				jsr CSH.GetCharNB
 				bcs .9
 				
 				cmp #'}'				End of block ?
-				bne .10
+				bne .1
 
 				jsr CSH.CheckStack		must be on stack....
 				bcs .9
@@ -65,45 +68,79 @@ CSH.Run			jsr CSH.GetBuf
 				tax
 				jmp (J.CSHCMDS.END,x) 
 				
-.10				jsr CSH.SavePtr			Save Ptr, in case of while,for....
+.1				cmp #$0D
+				bne .2
 				
-				cmp #$0D
-				beq .6					empty line...skip...
+				jmp CSH.GetNextCharNB	Skip CR
 				
-.1				iny
-				sta (pData),y				
+.2				pha
+				jsr CSH.SavePtr			Save Ptr, in case of while,for....
+				pla
+				jsr CSH.IsLetter
+				bcc .3
 				
-				cpy #CmdLine.MAX
-				beq .8					Buffer full, try execute...
+				cmp #'#'
+				beq .5					comments : pass line to shell
 				
-				jsr CSH.GetNextChar
-				bcs .8					EOF, try execute...
+				bra .9					error, todo : PREOPS ++ --.....
 				
-				cmp #$0D				EOL, skip CR and exec...
-				beq .6
-
-				jsr CSH.CheckCharNB
-				bcc .1					still in keyword....loop
-				
-				tya
-				sta (pData)
-				
-				jsr CSH.CheckKeyword
-				bcs .5					not an internal CSH keyword....
-				
-				lda #0
-				sta (pData)				Reset Cmdline
+.3				jsr CSH.GetName	
+				bcs .9
+						
+				jsr CSH.IsKeyword
+				bcs .4					not an internal CSH keyword....
 				
 				stx CSH.CmdSave
-				jmp (J.CSHCMDS,x)			
+				jmp (J.CSHCMDS,x)		
+
+.4				jsr CSH.GetVar
+				bcs .5
 				
-.5				lda (ZPBufPtr)			restore char....				
-				bra .1
+				jsr CSH.GetCharNB
+				bcs .9
+				cmp #'='
+				bne .99
 				
-.6				jsr CSH.GetNextChar		Skip last char...
+				jsr CSH.ExpEval
+				bcs .9
+				
+				jsr CSH.GetChar
+				bcs .9
+				cmp #';'
+				bne .99
+				
+				jsr CSH.SetVar
+				bcs .9
+				
+				jmp CSH.GetNextCharNB	Skip ;
+				
+.99				lda #CSHERR.SYNTAX
+				sec
+.9				rts
+
+.5				
+
+
+				jsr CSH.RestorePtr	Restore ptr to get full cmd line to execute
+				
+				jsr CSH.GetCharNB
+				
+				ldy #0
+				
+.6				cmp #13
+				beq .7
+				iny
+				sta (pData),y
+				cpy #CmdLine.MAX
+				beq .8
+				
+				jsr CSH.GetNextChar
+				bcc .6
+				bra .8
+				
+.7				jsr CSH.GetNextCharNB	Skip CR
 				
 .8				tya
-				beq .80					empty line....nothing to do..
 				sta (pData)
 				
 				ldy #bEcho
@@ -113,8 +150,9 @@ CSH.Run			jsr CSH.GetBuf
 				>PUSHW pData
 				>LDYA L.MSG.ECHO
 				>SYSCALL PPrintFYA
+				
 .80				clc
-.9				rts
+				rts
 *--------------------------------------
 CSH.Quit		ldy #CSH.hBuf
 				lda (pData),y
@@ -185,14 +223,34 @@ CSH.GetPtrs		ldy #CSH.hSymbols
 				>STYA ZPCSHStack
 				rts
 *--------------------------------------
-CSH.SavePtr		ldx ZPBufPtr
-				stx CSH.BufPtrSave
-				ldx ZPBufPtr+1
-				stx CSH.BufPtrSave+1
+CSH.SavePtr		phy
+				ldy #CSH.BufPtr
+				lda (pData),y
+				sta CSH.BufPtrSave
+				
+				iny
+				lda (pData),y
+				sta CSH.BufPtrSave+1
+				ply
 				rts
 *--------------------------------------
-CSH.CheckKeyword
-				phy
+CSH.RestorePtr	phy
+				ldy #CSH.BufPtr
+				lda CSH.BufPtrSave
+				sta (pData),y
+				clc
+				adc ZPBufBase
+				sta ZPBufPtr
+				
+				iny
+				lda CSH.BufPtrSave+1
+				sta (pData),y
+				adc ZPBufBase+1
+				sta ZPBufPtr+1
+				ply
+				rts
+*--------------------------------------
+CSH.IsKeyword	phy
 				>LDYA L.CSHCMDS
 				>STYA ZPPtr2
 				
@@ -201,12 +259,12 @@ CSH.CheckKeyword
 .1				lda (ZPPtr2)
 				beq .9					Ending 0, not found....
 				
-				cmp (pData)				Same Len ?
+				cmp CSH.Name			Same Len ?
 				bne .4
 				
 				tay
 				
-.2				lda (pData),y
+.2				lda CSH.Name,y
 
 				cmp #'a'				To Uppercase
 				bcc .3
@@ -348,7 +406,13 @@ CSH.TYPE		sta CSH.ACCT
 				cmp #' '
 				bne .9
 				
-				jsr CSH.GetIdentInCMD
+				jsr CSH.GetNextCharNB
+				bcs .9
+
+				jsr CSH.IsLetter
+				bcs .9
+
+				jsr CSH.GetName
 				bcs .9
 				
 				jsr CSH.GetCharNB
@@ -402,7 +466,7 @@ CSH.ExpEval		jsr CSH.ZeroACC
 
 				bra .9
 				
-.1				jsr CSH.IsDigit			number ?
+.1				jsr CSH.IsDigit10		number ?
 				bcs .9
 				
 				jsr CSH.GetNumInACC
@@ -416,23 +480,23 @@ CSH.ExpEval		jsr CSH.ZeroACC
 				sec
 .99				rts	
 *--------------------------------------
-CSH.GetIdentInCMD
-				ldy #0
-				
-				jsr CSH.GetNextCharNB
-				bcs .9
-				jsr CSH.IsLetter
-				bcs .9
-				
+CSH.GetName		ldy #0
+								
 .1				iny
-				sta CMD,y
+				sta CSH.Name,y
 				jsr CSH.GetNextChar
 				bcs .8
 				
 				jsr CSH.IsLetterOrDigit
+				bcs .8
+				cpy #CSH.Name.MAX
 				bcc .1
 				
-.8				sty CMD
+				lda #CSHERR.TOOLONG
+				sec
+				rts
+				
+.8				sty CSH.Name
 				clc
 				rts
 				
@@ -449,7 +513,7 @@ CSH.GetNumInACC	ldy #0
 				sta ARGS,y
 				jsr CSH.GetNextChar
 				bcs .8
-				jsr CSH.IsDigit
+				jsr CSH.IsDigit10
 				bcc .1
 				
 .8				sty ARGS
@@ -479,7 +543,7 @@ CSH.AddVar		jsr CSH.FindVar
 				lda (pData),y
 				
 				sec
-				adc ARGS
+				adc CSH.Name
 				bcs .99
 				
 				adc #2					TYPE + OFS
@@ -501,10 +565,10 @@ CSH.AddVar		jsr CSH.FindVar
 				tay
 				
 .10				inx
-				lda CMD,x
+				lda CSH.Name,x
 				sta (ZPCSHSymbols),y
 				iny
-				cpx CMD
+				cpx CSH.Name
 				bne .10
 				
 				lda CSH.ACCT
@@ -557,10 +621,11 @@ CSH.SetVar
 				clc
 				rts
 *--------------------------------------
-CSH.GetVar
-
+CSH.GetVar		jsr CSH.FindVar
+				bcs .9
+				
 				clc
-				rts
+.9				rts
 *--------------------------------------
 CSH.FindVar		>LDYA ZPCSHSymbols
 				>STYA ZPPTR1
@@ -570,7 +635,7 @@ CSH.FindVar		>LDYA ZPCSHSymbols
 				lda (ZPPTR1),y
 				beq .9
 				
-				cmp CMD
+				cmp CSH.Name
 				bne .4
 				
 				pha						Save Name len...
@@ -580,10 +645,10 @@ CSH.FindVar		>LDYA ZPCSHSymbols
 .2				iny
 				inx
 				lda (ZPPTR1),y
-				cmp CMD,x
+				cmp CSH.Name,x
 				bne .3
 				
-				cpx CMD
+				cpx CSH.Name
 				bne .2
 				
 				pla
@@ -729,10 +794,15 @@ CSH.GetChar.8	lda (ZPBufPtr)
 				rts
 *---------------------------------------
 CSH.IsLetterOrDigit
-				jsr CSH.IsDigit
+				jsr CSH.IsDigit10
 				bcc CSH.IsLetterRTS
 *---------------------------------------
-CSH.IsLetter	cmp #'A'
+CSH.IsLetter	cmp #'_'
+				bne .1
+				clc
+				rts
+				
+.1				cmp #'A'
 				bcc .9
 				
 				cmp #'Z'+1
@@ -747,7 +817,7 @@ CSH.IsLetter	cmp #'A'
 				
 CSH.IsLetterRTS	rts					
 *---------------------------------------
-CSH.IsDigit		cmp #'0'
+CSH.IsDigit10	cmp #'0'
 				bcc .9
 				cmp #'9'+1
 				rts						cc if ok, cs if not
