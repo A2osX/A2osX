@@ -7,10 +7,11 @@ Thanx a lot for all positive comments i read here and there, but i definitively 
 
 Anybody wants to join this project ?
 
-If you interested on contributing, please send a message with your skills, in which area you are interested to work on (Network, Kernel, device drivers for additional hardware support, GUI, graphical resourses, command line tools....)
+If you're interested on contributing, please send a message with your skills and in which area you are interested to work on (Network, Kernel, device drivers for additional hardware support, GUI, graphical resourses, command line tools....)
 
 This is some sort of "last hope call", some of you were right, this project is really huge!!! 
-Anyway, i'm convinced that a small team of developers could reach "version 1.0" with GUI & network support in few months....i'm working on it for...4 years now, spending the most of my free time fixing hardware to test this code instead of...writing it! (anybody could help me fix this -5v -12v issue on this nasty Astec AA11042c PSU! ;-)
+Anyway, i'm convinced that a small team of developers could reach "version 1.0" with GUI & network support in few months....i'm working on it for...4 years now, spending the most of my free time fixing hardware to test this code instead of...writing it! 
+(anybody could help me fix this -5v -12v issue on this nasty Astec AA11042c PSU! ;-)
 
 Well, let me know if you can bring "fresh blood" to this stuff... 
 
