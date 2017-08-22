@@ -107,11 +107,23 @@ Scan a PStr (in progress)
 
 ## Out:
 
-# PPrintFYA/CPrintFYA
+# PrintFYA/SPrintFYA/FPrintFYA
 Prints Pascal/C-Style String
 
 ## In:
-+ Y,A = PTR to PStr/CStr
++ PrintFYA : 
+ + Y,A = PTR to CStr
++ SPrintFYA : 
+ + Y,A = PTR to CStr
+ + PULLW = Ptr to Dst Buffer
++ FPrintFYA : 
+ + Y,A = PTR to CStr
+ + PULLB = hDev
+
+## Out:
++ CC : success
++ CS : error code from Output
++ Specifiers :
  + %a : pull 2 bytes to Print Access right String 'drwxrwxrwx'
  + %b : pull 1 byte to Print BIN 
  + %B : pull 2 bytes to Print BIN
@@ -143,10 +155,6 @@ Prints Pascal/C-Style String
  + %11s  : 'ABCDEFGH   '	
  + %011s : 'ABCDEFGH000'
  + %2f	  :	'3.14'
-
-## Out:
-+ CC : success
-+ CS : I/O error from COut
 
 # AToI
 Convert String to 32 bit int
@@ -644,11 +652,11 @@ Convert string to UPPERCASE/lowercase
 ## Out:
  + Uppercased/lowercased String in Buffer
 
-# PStrFTime
-Convert S.TIME struct to PSTR
+# StrFTime
+Convert S.TIME struct to CSTR
 
 ## In: 
-+ PUSHW = Dst PTR To PSTR Buf
++ PUSHW = Dst PTR To CSTR Buf
 + PUSHW = Src PTR To Format String
  + %a : Abbreviated weekday name : Thu
  + %A : Full weekday name : Thursday 
