@@ -29,7 +29,7 @@ Print A (char) to File
 ## Out: 
 + CC = success
 
-# PutCA
+# PutCharA
 Print A (char) to StdOut
 
 ## In:
@@ -38,21 +38,21 @@ Print A (char) to StdOut
 ## Out: 
 + CC = success
 
-# FGetCA
-Get char from File
+# GetChar
+Get char from StdIn
 
 ## In:
-+ A = hFILE
++ none.
 
 ## Out: 
 + CC = success
  + A = char
 
-# GetC
-Get char from StdIn
+# GetCA
+Get char from File
 
 ## In:
-+ none.
++ A = hFILE
 
 ## Out: 
 + CC = success
@@ -108,17 +108,17 @@ Scan a PStr (in progress)
 ## Out:
 
 # PrintFYA/SPrintFYA/FPrintFYA
-Prints Pascal/C-Style String
+Prints C-Style String
 
 ## In:
-+ PrintFYA : 
+PrintFYA : 
  + Y,A = PTR to CStr
-+ SPrintFYA : 
+SPrintFYA : 
  + Y,A = PTR to CStr
  + PULLW = Ptr to Dst Buffer
-+ FPrintFYA : 
+FPrintFYA : 
  + Y,A = PTR to CStr
- + PULLB = hDev
+ + PULLB = hNode
 
 ## Out:
 + CC : success
