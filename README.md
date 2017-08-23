@@ -1,5 +1,14 @@
-# A2osX  (0.9)
-Multi-Tasking OS for Apple II
+# A2osX  (0.9.1) Multi-Tasking OS for Apple II
+
+0.9 has been archived, next Kernel Version is 0.9.1  
+Target :  
+ + More Standard C API compliance
+ + API Cleanup, many functions still use shared space
+ + Per process Stack Segment
+ + Larger S.PS structure
+ + ...
+ + to allow...Preemtive!
+
 
 ## !!!HELP NEEDED!!!
 
@@ -11,7 +20,6 @@ If you're interested on contributing, please send a message with your skills and
 
 This is some sort of "last hope call", some of you were right, this project is really huge!!! 
 Anyway, i'm convinced that a small team of developers could reach "version 1.0" with GUI & network support in few months....i'm working on it for...4 years now, spending the most of my free time fixing hardware to test this code instead of...writing it! 
-(anybody could help me fix this -5v -12v issue on this nasty Astec AA11042c PSU! ;-)
 
 Well, let me know if you can bring "fresh blood" to this stuff... 
 
@@ -25,9 +33,9 @@ Its principal goal is to collect all "genius" 65c02 pieces of code ever written 
 "Complete working place", no needing any more to reboot to switch between tons of diskettes!!!
 
 A2osX is designed to work on any "stock" 128k Apple //e, with no additional hardware. As VBL signal is NOT available as an IRQ on //e (it is on //c & IIgs)
-it makes __preemptive__ multitasking __impossible__.
+it makes preemptive multitasking impossible.
 
-(Well, GSosX, 16 bits equivalent for IIgs, another project which is "cooking" in my mind, could do it!)
+A new attempt using Mouse card VBL IRQ is targeted i 0.9.1.
 
 Kernel, loading in Aux LC on top of ProDOS provide API inspired from Linux/Unix World to allow writing applications & command line tools on top of it.
 This kernel provides an advanced "Memory Manager" able to relocate 65c02 code.
@@ -65,9 +73,9 @@ Several subprojects are now indentified :
 
 ## General Information:
 
-** Kernel 0.9 complete rewrite in progress **
+** Kernel 0.9.1 rewrite in progress **
 
-(Kernel 0.8 has been archived)
+(Kernel 0.9 has been archived)
 It is confined in Aux LC Bank 1 & 2 to leave enough room at $EOOO for Drivers.
 Network drivers, Mouse, DHGR.DRV can load and fit in Aux LC.
 Now it's time to make all external BINs use new API, then GUI development will resume.
