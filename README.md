@@ -1,7 +1,7 @@
-# A2osX  (0.9.1) Multi-Tasking OS for Apple II
+# A2osX (0.9.1) Multi-Tasking OS for Apple II
 
 0.9 has been archived, next Kernel Version is 0.9.1  
-Target :  
+   
  + More Standard C API compliance
  + API Cleanup, many functions still use shared space
  + Per process Stack Segment
