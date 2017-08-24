@@ -4,17 +4,151 @@ LOMEM $A00
 INC 1
 AUTO 6
 *--------------------------------------
-* BIN.LoadExeYA
+* K.LoadDrv.YA
+*  in :
+*   Y,A = PTR To Full Cmd Line PStrArray
+*  out :
+*   none
+*--------------------------------------
+K.LoadDrv.YA	>STYA K.LoadDrv.CmdArray
+
+				>LDYAI ENV.DRV			push ENVNAME=DRV
+				>SYSCALL GetEnvYA		get value for ENV=DRV
+				bcs .9
+				
+				>PUSHYA					Push $DRV value
+
+				>PUSHW K.LoadDrv.CmdArray  		(ARG[0] = DRVNAME)
+				
+				jsr K.FileSearch.I		find Driver in $DRV
+				bcs .9
+
+				>LDYAI K.Buf256
+				jsr K.LoadBin.YA		Y,A =filename full path
+				bcs .9
+				
+				>STYA pDrv
+				stx .97+1
+
+				>LDYA K.LoadDrv.CmdArray
+				>STYA ZPPtr1
+				
+.1				lda (ZPPtr1)			Advance to  ARG[1]
+				beq .2
+				inc ZPPtr1
+				bne .1
+				inc ZPPtr1+1
+				bra .1
+				
+.2				>LDYA ZPPtr1
+
+				jsr pDrvJmp				call Dev.Detect
+				bcs .96
+
+				jsr BIN.InstallDRV
+				bcs .96
+				
+				jsr .96					Cleanup...
+				
+				lda #0					Make sure RC = 0 if success
+				clc
+.9				rts
+				
+.96				pha				
+.97				lda #$ff
+				jsr K.FreeMemA
+				pla
+				rts
+*--------------------------------------
+K.LoadDrv.CmdArray	.BS 2
+*--------------------------------------
+* K.LoadLib.YA
+*  in :
+*   Y,A = PTR To Lib Name
+* out :
+*   A = hMem To loaded LIB
+*--------------------------------------
+K.LoadLib.YA	>STYA K.LoadLib.Name	SAVE LIBname for K.FileSearch
+				>LDYAI ENV.LIB			push ENVNAME=LIB
+				>SYSCALL GetEnvYA	get value for ENV=LIB
+				bcs .9
+				
+				>PUSHYA					Push $LIB value
+
+				>PUSHW K.LoadLib.Name
+				
+				jsr K.FileSearch.I		find libname in $LIB
+				bcs .9
+
+				>LDYAI K.Buf256
+				jsr K.LoadBin.YA			Y,A=filename full path
+				bcs .9
+				
+				stx .8+1
+				>STYA LIB.Jump+1
+
+				txa						Pass hLib to LibLoad
+				ldx #LIBMGR.LOAD
+				jsr LIB.Jump			Call LIB.LOAD function
+				
+				bcs .99
+
+.8				lda #$ff				hLib
+				clc
+.9				rts
+				
+.99				pha
+				lda .8+1
+				jsr K.FreeMemA
+				pla
+				
+				sec
+				rts
+*--------------------------------------
+K.LoadLib.Name	.BS 2
+*--------------------------------------
+* K.UnloadLib.A
+*  in :
+*   A = hMem To Lib
+* out :
+*--------------------------------------
+K.UnloadLib.A	pha
+				jsr K.GetMemByIDA
+				>STYA ZPPtr1
+				ldy #S.MEM.REFCNT
+				lda (ZPPtr1),y		Get count of those referencing this lib
+				dec						only one left ?	
+				beq .1
+				sta (ZPPtr1),y
+				pla
+				clc
+				rts
+				
+.1				ldy #S.MEM.PTR
+				lda (ZPPtr1),y
+				sta LIB.Jump+1
+				
+				iny
+				lda (ZPPtr1),y
+				sta LIB.Jump+2
+				
+				ldx #LIBMGR.UNLOAD
+				jsr LIB.Jump			Call LIB.UNLOAD function
+				pla
+				jmp K.FreeMemA
+LIB.Jump		jmp $ffff				Self Modiied
+*--------------------------------------
+* K.LoadBin.YA
 *  in :
 *   A = hMem of FilePath (PSTR)
 * out :
 *   Y,A = MEMPTR	
 *   X = hMem of Code Segment
 *--------------------------------------
-K.LoadEXEYA		>STYA K.LoadEXEYA.Filename
-				>SYSCALL StrUprYA		Y,A unmodified
+K.LoadBin.YA	>STYA K.LoadBin.YA.Filename
+
 				jsr MEM.GetMemByNameYA
-				bcs K.LoadEXEYA.1		not already loaded
+				bcs K.LoadBin.YA.1		not already loaded
 
 				>STYA ZPPtr1			Save base address
 				ldy #S.MEM.REFCNT
@@ -25,8 +159,8 @@ K.LoadEXEYA		>STYA K.LoadEXEYA.Filename
 				txa
 				jmp K.GetMemPtrA		X=hMem from K.GetMemByNameA
 *--------------------------------------				
-K.LoadEXEYA.1	>PUSHWI K.S.STAT
-				>PUSHW K.LoadEXEYA.Filename
+K.LoadBin.YA.1	>PUSHWI K.S.STAT
+				>PUSHW K.LoadBin.YA.Filename
 				jsr K.STAT				Look for AUXTYPE
 				bcs .9
 				
@@ -36,12 +170,12 @@ K.LoadEXEYA.1	>PUSHWI K.S.STAT
 				>PUSHYA					Push AUXTYPE
 				>PUSHBI 6				S.FILEINFO.TYPE.BIN
 				>PUSHBI	SYS.FOpen.R
-				>PUSHW K.LoadEXEYA.Filename
+				>PUSHW K.LoadBin.YA.Filename
 
 				jsr K.LoadFile
 .9				bcs .99					Error Loading file
 
-				stx K.LoadEXEYA.hMem	save hMem
+				stx K.LoadBin.YA.hMem	save hMem
 				
 				pha						YA=CODE+DATA size
 				tya
@@ -78,11 +212,11 @@ K.LoadEXEYA.1	>PUSHWI K.S.STAT
 				
 				jsr BIN.RelocateEXE
 				
-				>LDYA K.LoadEXEYA.Filename	get back bin path
+				>LDYA K.LoadBin.YA.Filename	get back bin path
 				>SYSCALL NewPStrYA			make a copy of this string
 				bcs .98
 				
-				lda K.LoadEXEYA.hMem		Keep X=hMem		
+				lda K.LoadBin.YA.hMem		Keep X=hMem		
 				jsr K.GetMemByIDA			X unmodified
 				>STYA ZPPtr1
 				
@@ -94,28 +228,28 @@ K.LoadEXEYA.1	>PUSHWI K.S.STAT
 				ldy #S.MEM.BIN
 				sta (ZPPtr1),y
 							
-				lda K.LoadEXEYA.hMem		
+				lda K.LoadBin.YA.hMem		
 				tax						return hMEM to Caller...
 				jsr K.GetMemPtrA
 				clc						...and Y,A=PTR to CS
 				rts
 				
 .98				pha
-				lda K.LoadEXEYA.hMem	
+				lda K.LoadBin.YA.hMem	
 				jsr K.FreeMemA			Discard Loaded Code
 				pla
 				
 				sec
 .99				rts
 *--------------------------------------
-K.LoadEXEYA.Filename	.BS 2
-K.LoadEXEYA.hMem		.BS 1
+K.LoadBin.YA.Filename	.BS 2
+K.LoadBin.YA.hMem		.BS 1
 *--------------------------------------
 * BIN.InstallDRV
 *  In:
 *   pDrv = .DRV File Loaded Address
 * Note:
-*  K.LoadEXEYA called from K.LoadDrvYA
+*  K.LoadBin.YA called from K.LoadDrvYA
 *  Already setup correctly pDrv,
 *  BIN.Relocate.Start,End
 *--------------------------------------

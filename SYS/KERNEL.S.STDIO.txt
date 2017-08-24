@@ -4,6 +4,402 @@ LOMEM $A00
 INC 1
 AUTO 6
 */--------------------------------------
+* # FOpen
+* Open a file
+* ## In :
+*  PUSHW = AUXTYPE
+*  PUSHB = TYPE
+*  PUSHB = MODE
+*   SYS.FOpen.R : if R and !exists -> ERROR
+*   SYS.FOpen.W : if W and !exists -> CREATE
+*   SYS.FOpen.A : Append
+*   SYS.FOpen.T : Open/Append in Text mode
+*   SYS.FOpen.X : Create if not exists
+*  PUSHW = PATH (PSTR)
+* ## Out : 
+*  CC : A = hFILE
+*  CS : A = EC
+*\--------------------------------------
+K.FOpen			jsr PFT.CheckPathSTK
+				jsr STDIO.PullMLIPath
+				>PULLB K.FOpen.MODE
+				>PULLB K.FOpen.TYPE
+				>PULLW K.FOpen.AUXTYPE
+				
+				>MLICALL MLIGETFILEINFO
+				bcc K.FOpen.10			Already Exists
+				
+				bit K.FOpen.MODE		Create if not exists ?
+				bpl K.FOpen.9			No, return MLI error
+				
+				lda #S.FILEINFO.ACCESS.FULL				Yes, Create...
+				sta K.MLI.PARAMS+3	Access
+				lda K.FOpen.TYPE
+				sta K.MLI.PARAMS+4	File type
+				>LDYA K.FOpen.AUXTYPE
+				>STYA K.MLI.PARAMS+5	Aux type
+				lda #S.FILEINFO.STORETYPE.STD
+				sta K.MLI.PARAMS+7
+				
+				ldx #3
+				
+.1				lda DATELO,x
+				sta K.MLI.PARAMS+8,x
+				dex
+				bpl .1
+
+				>MLICALL MLICREATE
+				bcc K.FOpen.10
+K.FOpen.9		rts
+
+K.FOpen.10		>LDYAI S.NODE.REG
+				jsr K.GetMem0YA
+				bcs K.FOpen.9
+				
+				>STYA ZPPtr1
+				stx hFILE			
+				
+				jsr STDIO.SetIOBUF
+				bcs .98
+
+				>MLICALL MLIOPEN
+				bcs .98
+				
+				lda K.MLI.PARAMS+5	get ref_num
+				ldy #S.NODE.REG.REF
+				sta (ZPPtr1),y
+				
+				sta K.MLI.PARAMS+1	Next MLI Calls are REF_NUM based
+				
+				lda K.FOpen.MODE
+				bit #SYS.FOpen.W
+				beq .20					Write mode ?
+				
+				and #SYS.FOpen.A		Append ?
+				bne .11					yes, go to end of file
+				
+				stz K.MLI.PARAMS+2
+				stz K.MLI.PARAMS+3
+				stz K.MLI.PARAMS+4
+				>MLICALL MLISETEOF		no, reset size to 0
+				bcs .98
+				bra .20
+				
+.11				>MLICALL MLIGETEOF
+				bcs .98
+				
+				>MLICALL MLISETMARK
+				bcs .98
+				
+.20				lda K.FOpen.MODE
+				and #SYS.FOpen.T		Text Mode ?
+				beq .30
+				
+				lda #$FF
+				sta K.MLI.PARAMS+2
+				lda #$0D
+				sta K.MLI.PARAMS+3
+				>MLICALL MLINEWLINE				
+				
+.30				ldy #S.NODE.T
+				lda #S.NODE.T.REG
+				sta (ZPPtr1),y
+				lda hFILE
+				clc
+				rts						CC
+
+.98				pha						save MLI error
+				lda hFILE
+				jsr K.FCloseA.1
+				pla						get back MLI error
+				sec
+				rts
+*--------------------------------------
+K.FOpen.MODE	.BS 1
+K.FOpen.TYPE	.BS 1
+K.FOpen.AUXTYPE	.BS 2
+hFILE			.BS 1
+*/--------------------------------------
+* # FCloseA
+* Close a file
+* ## In :
+*  A = hFILE
+* ## Out :
+*\--------------------------------------
+K.FCloseA		jsr PFT.CheckNodeA
+				pha
+				jsr K.GetMemPtrA
+				>STYA ZPPtr1
+				pla
+				
+K.FCloseA.1		sta K.FCloseA.2+1
+				ldy #S.NODE.REG.REF
+				lda (ZPPtr1),y
+				beq .1
+				sta K.MLI.PARAMS+1
+				>MLICALL MLICLOSE
+
+.1				ldy #S.NODE.REG.IOBUF				
+				lda (ZPPtr1),y
+				beq K.FCloseA.2
+				jsr K.FreeMemA
+
+K.FCloseA.2		lda #$ff				Self Modified
+				jmp K.FreeMemA
+*/--------------------------------------
+* # FReadA
+* Read ONE byte from file
+* ## In :
+*  A = hFILE
+* ## Out :
+*  A = Byte Read
+*\--------------------------------------
+K.FReadA		jsr PFT.CheckNodeA
+				ldx #MLIREAD
+				bra K.FReadWrite.0				
+*/--------------------------------------
+* # FWriteAY
+* ## In:
+*  A = hFILE
+*  Y = char
+* # Out:
+*  Y,A = Bytes Written
+*\--------------------------------------
+K.FWriteAY		jsr PFT.CheckNodeA
+				sty K.FWriteAY.Buf
+				ldx #MLIWRITE
+K.FReadWrite.0	jsr STDIO.GetRefNum
+				>LDYAI K.FWriteAY.Buf
+				>STYA K.MLI.PARAMS+2
+				lda #1
+				sta K.MLI.PARAMS+4
+				stz K.MLI.PARAMS+5
+				lda #4					Param Count = 4 for MLIREAD & MLIWRITE
+				jsr A2osX.MLICALL
+				bcs .9
+				lda K.FWriteAY.Buf
+.9				rts
+K.FWriteAY.Buf	.BS 1		
+*/--------------------------------------
+* # FRead
+* Read bytes from file
+* ## In :
+*  PUSHW = Dest Ptr
+*  PUSHW = Bytes To Read
+*  PUSHB = hFILE
+* ## Out :
+*  Y,A = Bytes Read
+*\--------------------------------------
+K.FRead			jsr PFT.CheckNodeSTK
+				ldx #MLIREAD
+				bra K.FReadWrite.1
+*/--------------------------------------
+* # FWrite
+* ## In:
+*  PUSHW = Src Ptr
+*  PUSHW = Bytes To Write
+*  PUSHB = hFILE
+* # Out:
+*  Y,A = Bytes Written
+*\--------------------------------------
+K.FWrite		jsr PFT.CheckNodeSTK
+				ldx #MLIWRITE
+K.FReadWrite.1	>PULLA
+				jsr STDIO.GetRefNum
+				>PULLW K.MLI.PARAMS+4
+				>PULLW K.MLI.PARAMS+2
+
+				lda #4					Param Count = 4 for MLIREAD & MLIWRITE
+				jsr A2osX.MLICALL
+				bcs .9
+				>LDYA K.MLI.PARAMS+6
+.9				rts
+*/--------------------------------------
+* # FFlushA
+* ## In:
+*  A = hFILE
+*\--------------------------------------
+K.FFlushA		jsr PFT.CheckNodeA
+				jsr STDIO.GetRefNum
+				>MLICALL MLIFLUSH
+				rts
+*/-------------------------------------
+* # FSeek
+* ## In:
+*  PUSHW = OffsetHi
+*  PUSHW = OffsetLo
+*  PUSHB = From
+*  PUSHB = hFILE
+*\-------------------------------------
+K.FSeek			jsr PFT.CheckNodeSTK
+				>PULLA
+				jsr STDIO.GetRefNum
+				>PULLA					FROM
+				tax
+				>PULLW K.FSeek.OFFSET
+				>PULLW K.FSeek.OFFSET+2
+
+				cpx #SYS.FSeek.SET
+
+				bne .1
+				stz K.MLI.PARAMS+2
+				stz K.MLI.PARAMS+3
+				stz K.MLI.PARAMS+4
+				bra .8
+
+.1				cpx #SYS.FSeek.CUR
+				bne .2
+				>MLICALL MLIGETMARK
+				bcc .8
+				rts
+
+.2				cpx #SYS.FSeek.END
+				bne .98
+				>MLICALL MLIGETEOF
+				bcs .9
+
+.8				ldx #0
+				ldy #3
+				
+				clc
+				
+.81				lda K.MLI.PARAMS+2,x
+				adc K.FSeek.OFFSET,x
+				sta K.MLI.PARAMS+2,x
+
+				inx
+				dey
+				bne .81
+				
+				bcs .99					Offset out of range!			
+
+				>MLICALL MLISETMARK
+
+.9				rts
+
+.98				lda #SYSMGR.ERRSYN
+				.HS 2C					bit abs
+.99				lda #SYSMGR.ERRFTB
+				sec
+				rts
+*--------------------------------------
+K.FSeek.OFFSET	.BS 4			
+*/--------------------------------------
+* # FTellA
+* ## In:
+*  A = hFILE
+* ## Out:
+*   Y,A,X = Offset
+*\--------------------------------------
+K.FTellA		jsr PFT.CheckNodeA
+K.FTellA.1		jsr STDIO.GetRefNum
+				>MLICALL MLIGETMARK
+				bcs .9
+				>LDYA K.MLI.PARAMS+2
+				ldx K.MLI.PARAMS+4
+.9				rts
+*/--------------------------------------
+* # FEOFA
+* ## In:
+*  A = hFILE
+* ## Out:
+*  CC : 
+*   A=0 EOF
+*   A !=0 NOT EOF
+*  CS :
+*\--------------------------------------
+K.FEOFA			jsr PFT.CheckNodeA
+				jsr STDIO.GetRefNum
+				jsr K.FTellA.1
+				bcs .9
+				>STYA K.FEOFA.MARK
+				stx K.FEOFA.MARK+2
+
+				>MLICALL MLIGETEOF
+				bcs .9
+
+				sec
+				lda K.MLI.PARAMS+2
+				sbc K.FEOFA.MARK
+				bne .8
+				lda K.MLI.PARAMS+3
+				sbc K.FEOFA.MARK+1
+				bne .8
+				lda K.MLI.PARAMS+4
+				sbc K.FEOFA.MARK+2
+.8				clc
+.9				rts
+K.FEOFA.MARK	.BS 3
+*/--------------------------------------
+* # RemoveYA
+*\--------------------------------------
+K.RemoveYA		jsr PFT.CheckPathYA
+				jsr STDIO.PullMLIPath
+				>MLICALL MLIDESTROY
+				rts
+*/--------------------------------------
+* # Rename
+* Rename a file
+* ## In :
+*  PUSHW = New Name
+*  PUSHW = Old Name
+* ## Out :
+*\--------------------------------------
+K.Rename		jsr PFT.CheckPathSTK
+				jsr STDIO.PullMLIPath
+				>PULLW .1+1
+				
+				ldy #0
+				
+.1				lda $ffff,y				Self Modified
+				beq .8
+				iny
+				sta K.Buf256,y
+				cpy #MLI.MAXPATH
+				bne .1
+				
+.8				sty K.Buf256
+				>LDYAI K.Buf256
+				>STYA K.MLI.PARAMS+3
+
+				>MLICALL MLIRename
+				rts
+*--------------------------------------
+STDIO.PullMLIPath
+				>PULLW .1+1
+				
+				ldy #0
+				
+.1				lda $ffff,y				Self Modified
+				beq .8
+				iny
+				sta K.MLI.PATH,y
+				cpy #MLI.MAXPATH
+				bne .1
+				
+.8				sty K.MLI.PATH
+				>LDYAI K.MLI.PATH
+				>STYA K.MLI.PARAMS+1
+				rts
+*--------------------------------------
+STDIO.SetIOBUF	>PUSHWI 1024			get a ProDOS IOBUF
+				>PUSHBI S.MEM.F.ALIGN+S.MEM.F.NOMOVE
+				jsr K.GetMem
+				bcs .9
+
+				>STYA K.MLI.PARAMS+3	Save Ptr to IOBUF for MLIOPEN call
+				txa
+				ldy #S.NODE.REG.IOBUF
+				sta (ZPPtr1),y
+.9				rts
+*--------------------------------------
+STDIO.GetRefNum	jsr K.GetMemPtrA
+				>STYA ZPPtr1				
+				ldy #S.NODE.REG.REF
+				lda (ZPPtr1),y
+				sta K.MLI.PARAMS+1
+				rts
+*/--------------------------------------
 * # FPutCAY
 * Print A (char) to File
 * ## In:
@@ -331,15 +727,15 @@ K.SScanF.IsDigit
 .1				sec
 				rts				
 */--------------------------------------
-* # PrintFYA/SPrintFYA/FPrintFYA
+* # PrintF.YA/SPrintF.YA/FPrintF.YA
 * Prints C-Style String
 * ## In:
-* PrintFYA : 
+* PrintF.YA : 
 *   Y,A = PTR to CStr
-* SPrintFYA : 
+* SPrintF.YA : 
 *   Y,A = PTR to CStr
 *   PULLW = Ptr to Dst Buffer
-* FPrintFYA : 
+* FPrintF.YA : 
 *   Y,A = PTR to CStr
 *   PULLB = hNode
 * ## Out:
@@ -378,12 +774,12 @@ K.SScanF.IsDigit
 *   %011s : 'ABCDEFGH000'
 *   %2f	  :	'3.14'
 *\--------------------------------------
-K.SPrintFYA		>STYA ZPPtr1
+K.SPrintF.YA	>STYA ZPPtr1
 				>PULLW Printf.Cout.Ptr+1
 				
-K.FPrintFYA		>STYA ZPPtr1
+K.FPrintF.YA	>STYA ZPPtr1
 
-K.PrintFYA		>STYA ZPPtr1
+K.PrintF.YA		>STYA ZPPtr1
 				
 				ldy	#0				
 				
@@ -729,24 +1125,6 @@ PrintF.SS		ldy #$00				PSTR
 Printf.Cout		jmp K.PutCharA
 
 Printf.Cout.Ptr	sta $ffff				Self modified
-*--------------------------------------
-FILE.SetIOBUF	>PUSHWI 1024			get a ProDOS IOBUF
-				>PUSHBI S.MEM.F.ALIGN+S.MEM.F.NOMOVE
-				jsr K.GetMem
-				bcs .9
-
-				>STYA K.MLI.PARAMS+3	Save Ptr to IOBUF for MLIOPEN call
-				txa
-				ldy #S.NODE.REG.IOBUF
-				sta (ZPPtr1),y
-.9				rts
-*--------------------------------------
-FILE.SetupPrt1A	jsr K.GetMemPtrA
-				>STYA ZPPtr1				
-				ldy #S.NODE.REG.REF
-				lda (ZPPtr1),y
-				sta K.MLI.PARAMS+1
-				rts
 *--------------------------------------
 MAN
 SAVE /A2OSX.SRC/SYS/KERNEL.S.STDIO
