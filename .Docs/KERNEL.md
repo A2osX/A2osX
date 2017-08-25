@@ -80,19 +80,6 @@ Returns argument count in the process command line.
 ## Out:
 + none, always succeed. 
 
-# NewPStrYA
-Create a new copy of PSTR
-
-## In:
-+ Y,A = PTR to buffer
-
-## Out:
-+ CC : success 
- + Y,A = PTR to String
- + X = hMem (PSTR)
-+ CS : error
- + A = SYS error code
-
 # ExpandPStr.YA
 
 ## In:
@@ -205,6 +192,19 @@ And return, if found, the full path to it.
 ## In:
 + PUSHW = GID
 + PUSHW = PATH
+
+# NewPStrYA
+Create a new copy of PSTR
+
+## In:
++ Y,A = PTR to buffer
+
+## Out:
++ CC : success 
+ + Y,A = PTR to String
+ + X = hMem (PSTR)
++ CS : error
+ + A = SYS error code
 
 # GetMem
 
@@ -329,7 +329,7 @@ Return information about a file
 
 ## In :
 + PUSHW = PTR to S.STAT buffer
-+ PUSHW = PTR to Filename (PSTR)
++ PUSHW = PTR to Filename (C-String)
 
 ## Out :
 
@@ -353,17 +353,6 @@ return a hFile for a given Device Name
 + CC = OK, CS = ERROR
 + A = hFILE
 
-# MkNod.A
-return a hFile for a given Socket
-
-## IN: 
-+ A=hSocket
-
-## OUT:
-+ CC = OK, CS = ERROR
-+ X = hFILE
-+ Y,A = pFILE
-
 # MKFIFO
 return a S.FILE to a new FIFO
 
@@ -372,6 +361,83 @@ return a S.FILE to a new FIFO
 ## OUT:
 + CC = OK, CS = ERROR
 + A = hFILE
+
+# FPutC.AY
+Print A (char) to File
+
+## In:
++ A : char to print
++ Y = hFILE
+
+## Out: 
++ CC = success
+
+# PutChar.A
+Print A (char) to StdOut
+
+## In:
++ A : char to print
+
+## Out: 
++ CC = success
+
+# GetChar
+Get char from StdIn
+
+## In:
++ none.
+
+## Out: 
++ CC = success
+ + A = char
+
+# GetC.A
+Get char from File
+
+## In:
++ A = hFILE
+
+## Out: 
++ CC = success
+ + A = char
+
+# FPutS
+Write String to FILE
+
+## In:
++ PUSHW : CPtr 
++ PUSHB : hFILE
+
+## Out: 
++ CC = success
+
+# PutS.YA
+Write String to StdOut
+
+## In:
++ Y,A : CPtr 
+
+## Out: 
++ CC = success
+
+# FGetS
+Read String From FILE
+
+## In:
++ PUSHW : CPtr 
++ PUSHB : hFILE
+
+## Out: 
++ CC = success
+
+# GetS.YA
+Read String From StdIn
+
+## In:
++ Y,A : CPtr 
+
+## Out: 
++ CC = success
 
 # FOpen
 Open a file
@@ -481,83 +547,6 @@ Rename a file
 
 ## Out :
 
-# FPutC.AY
-Print A (char) to File
-
-## In:
-+ A : char to print
-+ Y = hFILE
-
-## Out: 
-+ CC = success
-
-# PutChar.A
-Print A (char) to StdOut
-
-## In:
-+ A : char to print
-
-## Out: 
-+ CC = success
-
-# GetChar
-Get char from StdIn
-
-## In:
-+ none.
-
-## Out: 
-+ CC = success
- + A = char
-
-# GetC.A
-Get char from File
-
-## In:
-+ A = hFILE
-
-## Out: 
-+ CC = success
- + A = char
-
-# FPutS
-Write String to FILE
-
-## In:
-+ PUSHW : CPtr 
-+ PUSHB : hFILE
-
-## Out: 
-+ CC = success
-
-# PutS.YA
-Write String to StdOut
-
-## In:
-+ Y,A : CPtr 
-
-## Out: 
-+ CC = success
-
-# FGetS
-Read String From FILE
-
-## In:
-+ PUSHW : CPtr 
-+ PUSHB : hFILE
-
-## Out: 
-+ CC = success
-
-# GetS.YA
-Read String From StdIn
-
-## In:
-+ Y,A : CPtr 
-
-## Out: 
-+ CC = success
-
 # SScanF
 Scan a PStr (in progress)
 
@@ -618,8 +607,26 @@ FPrintF.YA :
  + %011s : 'ABCDEFGH000'
  + %2f	  :	'3.14'
 
-# AToI
-Convert String to 32 bit int
+# AToF
+Convert String to 40 bits Float
+
+## In:
++ PUSHW PTR to target buffer (5 Bytes)
++ PUSHW Source String (PSTR)
+
+## Out:
+
+# AToI.YA
+Convert String to 16 bits int
+
+## In:
++ Y,A = Source String (C-String)
+
+## Out:
++ Y,A = Int
+
+# AToL
+Convert String to 32 bits int
 
 ## In:
 + PUSHW PTR to target buffer DWORD
