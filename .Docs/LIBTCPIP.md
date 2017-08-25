@@ -25,7 +25,7 @@
 + PUSHW PTR to MAC
 + PUSHW PTR to IP
 
-# ARP.GetCache
+# ARP.GetC.Ache
 + Return a Ptr to ARP Cache Table
 
 ## In:
@@ -58,7 +58,7 @@
 + PUSHW = PTR to IP
 + PUSHW = hostname PSTR to Add
 
-# DNS.GetCache
+# DNS.GetC.Ache
 + Return a Ptr to DNS Cache Table
 
 ## In:
@@ -155,7 +155,7 @@
 
 ## Out :
 
-# SKT.GetCA (STREAM)
+# SKT.GetC.A (STREAM)
 + Read a Char From Stream in A
 
 ## In : 

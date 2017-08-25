@@ -35,7 +35,7 @@ Its principal goal is to collect all "genius" 65c02 pieces of code ever written 
 A2osX is designed to work on any "stock" 128k Apple //e, with no additional hardware. As VBL signal is NOT available as an IRQ on //e (it is on //c & IIgs)
 it makes preemptive multitasking impossible.
 
-A new attempt using Mouse card VBL IRQ is targeted i 0.9.1.
+__A new attempt using Mouse card VBL IRQ is targeted in 0.9.1.__
 
 Kernel, loading in Aux LC on top of ProDOS provide API inspired from Linux/Unix World to allow writing applications & command line tools on top of it.
 This kernel provides an advanced "Memory Manager" able to relocate 65c02 code.
@@ -206,7 +206,6 @@ note : '$VAR' does NOT expand Variable
 | Name | Status | Comment | K.Ver |
 | ---- | ------ | ------- | ----- |
 | ASM | In Progress | S-C MASM based multi CPU assembler | 0.9 |
-| DEVDUMP |  | | 0.8 |
 | MEMDUMP | Working | | 0.9 |
 | RPCDUMP | Working | tool based on UDP socket API, renamed from RPCINFO | 0.9 |
 

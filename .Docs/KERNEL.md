@@ -9,17 +9,479 @@ Returns argument count in the process command line.
 ## Out: 
 + A = Command line Arg Count (Including /path/cmd)
 
-# GetArgA
+# GetArg.A
 
 ## In:
 + A = argument index.
 
 ## Out: 
 + CC : success
- + Y,A = PStr To Arg[A]
+ + Y,A = CStr To Arg[A]
 + CS : Out Of Bound
 
-# FPutCAY
+# GetDevByID.A
+
+## IN: 
++ A = DevID
+
+## OUT:
++ CC = OK, CS = ERROR
++ Y,A = DEVSLOT
++ note: X Unmodified
+
+# GetDevByName.YA
+
+## IN: 
++ Y,A = Ptr to device name (PStr)
+
+## OUT:
++ CC = OK, CS = ERROR
++ X = DEVID
++ Y,A = DEVSLOT
+
+# GetDevStatus.A
+
+## IN: 
++ A = DevID
+
+## OUT:
++ CC = OK, CS = ERROR
++ Y,A = Ptr to S.DEVINFO
+
+# OpenDir.YA
+
+## In:
++ Y,A = PATH (C-String)
+
+## Out: 
++ CC : success
+ + A = hDIR
++ CS : error
+ + A = EC
+
+# ReadDir.A
+
+## In: 
++ A = hDIR
+
+## Out: 
++ CC : success
+ + X = hDIRENT
+ + Y,A = PTR to S.DIRENT
++ CS : error
+ + A = EC
+ + note : A = 0 means no more entry
+
+# CloseDir.A
+
+## In: 
++ A = hDIR
+
+## Out:
++ none, always succeed. 
+
+# NewPStrYA
+Create a new copy of PSTR
+
+## In:
++ Y,A = PTR to buffer
+
+## Out:
++ CC : success 
+ + Y,A = PTR to String
+ + X = hMem (PSTR)
++ CS : error
+ + A = SYS error code
+
+# ExpandPStr.YA
+
+## In:
++ Y,A = PTR to String to Expand (PSTR)
+
+## Out:
++ X = hMem to Expanded String (PSTR)
++ Y,A = PTR to Expanded String 
+
+# PutEnv.YA
+
+## In:
++ Y,A = PTR to String NAME=VALUE (PSTR)
+
+## Out:
+
+# SetEnv
+
+## In:
++ PUSHW = PTR To Value (PSTR)
++ PUSHW = PTR To Name (PSTR)
+
+## Out:
+
+# GetEnv.YA
+
+## In:
++ Y,A = PTR to NAME (PSTR)
+
+## Out:
++ CC : Y,A = PTR to VALUE (PSTR)
++ CS : not found
+
+# UnsetEnv.YA
+
+## In:
++ Y,A = PTR To Name (PSTR)
+
+## Out:
+
+# FileSearch
+Search a file in the provided PATH list
+And return, if found, the full path to it.
+
+## In:
++ PUSHW = Ptr to Search Path (CSTR) %LIB%;/SYS/SLIB
++ PUSHW = Ptr to File Name (CSTR)		
++ PUSHW = Ptr to DstBuf
++ PUSHW = Ptr to DstStat
+
+## Out:
++ CC : success
+ + DstBuf = FilePath
+ + DstStat = S.STAT
++ CS : not found
+
+# GetFullPath.YA
+
+## In :
++ Y,A = Filename (PSTR)
+
+## Out :
++ CC : success
+ + Y,A = FullPath (PSTR)
+ + X = hMem of FullPath
++ CS : A = Error Code
+
+# LoadFile
+
+## In:
++ PUSHW = AUXTYPE (Handled by....
++ PUSHB = TYPE  ...
++ PUSHB = MODE  ...
++ PUSHW = PATH ...FOpen)
+
+## Out:
++ Y,A = File Length
++ X = hMem of Loaded File
+
+# SaveFile
+
+## In:
++ PUSHW = SrcPtr
++ PUSHW = SrcLen
++ PUSHW = AUXTYPE (Handled by....
++ PUSHB = TYPE  ...
++ PUSHB = MODE  ...
++ PUSHW = PATH ...FOpen)
+
+# ChTyp
+
+## In:
++ PUSHB = TYPE
++ PUSHW = PATH
+
+# ChMod
+
+## In:
++ PUSHW = UID
++ PUSHW = PATH
+
+# ChOwn
+
+## In:
++ PUSHW = UID
++ PUSHW = PATH
+
+# ChGrp
+
+## In:
++ PUSHW = GID
++ PUSHW = PATH
+
+# GetMem
+
+## In: 
++ PUSHW = Size Requested
++ PUSHB = Options
+ + S.MEM.F.INIT0 : init memory with 00
+ + S.MEM.F.ALIGN : page aligned
+
+## Out:
++ CC : success
+ + YA = PTR to Mem
+*	X = hMem
++ CS :
+ + A = EC
+
+# GetMem0.YA
+
+## In: 
++ Y,A = Size Requested
+
+## Out:
++ CC : success
+ + YA = PTR to Mem (ZERO Initialised)
+*	X = hMem
++ CS :
+ + A = EC
+
+# GetMem.YA
+
+## In: 
++ Y,A = Size Requested
+
+## Out:
++ CC : success
+ + YA = PTR to Mem (Uninitialised)
+*	X = hMem
++ CS :
+ + A = EC
+
+# FreeMem.A
+
+## In:
++ A = hMem To Free
+
+## Out:
++ none.
++ (X,Y unmodified)
+
+# GetMemPtr.A
+
+## In:
++ A = hMem
+
+## Out:
++ Y,A = PTR to MemBlock
++ (X unmodified)
+
+# GetMemByID.A
+
+## In:
++ A = hMem
+
+## Out:
++ Y,A = ZPMemMgrSPtr = PTR to S.MEM
++ X unmodified
+
+# GetMemStat.YA
+
+## In:
++ Y,A = 24 bytes buffer
+
+## Out:
++ Buffer filled with memory stats
+
+# ExecProcessNewEnv.YA
+
+# ExecProcess.YA	(Blocking Parent PID)
+
+# CreateProcessNewEnv.YA 
+
+# CreateProcess.YA (Non Blocking)
+
+## In:
+ + Y,A = PTR To Cmd Line
+
+## Out:
+ + A = Child PSID
+
+# GetPSByID.A
+
+## In : 
++ A = PID
+
+## Out : 
++ Y,A = PTR to TSKSLOT
+
+# Sleep
+Make current process suspend until next RUN
+
+## In : 
++ (none)
+
+## Out : 
++ (none)
+
+# Str2StrArray.YA
+Convert a CSTR (e.g. : command Line) to a Array of CSTRs (Args[])
+
+## In: 
++ Y,A = PTR to String
+
+## Out:
++ CC : success
+ + Y,A = PTR to StrArray
+ + X = hMem
++ CS : error
+ + A = SYS error code
+
+# Stat
+Return information about a file
+
+## In :
++ PUSHW = PTR to S.STAT buffer
++ PUSHW = PTR to Filename (PSTR)
+
+## Out :
+
+# MKDirYA
+
+## In: 
++ Y,A = DIR name
+
+## Out:
++ CC : success
++ CS : error
+ + A = EC
+
+# MkNod.YA
+return a hFile for a given Device Name
+
+## IN: 
++ Y,A=DevName
+
+## OUT:
++ CC = OK, CS = ERROR
++ A = hFILE
+
+# MkNod.A
+return a hFile for a given Socket
+
+## IN: 
++ A=hSocket
+
+## OUT:
++ CC = OK, CS = ERROR
++ X = hFILE
++ Y,A = pFILE
+
+# MKFIFO
+return a S.FILE to a new FIFO
+
+## IN: 
+
+## OUT:
++ CC = OK, CS = ERROR
++ A = hFILE
+
+# FOpen
+Open a file
+
+## In :
++ PUSHW = AUXTYPE
++ PUSHB = TYPE
++ PUSHB = MODE
+ + SYS.FOpen.R : if R and exists -> ERROR
+ + SYS.FOpen.W : if W and exists -> CREATE
+ + SYS.FOpen.A : Append
+ + SYS.FOpen.T : Open/Append in Text mode
+ + SYS.FOpen.X : Create if not exists
++ PUSHW = PATH (PSTR)
+
+## Out : 
++ CC : A = hFILE
++ CS : A = EC
+
+# FClose.A
+Close a file
+
+## In :
++ A = hFILE
+
+## Out :
+
+# FRead.A
+Read ONE byte from file
+
+## In :
++ A = hFILE
+
+## Out :
++ A = Byte Read
+
+# FWrite.AY
+
+## In:
++ A = hFILE
++ Y = char
+
+# Out:
++ Y,A = Bytes Written
+
+# FRead
+Read bytes from file
+
+## In :
++ PUSHW = Dest Ptr
++ PUSHW = Bytes To Read
++ PUSHB = hFILE
+
+## Out :
++ Y,A = Bytes Read
+
+# FWrite
+
+## In:
++ PUSHW = Src Ptr
++ PUSHW = Bytes To Write
++ PUSHB = hFILE
+
+# Out:
++ Y,A = Bytes Written
+
+# FFlush.A
+
+## In:
++ A = hFILE
+
+# FSeek
+
+## In:
++ PUSHW = OffsetHi
++ PUSHW = OffsetLo
++ PUSHB = From
++ PUSHB = hFILE
+
+# FTell.A
+
+## In:
++ A = hFILE
+
+## Out:
+ + Y,A,X = Offset
+
+# FEOF.A
+
+## In:
++ A = hFILE
+
+## Out:
++ CC : 
+ + A=0 EOF
+ + A =0 NOT EOF
++ CS :
+
+# Remove.YA
+
+# Rename
+Rename a file
+
+## In :
++ PUSHW = New Name
++ PUSHW = Old Name
+
+## Out :
+
+# FPutC.AY
 Print A (char) to File
 
 ## In:
@@ -29,7 +491,7 @@ Print A (char) to File
 ## Out: 
 + CC = success
 
-# PutCharA
+# PutChar.A
 Print A (char) to StdOut
 
 ## In:
@@ -48,7 +510,7 @@ Get char from StdIn
 + CC = success
  + A = char
 
-# GetCA
+# GetC.A
 Get char from File
 
 ## In:
@@ -68,7 +530,7 @@ Write String to FILE
 ## Out: 
 + CC = success
 
-# PutSYA
+# PutS.YA
 Write String to StdOut
 
 ## In:
@@ -87,7 +549,7 @@ Read String From FILE
 ## Out: 
 + CC = success
 
-# GetSYA
+# GetS.YA
 Read String From StdIn
 
 ## In:
@@ -107,16 +569,16 @@ Scan a PStr (in progress)
 
 ## Out:
 
-# PrintFYA/SPrintFYA/FPrintFYA
+# PrintF.YA/SPrintF.YA/FPrintF.YA
 Prints C-Style String
 
 ## In:
-PrintFYA : 
+PrintF.YA : 
  + Y,A = PTR to CStr
-SPrintFYA : 
+SPrintF.YA : 
  + Y,A = PTR to CStr
  + PULLW = Ptr to Dst Buffer
-FPrintFYA : 
+FPrintF.YA : 
  + Y,A = PTR to CStr
  + PULLB = hNode
 
@@ -165,474 +627,36 @@ Convert String to 32 bit int
 
 ## Out:
 
-# GetDevByIDA
+# StrLen.YA
+Returns Length of C-String
 
-## IN: 
-+ A = DevID
-
-## OUT:
-+ CC = OK, CS = ERROR
-+ Y,A = DEVSLOT
-+ note: X Unmodified
-
-# GetDevByNameYA
-
-## IN: 
-+ Y,A = Ptr to device name (PStr)
-
-## OUT:
-+ CC = OK, CS = ERROR
-+ X = DEVID
-+ Y,A = DEVSLOT
-
-# GetDevStatusA
-
-## IN: 
-+ A = DevID
-
-## OUT:
-+ CC = OK, CS = ERROR
-+ Y,A = Ptr to S.DEVINFO
-
-# MkNodYA
-return a hFile for a given Device Name
-
-## IN: 
-+ Y,A=DevName
-
-## OUT:
-+ CC = OK, CS = ERROR
-+ A = hFILE
-
-# MkNodA
-return a hFile for a given Socket
-
-## IN: 
-+ A=hSocket
-
-## OUT:
-+ CC = OK, CS = ERROR
-+ X = hFILE
-+ Y,A = pFILE
-
-# MKFIFO
-return a S.FILE to a new FIFO
-
-## IN: 
-
-## OUT:
-+ CC = OK, CS = ERROR
-+ A = hFILE
-
-# OpenDirYA
-
-## In:
-+ Y,A = PATH (PSTR)
+## In: 
++ Y,A = Ptr to CSTR
 
 ## Out: 
-+ CC : success
- + A = hDIR
-+ CS : error
- + A = EC
++ Y,A = String length
 
-# ReadDirA
-
-## In: 
-+ A = hDIR
-
-## Out: 
-+ CC : success
- + X = hDIRENT
- + Y,A = PTR to S.DIRENT
-+ CS : error
- + A = EC
- + note : A = 0 means no more entry
-
-# CloseDirA
-
-## In: 
-+ A = hDIR
-
-## Out:
-+ none, always succeed. 
-
-# MKDirYA
-
-## In: 
-+ Y,A = DIR name
-
-## Out:
-+ CC : success
-+ CS : error
- + A = EC
-
-# ExpandPStrYA
-
-## In:
-+ Y,A = PTR to String to Expand (PSTR)
-
-## Out:
-+ X = hMem to Expanded String (PSTR)
-+ Y,A = PTR to Expanded String 
-
-# PutEnvYA
-
-## In:
-+ Y,A = PTR to String NAME=VALUE (PSTR)
-
-## Out:
-
-# SetEnv
-
-## In:
-+ PUSHW = PTR To Value (PSTR)
-+ PUSHW = PTR To Name (PSTR)
-
-## Out:
-
-# GetEnvYA
-
-## In:
-+ Y,A = PTR to NAME (PSTR)
-
-## Out:
-+ CC : Y,A = PTR to VALUE (PSTR)
-+ CS : not found
-
-# UnsetEnvYA
-
-## In:
-+ Y,A = PTR To Name (PSTR)
-
-## Out:
-
-# FOpen
-Open a file
-
-## In :
-+ PUSHW = AUXTYPE
-+ PUSHB = TYPE
-+ PUSHB = MODE
- + SYS.FOpen.R : if R and exists -> ERROR
- + SYS.FOpen.W : if W and exists -> CREATE
- + SYS.FOpen.A : Append
- + SYS.FOpen.T : Open/Append in Text mode
- + SYS.FOpen.X : Create if not exists
-+ PUSHW = PATH (PSTR)
-
-## Out : 
-+ CC : A = hFILE
-+ CS : A = EC
-
-# FCloseA
-Close a file
-
-## In :
-+ A = hFILE
-
-## Out :
-
-# FReadA
-Read ONE byte from file
-
-## In :
-+ A = hFILE
-
-## Out :
-+ A = Byte Read
-
-# FWriteAY
-
-## In:
-+ A = hFILE
-+ Y = char
-
-# Out:
-+ Y,A = Bytes Written
-
-# FRead
-Read bytes from file
-
-## In :
-+ PUSHW = Dest Ptr
-+ PUSHW = Bytes To Read
-+ PUSHB = hFILE
-
-## Out :
-+ Y,A = Bytes Read
-
-# FWrite
-
-## In:
-+ PUSHW = Src Ptr
-+ PUSHW = Bytes To Write
-+ PUSHB = hFILE
-
-# Out:
-+ Y,A = Bytes Written
-
-# FFlushA
-
-## In:
-+ A = hFILE
-
-# FSeek
-
-## In:
-+ PUSHW = OffsetHi
-+ PUSHW = OffsetLo
-+ PUSHB = From
-+ PUSHB = hFILE
-
-# FTellA
-
-## In:
-+ A = hFILE
-
-## Out:
- + Y,A,X = Offset
-
-# FEOFA
-
-## In:
-+ A = hFILE
-
-## Out:
-+ CC : 
- + A=0 EOF
- + A =0 NOT EOF
-+ CS :
-
-# RemoveYA
-
-# Rename
-Rename a file
-
-## In :
-+ PUSHW = New Name
-+ PUSHW = Old Name
-
-## Out :
-
-# Stat
-Return information about a file
-
-## In :
-+ PUSHW = PTR to S.STAT buffer
-+ PUSHW = PTR to Filename (PSTR)
-
-## Out :
-
-# FileSearch
-Search a file in the provided PATH list
-And return, if found, the full path to it.
-
-## In:
-+ PUSHW = Ptr to Search Path (PSTR) %LIB%;/SYS/SLIB
-+ PUSHW = Ptr to File Name (PSTR)		
-
-## Out:
-+ CC : success
- + Y,A = PSTR to FilePath (PSTR)
- + X = hMem to FilePath
-+ CS : not found
-
-# GetFullPathYA
-
-## In :
-+ Y,A = Filename (PSTR)
-
-## Out :
-+ CC : success
- + Y,A = FullPath (PSTR)
- + X = hMem of FullPath
-+ CS : A = Error Code
-
-# LoadFile
-
-## In:
-+ PUSHW = AUXTYPE (Handled by....
-+ PUSHB = TYPE  ...
-+ PUSHB = MODE  ...
-+ PUSHW = PATH ...FOpen)
-
-## Out:
-+ Y,A = File Length
-+ X = hMem of Loaded File
-
-# SaveFile
-
-## In:
-+ PUSHW = SrcPtr
-+ PUSHW = SrcLen
-+ PUSHW = AUXTYPE (Handled by....
-+ PUSHB = TYPE  ...
-+ PUSHB = MODE  ...
-+ PUSHW = PATH ...FOpen)
-
-# ChTyp
-
-## In:
-+ PUSHB = TYPE
-+ PUSHW = PATH
-
-# ChMod
-
-## In:
-+ PUSHW = MODE
-+ PUSHW = PATH
-
-# ChOwn
-
-## In:
-+ PUSHW = UID
-+ PUSHW = PATH
-
-# ChGrp
-
-## In:
-+ PUSHW = GID
-+ PUSHW = PATH
-
-# GetMem
-
-## In: 
-+ PUSHW = Size Requested
-+ PUSHB = Options
- + S.MEM.F.INIT0 : init memory with 00
- + S.MEM.F.ALIGN : page aligned
-
-## Out:
-+ CC : success
- + YA = PTR to Mem
-*	X = hMem
-+ CS :
- + A = EC
-
-# GetMem0YA
-
-## In: 
-+ Y,A = Size Requested
-
-## Out:
-+ CC : success
- + YA = PTR to Mem (ZERO Initialised)
-*	X = hMem
-+ CS :
- + A = EC
-
-# GetMemYA
-
-## In: 
-+ Y,A = Size Requested
-
-## Out:
-+ CC : success
- + YA = PTR to Mem (Uninitialised)
-*	X = hMem
-+ CS :
- + A = EC
-
-# FreeMemA
-
-## In:
-+ A = hMem To Free
-
-## Out:
-+ none.
-+ (X,Y unmodified)
-
-# GetMemPtrA
-
-## In:
-+ A = hMem
-
-## Out:
-+ Y,A = PTR to MemBlock
-+ (X unmodified)
-
-# GetMemByIDA
-
-## In:
-+ A = hMem
-
-## Out:
-+ Y,A = ZPMemMgrSPtr = PTR to S.MEM
-+ X unmodified
-
-# GetMemStatYA
-
-## In:
-+ Y,A = 24 bytes buffer
-
-## Out:
-+ Buffer filled with memory stats
-
-# ExecProcessNewEnvYA
-
-# ExecProcessYA	(Blocking Parent PID)
-
-# CreateProcessNewEnvYA 
-
-# CreateProcessYA (Non Blocking)
-
-## In:
- + Y,A = PTR To Cmd Line
-
-## Out:
- + A = Child PSID
-
-# GetPSByIDA
-
-## In : 
-+ A = PID
-
-## Out : 
-+ Y,A = PTR to TSKSLOT
-
-# Sleep
-Make current process suspend until next RUN
-
-## In : 
-+ (none)
-
-## Out : 
-+ (none)
-
-# NewPStrYA
-Create a new copy of PSTR
-
-## In:
-+ Y,A = PTR to buffer
-
-## Out:
-+ CC : success 
- + Y,A = PTR to String
- + X = hMem (PSTR)
-+ CS : error
- + A = SYS error code
-
-# PStrCpy
-Copy string
-
-## In: 
-+ PUSHW = Ptr to SRC (PSTR)
-+ PUSHW = Ptr to DST (PSTR)
-
-## Out: 
-+ DST = SRC (PSTR)
-
-# PStrCat
+# StrCat
 Append SRC to DST
 
 ## In: 
-+ PUSHW = Ptr to SRC (PSTR)
-+ PUSHW = Ptr to DST (PSTR)
++ PUSHW = Ptr to SRC (CSTR)
++ PUSHW = Ptr to DST (CSTR)
 
 ## Out: 
-+ DST = DST+SRC (PSTR)
++ DST = DST+SRC
 
-# PStrMatch
+# StrCpy
+Copy string
+
+## In: 
++ PUSHW = Ptr to SRC (CSTR)
++ PUSHW = Ptr to DST (CSTR)
+
+## Out: 
++ DST = SRC
+
+# StrMatch
 Compare a String against pattern
 
 ## In: 
@@ -643,11 +667,11 @@ Compare a String against pattern
  + CC : match
  + CS : no match
 
-# PStrUprYA/PStrLwrYA
+# StrUpr.YA/StrLwr.YA
 Convert string to UPPERCASE/lowercase
 
 ## In:
- + Y,A = PTR to String (PSTR)
+ + Y,A = PTR to String (CSTR)
 
 ## Out:
  + Uppercased/lowercased String in Buffer
@@ -676,16 +700,3 @@ Convert S.TIME struct to CSTR
 
 ## Out:
  + none. always succeed.
-
-# PStr2StrArrayYA
-Convert a PSTR (e.g. : command Line) to a Array of PSTRs (Args[])
-
-## In: 
-+ Y,A = PTR to String
-
-## Out:
-+ CC : success
- + Y,A = PTR to StrArray
- + X = hMem
-+ CS : error
- + A = SYS error code
