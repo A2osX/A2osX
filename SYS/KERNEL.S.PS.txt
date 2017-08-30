@@ -4,52 +4,6 @@ LOMEM $A00
 INC 1
 AUTO 6
 */--------------------------------------
-* # ExecProcessNewEnv.YA
-* # ExecProcess.YA	(Blocking Parent PID)
-* # CreateProcessNewEnv.YA 
-* # CreateProcess.YA (Non Blocking)
-* ## In:
-*   Y,A = PTR To Cmd Line
-* ## Out:
-*   A = Child PSID
-*\--------------------------------------
-K.ExecProcessNewEnv.YA
-				ldx #S.PS.F.ENV+S.PS.F.HOLD
-				.HS 2C					bit abs
-K.ExecProcess.YA
-				ldx #S.PS.F.HOLD
-				.HS 2C					bit abs
-K.CreateProcessNewEnv.YA 
-				ldx #S.PS.F.ENV
-				.HS 2C					bit abs
-K.CreateProcess.YA
-				ldx #0
-				stx K.CreateProcess.Flags
-				>STYA K.CreateProcess.CmdLine
-				
-				jsr PS.CreateChild
-				bcs .9
-
-				sta .8+1
-				
-				>DEBUG
-				
-				jsr PS.Init
-				bcc .8
-				
-				pha						save error code
-				lda .8+1
-				jsr PS.Free.A
-				pla						get back error code
-				sec
-				rts
-				
-.8				lda #$ff				self modified
-.9				rts
-*--------------------------------------
-K.CreateProcess.Flags	.BS 1
-K.CreateProcess.CmdLine	.BS 2
-*/--------------------------------------
 * # GetPSByID.A
 * ## In : 
 *  A = PID
@@ -114,6 +68,68 @@ K.Sleep			pla						get PC LO
 				sta (pPs)
 				clc						No error,
 				rts						back to Kernel
+*/--------------------------------------
+* # ExecProcessNewEnv.YA
+* # ExecProcess.YA	(Blocking Parent PID)
+* # CreateProcessNewEnv.YA 
+* # CreateProcess.YA (Non Blocking)
+* ## In:
+*   Y,A = PTR To Cmd Line
+* ## Out:
+*   A = Child PSID
+*\--------------------------------------
+K.ExecProcessNewEnv.YA
+				ldx #S.PS.F.ENV+S.PS.F.HOLD
+				.HS 2C					bit abs
+K.ExecProcess.YA
+				ldx #S.PS.F.HOLD
+				.HS 2C					bit abs
+K.CreateProcessNewEnv.YA 
+				ldx #S.PS.F.ENV
+				.HS 2C					bit abs
+K.CreateProcess.YA
+				ldx #0
+				stx K.CreateProcess.Flags
+				>STYA K.CreateProcess.CmdLine
+				
+				>DEBUG
+				>SYSCALL PrintF.YA
+				>DEBUG
+				
+				jsr PS.CreateChild
+				bcs .9
+
+				sta .8+1
+				
+				>LDYA K.CreateProcess.CmdLine
+				jsr PS.CmdLine2Args
+				bcs .9
+				
+				phy						save PTR to Args[0]...
+				pha
+				
+				txa
+				ldy #S.PS.hARGS
+				sta (ZPPtr3),y
+
+				pla						Restore PTR...
+				ply
+				
+				jsr PS.Init
+				bcc .8
+				
+				pha						save error code
+				lda .8+1
+				jsr PS.Free.A
+				pla						get back error code
+				sec
+				rts
+				
+.8				lda #$ff				self modified
+.9				rts
+*--------------------------------------
+K.CreateProcess.Flags	.BS 1
+K.CreateProcess.CmdLine	.BS 2
 *--------------------------------------
 * PS.CreateChild
 *  in :
@@ -234,20 +250,76 @@ PS.CreateChild	>LDYAI TskMgr.Table+S.PS
 				clc						Exit with A=PSID
 .9				rts
 *--------------------------------------
-PS.Init			>LDYA K.CreateProcess.CmdLine
-				jsr PS.CmdLine2Args
+PS.CmdLine2Args	>STYA ZPPtr1
+				
+				ldy #0
+				
+.1				lda (ZPPtr1),y			compute strlen in Y,X
+				beq .2
+				cmp #'"'				skip "" in computation.... 
+				beq .1
+				iny
+				bne .1					max 255
+				
+.2				tya						+2 for ending 0 for last string, and endig 0 for array
+				clc
+				adc #2
+				tay
+				lda #0
+				bcc .3
+				inc
+				
+.3				jsr K.GetMem.YA
 				bcs .9
-				
-				phy						save PTR to Args[0]...
-				pha
-				
-				txa
-				ldy #S.PS.hCMDLINE
-				sta (ZPPtr3),y
+				phx					save hMem
+				phy					save PTR.LO
+				pha					save PTR.HI
+				>STYA ZPPtr2
 
-				pla						Restore PTR...
-				ply
-				jsr BIN.Load.YA			Y,A=filename full path
+				stz PS.CmdLine2Args.bInQuote
+				
+				ldy #0
+				ldx #0				Arg Count
+				
+.4				lda (ZPPtr1),y
+				beq .8
+				
+				cmp #'"'			found a quote ?
+				bne .5
+				lda PS.CmdLine2Args.bInQuote
+				eor #$ff
+				sta PS.CmdLine2Args.bInQuote
+				bra .71
+				
+.5				cmp #' '
+				bne .70
+				
+				bit PS.CmdLine2Args.bInQuote
+				bmi .70
+				
+				inx					Found one arg !!!
+				lda #0
+				
+.70				sta (ZPPtr2)		yes, set this token len
+.71				inc ZPPtr2
+				bne .72
+				inc ZPPtr2+1
+.72				iny
+				bne .4
+				
+.8				lda #0
+				sta (ZPPtr2)		set Array Ending 0
+				
+				pla					get back PTR.HI
+				ply					get back PTR.LO
+				plx					get back hMem
+				clc
+.9				rts
+
+PS.CmdLine2Args.bInQuote
+				.BS 1
+*--------------------------------------
+PS.Init			jsr BIN.Load.YA			Y,A=filename full path
 				bcs .9
 				
 				>STYA ZPPtr4			save PTR to Code Segment
@@ -279,7 +351,7 @@ PS.Init			>LDYA K.CreateProcess.CmdLine
 				dey	
 				ora (ZPPtr4),y
 				
-				beq *					DS.SIZE=0!!!!
+				beq *					SS.SIZE=0!!!!
 				
 				lda (ZPPtr4),y
 				tay
@@ -300,7 +372,7 @@ PS.Init			>LDYA K.CreateProcess.CmdLine
 *--------------------------------------
 PS.Free.A		jsr K.GetPSByID.A		PS in ZPPtr1
 				
-				ldy #S.PS.hCMDLINE
+				ldy #S.PS.hARGS
 				jsr PS.Free.A.PsY
 
 				lda (ZPPtr1)			get S.PS.F
@@ -382,74 +454,6 @@ PS.DupEnv.A		jsr K.GetMemPtr.A
 .8				txa
 				clc
 .9				rts
-*--------------------------------------
-PS.CmdLine2Args	>STYA ZPPtr1
-				
-				ldy #0
-				
-.1				lda (ZPPtr1),y			compute strlen in Y,X
-				beq .2
-				cmp #'"'				skip "" in computation.... 
-				beq .1
-				iny
-				bne .1					max 255
-				
-.2				tya						+2 for ending 0 for last string, and endig 0 for array
-				clc
-				adc #2
-				tay
-				lda #0
-				bcc .3
-				inc
-				
-.3				jsr K.GetMem.YA
-				bcs .9
-				phx					save hMem
-				phy					save PTR.LO
-				pha					save PTR.HI
-				>STYA ZPPtr2
-
-				stz PS.CmdLine2Args.bInQuote
-				
-				ldy #0
-				ldx #0				Arg Count
-				
-.4				lda (ZPPtr1),y
-				beq .8
-				
-				cmp #'"'			found a quote ?
-				bne .5
-				lda PS.CmdLine2Args.bInQuote
-				eor #$ff
-				sta PS.CmdLine2Args.bInQuote
-				bra .71
-				
-.5				cmp #' '
-				bne .70
-				
-				bit PS.CmdLine2Args.bInQuote
-				bmi .70
-				
-				inx					Found one arg !!!
-				lda #0
-				
-.70				sta (ZPPtr2)		yes, set this token len
-.71				inc ZPPtr2
-				bne .72
-				inc ZPPtr2+1
-.72				iny
-				bne .4
-				
-.8				lda #0
-				sta (ZPPtr2)		set Array Ending 0
-				
-				pla					get back PTR.HI
-				ply					get back PTR.LO
-				plx					get back hMem
-				clc
-.9				rts
-
-PS.CmdLine2Args.bInQuote	
 *--------------------------------------
 MAN
 SAVE /A2OSX.SRC/SYS/KERNEL.S.PS

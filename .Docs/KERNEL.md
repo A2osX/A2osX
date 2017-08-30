@@ -80,13 +80,13 @@ Returns argument count in the process command line.
 ## Out:
 + none, always succeed. 
 
-# ExpandPStr.YA
+# ExpandStr.YA
 
 ## In:
-+ Y,A = PTR to String to Expand (PSTR)
++ Y,A = PTR to String to Expand (C-String)
 
 ## Out:
-+ X = hMem to Expanded String (PSTR)
++ X = hMem to Expanded String (C-String)
 + Y,A = PTR to Expanded String 
 
 # PutEnv.YA
@@ -139,11 +139,11 @@ And return, if found, the full path to it.
 # GetFullPath.YA
 
 ## In :
-+ Y,A = Filename (PSTR)
++ Y,A = Filename (C-String)
 
 ## Out :
 + CC : success
- + Y,A = FullPath (PSTR)
+ + Y,A = FullPath (C-String)
  + X = hMem of FullPath
 + CS : A = Error Code
 
@@ -280,20 +280,6 @@ Create a new copy of PSTR
 ## Out:
 + Buffer filled with memory stats
 
-# ExecProcessNewEnv.YA
-
-# ExecProcess.YA	(Blocking Parent PID)
-
-# CreateProcessNewEnv.YA 
-
-# CreateProcess.YA (Non Blocking)
-
-## In:
- + Y,A = PTR To Cmd Line
-
-## Out:
- + A = Child PSID
-
 # GetPSByID.A
 
 ## In : 
@@ -311,18 +297,19 @@ Make current process suspend until next RUN
 ## Out : 
 + (none)
 
-# Str2StrArray.YA
-Convert a CSTR (e.g. : command Line) to a Array of CSTRs (Args[])
+# ExecProcessNewEnv.YA
 
-## In: 
-+ Y,A = PTR to String
+# ExecProcess.YA	(Blocking Parent PID)
+
+# CreateProcessNewEnv.YA 
+
+# CreateProcess.YA (Non Blocking)
+
+## In:
+ + Y,A = PTR To Cmd Line
 
 ## Out:
-+ CC : success
- + Y,A = PTR to StrArray
- + X = hMem
-+ CS : error
- + A = SYS error code
+ + A = Child PSID
 
 # Stat
 Return information about a file
