@@ -17,8 +17,7 @@ CORE.Run		jsr CORE.TskMgrRun
 				jsr CORE.DispatchEvents
 				bcc .4					CC=All Events Dispatched
 
-				>LDYAI TskMgr.Table		Select PS0
-				>STYA pPs
+				jsr PS.Select0
 
 				lda #EvtMgr.Table
 				sta pEvent
@@ -48,7 +47,9 @@ CORE.Run		jsr CORE.TskMgrRun
 				sta SYS.BASL0+38
 				dex
 				bpl .5
+				
 				ldx #3
+				
 .5				stx SYS.CPULOADI
 				
 .6				bit OPENAPPLE
@@ -63,27 +64,8 @@ CORE.Run		jsr CORE.TskMgrRun
 				cmp #"5"
 				bcs CORE.Run
 				
-				sta KBDSTROBE
-
-				and #$0F
-				cmp A2osX.ASCREEN		Same as active screen...nothing to do
-				beq CORE.Run
-				
-				tax
-
-				lda A2osX.SCRNDEVS-1,x
-				beq CORE.Run			No device claimed this screen
-
-				jsr K.GetDevByID.A		x unmodified.....
-				bcs CORE.Run			??? 
-				
-				stx A2osX.ASCREEN
-				
-				>STYA pDev
-
-				ldx #DEVMGR.CONTROL
-				jsr pDevJmp
-				jmp CORE.Run
+				jsr CORE.ScreenSelect
+				bra CORE.Run
 *--------------------------------------
 CORE.DumpEvent	ldy #S.EVT-1
 				
@@ -95,6 +77,30 @@ CORE.DumpEvent	ldy #S.EVT-1
 				jmp K.PrintF.YA
 				
 .2				>CSTR "!Evt:F=%b,Dev=$%h,LO=$%h,HI=$%h,W1=$%H,W2=$%H\n"
+*--------------------------------------
+CORE.ScreenSelect
+				sta KBDSTROBE
+
+				and #$0F
+				cmp A2osX.ASCREEN		Same as active screen...nothing to do
+				beq .8
+				
+				tax
+
+				lda A2osX.SCRNDEVS-1,x
+				beq .8					No device claimed this screen
+
+				jsr K.GetDevByID.A		x unmodified.....
+				bcs .8					??? 
+				
+				stx A2osX.ASCREEN
+				
+				>STYA pDev
+
+				ldx #DEVMGR.CONTROL
+				jmp pDevJmp
+				
+.8				rts
 *--------------------------------------
 SYS.CPULOADI 	.BS 1
 SYS.CPULOADC	.AS "|/-\"
@@ -184,6 +190,70 @@ CORE.TskMgrRun	>LDYAI TskMgr.Table+S.PS		skip PS 0
 				
 .8				clc
 				rts
+*--------------------------------------
+* CORE.GetEvents :
+*  IN :
+*  OUT : 
+*   CS = no event, A = ERROR
+*   CC * event in YA
+*   (pEvent)
+*--------------------------------------
+CORE.GetEvents	lda #EvtMgr.Table
+				sta	pEvent				point to start of event list
+				
+				stz EvtMgr.Count		reset Size
+				
+				lda K.IrkMgr.VBL		do we have IRQ enabled for VBL ?
+				bpl .10					no, regular poll
+				
+				lda K.IrkMgr.VBLINT
+				beq .3					no
+				
+				dec K.IrkMgr.VBLINT
+				bra .11
+				
+.10				lda VBL					get VLINE status
+				tax
+				eor EvtMgr.VBLState		
+				bpl .3	no change,no tick
+				txa
+				sta EvtMgr.VBLState		save new
+				bpl .3					Up2down transition,no tick
+				
+.11				inc A2osX.TIMER16
+				bne .1
+				inc A2osX.TIMER16+1
+
+.1				dec EvtMgr.HZ.CNT
+				bne .3					not yet 100ms
+
+				ldx A2osX.HZ
+				stx EvtMgr.HZ.CNT
+
+				lda #S.EVT.F.T10TH
+
+				dec EvtMgr.10TH.CNT
+				bne .2
+				
+				ldx #10
+				stx EvtMgr.10TH.CNT
+
+				ora #S.EVT.F.T1SEC
+				
+.2				sta (pEvent)
+				inc EvtMgr.Count		Add one event to Queue
+
+				lda pEvent
+				clc
+				adc #S.EVT
+				sta pEvent				if CS, EVT queue full!!! ($100)
+
+.3				sec
+				lda EvtMgr.Count		if 0, exit with CS (from cmp), and A=0 "no event"
+				beq .9
+				
+.8				clc
+.9				rts
 *--------------------------------------
 CORE.PSWakeUp	and #$FF^S.PS.F.SLEEP	unmark as SLEEP
 				sta (pPS)
@@ -279,74 +349,6 @@ CORE.TskMgrQuit	clc
 *--------------------------------------
 TskMgr.Idx		.BS 1
 TSKMGR.EVENTCNT	.BS 1
-*--------------------------------------
-* CORE.GetEvents :
-*  IN :
-*  OUT : 
-*   CS = no event, A = ERROR
-*   CC * event in YA
-*   (pEvent)
-*--------------------------------------
-CORE.GetEvents	lda #EvtMgr.Table
-				sta	pEvent				point to start of event list
-				
-				stz EvtMgr.Count		reset Size
-				
-				lda K.IrkMgr.VBL		do we have IRQ enabled for VBL ?
-				bpl .10					no, regular poll
-				
-				lda K.IrkMgr.VBLINT
-				beq .3					no
-				
-				dec K.IrkMgr.VBLINT
-				bra .11
-				
-.10				lda VBL					get VLINE status
-				tax
-				eor EvtMgr.VBLState		
-				bpl .3	no change,no tick
-				txa
-				sta EvtMgr.VBLState		save new
-				bpl .3					Up2down transition,no tick
-				
-.11				inc A2osX.TIMER16
-				bne .1
-				inc A2osX.TIMER16+1
-
-.1				dec EvtMgr.HZ.CNT
-				bne .3					not yet 100ms
-
-				ldx A2osX.HZ
-				stx EvtMgr.HZ.CNT
-
-				lda #S.EVT.F.T10TH
-
-				dec EvtMgr.10TH.CNT
-				bne .2
-				
-				ldx #10
-				stx EvtMgr.10TH.CNT
-
-				ora #S.EVT.F.T1SEC
-				
-.2				sta (pEvent)
-				jsr CORE.GetEvents.Add				
-.3	
-				sec
-				lda EvtMgr.Count		if 0, exit with CS (from cmp), and A=0 "no event"
-				beq .9
-				
-.8				clc
-.9				rts
-*--------------------------------------
-CORE.GetEvents.Add
-				inc EvtMgr.Count		Add one event to Queue
-
-				lda pEvent
-				clc
-				adc #S.EVT
-				sta pEvent
-				rts						if CS, EVT queue full!!! ($100)
 *--------------------------------------
 CORE.DestroyEvent
 				lda (pEvent)
