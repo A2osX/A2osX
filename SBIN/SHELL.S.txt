@@ -12,6 +12,160 @@ AUTO 6
 				.INB /A2OSX.BUILD/INC/A2OSX.I
 				.INB /A2OSX.BUILD/INC/MLI.ERR.I
 *--------------------------------------
+UsrBuf256		.EQ $200
+*--------------------------------------
+Stack			.EQ $80
+Stack.B			.EQ $fe
+Stack.P			.EQ $ff					Initial value=$fd
+*--------------------------------------
+				.MA STACK.BACKUP
+				
+				ldy #0
+				
+				ldx Stack.P				At least eq $fd
+				inx
+				
+:1				lda Stack,x
+				sta (pStack),y
+				iny
+				inx
+				bne :1
+				
+				tsx
+				inx
+				inx						Skip 2 bytes Return address to Kernel
+				
+				txa
+				eor #$ff				compute byte count on stack....
+				inx
+				beq :9
+
+				sta :8+1				save count for later
+				
+				
+:2				pla
+				sta (pStack),y
+				iny
+				inx
+				bne :2
+				
+:8				lda #$ff
+:9				sta (pStack),y
+
+				tya
+				ldy #S.PS.SP
+				sta (pPs),y
+				
+				.EM
+*--------------------------------------
+				.MA STACK.RESTORE
+				ldy #S.PS.SP			get PS stack top....
+				lda (pPs),y
+				tay
+				
+				lda (pStack),y			get 6502 stack bytes to restore
+				dey
+				tax
+				beq :2
+				
+:1				lda (pStack),y
+				dey
+				pha
+				dex
+				bne :1
+				
+				ldx #$ff
+				
+:2				tya
+				beq :8
+				
+				lda (pStack),y
+				sta Stack,x
+				dex
+				dey
+				
+:8				
+				.EM
+*--------------------------------------
+				.MA	ADDLOCAL
+				lda Stack.P
+				sec
+				sbc #]1
+				sta Stack.P
+				sta Stack.B
+				.EM
+*--------------------------------------
+				.MA GETL.A
+				ldx Stack.B
+				lda Stack+]1,x
+				.EM
+*--------------------------------------
+				.MA GETL.YA
+				ldx Stack.B
+				ldy Stack+]1,x
+				lda Stack+1+]1,x
+				.EM
+*--------------------------------------
+				.MA SETL.A
+				ldx Stack.B
+				sta Stack+]1,x
+				.EM
+*--------------------------------------
+				.MA SETL.YA
+				ldx Stack.B
+				sty Stack+]1,x
+				sta Stack+1+]1,x
+				.EM
+*--------------------------------------
+				.MA PUSHLW
+				ldx Stack.P
+				.DO ]#=2
+				lda ]1+1,]2
+				sta Stack,x
+				dex
+				lda ]1,]2
+				sta Stack,x
+				dex
+				stx Stack.P
+				.ELSE
+				lda ]1+1
+				sta Stack,x
+				dex
+				lda ]1
+				sta Stack,x
+				dex
+				stx Stack.P
+				.FIN				
+				.EM
+*--------------------------------------
+				.MA	GETG.A
+				ldy #]1
+				lda (pData),y
+				.EM
+*--------------------------------------
+				.MA	SETG.A
+				ldy #]1
+				sta (pData),y
+				.EM
+*--------------------------------------
+				.MA	GETG.YA
+				ldy #]1
+				lda (pData),y
+				pha
+				iny
+				lda (pData),y
+				ply
+				.EM
+*--------------------------------------
+				.MA	SETG.YA
+				phy
+				ldy #]1+1
+				sta (pData),y
+				dey
+				pla
+				sta (pData),y
+				.EM
+*--------------------------------------
 ZPPTR1			.EQ ZPBIN
 ZPPTR2			.EQ ZPBIN+2
 ZPPTR3			.EQ ZPBIN+4
@@ -23,15 +177,16 @@ ZPCSHStack		.EQ ZPBIN+14
 *--------------------------------------
 CmdLine.MAX		.EQ 127
 VarLen.MAX		.EQ 15
+
 CSH.Stack.MAX	.EQ 15
 CSH.Name.MAX	.EQ 15
-CSHERR.SYNTAX	.EQ $7F		
-CSHERR.SOVERFLW	.EQ $7E
-CSHERR.NOVERFLW	.EQ $7D
-CSHERR.OOM		.EQ $7C
-CSHERR.DUP		.EQ $7B
-CSHERR.UNDEF	.EQ $7A
-CSHERR.TOOLONG	.EQ $79
+CSH.E.SYNTAX	.EQ $7F		
+CSH.E.SOVERFLW	.EQ $7E
+CSH.E.NOVERFLW	.EQ $7D
+CSH.E.OOM		.EQ $7C
+CSH.E.DUP		.EQ $7B
+CSH.E.UNDEF		.EQ $7A
+CSH.E.TOOLONG	.EQ $79
 *--------------------------------------
 *			File Header (16 Bytes)
 *--------------------------------------
@@ -42,7 +197,7 @@ CS.START		cld
 				.DA 0
 				.DA CS.END-CS.START		Code Length To Relocate
 				.DA DS.END-DS.START		Data Segment to Allocate
-				.DA 64					SS
+				.DA 0
 				.DA 0
 *--------------------------------------
 * Relocation Table
@@ -103,8 +258,8 @@ CS.INIT			jsr SetPWD
 				ora #S.PS.F.EVENT		Now accept events
 				sta (pPs)
 								
-				>SYSCALL GetArgC
-				cmp #1
+				ldy #S.PS.ARGC
+				lda (pPs),y
 
 				beq .1					no arg, continue starting interactive
 
@@ -144,8 +299,7 @@ CS.INIT			jsr SetPWD
 *				clc
 .9				rts				
 *--------------------------------------
-CS.RUN			ldy #VarBuffer			READ Command ?
-				lda (pData),y
+CS.RUN			>GETG.A bReadMode		READ Command ?
 				bne CS.RUN.READ
 				
 				ldy #S.PS.RC
@@ -165,8 +319,7 @@ CS.RUN			ldy #VarBuffer			READ Command ?
 .13				jsr CheckSleep
 				bne .8
 				
-				ldy #CSH.hBuf			batch mode ?
-				lda (pData),y
+				>GETG.A CSH.hBuf		batch mode ?
 				beq .10
 				
 				jmp CS.RUN.BATCH
@@ -224,11 +377,8 @@ CS.RUN.READ		lda #0
 				
 				jsr CS.CHARIN
 
-				lda (pData)
+				>GETG.A bCmdBuf.exec
 				bpl .1
-				
-				and #$7F
-				sta (pData)
 				
 				>PUSHW pData
 				
@@ -317,7 +467,6 @@ CS.RUN.BATCH	jsr	CSH.Run
 CS.DOEVENT		lda (pEvent)
 				bpl .9
 
-
 				jsr CheckSleep
 				beq .9
 
@@ -335,32 +484,33 @@ CS.DOEVENT		lda (pEvent)
 .9				sec
 				rts
 *--------------------------------------
-CS.CHARIN		tax
-				ldy #CSH.hBuf			Batch mode ?
-				lda (pData),y
+CS.CHARIN		>ADDLOCAL 2				room for bCmdBuf
+				>GETG.A hCmdBuf
+				>SYSCALL GetMemPtr.A
+				>SETL.YA 0
+				
+				tax						Save Char
+				>GETG.A CSH.hBuf			Batch mode ?
 				beq .10
 * Batch Mode			
 				cpx #3					test Ctrl-c
 				bne .12
 				
-				ldy #bExitOnEOF
-				lda (pData),y
-				ldy #bExit
-				sta (pData),y
+				>GETG.A bExitOnEOF
+				>SETG.A bExit
 				clc
 				rts
 
 .12				cpx #19					test Ctrl-s
 				bne .8
-				ldy #bPause
+				
 				lda #$80
-				sta (pData),y
+				>SETG.A bPause
 				clc
 				rts
 				
 * interactive mode				
-.10				ldy #bEscMode
-				lda (pData),y
+.10				>GETG.A bEscMode
 				beq .13
 				
 				cpx #'['
@@ -421,18 +571,16 @@ CS.CHARIN.CTRL	cpx #13					CR
 				lda #10
 				>SYSCALL PutChar.A
 				
-				lda (pData)				CmdBuffer
-				ora #$80
-				sta (pData)
+				lda #$ff
+				>SETG.A bCmdBuf.exec
 				clc
 				rts
 				
 .10				cpx #$1B				esc
 				bne .11
 				
-				ldy #bEscMode
 				lda #$ff
-				sta (pData),y
+				>SETG.A bEscMode
 				clc
 				rts
 
@@ -605,8 +753,12 @@ CSH.ARG			.BS 5
 				.DUMMY
 				.OR 0
 DS.START
-CmdBuffer		.BS CmdLine.MAX+1		(pData)
-VarBuffer		.BS VarLen.MAX+1
+hCmdBuf			.BS 1
+CmdBuf.len		.BS 1
+bCmdBuf.exec	.BS 1
+
+bReadMode		.BS 1
+
 bEscMode		.BS 1
 bPause			.BS 1
 bExit			.BS 1
