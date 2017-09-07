@@ -5,17 +5,24 @@ INC 1
 AUTO 6
 				.LIST OFF	
 *--------------------------------------
-* Remove extra SPACE & comment
+CMD.Init		>LDYAI CmdLine.MAX+1
+				>SYSCALL GetMem.YA
+				bcs .9
+				txa
+				>SETG.A hCmdBuf
+.9				rts				
 *--------------------------------------
-Cmd.Normalize	>LDYA ZPBufBase
+* ZPCMDBuf : Remove extra SPACE & comment
+*--------------------------------------
+Cmd.Parse		>LDYA ZPCMDBuf
 				>STYA ZPPtr1
 				
-				lda (ZPBufBase)			empty line...quit
+				lda (ZPCMDBuf)			empty line...quit
 				beq .9
 
 				ldy #0
 								
-.1				jsr Cmd.Normalize.Next
+.1				jsr Cmd.Parse.NextC
 				beq .8					no more char, exit
 				
 				cmp #' '				skip leading spaces
@@ -24,19 +31,19 @@ Cmd.Normalize	>LDYA ZPBufBase
 				cmp #'#'				Comment ?
 				beq .8					ignore remaining chars
 				
-.3				sta (ZPBufBase),y		add char to buffer
+.3				sta (ZPCMDBuf),y		add char to buffer
 				iny
 				
-				jsr Cmd.Normalize.Next
+				jsr Cmd.Parse.NextC
 				beq .8
 				
 				cmp #' '
 				bne .3
 				
-				sta (ZPBufBase),y		add One SPACE to buffer
+				sta (ZPCMDBuf),y		add One SPACE to buffer
 				iny
 				
-.5				jsr Cmd.Normalize.Next
+.5				jsr Cmd.Parse.NextC
 				beq .8
 				
 				cmp #' '
@@ -44,12 +51,11 @@ Cmd.Normalize	>LDYA ZPBufBase
 				bne .3					no more space, add next word...
 				
 .8				lda #0
-				sta (ZPBufBase),y
+				sta (ZPCMDBuf),y
 
 .9				rts
 
-Cmd.Normalize.Next
-				lda (ZPPtr1)
+Cmd.Parse.NextC	lda (ZPPtr1)
 				beq .8
 				
 				inc ZPPtr1
@@ -57,51 +63,56 @@ Cmd.Normalize.Next
 				inc ZPPtr1+1			never Z
 .8				rts
 *--------------------------------------
-* Y,A -> Command line (formatted & not empty)
+* ZPCMDBuf-> Command line (formatted & not empty)
 *--------------------------------------
-Cmd.ExecYA		stz	bStartProc
+Cmd.Exec		stz	bStartProc
+				>LDYA ZPCMDBuf
+				
+Cmd.ExecYA		>SYSCALL ExpandStr.YA
+				>STYA ZPPtr1			Ptr to CMD
+				
+				txa
+				>SETG.A CMD.hCmdLine
 
-Cmd.ExecYA.1	>SYSCALL ExpandStr.YA
-				>STYA ZPPtr1
-				>STYA ZPPtr2
-				stx	Cmd.ExecYA.Exit.1+1
-
-				ldy #0					CMD len
+				ldy #$ff				CMD Len
 				
-				lda (ZPPtr2)
-				tax						ARGS len=Total Len
-				
-.1				inc ZPPtr2				Next Cmd Char
-				bne .2
-				inc ZPPtr2+1
-				
-.2				lda (ZPPtr2)
+.1				iny
+				lda (ZPPtr1),y			Get CMD char...
+				beq .2
+								
 				cmp #" "				we reached blank between CMD ARGS
-				beq .3
-				
-				iny						CMD+1
-				dex						Total=0
 				bne .1
 				
-.3				tya
-				sta (ZPPtr1)			Cut CMD
-				txa
-				sta (ZPPtr2)			Cut ARGS
+.2				phy						Y=CMD len
 				
 				>LDYA L.INTCMDS
-				>STYA ZPPtr3
+				>STYA ZPPtr2
 				
 				ldx #0
 				
-.4				lda (ZPPtr3)
-				beq Cmd.Exec.EXT		Ending 0, must be an external Cmd....
+.3				lda (ZPPtr2)
+				beq Cmd.Exec.EXT		Array Ending 0, must be an external Cmd....
 				
-				cmp (ZPPtr1)			Same Len ?
-				bne .8
+				pla						get back CMD len
+				pha
 				
-				tay
+				cmp (ZPPtr2)			Same Len ?
+				beq .5
 				
-.5				lda (ZPPtr1),y
+.4				inx
+				inx
+				
+				lda ZPPtr2
+				sec
+				adc (ZPPtr2)
+				sta ZPPtr2
+				bcc .3
+				inc ZPPtr2+1
+				bra .3				
+				
+.5				tay
+				dey
+				lda (ZPPtr1),y
 
 				cmp #'a'				To Uppercase
 				bcc .6
@@ -109,36 +120,37 @@ Cmd.ExecYA.1	>SYSCALL ExpandStr.YA
 				bcs .6
 				eor #$20
 
-.6				cmp (ZPPtr3),y
-				bne .8
+.6				iny
+				cmp (ZPPtr2),y
+				bne .4
 				dey
-				bne .6
+				dey
+				bne .5
+				
+				ply						get back Cmd Len
+				lda (ZPPtr1),y
+				beq .7					ARGS = ""
+				iny						skip " "
+.7				tya
+				clc
+				adc ZPPtr1
+				sta ZPPtr2
+				lda #0
+				adc ZPPtr1+1
+				sta ZPPtr2+1			ZPPtr2->ARGS
 				
 				jsr Cmd.Exec.INT		Found an internal Cmd...
 				
-				bcs .7
+				bcs .9
 				
 				lda #0
 				
-.7				ldy #S.PS.RC
+.9				ldy #S.PS.RC
 				sta (pPS),y
-				bra Cmd.ExecYA.Exit
 
-.8				inx
-				inx
-				
-				lda ZPPtr3
-				sec
-				adc (ZPPtr3)
-				sta ZPPtr3
-				bcc .4
-				inc ZPPtr3+1
-				bra .4
-*--------------------------------------
-Cmd.ExecYA.Exit	php
-				pha
-Cmd.ExecYA.Exit.1				
-				lda #$ff
+Cmd.Exec.Done	php
+				pha			
+				>GETG.A CMD.hCmdLine
 				>SYSCALL FreeMem.A
 				pla
 				plp
@@ -146,8 +158,9 @@ Cmd.ExecYA.Exit.1
 *--------------------------------------
 Cmd.Exec.INT	jmp (J.INTCMDS,x)
 *--------------------------------------
-Cmd.Exec.EXT	ldy #1
-				lda (ZPPtr1),y
+Cmd.Exec.EXT	pla						Discard CMD len
+
+				lda (ZPPtr1)
 				cmp #'/'				Command line is already full path, no search
 				bne .10
 				jmp .3
@@ -201,7 +214,7 @@ Cmd.Exec.EXT	ldy #1
 				
 .9				lda #SYSMGR.ERRSYN
 				sec	
-.99				jmp Cmd.ExecYA.Exit
+.99				jmp Cmd.Exec.Done
 *--------------------------------------
 * TXT : Launch "/PATH/SHELL /PATH/CMD ARGS"
 *--------------------------------------
@@ -241,10 +254,10 @@ Cmd.Exec.EXT.BIN
 				bmi .2					startproc
 				
 				>SYSCALL ExecProcessNewEnvYA
-				jmp Cmd.ExecYA.Exit
+				jmp Cmd.Exec.Done
 
 .2				>SYSCALL CreateProcessYA
-				jmp Cmd.ExecYA.Exit
+				jmp Cmd.Exec.Done
 *--------------------------------------
 * Internal Commands
 *--------------------------------------
@@ -374,7 +387,7 @@ Cmd.Exec.STARTPROC
 				ror	bStartProc
 
 				>LDYA L.ARGS
-				jmp Cmd.ExecYA.1
+				jmp Cmd.ExecYA
 *--------------------------------------
 Cmd.Exec.SET	lda ARGS
 				bne Cmd.Exec.SETVAR
@@ -505,12 +518,11 @@ Cmd.Exec.READ	lda ARGS
 				beq .9 
 
 				lda #0
-				ldy #bSecureRead
-				sta (pData),y
+				>SETG.A bSecureRead
 
 				lda pData
 				clc
-				adc #VarBuffer
+				adc #CMD.VarName
 				sta ZPPTR1
 				lda pData+1
 				adc #0
@@ -534,9 +546,8 @@ Cmd.Exec.READ	lda ARGS
 				cmp #'S'
 				bne .2
 				
-				ldy #bSecureRead
 				lda #$80
-				sta (pData),y
+				>SETG.A bSecureRead
 				bra .1
 				
 .2				cmp #'P'			
@@ -612,15 +623,13 @@ Cmd.Exec.SLEEP	lda ARGS
 				rts
 .9				jmp Cmd.Exec.ERRSYN				
 *--------------------------------------
-Cmd.Exec.PAUSE	ldy #bPause
-				lda #$80
-				sta (pData),y
+Cmd.Exec.PAUSE	lda #$FF
+				>SETG.A bPause
 				clc
 				rts
 *--------------------------------------
-Cmd.Exec.EXIT	ldy #bEXIT
-				lda #$FF
-				sta (pData),y
+Cmd.Exec.EXIT	lda #$FF
+				>SETG.A bExit
 				clc
 				rts
 *--------------------------------------

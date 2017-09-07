@@ -16,9 +16,9 @@ UsrBuf256		.EQ $200
 *--------------------------------------
 ZPPTR1			.EQ ZPBIN
 ZPPTR2			.EQ ZPBIN+2
-ZPPTR3			.EQ ZPBIN+4
-ZPBufBase		.EQ ZPBIN+6
-ZPBufPtr		.EQ ZPBIN+8
+ZPCMDBuf		.EQ ZPBIN+4
+ZPCSHBufBase	.EQ ZPBIN+6
+ZPCSHBufPtr		.EQ ZPBIN+8
 ZPCSHSymbols	.EQ ZPBIN+10
 ZPCSHData		.EQ ZPBIN+12
 ZPCSHStack		.EQ ZPBIN+14
@@ -102,32 +102,17 @@ L.ERR.Messages	.DA ERR.Messages
 *--------------------------------------
 CS.INIT			jsr SetPWD
 
+				jsr CMD.Init
+				bcs .9
+				
 				lda (pPs)
 				ora #S.PS.F.EVENT		Now accept events
 				sta (pPs)
-								
+						
 				ldy #S.PS.ARGC
 				lda (pPs),y
 
 				beq .1					no arg, continue starting interactive
-
-				>PUSHWI 0				Aux type
-				>PUSHBI 4				S.FILEINFO.TYPE.TXT
-				>PUSHBI	SYS.FOpen.R
-				
-				lda #1
-				>SYSCALL GetArg.A
-				>PUSHYA
-				>SYSCALL LoadFile
-				bcs .9
-				>DEBUG
-				>SETG.YA CSH.BufLen+1
-				
-				txa
-				>SETG.A CSH.hBuf
-				
-				lda #$FF
-				>SETG.A bExitOnEOF
 				
 				jmp CSH.Init
 				
@@ -155,7 +140,9 @@ CS.RUN			>GETG.A bReadMode		READ Command ?
 				>SYSCALL GetChar
 				bcs .8
 				
-.13				jsr CheckSleep
+.13				>DEBUG
+				
+				jsr CheckSleep
 				bne .8
 				
 				>GETG.A CSH.hBuf		batch mode ?
@@ -167,10 +154,10 @@ CS.RUN			>GETG.A bReadMode		READ Command ?
 
 .10				>GETG.A hCmdBuf			Get the buffer
 				>SYSCALL GetMemPtr.A
-				>STYA ZPBufBase
+				>STYA ZPCMDBuf
 				
 				lda #0					reset it
-				sta (ZPBufBase)
+				sta (ZPCMDBuf)
 				
 				>SETG.A bSecureRead		Clear password mode
 				
@@ -186,21 +173,19 @@ CS.RUN			>GETG.A bReadMode		READ Command ?
 				>GETG.A bCmdBufexec		Something to execute ?
 				bpl .1
 
-				jsr Cmd.Normalize
+				jsr Cmd.Parse
 				
 				>GETG.A CmdBuflen
 				beq .12					Empty line
 
 				jsr HIS.Add
 
-				>LDYA ZPBufBase
-				jsr Cmd.ExecYA
+				jsr Cmd.Exec
 				
 				ldy #S.PS.RC
 				sta (pPs),y
 				
-				ldy	#bEXIT
-				lda (pData),y
+				>GETG.A bExit
 				bne CS.RUN.EXIT
 				
 .8				clc
@@ -212,10 +197,10 @@ CS.RUN.EXIT.RTS	rts
 *--------------------------------------
 CS.RUN.READ		>GETG.A hCmdBuf			Get the buffer
 				>SYSCALL GetMemPtr.A
-				>STYA ZPBufBase
+				>STYA ZPCMDBuf
 				
 				lda #0					reset it
-				sta (ZPBufBase)
+				sta (ZPCMDBuf)
 				
 .1				>SYSCALL Sleep
 				>SYSCALL GetChar
@@ -226,9 +211,9 @@ CS.RUN.READ		>GETG.A hCmdBuf			Get the buffer
 				>GETG.A bCmdBufexec
 				bpl .1
 				
-				>PUSHW ZPBufBase
+				>PUSHW ZPCMDBuf
 				
-				lda #VarBuffer
+				lda #CMD.VarName
 				clc
 				adc pData
 				tay
@@ -236,15 +221,6 @@ CS.RUN.READ		>GETG.A hCmdBuf			Get the buffer
 				adc #0
 				>PUSHYA
 				>SYSCALL SetEnv
-				php
-				pha
-				
-				ldy #VarBuffer
-				lda #0
-				sta (pData),y
-				
-				pla
-				plp
 				rts
 *--------------------------------------
 CS.RUN.BATCH	>DEBUG
@@ -252,15 +228,14 @@ CS.RUN.BATCH	>DEBUG
 				jsr	CSH.Run
 				bcs .9
 				
-				lda (pData)
-				beq .8					Empty line....nothing to do....
+				>GETG.A bCmdBufexec
+				bpl .8					Empty line....nothing to do....
 
-				jsr Cmd.Normalize
-				lda (pData)
+				jsr Cmd.Parse
+				>GETG.A CmdBuflen
 				beq .8
 				
-				>LDYA pData
-				jsr Cmd.ExecYA
+				jsr Cmd.Exec
 				
 .8				ldy #S.PS.RC
 				sta (pPs),y
@@ -355,7 +330,7 @@ CS.CHARIN		tax						Save Char
 * interactive mode				
 .10				>GETG.A hCmdBuf
 				>SYSCALL GetMemPtr.A
-				>STYA ZPBufBase
+				>STYA ZPCMDBuf
 				
 				>GETG.A bEscMode
 				beq .13
@@ -389,20 +364,20 @@ CS.CHARIN		tax						Save Char
 				clc
 				rts
 
-.2				lda (pData)				CmdBuffer
+.2				>GETG.A CmdBuflen
 				
 				cmp #CmdLine.MAX
 				beq .8
 				
+				pha
+				
 				inc
-				sta (pData)
-				tay
-				txa
 				sta (pData),y
+				txa
+				ply
+				sta (ZPCMDBuf),y
 
-				tax
-				ldy #bSecureRead
-				lda (pData),y
+				>GETG.A bSecureRead
 				bne .8
 				
 				txa
@@ -508,33 +483,38 @@ PrintPrompt		>LDYA L.ENV.PS1
 				plp
 .9				rts
 *--------------------------------------
-CmdLine.CLR		lda (pData)
+CmdLine.CLR		ldy #0
+
+.1				lda (ZPCMDBuf),y
 				beq .9 		
 
-				tay
 				lda #8
 				
-.1				sta (pData),y
-				dey
+				sta (pData),y
+				iny
 				bne .1
+				
 				jsr CmdLine.SET
 
 				lda #0
-				sta (pData)
+				sta (ZPCMDBuf)
 				
 .9				rts
 *--------------------------------------
-CmdLine.DEL		lda (pData)
+CmdLine.DEL		>GETG.A CmdBuflen
 				beq .9
+				dec
+				sta (pData),y
+				
+				tay
+				lda #0
+				sta (pData),y
 				
 				lda #8
 				>SYSCALL PutChar.A
-				lda (pData)
-				dec
-				sta (pData)
 .9				rts
 *--------------------------------------
-CmdLine.SET		>PUSHW pData
+CmdLine.SET		>PUSHW ZPCMDBuf
 				>LDYA L.MSG.PSTR
 				>SYSCALL PrintF.YA
 				rts
@@ -615,7 +595,8 @@ bSecureRead		.BS 1
 
 Sleep			.BS 4
 
-VarBuffer		.BS 16
+CMD.hCmdLine	.BS 1
+CMD.VarName		.BS VarLen.MAX+1
 
 HIS.hBuf		.BS 1
 HIS.BufIndex	.BS 1
