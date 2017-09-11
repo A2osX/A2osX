@@ -92,7 +92,7 @@ Returns argument count in the process command line.
 # PutEnv.YA
 
 ## In:
-+ Y,A = PTR to String NAME=VALUE (PSTR)
++ Y,A = PTR to String NAME=VALUE (C-String)
 
 ## Out:
 
@@ -193,19 +193,6 @@ And return, if found, the full path to it.
 + PUSHW = GID
 + PUSHW = PATH
 
-# NewPStrYA
-Create a new copy of PSTR
-
-## In:
-+ Y,A = PTR to buffer
-
-## Out:
-+ CC : success 
- + Y,A = PTR to String
- + X = hMem (PSTR)
-+ CS : error
- + A = SYS error code
-
 # GetMem
 
 ## In: 
@@ -272,21 +259,26 @@ Create a new copy of PSTR
 + Y,A = ZPMemMgrSPtr = PTR to S.MEM
 + X unmodified
 
+# NewStr.YA
+Create a new copy of this C-String
+
+## In:
++ Y,A = Ptr to source C-String
+
+## Out:
++ CC : success 
+ + Y,A = PTR to String
+ + X = hMem (PSTR)
++ CS : error
+ + A = SYS error code
+
 # GetMemStat.YA
 
 ## In:
-+ Y,A = 24 bytes buffer
++ Y,A = Ptr to 24 bytes buffer
 
 ## Out:
 + Buffer filled with memory stats
-
-# GetPSByID.A
-
-## In : 
-+ A = PID
-
-## Out : 
-+ Y,A = PTR to TSKSLOT
 
 # Sleep
 Make current process suspend until next RUN
