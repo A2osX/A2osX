@@ -84,68 +84,62 @@ Cmd.Exec.2		ldy #$ff				CMD Len
 				bne .1
 				
 				lda #0
-				sta  (ZPPtr1),y			Cut CMD with the ending 0
+				sta (ZPPtr1),y			Cut CMD with the ending 0
+				iny
 				
-.2				phy						Y=CMD len
-				
-				>LDYA L.INTCMDS
-				>STYA ZPPtr2
-				
-				ldx #0
-				
-.3				lda (ZPPtr2)
-				beq Cmd.Exec.EXT		Array Ending 0, must be an external Cmd....
-				
-				pla						get back CMD len
-				pha
-				
-				cmp (ZPPtr2)			Same Len ?
-				beq .51
-				
-.4				inx
-				inx
-				
-				lda ZPPtr2
-				sec
-				adc (ZPPtr2)
-				sta ZPPtr2
-				bcc .3
-				inc ZPPtr2+1
-				bra .3				
-				
-.51				tay
-
-.5				dey
-				lda (ZPPtr1),y
-
-				cmp #'a'				To Uppercase
-				bcc .6
-				cmp #'z'+1
-				bcs .6
-				eor #$20
-
-.6				iny
-				cmp (ZPPtr2),y
-				bne .4
-				dey
-				bne .5
-				
-				ply						get back Cmd Len
-				
-				lda (ZPPtr1),y
-				beq .7					ARGS = ""
-				
-				iny						skip " "
-
-.7				tya
+.2				tya						Y=CMD len+0, if ARGS="" Y=
 				clc
 				adc ZPPtr1
 				sta ZPPtr2
-				lda #0
-				adc ZPPtr1+1
-				sta ZPPtr2+1			ZPPtr2->ARGS
+				lda ZPPtr1+1
+				adc #0
+				sta ZPPtr2+1			ZPPtr2->ARGS or CMD ending 0 if empty
 				
-				jsr Cmd.Exec.INT		Found an internal Cmd...
+				>LDYA L.INTCMDS
+				>STYA ZPCMDBuf			we use ZPCMDBuf as a temp Ptr
+				
+				ldx #0
+				
+.3				lda (ZPCMDBuf)
+				beq Cmd.Exec.EXT		Array Ending 0, must be an external Cmd....
+				
+				ldy #$ff
+				
+.4				iny
+				lda (ZPCMDBuf),y
+				bne .41					End of string in array
+
+				lda (ZPPtr1),y			Get CMD char...
+				beq .8					both end with 0, found!
+				
+.41				lda (ZPPtr1),y			Get CMD char...
+				beq .61					end of CMD.....too short...
+				
+				cmp #'a'				To Uppercase
+				bcc .5
+				cmp #'z'+1
+				bcs .5
+				eor #$20
+				
+.5				cmp (ZPCMDBuf),y
+				beq .4
+				
+.61				iny
+				lda (ZPCMDBuf),y
+				bne .61
+				
+.7				inx
+				inx
+				
+				tya				
+				sec
+				adc ZPCMDBuf
+				sta ZPCMDBuf
+				bcc .3
+				inc ZPCMDBuf+1
+				bra .3
+
+.8				jsr Cmd.Exec.INT		Found an internal Cmd...
 
 Cmd.Exec.Done	php
 				pha			
@@ -155,10 +149,20 @@ Cmd.Exec.Done	php
 				plp
 				rts
 *--------------------------------------
-Cmd.Exec.INT	jmp (J.INTCMDS,x)
+* ZPPtr1->CMD
+* ZPPtr2->ARGS
 *--------------------------------------
-Cmd.Exec.EXT	pla						Discard CMD len
-
+Cmd.Exec.EXT	>LDYAI 256
+				>SYSCALL GetMem.YA
+				bcs .99
+				>STYA ZPCMDBuf
+				
+				lda #0
+				sta (ZPCMDBuf)
+				
+				txa
+				>STA.G CMD.hExtCmdLine
+				
 				lda (ZPPtr1)
 				cmp #'/'				Command line is already full path, no search
 				bne .1
@@ -166,23 +170,31 @@ Cmd.Exec.EXT	pla						Discard CMD len
 				>PUSHW L.STAT
 				>PUSHW ZPPtr1
 				>SYSCALL STAT
-				bcc .3
-				bra Cmd.Exec.Done
+				bcs Cmd.Exec.Done
+				
+				>LDYA ZPPtr1
+				bra .4
 
 .1				>LDYA L.ENV.PATH		push ENVNAME=PATH for search
 				>SYSCALL GetEnv.YA		get value for ENV=PATH
 				bcs .2					No PATH, try in CD
 
-				jsr Cmd.Exec.Search
+				jsr Cmd.Exec.EXT.Search
 				bcc .3
 
 .2				ldy #S.PS.hPREFIX		not found, try in CD
 				lda (pPs),y
 				>SYSCALL GetMemPtr.A
-				jsr Cmd.Exec.Search
+				jsr Cmd.Exec.EXT.Search
 				bcs .99
 			
-.3				lda STAT+S.STAT.P.TYPE
+.3				>LDYA ZPCMDBuf
+.4				>SYSCALL NewStr.YA
+				bcs .99
+				txa
+				>STA.G CMD.hFullpath
+
+				lda STAT+S.STAT.P.TYPE
 				cmp #$04				TXT File ?
 				beq Cmd.Exec.EXT.TXT
 				cmp #$06				BIN File ?
@@ -196,47 +208,34 @@ Cmd.Exec.EXT	pla						Discard CMD len
 				sec	
 .99				jmp Cmd.Exec.Done
 *--------------------------------------
-Cmd.Exec.Search >PUSHYA					push search list
-				>PUSHW ZPPtr1
-				>PUSHWI UsrBuf256
-				>PUSHW L.STAT
-				>SYSCALL FileSearch
-				rts
-*--------------------------------------
 * TXT : Launch "/PATH/SHELL /PATH/CMD ARGS"
 *--------------------------------------
 Cmd.Exec.EXT.TXT
 				lda #0					Get arg[0] = /PATH/SHELL
 				>SYSCALL GetArg.A
-				>PUSHYA
-				>PUSHWI UsrBuf256
+				>PUSHYA						
+				>PUSHW ZPCMDBuf
 				>SYSCALL StrCpy
 				
-				inc UsrBuf256		Add a space....
-				ldy UsrBuf256
-				lda #' '
-				sta UsrBuf256,y
+				jsr Cmd.Exec.EXT.SEP	Add a space....
+				
+				>LDA.G CMD.hFullpath
+				>SYSCALL GetMemPtr.A
+				>PUSHYA
+				>PUSHW ZPCMDBuf
+				>SYSCALL StrCat
 *--------------------------------------
 * BIN : Launch "/PATH/CMD ARGS"
 *--------------------------------------
 Cmd.Exec.EXT.BIN
-				>PUSHW L.CMD
-				>PUSHWI UsrBuf256
-				>SYSCALL StrCat
-				
-				lda (ZPPTR2)
-				beq .1
-				
-				inc UsrBuf256		Add a space....
-				ldy UsrBuf256
-				lda #' '
-				sta UsrBuf256,y
+				jsr Cmd.Exec.EXT.SEP	Add a space....
 				
 				>PUSHW ZPPTR2
-				>PUSHWI UsrBuf256
+				>DEBUG
+				>PUSHW ZPCMDBuf
 				>SYSCALL StrCat
-			
-.1				>LDYAI UsrBuf256
+				
+.1				>LDYA ZPCMDBuf
 				bit bStartProc
 				bmi .2					startproc
 				
@@ -246,7 +245,30 @@ Cmd.Exec.EXT.BIN
 .2				>SYSCALL CreateProcessYA
 				jmp Cmd.Exec.Done
 *--------------------------------------
+Cmd.Exec.EXT.Search
+				>PUSHYA					push search list
+				>PUSHW ZPPtr1			push CMD
+				>PUSHW ZPCMDBuf			push dest full path
+				>PUSHW L.STAT
+				>SYSCALL FileSearch
+				rts
+*--------------------------------------
+Cmd.Exec.EXT.SEP
+				ldy #$ff
+.1				iny
+				lda (ZPCMDBuf),y
+				bne .1
+				
+				lda #' '
+				sta (ZPCMDBuf),y
+				iny
+				lda #0
+				sta (ZPCMDBuf),y
+				rts
+*--------------------------------------
 * Internal Commands
+*--------------------------------------
+Cmd.Exec.INT	jmp (J.INTCMDS,x)
 *--------------------------------------
 Cmd.Exec.CD		lda (ZPPTR2)
 				bne Cmd.Exec.CD1
