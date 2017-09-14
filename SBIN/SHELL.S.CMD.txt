@@ -65,7 +65,10 @@ Cmd.Parse.NextC	lda (ZPPtr1)
 *--------------------------------------
 * ZPCMDBuf-> Command line (formatted & not empty)
 *--------------------------------------
-Cmd.Exec		stz	bStartProc
+Cmd.Exec		lda #0
+				>STA.G CMD.bStartProc
+				>STA.G CMD.hFullpath
+				>STA.G CMD.hExtCmdLine
 				>LDYA ZPCMDBuf
 				
 				>SYSCALL ExpandStr.YA
@@ -74,26 +77,7 @@ Cmd.Exec		stz	bStartProc
 				txa
 				>STA.G CMD.hCmdLine
 								
-Cmd.Exec.2		ldy #$ff				CMD Len
-				
-.1				iny
-				lda (ZPPtr1),y			Get CMD char...
-				beq .2
-								
-				cmp #' '				we reached blank between CMD ARGS
-				bne .1
-				
-				lda #0
-				sta (ZPPtr1),y			Cut CMD with the ending 0
-				iny
-				
-.2				tya						Y=CMD len+0, if ARGS="" Y=
-				clc
-				adc ZPPtr1
-				sta ZPPtr2
-				lda ZPPtr1+1
-				adc #0
-				sta ZPPtr2+1			ZPPtr2->ARGS or CMD ending 0 if empty
+				jsr Cmd.Exec.Split
 				
 				>LDYA L.INTCMDS
 				>STYA ZPCMDBuf			we use ZPCMDBuf as a temp Ptr
@@ -139,14 +123,45 @@ Cmd.Exec.2		ldy #$ff				CMD Len
 				inc ZPCMDBuf+1
 				bra .3
 
-.8				jsr Cmd.Exec.INT		Found an internal Cmd...
-
+.8				jmp (J.INTCMDS,x)		Found an internal Cmd...
+*--------------------------------------
 Cmd.Exec.Done	php
 				pha			
 				>LDA.G CMD.hCmdLine
 				>SYSCALL FreeMem.A
-				pla
+				
+				>LDA.G CMD.hExtCmdLine
+				beq .1
+				>SYSCALL FreeMem.A
+				
+.1				>LDA.G CMD.hFullpath
+				beq .2
+				>SYSCALL FreeMem.A
+				
+.2				pla
 				plp
+				rts
+*--------------------------------------
+Cmd.Exec.Split	ldy #$ff				CMD Len
+				
+.1				iny
+				lda (ZPPtr1),y			Get CMD char...
+				beq .2
+								
+				cmp #' '				we reached blank between CMD ARGS
+				bne .1
+				
+				lda #0
+				sta (ZPPtr1),y			Cut CMD with the ending 0
+				iny
+				
+.2				tya						Y=CMD len+0, if ARGS="" Y=
+				clc
+				adc ZPPtr1
+				sta ZPPtr2
+				lda ZPPtr1+1
+				adc #0
+				sta ZPPtr2+1			ZPPtr2->ARGS or CMD ending 0 if empty
 				rts
 *--------------------------------------
 * ZPPtr1->CMD
@@ -157,11 +172,11 @@ Cmd.Exec.EXT	>LDYAI 256
 				bcs .99
 				>STYA ZPCMDBuf
 				
-				lda #0
-				sta (ZPCMDBuf)
-				
 				txa
 				>STA.G CMD.hExtCmdLine
+				
+				lda #0
+				sta (ZPCMDBuf)
 				
 				lda (ZPPtr1)
 				cmp #'/'				Command line is already full path, no search
@@ -234,9 +249,10 @@ Cmd.Exec.EXT.BIN
 				>PUSHW ZPCMDBuf
 				>SYSCALL StrCat
 				
-.1				>LDYA ZPCMDBuf
-				bit bStartProc
-				bmi .2					startproc
+.1				>LDA.G CMD.bStartProc
+				asl
+				>LDYA ZPCMDBuf
+				bcs .2					startproc
 				
 				>SYSCALL ExecProcessNewEnvYA
 				jmp Cmd.Exec.Done
@@ -267,8 +283,6 @@ Cmd.Exec.EXT.SEP
 *--------------------------------------
 * Internal Commands
 *--------------------------------------
-Cmd.Exec.INT	jmp (J.INTCMDS,x)
-*--------------------------------------
 Cmd.Exec.CD		lda (ZPPTR2)
 				bne Cmd.Exec.CD1
 				
@@ -276,7 +290,7 @@ Cmd.Exec.PWD	ldy #S.PS.hPREFIX
 				lda (pPs),y
 				>SYSCALL GetMemPtr.A
 				>SYSCALL PrintF.YA
-				rts
+				jmp Cmd.Exec.Done
 				
 Cmd.Exec.CD1	stz UsrBuf256
 
@@ -380,21 +394,24 @@ Cmd.Exec.CD1	stz UsrBuf256
 				sta (pPs),y
 				jsr SetPWD
 				clc
-.9				rts
+.9				jmp Cmd.Exec.Done
+
 *--------------------------------------
 Cmd.Exec.ERRSYN	lda #SYSMGR.ERRSYN
 				sec
-				rts
+				jmp Cmd.Exec.Done
 *--------------------------------------
 Cmd.Exec.STARTPROC
 				lda (ZPPTR2)
 				beq Cmd.Exec.ERRSYN
-				sec
-				ror	bStartProc
+				lda #$ff
+				>STA.G CMD.bStartProc
 
 				>LDYA ZPPTR2
 				>STYA ZPPTR1
-				jmp Cmd.Exec.2
+				
+				jsr Cmd.Exec.Split
+				jmp Cmd.Exec.EXT
 *--------------------------------------
 Cmd.Exec.SET	lda (ZPPTR2)
 				bne Cmd.Exec.SETVAR
@@ -446,7 +463,8 @@ Cmd.Exec.SET	lda (ZPPTR2)
 				bra .1
 				
 .8				clc
-.9				rts
+.9				jmp Cmd.Exec.Done
+
 				
 Cmd.Exec.SETVAR	ldy #0
 
@@ -467,13 +485,13 @@ Cmd.Exec.SETVAR	ldy #0
 				
 				>LDYA ZPPTR2			String is VAR=VALUE...	
 				>SYSCALL PutEnv.YA
-				rts
+				jmp Cmd.Exec.Done
 				
 .2				dey						String is "VAR=", Remove endig '='
 				sta (ZPPTR2),y
 				>LDYA ZPPTR2			String is "VAR"...	
 				>SYSCALL UnsetEnv.YA
-				rts
+				jmp Cmd.Exec.Done
 
 * Print requested VAR
 				
@@ -487,7 +505,7 @@ Cmd.Exec.SETVAR	ldy #0
 				>SYSCALL PrintF.YA
 				
 .8				clc
-.9				rts
+.9				jmp Cmd.Exec.Done
 
 .99				jmp Cmd.Exec.ERRSYN
 *--------------------------------------
@@ -511,7 +529,7 @@ Cmd.Exec.TIME	clc
 				
 				>LDYAI UsrBuf256
 				>SYSCALL PrintF.YA
-				bcs Cmd.Exec.ECHO.RTS
+				bcs Cmd.Exec.ECHO.END
 				bra Cmd.Exec.ECHO.CR
 *--------------------------------------
 Cmd.Exec.ECHO	lda (ZPPtr2)
@@ -523,13 +541,13 @@ Cmd.Exec.ECHO	lda (ZPPtr2)
 Cmd.Exec.ECHO.CR
 				lda #13
 				>SYSCALL PutChar.A
-				bcs Cmd.Exec.ECHO.RTS
+				bcs Cmd.Exec.ECHO.END
 				
 				lda #10
 				>SYSCALL PutChar.A
 
-Cmd.Exec.ECHO.RTS
-				rts
+Cmd.Exec.ECHO.END
+				jmp Cmd.Exec.Done
 *--------------------------------------
 Cmd.Exec.READ	lda (ZPPtr2)
 				beq .9 
@@ -613,7 +631,7 @@ Cmd.Exec.READ	lda (ZPPtr2)
 				beq .9
 				
 				clc
-.99				rts		
+.99				jmp Cmd.Exec.Done		
 *--------------------------------------
 Cmd.Exec.SLEEP	lda (ZPPtr2)
 				beq .9
@@ -630,18 +648,18 @@ Cmd.Exec.SLEEP	lda (ZPPtr2)
 				
 				bcs .9
 			
-				rts
+				jmp Cmd.Exec.Done
 .9				jmp Cmd.Exec.ERRSYN				
 *--------------------------------------
 Cmd.Exec.PAUSE	lda #$FF
 				>STA.G bPause
 				clc
-				rts
+				jmp Cmd.Exec.Done
 *--------------------------------------
 Cmd.Exec.EXIT	lda #$FF
 				>STA.G bExit
 				clc
-				rts
+				jmp Cmd.Exec.Done
 *--------------------------------------
 MAN
 SAVE /A2OSX.SRC/SBIN/SHELL.S.CMD
