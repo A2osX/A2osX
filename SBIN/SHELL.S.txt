@@ -23,7 +23,7 @@ ZPCSHSymbols	.EQ ZPBIN+10
 ZPCSHData		.EQ ZPBIN+12
 ZPCSHStack		.EQ ZPBIN+14
 *--------------------------------------
-CmdLine.MAX		.EQ 127
+CmdLine.MAX		.EQ 255
 VarLen.MAX		.EQ 15
 
 CSH.Stack.MAX	.EQ 15
@@ -64,8 +64,6 @@ L.MSG.CSHERR	.DA MSG.CSHERR
 L.ENV.PATH		.DA ENV.PATH
 L.ENV.PWD		.DA ENV.PWD
 L.ENV.PS1		.DA ENV.PS1
-L.TIME			.DA TIME
-L.STAT			.DA STAT
 L.FMT.DATE		.DA FMT.DATE
 L.FMT.TIME		.DA FMT.TIME
 L.INTCMDS		.DA INTCMDS
@@ -142,15 +140,12 @@ CS.RUN			>LDA.G bReadMode		READ Command ?
 				beq .10
 
 				jmp CS.RUN.BATCH
-* Interactive Mode
+*--------------------------------------
 .10				>LDA.G hCmdBuf			Get the buffer
 				>SYSCALL GetMemPtr.A
 				>STYA ZPCMDBuf
 
-				lda #0					reset it
-				sta (ZPCMDBuf)
-
-				>STA.G bCmdBufexec
+				jsr CmdLine.RESET		reset it
 				>STA.G bSecureRead		Clear password mode
 				
 .12				jsr PrintPrompt
@@ -162,19 +157,22 @@ CS.RUN			>LDA.G bReadMode		READ Command ?
 
 				jsr CS.CHARIN
 
-				>LDA.G bCmdBufexec		Something to execute ?
+				>LDA.G bCmdBufExec		Something to execute ?
 				bpl .1
 
-				jsr Cmd.Parse
+				jsr CMD.Parse
 
 				>LDA.G CmdBuflen
 				beq .12					Empty line
 
 				jsr HIS.Add
 
-				jsr Cmd.Exec
+				jsr CMD.Exec
+				bcs .2
+				
+				lda #0
 
-				ldy #S.PS.RC
+.2				ldy #S.PS.RC
 				sta (pPs),y
 
 				>LDA.G bExit
@@ -200,7 +198,7 @@ CS.RUN.READ		>LDA.G hCmdBuf			Get the buffer
 
 				jsr CS.CHARIN
 
-				>LDA.G bCmdBufexec
+				>LDA.G bCmdBufExec
 				bpl .1
 
 				>PUSHW ZPCMDBuf
@@ -216,30 +214,12 @@ CS.RUN.READ		>LDA.G hCmdBuf			Get the buffer
 				rts
 *--------------------------------------
 CS.RUN.BATCH	jsr	CSH.Run
-				bcs .9
+				bcc .7
+				
+				cmp #MLI.ERR.EOF
+				beq .9
 
-				>LDA.G bCmdBufexec
-				bpl .8					Empty line....nothing to do....
-
-				jsr Cmd.Parse
-
-				lda (ZPCMDBuf)
-				beq .8
-
-				jsr Cmd.Exec
-
-.8				ldy #S.PS.RC
-				sta (pPs),y
-				clc
-				rts
-
-.9				cmp #MLI.ERR.EOF
-				bne .7
-				lda #0
-				sec
-				rts
-
-.7				pha
+				pha
 
 				ldy #CSH.BufPtr+1
 				>PUSHB (pData),y
@@ -251,23 +231,20 @@ CS.RUN.BATCH	jsr	CSH.Run
 
 				jsr CSH.RestorePtr
 
-.90				jsr CSH.GetChar
-				bcs .92
+				jsr CSH.GetChar
+				bcs .2
 				>SYSCALL PutChar.A
 
-.91				jsr CSH.GetNextChar
-				bcs .92
+.1				jsr CSH.GetNextChar
+				bcs .2
 				cmp #13
-				beq .92
+				beq .2
 				>SYSCALL PutChar.A
-				bra .91
+				bra .1
 
-.92				pla
-				bra .99
+.2				pla
 
-.98				lda #0
-
-.99				ldy #S.PS.RC
+				ldy #S.PS.RC
 				sta (pPs),y
 				pha
 
@@ -276,6 +253,28 @@ CS.RUN.BATCH	jsr	CSH.Run
 				asl						CS if bExitOnEOF
 
 				pla
+				rts
+
+.7				>LDA.G bCmdBufExec
+				bpl .8					Empty line....nothing to do....
+
+				jsr Cmd.Parse
+
+				lda (ZPCMDBuf)
+				beq .8
+
+				jsr Cmd.Exec
+				bcs .8
+
+				lda #0
+				
+.8				ldy #S.PS.RC
+				sta (pPs),y
+				clc
+				rts
+				
+.9				lda #0
+				sec
 				rts
 *--------------------------------------
 CS.DOEVENT		lda (pEvent)
@@ -362,6 +361,9 @@ CS.CHARIN		tax						Save Char
 				sta (pData),y
 				txa
 				ply
+				sta (ZPCMDBuf),y
+				iny
+				lda #0
 				sta (ZPCMDBuf),y
 
 				>LDA.G bSecureRead
@@ -481,10 +483,9 @@ CmdLine.CLR		ldy #0
 				iny
 				bne .1
 
-				jsr CmdLine.SET
+				jsr CmdLine.PRINT
 
-				lda #0
-				sta (ZPCMDBuf)
+				jmp CmdLine.RESET
 
 .9				rts
 *--------------------------------------
@@ -501,8 +502,14 @@ CmdLine.DEL		>LDA.G CmdBuflen
 				>SYSCALL PutChar.A
 .9				rts
 *--------------------------------------
-CmdLine.SET		>LDYA  ZPCMDBuf
+CmdLine.PRINT	>LDYA ZPCMDBuf
 				>SYSCALL PrintF.YA
+				rts
+*--------------------------------------
+CmdLine.RESET	lda #0
+				sta (ZPCMDBuf)
+				>STA.G CmdBuflen
+				>STA.G bCmdBufExec
 				rts
 *--------------------------------------
 				.INB /A2OSX.SRC/SBIN/SHELL.S.CMD
@@ -551,8 +558,6 @@ FMT.TIME		>CSTR "%H:%M:%S (%I:%M:%S%p)"
 *--------------------------------------
 EscChars		>PSTR "DBAC"
 EscAscii		.HS 04080A0B15
-TIME			.BS S.TIME
-STAT			.BS S.STAT
 CSH.TSIZE		.HS 0001020405			00,CHAR,INT,LONG,FLOAT....
 CSH.ACCT		.BS 1
 CSH.ACC			.BS 5
@@ -579,10 +584,10 @@ Sleep			.BS 4
 
 CMD.hCmdLine	.BS 1
 CMD.hFullpath	.BS 1
-CMD.hExtCmdLine	.BS 1
 CMD.bStartProc	.BS 1
 CMD.VarName		.BS VarLen.MAX+1
 CMD.Stat		.BS S.STAT
+CMD.Time		.BS S.TIME
 
 HIS.hBuf		.BS 1
 HIS.BufIndex	.BS 1

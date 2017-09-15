@@ -17,11 +17,11 @@ CMD.Init		>LDYAI CmdLine.MAX+1
 Cmd.Parse		>LDYA ZPCMDBuf
 				>STYA ZPPtr1
 				
+				ldy #0
+
 				lda (ZPCMDBuf)			empty line...quit
 				beq .9
-
-				ldy #0
-								
+				
 .1				jsr Cmd.Parse.NextC
 				beq .8					no more char, exit
 				
@@ -52,8 +52,10 @@ Cmd.Parse		>LDYA ZPCMDBuf
 				
 .8				lda #0
 				sta (ZPCMDBuf),y
-
-.9				rts
+				
+.9				tya
+				>STA.G CmdBuflen
+				rts
 
 Cmd.Parse.NextC	lda (ZPPtr1)
 				beq .8
@@ -68,7 +70,6 @@ Cmd.Parse.NextC	lda (ZPPtr1)
 Cmd.Exec		lda #0
 				>STA.G CMD.bStartProc
 				>STA.G CMD.hFullpath
-				>STA.G CMD.hExtCmdLine
 				>LDYA ZPCMDBuf
 				
 				>SYSCALL ExpandStr.YA
@@ -77,27 +78,29 @@ Cmd.Exec		lda #0
 				txa
 				>STA.G CMD.hCmdLine
 								
-				jsr Cmd.Exec.Split
-				
 				>LDYA L.INTCMDS
-				>STYA ZPCMDBuf			we use ZPCMDBuf as a temp Ptr
+				>STYA ZPPtr2
 				
 				ldx #0
 				
-.3				lda (ZPCMDBuf)
+.3				lda (ZPPtr2)
 				beq Cmd.Exec.EXT		Array Ending 0, must be an external Cmd....
 				
 				ldy #$ff
 				
 .4				iny
-				lda (ZPCMDBuf),y
+				lda (ZPPtr2),y
 				bne .41					End of string in array
 
 				lda (ZPPtr1),y			Get CMD char...
 				beq .8					both end with 0, found!
+				cmp #' '
+				beq .8					we reached space between CMD & ARGS....
 				
 .41				lda (ZPPtr1),y			Get CMD char...
 				beq .61					end of CMD.....too short...
+				cmp #' '
+				beq .61					we reached space between CMD & ARGS....
 				
 				cmp #'a'				To Uppercase
 				bcc .5
@@ -105,11 +108,11 @@ Cmd.Exec		lda #0
 				bcs .5
 				eor #$20
 				
-.5				cmp (ZPCMDBuf),y
+.5				cmp (ZPPtr2),y
 				beq .4
 				
 .61				iny
-				lda (ZPCMDBuf),y
+				lda (ZPPtr2),y
 				bne .61
 				
 .7				inx
@@ -117,72 +120,36 @@ Cmd.Exec		lda #0
 				
 				tya				
 				sec
-				adc ZPCMDBuf
-				sta ZPCMDBuf
+				adc ZPPtr2
+				sta ZPPtr2
 				bcc .3
-				inc ZPCMDBuf+1
+				inc ZPPtr2+1
 				bra .3
 
-.8				jmp (J.INTCMDS,x)		Found an internal Cmd...
+.8				jsr Cmd.Exec.Split		X unmodified
+				jmp (J.INTCMDS,x)		Found an internal Cmd...
 *--------------------------------------
 Cmd.Exec.Done	php
 				pha			
 				>LDA.G CMD.hCmdLine
 				>SYSCALL FreeMem.A
 				
-				>LDA.G CMD.hExtCmdLine
+				>LDA.G CMD.hFullpath
 				beq .1
 				>SYSCALL FreeMem.A
 				
-.1				>LDA.G CMD.hFullpath
-				beq .2
-				>SYSCALL FreeMem.A
-				
-.2				pla
+.1				pla
 				plp
 				rts
 *--------------------------------------
-Cmd.Exec.Split	ldy #$ff				CMD Len
-				
-.1				iny
-				lda (ZPPtr1),y			Get CMD char...
-				beq .2
-								
-				cmp #' '				we reached blank between CMD ARGS
-				bne .1
-				
-				lda #0
-				sta (ZPPtr1),y			Cut CMD with the ending 0
-				iny
-				
-.2				tya						Y=CMD len+0, if ARGS="" Y=
-				clc
-				adc ZPPtr1
-				sta ZPPtr2
-				lda ZPPtr1+1
-				adc #0
-				sta ZPPtr2+1			ZPPtr2->ARGS or CMD ending 0 if empty
-				rts
-*--------------------------------------
-* ZPPtr1->CMD
-* ZPPtr2->ARGS
-*--------------------------------------
-Cmd.Exec.EXT	>LDYAI 256
-				>SYSCALL GetMem.YA
-				bcs .99
-				>STYA ZPCMDBuf
-				
-				txa
-				>STA.G CMD.hExtCmdLine
-				
-				lda #0
-				sta (ZPCMDBuf)
-				
+Cmd.Exec.EXT	jsr Cmd.Exec.Split
+
 				lda (ZPPtr1)
 				cmp #'/'				Command line is already full path, no search
 				bne .1
 				
-				>PUSHW L.STAT
+				>LEA.G CMD.Stat
+				>PUSHYA
 				>PUSHW ZPPtr1
 				>SYSCALL STAT
 				bcs Cmd.Exec.Done
@@ -209,7 +176,8 @@ Cmd.Exec.EXT	>LDYAI 256
 				txa
 				>STA.G CMD.hFullpath
 
-				lda STAT+S.STAT.P.TYPE
+				ldy #CMD.Stat+S.STAT.P.TYPE
+				lda (pData),y
 				cmp #$04				TXT File ?
 				beq Cmd.Exec.EXT.TXT
 				cmp #$06				BIN File ?
@@ -264,7 +232,8 @@ Cmd.Exec.EXT.Search
 				>PUSHYA					push search list
 				>PUSHW ZPPtr1			push CMD
 				>PUSHW ZPCMDBuf			push dest full path
-				>PUSHW L.STAT
+				>LEA.G CMD.Stat
+				>PUSHYA
 				>SYSCALL FileSearch
 				rts
 *--------------------------------------
@@ -292,7 +261,8 @@ Cmd.Exec.PWD	ldy #S.PS.hPREFIX
 				>SYSCALL PrintF.YA
 				jmp Cmd.Exec.Done
 				
-Cmd.Exec.CD1	stz UsrBuf256
+Cmd.Exec.CD1	lda #0
+				sta (ZPCMDBuf)
 
 				cmp #'/'				Full Path?
 				beq .1
@@ -301,47 +271,57 @@ Cmd.Exec.CD1	stz UsrBuf256
 				lda (pPs),y
 				>SYSCALL GetMemPtr.A
 				>PUSHYA
-				>PUSHWI UsrBuf256
+				>PUSHW ZPCMDBuf
 				>SYSCALL StrCpy
 				
 .1				>PUSHW ZPPTR2			Append ARG to buffer
-				>PUSHWI UsrBuf256
+				>PUSHW ZPCMDBuf
 				>SYSCALL StrCat
 				
-				lda #'/'
-				ldx UsrBuf256
-				cmp UsrBuf256,x			Ending '/' ?
+				ldy #$ff
+				ldx #'/'
+				
+.10				tax
+				iny
+				lda (ZPCMDBuf),y
+				bne .10
+				
+				cpx #'/'
 				beq .2
+				lda #'/'
 				
-				sta UsrBuf256+1,x		no, add one...
-				inc UsrBuf256
+				sta (ZPCMDBuf),y
+				iny
+				lda #0
+				sta (ZPCMDBuf),y
 				
-.2				ldx #0					path is something like : /dir1/../dir2/
+.2				ldy #$ff				path is something like : /dir1/../dir2/
 
-.3				ldy #0					reset char counter
+.3				ldx #0					reset char counter
 				
-.4				cpx UsrBuf256
+.4				iny
+				lda (ZPCMDBuf),y
 				beq .8
 				
-				inx
-				lda UsrBuf256,x
 				cmp #'/'
-				beq .5
-				iny						char=char+1!!!
+				bne .4
+
+.5				txa						any char count?
+				bne .51					no, start counting...
+				
+				inx
 				bra .4
 				
-.5				tya						any char count?
-				beq .4					no, start counting...
-				
-				cpy #2					do we have /xx/?
+.51				inx
+				cpx #2					do we have /xx/?
 				bne .3					no, skip this token
 
-				lda #'.'
-				cmp UsrBuf256-1,x		/yy/x./  ?
+				dey
+				lda (ZPCMDBuf),y		/yy/x./  ?
+				dey
+				cmp (ZPCMDBuf),y		/yy/../  ?
 				bne .3
-				cmp UsrBuf256-2,x		/yy/../  ?
-				bne .3
-				cpx #4					/../   ?
+				cpy #3					/../   ?
 				beq Cmd.Exec.ERRSYN		illegal
 				
 				txa
@@ -370,12 +350,14 @@ Cmd.Exec.CD1	stz UsrBuf256
 .8				cpx #1					
 				beq .80 				we have '/' go change prefix
 				
-				>PUSHW L.STAT
+				>LEA.G CMD.Stat
+				>PUSHYA
 				>PUSHWI UsrBuf256
 				>SYSCALL STAT
 				bcs .9
 
-				lda STAT+S.STAT.P.TYPE
+				ldy #CMD.Stat+S.STAT.P.TYPE
+				lda (pData),y
 				cmp #$0F				Directory ?
 				bne Cmd.Exec.ERRSYN
 				
@@ -410,7 +392,6 @@ Cmd.Exec.STARTPROC
 				>LDYA ZPPTR2
 				>STYA ZPPTR1
 				
-				jsr Cmd.Exec.Split
 				jmp Cmd.Exec.EXT
 *--------------------------------------
 Cmd.Exec.SET	lda (ZPPTR2)
@@ -511,23 +492,23 @@ Cmd.Exec.SETVAR	ldy #0
 *--------------------------------------
 Cmd.Exec.DATE	sec
 				.HS 90					bcc
-
 Cmd.Exec.TIME	clc
 				php
-				>LDYA L.TIME
+				>LEA.G CMD.Time
 				>SYSCALL TimeYA
 
-				>PUSHWI UsrBuf256
+				>PUSHWI ZPCMDBuf
 				plp
 				bcc .1
 				>PUSHW L.FMT.DATE
 				bra .2
 .1				>PUSHW L.FMT.TIME
 
-.2				>PUSHW L.TIME
+.2				>LEA.G CMD.Time
+				>PUSHYA
 				>SYSCALL StrFTime
 				
-				>LDYAI UsrBuf256
+				>LDYAI ZPCMDBuf
 				>SYSCALL PrintF.YA
 				bcs Cmd.Exec.ECHO.END
 				bra Cmd.Exec.ECHO.CR
@@ -545,7 +526,6 @@ Cmd.Exec.ECHO.CR
 				
 				lda #10
 				>SYSCALL PutChar.A
-
 Cmd.Exec.ECHO.END
 				jmp Cmd.Exec.Done
 *--------------------------------------
@@ -660,6 +640,28 @@ Cmd.Exec.EXIT	lda #$FF
 				>STA.G bExit
 				clc
 				jmp Cmd.Exec.Done
+*--------------------------------------
+Cmd.Exec.Split	ldy #$ff				CMD Len
+				
+.1				iny
+				lda (ZPPtr1),y			Get CMD char...
+				beq .2
+								
+				cmp #' '				we reached blank between CMD ARGS
+				bne .1
+				
+				lda #0
+				sta (ZPPtr1),y			Cut CMD with the ending 0
+				iny
+				
+.2				tya						Y=CMD len+0, if ARGS="" Y=
+				clc
+				adc ZPPtr1
+				sta ZPPtr2
+				lda ZPPtr1+1
+				adc #0
+				sta ZPPtr2+1			ZPPtr2->ARGS or CMD ending 0 if empty
+				rts
 *--------------------------------------
 MAN
 SAVE /A2OSX.SRC/SBIN/SHELL.S.CMD
