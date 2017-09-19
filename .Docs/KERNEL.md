@@ -19,6 +19,31 @@ Returns argument count in the process command line.
  + Y,A = CStr To Arg[A]
 + CS : Out Of Bound
 
+# FileSearch
+Search a file in the provided PATH list
+And return, if found, the full path to it.
+
+## In:
++ PUSHW = Ptr to Search Path (CSTR) %LIB%;/SYS/SLIB
++ PUSHW = Ptr to File Name (CSTR)		
++ PUSHW = Ptr to DstBuf
++ PUSHW = Ptr to DstStat
+
+## Out:
++ CC : success
+ + DstBuf = FilePath
+ + DstStat = S.STAT
++ CS : not found
+
+# Sleep
+Make current process suspend until next RUN
+
+## In : 
++ (none)
+
+## Out : 
++ (none)
+
 # GetDevByID.A
 
 ## IN: 
@@ -32,7 +57,7 @@ Returns argument count in the process command line.
 # GetDevByName.YA
 
 ## IN: 
-+ Y,A = Ptr to device name (PStr)
++ Y,A = Ptr to device name (C-String)
 
 ## OUT:
 + CC = OK, CS = ERROR
@@ -119,22 +144,6 @@ Returns argument count in the process command line.
 + Y,A = PTR To Name (PSTR)
 
 ## Out:
-
-# FileSearch
-Search a file in the provided PATH list
-And return, if found, the full path to it.
-
-## In:
-+ PUSHW = Ptr to Search Path (CSTR) %LIB%;/SYS/SLIB
-+ PUSHW = Ptr to File Name (CSTR)		
-+ PUSHW = Ptr to DstBuf
-+ PUSHW = Ptr to DstStat
-
-## Out:
-+ CC : success
- + DstBuf = FilePath
- + DstStat = S.STAT
-+ CS : not found
 
 # GetFullPath.YA
 
@@ -280,18 +289,9 @@ Create a new copy of this C-String
 ## Out:
 + Buffer filled with memory stats
 
-# Sleep
-Make current process suspend until next RUN
-
-## In : 
-+ (none)
-
-## Out : 
-+ (none)
-
 # ExecProcessNewEnv.YA
 
-# ExecProcess.YA	(Blocking Parent PID)
+# ExecProcess.YA (Blocking Parent PID)
 
 # CreateProcessNewEnv.YA 
 

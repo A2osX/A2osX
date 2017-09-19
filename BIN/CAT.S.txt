@@ -13,6 +13,7 @@ AUTO 6
 				.INB /A2OSX.BUILD/INC/MLI.ERR.I
 *--------------------------------------
 ZPPTR1			.EQ ZPBIN
+ZPBufPtr		.EQ ZPBIN+2
 *--------------------------------------
 *			File Header (16 Bytes)
 *--------------------------------------
@@ -38,15 +39,18 @@ L.MSG.CTRLCHAR	.DA MSG.CTRLCHAR
 L.ASCII			.DA ASCII
 				.DA 0
 *--------------------------------------
-CS.INIT			>SYSCALL GetArgC
-				sta ArgCount
-				cmp #1
+CS.INIT			ldy #S.PS.ARGC
+				lda (pPs),y
 				beq .99
 				
-.1				dec ArgCount
-				beq .5
+				>STA.G ArgCount
 				
-				lda ArgCount
+.1				>LDA.G ArgCount
+				dec
+				bmi .5
+				
+				sta (pData),y
+				
 				>SYSCALL GetArg.A
 				>STYA ZPPtr1
 				
@@ -80,21 +84,30 @@ CS.INIT			>SYSCALL GetArgC
 				sta (pData),y
 				bra .1
 				
-.4				inc FileCount
+.4				>LDA.G FileCount
+				inc
+				sta (pData),y
 				bra .1					scan for any other args
 				
-.5				lda FileCount
+.5				>LDA.G FileCount
 				beq .99
 				
+				>LDYAI 256
+				>SYSCALL GetMem.YA
+				bcs .9
+				
+				>STYA ZPBufPtr
+				txa
+				>STA.G hBuf
 .8				
 *				lda (pPs)
 *				ora #S.PS.F.EVENT		Now accept events
 *				sta (pPs)
 				
 				clc
-				rts
+.9				rts
 *--------------------------------------
-CS.RUN			>SYSCALL GetC
+CS.RUN			>SYSCALL GetChar
 				bcs .10					no char
 				
 				cmp #$03				Ctrl-C
@@ -103,22 +116,18 @@ CS.RUN			>SYSCALL GetC
 				cmp #$13				Ctrl-S
 				bne .10
 
-				ldy #bPause
-				lda (pData),y
+				>LDA.G bPause
 				eor	#$ff
 				sta (pData),y
 				bne .8
 				
-.10				ldy #bPause
-				lda (pData),y
+.10				>LDA.G bPause
 				bne .8					Pause...
 				
-				ldy #hFILE
-				lda (pData),y
+				>LDA.G hFILE
 				bne .2
 				
-.1				ldy #ArgIndex
-				lda (pData),y
+.1				>LDA.G ArgIndex
 				inc
 				sta (pData),y
 				>SYSCALL GetArg.A
@@ -136,14 +145,13 @@ CS.RUN			>SYSCALL GetC
 				jsr CS.RUN.OPEN
 				bcs .9
 				
-				ldy #hFILE
-				sta (pData),y
-				
+				>STA.G hFILE
+
 				clc
 				rts
 				
 .2				pha
-				>PUSHWI UsrBuf256
+				>PUSHW ZPBufPtr
 				>PUSHWI	256
 				pla
 				>PUSHA
@@ -166,18 +174,9 @@ CS.RUN			>SYSCALL GetC
 CS.RUN.PRINT	sty	BytesRead			Y,A = Bytes read
 				stz ByteIndex
 				
-				ldy #LineNum
-				lda (pData),y
-				clc
-				adc #1
-				sta (pData),y
-				
-				iny
-				lda (pData),y
-				adc #0
-				sta (pData),y
+				>INCW.G LineNum
 
-				ldy #bSuppressBlankLine
+				>LDA.G bSuppressBlankLine
 				lda (pData),y
 				bpl .10
 								
@@ -185,41 +184,39 @@ CS.RUN.PRINT	sty	BytesRead			Y,A = Bytes read
 				beq .12					Empty line ?
 				dec
 				bne .1					Only one CR ?
-				lda UsrBuf256
+				lda (ZPBufPtr)
 				cmp #13
 				bne .1
 				
-.12				ldy #bPrintedBlankLine
-				lda (pData),y
+.12				>LDA.G bPrintedBlankLine
 				bmi .8
 				
 				lda #$ff
 				sta (pData),y
 				bra .10
 				
-.1				ldy #bPrintedBlankLine
-				lda #0
-				sta (pData),y
+.1				lda #0
+				>STA.G bPrintedBlankLine
 				
 .10				jsr CS.RUN.PRINTNUM
 				bcs .9
 				
-.20				ldx ByteIndex
-				lda UsrBuf256,x
+.20				ldy ByteIndex
+				lda (ZPBufPtr),y
 				cmp #' '
 				bcs .6
 				
 				cmp #13					Allow printing of CR even if not bPrintAll
 				beq .4
 				
-				ldy #bPrintAll
-				lda (pData),y
+				>LDA.G bPrintAll
 				bpl .7
 	
 				>LDYA L.ASCII
 				>STYA ZPPtr1
 				
-				lda UsrBuf256,x
+				ldy ByteIndex
+				lda (ZPBufPtr),y
 				tax
 				
 .2				dex
@@ -257,18 +254,11 @@ CS.RUN.PRINT	sty	BytesRead			Y,A = Bytes read
 .9				rts				
 *--------------------------------------
 CS.RUN.PRINTNUM	clc
-				ldy #bLineNum
-				lda (pData),y
+				>LDA.G bLineNum
 				bpl .8
 
-				ldy #LineNum
-				lda (pData),y
-				pha
-				
-				iny
-				lda (pData),y
-				ply
-				
+				>LDYA.G LineNum
+
 				>PUSHYA
 				>LDYA L.MSG.LINENUM
 				>SYSCALL PrintF.YA
@@ -293,8 +283,7 @@ CS.RUN.OPEN		>SYSCALL GetFullPath.YA
 				pha
 
 				lda #0
-				ldy #bPrintedBlankLine	Reset this flag for the new file
-				sta (pData),y
+				>STA.G bPrintedBlankLine	Reset this flag for the new file
 				
 				pla
 				clc
@@ -307,8 +296,11 @@ CS.RUN.OPEN		>SYSCALL GetFullPath.YA
 .9				sec
 				rts
 *--------------------------------------
-CS.RUN.CLOSE
-CS.QUIT			ldy #hFILE
+CS.QUIT			>LDA.G hBuf
+				beq CS.RUN.CLOSE
+				>SYSCALL FreeMem.A
+
+CS.RUN.CLOSE	ldy #hFILE
 				lda (pData),y
 				beq .8
 				
@@ -366,8 +358,6 @@ ASCII			>PSTR "NULL"
 				>PSTR "RS"
 				>PSTR "US"
 *--------------------------------------
-ArgCount		.BS 1
-FileCount		.BS 1
 hFullPath		.BS 1
 BytesRead		.BS 1
 ByteIndex		.BS 1
@@ -375,12 +365,15 @@ ByteIndex		.BS 1
 				.DUMMY
 				.OR 0
 DS.START
+ArgCount		.BS 1
+FileCount		.BS 1
 bPause			.BS 1
 bPrintAll		.BS 1
 bLineNum		.BS 1
 bSuppressBlankLine	.BS 1
 ArgIndex		.BS 1
-hFILE			.BS 1
+hBuf			.BS 1
+hFile			.BS 1
 LineNum			.BS 2
 bPrintedBlankLine	.BS 1
 DS.END
