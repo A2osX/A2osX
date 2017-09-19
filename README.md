@@ -100,7 +100,7 @@ OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
 ## SBIN,Daemons/Commands:
 
 | Name    | Status      | Comment | K.Ver |
-| ----    | ------      | ------- | -----:|
+| ----    | ------      | ------- | ------|
 | INSDRV  | Working     |         | 0.9 |
 | GETTY   | Working     |         | 0.9 |
 | LOGIN   | In Progress | no auth using /etc/passd yet | 0.9 |
@@ -126,6 +126,7 @@ OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
 |           |         | -P : "prompt message"   |
 | TIME      | Working | |
 | SET       | Working | |
+| SLEEP     | Working | |
 | STARTPROC | Working | Used in A2osX.startup |
 
 ## Shell variables:
