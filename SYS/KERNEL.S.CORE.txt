@@ -8,89 +8,89 @@ SYS.BASL0		.EQ $800
 *--------------------------------------
 CORE.Run		lda CORE.PSCount
 				sta CORE.Counter
-				beq CORE.Events
+				bne .1					SHOULD NEVER HAPPEN!!!
+				jmp CORE.Events
 				
 .1				ldx CORE.Counter
-				
 				lda PS.Table.PID-1,x
-				beq .7
+				beq .8
 				
 				lda PS.Table.hMem-1,x
 				jsr K.GetMemPtr.A
 				>STYA pPS
 				
+				lda (pPs)				get S.PS.F 
 				bit #S.PS.F.HOLD		Waiting for Another Task to Terminate?
 				beq .2
 				
 				ldy #S.PS.CPID
 				lda (pPs),y
 				jsr CORE.GetPSByID.A
-				bcc .7					yes, running....
+				bcc .8					yes, still running....
 				
-				lda (pPs)				get S.PS.F
+				lda (pPs)				get S.PS.F again
 				and #$FF^S.PS.F.HOLD	unmark as HOLD
 				sta (pPs)
 				
-.2				jsr CORE.PSSelect
+.2				jsr CORE.PSEnter		Restore at least ZP & Ptrs
 
-				lda (pPS)
-				bit #S.PS.F.INIT
-				bne .30
-
+				lda (pPs)				get S.PS.F again
 				bit #S.PS.F.SLEEP		Is this PS sleeping?
-				beq .3					no, call TSKMGR.RUN
+				beq .3					no, call INIT/RUN
 				
-				jsr CORE.PSWakeUp
-				bra .4
+				and #$FF^S.PS.F.SLEEP	unmark as SLEEP
+				sta (pPS)
 				
-.30				and #$FF^S.PS.F.INIT	unmark as INIT
+				jsr CORE.PSResume		Restore PC....and JMP to
+				bcc .7
+				bcs .5
+				
+.3				bit #S.PS.F.INIT
+				beq .4
+
+				and #$FF^S.PS.F.INIT	unmark as INIT
 				sta (pPS)
 				
 				ldx #TSKMGR.INIT
 				.HS 2C					BIT abs
-.3				ldx #TSKMGR.RUN
+.4				ldx #TSKMGR.RUN
 
-.31				jsr pCodeJmp			Call INIT/RUN function
+				jsr pCodeJmp			Call INIT/RUN function
+				bcc .7					INIT/RUN/RESUME said CS=QUIT?
 
-.4				bcc .7					INIT/RUN said CS=QUIT?
-
-				pha						save RC
+.5				tax						save RC
 				ldy #S.PS.PPID			Notify Parent Process for exit code...
 				lda (pPs),y
-				jsr CORE.GetPSByID.A
-				bcs .5					parent is dead.....skipping...
+				jsr CORE.GetPSByID.A	X unmodified
+				bcs .6					parent is dead.....skipping...
 				>STYA ZPPtr1
+				
 				lda (ZPPtr1)			Parent PS is HOLD? 
 				bit #S.PS.F.HOLD
-				beq .5					no...
+				beq .6					no...
 				
 				eor #S.PS.F.HOLD		yes, release hold...
 				sta (ZPPtr1)
 				
-				pla						...probably waiting for this PS to terminate....
+				txa						...probably waiting for this PS to terminate....
 				ldy #S.PS.RC			give it RC
 				sta (ZPPtr1),y
 				
-				.HS B0					BCS
-.5				pla
-				
-.6				ldx #TSKMGR.QUIT		yes, quit this process
+.6				ldx #TSKMGR.QUIT		Quit this process
 				jsr pCodeJmp			Call QUIT function
 				
 				ldy #S.PS.PID
 				lda (pPs),y
 				jsr CORE.PSFree.A
+				bra .8
 				
-.7				dec CORE.Counter
+.7				jsr CORE.PSLeave		Save ZP & Ptrs
+				
+.8				dec CORE.Counter
 				bne .1				
 *--------------------------------------
-CORE.Events		stx A2osX.RANDOM16
+CORE.Events		jsr CORE.GetEvents
 				
-				jsr CORE.GetEvents
-				
-				txa
-				eor KBD
-				sta A2osX.RANDOM16+1
 				bcs .4					CS=no event
 
 				jsr CORE.DispatchEvents
@@ -116,7 +116,7 @@ CORE.Events		stx A2osX.RANDOM16
 				sta pEvent
 				lda EVTMGR.COUNT
 				bne .1
-				
+*--------------------------------------			
 .4				lda A2osX.ASCREEN
 				cmp #2					is SYS active?
 				bne .6
@@ -143,6 +143,7 @@ CORE.Events		stx A2osX.RANDOM16
 				cmp #"5"
 				bcs .8
 				
+				sta KBDSTROBE
 				jsr CORE.ScreenSelect
 .8				jmp CORE.Run
 *--------------------------------------
@@ -170,7 +171,7 @@ CORE.GetEvents	lda #EvtMgr.Table
 .10				lda VBL					get VLINE status
 				tax
 				eor EvtMgr.VBLState		
-				bpl .3	no change,no tick
+				bpl .3					no change,no tick
 				txa
 				sta EvtMgr.VBLState		save new
 				bpl .3					Up2down transition,no tick
@@ -224,7 +225,7 @@ CORE.DispatchEvents
 .1				ldx CORE.Counter
 				
 				lda PS.Table.PID-1,x
-				beq .4
+				beq .5
 				
 				lda PS.Table.hMem-1,x
 				jsr K.GetMemPtr.A
@@ -232,12 +233,12 @@ CORE.DispatchEvents
 			
 				lda (pPs)				get S.PS.F
 				bit #S.PS.F.INIT+S.PS.F.HOLD	Init or Waiting for Another Task to Terminate?
-				bne .4
+				bne .5
 
 				bit #S.PS.F.EVENT		Accept Events ?
-				beq .4
+				beq .5
 
-				jsr CORE.PSSelect
+				jsr CORE.PSEnter
 
 				lda #EvtMgr.Table
 				sta pEvent				Select first event in list
@@ -247,10 +248,6 @@ CORE.DispatchEvents
 
 .2				lda (pEvent)			Empty event, select next
 				beq .3
-				
-				lda (pCode)
-				cmp #H.BIN.HEADER.BIN65
-				bne *
 				
 				ldx #TSKMGR.DOEVENT
 				jsr pCodeJmp			Call DOEVENT function
@@ -268,74 +265,29 @@ CORE.DispatchEvents
 				adc #S.EVT
 				sta pEvent
 				bra .2
+
+.4				jsr CORE.PSLeave
 				
-.4				dec CORE.Counter
+.5				dec CORE.Counter
 				bne .1
 				
-.9				dec
+.9				sec
 				rts
 				
 .8				clc
 				rts
 *--------------------------------------
-CORE.DumpEvent	ldy #S.EVT-1
-				
-.1				>PUSHB (pEvent),y
-				dey
-				bpl .1
-				
-				>LDYAI .2
-				jmp K.PrintF.YA
-				
-.2				>CSTR "!Evt:F=%b,Dev=$%h,LO=$%h,HI=$%h,W1=$%H,W2=$%H\n"
-*--------------------------------------
-CORE.ScreenSelect
-				sta KBDSTROBE
-
-				and #$0F
-				cmp A2osX.ASCREEN		Same as active screen...nothing to do
-				beq .8
-				
-				tax
-
-				lda A2osX.SCRNDEVS-1,x
-				beq .8					No device claimed this screen
-
-				jsr K.GetDevByID.A		x unmodified.....
-				bcs .8					??? 
-				
-				stx A2osX.ASCREEN
-				
-				>STYA pDev
-
-				ldx #DEVMGR.CONTROL
-				jmp pDevJmp
-				
-.8				rts
-*--------------------------------------
-CORE.GetPSByID.A
-				ldx CORE.PSCount
-				beq .9
-				
-.1				cmp PS.Table.PID-1,x
-				beq .2
-				dex
-				bne .1
-				
-.9				lda #TSKMGR.ERRNSP
-				sec
+CORE.Quit		clc
 				rts
-				
-.2				lda PS.TABLE.hMem-1,x
-				jmp K.GetMemPtr.A
 *--------------------------------------
 * PS.Free.A
 *   In : A = PID to free
 *--------------------------------------
-CORE.PSFree.A	jsr CORE.GetPSByID.A	PS in ZPPtr1
+CORE.PSFree.A	sta .1+1				Save PS ID
+				jsr CORE.GetPSByID.A	PS in ZPPtr1
+				bcs .9
 				>STYA ZPPtr1
-				stx .1+1				Save Offset in PS.Table	
-				
+
 				ldy #S.PS.hSS
 				jsr .8
 				
@@ -358,17 +310,74 @@ CORE.PSFree.A	jsr CORE.GetPSByID.A	PS in ZPPtr1
 				ldy #S.PS.hPREFIX
 				jsr .8
 				
-.1				ldx #$ff				Self Modified
-				stz PS.Table.PID-1,x
+.1				lda #$ff				Self Modified
+
+				ldx CORE.PSCount
+
+.2				cmp PS.Table.PID-1,x
+				beq .3
+				dex
+				bne .2
+				bra *
+				
+.3				stz PS.Table.PID-1,x
 				lda PS.TABLE.hMem-1,x 
-.7				jmp K.FreeMem.A
+				jmp K.FreeMem.A
 
 .8				lda (ZPPtr1),y
 				bne .9
 .9				rts
 *--------------------------------------
-CORE.Quit		clc
+* X unmodofied
+*--------------------------------------
+CORE.GetPSByID.A
+				ldy CORE.PSCount
+				beq .9
+				
+.1				cmp PS.Table.PID-1,y
+				beq .2
+				dey
+				bne .1
+				
+.9				lda #TSKMGR.ERRNSP
+				sec
 				rts
+				
+.2				lda PS.TABLE.hMem-1,y
+				jmp K.GetMemPtr.A
+*--------------------------------------
+CORE.DumpEvent	ldy #S.EVT-1
+				
+.1				>PUSHB (pEvent),y
+				dey
+				bpl .1
+				
+				>LDYAI .2
+				jmp K.PrintF.YA
+				
+.2				>CSTR "!Evt:F=%b,Dev=$%h,LO=$%h,HI=$%h,W1=$%H,W2=$%H\n"
+*--------------------------------------
+CORE.ScreenSelect
+				and #$0F
+				cmp A2osX.ASCREEN		Same as active screen...nothing to do
+				beq .8
+				
+				tax
+
+				lda A2osX.SCRNDEVS-1,x
+				beq .8					No device claimed this screen
+
+				jsr K.GetDevByID.A		x unmodified.....
+				bcs .8					??? 
+				
+				stx A2osX.ASCREEN
+				
+				>STYA pDev
+
+				ldx #DEVMGR.CONTROL
+				jmp pDevJmp
+				
+.8				rts
 *--------------------------------------
 CORE.DestroyEvent
 				lda (pEvent)
@@ -397,34 +406,9 @@ CORE.DestroyEvent
 *--------------------------------------
 CORE.PSSelect0	>LDYAI CORE.S.PS0		Select PS0
 				>STYA pPs
-
-				>LDYA K.STACK
+				
+				>LDYA CORE.S.PS0+S.PS.Context+4
 				>STYA pStack
-				rts
-*--------------------------------------
-CORE.PSSelect	ldy #S.PS.hCS
-				lda (pPs),y
-				
-				jsr K.GetMemPtr.A
-				>STYA pCode
-
-				ldy #S.PS.hDS
-				lda (pPs),y
-				beq .1
-
-				jsr K.GetMemPtr.A
-				>STYA pData
-				
-.1				ldy #S.PS.hSS
-				lda (pPs),y
-				jsr K.GetMemPtr.A
-				sta pStack+1
-
-				ldy #S.PS.SP
-				lda (pPs),y
-				sta pStack
-				
-				clc
 				rts
 */--------------------------------------
 * # Sleep
@@ -448,11 +432,11 @@ K.Sleep			pla						get PC LO
 				lda (pPs)
 				ora #S.PS.F.SLEEP
 				sta (pPs)
-								
+*--------------------------------------							
 CORE.PSLeave	ldy #S.PS.Context+23
 				ldx #23
 				
-.1				lda pPs,x
+.1				lda pCode,x
 				sta (pPs),y
 				dey
 				dex
@@ -461,11 +445,17 @@ CORE.PSLeave	ldy #S.PS.Context+23
 				clc						No error,
 				rts						back to Kernel
 *--------------------------------------
-CORE.PSWakeUp	lda (pPs)
-				and #$FF^S.PS.F.SLEEP	unmark as SLEEP
-				sta (pPS)
+CORE.PSEnter	ldy #S.PS.Context+23
+				ldx #23
 				
-				ldy #S.PS.PC
+.1				lda (pPs),y
+				sta pCode,x
+				dey
+				dex
+				bpl .1
+				rts
+*--------------------------------------
+CORE.PSResume	ldy #S.PS.PC
 				lda (pPs),y
 				sec						Advance PC by one as it was saved by a JSR
 				adc pCode				setup by PS.Select
@@ -474,15 +464,6 @@ CORE.PSWakeUp	lda (pPs)
 				lda (pPs),y
 				adc pCode+1
 				sta .8+2
-
-				ldy #S.PS.Context+23
-				ldx #23
-				
-.1				lda (pPs),y
-				sta pPs,x
-				dey
-				dex
-				bpl .1
 								
 .8				jmp $FFFF
 *--------------------------------------
