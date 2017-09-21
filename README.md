@@ -73,10 +73,7 @@ Several subprojects are now indentified :
 
 ## General Information:
 
-** Kernel 0.9.1 rewrite in progress **
-
-(Kernel 0.9 has been archived)
-It is confined in Aux LC Bank 1 & 2 to leave enough room at $EOOO for Drivers.
+Kernel API is confined in Aux LC Bank 1 & 2 to leave enough room at $EOOO for Drivers.
 Network drivers, Mouse, DHGR.DRV can load and fit in Aux LC.
 Now it's time to make all external BINs use new API, then GUI development will resume.
 
@@ -101,11 +98,11 @@ OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
 
 | Name    | Status      | Comment | K.Ver |
 | ----    | ------      | ------- | ------|
-| INSDRV  | Working     |         | 0.9 |
-| GETTY   | Working     |         | 0.9 |
-| LOGIN   | In Progress | no auth using /etc/passd yet | 0.9 |
-| SHELL   | Working     | (See Internal Shell commands) | 0.9 |
-| KCONFIG | Working     | Kernel Configuration Utility | 0.9 |
+| INSDRV  | Working     |         | 0.9.1 |
+| GETTY   | Working     |         | 0.9.1 |
+| LOGIN   | In Progress | no auth using /etc/passd yet | 0.9.1 |
+| SHELL   | Working     | (See Internal Shell commands) | 0.9.1 |
+| KCONFIG | Working     | Kernel Configuration Utility | 0.9.1 |
 | ----    | ------      | ------- | ----- |
 | TCPIP   | Working     | Socket API.ARP,IP,ICMP,UDP & TCP ok | 0.9 |
 | DHCPCLNT| Working     | rewritten to use new Socket API | 0.9 |
@@ -149,7 +146,7 @@ note : '$VAR' does NOT expand Variable
 
 | Name | Status | Comment | K.Ver |
 | ---- | ------ | ------- | ----- |
-| Console.DRV | Working | ANSI support in Progress. | 0.9 |
+| Console.DRV | Working | ANSI support in Progress. | 0.9.1 |
 | SSC.DRV     | Working | Apple "Super Serial Card" Driver | 0.9 |
 | SSC.I.DRV   | Working | Apple "Super Serial Card" Driver (IRQ enabled) | 0.9 |
 | PIC.DRV | In Progress | Apple "Parallel Interface Card" Driver, renamed from PPIC.DRV | 0.9 |
@@ -164,9 +161,9 @@ note : '$VAR' does NOT expand Variable
 ## BIN,External Shell commands:
 | Name | Status | Comment | K.Ver |
 | ---- | ------ | ------- | ----- |
-| MEM | Working | Old dump behavior is now MEMDUMP.  New MEM command displays MEMSTAT (Main, Aux & Kernel Memory) | 0.9 |
-| LSDEV | Working | | 0.9 |
-| PS | Working | | 0.9 |
+| MEM | Working | Old dump behavior is now MEMDUMP.  New MEM command displays MEMSTAT (Main, Aux & Kernel Memory) | 0.9.1 |
+| LSDEV | Working | | 0.9.1 |
+| PS | Working | | 0.9.1 |
 | MD | Working | | 0.9 |
 | LS | Working | -A : Do Not Print . & .. | 0.9 |
 | | | -L : long listing with size/date... | |
@@ -182,7 +179,7 @@ note : '$VAR' does NOT expand Variable
 | | | -Q : Quiet | |
 | | | -R : Recurse subdirectories | |
 | | | -Y : Dont't Prompt For Override | |
-| CAT | Working | -A : Show All non printable caracters | 0.9 |
+| CAT | Working | -A : Show All non printable caracters | 0.9.1 |
 | | | -N : Number all output lines | |
 | | | -S : Suppress repeated empty output lines | |
 | CHTYP | In Progress | -C : Continue On Error | 0.9 |
@@ -207,7 +204,7 @@ note : '$VAR' does NOT expand Variable
 | Name | Status | Comment | K.Ver |
 | ---- | ------ | ------- | ----- |
 | ASM | In Progress | S-C MASM based multi CPU assembler | 0.9 |
-| MEMDUMP | Working | | 0.9 |
+| MEMDUMP | Working | | 0.9.1 |
 | RPCDUMP | Working | tool based on UDP socket API, renamed from RPCINFO | 0.9 |
 
 ## Misc
