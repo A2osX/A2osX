@@ -164,7 +164,7 @@ note : '$VAR' does NOT expand Variable
 | MEM | Working | Old dump behavior is now MEMDUMP.  New MEM command displays MEMSTAT (Main, Aux & Kernel Memory) | 0.9.1 |
 | LSDEV | Working | | 0.9.1 |
 | PS | Working | | 0.9.1 |
-| MD | Working | | 0.9 |
+| MD | Working | | 0.9.1 |
 | LS | Working | -A : Do Not Print . & .. | 0.9 |
 | | | -L : long listing with size/date... | |
 | | | -R : Recurse subdirectories | |
