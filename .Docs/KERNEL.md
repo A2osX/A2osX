@@ -662,6 +662,29 @@ Convert string to UPPERCASE/lowercase
 ## Out:
  + Uppercased/lowercased String in Buffer
 
+# Time.YA
++ Get System Time in Buffer
+
+## In :
++ Y,A = PTR to S.TIME
+
+## Out :
++ S.TIME filled with System date/time
+
+# PTime2Time
++ Convert ProDOS Time To S.TIME
+
+## In : 
++ PUSHW = Dst PTR To S.TIME
++ PUSHW = Src PTR to ProDOS DATE/TIME (DWORD)
+
+# K.CTime2Time
++ Convert CTIME to S.TIME
+
+## In : 
++ PUSHW = Dst PTR To S.TIME
++ PUSHW = Src CTIME DWORD
+
 # StrFTime
 Convert S.TIME struct to CSTR
 

@@ -1,14 +1,36 @@
-# A2osX (0.9.1) Multi-Tasking OS for Apple II
+# A2osX (0.9.1) Multi-Tasking OS for Apple II  
 
-0.9 has been archived, next Kernel Version is 0.9.1  
+...preemtive ?
+
+## Latest News 2017-09-22
+
+**Disk images :**  
+
++ **A2OSX.BOOT.po**   : **0.9** 140k BOOT disk image with all binaries  
++ **A2OSX.DEV.po**    : **0.9** 140k disk image with ASM binaries, Debug Tools & INClude files  
++ **A2OSX.BUILD.po**  : **0.9.1** 800k BOOT disk image with S-C MASM 2.0 and all binaries (BOOT+DEV)  
++ **A2OSX.SRC.po**    : **0.9.1** 800k disk image with all sources  
+
+(once Kernel 0.9.1 stable enough, BOOT & DEV will be updated)
+
+**0.9 has been archived, next Kernel Version is 0.9.1**  
    
- + More Standard C API compliance
- + API Cleanup, many functions still use shared space
- + Per process Stack Segment
- + Larger S.PS structure
+ + More Standard C API compliance __(done!)__
+ + API Cleanup, many functions still use shared space __(done!)__
+ + Per process Stack Segment __(done!)__
+ + Larger S.PS structure __(done!)__
  + ...
  + to allow...Preemtive!
 
+
+**"System Tick" sources for preemtive mode :**
+
+| Hardware                 | Resolution | Status      | Comment |
+| -------------------------| ---------- | ----------- | ------- |
+| //c,//c+,IIgs Mouse port | 50/50 Hz   | Working     | Supported at Kernel level, no conflict with GUI's Mouse.DRV (not required to be loaded), requires setting "Machine Timing" properly in KConfig Utility |
+| IIe Mouse Card           | 50/50 Hz   | Working     | (same as above) |
+| ThunderClock Plus        | 64 Hz      | In Progress | ...Need to fix this faulty H/W first! |
+| ... Any suggestion ?     |            |             |  |
 
 ## !!!HELP NEEDED!!!
 
@@ -76,11 +98,6 @@ Several subprojects are now indentified :
 Kernel API is confined in Aux LC Bank 1 & 2 to leave enough room at $EOOO for Drivers.
 Network drivers, Mouse, DHGR.DRV can load and fit in Aux LC.
 Now it's time to make all external BINs use new API, then GUI development will resume.
-
-+ **A2OSX.BOOT.po**   : 140k BOOT disk image with all binaries  
-+ **A2OSX.DEV.po**    : 140k disk image with ASM binaries, Debug Tools & INClude files  
-+ **A2OSX.BUILD.po**  : 800k BOOT disk image with S-C MASM 2.0 and all binaries (BOOT+DEV)  
-+ **A2OSX.SRC.po**    : 800k disk image with all sources  
 
 OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
 (OApple+shift+1,OApple+shift+2,OApple+shift+3 on FR keyboard)
