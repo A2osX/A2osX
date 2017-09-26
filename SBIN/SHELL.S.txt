@@ -42,9 +42,10 @@ CS.START		cld
 				.DA #$61				6502,Level 1 (65c02)
 				.DA #1					BIN Layout Version 1
 				.DA 0
-				.DA CS.END-CS.START		Code Length To Relocate
-				.DA DS.END-DS.START		Data Segment to Allocate
-				.DA 0
+				.DA CS.END-CS.START		CS
+				.DA DS.END-DS.START		DS
+				.DA #64					SS
+				.DA #16					ZP
 				.DA 0
 *--------------------------------------
 * Relocation Table
@@ -65,6 +66,11 @@ L.ENV.PWD		.DA ENV.PWD
 L.ENV.PS1		.DA ENV.PS1
 L.FMT.DATE		.DA FMT.DATE
 L.FMT.TIME		.DA FMT.TIME
+L.MSG.HEXBYTE	.DA MSG.HEXBYTE
+J.ESC			.DA CmdLine.BS			left arrow
+				.DA HIS.GetNext			
+				.DA HIS.GetPrev
+				.DA CmdLine.NAK			right arow
 L.INTCMDS		.DA INTCMDS
 J.INTCMDS		.DA Cmd.Exec.CD
 				.DA Cmd.Exec.DATE
@@ -310,7 +316,7 @@ CS.CHARIN		tax						Save Char
 				>STA.G bPause
 				clc
 				rts
-
+*--------------------------------------
 * interactive mode
 .10				>LDA.G bEscMode
 				beq .13
@@ -320,47 +326,61 @@ CS.CHARIN		tax						Save Char
 
 				lda #0
 				sta (pData),y			Y=bEscMode
-
 				txa
 
-				ldx EscChars
+				ldx #EscChars.count-1
+
 .17				cmp EscChars,x
 				beq .18
 				dex
-				bne .17
-				bra .8
+				bpl .17
+				clc
+				rts
 
-.18				lda EscAscii,x
+.18				txa
+				asl
 				tax
-
+				jmp (J.ESC,x)
+*--------------------------------------
 .13				cpx #$20
-				bcs .1
-				jsr CS.CHARIN.CTRL
-				bra .8
+				bcc CS.CHARIN.CTRL
 
 .1				cpx #$7f
 				bne .2
-				jsr CmdLine.DEL
-				clc
-				rts
+				jmp CmdLine.DEL
 
 .2				>LDA.G CmdBuflen
 
 				cmp #CmdLine.MAX
-				beq .8
-
-				pha
+				beq .8					Buffer full, discard...
 
 				inc
 				sta (pData),y
-				txa
-				ply
-				sta (ZPCMDBuf),y
-				iny
+				
+				tay
 				lda #0
 				sta (ZPCMDBuf),y
 
-				>LDA.G bSecureRead
+				>LDA.G CmdBufPtr
+				tay
+								
+*.3				lda (ZPCMDBuf),y		Move from Ptr To end of buffer forward...
+*				iny
+*				sta (ZPCMDBuf),y
+*				ora #0
+*				bne .3					...until ending 0
+
+				txa
+				
+				>LDA.G CmdBufPtr		Insert char at Ptr
+				tay
+				sta (ZPCMDBuf),y
+				
+				>INC.G CmdBufPtr
+				>CMP.G CmdBuflen
+				bne .4
+
+.4				>LDA.G bSecureRead
 				bne .8
 
 				txa
@@ -369,8 +389,17 @@ CS.CHARIN		tax						Save Char
 .8				clc
 				rts	
 *--------------------------------------
-CS.CHARIN.CTRL	cpx #13					CR
+CS.CHARIN.CTRL	
+*				phx
+*				txa
+*				>PUSHA
+*				>LDYA L.MSG.HEXBYTE
+*				>SYSCALL PrintF.YA
+*				plx
+				
+				cpx #13					CR
 				bne .10
+
 				txa
 				>SYSCALL PutChar.A
 				lda #10
@@ -390,35 +419,9 @@ CS.CHARIN.CTRL	cpx #13					CR
 				rts
 
 .11				cpx #3					Ctrl-C
-				bne .1
-
-				jsr CmdLine.CLR
-				clc
-				rts
-
-.1				cpx #8					BS (left arrow)
-				bne .2
-				jsr CmdLine.DEL
-				clc
-				rts
-
-.2				cpx #10					LF (down arrow)
-				bne .3
-
-				jsr HIS.GetNext
-				clc
-				rts
-
-.3				cpx #11					VT (up arrow)
-				bne .4
-
-				jsr HIS.GetPrev
-				clc
-				rts
-
-.4				cpx #21					NAK (right arrow)
 				bne .8
 
+				jsr CmdLine.CLR
 				clc
 				rts
 
@@ -470,17 +473,29 @@ CmdLine.CLR		ldy #0
 .1				lda (ZPCMDBuf),y
 				beq .9
 
-				lda #8
+.2				lda #8
 
-				sta (pData),y
+				sta (ZPCMDBuf),y
 				iny
-				bne .1
+				lda (ZPCMDBuf),y
+				bne .2
 
 				jsr CmdLine.PRINT
 
 				jmp CmdLine.RESET
 
 .9				rts
+*--------------------------------------
+CmdLine.BS		>LDA.G CmdBufPtr
+				beq .9
+				dec
+				sta (pData),y
+				
+				lda #8
+				>SYSCALL PutChar.A				
+.9				rts
+*--------------------------------------
+CmdLine.NAK		rts
 *--------------------------------------
 CmdLine.DEL		>LDA.G CmdBuflen
 				beq .9
@@ -502,6 +517,7 @@ CmdLine.PRINT	>LDYA ZPCMDBuf
 CmdLine.RESET	lda #0
 				sta (ZPCMDBuf)
 				>STA.G bCmdBufexec
+				>STA.G CmdBufPtr
 				>STA.G CmdBuflen
 				>STA.G bSecureRead		Clear password mode
 				rts
@@ -547,11 +563,13 @@ MSG.PRINTENV	>CSTR "%s=%s\r\n"
 MSG.CSHERR		>CSTR "Pos %D:"
 FMT.DATE		>CSTR "%A, %B %d %Y"
 FMT.TIME		>CSTR "%H:%M:%S (%I:%M:%S%p)"
+MSG.HEXBYTE		>CSTR "[%h]"
 *--------------------------------------
 				.INB /A2OSX.SRC/X.ERRORS.S
 *--------------------------------------
-EscChars		>PSTR "DBAC"
-EscAscii		.HS 04080A0B15
+EscChars.Count	.EQ 4
+EscChars		.AS 'DBAC'
+
 CSH.TSIZE		.HS 0001020405			00,CHAR,INT,LONG,FLOAT....
 CSH.ACCT		.BS 1
 CSH.ACC			.BS 5
@@ -562,6 +580,7 @@ CSH.ARG			.BS 5
 				.OR 0
 DS.START
 hCmdBuf			.BS 1
+CmdBufPtr		.BS 1
 CmdBuflen		.BS 1
 bCmdBufexec		.BS 1
 
