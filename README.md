@@ -164,8 +164,8 @@ note : '$VAR' does NOT expand Variable
 | Name | Status | Comment | K.Ver |
 | ---- | ------ | ------- | ----- |
 | Console.DRV | Working | ANSI support in Progress. | 0.9.1 |
-| SSC.DRV     | Working | Apple "Super Serial Card" Driver | 0.9 |
-| SSC.I.DRV   | Working | Apple "Super Serial Card" Driver (IRQ enabled) | 0.9 |
+| SSC.DRV     | Working | Apple "Super Serial Card" Driver | 0.9.1 |
+| SSC.I.DRV   | Working | Apple "Super Serial Card" Driver (IRQ enabled) | 0.9.1 |
 | PIC.DRV | In Progress | Apple "Parallel Interface Card" Driver, renamed from PPIC.DRV | 0.9 |
 | Mouse.DRV | Working | Apple Mouse Card,//c Mouse Port | 0.9 |
 | DHGR.DRV | In Progress | except bitblt... | 0.9 |
@@ -182,7 +182,7 @@ note : '$VAR' does NOT expand Variable
 | LSDEV | Working | | 0.9.1 |
 | PS | Working | | 0.9.1 |
 | MD | Working | | 0.9.1 |
-| LS | Working | -A : Do Not Print . & .. | 0.9 |
+| LS | Working | -A : Do Not Print . & .. | 0.9.1 |
 | | | -L : long listing with size/date... | |
 | | | -R : Recurse subdirectories | |
 | RM | Working | -C : Continue On Error | 0.9 |
