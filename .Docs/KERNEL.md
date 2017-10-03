@@ -600,7 +600,7 @@ Convert String to 32 bits int
 
 ## In:
 + PUSHW PTR to target buffer DWORD
-+ PUSHW Source String (PSTR)
++ PUSHW Source String (C-Sring)
 
 ## Out:
 

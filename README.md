@@ -188,7 +188,7 @@ note : '$VAR' does NOT expand Variable
 | RM | Working | -C : Continue On Error | 0.9 |
 | | | -Q : Quiet | |
 | | | -R : Recurse subdirectories | |
-| CP | Working | -C : Continue On Error | 0.9 |
+| CP | Working | -C : Continue On Error | 0.9.1 |
 | | | -Q : Quiet | |
 | | | -R : Recurse subdirectories | |
 | | | -Y : Dont't Prompt For Override | |
@@ -207,7 +207,7 @@ note : '$VAR' does NOT expand Variable
 | | | -R : Recurse subdirectories | |
 | CHGRP | In Progress | -C : Continue On Error | 0.9 |
 | | | -R : Recurse subdirectories | |
-| FORMAT | In Progress | -L : Low-Level Format | 0.9 |
+| FORMAT | In Progress | -L : Low-Level Format | 0.9.1 |
 | EDIT | Working | still missing : find/replace | 0.9 |
 | NSCUTIL | Working | Tool for setting time in NSC/DL1216E | 0.9 |
 | ---- | ------ | ------- | ----- |
