@@ -6,12 +6,12 @@
 
 **Disk images :**  
 
-+ **A2OSX.BOOT.po**   :  **(0.9)**  140k BOOT disk image with all binaries  
-+ **A2OSX.DEV.po**    :  **(0.9)**  140k disk image with ASM binaries, Debug Tools & INClude files  
++ **A2OSX.BOOT.po**   :  **(0.9.1)**  140k BOOT disk image with all binaries  
++ **A2OSX.DEV.po**    :  **(0.9.1)**  140k disk image with ASM binaries, Debug Tools & INClude files  
 + **A2OSX.BUILD.po**  :  **(0.9.1)**  800k BOOT disk image with S-C MASM 2.0 and all binaries (BOOT+DEV)  
 + **A2OSX.SRC.po**    :  **(0.9.1)**  800k disk image with all sources  
 
-(once Kernel 0.9.1 stable enough, BOOT & DEV will be updated)
+(once Kernel 0.9.1 stable enough, BOOT & DEV will be updated) __(done!)__
 
 **0.9 has been archived, next Kernel Version is 0.9.1**  
    
@@ -185,21 +185,21 @@ note : '$VAR' does NOT expand Variable
 | LS | Working | -A : Do Not Print . & .. | 0.9.1 |
 | | | -L : long listing with size/date... | |
 | | | -R : Recurse subdirectories | |
-| RM | Working | -C : Continue On Error | 0.9 |
+| RM | Working | -C : Continue On Error | 0.9.1 |
 | | | -Q : Quiet | |
 | | | -R : Recurse subdirectories | |
 | CP | Working | -C : Continue On Error | 0.9.1 |
 | | | -Q : Quiet | |
 | | | -R : Recurse subdirectories | |
 | | | -Y : Dont't Prompt For Override | |
-| MV | Working | -C : Continue On Error | 0.9 |
+| MV | Working | -C : Continue On Error | 0.9.1 |
 | | | -Q : Quiet | |
 | | | -R : Recurse subdirectories | |
 | | | -Y : Dont't Prompt For Override | |
 | CAT | Working | -A : Show All non printable caracters | 0.9.1 |
 | | | -N : Number all output lines | |
 | | | -S : Suppress repeated empty output lines | |
-| CHTYP | In Progress | -C : Continue On Error | 0.9 |
+| CHTYP | Working | -C : Continue On Error | 0.9.1 |
 | | | -R : Recurse subdirectories | |
 | CHMOD | In Progress | -C : Continue On Error | 0.9 |
 | | | -R : Recurse subdirectories | |
@@ -222,6 +222,7 @@ note : '$VAR' does NOT expand Variable
 | ---- | ------ | ------- | ----- |
 | ASM | In Progress | S-C MASM based multi CPU assembler | 0.9 |
 | MEMDUMP | Working | | 0.9.1 |
+| ---- | ------ | ------- | ----- |
 | RPCDUMP | Working | tool based on UDP socket API, renamed from RPCINFO | 0.9 |
 
 ## Misc

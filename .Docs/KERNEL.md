@@ -136,17 +136,6 @@ Make current process suspend until next RUN
 
 ## Out:
 
-# GetFullPath.YA
-
-## In :
-+ Y,A = Filename (C-String)
-
-## Out :
-+ CC : success
- + Y,A = FullPath (C-String)
- + X = hMem of FullPath
-+ CS : A = Error Code
-
 # LoadFile
 
 ## In:
