@@ -121,7 +121,7 @@ OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
 | SHELL   | Working     | (See Internal Shell commands) | 0.9.1 |
 | KCONFIG | Working     | Kernel Configuration Utility | 0.9.1 |
 | ----    | ------      | ------- | ----- |
-| TCPIP   | Working     | Socket API.ARP,IP,ICMP,UDP & TCP ok | 0.9 |
+| TCPIPD  | Working     | Socket API.ARP,IP,ICMP,UDP & TCP ok | 0.9 |
 | DHCPCLNT| Working     | rewritten to use new Socket API | 0.9 |
 | TELNETD | In Progress |  | 0.9 |
 | HTTPD   | In Progress |  | 0.9 |
