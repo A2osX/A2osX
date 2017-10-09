@@ -280,7 +280,7 @@ K.FOpen.10		>LDYAI S.NODE.REG
 				bcs K.FOpen.9
 				
 				>STYA ZPPtr1
-				stx hFILE			
+				stx .8+1			
 				
 				jsr STDIO.SetIOBUF
 				bcs .98
@@ -327,12 +327,12 @@ K.FOpen.10		>LDYAI S.NODE.REG
 .30				ldy #S.NODE.T
 				lda #S.NODE.T.REG
 				sta (ZPPtr1),y
-				lda hFILE
+.8				lda #$ff				Self Modified
 				clc
 				rts						CC
 
 .98				pha						save MLI error
-				lda hFILE
+				lda .8+1
 				jsr K.FClose.A.1
 				pla						get back MLI error
 				sec
@@ -341,7 +341,6 @@ K.FOpen.10		>LDYAI S.NODE.REG
 K.FOpen.MODE	.BS 1
 K.FOpen.TYPE	.BS 1
 K.FOpen.AUXTYPE	.BS 2
-hFILE			.BS 1
 */--------------------------------------
 * # FClose.A
 * Close a file
@@ -448,9 +447,9 @@ K.FFlush.A		jsr PFT.CheckNodeA
 				rts
 */-------------------------------------
 * # FSeek
+*  Set the file-position indicator for hFILE
 * ## In:
-*  PUSHW = OffsetHi
-*  PUSHW = OffsetLo
+*  PUSHW = Ptr to Offset (DWORD)
 *  PUSHB = From
 *  PUSHB = hFILE
 *\-------------------------------------
@@ -459,39 +458,44 @@ K.FSeek			jsr PFT.CheckNodeSTK
 				jsr STDIO.GetRefNum
 				>PULLA					FROM
 				tax
-				>PULLW K.FSeek.OFFSET
-				>PULLW K.FSeek.OFFSET+2
-
-				cpx #SYS.FSeek.SET
-
-				bne .1
-				stz K.MLI.PARAMS+2
+				>PULLW ZPPtr1
+				cpx #SYS.FSeek.END+1
+				bcs .98
+				txa
+				asl
+				tax
+				
+				jmp (.1,x)
+				
+.1				.DA .10
+				.DA .20
+				.DA .30			
+* K.FSeek.SET
+.10				stz K.MLI.PARAMS+2
 				stz K.MLI.PARAMS+3
 				stz K.MLI.PARAMS+4
 				bra .8
 
-.1				cpx #SYS.FSeek.CUR
-				bne .2
-				>MLICALL MLIGETMARK
+* K.FSeek.CUR
+.20				>MLICALL MLIGETMARK
 				bcc .8
 				rts
 
-.2				cpx #SYS.FSeek.END
-				bne .98
-				>MLICALL MLIGETEOF
+* K.FSeek.END
+.30				>MLICALL MLIGETEOF
 				bcs .9
 
-.8				ldx #0
-				ldy #3
+.8				ldy #0
+				ldx #3					3 bytes, 24 bits!!!
 				
 				clc
 				
-.81				lda K.MLI.PARAMS+2,x
-				adc K.FSeek.OFFSET,x
-				sta K.MLI.PARAMS+2,x
+.81				lda K.MLI.PARAMS+2,y
+				adc (ZPPtr1),y
+				sta K.MLI.PARAMS+2,y
 
-				inx
-				dey
+				iny
+				dex
 				bne .81
 				
 				bcs .99					Offset out of range!			
@@ -505,24 +509,9 @@ K.FSeek			jsr PFT.CheckNodeSTK
 .99				lda #SYSMGR.ERRFTB
 				sec
 				rts
-*--------------------------------------
-K.FSeek.OFFSET	.BS 4			
-*/--------------------------------------
-* # FTell.A
-* ## In:
-*  A = hFILE
-* ## Out:
-*   Y,A,X = Offset
-*\--------------------------------------
-K.FTell.A		jsr PFT.CheckNodeA
-K.FTell.A.1		jsr STDIO.GetRefNum
-				>MLICALL MLIGETMARK
-				bcs .9
-				>LDYA K.MLI.PARAMS+2
-				ldx K.MLI.PARAMS+4
-.9				rts
 */--------------------------------------
 * # FEOF.A
+*  Test the end-of-file indicator for hFILE
 * ## In:
 *  A = hFILE
 * ## Out:
@@ -533,26 +522,61 @@ K.FTell.A.1		jsr STDIO.GetRefNum
 *\--------------------------------------
 K.FEOF.A		jsr PFT.CheckNodeA
 				jsr STDIO.GetRefNum
-				jsr K.FTell.A.1
+
+				>MLICALL MLIGETMARK
 				bcs .9
-				>STYA K.FEOF.A.MARK
-				stx K.FEOF.A.MARK+2
+				
+				ldy #2
+				
+.1				lda K.MLI.PARAMS+2,y
+				sta K.FEOF.A.MARK,y
+				dey
+				bpl .1
 
 				>MLICALL MLIGETEOF
 				bcs .9
 
-				sec
-				lda K.MLI.PARAMS+2
-				sbc K.FEOF.A.MARK
+				ldy #2
+				
+.2				lda K.MLI.PARAMS+2,y
+				eor K.FEOF.A.MARK,y
 				bne .8
-				lda K.MLI.PARAMS+3
-				sbc K.FEOF.A.MARK+1
-				bne .8
-				lda K.MLI.PARAMS+4
-				sbc K.FEOF.A.MARK+2
+				dey
+				bpl .2
+				
 .8				clc
 .9				rts
+
 K.FEOF.A.MARK	.BS 3
+*/--------------------------------------
+* # FTell
+*  Return the current value of the file-position indicator
+* ## In:
+*  PUSHW = Ptr to Offset (DWORD)
+*  PUSHB = hFILE
+* ## Out:
+*   Offset = Offset
+*\--------------------------------------
+K.FTell			jsr PFT.CheckNodeSTK
+				>PULLA
+				jsr STDIO.GetRefNum
+				>PULLW ZPPtr1
+				>MLICALL MLIGETMARK
+				bcs .9
+				
+				ldy #3
+				
+				lda #0
+				sta (ZPPtr1),y
+				
+				dey
+
+.1				lda K.MLI.PARAMS+2,y
+				sta (ZPPtr1),y
+				dey
+				bpl .1
+				
+.9				rts
 */--------------------------------------
 * # Remove.YA
 *\--------------------------------------

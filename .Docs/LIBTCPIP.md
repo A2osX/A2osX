@@ -25,7 +25,7 @@
 + PUSHW PTR to MAC
 + PUSHW PTR to IP
 
-# ARP.GetC.Ache
+# ARP.GetCAche
 + Return a Ptr to ARP Cache Table
 
 ## In:
@@ -58,7 +58,7 @@
 + PUSHW = PTR to IP
 + PUSHW = hostname PSTR to Add
 
-# DNS.GetC.Ache
+# DNS.GetCAche
 + Return a Ptr to DNS Cache Table
 
 ## In:

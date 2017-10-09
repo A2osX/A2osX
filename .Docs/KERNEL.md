@@ -313,7 +313,7 @@ return a hFile for a given Device Name
 + A = hFILE
 
 # MKFIFO
-return a S.FILE to a new FIFO
+return a hFILE to a new FIFO
 
 ## IN: 
 
@@ -469,22 +469,15 @@ Read bytes from file
 + A = hFILE
 
 # FSeek
++ Set the file-position indicator for hFILE
 
 ## In:
-+ PUSHW = OffsetHi
-+ PUSHW = OffsetLo
++ PUSHW = Ptr to Offset (DWORD)
 + PUSHB = From
 + PUSHB = hFILE
 
-# FTell.A
-
-## In:
-+ A = hFILE
-
-## Out:
- + Y,A,X = Offset
-
 # FEOF.A
++ Test the end-of-file indicator for hFILE
 
 ## In:
 + A = hFILE
@@ -494,6 +487,16 @@ Read bytes from file
  + A=0 EOF
  + A =0 NOT EOF
 + CS :
+
+# FTell
++ Return the current value of the file-position indicator
+
+## In:
++ PUSHW = Ptr to Offset (DWORD)
++ PUSHB = hFILE
+
+## Out:
+ + Offset = Offset
 
 # Remove.YA
 
@@ -670,7 +673,7 @@ Convert string to UPPERCASE/lowercase
 + PUSHW = Dst PTR To S.TIME
 + PUSHW = Src PTR to ProDOS DATE/TIME (DWORD)
 
-# K.CTime2Time
+# CTime2Time
 + Convert CTIME to S.TIME
 
 ## In : 
