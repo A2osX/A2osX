@@ -469,7 +469,7 @@ Read bytes from file
 + A = hFILE
 
 # FSeek
-+ Set the file-position indicator for hFILE
+Set the file-position indicator for hFILE
 
 ## In:
 + PUSHW = Ptr to Offset (DWORD)
@@ -477,7 +477,7 @@ Read bytes from file
 + PUSHB = hFILE
 
 # FEOF.A
-+ Test the end-of-file indicator for hFILE
+Test the end-of-file indicator for hFILE
 
 ## In:
 + A = hFILE
@@ -489,7 +489,7 @@ Read bytes from file
 + CS :
 
 # FTell
-+ Return the current value of the file-position indicator
+Return the current value of the file-position indicator
 
 ## In:
 + PUSHW = Ptr to Offset (DWORD)
@@ -537,7 +537,6 @@ FPrintF.YA :
 + CC : success
 + CS : error code from Output
 + Specifiers :
- + %a : pull 2 bytes to Print Access right String 'drwxrwxrwx'
  + %b : pull 1 byte to Print BIN 
  + %B : pull 2 bytes to Print BIN
  + %d : pull 1 byte unsigned DEC 0..255
@@ -574,7 +573,7 @@ Convert String to 40 bits Float
 
 ## In:
 + PUSHW PTR to target buffer (5 Bytes)
-+ PUSHW Source String (PSTR)
++ PUSHW Source String (C-Sring)
 
 ## Out:
 
@@ -592,6 +591,38 @@ Convert String to 32 bits int
 
 ## In:
 + PUSHW PTR to target buffer DWORD
++ PUSHW Source String (C-Sring)
+
+## Out:
+
+# StrToF
+Convert String to 40 bits Float
+
+## In:
++ PUSHW PTR to target buffer FLOAT (5 bytes)
++ PUSHW PTR to EndPtr
++ PUSHW Source String (C-Sring)
+
+## Out:
+
+# StrToL
+Convert String to 32 bits int
+
+## In:
++ PUSHB Base
++ PUSHW PTR to target buffer DWORD
++ PUSHW PTR to EndPtr
++ PUSHW Source String (C-Sring)
+
+## Out:
+
+# StrToUL
+Convert String to 32 bits unsigned int
+
+## In:
++ PUSHB Base
++ PUSHW PTR to target buffer DWORD
++ PUSHW PTR to EndPtr
 + PUSHW Source String (C-Sring)
 
 ## Out:
