@@ -568,12 +568,53 @@ FPrintF.YA :
  + %011s : 'ABCDEFGH000'
  + %2f	  :	'3.14'
 
+# StrToF
+Convert String to 40 bits Float
+
+## In:
++ PUSHW PTR to EndPtr
++ PUSHW Source String (C-Sring)
++ PUSHW PTR to target buffer (5 bytes)
+
+## Out:
+
 # AToF
 Convert String to 40 bits Float
 
 ## In:
-+ PUSHW PTR to target buffer (5 Bytes)
 + PUSHW Source String (C-Sring)
++ PUSHW PTR to target buffer (5 Bytes)
+
+## Out:
+
+# StrToL
+Convert String to 32 bits int
+
+## In:
++ PUSHB Base
++ PUSHW PTR to EndPtr
++ PUSHW Source String (C-Sring)
++ PUSHW PTR to target buffer DWORD
+
+## Out:
+
+# StrToUL
+Convert String to 32 bits unsigned int
+
+## In:
++ PUSHB Base
++ PUSHW PTR to EndPtr
++ PUSHW Source String (C-Sring)
++ PUSHW PTR to target buffer DWORD
+
+## Out:
+
+# AToL
+Convert String to 32 bits int
+
+## In:
++ PUSHW Source String (C-Sring)
++ PUSHW PTR to target buffer DWORD
 
 ## Out:
 
@@ -585,47 +626,6 @@ Convert String to 16 bits int
 
 ## Out:
 + Y,A = Int
-
-# AToL
-Convert String to 32 bits int
-
-## In:
-+ PUSHW PTR to target buffer DWORD
-+ PUSHW Source String (C-Sring)
-
-## Out:
-
-# StrToF
-Convert String to 40 bits Float
-
-## In:
-+ PUSHW PTR to target buffer FLOAT (5 bytes)
-+ PUSHW PTR to EndPtr
-+ PUSHW Source String (C-Sring)
-
-## Out:
-
-# StrToL
-Convert String to 32 bits int
-
-## In:
-+ PUSHB Base
-+ PUSHW PTR to target buffer DWORD
-+ PUSHW PTR to EndPtr
-+ PUSHW Source String (C-Sring)
-
-## Out:
-
-# StrToUL
-Convert String to 32 bits unsigned int
-
-## In:
-+ PUSHB Base
-+ PUSHW PTR to target buffer DWORD
-+ PUSHW PTR to EndPtr
-+ PUSHW Source String (C-Sring)
-
-## Out:
 
 # RealPath.YA
 Return the canonicalized absolute pathname
