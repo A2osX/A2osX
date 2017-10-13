@@ -657,14 +657,14 @@ K.SScanF		jsr PullPtr1Ptr2Ptr3
 				cmp #'d'				BYTE ?
 				bne .3
 				
-				stz ASCBUF
+*				stz ASCBUF
 .20				lda (ZPPtr1)
 				jsr STDIO.IsDigit
 				bcs .21
 				phx
-				inc ASCBUF
-				ldx ASCBUF
-				sta ASCBUF,x
+*				inc ASCBUF
+*				ldx ASCBUF
+*				sta ASCBUF,x
 				plx
 				jsr K.SScanF.IncPtr1
 				bne .20					end of string ?
@@ -728,8 +728,8 @@ K.SScanF.IncPtr1
 *   %d : pull 1 byte unsigned DEC 0..255
 *   %D : pull 2 bytes unsigned DEC 0..65535
 *   %u : pull 2 bytes PTR to 4 bytes long unsigned DEC 0..4294967295
-*   %e : pull 2 bytes PTR to 6 Bytes Real +1.23456789e+12
-*   %f : pull 2 bytes PTR to 6 Bytes Real 3.1415
+*   %e : pull 2 bytes PTR to 5 Bytes float +1.23456789e+12
+*   %f : pull 2 bytes PTR to 5 Bytes float 3.1415
 *   %h : pull 1 byte to Print HEX
 *   %H : pull 2 bytes to Print HEX
 *   %i : pull 1 byte to Print signed DEC -128..127
@@ -878,27 +878,66 @@ PrintF.B.1		ldx #8
 				bne .1
 				rts
 *--------------------------------------
-PrintF.D		>PULLB HEXBUF
+PrintF.I		sec						signed short
+				.HS 90					BCC
+PrintF.D		clc						unsigned short (BYTE)
+				ldx #0					one byte
+				
+				>PULLB HEXBUF
 				stz HEXBUF+1
 				bra PrintF.DD.1
 				
-PrintF.DD		>PULLW HEXBUF
+PrintF.II		sec						signed int
+				.HS 90					BCC
+PrintF.DD		clc						unsigned int (WORD)
+				ldx #1					two bytes
+				
+				>PULLW HEXBUF
+
 PrintF.DD.1		stz HEXBUF+2
 				stz HEXBUF+3
 				bra PrintF.U.1
+
+PrintF.L		sec						signed long
+				.HS 90					BCC
+PrintF.U		clc						unsigned long (DWORD)
+				ldx #3					4 bytes
 				
-PrintF.U		>PULLW ZPPtr2
+				>PULLW ZPPtr2			
+
 				ldy #3
 				
 .1				lda (ZPPtr2),y
 				sta HEXBUF,y
 				dey
 				bpl .1
+				
+PrintF.U.1		bcc .8					unsigned, nothing to check
 
-PrintF.U.1		stz SIGN
-				jsr HEX2DEC
-				jmp PrintDEC
-*--------------------------------------				
+				
+				lda HEXBUF,x			get sign
+				bpl .8
+				
+*				sec
+
+				ldy #0
+				
+.1				lda HEXBUF,y			two's complement of X bytes
+				eor #$ff
+				adc #0
+				sta HEXBUF,y
+				iny
+				dex
+				bpl .1
+				
+				sec						tell to print a "-" sign....
+				
+.8				jmp HEX2DEC
+*--------------------------------------		
+*  	.HS 9E 6E6B2800  1,000,000,000
+*       EXP(8) 1(s) 1significants(31)
+* http://apple2.org.za/gswv/a2zine/GS.WorldView/Resources/GS.TECH.INFO/AppleSoft/
+*--------------------------------------		
 PrintF.E		
 *				>PULLW ZPPtr2
 *				rts
@@ -916,94 +955,7 @@ PrintF.H		>PULLA
 PrintF.H.1		pha
 				jsr PrintF.NN.1
 				pla
-				jmp PrintF.N.1
-*--------------------------------------
-PrintF.I		>PULLB HEXBUF
-				eor #$ff				if positive, it becomes neg so branch if....minus!
-				clc
-				bmi .1
-				sec
-				inc						2s complement...
-				sta HEXBUF
-
-				
-.1				stz HEXBUF+1
-				bra PrintF.II.1
-				
-PrintF.II		>PULLW HEXBUF			A=HI
-				eor #$ff
-				clc
-				bmi PrintF.II.1
-				sec
-				tax
-				lda HEXBUF
-				eor #$ff
-				inc						2s complement...
-				sta HEXBUF
-				bne .1
-				inx
-.1				sta HEXBUF
-				stx HEXBUF+1
-
-PrintF.II.1		stz HEXBUF+2
-				stz HEXBUF+3
-				bra PrintF.L.1
-				
-PrintF.L		>PULLW ZPPtr2
-				ldy #3
-				
-.1				lda (ZPPtr2),y
-				sta HEXBUF,y
-				dey
-				bpl .1
-
-				
-PrintF.L.1		ror SIGN
-				jsr HEX2DEC
-*--------------------------------------
-PRINTDEC		lda PADLEN			any Len format ?
-				beq .1				no
-				
-				lda #10
-				sec					yes, Print only digits starting at pos 10-padlen
-				sbc PADLEN
-				
-.1				tax					x=0 if no padlen, or x=10-padlen
-
-.2				lda ASCBUF,x		
-				cmp #'0'			a zero?
-				beq .3
-				
-				inc PADLEN			found a non zero, Print all digits, even if 0, next time
-				ldy #'0'
-				sty PADCHAR
-				bra .4
-				
-.3				cpx #9				last digit ?
-				beq .4				Print always
-				
-				ldy PADLEN			no pad to fill, do not Print 0
-				beq .6
-				
-				lda PADCHAR			fill with PADCHAR
-				
-.4				bit SIGN			a sign to print before digits ?
-				bpl .5
-				pha					yes, save whatever we have to print....
-				lda #'-'
-				jsr Printf.Cout
-				stz SIGN			reset flag for next char...
-				pla
-				
-.5				jsr Printf.Cout
-				bcs .9
-
-.6				inx
-				cpx #10
-				bne .2
-				
-				clc
-.9				rts
+				bra PrintF.N.1
 *--------------------------------------
 PrintF.N		>PULLA
 PrintF.N.1		and #$0F
@@ -1122,13 +1074,21 @@ STDIO.IsDigit	cmp #'0'
 .1				sec
 				rts				
 *--------------------------------------
-SIGN			.BS 1
+STDIO.AT10
+*--------------------------------------
 PADLEN			.BS 1
 PADCHAR			.BS 1
 *--------------------------------------
+*EXP				.BS 1
+HEXBUF			.BS 4
+bNeg			.BS 1
+BCDBUF			.BS 5					5, enough to handle 10 digits (32bits)
+*--------------------------------------
 * Convert HEXBUF to ASCBUF decimal padded with 0
 *--------------------------------------
-HEX2DEC			ldx #4
+HEX2DEC			ror	bNeg
+
+				ldx #4
 
 .1				stz BCDBUF,x	Clear all 5 bytes
 				dex
@@ -1155,32 +1115,62 @@ HEX2DEC			ldx #4
 				bne .2
 				
 				cld
-				
-				ldy #4
-				ldx #9
-				
-.4				lda BCDBUF,y
-				pha
-				and #$0F
-				ora #$30
-				sta	ASCBUF,x
-				dex
-				pla
-				lsr
-				lsr
-				lsr
-				lsr
-				ora #$30
-				sta	ASCBUF,x
-				dey
-				dex
-				bpl .4
-				
-				rts
 *--------------------------------------
-HEXBUF			.BS 4
-BCDBUF			.BS 5					5, enough to handle 10 digits (32bits)
-ASCBUF			.BS 12					LEN + sign + 10 digits ($FFFFFFFF=4.294.967.295)
+				bit bNeg				a -sign to print before digits ?
+				bpl .9
+				lda #'-'
+				jsr Printf.Cout
+				
+.9				lda PADLEN				any Len format ?
+				beq .4					no
+				
+				lda #10
+				sec						yes, Print only digits starting at pos 10-padlen
+				sbc PADLEN
+				
+.4				tax						x=0 if no padlen, or x=10-padlen
+
+.5				txa						X range 0 to 9
+				lsr						CS if lo nibble (1,3,5,7,9)
+				tay
+				
+				lda BCDBUF,y
+				
+				bcs .6
+				
+				lsr
+				lsr
+				lsr
+				lsr
+				
+.6				and #$0F
+				ora #$30
+				
+				cmp #'0'			a zero?
+				beq .7
+				
+				inc PADLEN			found a non zero, Print all digits, even if 0, next time
+				ldy #'0'
+				sty PADCHAR
+				bra .8
+				
+.7				cpx #9				last digit ?
+				beq .8				Print always
+				
+				ldy PADLEN			no pad to fill, do not Print 0
+				beq .10
+				
+				lda PADCHAR			fill with PADCHAR
+				
+.8				jsr Printf.Cout
+				bcs .99
+
+.10				inx
+				cpx #10
+				bne .5
+				
+				clc
+.99				rts
 *--------------------------------------
 MAN
 SAVE /A2OSX.SRC/SYS/KERNEL.S.STDIO
