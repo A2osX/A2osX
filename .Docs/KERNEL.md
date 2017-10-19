@@ -136,7 +136,18 @@ Make current process suspend until next RUN
 
 ## Out:
 
+# LoadTxtFile.YA
+Load TXT a file in memory (with ending 0)
+
+## In:
++ Y,A = File Path
+
+## Out:
++ Y,A = File Length (without ending 0)
++ X = hMem of Loaded File
+
 # LoadFile
+Load a file in memory
 
 ## In:
 + PUSHW = AUXTYPE (Handled by....
@@ -147,16 +158,6 @@ Make current process suspend until next RUN
 ## Out:
 + Y,A = File Length
 + X = hMem of Loaded File
-
-# SaveFile
-
-## In:
-+ PUSHW = SrcPtr
-+ PUSHW = SrcLen
-+ PUSHW = AUXTYPE (Handled by....
-+ PUSHB = TYPE  ...
-+ PUSHB = MODE  ...
-+ PUSHW = PATH ...FOpen)
 
 # ChTyp
 
@@ -261,6 +262,62 @@ Create a new copy of this C-String
 + CS : error
  + A = SYS error code
 
+# SListNew
+
+## In:
+
+## Out:
++ A=hMem
+
+# SListAdd
+
+## In:
+
+## Out:
++ A=hMem
+
+# SListGet
+
+## In:
+
+## Out:
++ A=hMem
+
+# SListPut
+
+## In:
+
+## Out:
++ A=hMem
+
+# SListFree
+
+## In:
+
+## Out:
++ A=hMem
+
+# LoadStkObj.YA
+
+## In:
+
+## Out:
++ A=hMem
+
+# GetStkObj.A
+
+## In:
+
+## Out:
++ A=hMem
+
+# FreeStkObj.A
+
+## In:
+
+## Out:
++ A=hMem
+
 # GetMemStat.YA
 
 ## In:
@@ -269,13 +326,13 @@ Create a new copy of this C-String
 ## Out:
 + Buffer filled with memory stats
 
-# ExecProcessNewEnv.YA
+# ExecPSNewEnv.YA
 
-# ExecProcess.YA (Blocking Parent PID)
+# ExecPS.YA (Blocking Parent PID)
 
-# CreateProcessNewEnv.YA 
+# CreatePSNewEnv.YA 
 
-# CreateProcess.YA (Non Blocking)
+# CreatePS.YA (Non Blocking)
 
 ## In:
  + Y,A = PTR To Cmd Line
@@ -536,14 +593,14 @@ FPrintF.YA :
 ## Out:
 + CC : success
 + CS : error code from Output
-+ Specifiers :
+Specifiers :
  + %b : pull 1 byte to Print BIN 
  + %B : pull 2 bytes to Print BIN
  + %d : pull 1 byte unsigned DEC 0..255
  + %D : pull 2 bytes unsigned DEC 0..65535
  + %u : pull 2 bytes PTR to 4 bytes long unsigned DEC 0..4294967295
- + %e : pull 2 bytes PTR to 6 Bytes Real +1.23456789e+12
- + %f : pull 2 bytes PTR to 6 Bytes Real 3.1415
+ + %e : pull 2 bytes PTR to 5 Bytes float (-)1.23456789e+12
+ + %f : pull 2 bytes PTR to 5 Bytes float (-)3.1415
  + %h : pull 1 byte to Print HEX
  + %H : pull 2 bytes to Print HEX
  + %i : pull 1 byte to Print signed DEC -128..127
@@ -560,7 +617,7 @@ FPrintF.YA :
  + \r : Print 'CR' ($0D,13)
  + \\\\ : Print \
  + \% : Print %
-+ Modifiers for len and padding : 
+Modifiers for len and padding : 
  + %d	  : '9'  '12'
  + %2d	  : ' 9' '12'   				
  + %02d  : '09' '12'
@@ -577,6 +634,7 @@ Convert String to 40 bits Float
 + PUSHW PTR to target buffer (5 bytes)
 
 ## Out:
++ Target buffer filled with a FLOAT (packed)
 
 # AToF
 Convert String to 40 bits Float
