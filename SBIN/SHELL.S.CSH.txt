@@ -27,8 +27,6 @@ CSH.Init		lda #$FF
 				>STA.G CSH.hBuf
 				>SYSCALL GetMemPtr.A
 				>STYA ZPCSHBufPtr
-
-				>STYA.G CSH.BufBase
 				
 				>LDYAI 256
 				>SYSCALL GetMem0.YA
@@ -89,18 +87,19 @@ CSH.Run			lda #0
 				
 				bra .9					error, todo : PREOPS ++ --.....
 				
-.3				jsr CSH.GetLen			Get the len of this possible keyword/var
-						
+.3				>LDYA L.CSHCMDS
 				jsr CSH.IsKeyword
 				bcs .4					not an internal CSH keyword....
 				
-				stx CSH.CmdSave
-				
+				txa	
+				>STA.G CSH.CmdSave
 				
 				jmp (J.CSHCMDS,x)		
 
-.4				jsr CSH.GetVar
+.4				jsr CSH.GetVar			Y=Ptr To Value
 				bcs .5
+				
+				
 				jsr CSH.GetCharNB
 				bcs .9
 				cmp #'='
@@ -109,16 +108,15 @@ CSH.Run			lda #0
 				jsr CSH.GetNextCharNB	Skip =
 				bcs .99
 				
+				phy
 				jsr CSH.ExpEval
+				ply
 				bcs .9
 				
-				jsr CSH.GetChar
+				jsr CSH.SetVarValueAtY
 				bcs .9
 				cmp #';'
 				bne .99
-				
-				jsr CSH.SetVar
-				bcs .9
 				
 				jmp CSH.GetNextCharNB	Skip ;
 				
@@ -195,68 +193,56 @@ CSH.RestorePtr	phy
 				ply
 				rts
 *--------------------------------------
-CSH.GetLen		ldy #0					we have already a letter
-								
-.1				iny
-				lda (ZPCSHBufPtr),y
-				beq .8
-
-				jsr CSH.IsLetterOrDigit
-				bcc .1
+CSH.IsKeyword	>STYA ZPPtr1
 				
-.8				tya
-				>STA.G CSH.IdentLen
-				rts
-*--------------------------------------
-CSH.IsKeyword	>LDYA L.CSHCMDS
-				>STYA ZPPtr2
+				jsr CSH.GetIdentLen
+				
+				phy						Y = kw len
 				
 				ldx #0
 				
-.1				lda (ZPPtr2)
+.1				lda (ZPPtr1)
 				beq .9					Ending 0, not found....
 				
-				>LDA.G CSH.IdentLen
+				pla
+				pha						Get Back Len
 				
-				cmp (ZPPtr2)			Same Len ?
+				cmp (ZPPtr1)			Same Len ?
 				bne .4
 				
 				tay
 				
-.2				lda (ZPCSHBufPtr),y
+.2				lda (ZPPtr1),y
 
-				cmp #'a'				To Uppercase
-				bcc .3
-				cmp #'z'+1
-				bcs .3
-				eor #$20
-
-.3				cmp (ZPPtr2),y
+.3				dey
+				cmp (ZPCSHBufPtr),y
 				bne .4
-				dey
+				tya
+
 				bne .2
 				
-				>LDA.G CSH.IdentLen
+				pla						Found keyword...
 				clc
-				adc ZPCSHBufPtr
+				adc ZPCSHBufPtr			..advance Ptr to char after it..
 				sta ZPCSHBufPtr
 				bcc .8
 				inc ZPCSHBufPtr+1	
-				clc						Found an internal Cmd...
+				clc						
 .8				rts
 
 .4				inx
 				inx
 				
-				lda ZPPtr2
+				lda ZPPtr1
 				sec
-				adc (ZPPtr2)
-				sta ZPPtr2
+				adc (ZPPtr1)
+				sta ZPPtr1
 				bcc .1
-				inc ZPPtr2+1
+				inc ZPPtr1+1
 				bra .1
 				
-.9				sec
+.9				pla
+				sec
 				rts
 *--------------------------------------
 CSH.WHILE
@@ -292,13 +278,13 @@ CSH.IF			jsr CSH.GetCharNB
 				
 				jsr CSH.GetNextCharNB	Skip '{'
 
-				lda CSH.CmdSave			Push "IF" or "WHILE"
+				>LDA.G CSH.CmdSave		Push "IF" or "WHILE"
 				beq .1					if "IF", no need to push Saved Ptr
 				
 				pha
-				lda CSH.BufPtrSave+1	WHILE : push loop address...
+				>LDA.G CSH.BufPtrSave+1	WHILE : push loop address...
 				jsr CSH.Push
-				lda CSH.BufPtrSave
+				>LDA.G CSH.BufPtrSave
 				jsr CSH.Push		
 				pla
 				
@@ -376,9 +362,12 @@ CSH.TYPE		>STA.G CSH.ACCT
 				jsr CSH.IsLetter
 				bcs .9
 
-				jsr CSH.GetLen
-				jsr CSH.FindVar
+				jsr CSH.GetVar			Already exists ?
 				bcc .90
+				
+				jsr CSH.AddVar			No, add with undefined value...
+				bcs .99
+*										Y=Ptr in DATA to Value
 				
 				jsr CSH.GetCharNB
 				bcs .9
@@ -391,31 +380,32 @@ CSH.TYPE		>STA.G CSH.ACCT
 				jsr CSH.GetNextCharNB
 				bcs .9
 				
+				phy						Save Ptr To Value
 				jsr CSH.ExpEval
+				ply
+
 				bcs .9
+				
+				jsr CSH.SetVarValueAtY	Update value to this var
 				
 				jsr CSH.GetChar
 				bcs .9
 				cmp #';'
 				bne .9
 				
-.8				jsr CSH.AddVar
-				bcs .99
-				
-				jsr CSH.GetNextCharNB	Skip ;
+.8				jsr CSH.GetNextCharNB	Skip ;
 				clc
 				rts
 
 .90				lda #CSH.E.DUP
 				sec
 				rts
+							
 .9				lda #CSH.E.SYNTAX
 				sec
 .99				rts
 *--------------------------------------
 CSH.ExpEval		jsr CSH.ZeroACC
-				
-				ldy #0
 				
 				jsr CSH.GetCharNB
 				bcs .9
@@ -433,6 +423,7 @@ CSH.ExpEval		jsr CSH.ZeroACC
 				bcs .9
 				
 				jsr CSH.GetNumInACC
+
 				bcs .9
 		
 				
@@ -443,41 +434,45 @@ CSH.ExpEval		jsr CSH.ZeroACC
 				sec
 .99				rts	
 *--------------------------------------
-CSH.GetNumInACC	
+CSH.GetNumInACC	>LDA.G CSH.ACCT
+				cmp #CSH.TYPE.FLOAT
+				bcc .1
+				>PUSHWI ZPCSHBufPtr
+				>PUSHW ZPCSHBufPtr
+				>PUSHEA.G CSH.ACC
+				
+				>SYSCALL StrToF
+				rts
+				
+.1				>PUSHBI 10
 
-				>LDA.G CSH.ACCT
-				
-*				>SYSCALL StrToL
-*				bcs .9
-*				rts
-				
-.9				lda #CSH.E.SYNTAX
-				sec
+				>PUSHWI ZPCSHBufPtr
+				>PUSHW ZPCSHBufPtr
+				>PUSHEA.G CSH.ACC
+				>DEBUG
+				>SYSCALL StrToL
 				rts	
 *--------------------------------------
 CSH.ZeroACC		lda #0
-			
-				>STA.G CSH.ACC
+				ldx #5
+				ldy #CSH.ACC
+				
+.1				sta (pData),y
 				iny
-				sta (pData),y
-				iny
-				sta (pData),y
-				iny
-				sta (pData),y
+				dex
+				bne .1
+				
 				rts
 *--------------------------------------
 * Vars...
 *--------------------------------------
-CSH.AddVar		jsr CSH.FindVar
-				bcc .97
-
-				>LDA.G CSH.SymbolsPtr
-				
+CSH.AddVar		jsr CSH.GetIdentLen
 				sec
-				>ADC.G CSH.IdentLen
+				>ADC.G CSH.SymbolsPtr
+				
 				bcs .99
 				
-				adc #2					TYPE + OFS
+				adc #1					OFS
 				bcs .99
 				
 				>LDA.G CSH.DataPtr
@@ -485,7 +480,7 @@ CSH.AddVar		jsr CSH.FindVar
 				
 				>LDA.G CSH.ACCT
 				tax
-*				clc
+				sec						+1 for Type
 				adc CSH.TSIZE,x
 				bcs .98					Out of memory
 
@@ -494,17 +489,13 @@ CSH.AddVar		jsr CSH.FindVar
 				
 				jsr CSH.GetChar
 				
-.10				sta (ZPCSHSymbols),y
+.1				sta (ZPCSHSymbols),y
 				iny
 				jsr CSH.GetNextChar
 				
 				jsr CSH.IsLetterOrDigit
-				bcc .10
+				bcc .1
 				
-				lda CSH.ACCT
-				sta (ZPCSHSymbols),y
-				
-				iny
 				pla						Get Back Data OFS				
 				pha
 				sta (ZPCSHSymbols),y
@@ -513,93 +504,97 @@ CSH.AddVar		jsr CSH.FindVar
 				tya
 				>STA.G CSH.SymbolsPtr
 				
+				>LEA.G CSH.ACCT
+				>STYA ZPPtr1			ACCT/ACC in ZPPtr1
+				
 				ply						Get Back Data OFS again
+				phy
 				
-				>LDA.G CSH.ACCT
+				lda (ZPPtr1)
+				sta (ZPCSHSymbols),y	Add Type to Data
+				iny
+
 				tax
-				lda CSH.TSIZE,x
+				lda CSH.TSIZE,x			A = byte count to store
 				
-				ldx #0
-				
-.1				pha
-				>LDA.G CSH.ACC
 				tax
+				
+.2				inc ZPPtr1
+				bne .3
+				inc ZPPtr1+1
+				
+.3				lda (ZPPtr1)
 				sta (ZPCSHData),y
 				iny
-				inx
-				pla
-				dec
-				bne .1
+				dex
+				bne .2
 				
 				tya
 				>STA.G CSH.DataPtr
 				
+				ply						Exit with Y=Data Offset
 				clc
 				rts
-				
-.97				lda #CSH.E.DUP
-				sec
-				rts
-			
+							
 .98				pla
 .99				lda #CSH.E.OOM
 				sec
 				rts
 *--------------------------------------
-CSH.SetVar
+CSH.SetVarValueAtY
 
 				clc
 				rts
 *--------------------------------------
-CSH.GetVar		jsr CSH.FindVar
-				bcs .9
+CSH.GetVar		>LDYA ZPCSHSymbols
+				>STYA ZPPtr1
 				
-				clc
-.9				rts
-*--------------------------------------
-CSH.FindVar		>LDYA ZPCSHSymbols
-				>STYA ZPPTR1
+				jsr CSH.GetIdentLen
+				phy
 				
-.1				lda (ZPPTR1)
+.1				lda (ZPPtr1)
 				beq .9
 				
-				>CMP.G CSH.IdentLen
-				bne .4
+				pla
+				pha
+				cmp (ZPPtr1)
+				bne .3
 				
 				tay
 				
-.2				lda (ZPPTR1),y
+.2				lda (ZPPtr1),y
+				dey
 				cmp (ZPCSHBufPtr),y
 				bne .3
 				
-				dey
+				tya
 				bne .2
 				
-				lda (ZPPTR1)
-				sec
-				adc ZPPTR1
-				sta ZPPTR1
-				bcc .8
-				inc ZPPTR1+1
+				pla
+				
+				jsr CSH.VarSkipName
 				
 				clc
 .8				rts
 							
-.3				lda (ZPPTR1)			skip Name
-.4				sec
-				adc ZPPTR1
-				bcc .5
-				inc ZPPTR1+1
-				clc
+.3				jsr CSH.VarSkipName
 				
-.5				adc #2					Skip Type+OFS
-				sta ZPPTR1
-				bcc .1
-				inc ZPPTR1+1
+.5				inc ZPPtr1				Skip Pointer to TYPE/DATA
+				bne .1
+				inc ZPPtr1+1
 				bra .1
 				
-.9				sec
+.9				pla
+				sec
 				rts
+*--------------------------------------
+CSH.VarSkipName	lda (ZPPtr1)
+				sec
+				adc ZPPtr1
+				sta ZPPtr1
+				bcc .8
+				inc ZPPtr1+1
+.8				rts				
 *--------------------------------------
 * Stack
 *--------------------------------------
@@ -654,6 +649,16 @@ CSH.CheckStack	pha
 				rts						
 *--------------------------------------
 * CHAR related Subs.....
+*--------------------------------------
+CSH.GetIdentLen	ldy #0
+								
+.1				iny
+				lda (ZPCSHBufPtr),y
+				beq .8
+
+				jsr CSH.IsLetterOrDigit
+				bcc .1
+.8				rts
 *--------------------------------------
 CSH.GetCharNB	jsr CSH.GetChar
 				bcs CSH.GetNextCharNB.RTS
@@ -722,6 +727,72 @@ CSH.IsDigit10	cmp #'0'
 				rts						cc if ok, cs if not
 					
 .9				sec
+				rts
+*--------------------------------------
+CSH.ErrorMsg	>LDA.G CSH.hBuf
+				>SYSCALL GetMemPtr.A
+				>STYA ZPPtr1
+				
+				lda #0
+				>STA.G CSH.LineNum
+				iny
+				>STA.G CSH.LineNum+1
+				
+.1				>LDYA ZPPtr1
+				>STYA ZPPtr2			Save actual line start
+				
+				>INCW.G CSH.LineNum
+
+.2				lda (ZPPtr1)
+				beq .6					EoF
+				inc ZPPtr1
+				bne .3
+				inc ZPPtr1+1
+				
+.3				cmp #$0D
+				bne .2					Scan until EoL
+				
+				ldx ZPPtr1
+				cpx ZPCSHBufPtr
+				lda ZPPtr1+1
+				sbc ZPCSHBufPtr+1
+				bcc .1					not this line....
+
+.4				ldy #0
+
+.5				lda (ZPPtr2),y
+				beq .6
+				iny
+				cmp #$0D
+				beq .6
+				phy
+				>SYSCALL PutChar.A
+				ply
+				bra .5
+				
+.6				lda #$0D
+				>SYSCALL PutChar.A
+				lda #$0A
+				>SYSCALL PutChar.A
+				
+				lda ZPCSHBufPtr
+				sec
+				sbc ZPPtr2
+				beq .8
+				tay
+				
+.7				phy
+				lda #'-'
+				>SYSCALL PutChar.A
+				ply
+				dey
+				bne .7
+				
+.8				>PUSHW.G CSH.LineNum
+				
+				>LDYA L.MSG.CSHERR
+				>SYSCALL PrintF.YA
+
 				rts
 *--------------------------------------
 MAN
