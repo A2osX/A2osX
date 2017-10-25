@@ -64,7 +64,7 @@ CSH.Run			lda #0
 				cmp #'}'				End of block ?
 				bne .1
 
-				jsr CSH.CheckStack		must be on stack....
+				jsr CSH.CheckStack		must be something on stack....
 				bcs .9
 				
 				jsr CSH.Pop				was expected, get stacked Cmd...
@@ -88,7 +88,8 @@ CSH.Run			lda #0
 				bra .9					error, todo : PREOPS ++ --.....
 				
 .3				>LDYA L.CSH.KEYWORDS
-				jsr CSH.Lookup
+				jsr CSH.LookupID
+
 				bcs .4					not an internal CSH keyword....
 				
 				txa	
@@ -184,63 +185,103 @@ CSH.Quit		>LDA.G CSH.hBuf
 				
 .8				rts
 *--------------------------------------
-CSH.SavePtr		>LDYA ZPCSHBufPtr
-				>STYA.G CSH.BufPtrSave
+CSH.WHILE
+CSH.IF			jsr CSH.GetCharNB
+				bcs .9
+				cmp #'('
+				bne .9
+				
+				jsr CSH.GetNextCharNB
+				bcs .9
+
+				jsr CSH.ExpEval
+				bcs .99
+				
+				jsr CSH.GetCharNB
+				bcs .99
+				cmp #')'
+				bne .9
+				
+				jsr CSH.GetNextCharNB
+				bcs .99
+				cmp #'{'
+				bne .9
+				
+				jsr CSH.IsACC0
+				bcc .6					eval returned ACC=0, skip {{....}}
+				
+				jsr CSH.GetNextCharNB	Skip '{'
+				bcs .99
+				
+				>LDA.G CSH.CmdSave		Push "IF" or "WHILE"
+				tax
+				jsr CSH.Keyword.start 
+				bcs .99
+				
+				lda #'}'				Tell '}' is expected at the end of block
+				jsr CSH.Push
+				bcs .99
+	
 				rts
-*--------------------------------------
-CSH.RestorePtr	>LDYA.G CSH.BufPtrSave
-				>STYA ZPCSHBufPtr
-				rts
-*--------------------------------------
-CSH.Lookup		>STYA ZPPtr1
 				
-				jsr CSH.GetIdentLen
-				
-				phy						Y = kw len
-				
-				ldx #0
-				
-.1				lda (ZPPtr1)
-				beq .9					Ending 0, not found....
-				
-				pla
-				pha						Get Back Len
-				
-				cmp (ZPPtr1)			Same Len ?
-				bne .4
-				
-				tay
-				
-.2				lda (ZPPtr1),y
+.6				ldx #1					expecting 1 '}' for now....
 
-.3				dey
-				cmp (ZPCSHBufPtr),y
-				bne .4
-				tya
-
-				bne .2
-				
-				pla						Found keyword...
-				clc
-				adc ZPCSHBufPtr			..advance Ptr to char after it..
-				sta ZPCSHBufPtr
-				bcc .8
-				inc ZPCSHBufPtr+1	
-				clc						
-.8				rts
-
-.4				inx
+.7				jsr CSH.GetNextChar
+				bcs .9
+				cmp #'{'
+				bne .71
 				inx
+				bra .7
 				
-				lda ZPPtr1
+.71				cmp #'}'
+				bne .7
+				txa
+				beq .9
+				dex
+				bne .7
+				
+				jsr CSH.GetNextChar
+				
+				clc
+				rts
+				
+.9				lda #CSH.E.SYNTAX
 				sec
-				adc (ZPPtr1)
-				sta ZPPtr1
-				bcc .1
-				inc ZPPtr1+1
-				bra .1
-				
-.9				pla
+.99				rts
+
+CSH.Keyword.Start
+				jmp (J.CSH.KEYWORDS.START,x)
+*--------------------------------------
+CSH.IF.START	jmp CSH.Push
+*--------------------------------------
+CSH.WHILE.START pha
+				>LDA.G CSH.BufPtrSave+1	WHILE : push loop address...
+				jsr CSH.Push
+				>LDA.G CSH.BufPtrSave
+				jsr CSH.Push		
+				pla
+				jmp CSH.Push
+*--------------------------------------
+CSH.IF.END		jsr CSH.GetNextChar		just skip ending '}'
+				clc
+				rts
+*--------------------------------------
+CSH.WHILE.END	jsr CSH.Pop
+				sta ZPCSHBufPtr
+				jsr CSH.Pop
+				sta ZPCSHBufPtr+1
+				clc
+				rts
+*--------------------------------------
+CSH.ELSE
+CSH.DO
+CSH.FOR
+CSH.SWITCH
+CSH.CASE
+CSH.BREAK
+CSH.CONTINUE
+
+				lda #CSH.E.SYNTAX
 				sec
 				rts
 *--------------------------------------
@@ -253,7 +294,7 @@ CSH.LONG		lda #CSH.TYPE.LONG
 CSH.FLOAT		lda #CSH.TYPE.FLOAT
 
 CSH.TYPE		>STA.G CSH.ACCT
-				
+
 				jsr CSH.GetChar
 				bcs .9
 				cmp #' '
@@ -307,108 +348,71 @@ CSH.TYPE		>STA.G CSH.ACCT
 				sec
 .99				rts
 *--------------------------------------
-CSH.WHILE
-CSH.IF			jsr CSH.GetCharNB
-				bcs .9
-				cmp #'('
-				bne .9
-				
-				jsr CSH.GetNextCharNB
-				bcs .9
+CSH.SavePtr		>LDYA ZPCSHBufPtr
+				>STYA.G CSH.BufPtrSave
+				rts
+*--------------------------------------
+CSH.RestorePtr	>LDYA.G CSH.BufPtrSave
+				>STYA ZPCSHBufPtr
+				rts
+*--------------------------------------
+CSH.LookupID	>STYA ZPPtr1
+				jsr CSH.GetIDLen
+				bra CSH.Lookup
 
-				jsr CSH.ExpEval
-				bcs .99
+CSH.LookupOP	>STYA ZPPtr1
+				jsr CSH.GetOPLen
 				
-				jsr CSH.GetCharNB
-				bcs .99
-				cmp #')'
-				bne .9
+CSH.Lookup		phy						Y = len
 				
-				jsr CSH.GetNextCharNB
-				bcs .99
-				cmp #'{'
-				bne .9
+				ldx #0
 				
-				>LDA.G CSH.ACC
-				iny
-				ora (pData),y
-				iny
-				ora (pData),y
-				iny
-				ora (pData),y
-				beq .6					eval returned false, skip {{....}}
+.1				lda (ZPPtr1)
+				beq .9					Ending 0, not found....
 				
-				jsr CSH.GetNextCharNB	Skip '{'
-
-				>LDA.G CSH.CmdSave		Push "IF" or "WHILE"
-				cmp #10					WHILE
-				beq .1					if "IF", no need to push Saved Ptr
-				
-				pha
-				>LDA.G CSH.BufPtrSave+1	WHILE : push loop address...
-				jsr CSH.Push
-				>LDA.G CSH.BufPtrSave
-				jsr CSH.Push		
 				pla
+				pha						Get Back Len
 				
-.1				jsr CSH.Push
-				bcs .99
+				cmp (ZPPtr1)			Same Len ?
+				bne .4
 				
-				lda #'}'				Tell '}' is expected at the end of block
-				jsr CSH.Push
-				bcs .99
-	
-				rts
+				tay
 				
-.6				ldx #1					expecting 1 '}' for now....
+.2				lda (ZPPtr1),y
 
-.7				jsr CSH.GetNextChar
-				bcs .9
-				cmp #'{'
-				bne .71
-				inx
-				bra .7
+.3				dey
+				cmp (ZPCSHBufPtr),y
+				bne .4
+				tya
+
+				bne .2
 				
-.71				cmp #'}'
-				bne .7
-				txa
-				beq .9
-				dex
-				bne .7
-				
-				jsr CSH.GetNextChar
-				
+				pla						Found keyword...
 				clc
-				rts
-				
-.9				lda #CSH.E.SYNTAX
-				sec
-.99				rts
-*--------------------------------------
-CSH.IF.END		jsr CSH.GetNextChar		just skip ending '}'
-				clc
-				rts
-*--------------------------------------
-CSH.WHILE.END	jsr CSH.Pop
+				adc ZPCSHBufPtr			..advance Ptr to char after it..
 				sta ZPCSHBufPtr
-				jsr CSH.Pop
-				sta ZPCSHBufPtr+1
-				clc
-				rts
-*--------------------------------------
-CSH.ELSE
-CSH.DO
-CSH.FOR
-CSH.SWITCH
-CSH.CASE
-CSH.BREAK
-CSH.CONTINUE
+				bcc .8
+				inc ZPCSHBufPtr+1	
+				clc						
+.8				rts
 
-				lda #CSH.E.SYNTAX
+.4				inx
+				inx
+				
+				lda ZPPtr1
+				sec
+				adc (ZPPtr1)
+				sta ZPPtr1
+				bcc .1
+				inc ZPPtr1+1
+				bra .1
+				
+.9				pla
 				sec
 				rts
 *--------------------------------------
 CSH.ExpEval		jsr CSH.ZeroACC
+				>STA.G CSH.EXPBOP1		A=0
 				
 				jsr CSH.GetCharNB
 				bcs .9
@@ -417,13 +421,14 @@ CSH.ExpEval		jsr CSH.ZeroACC
 				cmp #';'
 				beq .8
 				
-				jsr CSH.IsLetter		Fnc or Var ?
+.10				jsr CSH.IsLetter		Fnc or Var ?
 				bcs .5
 
 				jsr CSH.GetVar
 				
-				bcs .1
+				bcs .4
 				
+				>DEBUG
 				jsr CSH.LoadACCFromVar
 				bcs .9
 
@@ -433,12 +438,41 @@ CSH.ExpEval		jsr CSH.ZeroACC
 				bcs .9
 				
 				>LDYA L.CSH.BOPS
-				jsr CSH.Lookup
+				jsr CSH.LookupOP
+				bcs .9
+				
+				>LDA.G CSH.EXPBOP1		previous OP...
+				bne .2					go check precedence
+				
+				txa
+				>STA.G CSH.EXPBOP1
+				jsr CSH.ACC2ARG
+				jsr CSH.GetCharNB
+				bcc .10
+				
+.9				lda #CSH.E.SYNTAX
+				sec
+.99				rts	
+				
+.2				txa
+				>STA.G CSH.EXPBOP2
+				>CMP.G CSH.EXPBOP1		
+				bcs .3					
+				
+* new OP has precedence, stack ACC
 				
 				
-				bra .8
+
+				bra .10
 				
-.1				
+* Old OP has precedence, compute ACC=ARG <BOP> ACC					
+.3				>LDA.G CSH.EXPBOP1
+				jsr CSA.Compute
+				bcs .9				
+				jsr CSH.GetCharNB
+				bcc .10				
+				
+.4				
 				
 				bra .9
 				
@@ -452,10 +486,9 @@ CSH.ExpEval		jsr CSH.ZeroACC
 				
 .8				clc
 				rts
-				
-.9				lda #CSH.E.SYNTAX
-				sec
-.99				rts	
+*--------------------------------------
+CSA.Compute		tax
+				jmp (J.CSH.BOBS,x)
 *--------------------------------------
 CSH.GetNumInACC	>LDA.G CSH.ACCT
 				cmp #CSH.TYPE.FLOAT
@@ -487,9 +520,11 @@ CSH.ZeroACC		lda #0
 				
 				rts
 *--------------------------------------
+CSH.ACC2ARG		
+*--------------------------------------
 * Vars...
 *--------------------------------------
-CSH.AddVar		jsr CSH.GetIdentLen
+CSH.AddVar		jsr CSH.GetIDLen
 				
 				sec
 				>ADC.G CSH.SymbolsPtr	Enough room to store this symbol ?
@@ -511,7 +546,7 @@ CSH.AddVar		jsr CSH.GetIdentLen
 				>LDA.G CSH.SymbolsPtr
 				pha
 
-				jsr CSH.GetIdentLen
+				jsr CSH.GetIDLen
 				
 				ply
 				sta (ZPCSHSymbols),y
@@ -556,7 +591,7 @@ CSH.AddVar		jsr CSH.GetIdentLen
 CSH.GetVar		>LDYA ZPCSHSymbols
 				>STYA ZPPtr1
 				
-				jsr CSH.GetIdentLen
+				jsr CSH.GetIDLen
 				pha
 
 .1				lda (ZPPtr1)
@@ -626,6 +661,8 @@ CSH.LoadACCFromVar
 								
 				>LEA.G CSH.ACC
 				>STYA ZPPtr1
+				
+				ldy #0
 
 .1				lda (ZPCSHValue),y
 				sta (ZPPtr1)
@@ -655,6 +692,8 @@ CSH.StoreACCToVar
 				
 				>LEA.G CSH.ACC
 				>STYA ZPPtr1
+
+				ldy #0
 				
 .1				lda (ZPPtr1)
 				inc ZPPtr1
@@ -670,6 +709,38 @@ CSH.StoreACCToVar
 				
 .9				lda #CSH.E.TMISMATCH
 				sec
+				rts
+*--------------------------------------
+CSH.IsACC0		>LDA.G CSH.ACCT
+				cmp #CSH.TYPE.FLOAT
+				bne .1					char,int,long
+				>LDA.G CSH.ACC
+				bne .9
+				
+.8				clc
+				rts
+				
+.1				tax
+				lda CSH.TSIZE,x
+				tax
+				
+				lda #0
+				ldy #CSH.ACC
+
+.2				ora (pData),y
+				iny
+				dex
+				bne .2
+				
+				tax
+				beq .8
+				
+.9				sec
+				rts
+*--------------------------------------
+CSH.BOPS.PLUS	
+
+				clc
 				rts
 *--------------------------------------
 * Stack
@@ -738,7 +809,7 @@ CSH.GetOPLen	ldy #0
 .8				tya
 				rts
 *--------------------------------------
-CSH.GetIdentLen	ldy #0
+CSH.GetIDLen	ldy #0
 								
 .1				iny
 				lda (ZPCSHBufPtr),y
