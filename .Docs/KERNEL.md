@@ -183,6 +183,28 @@ Load a file in memory
 + PUSHW = GID
 + PUSHW = PATH
 
+# FAdd,FSub,FMult,FDiv,FPwr
+Return X+Y, X-Y, X*Y, X/Y, X^Y
+
+## In:
++ PUSHW = X (*Float)
++ PUSHW = Y (*Float)
++ Y,A = Dest (*Float)
+
+# Log,Sqr,Exp,Cos,Sin,Tan,ATan
+Return Log(x), Sqr(x), E^X, Cos(x), Sin(X), Tan(x), ATan(x)
+
+## In:
++ PUSHW = X (*Float)
++ Y,A = Dest (*Float)
+
+# LRIntF
+Return Float rounded into a long
+
+## In:
++ PUSHW = X (*Float)
++ Y,A = Dest (*long)
+
 # GetMem
 
 ## In: 
