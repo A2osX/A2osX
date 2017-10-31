@@ -198,6 +198,13 @@ Return Log(x), Sqr(x), E^X, Cos(x), Sin(X), Tan(x), ATan(x)
 + PUSHW = X (*Float)
 + Y,A = Dest (*Float)
 
+# Float
+Return return 'floated' long
+
+## In:
++ PUSHW = X (*long)
++ Y,A = Dest (*float)
+
 # LRIntF
 Return Float rounded into a long
 
@@ -371,7 +378,7 @@ Return information about a file
 
 ## Out :
 
-# MKDirYA
+# MKDir.YA
 
 ## In: 
 + Y,A = DIR name
