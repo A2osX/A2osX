@@ -16,7 +16,8 @@ AUTO 6
 				.INB /A2OSX.BUILD/INC/COM.6551.I
 *--------------------------------------
 TmpPtr1			.EQ	$0
-VS.CMD			.EQ $C5					"E": Virtual Drive Command Envelope
+ADT.CMD.VSD		.EQ $C5					"E": Virtual Drive Command Envelope
+ADT.CMD.PING	.EQ $D9					"Y": PING
 DRV.EntryPoint	.EQ $BF41
 *--------------------------------------
 VSDRIVE.Init	>LDAXI VSDRIVE.MSG0
@@ -31,7 +32,8 @@ VSDRIVE.Init	>LDAXI VSDRIVE.MSG0
 				bcs .99
 
 				stx DRV+2				DRV.Slotn0
-				sta .1+1				SlotCn
+
+				sta .1+1				Slot Cn
 				
 				and #$0F
 				pha						slot n
@@ -117,16 +119,20 @@ SSC.Detect		stz TmpPtr1
 							
 				stz SSC.RESET,x 
 				
-				pha						zzzzzzz...
-				pla
+				jsr VSDRIVE.Wait
 				
 				lda #SSC.CTL.CLKEXT+SSC.CTL.B115200+SSC.CTL.8D+SSC.CTL.1S+SSC.CMD.NOP
 				sta SSC.CTL,x
 				
+				jsr VSDRIVE.Wait
+				
 				lda #SSC.CMD.RIRQDIS+SSC.CMD.TE+SSC.CMD.DTR
 				sta SSC.CMD,x				
-				lda TmpPtr1+1
 				
+				jsr VSDRIVE.Wait
+
+				lda TmpPtr1+1			A=Slot Cn, X=n0
+
 				clc
 				rts						X=SlotN0, A=SlotCN
 				
@@ -139,15 +145,15 @@ SSC.Detect		stz TmpPtr1
 				rts
 *--------------------------------------
 VSDRIVE.Ping	ldx DRV+2				DRV.Slotn0
-				
+			
 				stz VSDRIVE.Ping.TO
 				stz VSDRIVE.Ping.TO+1
 				
 				ldy #10
 				
 .1				lda SSC.STATUS,x
-				bit #SSC.STATUS.TDRE	Ready for transmit?
-				bne .2
+				and #SSC.STATUS.TDRE	Ready for transmit?
+				bne .20
 			
 				jsr	VSDRIVE.IncTimer	Wait.......
 				bne .1
@@ -155,37 +161,39 @@ VSDRIVE.Ping	ldx DRV+2				DRV.Slotn0
 				bne .1
 				
 				lda #1
+				
 .9				sec
 				rts						Time Out.....
 				
-				ldy #4					Five bytes to send
-
 				stz VSDRIVE.Ping.TO
 				stz VSDRIVE.Ping.TO+1
-				
-.2				lda VSDRIVE.Ping.CMD,y
+
+.20				ldy #5					5 bytes to send
+
+.2				lda VSDRIVE.CMDS-1,y
 				sta SSC.DATA,x
 				
-.3				lda SSC.STATUS,x
-				bit #SSC.STATUS.TDRE	char transmitted?
-				bne .4
+				jsr VSDRIVE.Wait
 				
+.3				lda SSC.STATUS,x
+				and #SSC.STATUS.TDRE	char transmitted?
+				bne .4
+
 				jsr	VSDRIVE.IncTimer
 				bne .3
 				lda #2
 				bra .9
 				
 .4				dey
-				bpl .2					next byte
+				bne .2					next byte
 				
-				lda #518^$ff
+				lda #521^$ffff			522 bytes to recieve
 				sta VSDRIVE.Ping.BC
-				lda /518^$ff
+				lda /521^$ffff
 				sta VSDRIVE.Ping.BC+1
 				
 				stz VSDRIVE.Ping.TO
 				stz VSDRIVE.Ping.TO+1
-				ldy #20
 				
 .5				lda SSC.STATUS,x
 				and #SSC.STATUS.RDRF	incoming char?
@@ -193,15 +201,12 @@ VSDRIVE.Ping	ldx DRV+2				DRV.Slotn0
 				
 				jsr	VSDRIVE.IncTimer
 				bne .5
-				dey
-				bne .5
 				
 				lda #3
 				bra .9
 				
 .6				lda SSC.DATA,x
-
-				inc VSDRIVE.Ping.BC		518 bytes to recieve
+				inc VSDRIVE.Ping.BC
 				bne .5
 				inc VSDRIVE.Ping.BC+1
 				bne .5
@@ -215,7 +220,15 @@ VSDRIVE.IncTimer
 				inc VSDRIVE.Ping.TO+1
 .8				rts
 *--------------------------------------
-VSDRIVE.Ping.CMD	.HS C4000001C5		C4=C5 eor 01 eor 00 eor 00				
+VSDRIVE.Wait	lda #0
+				
+.1				dec
+				bne .1
+				rts
+*--------------------------------------			
+VSDRIVE.CMDS	.HS C6.00.00.03
+				.DA #ADT.CMD.VSD
+*				C6=C5 eor 03 eor 00 eor 00				
 VSDRIVE.Ping.TO	.BS 2
 VSDRIVE.Ping.BC	.BS 2			
 *--------------------------------------
@@ -358,16 +371,16 @@ DRV.Slotn0		ldx #$ff				Self Modified
 				adc #2					CC from bcs
 				
 .2				sta DRV.CmdBuf.Cmd		store cmd
-				eor #VS.CMD
+				eor #ADT.CMD.VSD
 				eor DRV.BLKNUM
 				eor DRV.BLKNUM+1
 				sta DRV.CmdBuf.Sum		Compute & store CheckSum
 				
 				lda DRV.BLKNUM
-				sta DRV.CmdBuf.BlkLo
+				sta DRV.CmdBuf.BlkL
 
 				lda DRV.BLKNUM+1
-				sta DRV.CmdBuf.BlkHi
+				sta DRV.CmdBuf.BlkH
 				
 * send CMD+CS
 				ldy #4					Send 5 bytes including Sum
@@ -383,7 +396,6 @@ DRV.Slotn0		ldx #$ff				Self Modified
 				sta $100,y
 				dey
 				bpl .5
-
 *--------------------------------------
 				lda DRV.COMMAND
 				dec						1-1=0 if read
@@ -394,7 +406,7 @@ DRV.Slotn0		ldx #$ff				Self Modified
 DRV.DO.CMD.R	ldy #3					Read Back and check 4 bytes
 				
 .1				jsr DRV.SSCGet
-				eor DRV.CmdBuf.BlkHi,y
+				eor DRV.CmdBuf.BlkH,y
 				bne DRV.DO.CMD.ERR
 				dey
 				bpl .1
@@ -516,10 +528,10 @@ DRV.READWRITE	bit RRAMWRAMBNK1
 				rts 
 *--------------------------------------
 DRV.CmdBuf.Sum	.BS 1					Reverse order for dey 
-DRV.CmdBuf.BlkHi	.BS 1
-DRV.CmdBuf.BlkLo	.BS 1
+DRV.CmdBuf.BlkH	.BS 1
+DRV.CmdBuf.BlkL	.BS 1
 DRV.CmdBuf.Cmd	.BS 1
-DRV.CmdBuf.Env	.DA #VS.CMD
+DRV.CmdBuf.Env	.DA #ADT.CMD.VSD
 *--------------------------------------
 				.EP
 *--------------------------------------

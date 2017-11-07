@@ -694,67 +694,101 @@ TClock.SIG		.HS	0878282c58ff700538b00118b8087848
 DevMgrInit		>LDYAI MSG.DEV
 				>SYSCALL PrintF.YA
 				
-				stz ZPPtr1
-				lda #$C1
-				sta ZPPtr1+1
-				lda #1
-				sta DEV.HEADER+S.DEV.BUSID
+				lda DEVCNT
+				sta DevMgrInit.DEVCNT
 				
-.1				lda #1
+.1				ldx DevMgrInit.DEVCNT
+				lda DEVLST,x
+				
+				asl
+				php								Save Drive 1/2 in C
+				lsr								0SSSxxxx
+				
+				lsr
+				lsr
+				lsr
+				lsr								00000SSS
+				sta DEV.HEADER+S.DEV.BUSID
+
+				asl								0000SSS0
+				
+				tax
+				stz ZPPtr1
+				lda DEVPTRS+1,x
+				sta ZPPtr1+1
+				
+				plp
+				lda #0
+				adc #1					Make DevID 1 or 2
 				sta DEV.HEADER+S.DEV.DEVID
 				
-				ldx #SmartPort.SIG-SmartPort.OFS-1
+				lda ZPPtr1+1
+				cmp #$D0				Disk II Driver is $D000
+				bne .2
+				
+				jsr DevMgrInit.DII
+				lda #A2osX.S.DII
+				bra .7					Go mark slot as USED
 
-.2				ldy SmartPort.OFS,x		Check if there is a smartport firmware
+.2				cmp #$FF				/RAM is always $FF00
+				bne .3
+				jsr DevMgrInit.RAM
+				bra .8
+				
+.3				and #$f
+				cmp #$C0
+				beq .4
+				
+				jsr DevMgrInit.BLK		Outside ROM space, ram loaded BLK dev
+				bra .8
+				
+.4				ldx #SmartPort.SIG-SmartPort.OFS-1
+
+.5				ldy SmartPort.OFS,x		Check if there is a smartport firmware
 				lda (ZPPtr1),y
 				cmp SmartPort.SIG,x
 				bne .8					not a Disk Controller...
 				dex
-				bpl .2
-
-				ldy #$ff
-				lda (ZPPtr1),y
-				bne .3					$0, Disk II, 16sect
-
-				jsr DevMgrInit.DII
-				ldy #A2osX.S.DII
-				bra .7
-
-.3				inc
-				beq .7					$ff, Disk II 13 Sect, ignore
+				bpl .5
 				
 				ldy #7
 				lda (ZPPtr1),y
-				bne .4					$Cn07=00 : SmartPort
+				bne .6					$Cn07=00 : SmartPort
 				
-				jsr DevMgrInit.SP
-				ldy #A2osX.S.SP
+				lda ZPPtr1				get $Cn
+				and #$f					get $0n
+				cmp DEV.HEADER+S.DEV.BUSID same as SSS ?
+				beq .51
+				
+				inc DEV.HEADER+S.DEV.DEVID	Remapped SP devices....
+				inc DEV.HEADER+S.DEV.DEVID	Add 2 to DEVID (2 & 3)
+				
+.51				jsr DevMgrInit.SP
+				lda #A2osX.S.SP
 				bra .7
 	
-.4				jsr DevMgrInit.BLK
-				ldy #A2osX.S.BLK
+.6				jsr DevMgrInit.BLK
+				lda #A2osX.S.BLK
 				
-.7				lda ZPPtr1+1
-				and #$0f
-				tax
-				tya
+.7				ldx DEV.HEADER+S.DEV.BUSID
 				sta A2osX.S,x
 				
-.8				inc DEV.HEADER+S.DEV.BUSID
-				inc ZPPtr1+1
-				lda ZPPtr1+1				
-				cmp #$C8
-				bne .1
+.8				dec DevMgrInit.DEVCNT
+				bpl .1
 				
 				clc
 				rts
+DevMgrInit.DEVCNT
+				.BS 1
 *--------------------------------------
 DevMgrInit.DII	>LDYAI A2osX.DIIDrv
 				>STYA DEV.HEADER+S.DEV.DRV.JMP
-				jsr DevMgrInit.AddDev
-				inc DEV.HEADER+S.DEV.DEVID
-				jsr DevMgrInit.AddDev
-				rts
+				jmp DevMgrInit.AddDev
+*--------------------------------------
+DevMgrInit.RAM	>DEBUG
+				>LDYAI A2osX.RamDrv
+				>STYA DEV.HEADER+S.DEV.DRV.JMP
+				jmp DevMgrInit.AddDev
 *--------------------------------------
 DevMgrInit.BLK	ldy #$ff
 				lda (ZPPtr1),y
@@ -763,52 +797,36 @@ DevMgrInit.BLK	ldy #$ff
 				sta DEV.HEADER+S.DEV.ROM.JMP+1
 				
 				>LDYAI A2osX.BlkDrv
-				>STYA DEV.HEADER+S.DEV.DRV.JMP
-				
-				jsr DevMgrInit.AddDev
-				inc DEV.HEADER+S.DEV.DEVID
-				jsr DevMgrInit.AddDev
-				rts
+				>STYA DEV.HEADER+S.DEV.DRV.JMP				
+				jmp DevMgrInit.AddDev
 *--------------------------------------
 DevMgrInit.SP	ldy #$ff
 				lda (ZPPtr1),y
 				clc
 				adc #3					Compute smartport entry point
-				sta .1+1
 				sta .3+1
 				sta DEV.HEADER+S.DEV.ROM.JMP
 				lda ZPPtr1+1
-				sta .1+2
+
 				sta .3+2
 				sta DEV.HEADER+S.DEV.ROM.JMP+1
 
 				>LDYAI A2osX.PrtDrv
 				>STYA DEV.HEADER+S.DEV.DRV.JMP
 				
-.1				jsr $ffff				Self Modified
-				.DA #0					Status
-				.DA SP.CTRL.STATUS
-				bcs .9
-				lda SP.CTRL.STATUS.DATA
-				beq .9					no device
-				
-.2				lda #1
+.2				lda DEV.HEADER+S.DEV.DEVID
 				sta SP.DEV.STATUS.DEVID
 				
 .3				jsr $ffff				Self Modified
 				.DA #0					Status
 				.DA SP.DEV.STATUS
-				bcs .7
+				bcs .9
+				
 				lda SP.DEV.STATUS.DATA+S.DSTAT.S
 				sta DEV.HEADER+S.DEV.S
 				
 				jsr DevMgrInit.AddDev
 				
-.7				inc SP.DEV.STATUS.DEVID
-				inc DEV.HEADER+S.DEV.DEVID
-				dec SP.CTRL.STATUS.DATA
-				bne .3
-
 .9				rts
 *--------------------------------------
 DevMgrInit.AddDev
@@ -855,12 +873,6 @@ DEV.HEADER		clc
 SmartPort.OFS	.HS 010305
 SmartPort.SIG	.HS 200003
 *--------------------------------------
-SP.CTRL.STATUS	.DA #3
-				.DA #0
-				.DA SP.CTRL.STATUS.DATA
-				.DA #0
-SP.CTRL.STATUS.DATA
-				.BS 8					DevCnt
 SP.DEV.STATUS	.DA #3
 SP.DEV.STATUS.DEVID
 				.BS 1
