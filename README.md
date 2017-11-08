@@ -1,15 +1,31 @@
 # A2osX (0.9.1) Multi-Tasking OS for Apple II  
 
-...preemtive ?
+...preemtive ? soon !
 
-## Latest News 2017-09-22
-
-**Disk images :**  
+## Disk images :  
 
 + **A2OSX.BOOT.po**   :  **(0.9.1)**  140k BOOT disk image with all binaries  
 + **A2OSX.DEV.po**    :  **(0.9.1)**  140k disk image with ASM binaries, Debug Tools & INClude files  
 + **A2OSX.BUILD.po**  :  **(0.9.1)**  800k BOOT disk image with S-C MASM 2.0 and all binaries (BOOT+DEV)  
 + **A2OSX.SRC.po**    :  **(0.9.1)**  800k disk image with all sources  
+
+## Latest News 2017-11-08
+
+Kernel 0.9.1 stable enough to resume building.
+
+ + KM.APPLETALK module not crashing anymore  
+   (Undocummented AtInit function, had to go further in official ATINIT dissaembly) 
+
+ + Improved Command Line editing and history. 
+   (SUPPR key is emulated with Ctrl-X using //e keyboard)
+
+ + New DevMgr enumeration stratey, now including /RAM and other virtual Block Devices 
+ 
+ + Math API (Hacked from APLLESOFT ROM ;-)
+
+ + CSH Script engine in progress within Shell (In progress)
+ 
+## Latest News 2017-09-22
 
 (once Kernel 0.9.1 stable enough, BOOT & DEV will be updated) __(done!)__
 
