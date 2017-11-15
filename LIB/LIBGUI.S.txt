@@ -6,11 +6,11 @@ AUTO 6
 				.LIST OFF	
 				.OP	65C02
 				.OR	$2000
-				.TF /A2OSX.BUILD/LIB/LIBGFX.O
+				.TF /A2OSX.BUILD/LIB/LIBGUI.O
 *--------------------------------------
 				.INB /A2OSX.BUILD/INC/MACROS.I
 				.INB /A2OSX.BUILD/INC/A2OSX.I
-				.INB /A2OSX.BUILD/INC/LIBGFX.I
+				.INB /A2OSX.BUILD/INC/LIBGUI.I
 *--------------------------------------
 				.MA SWAP16
 				lda ]1
@@ -32,8 +32,8 @@ AUTO 6
 				sta ]1+1
 				.EM
 *--------------------------------------
-ZPCBPtr			.EQ ZPLIB
 ZPDCPtr			.EQ ZPLIB+2
+ZPCmdPtr		.EQ ZPLIB+4
 *--------------------------------------
 *			File Header (16 Bytes)
 *--------------------------------------
@@ -51,10 +51,11 @@ CS.START		cld
 *--------------------------------------
 .1				.DA LIB.LOAD
 				.DA LIB.UNLOAD
-				.DA InitGFXA
-				.DA CloseGFX
-				.DA InitCursor
-				.DA SetCursorYA
+				.DA InitGUI.A
+J.Cmds			.DA CloseGUI			J.Cmds-12 !!!
+				.DA Draw
+				.DA SetCursor.A
+				.DA SetCursorPos
 				.DA HideCursor
 				.DA ShowCursor
 				.DA DrawLine
@@ -65,21 +66,59 @@ LIB.LOAD
 LIB.UNLOAD		clc
 				rts
 *--------------------------------------
-InitGFXA		sta hDev
-				>SYSCALL GetDevByIDA
-				>STYA GoDevGFX.1+1
+InitGUI.A		sta hDev
+				>SYSCALL GetDevByID.A
+				>STYA GoDev.Jmp+1
 
 				clc
 				rts			
 *--------------------------------------
-CloseGFX
+CloseGUI
 				stz hDev
 				sec
 				rts
 *--------------------------------------
-InitCursor
+Draw			>PULLW ZPCmdPtr
+
+				lda (ZPCmdPtr)			Get Cmd
+
+.1				tax
+				cpx #S.CB.CMD.DRAWLINE
+				bcc .3					Native DRV Cmd
+
+				ldy CB.CmdLen,x
+				
+.2				lda (ZPCmdPtr),y		Y=Byte count-1 to cache
+				sta CB.Cache,y
+				dey
+				bpl .2
+				jsr Draw.Jmp
+				bra .7
+				
+.3				>LDYA ZPCmdPtr
+
+				jsr GoDev.YA
+				
+.7				lda (ZPCmdPtr)			Get Cmd
+				tax
+				lda CB.CmdLen,x
+				sec
+				adc ZPCmdPtr
+				sta ZPCmdPtr
+				bcc .8
+				inc ZPCmdPtr+1
+				
+.8				lda (ZPCmdPtr)			Get Cmd
+				bne .1
+				
+				clc								
+				rts
+				
+Draw.Jmp		jmp (J.Cmds,x)				
 *--------------------------------------
-SetCursorYA
+SetCursor.A
+*--------------------------------------
+SetCursorPos
 *--------------------------------------
 HideCursor
 *--------------------------------------
@@ -98,12 +137,8 @@ ShowCursor
 *  X2
 *  Y2
 *--------------------------------------
-DrawLine		ldy #S.CB.Y2+1
-				jsr GetCB
-				
+DrawLine		lda CB.Cache+S.CB.X2
 				sec
-
-				lda CB.Cache+S.CB.X2
 				sbc CB.Cache+S.CB.X1
 				sta DX
 				
@@ -116,8 +151,9 @@ DrawLine		ldy #S.CB.Y2+1
 				ora DX
 				bne .2					DX > 0...
 
-				ldx #DEVMGR.GFX.VLINE
-				jmp GoDevGFX			DX=0 : VLIN Y1,Y2 At X1
+				lda #S.CB.CMD.VLINE
+				sta CB.Cache+S.CB.CMD
+				jmp GoDev				DX=0 : VLIN Y1,Y2 At X1
 				
 .1				>SWAP16 CB.Cache+S.CB.X1,CB.Cache+S.CB.X2
 *				>SWAP16 CB.Cache+S.CB.Y1,CB.Cache+S.CB.Y2
@@ -147,15 +183,17 @@ DrawLine		ldy #S.CB.Y2+1
 				ora DY
 				bne .4
 				
-				ldx #DEVMGR.GFX.HLINE
-				jmp GoDevGFX			DY=0 : HLIN X1,X2 At Y1
+				lda #S.CB.CMD.HLINE
+				sta CB.Cache+S.CB.CMD
+				jmp GoDev				DY=0 : HLIN X1,X2 At Y1
 				
 .3				>NOT16 DY				set DY=-DY
 				lda #$ff
 				sta IY					set IY=-1
 
-.4				ldx #DEVMGR.GFX.SETPIXEL
-				jsr GoDevGFX
+.4				lda #S.CB.CMD.SETPIXEL
+				sta CB.Cache+S.CB.CMD
+				jsr GoDev
 				
 				lda DX
 				sec
@@ -193,8 +231,7 @@ DrawLine.IncXY	lda DX					DX=DY
 				adc IY
 				sta CB.Cache+S.CB.Y1
 				
-				ldx #DEVMGR.GFX.SETPIXEL
-				jsr GoDevGFX
+				jsr GoDev
 				bra .1
 				
 .8				rts
@@ -277,8 +314,7 @@ DrawLine.IncY	lda DY
 				adc IY
 				sta CB.Cache+S.CB.Y1
 				
-				ldx #DEVMGR.GFX.SETPIXEL
-				jsr GoDevGFX
+				jsr GoDev
 				bra .1
 				
 .8				rts
@@ -362,22 +398,14 @@ DrawLine.IncX	lda DX
 				bne .6
 				inc CB.Cache+S.CB.X1+1
 				
-.6				ldx #DEVMGR.GFX.SETPIXEL
-				jsr GoDevGFX
+.6				jsr GoDev
 				bra .1
 				
 .8				rts
 *--------------------------------------
-GetCB			>PULLW ZPCBPtr
-				
-.1				lda (ZPCBPtr),y			Y=Byte count to cache
-				sta CB.Cache,y
-				dey
-				bpl .1
-				rts
-*--------------------------------------
-GoDevGFX		>LDYA L.CB.Cache
-GoDevGFX.1		jmp $ffff
+GoDev			>LDYA L.CB.Cache
+GoDev.YA		ldx #DEVMGR.WRITE
+GoDev.Jmp		jmp $ffff
 *--------------------------------------
 CS.END
 hDev			.BS 1
@@ -389,6 +417,14 @@ IE				.BS 2
 D				.BS 2
 INE				.BS 2
 Counter			.BS 2
+*--------------------------------------
+CB.CmdLen		.DA S.CB.Y1+1			SETPIXEL
+				.DA S.CB.Y1+1			GETPIXEL
+				.DA S.CB.X2+1			HLINE
+				.DA S.CB.Y2+1			VLINE
+				.DA S.CB.Y2+1			FILLRECT
+				.DA S.CB.DstPtr+1		BITBLT
+				.DA S.CB.Y2+1			DRAWLINE
 *--------------------------------------
 CB.Cache		.BS S.CB
 *--------------------------------------
