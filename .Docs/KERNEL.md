@@ -26,15 +26,6 @@ And return, if found, the full path to it.
  + DstStat = S.STAT
 + CS : not found
 
-# Sleep
-Make current process suspend until next RUN
-
-## In : 
-+ (none)
-
-## Out : 
-+ (none)
-
 # GetDevByID.A
 
 ## IN: 
@@ -54,15 +45,6 @@ Make current process suspend until next RUN
 + CC = OK, CS = ERROR
 + X = DEVID
 + Y,A = DEVSLOT
-
-# GetDevStatus.A
-
-## IN: 
-+ A = DevID
-
-## OUT:
-+ CC = OK, CS = ERROR
-+ Y,A = Ptr to S.DEVINFO
 
 # OpenDir.YA
 
