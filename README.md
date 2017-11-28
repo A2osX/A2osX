@@ -14,14 +14,14 @@
 Kernel 0.9.1 stable enough to resume building.
 
  + KM.APPLETALK module not crashing anymore  
-   (Undocummented AtInit function, had to go further in official ATINIT dissaembly) 
+   (Undocummented AtInit function, had to go further in official ATINIT disassembly) 
 
  + Improved Command Line editing and history. 
    (SUPPR key is emulated with Ctrl-X using //e keyboard)
 
  + New DevMgr enumeration stratey, now including /RAM and other virtual Block Devices 
  
- + Math API (Hacked from APLLESOFT ROM ;-)
+ + Math API (Hacked from APPLESOFT ROM ;-)
 
  + CSH Script engine in progress within Shell (In progress)
  
