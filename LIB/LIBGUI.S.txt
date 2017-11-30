@@ -11,6 +11,7 @@ AUTO 6
 				.INB /A2OSX.BUILD/INC/MACROS.I
 				.INB /A2OSX.BUILD/INC/A2OSX.I
 				.INB /A2OSX.BUILD/INC/LIBGUI.I
+				.INB /A2OSX.BUILD/INC/GFX.I
 *--------------------------------------
 				.MA SWAP16
 				lda ]1
@@ -41,6 +42,7 @@ AUTO 6
 :1				.EQ *
 				.EM				
 *--------------------------------------
+ZPPtr1			.EQ ZPLIB
 ZPDCPtr			.EQ ZPLIB+2
 ZPCmdPtr		.EQ ZPLIB+4
 *--------------------------------------
@@ -60,42 +62,156 @@ CS.START		cld
 *--------------------------------------
 .1				.DA LIB.LOAD
 				.DA LIB.UNLOAD
-J.Cmds			.DA InitGUI.A
-				.DA CloseGUI			J.Cmds-12 !!!
+				.DA InitGUI
+J.Cmds			.DA CloseGUI			J.Cmds-12 !!!
 				.DA Draw
 				.DA SetCursor.A
 				.DA SetCursorPos
 				.DA HideCursor
 				.DA ShowCursor
+				.DA ReadMouse
 				.DA DrawLine
+L.DEVNAME.GFX	.DA DEVNAME.GFX
+L.DEVNAME.MOUSE	.DA DEVNAME.MOUSE
+L.MouseClamp	.DA MouseClamp
 L.CB.Cache		.DA CB.Cache
+L.CUR.CB		.DA CUR.CB
+L.CUR.SaveBuf	.DA CUR.SaveBuf
+L.Cursors		.DA CUR.Arrow
 				.DA 0
 *--------------------------------------
 LIB.LOAD
 LIB.UNLOAD		clc
 				rts
 *--------------------------------------
-InitGUI.A		sta GC.Screen+S.GC.hDev
-				>SYSCALL GetDevByID.A
-				>STYA GoDev.Jmp+1
+InitGUI			lda GC.Screen+S.GC.hDev
+				beq .10
+				clc
+.9				rts
 
+.10				>LDYA L.DEVNAME.GFX
+				>SYSCALL GetDevByName.YA
+				bcs .9
+				
+				stx GC.Screen+S.GC.hDev
+				>STYA GoDevGfx.Jmp+1
+				
+				txa
+				ldx #DEVMGR.OPEN
+				jsr GoDevGfx.Jmp
+
+.1				>LDYA L.DEVNAME.MOUSE
+				>SYSCALL GetDevByName.YA
+				bcc .2
+				
+				inc DEVNAME.MOUSE+3
+				lda DEVNAME.MOUSE+3
+				cmp #'8'
+				bne .1
+				beq .3					No mouse found, skip mouse init
+
+.2				stx hDevMouse
+				>STYA GoDevMouse+1
+
+				txa
+				ldx #DEVMGR.OPEN
+				jsr GoDevMouse
+				
+				ldx #DEVMGR.CONTROL		Mouse driver disturb graphic screen....
+				jsr GoDevGfx.Jmp
+
+				ldx #DEVMGR.STATUS		get graphic mode and resolution....
+				jsr GoDevGfx.Jmp
+				
+				>STYA ZPPtr1
+
+				ldy #S.DSTAT.GFX.W+1
+				lda (ZPPtr1),y
+				sta GC.Screen+S.GC.W+1
+				sta MouseClamp+3
+				lsr
+				sta CUR.Pos+S.RECT.X1+1
+				
+				dey
+				
+				lda (ZPPtr1),y
+				sta MouseClamp+2
+				sta GC.Screen+S.GC.W
+				ror
+				sta CUR.Pos+S.RECT.X1
+				
+				ldy #S.DSTAT.GFX.H+1
+				
+				lda (ZPPtr1),y
+				sta MouseClamp+7
+				sta GC.Screen+S.GC.H+1
+				lsr
+				sta CUR.Pos+S.RECT.Y1+1
+				
+				dey
+				
+				lda (ZPPtr1),y
+				sta MouseClamp+6
+				sta GC.Screen+S.GC.H
+				ror
+				sta CUR.Pos+S.RECT.Y1
+				
+				>LDYA L.MouseClamp
+				ldx #DEVMGR.CONTROL
+				jsr GoDevMouse
+				
+				>LDYA L.CUR.SaveBuf
+				>STYA CUR.CB+S.CB.DstPtr
+				
+				lda #CUR.T.ARROW
+				jsr SetCursor.A
+				
+				jsr ShowCursor
+				
+.3				
 				clc
 				rts			
 *--------------------------------------
-CloseGUI
-				stz GC.Screen+S.GC.hDev
+CloseGUI		lda hDevMouse
+				beq .1
+				
+				ldx #DEVMGR.CLOSE
+				jsr GoDevMouse				
+
+.1				stz GC.Screen+S.GC.hDev
 				sec
 				rts
 *--------------------------------------
-GoDev			>LDYA L.CB.Cache
-GoDev.YA		ldx #DEVMGR.WRITE
-GoDev.Jmp		jmp $ffff
+ReadMouse		>PULLW ZPPtr1
+
+				lda hDevMouse			Mouse is active ?
+				beq .9
+				
+				>LDYA ZPPtr1
+				ldx #DEVMGR.READBLOCK
+				jmp GoDevMouse
+				
+.9				sec
+				rts
+*--------------------------------------
+GoDevGfx		>LDYA L.CB.Cache
+GoDevGfx.YA		ldx #DEVMGR.WRITE
+GoDevGfx.Jmp	jmp $ffff
+*--------------------------------------
+GoDevMouse		jmp $ffff
 *--------------------------------------
 				.INB /A2OSX.SRC/LIB/LIBGUI.S.DRAW
 				.INB /A2OSX.SRC/LIB/LIBGUI.S.CLIP
 				.INB /A2OSX.SRC/LIB/LIBGUI.S.CUR
 *--------------------------------------
 CS.END
+*--------------------------------------
+				.INB /A2OSX.SRC/LIB/LIBGUI.G.CUR
+*--------------------------------------
+DEVNAME.GFX		>CSTR "GFX"
+DEVNAME.MOUSE	>CSTR "MOU1"
+*--------------------------------------
+hDevMouse		.BS 1
 *--------------------------------------
 DX				.BS 2
 DY				.BS 2
@@ -115,6 +231,8 @@ CB.CmdLen		.DA S.CB.Y1+1			SETPIXEL
 				.DA S.CB.DstPtr+1		BITBLT
 				.DA S.CB.DstPtr+1		GETRECTBUFSIZE
 				.DA S.CB.Y2+1			DRAWLINE
+*--------------------------------------
+MouseClamp		.BS 8
 *--------------------------------------
 GC.Screen		.BS S.GC
 GC.Cache		.BS S.GC
