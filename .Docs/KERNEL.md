@@ -308,26 +308,48 @@ Create a new copy of this C-String
 ## Out:
 + A=hMem
 
-# LoadStkObj.YA
+# NewStkObj.YA
 
-## In:
+## In: 
++ Y,A = Size Requested
 
 ## Out:
-+ A=hMem
++ CC : success
+ + YA = PTR to Mem (Uninitialised)
+*	X = hMem
++ CS :
+ + A = EC
+
+# LoadStkObj
+Load a file in AUX memory (Stock Objects)
+
+## In:
++ PUSHW = AUXTYPE (Handled by....
++ PUSHB = TYPE  ...
++ PUSHB = MODE  ...
++ PUSHW = PATH ...FOpen)
+
+## Out:
++ Y,A = File Length
++ X = hMem of Loaded Object in AUX mem
 
 # GetStkObj.A
 
 ## In:
++ A = hMem
 
 ## Out:
-+ A=hMem
++ Y,A = PTR to MemBlock (AUX Mem)
++ (X unmodified)
 
 # FreeStkObj.A
 
 ## In:
++ A = hMem To Free (AUX Memory)
 
 ## Out:
-+ A=hMem
++ none.
++ (X,Y unmodified)
 
 # GetMemStat.YA
 
