@@ -19,7 +19,7 @@ Kernel 0.9.1 stable enough to resume building.
  + Improved Command Line editing and history. 
    (SUPPR key is emulated with Ctrl-X using //e keyboard)
 
- + New DevMgr enumeration stratey, now including /RAM and other virtual Block Devices 
+ + New DevMgr enumeration strategy, now including /RAM and other virtual Block Devices 
  
  + Math API (Hacked from APPLESOFT ROM ;-)
 
@@ -97,15 +97,24 @@ Several subprojects are now indentified :
 
 ## Screenshots
 
+UNIX-Like Shell...
 ![](./.screen-shots/ScreenShot.LS.png)
+
+TCP/IP Stack...
 
 ![](./.screen-shots/ScreenShot.IP1.png)
 
 ![](./.screen-shots/ScreenShot.IP2.png)
 
+Full screen editor ...
+
 ![](./.screen-shots/ScreenShot.EDIT.png)
 
+Kernel Configuration Utility...
+
 ![](./.screen-shots/ScreenShot.KCONFIG.png)
+
+Color ANSI/VT100 Support !!!
 
 ![](./.screen-shots/PuTTY.png)
 
