@@ -1,6 +1,6 @@
 PR#3
 PREFIX /A2OSX.BUILD
-NEW
+LOMEM $900
 INC 1
 AUTO 6
 				.LIST OFF
@@ -56,10 +56,9 @@ ZPPTR1			.EQ ZPBIN
 ZPInputBufPtr	.EQ ZPBIN+2
 ZPInputTblPtr	.EQ ZPBIN+4
 ZPInputBMPtr	.EQ ZPBIN+6
-
-ZPOutPutTblPtr	.EQ ZPBIN+8
-
-ZPCharBufPtr	.EQ ZPBIN+12
+ZPCharBufPtr	.EQ ZPBIN+8
+ZPOutPutTblPtr	.EQ ZPBIN+10
+ZPOutPutCharOfs	.EQ ZPBIN+14
 *--------------------------------------
 *			File Header (16 Bytes)
 *--------------------------------------
@@ -90,7 +89,7 @@ L.MSG.DONE		.DA MSG.DONE
 				.DA 0
 *--------------------------------------
 CS.INIT			
-.1				>INC.G ArgCount
+.1				>INC.G Count
 				>SYSCALL GetArg.A
 				bcs .7
 				
@@ -251,21 +250,44 @@ CS.RUN			ldy #S.FNT.dfBreakChar
 				>STA.G CharCount
 				
 				asl
-				tay
+				pha
+				>STA.G BM.Offset
 				lda #0
 				rol
+				iny
+				sta (pData),y
+				ply
+				
 				>SYSCALL GetMem.YA
 				>STYA ZPOutPutTblPtr
 				txa
 				>STA.G hTblBuf
 
-				>LDA.G FNT.Version
+				lda #S.FON
+				clc
+				>ADC.G BM.Offset
+				sta ZPOutPutCharOfs
+				
+				lda #S.FON+1
+				>ADC.G BM.Offset+1
+				sta ZPOutPutCharOfs+1
+				
+				>LEA.G BM.Offset
+				>PUSHYA
+				>PUSHBI SYS.FSeek.SET
+				>LDA.G hOutputFile
+				>PUSHA
+				>SYSCALL FSeek
+				bcc .1
+				rts
+				
+.1				>LDA.G FNT.Version
 				ldx #S.FNT.dfCharTable2
 				cmp #4
-				beq .1
+				beq .2
 				ldx #S.FNT.dfCharTable3
 				
-.1				txa
+.2				txa
 				clc
 				adc ZPInputBufPtr
 				sta ZPInputTblPtr
@@ -273,7 +295,25 @@ CS.RUN			ldy #S.FNT.dfBreakChar
 				adc ZPInputBufPtr+1
 				sta ZPInputTblPtr+1
 				
-.2				ldy #2
+CS.RUN.LOOP		>SLEEP
+
+				>SYSCALL GetChar
+				bcs .3
+
+				cmp #$03				Ctrl-C
+				beq .9					Abort....
+				
+				cmp #$13				Ctrl-S
+				bne .3
+				
+				>LDA.G bPause
+				eor #$FF
+				sta (pData),y
+
+.3				>LDA.G bPause
+				bmi CS.RUN.LOOP
+
+				ldy #2
 				lda (ZPInputTblPtr),y	Get Char BitMap Offset 
 				clc
 				adc ZPInputBufPtr
@@ -283,16 +323,12 @@ CS.RUN			ldy #S.FNT.dfBreakChar
 				adc ZPInputBufPtr+1
 				sta ZPInputBMPtr+1
 				
-				lda (ZPInputTblPtr)		Get Char PixW
-
 				jsr CS.RUN.GetChar
-				jsr CS.RUN.DumpChar
 				jsr CS.RUN.ShiftLChar
-				jsr CS.RUN.DumpChar
 				jsr CS.RUN.CutRChar
 				jsr CS.RUN.DumpChar
-				
-				>DEBUG
+				jsr CS.RUN.StoreChar
+				bcs .9
 				
 				>INC.G CharIndex
 				>DEC.G CharCount
@@ -302,20 +338,25 @@ CS.RUN			ldy #S.FNT.dfBreakChar
 				clc
 				>ADC.G FNT.Version
 				sta ZPInputTblPtr
-				bcc .2
+				bcc CS.RUN.LOOP
 				inc ZPInputTblPtr+1
-				bra .2
+				bra CS.RUN.LOOP
 				
-.8				>LDYA L.MSG.DONE
+.8				jsr CS.RUN.WriteBMAndTbl
+				bcs .9
+				
+				>LDYA L.MSG.DONE
 				>SYSCALL PrintF.YA
 				
 				lda #0
 				sec
-CS.RUN.RTS		rts
+.9				rts
 *--------------------------------------
-* A=PixW, ZPInputBMPtr->DATA
+* ZPInputBMPtr->DATA
 *--------------------------------------
-CS.RUN.GetChar	>STA.G CharPixW
+CS.RUN.GetChar	lda (ZPInputTblPtr)		Get Char PixW
+
+				>STA.G CharPixW
 				>STA.G CharOutPixW
 
 				pha
@@ -392,22 +433,20 @@ CS.RUN.DumpChar	>LDA.G CharOutByteW
 				sta ZPPTR1+1
 
 				>LDA.G FON.Header+S.FON.PixH
-				tay
 				
-.1				phy
-
+.1				pha
 				lda #'|'
 				>SYSCALL PutChar.A
 				
 				>LDA.G CharOutPixW
-				tay
+				>STA.G Count
+
+				ldy #0
 				
-.2				lda (ZPPTR1)
-				inc ZPPTR1
-				bne .3
-				inc ZPPTR1+1
+.2				lda (ZPPTR1),y
+				phy
 				
-.3				ldx #8
+				ldx #8
 				
 .4				lsr
 				pha
@@ -416,28 +455,40 @@ CS.RUN.DumpChar	>LDA.G CharOutByteW
 				lda #'O'
 				
 .5				phx
-				phy
 				>SYSCALL PutChar.A
-				ply
 				plx
 				
-				pla
-				dey
+				>DEC.G Count
 				beq .6
+				
+				pla						Get back BYTE
 				
 				dex
 				bne .4
+				
+				ply
+				iny
 				bra .2
 				
-.6				lda #'|'
+.6				pla
+				pla
+
+				lda #'|'
 				>SYSCALL PutChar.A
 				lda #13
 				>SYSCALL PutChar.A
 				lda #10
 				>SYSCALL PutChar.A
 				
-				ply
-				dey
+				lda ZPPTR1
+				clc
+				>ADC.G CharByteW
+				sta ZPPTR1
+				bcc .7
+				inc ZPPTR1+1
+
+.7				pla
+				dec
 				bne .1
 				
 				rts
@@ -517,15 +568,15 @@ CS.RUN.ShiftLChar
 CS.RUN.CutRChar	>LDA.G bNoShrink
 				bmi .9
 				
-				lda ZPCharBufPtr
+.1				lda ZPCharBufPtr
 				sta ZPPTR1
 				lda ZPCharBufPtr+1
 				sta ZPPTR1+1
 				
-.1				>LDA.G FON.Header+S.FON.PixH
+				>LDA.G FON.Header+S.FON.PixH
 				tax
 
-				>LDA.G CharByteW
+				>LDA.G CharOutByteW
 				tay
 				dey
 				
@@ -563,18 +614,19 @@ CS.RUN.CutRChar	>LDA.G bNoShrink
 				bra .1
 				
 .4				pha
-				>LDA.G CharOutPixW
+				>LDA.G CharOutByteW
+				asl
+				asl
+				asl
 				tax
 				pla
-
-				>DEBUG
 				
 .5				dex
 				asl
 				bpl .5
 				
 				txa
-				sta (pData),y
+				>STA.G CharOutPixW
 				
 				pha
 				lsr
@@ -590,6 +642,99 @@ CS.RUN.CutRChar	>LDA.G bNoShrink
 				>STA.G CharOutByteW
 				
 .9				rts
+*--------------------------------------
+CS.RUN.StoreChar
+				lda ZPOutPutCharOfs
+				sta (ZPOutPutTblPtr)
+				
+				lda ZPOutPutCharOfs+1
+				ldy #1
+				sta (ZPOutPutTblPtr),y
+				
+				lda ZPOutPutTblPtr
+				clc
+				adc #2
+				sta ZPOutPutTblPtr
+				bcc .1
+				
+				inc ZPOutPutTblPtr+1
+				
+.1				>LDA.G CharOutPixW
+				jsr CS.RUN.WriteByte
+				bcs .99
+				
+				>LDA.G CharOutByteW
+				jsr CS.RUN.WriteByte
+				bcs .99
+				
+				lda ZPCharBufPtr
+				sta ZPPTR1
+				lda ZPCharBufPtr+1
+				sta ZPPTR1+1
+				
+				>LDA.G FON.Header+S.FON.PixH
+				pha
+
+.2				>LDA.G CharOutByteW
+				tax
+				
+				ldy #0
+				
+.3				lda (ZPPTR1),y
+				jsr CS.RUN.WriteByte
+				bcs .9
+				
+				iny
+				dex
+				bne .3
+				
+				pla
+				dec
+				beq .8
+				pha
+				
+				lda ZPPTR1
+				clc
+				>ADC.G CharByteW
+				sta ZPPTR1
+				bcc .2
+				inc ZPPTR1+1
+				bra .2
+				
+.8				clc				
+				rts
+				
+.9				plx
+.99				rts
+*--------------------------------------
+CS.RUN.WriteBMAndTbl
+
+				>LDA.G hTblBuf
+				>SYSCALL GetMemPtr.A
+				>STYA ZPOutPutTblPtr
+				
+				
+				clc
+				rts
+*--------------------------------------
+CS.RUN.WriteByte
+				phx
+				phy
+				pha
+				>LDA.G hOutputFile
+				tay
+				pla
+				
+				>DEBUG
+				>SYSCALL FPutC.AY
+
+				inc ZPOutPutCharOfs
+				bne .1
+				inc ZPOutPutCharOfs+1
+				
+.1				ply
+				plx
+				rts
 *--------------------------------------
 CS.DOEVENT		sec
 				rts
@@ -633,9 +778,10 @@ MSG.DONE		>CSTR "All Done!!!\r\n"
 DS.START
 FNT.Version		.BS 1
 FON.Header		.BS	S.FON
-ArgCount		.BS 1
+Count			.BS 1
 hInputBuf		.BS 1
 hOutputFile		.BS 1
+bPause			.BS 1
 bVerbose		.BS 1
 bNoShrink		.BS 1
 hCharBuf		.BS 1
@@ -646,6 +792,8 @@ CharPixW		.BS 1
 CharByteW		.BS 1
 CharOutPixW		.BS 1
 CharOutByteW	.BS 1
+BM.Offset		.BS 4
+
 DS.END
 				.ED
 *--------------------------------------
