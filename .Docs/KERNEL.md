@@ -515,7 +515,7 @@ Close a file
 ## Out :
 
 # FRead.A
-Read ONE byte from file
+Read ONE byte (A) from file (Y)
 
 ## In :
 + A = hFILE
@@ -524,6 +524,7 @@ Read ONE byte from file
 + A = Byte Read
 
 # FWrite.AY
+Write ONE byte (A) To file (Y)
 
 ## In:
 + A = hFILE
@@ -544,6 +545,7 @@ Read bytes from file
 + Y,A = Bytes Read
 
 # FWrite
+Write bytes to file
 
 ## In:
 + PUSHW = Src Ptr
@@ -600,7 +602,7 @@ Rename a file
 ## Out :
 
 # SScanF
-Scan a PStr (in progress)
+Scan a C-String (in progress)
 
 ## In:
 + PUSHW PTR to target buffer
