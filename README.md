@@ -45,7 +45,7 @@ Kernel 0.9.1 stable enough to resume building.
 | -------------------------| ---------- | ----------- | ------- |
 | //c,//c+,IIgs Mouse port | 50/50 Hz   | Working     | Supported at Kernel level, no conflict with GUI's Mouse.DRV (not required to be loaded), requires setting "Machine Timing" properly in KConfig Utility |
 | IIe Mouse Card           | 50/50 Hz   | Working     | (same as above) |
-| ThunderClock Plus        | 64 Hz      | In Progress | ...Need to fix this faulty H/W first! |
+| ThunderClock Plus        | 64 Hz      | Working     | gave up fixing this faulty H/W, thanx to JACE emulator! |
 | ... Any suggestion ?     |            |             |  |
 
 ## !!!HELP NEEDED!!!
