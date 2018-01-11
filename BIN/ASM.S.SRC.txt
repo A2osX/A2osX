@@ -2,20 +2,17 @@ NEW
 PREFIX /A2OSX.BUILD
 AUTO 4,1
 *---------------------------------------
-SRC.PrintLine		ldy #ASM.MACRO.ON
-					lda (pData),y
+SRC.PrintLine		>LDA.G ASM.MACRO.ON
 					bpl .1
 					
-					ldy #ASM.LI.CON
-					lda (pData),y
+					>LDA.G ASM.LI.CON
 					bpl .9
 					bmi .8
 					
-.1					ldy #ASM.LI.ON
-					lda (pData),y
-					bpl .9
+.1					>LDA.G ASM.LI.ON
+*					bpl .9
 					
-.8					>PUSHWI UsrBuf256
+.8					>PUSHW ZPLineBuf
 					>PUSHW SRC.LINENUM
 					ldy #ASM.PC+1
 					>PUSHB (pData),y
@@ -25,49 +22,52 @@ SRC.PrintLine		ldy #ASM.MACRO.ON
 					>SYSCALL PrintF.YA
 .9					rts
 *---------------------------------------
-SRC.PrintLineErr	ldx #0
-.1					lda UsrBuf256,x
-					beq .2
-					phx
+SRC.PrintLineErr	>LDYA ZPLineBuf
+					>SYSCALL PrintF.YA
+					bcs .9
+
+					lda #13
 					>SYSCALL PutChar.A
-					plx
-					inx
-					bcc .1
-					rts	
-					
-.2					lda #13
+					bcs .9
+
+					lda #10
 					>SYSCALL PutChar.A
 					bcs .9
 					
-					ldx #0
-.3					lda UsrBuf256,x
-					beq .5
-					inx
-					cpx SRC.BufPtr
+					lda ZPLinePtr
+					sec
+					sbc ZPLineBuf
+					tax
 					beq .4
-					phx
+					
+.3					phx
 					lda #'-'
 					>SYSCALL PutChar.A
 					plx
 					bcs .9
-					bra .3
+					dex
+					bne .3
 					
 .4					lda #'^'
-					phx
+					phy
 					>SYSCALL PutChar.A
-					plx
+					ply
 					bcs .9
 
 .5					lda #13
 					>SYSCALL PutChar.A
+					lda #10
+					>SYSCALL PutChar.A
+					
 .9					rts
 *---------------------------------------
-SRC.ParseLine		ldx UsrBuf256
+SRC.ParseLine		lda (ZPLineBuf)
+					tax
 					beq .1
 					
-					cpx #'*'			Comment?
+					cmp #'*'			Comment?
 					beq .1
-					cpx #';'			Comment?
+					cmp #';'			Comment?
 					beq .1
 					
 					ldy #ASM.DO.ON
@@ -91,11 +91,13 @@ SRC.ParseLine		ldx UsrBuf256
 .2					jsr SRC.ParseLine.SymG
 .3					bcs SRC.ParseLine.Err
  
-.4					jsr SRC.GetCharNB	Scan for an Opcode...
+.4					jsr SRC.GetNextCharNB	Scan for an Opcode...
 					beq SRC.ParseLine.Ok
 					
 					cmp #'.'
 					bne .5
+					
+					jsr SRC.GetNextChar		Skip .
 					
 					jsr SRC.ParseLine.Dir
 					bcs SRC.ParseLine.Err
@@ -108,11 +110,9 @@ SRC.ParseLine		ldx UsrBuf256
 					bcs SRC.ParseLine.Err
 					bra SRC.ParseLine.Ok
 					
-.6					dec SRC.BufPtr		Back one char...
-					jsr SRC.ParseLine.OpCode
+.6					jsr SRC.ParseLine.OpCode
 					bcs SRC.ParseLine.Err
 
-					
 SRC.ParseLine.Ok	lda SRC.GLabel.New
 					bpl .8
 					
@@ -146,7 +146,7 @@ SRC.ParseLine.Ok	lda SRC.GLabel.New
 .8					clc
 					rts
 
-SRC.ParseLine.Inv	lda #ERR.INVALID.LABEL
+SRC.ParseLine.Inv	lda #ERR.INV.LABEL
 SRC.ParseLine.Err	sec
 					rts
 					
@@ -154,13 +154,13 @@ SRC.ParseLine.Redef lda #ERR.SYMBOL.REDEFINE
 					sec
 					rts
 *---------------------------------------
-SRC.ParseLine.SymP	jsr SRC.GetChar
+SRC.ParseLine.SymP	jsr SRC.GetNextChar
 					beq SRC.ParseLine.SymE
 					jsr SRC.GetDecimal
 					bcs SRC.ParseLine.SymE
 					jmp SYM.AddPrivate
 *---------------------------------------
-SRC.ParseLine.SymL	jsr SRC.GetChar
+SRC.ParseLine.SymL	jsr SRC.GetNextChar
 					beq SRC.ParseLine.SymE
 					jsr SRC.GetDecimal
 					bcs SRC.ParseLine.SymE
@@ -199,7 +199,7 @@ SRC.ParseLine.SymL	jsr SRC.GetChar
 					bcc SRC.ParseLine.SymR
 					jmp SYM.AddLToGBlock
 *---------------------------------------
-SRC.ParseLine.SymE	lda #ERR.INVALID.LABEL
+SRC.ParseLine.SymE	lda #ERR.INV.LABEL
 					sec
 					rts
 					
@@ -238,11 +238,12 @@ SRC.ParseLine.SymG	>LDYA L.SRC.GLabel.Len
 *---------------------------------------
 SRC.ParseLine.Dir	>LDYA L.T.DIRECTIVES
 					jsr SRC.GetKeyword
+
 					bcs .9
 					
 					jmp (J.DIRECTIVES,x)
 					
-.9					lda #ERR.INVALID.DIRECTIVE
+.9					lda #ERR.INV.DIRECTIVE
 					sec
 					rts
 *---------------------------------------
@@ -255,7 +256,7 @@ SRC.ParseLine.Add.Macro
 					rts
 *---------------------------------------
 SRC.ParseLine.OpCode
-					jsr SRC.GetArg
+					jsr SRC.CheckBlank
 					bcc .11
 					rts
 
@@ -264,7 +265,7 @@ SRC.ParseLine.OpCode
 					>SYSCALL GetMemPtr.A
 					>STYA ZPPtr1
 
-					ldy #ASM.T.O		setup Ptr to Opcodes
+					ldy #ASM.T.O		setup Ptr2 to Opcodes
 					lda (ZPPtr1),y
 					clc
 					adc ZPPtr1
@@ -274,7 +275,7 @@ SRC.ParseLine.OpCode
 					adc ZPPtr1+1
 					sta ZPPtr2+1
 					
-					ldy #ASM.T.R		setup Ptr to Registers
+					ldy #ASM.T.R		setup Ptr3 to Registers
 					lda (ZPPtr1),y
 					clc
 					adc ZPPtr1
@@ -285,20 +286,20 @@ SRC.ParseLine.OpCode
 					sta ZPPtr3+1
 					
 					
-.10					lda (ZPPtr2)
-					ldy #1
-					ora (ZPPtr2),y
+.10					lda (ZPPtr2)		End Of OpCode List
 					beq .9
 					
-					ldx #$FF
+					lda (ZPPtr2)		Opcode Len
+					tax
 					
-.1					inx
-					lda SRC.Buffer,x
+					ldy #0
+					
+.1					lda (ZPLinePtr),y
 					iny
 					cmp (ZPPtr2),y
 					bne .7
 					
-					cpx SRC.Buffer
+					dex
 					bne .1
 					
 					jsr SRC.ParseLine.AM
@@ -355,14 +356,14 @@ SRC.ParseLine.OpCode
 					sta ZPPtr2+1
 					bra .10
 					
-.9					lda #ERR.INVALID.OPCODE
+.9					lda #ERR.INV.OPCODE
 					sec
 .99					rts
 *---------------------------------------
 SRC.ParseLine.AM	stz SRC.AM.ID
 					stz SRC.AM.StrBuf
 					
-.1					jsr SRC.GetCharUC	any arg immediately after ' '?
+.1					jsr SRC.GetNextCharUC	any arg immediately after ' '?
 					beq .8				no, AM.ID=0 (implied)
 
 					cmp #' '			another space ?
@@ -390,25 +391,25 @@ SRC.ParseLine.AM	stz SRC.AM.ID
 .21					jsr SRC.IsLetter	Any register?
 					bcs .70				no, try something else
 					
-					ldx SRC.BufPtr
-					stx SRC.BufPtrSave
+					ldx ZPLinePtr
+					stx SRC.LinePtrSave
+					ldx ZPLinePtr+1
+					stx SRC.LinePtrSave+1
 					
 					stz SRC.AM.tmpBuf
 					sta SRC.AM.tmpBuf+1
 					inc SRC.AM.tmpBuf
 					
-.3					jsr SRC.GetCharUC
-					beq .41
+.3					jsr SRC.GetNextCharUC
+					beq .4
 					jsr SRC.IsLetterOrDigit
 					bcs .4
 					inc SRC.AM.tmpBuf
 					ldx SRC.AM.tmpBuf
 					sta SRC.AM.tmpBuf,x
 					bra .3
-					
-.4					dec SRC.BufPtr		back one char
 
-.41					ldy #0
+.4					ldy #0
 					
 .5					lda (ZPPtr3),y
 					beq .71				last register ?
@@ -447,12 +448,13 @@ SRC.ParseLine.AM	stz SRC.AM.ID
 					tay
 					bra .5
 
-.71					lda SRC.BufPtrSave	Does not match a register,restore Ptr
-					sta SRC.BufPtr
-
-.70					dec SRC.BufPtr		back one char
-									
-					jsr EXP.Eval
+.71					ldx SRC.LinePtrSave	Does not match a register,restore Ptr
+					stx ZPLinePtr
+					stx SRC.LinePtrSave+1
+					stx ZPLinePtr+1
+					
+					
+.70					jsr EXP.Eval
 
 					bcs .99
 					
@@ -475,7 +477,7 @@ SRC.ParseLine.AM	stz SRC.AM.ID
 
 					
 					
-.9					lda #ERR.INVALID.AM.SYN
+.9					lda #ERR.INV.AM.SYN
 					sec
 .99					rts
 *---------------------------------------
@@ -483,23 +485,30 @@ SRC.GetDecimal		stz SRC.ACC+1
 					stz SRC.ACC+2
 					stz SRC.ACC+3
 					
-					jsr SRC.GetChar
+					lda (ZPLinePtr)
 					beq .99
+					
 					jsr SRC.IsDigit10
 					bcs .99
+					
 					and #$0F
 					sta SRC.ACC
 					
-.1					jsr SRC.GetChar
+.1					jsr SRC.GetNextChar
 					beq .8
+					
 					cmp #' '
-					beq .88
+					beq .8
+					
 					jsr SRC.IsEXPReserved
-					bcc .88
+					bcc .8
+					
 					jsr SRC.IsAMReserved
-					bcc .88
+					bcc .8
+					
 					jsr SRC.IsDigit10
-					bcs .99
+					bcs .9
+					
 					and #$0F
 					
 					pha
@@ -522,7 +531,6 @@ SRC.GetDecimal		stz SRC.ACC+1
 					sec
 					rts
 
-.88					dec SRC.BufPtr		Back One Char
 .8					clc
 					rts
 					
@@ -534,21 +542,21 @@ SRC.GetHex			stz SRC.ACC+1
 					stz SRC.ACC+2
 					stz SRC.ACC+3
 					
-					jsr SRC.GetChar
+					lda (ZPLinePtr)
 					beq .99
 					jsr SRC.IsDigit16
 					bcs .99
 
 					sta SRC.ACC
 					
-.1					jsr SRC.GetChar
+.1					jsr SRC.GetNextChar
 					beq .8
 					cmp #' '
-					beq .88
+					beq .8
 					jsr SRC.IsEXPReserved
-					bcc .88
+					bcc .8
 					jsr SRC.IsAMReserved
-					bcc .88
+					bcc .8
 					jsr SRC.IsDigit16
 					bcs .99
 					
@@ -564,7 +572,6 @@ SRC.GetHex			stz SRC.ACC+1
 					sta SRC.ACC
 					bra .1
 					
-.88					dec SRC.BufPtr		Back One Char
 .8					clc
 					rts
 					
@@ -580,23 +587,29 @@ SRC.GetOctal		stz SRC.ACC+1
 					stz SRC.ACC+2
 					stz SRC.ACC+3
 					
-					jsr SRC.GetChar
+					lda (ZPLinePtr)
 					beq .99
+					
 					jsr SRC.IsDigit8
 					bcs .99
+					
 					and #$0F
 					sta SRC.ACC
 					
-.1					jsr SRC.GetChar
+.1					jsr SRC.GetNextChar
 					beq .8
+					
 					cmp #' '
-					beq .88
+					beq .8
+					
 					jsr SRC.IsEXPReserved
-					bcc .88
+					bcc .8
+					
 					jsr SRC.IsAMReserved
-					bcc .88
+					bcc .8
+					
 					jsr SRC.IsDigit8
-					bcs .99
+					bcs .9
 					
 					asl
 					asl
@@ -615,7 +628,6 @@ SRC.GetOctal		stz SRC.ACC+1
 					bne .2
 					bra .1
 					
-.88					dec SRC.BufPtr		Back One Char
 .8					clc
 					rts
 					
@@ -631,25 +643,33 @@ SRC.GetBinary		stz SRC.ACC+1
 					stz SRC.ACC+2
 					stz SRC.ACC+3
 					
-					jsr SRC.GetChar
+					lda (ZPLinePtr)
 					beq .99
+					
 					cmp #'1'
 					beq .10
+					
 					cmp #'0'
 					bne .99
+					
 .10					and #$01
 					sta SRC.ACC
 					
-.1					jsr SRC.GetChar
+.1					jsr SRC.GetNextChar
 					beq .8
+					
 					cmp #' '
-					beq .88
+					beq .8
+					
 					jsr SRC.IsEXPReserved
-					bcc .88
+					bcc .8
+					
 					jsr SRC.IsAMReserved
-					bcc .88
+					bcc .8
+					
 					cmp #'1'
 					beq .11
+					
 					cmp #'0'
 					bne .8
 					
@@ -662,7 +682,6 @@ SRC.GetBinary		stz SRC.ACC+1
 					bcs .9
 					bra .1
 					
-.88					dec SRC.BufPtr		Back One Char
 .8					clc
 					rts
 					
@@ -676,7 +695,7 @@ SRC.GetBinary		stz SRC.ACC+1
 *---------------------------------------
 SRC.GetLabel		>STYA ZPPtr1
 
-					jsr SRC.GetCharUC
+					lda (ZPLinePtr)
 					beq .9
 					
 					jsr SRC.IsLetter
@@ -685,7 +704,7 @@ SRC.GetLabel		>STYA ZPPtr1
 					ldy #1
 					sta (ZPPtr1),y
 
-.1					jsr SRC.GetCharUC
+.1					jsr SRC.GetNextCharUC
 					beq .8
 
 					jsr SRC.IsLetterOrDigit
@@ -697,12 +716,12 @@ SRC.GetLabel		>STYA ZPPtr1
 					beq .2
 					
 					cmp #' '
-					beq .88
+					beq .8
 					jsr SRC.IsEXPReserved
-					bcc .88
+					bcc .8
 					jsr SRC.IsAMReserved
-					bcc .88
-					
+					bcc .8
+				
 .9					lda #ERR.SYNTAX.ERROR
 					sec
 					rts	
@@ -711,73 +730,62 @@ SRC.GetLabel		>STYA ZPPtr1
 					sta (ZPPtr1),y
 					cpy #SRC.GLABEL.MAXLEN
 					bcc .1				if equ Carry is set
-
-.88					dec SRC.BufPtr		Back One Char				
+				
 .8					tya
 					sta (ZPPtr1)
 					clc
 					rts
 *---------------------------------------
-SRC.GetKeyword		>STYA ZPPtr1
+SRC.GetKeyword		>STYA ZPPtr1		KeyWord table
 
-					jsr SRC.GetArg
-					bcs .9
-					
 					stz SRC.Keyword.ID
 					
-					ldy #0
+.1					lda (ZPPtr1)
+					beq .9				End Of table
 					
-.3					lda (ZPPtr1),y
-					beq .9
-					cmp SRC.Buffer
-					bne .6
-					phy
+					tax					KW len
 					
-					ldx #0
-.4					iny
-					inx
-					lda (ZPPtr1),y
-					cmp SRC.Buffer,x
-					bne .5
-					cpx SRC.Buffer
-					bne .4
+.2					ldy #0
 
-					ply
+.3					lda (ZPLinePtr),y
+					beq .5
+					jsr SRC.IsLetter
+					bcs .5
 					
-					ldx SRC.Keyword.ID
-					clc
-					rts
-					
-.5					ply	
-			
-.6					tya
-					sec					Add keyword Len+1
-					adc (ZPPtr1),y
-					tay
-					inc SRC.Keyword.ID
-					inc SRC.Keyword.ID
-					bra .3
-					
-.9					sec
-					rts
-*---------------------------------------
-SRC.GetArg			jsr SRC.GetCharUC
-					beq .9
-
-					sta SRC.Buffer+1
-					ldy #1
-					
-.1					jsr SRC.GetCharUC
-					beq .2
-					cmp #' '
-					beq .2
 					iny
-					sta SRC.Buffer,y
-					bra .1
+					cmp (ZPPtr1),y
+					bne .5
 					
-.2					sty SRC.Buffer
+					dex
+					bne .3
+					
+					lda (ZPLinePtr),y	All chars match...
+					beq .4				End of Line ?
+					
+					jsr SRC.IsLetter
+					bcc .5				Additional letters...
+					
+.4					lda ZPLinePtr
+					clc
+					adc (ZPPtr1)
+					sta ZPLinePtr
+					bcc .41
+					inc ZPLinePtr+1
+.41					ldx SRC.Keyword.ID
 					clc
 					rts
+
+.5					lda (ZPPtr1)
+					sec					Add keyword Len+1
+					adc ZPPtr1
+					sta ZPPtr1
+					bcc .6
+					
+					inc ZPPtr1+1
+					
+.6					inc SRC.Keyword.ID
+					inc SRC.Keyword.ID
+					bra .1
 					
 .9					sec
 					rts
@@ -860,13 +868,29 @@ SRC.IsDigit8		cmp #'0'
 .9					sec
 					rts
 *---------------------------------------
-SRC.GetCharNB		jsr SRC.GetCharUC
+SRC.CheckBlank		lda (ZPLinePtr)
 					beq .9
 					cmp #' '
-					beq SRC.GetCharNB
+					bne .9
+					
+.1					jsr SRC.GetNextChar
+					beq .9
+					
+					cmp #' '
+					beq .1
+					clc
+					rts
+					
+.9					sec
+					rts
+*---------------------------------------
+SRC.GetNextCharNB	jsr SRC.GetNextCharUC
+					beq .9
+					cmp #' '
+					beq SRC.GetNextCharNB
 .9					rts
 *---------------------------------------
-SRC.GetCharUC		jsr SRC.GetChar
+SRC.GetNextCharUC	jsr SRC.GetNextChar
 					beq .9
 					cmp #'a'
 					bcc .9
@@ -875,10 +899,24 @@ SRC.GetCharUC		jsr SRC.GetChar
 					eor #$20			to Uppercase
 .9					rts
 *---------------------------------------
-SRC.GetChar			ldx SRC.BufPtr
-					lda UsrBuf256,x
+SRC.GetCharUC		lda (ZPLinePtr)
 					beq .9
-					inc SRC.BufPtr		if 255, will make Z
+					cmp #'a'
+					bcc .9
+					cmp #'z'+1
+					bcs .9
+					eor #$20			to Uppercase
+.9					rts
+*---------------------------------------
+SRC.GetNextChar		lda (ZPLinePtr)
+					beq .9
+					
+					inc ZPLinePtr
+					bne .1
+					
+					inc ZPLinePtr+1
+					
+.1					lda (ZPLinePtr)			
 .9					rts
 *---------------------------------------
 SRC.ACC10			lda SRC.ACC			ACC*2-> ACC & ACCTMP
@@ -922,7 +960,6 @@ SRC.ACC10			lda SRC.ACC			ACC*2-> ACC & ACCTMP
 					sta SRC.ACC+3		CS if overflow
 					
 .9					rts					
-
 *---------------------------------------
 MAN
 SAVE /A2OSX.BUILD/BIN/DEV/ASM.S.SRC
