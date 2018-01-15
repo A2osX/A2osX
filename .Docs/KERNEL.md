@@ -46,6 +46,14 @@ And return, if found, the full path to it.
 + X = DEVID
 + Y,A = DEVSLOT
 
+# K.GetDevStatus.A
+
+## IN: 
++ A = DevID
+
+## OUT:
++ Y,A = S.DSTAT
+
 # OpenDir.YA
 
 ## In:
@@ -412,7 +420,7 @@ return a hFILE to a new FIFO
 + A = hFILE
 
 # FPutC.AY
-Print A (char) to File
+Print A (char) to Node
 
 ## In:
 + A : char to print
@@ -441,7 +449,7 @@ Get char from StdIn
  + A = char
 
 # GetC.A
-Get char from File
+Get char from Node
 
 ## In:
 + A = hFILE
@@ -470,7 +478,7 @@ Write String to StdOut
 + CC = success
 
 # FGetS
-Read String From FILE
+Read String From Node
 
 ## In:
 + PUSHW : CPtr 
