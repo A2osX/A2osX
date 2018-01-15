@@ -193,12 +193,12 @@ note : '$VAR' does NOT expand Variable
 | SSC.DRV     | Working | Apple "Super Serial Card" Driver | 0.9.1 |
 | SSC.I.DRV   | Working | Apple "Super Serial Card" Driver (IRQ enabled) | 0.9.1 |
 | PIC.DRV | In Progress | Apple "Parallel Interface Card" Driver, renamed from PPIC.DRV | 0.9 |
-| Mouse.DRV | Working | Apple Mouse Card,//c Mouse Port | 0.9 |
-| DHGR.DRV | In Progress | except bitblt... | 0.9 |
+| Mouse.DRV | Working | Apple Mouse Card,//c Mouse Port | 0.9.1 |
+| DHGR.DRV | Working | 560x192 Mono/16 colors Mixed-Mode support | 0.9.1 |
 | ---- | ------ | ------- | ----- |
-| LanCeGS.DRV | Working | | 0.9 |
-| Uthernet.DRV  | Working | | 0.9 |
-| Uthernet2.DRV | Working | | 0.9 |
+| LanCeGS.DRV | Working | | 0.9.1 |
+| Uthernet.DRV  | Working | | 0.9.1 |
+| Uthernet2.DRV | Working | | 0.9.1 |
 | Uther2.AI.DRV | In Progress | With ARP/IP Offloading | 0.9 |
 
 ## BIN,External Shell commands:
@@ -234,7 +234,7 @@ note : '$VAR' does NOT expand Variable
 | CHGRP | In Progress | -C : Continue On Error | 0.9 |
 | | | -R : Recurse subdirectories | |
 | FORMAT | In Progress | -L : Low-Level Format | 0.9.1 |
-| EDIT | Working | still missing : find/replace | 0.9 |
+| EDIT | Working | still missing : find/replace | 0.9.1 |
 | NSCUTIL | Working | Tool for setting time in NSC/DL1216E | 0.9 |
 | ---- | ------ | ------- | ----- |
 | ARP | Working | dump ARP cache, setup a static ARP entry | 0.9 |
@@ -246,7 +246,7 @@ note : '$VAR' does NOT expand Variable
 ## BIN,External DEV Shell commands:
 | Name | Status | Comment | K.Ver |
 | ---- | ------ | ------- | ----- |
-| ASM | In Progress | S-C MASM based multi CPU assembler | 0.9 |
+| ASM | In Progress | S-C MASM based multi CPU assembler | 0.9.1 |
 | MEMDUMP | Working | | 0.9.1 |
 | ---- | ------ | ------- | ----- |
 | RPCDUMP | Working | tool based on UDP socket API, renamed from RPCINFO | 0.9 |

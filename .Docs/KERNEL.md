@@ -54,6 +54,16 @@ And return, if found, the full path to it.
 ## OUT:
 + Y,A = S.DSTAT
 
+# K.DevIOCTL
+
+## IN: 
++ PUSHB = DevID
++ PUSHB = Operation
++ PUSHW = Param Block
+
+## OUT:
++ Y,A = ...
+
 # OpenDir.YA
 
 ## In:
@@ -281,6 +291,14 @@ Create a new copy of this C-String
 + CS : error
  + A = SYS error code
 
+# GetMemStat.YA
+
+## In:
++ Y,A = Ptr to 24 bytes buffer
+
+## Out:
++ Buffer filled with memory stats
+
 # SListNew
 
 ## In:
@@ -316,18 +334,6 @@ Create a new copy of this C-String
 ## Out:
 + A=hMem
 
-# NewStkObj.YA
-
-## In: 
-+ Y,A = Size Requested
-
-## Out:
-+ CC : success
- + YA = PTR to Mem (Uninitialised)
-*	X = hMem
-+ CS :
- + A = EC
-
 # LoadStkObj
 Load a file in AUX memory (Stock Objects)
 
@@ -341,14 +347,17 @@ Load a file in AUX memory (Stock Objects)
 + Y,A = File Length
 + X = hMem of Loaded Object in AUX mem
 
-# GetStkObj.A
+# NewStkObj.YA
 
-## In:
-+ A = hMem
+## In: 
++ Y,A = Size Requested
 
 ## Out:
-+ Y,A = PTR to MemBlock (AUX Mem)
-+ (X unmodified)
++ CC : success
+ + YA = PTR to Mem (Uninitialised)
+*	X = hMem
++ CS :
+ + A = EC
 
 # FreeStkObj.A
 
@@ -358,14 +367,6 @@ Load a file in AUX memory (Stock Objects)
 ## Out:
 + none.
 + (X,Y unmodified)
-
-# GetMemStat.YA
-
-## In:
-+ Y,A = Ptr to 24 bytes buffer
-
-## Out:
-+ Buffer filled with memory stats
 
 # ExecPSNewEnv.YA
 
@@ -470,25 +471,6 @@ Write String to FILE
 
 # PutS.YA
 Write String to StdOut
-
-## In:
-+ Y,A : CPtr 
-
-## Out: 
-+ CC = success
-
-# FGetS
-Read String From Node
-
-## In:
-+ PUSHW : CPtr 
-+ PUSHB : hFILE
-
-## Out: 
-+ CC = success
-
-# GetS.YA
-Read String From StdIn
 
 ## In:
 + Y,A : CPtr 
@@ -788,6 +770,27 @@ Convert string to UPPERCASE/lowercase
 
 ## Out:
  + Uppercased/lowercased String in Buffer
+
+# StrCmp
+Compare 2 strings
+
+## In: 
++ PUSHW = Ptr to String1 (CSTR)
++ PUSHW = Ptr to String2 (CSTR)
+
+## Out: 
++ DST = SRC
+
+# StrICmp
+Compare 2 strings
+
+## In: 
++ PUSHW = Ptr to String1 (CSTR)
++ PUSHW = Ptr to String2 (CSTR)
+
+## Out: 
++ CC, Y,A=0
++ CS, Y,A > 0 or < 0
 
 # Time.YA
 + Get System Time in Buffer
