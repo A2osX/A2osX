@@ -6,6 +6,11 @@ ZPMemMgrSPtr 	.EQ ZPMEMMGR			Pointer To Slot selected
 ZPMemMgrTmp1	.EQ ZPMEMMGR+2
 Mem.ReqSize 	.EQ ZPMEMMGR+4			store requested Size
 Mem.ReqFlags	.EQ ZPMEMMGR+6			store requested Flags
+
+ZPSListBlock 	.EQ ZPMEMMGR+8
+ZPSListIndex 	.EQ ZPMEMMGR+10
+ZPSListKey	 	.EQ ZPMEMMGR+12
+ZPSListData 	.EQ ZPMEMMGR+14
 *--------------------------------------
 * TODO :
 *  - Create a 256 bytes table
@@ -13,40 +18,46 @@ Mem.ReqFlags	.EQ ZPMEMMGR+6			store requested Flags
 *    Garbage collector move blocks
 *  - mem.ID=0 always used! useful to test if hMem=0
 *--------------------------------------
-*               PUBLIC
 */--------------------------------------
-* # GetMem
-* ## In: 
-*  PUSHW = Size Requested
-*  PUSHB = Options
-*   S.MEM.F.INIT0 : init memory with 00
-*   S.MEM.F.ALIGN : page aligned
+* # GetMemStat.YA
+* ## In:
+*  Y,A = Ptr to 24 bytes buffer
 * ## Out:
-*  CC : success
-*   YA = PTR to Mem
-*	X = hMem
-*  CS :
-*   A = EC
+*  Buffer filled with memory stats
 *\--------------------------------------
-K.GetMem		>PULLB Mem.ReqFlags		store requested flags
-
-				>PULLYA					get requested size
-
-				bit Mem.ReqFlags		S.MEM.F.AUX ?
-				bpl K.GetMem.I
-				.HS 2C					bit abs
+K.GetMemStat.YA	>STYA ZPMemMgrTmp1
 				
-K.GetMemAux.YA	stz Mem.ReqFlags
-
-				sta SETREADAUX			Aux Mem requested,switch to AUX
-				sta SETWRITEAUX				
+				ldy #6
 				
-				jsr K.GetMem.I
+.1				lda Mem.Table,y
+				sta (ZPMemMgrTmp1),y
+				dey
+				bpl .1
+				
+				
+				ldx #6
+				ldy #14
+				
+				sta SETREADAUX
+				
+.2				lda Mem.Table,x
+				sta (ZPMemMgrTmp1),y
+				dey
+				dex
+				bpl .2
 				
 				sta CLRREADAUX
-				sta CLRWRITEAUX
 				
-				rts				
+				ldx #6
+				ldy #22
+
+.3				lda DevMgr.Stat,x
+				sta (ZPMemMgrTmp1),y
+				dey
+				dex
+				bpl .3
+				
+				rts
 */--------------------------------------
 * # GetMem0.YA
 * ## In: 
@@ -57,9 +68,8 @@ K.GetMemAux.YA	stz Mem.ReqFlags
 *	X = hMem
 *  CS :
 *   A = EC
-*\--------------------------------------
+*\--------------------------------------		
 K.GetMem0.YA	ldx #S.MEM.F.INIT0
-				stx Mem.ReqFlags
 				.HS 2C					bit abs
 */--------------------------------------
 * # GetMem.YA
@@ -72,9 +82,10 @@ K.GetMem0.YA	ldx #S.MEM.F.INIT0
 *  CS :
 *   A = EC
 *\--------------------------------------
-K.GetMem.YA		stz Mem.ReqFlags
+K.GetMem.YA		ldx #0
 				
-K.GetMem.I		sta Mem.ReqSize+1
+MEM.GetMem.YAX	stx Mem.ReqFlags
+				sta Mem.ReqSize+1
 
 				tya
 				bit #$0F				16 bytes aligned ?
@@ -439,8 +450,6 @@ K.GetMemByID.A	sta ZPMemMgrSPtr
 K.NewStr.YA		>STYA .1+1
 				>STYA .4+1
 				
-				stz Mem.ReqFlags
-
 				ldy #0
 				lda #0
 				
@@ -456,7 +465,7 @@ K.NewStr.YA		>STYA .1+1
 				bne .3
 				inc 
 						
-.3				jsr K.GetMem.I
+.3				jsr K.GetMem.YA
 				bcs .9
 				>STYA .5+1
 				
@@ -480,95 +489,379 @@ K.NewStr.YA		>STYA .1+1
 				clc
 .9				rts				
 */--------------------------------------
-* # GetMemStat.YA
-* ## In:
-*  Y,A = Ptr to 24 bytes buffer
-* ## Out:
-*  Buffer filled with memory stats
-*\--------------------------------------
-K.GetMemStat.YA	>STYA ZPMemMgrTmp1
-				
-				ldy #6
-				
-.1				lda Mem.Table,y
-				sta (ZPMemMgrTmp1),y
-				dey
-				bpl .1
-				
-				
-				ldx #6
-				ldy #14
-				
-				sta SETREADAUX
-				
-.2				lda Mem.Table,x
-				sta (ZPMemMgrTmp1),y
-				dey
-				dex
-				bpl .2
-				
-				sta CLRREADAUX
-				
-				ldx #6
-				ldy #22
-
-.3				lda DevMgr.Stat,x
-				sta (ZPMemMgrTmp1),y
-				dey
-				dex
-				bpl .3
-				
-				rts
-*--------------------------------------
-* SList : 
-*  Block : 
-*   0 hMem of next Block (0=End)
-*   1....255 data records
-*  Record :
-*   0 Flags
-*   1 KeyLen+Key
-*   n DataLen+Data 
-*/--------------------------------------
 * # SListNew
 * ## In:
 * ## Out:
 *  A=hMem
 *\--------------------------------------
-K.SListNew
+K.SListNew		>LDYAI 160				40k Max before out of memory!!!
+				jsr K.GetMem0.YA
+				bcs .9
+				>STYA ZPSListIndex
+				stx .8+1
+				
+				>LDYAI 256
+				jsr K.GetMem0.YA
+				bcs .9
+				txa
+				sta (ZPSListIndex)
+				
+.8				lda #$ff				SELF MODIFIED				
+				
+.9				rts
+*/--------------------------------------
+* # SListGetByID
+* ## In:
+*  PUSHB = hSList
+*  PUSHW = Key Ptr
+*  PUSHW = Data Ptr
+*  PUSHW = KeyID
+* ## Out:
+*\--------------------------------------
+K.SListGetByID	>PULLW MEM.IndexOfs
+				
+				jsr MEM.GetSListParams
+				
+				ldy MEM.IndexOfs
+				lda (ZPSListIndex),y
+				beq .9
+				
+				jsr K.GetMemPtr.A
+				>STYA ZPSListBlock
+
+				clc
+				rts
+				
+.9				sec
+				rts
 */--------------------------------------
 * # SListAdd
 * ## In:
+*  PUSHB = hSList
+*  PUSHW = Key
+*  PUSHW = Data Ptr
 * ## Out:
-*  A=hMem
+*  A=hSList
 *\--------------------------------------
-K.SListAdd
+K.SListAdd		jsr K.SListLookup.I
+				bcc .9					Lookup succeeded...DUP
+				
+				sta SETWRITEAUX
+				
+				ldy #0
+				
+.1				jsr MEM.GetKeyCharY
+				iny
+				bcc .1
+				
+				tya
+				
+				jsr MEM.AddBlockByte
+				bcs .99
+				
+				ldy #0
+				
+.2				jsr MEM.GetKeyCharY
+				bcs .3
+				
+				jsr MEM.AddBlockByte
+				bcs .99
+				iny
+				bra .2
+				
+.3				sta CLRREADAUX
+				lda (ZPSListData)
+				sta SETREADAUX
+				tax
+				
+				jsr MEM.AddBlockByte
+				bcs .99
+				
+				ldy #1
+				
+.4				sta CLRREADAUX
+				lda (ZPSListData),y
+				sta SETREADAUX
+								
+				jsr MEM.AddBlockByte
+				bcs .99
+
+				iny
+				dex
+				bne .4
+				
+				clc
+				.HS B0					BCS
+				
+.9				sec
+
+.99				sta CLRWRITEAUX
+				sta CLRREADAUX
+				rts
 */--------------------------------------
-* # SListGet
+* # SListLookup
 * ## In:
+*  PUSHB = hSList
+*  PUSHW = Key
+*  PUSHW = Data Ptr
 * ## Out:
-*  A=hMem
+*  Data Ptr Updated
 *\--------------------------------------
-K.SListGet
+K.SListLookup	jsr K.SListLookup.I
+				bcs .9
+
+				jsr MEM.GetBlockByte
+				tax
+				sta (ZPSListData)
+				
+				ldy #0
+				
+.1				jsr MEM.GetBlockByte
+				iny
+				sta (ZPSListData),y
+				dex
+				bne .1
+				
+				sta CLRREADAUX
+				clc				
+.9				rts
+*--------------------------------------
+K.SListLookup.I	jsr MEM.GetSListParams
+				
+				lda (ZPSListIndex)
+				beq .9
+				
+				jsr K.GetMemPtr.A
+				>STYA ZPSListBlock
+				stz MEM.BlockOfs
+
+				jsr MEM.GetBlockByte
+				beq .9
+	
+				tax
+				
+.1				ldy #0
+				
+.2				jsr MEM.GetKeyCharY
+				bcs .4
+				iny
+				sta .3+1 
+				
+				jsr MEM.GetBlockByte
+.3				cmp #$ff				SELF MODIFIED
+				bne .4
+				
+				dex
+				bne .2
+
+				clc
+				rts
+				
+.4				jsr MEM.GetBlockByte	skip remaining key chars
+				dex
+				bne .4
+				
+				jsr MEM.GetBlockByte	get Data Len
+				tax
+				
+.5				jsr MEM.GetBlockByte	skip data bytes
+				dex
+				bne .5
+				
+				tax
+				bne .1
+				
+.9				sec
+				rts
 */--------------------------------------
-* # SListPut
+* # SListUpdate
 * ## In:
+*  PUSHB = hSList
+*  PUSHW = Key
+*  PUSHW = Data Ptr
 * ## Out:
-*  A=hMem
 *\--------------------------------------
-K.SListPut
+K.SListUpdate	jsr K.SListLookup.I
+				bcs .9
+
+				ldy #0
+				
+				sta CLRREADAUX
+				lda (ZPSListData)
+				sta SETREADAUX
+				tax
+				
+				jsr MEM.SetBlockByte
+				bcs .99
+				
+				ldy #1
+				
+.4				sta CLRREADAUX
+				lda (ZPSListData),y
+				sta SETREADAUX
+								
+				jsr MEM.SetBlockByte
+				bcs .99
+
+				iny
+				dex
+				bne .4
+				
+				clc
+				.HS B0					BCS
+				
+.9				sec
+
+.99				sta CLRWRITEAUX
+				sta CLRREADAUX
+				rts
 */--------------------------------------
 * # SListFree
 * ## In:
+*  A=hSList
 * ## Out:
-*  A=hMem
 *\--------------------------------------
-K.SListFree
+K.SListFree.A	sta .8
 
-
-
-
+				sta SETREADAUX
+				sta SETWRITEAUX
+				
+				jsr K.GetMemPtr.A
+				>STYA .1+1
+				
+				ldx #0
+				
+.1				lda $ffff,x				SELF MODIFIED
+				beq .8
+				jsr K.FreeMem.A
+				inx
+				bra .1
+				
+.8				lda #$ff				SELF MODIFIED
+				jsr K.FreeMem.A
+				sta CLRWRITEAUX
+				sta CLRREADAUX
+				rts
 *--------------------------------------
-MEM.SList.Next
+MEM.GetSListParams
+				>PULLW ZPSListData
+				>PULLW ZPSListKey
+				>PULLA
+
+				sta SETREADAUX
+
+				jsr K.GetMemPtr.A
+				>STYA ZPSListIndex
+				rts
+*--------------------------------------
+MEM.GetKeyCharY	sta CLRREADAUX
+				lda (ZPSListKey),y
+				sta SETREADAUX
+				beq .9
+				
+				cmp #'0'
+				bcc .9
+				cmp #'9'+1
+				bcc .8
+				
+				cmp #'A'
+				bcc .9
+				cmp #'Z'+1
+				bcc .8
+
+				cmp #'a'
+				bcc .9
+				cmp #'z'+1
+				bcc .8
+				
+				cmp #'.'
+				bne .9
+
+				cmp #'_'
+				bne .9
+				
+.8				clc
+				rts
+
+.9				sec
+				rts
+*--------------------------------------
+MEM.GetBlockByte
+				phy
+				ldy MEM.BlockOfs
+				lda (ZPSListBlock),y
+				inc MEM.BlockOfs
+				bne .8
+				
+				pha
+				ldy MEM.IndexOfs 
+				lda (ZPSListIndex),y
+				beq .9
+				
+				jsr K.GetMemPtr.A
+				>STYA ZPSListBlock
+*				stz MEM.BlockOfs
+
+				pla
+				
+.8				ply
+				clc
+				rts
+
+.9				pla
+				ply
+				sec
+				rts
+*--------------------------------------
+MEM.AddBlockByte
+				phy
+				ldy MEM.BlockOfs
+				sta (ZPSListBlock),y
+				inc MEM.BlockOfs
+				bne .8
+				
+				inc MEM.IndexOfs 
+				
+				>LDYAI 256
+				jsr K.GetMem0.YA
+				bcs .9
+				>STYA ZPSListBlock
+				txa
+				ldy MEM.IndexOfs 
+				sta (ZPSListIndex),y
+
+*				stz MEM.BlockOfs
+				
+.8				ply
+				clc
+				rts
+
+.9				ply
+				sec
+				rts				
+*--------------------------------------
+MEM.SetBlockByte
+				phy
+				ldy MEM.BlockOfs
+				sta (ZPSListBlock),y
+				inc MEM.BlockOfs
+				bne .8
+				
+				inc MEM.IndexOfs 
+				
+				ldy MEM.IndexOfs 
+				lda (ZPSListIndex),y
+
+				jsr K.GetMemPtr.A
+				>STYA ZPSListBlock
+*				stz MEM.BlockOfs
+				
+.8				ply
+				clc
+				rts
+*--------------------------------------
+MEM.IndexOfs 	.BS 1
+MEM.BlockOfs 	.BS 1
 */--------------------------------------
 * # LoadStkObj
 * Load a file in AUX memory (Stock Objects)
@@ -587,7 +880,7 @@ K.LoadStkObj	>SYSCALL LoadFile
 				stx .8+1				Save MAIN hMem
 				>STYA A2L				Save LEN temporarly
 				
-				jsr K.GetMemAux.YA
+				jsr K.NewStkObj.YA
 				bcs .9
 				stx .80+1
 				>STYA A4L				Save Destination Address in AUX

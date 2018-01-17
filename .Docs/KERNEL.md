@@ -212,20 +212,13 @@ Return Float rounded into a long
 + PUSHW = X (*Float)
 + Y,A = Dest (*long)
 
-# GetMem
+# GetMemStat.YA
 
-## In: 
-+ PUSHW = Size Requested
-+ PUSHB = Options
- + S.MEM.F.INIT0 : init memory with 00
- + S.MEM.F.ALIGN : page aligned
+## In:
++ Y,A = Ptr to 24 bytes buffer
 
 ## Out:
-+ CC : success
- + YA = PTR to Mem
-*	X = hMem
-+ CS :
- + A = EC
++ Buffer filled with memory stats
 
 # GetMem0.YA
 
@@ -291,14 +284,6 @@ Create a new copy of this C-String
 + CS : error
  + A = SYS error code
 
-# GetMemStat.YA
-
-## In:
-+ Y,A = Ptr to 24 bytes buffer
-
-## Out:
-+ Buffer filled with memory stats
-
 # SListNew
 
 ## In:
@@ -306,33 +291,50 @@ Create a new copy of this C-String
 ## Out:
 + A=hMem
 
+# SListGetByID
+
+## In:
++ PUSHB = hSList
++ PUSHW = KeyID
++ PUSHW = Data Ptr
+
+## Out:
+
 # SListAdd
 
 ## In:
++ PUSHB = hSList
++ PUSHW = Key
++ PUSHW = Data Ptr
 
 ## Out:
-+ A=hMem
++ A=hSList
 
-# SListGet
+# SListLookup
 
 ## In:
++ PUSHB = hSList
++ PUSHW = Key
++ PUSHW = Data Ptr
 
 ## Out:
-+ A=hMem
++ Data Ptr Updated
 
-# SListPut
+# SListUpdate
 
 ## In:
++ PUSHB = hSList
++ PUSHW = Key
++ PUSHW = Data Ptr
 
 ## Out:
-+ A=hMem
 
 # SListFree
 
 ## In:
++ A=hSList
 
 ## Out:
-+ A=hMem
 
 # LoadStkObj
 Load a file in AUX memory (Stock Objects)
