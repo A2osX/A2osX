@@ -284,14 +284,38 @@ Create a new copy of this C-String
 + CS : error
  + A = SYS error code
 
-# SListNew
+# SListAdd
 
 ## In:
++ PUSHB = hSList
++ PUSHW = Key Ptr
++ PUSHW = Data Ptr
 
 ## Out:
-+ A=hMem
++ A = Key Length
+
+# SListLookup
+
+## In:
++ PUSHB = hSList
++ PUSHW = Key Ptr
++ PUSHW = Data Ptr
+
+## Out:
++ A = Key Length
++ X,Y = KeyID
 
 # SListGetByID
+
+## In:
++ PUSHB = hSList
++ PUSHW = KeyID
++ PUSHW = Data Ptr (KEY+DATA)
+
+## Out:
++ Y,A = Next ID
+
+# SListUpdateByID
 
 ## In:
 + PUSHB = hSList
@@ -299,35 +323,15 @@ Create a new copy of this C-String
 + PUSHW = Data Ptr
 
 ## Out:
++ A = Key Length
++ X,Y = KeyID
 
-# SListAdd
+# SListNew
 
 ## In:
-+ PUSHB = hSList
-+ PUSHW = Key
-+ PUSHW = Data Ptr
 
 ## Out:
 + A=hSList
-
-# SListLookup
-
-## In:
-+ PUSHB = hSList
-+ PUSHW = Key
-+ PUSHW = Data Ptr
-
-## Out:
-+ Data Ptr Updated
-
-# SListUpdate
-
-## In:
-+ PUSHB = hSList
-+ PUSHW = Key
-+ PUSHW = Data Ptr
-
-## Out:
 
 # SListFree
 
