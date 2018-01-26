@@ -56,6 +56,7 @@ SRC.PrintLineErr	>PUSHW ZPLineBuf
 .9					rts
 *---------------------------------------
 SRC.ParseLine		lda #0
+					sta (ZPLocalBuf)
 					>STA.G SYM.bGlobal
 
 					jsr SRC.GetChar
@@ -84,7 +85,7 @@ SRC.ParseLine		lda #0
 					lda SRC.ACC
 					beq SRC.ParseLine.InvLbl	.0 is not allowed
 
-					jsr SYM.AddLocal
+					jsr SYM.AddLocalPC
 					
 					bra .7
 					
@@ -165,6 +166,8 @@ SRC.ParseLine.Add.Macro
 					rts
 *---------------------------------------
 SRC.ParseLine.OpCode
+					stz SRC.AM.ID
+					
 					>LDYA ZPOPtr
 					>STYA ZPPtr1
 					
@@ -187,6 +190,7 @@ SRC.ParseLine.OpCode
 					ldy #0
 					
 .2					lda (ZPLinePtr),y
+					beq .7
 					
 					cmp #'a'
 					bcc .3
@@ -197,37 +201,28 @@ SRC.ParseLine.OpCode
 					
 .3					iny
 					cmp (ZPPtr2),y
-					bne .4
+					bne .7
 					
 					dex
 					bne .2
 					
-					iny
 					lda (ZPLinePtr),y
 					beq .8				End of Line, no AM
 					
-					jsr SRC.IsLetterOrDigit
-					bcc .4
+					cmp #' '			A space after opcode ?
+					bne .7
 					
 					tya
-					clc
+					sec					skip OP + ' '
 					adc ZPLinePtr
 					sta ZPLinePtr
 					bcc .5
 					
 					inc ZPLinePtr+1
 					
-.5					
+.5					bra SRC.ParseLine.AM
 					
-					jsr SRC.ParseLine.AM
-					rts
-					
-					
-					
-.8					clc
-					rts
-					
-.4					lda ZPPtr1
+.7					lda ZPPtr1
 					clc
 					adc (ZPPtr1)
 					tax
@@ -238,17 +233,19 @@ SRC.ParseLine.OpCode
 					sta ZPPtr1+1
 					bra .1
 					
+.8					clc
+					rts
+					
 .9					lda #ERR.INV.OPCODE
 					sec
 .99					rts
 *---------------------------------------
-SRC.ParseLine.AM	stz SRC.AM.ID
-					stz SRC.AM.StrBuf
+SRC.ParseLine.AM	stz SRC.AM.StrBuf
 
-.1					jsr SRC.GetNextCharUC	any arg immediately after ' '?
-					bcs .8				no, AM.ID=0 (implied)
-
-					cmp #' '			another space ?
+.1					jsr SRC.GetChar
+					bcs .8
+					
+.10					cmp #' '			another space ?
 					beq .8				ignore end of line (comment)
 					
 					jsr SRC.IsAMReserved
@@ -257,89 +254,44 @@ SRC.ParseLine.AM	stz SRC.AM.ID
 					inc SRC.AM.StrBuf
 					ldx SRC.AM.StrBuf
 					sta SRC.AM.StrBuf,x
-					bra .1
-										
-.8					clc
-					rts
+					bra .7
 					
 .2					jsr SRC.IsMODReserved
-					bcs .21
+					bcs .3
+					
 					lda #'#'
 					inc SRC.AM.StrBuf
 					ldx SRC.AM.StrBuf
 					sta SRC.AM.StrBuf,x
+					bra .7
+					
+.3					jsr SRC.IsLetter	Any register?
+					bcs .6				no, try something else
+					
+					>LDYA ZPRPtr
+					jsr SRC.GetKeyword
+					bcs .6
+					
+					lda (ZPPtr1)		get register len
+					tax
+					
+					ldy SRC.AM.StrBuf
+					
+.4					inc ZPPtr1
+					bne .5
+					inc ZPPtr1+1
+					
+.5					lda (ZPPtr1)
+					iny
+					sta SRC.AM.StrBuf,y
+					dex
+					bne .4
+					
+					sty SRC.AM.StrBuf
+					
 					bra .1
 					
-.21					jsr SRC.IsLetter	Any register?
-					bcs .70				no, try something else
-					
-					ldx ZPLinePtr
-					stx SRC.LinePtrSave
-					ldx ZPLinePtr+1
-					stx SRC.LinePtrSave+1
-					
-					stz SRC.AM.tmpBuf
-					sta SRC.AM.tmpBuf+1
-					inc SRC.AM.tmpBuf
-					
-.3					jsr SRC.GetNextCharUC
-					bcs .4
-					
-					jsr SRC.IsLetterOrDigit
-					bcs .4
-					
-					inc SRC.AM.tmpBuf
-					ldx SRC.AM.tmpBuf
-					sta SRC.AM.tmpBuf,x
-					bra .3
-
-.4					ldy #0
-					
-.5					lda (ZPPtr3),y
-					beq .71				last register ?
-					
-					phy
-					ldx #$ff
-					
-.6					lda (ZPPtr3),y
-					iny
-					inx
-					cmp SRC.AM.tmpBuf,x
-					bne .7
-					
-					cpx SRC.AM.tmpBuf
-					bne .6
-					
-					ply
-					
-					ldy #0				register match, add to AM string
-					ldx SRC.AM.StrBuf
-					
-.61					iny
-					lda SRC.AM.tmpBuf,y
-					inx
-					sta SRC.AM.StrBuf,x					
-					cpy SRC.AM.tmpBuf
-					bne .61
-					
-					stx SRC.AM.StrBuf
-					jmp .1
-					
-.7					ply
-					tya
-					sec
-					adc (ZPPtr3),y
-					tay
-					bra .5
-
-.71					ldx SRC.LinePtrSave	Does not match a register,restore Ptr
-					stx ZPLinePtr
-					stx SRC.LinePtrSave+1
-					stx ZPLinePtr+1
-					
-					
-.70					jsr EXP.Eval
-
+.6					jsr EXP.Eval
 					bcs .99
 					
 					ldx #3
@@ -349,18 +301,24 @@ SRC.ParseLine.AM	stz SRC.AM.ID
 					bne .73
 					
 .72					inx
-					txa
-					ora #$30
-					inc SRC.AM.StrBuf
-					ldx SRC.AM.StrBuf
-					sta SRC.AM.StrBuf,x
+					lda #'a'
 					
-					jmp .1
-					clc
-					rts
+					ldy SRC.AM.StrBuf
+					
+.71					iny
+					sta SRC.AM.StrBuf,y
+					dex
+					bne .71
 
+					sty SRC.AM.StrBuf
+					bra .1
 					
+.7					jsr SRC.GetNextChar
+					bcc .10
 					
+.8					clc
+					rts
+	
 .9					lda #ERR.INV.AM.SYN
 					sec
 .99					rts
@@ -593,7 +551,7 @@ SRC.GetKeyword		>STYA ZPPtr1		KeyWord table
 .3					lda (ZPLinePtr),y
 					beq .5
 					
-					jsr SRC.IsLetter
+					jsr SRC.IsLetterUC
 					bcs .5
 					
 					iny
@@ -665,6 +623,22 @@ SRC.IsEXPReserved	ldx SRC.EXP.RESERVED
 					
 .8					clc
 					rts					
+*---------------------------------------
+SRC.IsLetterUC		cmp #'A'
+					bcc .9
+					cmp #'Z'+1
+					bcc .99
+
+					cmp #'a'
+					bcc .9
+					cmp #'z'+1
+					
+					eor #$20
+					
+					rts					CC if lowercase
+					
+.9					sec					
+.99					rts	
 *---------------------------------------
 SRC.IsLetterOrDigit jsr SRC.IsDigit10
 					bcc SRC.IsLetterRTS
