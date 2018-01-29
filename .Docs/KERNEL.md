@@ -293,6 +293,7 @@ Create a new copy of this C-String
 
 ## Out:
 + A = Key Length
++ X,Y = KeyID
 
 # SListLookup
 
@@ -313,7 +314,7 @@ Create a new copy of this C-String
 + PUSHW = Data Ptr (KEY+DATA)
 
 ## Out:
-+ Y,A = Next ID
++ X,Y = Next KeyID
 
 # SListUpdateByID
 
