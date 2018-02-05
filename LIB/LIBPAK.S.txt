@@ -26,14 +26,6 @@ S.PAKHDR.SHORT3	.EQ 18
 *
 S.PAKHDR		.EQ 26
 *--------------------------------------
-S.PAKSTAT.BL	.EQ 0
-S.PAKSTAT.REP	.EQ 2
-S.PAKSTAT.S3	.EQ 4
-S.PAKSTAT.S4	.EQ 6
-S.PAKSTAT.STORE	.EQ 8
-*
-S.PAKSTAT		.EQ 10
-*--------------------------------------
 PIPELEN			.EQ 18
 *--------------------------------------
 * BITSTREAM :
@@ -57,11 +49,13 @@ PIPELEN			.EQ 18
 *--------------------------------------
 				.INB /A2OSX.BUILD/INC/MACROS.I
 				.INB /A2OSX.BUILD/INC/A2OSX.I
+				.INB /A2OSX.BUILD/INC/LIBPAK.I
 *--------------------------------------
 Pak.SrcPtr		.EQ ZPLIB
 Pak.SrcBlPtr	.EQ ZPLIB+2
 Pak.SrcBlPtrT	.EQ ZPLIB+4
 Pak.DstPtr		.EQ ZPLIB+6
+Pak.StatPtr		.EQ ZPLIB+8
 *--------------------------------------
 *			File Header (16 Bytes)
 *--------------------------------------
@@ -86,34 +80,43 @@ CS.START		cld
 LIB.LOAD
 LIB.UNLOAD		clc
 				rts
-*--------------------------------------
-* In : 
-*  PULLW = Src PTR 
-*  PULLW = Src LEN 
-*  PULLW = Dst PTR Compressed Buffer
-*--------------------------------------
-Pak				>PULLYA
-				>STYA Pak.Src			Init for pass #1
-				>STYA Pak.SrcPtr
+*/--------------------------------------
+* # Pak
+* ## In : 
+*  PUSHW = Src PTR 
+*  PUSHW = Src Length 
+*  PUSHW = Dst PTR Output Buffer
+*  PUSHW = Dst PTR S.PAKSTAT
+*\--------------------------------------
+Pak				>PULLW Pak.StatPtr
+
+				>PULLW Pak.DstPtr
+				
 				>PULLA					Get Src Len LO
 				eor #$ff
 				sta Pak.SrcCnt
 				sta Pak.Cnt				Init for pass #1
+				sta Pak.DstCnt
 				tax
 
 				>PULLA					Get Src Len HI
 				eor #$ff
 				sta Pak.SrcCnt+1
 				sta Pak.Cnt+1			Init for pass #1
+				sta Pak.DstCnt+1
 				tay
 				
-				>PULLW Pak.DstPtr
 				txa
 				jsr Pak.PutByte
 				tya
-				jsr Pak.PutByte				
+				jsr Pak.PutByte
+
+				>PULLYA					Get Src PTR
+				>STYA Pak.Src			Init for pass #1
+				>STYA Pak.SrcPtr
 				
 				ldx #S.PAKSTAT-1
+				
 .1				stz PakStat,x			Reset Stats
 				dex
 				bpl .1
@@ -121,6 +124,7 @@ Pak				>PULLYA
 * PASS #1 : Count occurence for each value...
 
 Pak.1			ldx #0
+
 .1				stz	Pak.CntL,x
 				stz Pak.CntH,x
 				inx
@@ -173,7 +177,7 @@ Pak.1			ldx #0
 				stz Pak.CntH,x
 				dey
 				bpl .6
-				
+
 				ldx #15
 				
 .9				lda PakHdr+S.PAKHDR.SHORT4,x		Store SHORT4 in reverse order
@@ -203,7 +207,7 @@ Pak.2			>LDYA Pak.Src			Init for pass #2
 				stz Pak.Byte
 				
 				stz Pak.PipeLen
-				
+
 Pak.2.LOOP		ldx Pak.PipeLen			Always fill Bytes in the PIPE until full
 				
 .1				jsr Pak.GetByte			Load PIPE....
@@ -222,7 +226,14 @@ Pak.2.LOOP		ldx Pak.PipeLen			Always fill Bytes in the PIPE until full
 				
 				jmp	Pak.2.Store			only one....store it
 				
-Pak.2.EXIT		clc
+Pak.2.EXIT		ldy #S.PAKSTAT-1
+
+.1				lda PakStat,y
+*				sta (Pak.StatPtr),y
+				dey
+				bpl .1
+				
+				clc
 				rts
 
 * try finding REPeating same bytes.....
@@ -241,6 +252,7 @@ Pak.2.REP		ldx #0
 				phx						REP 1 + 0 or more....save REP count for later....
 				
 				jsr Pak.PutA			a = byte to store
+				bcs .91
 				
 				lda #%11100000
 				plx
@@ -251,10 +263,13 @@ Pak.2.REP		ldx #0
 				
 .3				ldy #4
 				jsr Pak.PutYBits
+				bcs .91
+				
 				txa
 				beq .4					if not REP 2 or more no extra count
 				ldy #4
 				jsr Pak.PutYBits
+				bcs .90
 				
 .4				pla
 				clc
@@ -264,7 +279,12 @@ Pak.2.REP		ldx #0
 				
 				ldx #S.PAKSTAT.REP
 				jsr Pak.UpdateStats
-				jmp Pak.2.LOOP				
+				jmp Pak.2.LOOP
+
+.91				pla
+.90				lda #K.E.OOM
+				sec
+				rts
 Pak.2.BL				
 * Try finding best matching BackLink between SrcBlPtr and SrcPtr (max 512)			
 .4				lda Pak.SrcPtr
@@ -306,6 +326,7 @@ Pak.2.BL
 				lda #%1100000
 				ldy #3
 				jsr Pak.PutYBits
+				bcs .91
 				
 				lda Pak.Limit
 				sec
@@ -314,6 +335,7 @@ Pak.2.BL
 				
 				ldy #8
 				jsr Pak.PutYBits
+				bcs .92
 				
 				plp
 				lda Pak.Limit+1
@@ -321,7 +343,7 @@ Pak.2.BL
 				sbc Pak.SrcBlPtrT+1
 				
 				jsr Pak.PutBit
-				
+				bcs .91
 				ply						Get back BL len
 				phy
 				
@@ -336,10 +358,17 @@ Pak.2.BL
 				asl
 				ldy #4					store 4 bits len
 				jsr Pak.PutYBits
+				bcs .90
+				
 				ldx #S.PAKSTAT.BL
 				jsr Pak.UpdateStats
 				jmp Pak.2.LOOP
-				
+
+.92				pla				
+.91				pla
+.90				lda #K.E.OOM
+				sec
+				rts
 * No match...try starting at next byte
 .9				inc	Pak.SrcBlPtrT
 				bne .5
@@ -361,9 +390,11 @@ Pak.2.Store		lda Pak.Pipe
 				lda #0
 				ldy #1
 				jsr Pak.PutYBits		write 0
+				bcs .9
 				
 				lda Pak.Pipe			...and byte
 				jsr Pak.PutA
+				bcs .9
 				
 				ldy #1
 				jsr Pak.StripPipe
@@ -387,26 +418,39 @@ Pak.2.Store		lda Pak.Pipe
 				ldy #6
 				
 .8				jsr Pak.PutYBits		write 100xxxx
+				bcs .9
 				
 				ldy #1
 				jsr Pak.StripPipe
 				jmp Pak.2.LOOP
+				
+.9				lda #K.E.OOM
+				sec
+				rts				
 *--------------------------------------
 Pak.PutA		ldy #8
 *--------------------------------------
 Pak.PutYBits	asl
 				jsr Pak.PutBit
+				bcs .9
 				dey
 				bne Pak.PutYBits
-				rts
+.9				rts
 *--------------------------------------
 * Pak.PutBit (bit in C)
 *--------------------------------------
-Pak.PutBit		ldx #$ff
+Pak.PutBit		ldx #$ff				SELF MODIFIED
+
 				pha
 				bne .1
+				
 				lda Pak.Byte
+				php
+				
 				jsr Pak.PutByte
+				bcs .9
+				
+				plp
 				stz Pak.Byte
 				ldx #8
 				
@@ -414,21 +458,42 @@ Pak.PutBit		ldx #$ff
 				stx Pak.PutBit+1
 				bcc .8					Nothing to "light up"
 				
-				lda Pak.Byte
 				lda Pak.BitMask,x
-				sta Pak.Byte
+				tsb Pak.Byte
+				clc
+				
 .8				pla
-				rts				
+				rts
+				
+.9				plp
+				pla
+				sec
+				rts
 *--------------------------------------
-Pak.PutByte		sta (Pak.DstPtr)
-				inc Pak.DstPtr
+Pak.PutByte		inc Pak.DstCnt
 				bne .1
+				inc Pak.DstCnt+1
+				beq .9
+				
+				bra .8
+				
+.1				sta (Pak.DstPtr)
+				inc Pak.DstPtr
+				bne .2
 				inc Pak.DstPtr+1
 				
-.1				inc PakHdr+S.PAKHDR.LEN
-				bne .2
+.2				inc PakHdr+S.PAKHDR.LEN
+				bne .3
 				inc PakHdr+S.PAKHDR.LEN+1
-.2				
+				
+.3				inc PakStat+S.PAKSTAT.SIZE
+				bne .8
+				inc PakStat+S.PAKSTAT.SIZE+1
+				
+.8				clc
+				rts
+				
+.9				sec
 				rts
 *--------------------------------------
 * Y = count to remove from PIPE
@@ -454,9 +519,9 @@ Pak.UpdateStats	inc PakStat,x
 				inc PakStat+1,x
 .8				rts
 *--------------------------------------
-Pak.GetByte		inc	UnPak.Cnt
+Pak.GetByte		inc	Pak.Cnt
 				bne .1
-				inc UnPak.Cnt+1
+				inc Pak.Cnt+1
 				beq .9
 
 .1				lda (Pak.SrcPtr)
@@ -634,12 +699,13 @@ CS.END
 Pak.Src			.BS 2
 Pak.SrcCnt		.BS 2
 Pak.Cnt			.BS 2
+Pak.DstCnt		.BS 2
 Pak.CntL		.BS 256
 Pak.CntH		.BS 256
 Pak.Byte		.BS 1
 Pak.Limit		.BS 2
 Pak.PipeLen		.BS 1
-Pak.Pipe		.BS 18
+Pak.Pipe		.BS PIPELEN
 Pak.BitMask		.HS 0102040810204080
 *--------------------------------------
 PakHdr			.BS S.PAKHDR
