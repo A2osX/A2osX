@@ -6,26 +6,6 @@ AUTO 4,1
 				.OR	$2000
 				.TF /A2OSX.BUILD/LIB/LIBPAK.O
 *--------------------------------------
-* File Header :
-*--------------------------------------
-S.PAKFILE.LEN	.EQ 0					File Length (uncomp)
-S.PAKFILE.CRC	.EQ 4					CRC of Target File
-S.PAKFILE.VER	.EQ 8
-S.PAKFILE.TF	.EQ 9					 Target File (C-String)
-*--------------------------------------
-* Shunk Header : 
-*  WORD : !Target UNCompressed Length
-*   USED TO STOP UNPACK 
-*    !!!NO EOF TOKEN!!!
-* Short3 : [0..7]
-* Short4 : [0..15]
-*--------------------------------------
-S.PAKHDR.LEN	.EQ 0
-S.PAKHDR.SHORT3	.EQ 2
-S.PAKHDR.SHORT4	.EQ 10
-*
-S.PAKHDR		.EQ 26
-*--------------------------------------
 * BITSTREAM :
 *--------------------------------------
 * 0 : SHORT3 (1)+3=4 bits
@@ -123,68 +103,23 @@ Pak				>PULLW ZPStatPtr
 				
 * PASS #1 : REP & BL, raw store
 
-Pak.1			jsr Pak.InitPass
+				jsr Pak.InitPass
 
 				stz Pak.StoreMode
 								
-.1				jsr Pak.GetReadAheadLen
-				beq .8					0 byte left...
-	
-.2				cmp #4					less than 4 chars t							
-				bcc .4
+				jsr Pak.Run
+				bcs .9
 				
-				pha
-				jsr Pak.ScanBL
-				bcc .3
-				pla
-				dec
-				bra .2
-				
-.3				ora #PAK.B.BACKLINK     %1110 + Ofs.HI			
-				jsr Pak.PutA
-				bcs .91					if failed, pop len
-				tya						push Ofs.LO
-				jsr Pak.PutA
-				bcs .91					if failed, pop len
-				pla						get back len
-				pha
-				jsr Pak.PutA
-				bcs .91
-				pla
-
-				jsr Pak.SrcForward
-				
-				ldx #S.PAKSTAT.BL
-				jsr Pak.UpdateStats
-				
-				bra .1
-
-.4				lda (ZPSrcPtr)
-
-				jsr Pak.PutA
-				bcs .90
-				
-				lda #1
-				jsr Pak.SrcForward
-				
-				ldx #S.PAKSTAT.STORE
-				jsr Pak.UpdateStats
-				bra .1
-				
-.91				pla
-.90				rts
-
-.8				>LDYA Pak.Stat+S.PAKSTAT.PASS2
+				>LDYA Pak.Stat+S.PAKSTAT.PASS2
 				>STYA Pak.Stat+S.PAKSTAT.PASS1
 
-				bra Pak.Exit
 * PASS #2a : Count occurence for each value...
 
-Pak.2a			jsr Pak.BuildShortTable
-	
+				jsr Pak.BuildShortTable
+				
 * PASS #2b : REP & BL, true store with S3,S4
 
-Pak.2b			jsr Pak.InitPass
+				jsr Pak.InitPass
 
 				dec Pak.StoreMode
 				
@@ -192,21 +127,26 @@ Pak.2b			jsr Pak.InitPass
 				sta Pak.PutBit+1		Initialize properly for
 				stz Pak.Byte			first "PutBit" Call
 
-
-
-
-Pak.Exit
+				jsr Pak.Run
+				bcs .9
+				
+				ldy #S.PAKHDR-1
+				
+.1				lda Pak.Hdr,y
+				sta (ZPHdrPtr),y
+				dey
+				bpl .1
 				
 				ldy #S.PAKSTAT-1
 				
-.80				lda Pak.Stat,y
+.2				lda Pak.Stat,y
 				sta (ZPStatPtr),y
 				dey
-				bpl .80
+				bpl .2
 				
 				clc
 				rts
-				
+
 .9				lda #K.E.OOM
 				sec
 				rts		
@@ -229,7 +169,7 @@ Pak.InitPass	>LDYA Pak.SrcPtr
 				lda #$ff				RepChar invalid
 				sta Pak.RepCnt
 				
-				ldx #S.PAKSTAT.BL
+				ldx #S.PAKSTAT.PASS2
 				
 .1				stz Pak.Stat,x			Reset Stats
 				inx
@@ -238,16 +178,70 @@ Pak.InitPass	>LDYA Pak.SrcPtr
 				
 				rts
 *--------------------------------------
-Pak.GetReadAheadLen
-				lda #$ff
+Pak.Run			lda #$ff
 				cmp Pak.SrcCnt+1		return 255 if not $ffxx
-				bne .9
+				bne .1
 				
 				lda Pak.SrcCnt
 				eor #$ff				return !xx if $ffxx
-.9				rts				
+				beq .8					0 byte left...
+				
+.1				cmp #4					less than 4 chars, give up BL						
+				bcc .4
+				
+				sta Pak.MaxReadAhead
+				stz Pak.BestBLLen
+				
+				ldx #3
+				
+.2				inx
+				jsr Pak.ScanBL
+				bcs .3
+				>STYA Pak.BestBL
+				stx Pak.BestBLLen
+				
+				cpx Pak.MaxReadAhead
+				bne .2
+				
+.3				lda Pak.BestBLLen
+				beq .4					NO BL found....
+				
+				lda Pak.BestBL+1
+				ora #PAK.B.BACKLINK     %1110 + Ofs.HI
+				jsr Pak.PutA
+				bcs .9
+				
+				lda Pak.BestBL			get Ofs.LO
+				jsr Pak.PutA
+				bcs .9
+				
+				lda Pak.BestBLLen		get back len
+				jsr Pak.PutA
+				bcs .9
+				
+				lda Pak.BestBLLen
+				jsr Pak.SrcForward
+				
+				ldx #S.PAKSTAT.BL
+				jsr Pak.UpdateStats
+				
+				bra Pak.Run
+
+.4				lda (ZPSrcPtr)
+
+				jsr Pak.PutA
+				bcs .9
+				
+				lda #1
+				jsr Pak.SrcForward
+				
+				bra Pak.Run
+				
+.8				clc				
+.9				rts
 *--------------------------------------
 Pak.SrcForward	pha						Len
+
 				clc
 				adc ZPSrcPtr
 				sta ZPSrcPtr
@@ -259,7 +253,6 @@ Pak.SrcForward	pha						Len
 				adc Pak.SrcCnt
 				sta Pak.SrcCnt
 				bcc .2
-				clc
 				inc Pak.SrcCnt+1
 				
 .2				sec
@@ -272,18 +265,18 @@ Pak.SrcForward	pha						Len
 				
 				cpy Pak.WPtr
 				sbc Pak.WPtr+1
-				bcs .8
-				
+				bcc .8
+
 				sty Pak.WPtr
 				stx Pak.WPtr+1
 .8				rts
 *--------------------------------------
 * Scan between Pak.WPtr & ZPSrcPtr-A
 * Byte string at ZPSrcPtr (len A)
-* IN : A = Byte string length
+* IN : X = Byte string length
 * OUT : CC: Y,A=offset to BL
 *--------------------------------------
-Pak.ScanBL		sta Pak.WStrLen
+Pak.ScanBL		stx Pak.WStrLen
 
 				sec
 				lda ZPSrcPtr			WLimit=ZPSrcPtr-WStrLen
@@ -358,6 +351,9 @@ Pak.BuildShortTable
 				eor #$ff
 				sta Pak.Cnt+1
 
+				>LDYA Pak.SrcPtr
+				>STYA .3+1
+				
 				ldy #0
 
 .2				inc Pak.Cnt
@@ -365,14 +361,14 @@ Pak.BuildShortTable
 				inc Pak.Cnt+1
 				beq .5
 				
-.3				lda (ZPSrcPtr),y
-				tax
+.3				ldx $FFFF,y				SELF MODIFIED
+				
 				inc Pak.CntL,x
 				bne .4
 				inc Pak.CntH,x
 .4				iny
 				bne .2
-				inc ZPSrcPtr+1
+				inc .3+2
 				bra .2
 
 * ...Search for Top 24
@@ -455,12 +451,49 @@ Pak.PutA		bit Pak.RepCnt
 .9				rts
 									
 Pak.PutA.1		bit Pak.StoreMode
-				bpl Pak.PutByte
+				bmi .10
 				
+				ldx #S.PAKSTAT.STORE
+				jsr Pak.UpdateStats
+				bra Pak.PutByte
 				
+.10				ldy #7
+
+.1				cmp Pak.Hdr+S.PAKHDR.SHORT3,y
+				beq .3
+				dey
+				bpl .1
 				
+				ldy #15
+
+.2				cmp Pak.Hdr+S.PAKHDR.SHORT4,y
+				beq .4
+				dey
+				bpl .2
 				
-				ldy #8
+				bra .7
+
+.3				tya
+				asl
+				asl
+				asl
+				asl
+				ora #PAK.B.SHORT3
+				ldy #4
+				ldx #S.PAKSTAT.S3
+				bra .8
+				
+.4				tya
+				asl
+				asl
+				ora #PAK.B.SHORT4
+				ldy #6
+				ldx #S.PAKSTAT.S4
+				bra .8
+				
+.7				ldy #8
+				ldx #S.PAKSTAT.STORE
+.8				jsr Pak.UpdateStats				
 *--------------------------------------
 Pak.PutYBits	asl
 				jsr Pak.PutBit
@@ -698,6 +731,10 @@ Pak.Byte		.BS 1
 Pak.Cnt			.BS 2
 
 Pak.StoreMode	.BS 1
+Pak.MaxReadAhead	.BS 1
+
+Pak.BestBLLen	.BS 1
+Pak.BestBL		.BS 2
 Pak.WPtr		.BS 2
 Pak.WLimit		.BS 2
 Pak.WStrLen		.BS 1
