@@ -23,19 +23,15 @@ AUTO 4,1
 *--------------------------------------
 * 1111 : STOREn (4) + 4 cnt + 8n....
 *--------------------------------------
-PAK.L.SHORT3	.EQ 1
-PAK.B.SHORT3	.EQ %00000000
-PAK.L.SHORT4	.EQ 2
-PAK.B.SHORT4	.EQ %10000000
-PAK.L.REPn		.EQ 3
-PAK.B.REPn		.EQ %11000000
-PAK.L.BACKLINK	.EQ 4
-PAK.B.BACKLINK	.EQ %11100000
-PAK.L.STOREn	.EQ 4
-PAK.B.STOREn	.EQ %11110000
+PAK.B.SHORT3	.EQ %00000000			0xxx0000
+PAK.B.SHORT4	.EQ %10000000			10xxxx00
+PAK.B.REPn		.EQ %11000000			110xxxxx
+PAK.B.BACKLINK	.EQ %11100000			1110hhhhllllllllxxxxxxxx	
+PAK.B.STOREn	.EQ %11110000			1111xxxx ...
 *--------------------------------------
 WSIZE			.EQ 4096
 REPMAX			.EQ 32
+STOREMAX		.EQ 16
 *--------------------------------------
 				.INB /A2OSX.BUILD/INC/MACROS.I
 				.INB /A2OSX.BUILD/INC/A2OSX.I
@@ -90,59 +86,65 @@ Pak				>PULLW ZPStatPtr
 				sta ZPHdrPtr
 				clc
 				adc #S.PAKHDR
-				sta Pak.DstPtr
+				sta ZPDstPtr
 				
 				>PULLA
 				sta ZPHdrPtr+1
 				adc /S.PAKHDR
-				sta Pak.DstPtr+1
+				sta ZPDstPtr+1
 				
 				>PULLW Pak.Hdr+S.PAKHDR.LEN
 
 				>PULLW Pak.SrcPtr
+
+* Reset Byte counters
+
+				ldx #0
+
+.1				stz	Pak.CntL,x
+				stz Pak.CntH,x
+				inx
+				bne .1
 				
-* PASS #1 : REP & BL, raw store
+* PASS #1 : REP & BL, no store, update byte counters
 
 				jsr Pak.InitPass
 
-				stz Pak.StoreMode
+				stz Pak.bPass2
 								
 				jsr Pak.Run
 				bcs .9
 				
-				>LDYA Pak.Stat+S.PAKSTAT.PASS2
-				>STYA Pak.Stat+S.PAKSTAT.PASS1
-
-* PASS #2a : Count occurence for each value...
-
 				jsr Pak.BuildShortTable
 				
-* PASS #2b : REP & BL, true store with S3,S4
+* PASS #2 : REP & BL, store with S3,S4
 
 				jsr Pak.InitPass
 
-				dec Pak.StoreMode
+				dec Pak.bPass2
 				
-				lda #8
-				sta Pak.PutBit+1		Initialize properly for
+				lda #$80
+				sta Pak.Mask			Initialize properly for
 				stz Pak.Byte			first "PutBit" Call
 
+				stz Pak.StoreCnt
+				
 				jsr Pak.Run
 				bcs .9
 				
 				ldy #S.PAKHDR-1
 				
-.1				lda Pak.Hdr,y
+.2				lda Pak.Hdr,y
 				sta (ZPHdrPtr),y
 				dey
-				bpl .1
+				bpl .2
 				
 				ldy #S.PAKSTAT-1
 				
-.2				lda Pak.Stat,y
+.3				lda Pak.Stat,y
 				sta (ZPStatPtr),y
 				dey
-				bpl .2
+				bpl .3
 				
 				clc
 				rts
@@ -154,9 +156,6 @@ Pak				>PULLW ZPStatPtr
 Pak.InitPass	>LDYA Pak.SrcPtr
 				>STYA ZPSrcPtr
 				>STYA Pak.WPtr
-				
-				>LDYA Pak.DstPtr
-				>STYA ZPDstPtr
 				
 				lda Pak.Hdr+S.PAKHDR.LEN
 				eor #$ff
@@ -237,7 +236,13 @@ Pak.Run			lda #$ff
 				
 				bra Pak.Run
 				
-.8				clc				
+.8				lda Pak.RepCnt			do we have a pending REP ?
+				beq .80
+				
+				ora #PAK.B.REPn			yes, add it
+				jmp  Pak.PutA.1
+				
+.80				clc				
 .9				rts
 *--------------------------------------
 Pak.SrcForward	pha						Len
@@ -337,42 +342,7 @@ Pak.ScanBL		stx Pak.WStrLen
 				rts
 *--------------------------------------
 Pak.BuildShortTable
-				ldx #0
-
-.1				stz	Pak.CntL,x
-				stz Pak.CntH,x
-				inx
-				bne .1
-				
-				lda Pak.Stat+S.PAKSTAT.PASS1
-				eor #$ff
-				sta Pak.Cnt
-				lda Pak.Stat+S.PAKSTAT.PASS1+1
-				eor #$ff
-				sta Pak.Cnt+1
-
-				>LDYA Pak.SrcPtr
-				>STYA .3+1
-				
 				ldy #0
-
-.2				inc Pak.Cnt
-				bne .3
-				inc Pak.Cnt+1
-				beq .5
-				
-.3				ldx $FFFF,y				SELF MODIFIED
-				
-				inc Pak.CntL,x
-				bne .4
-				inc Pak.CntH,x
-.4				iny
-				bne .2
-				inc .3+2
-				bra .2
-
-* ...Search for Top 24
-.5				ldy #0
 
 .6				stz Pak.Cnt				Init best score to 0
 				stz Pak.Cnt+1
@@ -383,7 +353,7 @@ Pak.BuildShortTable
 				cmp Pak.CntL,x			is it better at X
 				lda Pak.Cnt+1
 				sbc Pak.CntH,x
-				bcc .8					not better or equal...
+				bcs .8					not better or equal...
 				
 				stx Pak.Byte			save new score index...
 				
@@ -450,12 +420,21 @@ Pak.PutA		bit Pak.RepCnt
 .8				clc
 .9				rts
 									
-Pak.PutA.1		bit Pak.StoreMode
+Pak.PutA.1		bit Pak.bPass2
 				bmi .10
 				
-				ldx #S.PAKSTAT.STORE
-				jsr Pak.UpdateStats
-				bra Pak.PutByte
+				tax
+				inc Pak.CntL,x
+				bne .11
+				inc Pak.CntH,x
+				
+.11				inc Pak.Stat+S.PAKSTAT.PASS1
+				bne .12
+				inc Pak.Stat+S.PAKSTAT.PASS1+1
+.12				clc
+				rts
+				
+* Pak.PutA.1  PASS #2
 				
 .10				ldy #7
 
@@ -491,8 +470,15 @@ Pak.PutA.1		bit Pak.StoreMode
 				ldx #S.PAKSTAT.S4
 				bra .8
 				
-.7				ldy #8
-				ldx #S.PAKSTAT.STORE
+.7				ldx Pak.StoreCnt
+				sta Pak.StoreBuf,x
+				inx
+				cpx #STOREMAX
+				beq Pak.Flush
+				stx Pak.StoreCnt
+				clc
+				rts
+				
 .8				jsr Pak.UpdateStats				
 *--------------------------------------
 Pak.PutYBits	asl
@@ -502,37 +488,56 @@ Pak.PutYBits	asl
 				bne Pak.PutYBits
 .9				rts
 *--------------------------------------
+Pak.Flush		ldx Pak.StoreCnt 
+				beq .8
+				
+				lda #PAK.B.STOREn
+				ldy #4
+				jsr Pak.PutYBits
+				bcs .9
+				
+				ldx #0
+				
+.1				lda Pak.StoreBuf,x
+				ldy #4
+				jsr Pak.PutYBits
+				bcs .9
+				inx
+				dec Pak.StoreCnt
+				bne .1
+
+				ldx #S.PAKSTAT.STORE
+				jsr Pak.UpdateStats
+
+.8				clc				
+.9				rts
+*--------------------------------------
 * Pak.PutBit (bit in C)
 *--------------------------------------
-Pak.PutBit		ldx #$ff				SELF MODIFIED
+Pak.PutBit		pha
 
-				pha
-				bne .1
+				bcc .1
+				lda Pak.Mask
+				tsb Pak.Byte
+				clc
 				
-				lda Pak.Byte
-				php
+.1				lsr Pak.Mask
+				bne .8
 				
 				jsr Pak.PutByte
 				bcs .9
 				
-				plp
 				stz Pak.Byte
-				ldx #8
+				lda #$80
 				
-.1				dex
-				stx Pak.PutBit+1
-				bcc .8					Nothing to "light up"
-				
-				lda Pak.BitMask,x
-				tsb Pak.Byte
-				clc
+				sta Pak.Mask
 				
 .8				pla
+*				clc
 				rts
 				
-.9				plp
-				pla
-				sec
+.9				pla
+*				sec
 				rts
 *--------------------------------------
 Pak.PutByte		inc Pak.DstCnt
@@ -541,6 +546,7 @@ Pak.PutByte		inc Pak.DstCnt
 				beq .9
 				
 .1				sta (ZPDstPtr)
+
 				inc ZPDstPtr
 				bne .2
 				inc ZPDstPtr+1
@@ -720,17 +726,20 @@ UnPak.PutByte	inc UnZPDstPtr
 CS.END
 Pak.SrcPtr		.BS 2
 Pak.SrcCnt		.BS 2
-Pak.DstPtr		.BS 2
 Pak.DstCnt		.BS 2
 
 Pak.RepCnt		.BS 1
 Pak.LastByte	.BS 1
 
+Pak.StoreCnt	.BS 1
+Pak.StoreBuf	.BS STOREMAX
+
+Pak.Mask		.BS 1
 Pak.Byte		.BS 1
 
 Pak.Cnt			.BS 2
 
-Pak.StoreMode	.BS 1
+Pak.bPass2		.BS 1
 Pak.MaxReadAhead	.BS 1
 
 Pak.BestBLLen	.BS 1
@@ -739,13 +748,11 @@ Pak.WPtr		.BS 2
 Pak.WLimit		.BS 2
 Pak.WStrLen		.BS 1
 *--------------------------------------
-Pak.StoreBuf	.BS 16
 Pak.CntL		.BS 256
 Pak.CntH		.BS 256
 Pak.Hdr			.BS S.PAKHDR
 Pak.Stat		.BS S.PAKSTAT
 *--------------------------------------
-Pak.BitMask		.HS 0102040810204080
 UnPak.BitMask	.HS 8040201008040201
 MAN
 SAVE /A2OSX.SRC/LIB/LIBPAK.S
