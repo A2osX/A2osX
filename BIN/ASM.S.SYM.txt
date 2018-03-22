@@ -2,34 +2,40 @@ NEW
 PREFIX /A2OSX.BUILD
 AUTO 4,1
 *---------------------------------------
-* Global Symbol Record: (8+ bytes)
-*  0 : Len (6)
+* Global Symbol Record: (8 bytes)
+*  0 : Len (8)
 *  1 : Flags:
 *		b7=0=pending,1=resolved
 *		b6=R/W (.SE)
+*		b2,b1,b0 : Size (in bytes)
 *  2-5 : 32 bits Value
-*
-* Local Symbol Record: (2 bytes)
-*  2 : Local ID (1->255)
-*  3 : offset from Global Symbol
-*    ......
-*  Ending 0
+*  6-7 : LSID (Local Symbols ID)
 *---------------------------------------
-* Global Symbol Index (Sorted)
-* 0 : hGblock
-* 1 : Offset in block
+* Local Symbol Record: (7 bytes)
+*  0 : Len (8)
+*  1 : Flags:
+*		b7=0=pending,1=resolved
+*  2-5 : 32 bits Value (PC)
+*  6 : Local ID (1->255)
 *---------------------------------------
-* Private Symbol Record: (7 bytes)
-*  0,1 : MacroID
-*  2 : Private ID (0->255)
-*  3-6 : Value
-*---------------------------------------
-* Macro Record: ( bytes)
+* Private Symbol Record: (9 bytes)
+*  0 : Len (8)
+*  1 : Flags:
+*		b7=0=pending,1=resolved
+*  2-5 : 32 bits Value (PC)
+*  6,7 : MCID (Macro Context ID)
+*  8 : Private ID (0->255)
 *---------------------------------------
 SYM.Init			>SYSCALL SListNew
 					bcs .9
 
 					>STA.G SYM.hGlobals
+					
+					
+					>SYSCALL SListNew
+					bcs .9
+
+					>STA.G SYM.hLocals
 					
 					>LDYAI 256
 					>SYSCALL GetMem.YA
@@ -41,15 +47,23 @@ SYM.Init			>SYSCALL SListNew
 					
 .9					rts
 *---------------------------------------
+SYM.Reset			>STZ.G SYM.bGlobal
+					>STA.G SYM.LocalIndex
+					rts
+*---------------------------------------
 SYM.Quit			>LDA.G SYM.hLocalBuf
 					beq .2
 					
 					>SYSCALL FreeMem.A
 					
-.2					>LDA.G SYM.hGlobals
-					beq .8
+.2					>LDA.G SYM.hLocals
+					beq .3
 					>SYSCALL SListFree.A
 
+.3					>LDA.G SYM.hGlobals
+					beq .8
+					>SYSCALL SListFree.A
+					
 .8					clc
 					rts				
 *---------------------------------------
@@ -81,15 +95,15 @@ SYM.Dump			stz ZPLinePtr
 					adc #0
 					sta ZPPtr1+1
 					
-					ldy #SYM.F			Get Symbol Size
+					ldy #SYMG.F			Get Symbol Size
 					lda (ZPPtr1),y
-					and #SYM.F.SIZE
+					and #SYMG.F.SIZE
 					beq .3
 
 					pha
 					tax
 					
-					iny					SYM.V
+					iny					SYMG.V
 					
 .2					lda (ZPPtr1),y
 					>PUSHA
@@ -116,12 +130,12 @@ SYM.Dump			stz ZPLinePtr
 					rts
 *---------------------------------------
 SYM.AddGlobalPC		jsr SYM.PC2Global	A=PC Size
-					ora #SYM.F.RESOLVED	PC is always known
+					ora #SYMG.F.RESOLVED	PC is always known
 *---------------------------------------
-SYM.AddGlobal		>STA.G SYM.Global+SYM.F
+SYM.AddGlobal		>STA.G SYM.Global+SYMG.F
 
-					lda #5				F+DWORD
-					>STA.G SYM.Global+SYM.LEN
+					lda #SYMG.SIZE-1		F+V+LSID
+					>STA.G SYM.Global+SYMG.LEN
 					
 					>PUSHB.G SYM.hGlobals
 					>PUSHW ZPLinePtr
@@ -141,7 +155,7 @@ SYM.AddGlobal		>STA.G SYM.Global+SYM.F
 					.HS B0				BCS
 .9					sec
 					tya
-					>STA.G SYM.ID+1
+					>STA.G SYM.GlobalID+1
 					dey
 					txa
 					sta (pData),y
@@ -161,9 +175,9 @@ SYM.LookupGlobal	>PUSHB.G SYM.hGlobals
 					clc		
 					
 .1					tya
-					>STA.G SYM.ID+1
+					>STA.G SYM.GlobalID+1
 					txa
-					>STA.G SYM.ID
+					>STA.G SYM.GlobalID
 		
 .9					rts
 *---------------------------------------
@@ -172,7 +186,7 @@ SYM.UpdateGlobalPC	jsr SYM.PC2Global
 *---------------------------------------
 SYM.UpdateGlobalAcc	ldx #3
 					
-					ldy #SYM.Global+SYM.V+3
+					ldy #SYM.Global+SYMG.V+3
 					
 .1					lda SRC.ACC,x
 					sta (pData),y
@@ -182,17 +196,20 @@ SYM.UpdateGlobalAcc	ldx #3
 					
 					lda SRC.ACC.SIZE			
 *---------------------------------------
-SYM.UpdateGlobal	ora #SYM.F.RESOLVED
-					>STA.G SYM.Global+SYM.F
+SYM.UpdateGlobal	ora #SYMG.F.RESOLVED
+					>STA.G SYM.Global+SYMG.F
 
-					lda #5				F+DWORD
-					>STA.G SYM.Global+SYM.LEN
+					lda #SYMG.SIZE-1		F+V+LSID
+					>STA.G SYM.Global+SYMG.LEN
 					
 					>PUSHB.G SYM.hGlobals
-					>PUSHW.G SYM.ID
+					>PUSHW.G SYM.GlobalID
 					>PUSHEA.G SYM.Global
 					
 					>SYSCALL SListUpdateByID
+					rts
+*---------------------------------------
+SYMG.FlushGlobal		clc
 					rts
 *---------------------------------------
 SYM.PC2Global		ldx #4
@@ -207,7 +224,7 @@ SYM.PC2Global		ldx #4
 					
 					ldx #4
 					
-					ldy #SYM.Global+SYM.V+3
+					ldy #SYM.Global+SYMG.V+3
 					
 .2					pla
 					sta (pData),y
@@ -240,7 +257,7 @@ SYM.AddLocalPC		tax					Save ID
 					sta (ZPLocalBuf),y
 					
 					iny
-					lda #SYM.F.RESOLVED
+					lda #SYMG.F.RESOLVED
 					sta (ZPLocalBuf),y
 					
 					iny
@@ -309,7 +326,11 @@ SYM.AddLocalPending	tax					Save ID
 *					sec
 					rts
 *---------------------------------------
-SYM.GetLocal
+SYM.LookupLocal		lda #2
+					sta SRC.ACC.SIZE
+					lda #$FF
+					sta SRC.ACC
+					sta SRC.ACC+1
 					clc
 					rts
 *---------------------------------------
