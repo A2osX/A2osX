@@ -284,6 +284,17 @@ Create a new copy of this C-String
 + CS : error
  + A = SYS error code
 
+# SListGetByID
+
+## In:
++ PUSHB = hSList
++ PUSHW = Key Ptr
++ PUSHW = Data Ptr
++ PUSHW = KeyID
+
+## Out:
++ X,Y = Next KeyID
+
 # SListAdd
 
 ## In:
@@ -305,16 +316,6 @@ Create a new copy of this C-String
 ## Out:
 + A = Key Length
 + X,Y = KeyID
-
-# SListGetByID
-
-## In:
-+ PUSHB = hSList
-+ PUSHW = KeyID
-+ PUSHW = Data Ptr (KEY+DATA)
-
-## Out:
-+ X,Y = Next KeyID
 
 # SListUpdateByID
 
