@@ -21,7 +21,7 @@ SRC.ParseLine	jsr OUT.Reset
 				lda (pData),y
 				beq .8
 				
-.1				>LDA.G MAC.bAdd
+.1				>LDA.G ASM.MA.ON
 				bmi SRC.ParseLine.MACRO
 
 				jmp SRC.ParseLine.LABEL
@@ -80,7 +80,7 @@ SRC.ParseLine.Macro
 .22				jsr MAC.Store
 				bcs SRC.ParseLine.RTS
 				
-				>STZ.G MAC.bAdd
+				>STZ.G ASM.MA.ON
 				
 .8				clc
 				rts
@@ -208,10 +208,37 @@ SRC.ParseLine.Dir
 				jmp (J.DIRECTIVES,x)
 *---------------------------------------
 SRC.ParseLine.ExecMacro
+				jsr SRC.GetNextChar		skip '>'
+				bcs .90
+				
+				jsr MAC.Lookup
+				bcs .90
 				
 				
+				
+				
+				
+				
+				>LDA.G ASM.MA.StackPtr
+				cmp #MA.MAXDEPTH
+				beq .91
+				clc
+				adc #ASM.MA.StackPtr
+				tay
+				
+				
+				
+				>INC.G ASM.MA.StackPtr
 				clc
 				rts
+				
+.90				lda #ERR.MACRO.INV
+				sec
+				rts	
+				
+.91				lda #ERR.MACRO.INV
+				sec
+				rts	
 *---------------------------------------
 SRC.ParseLine.OpCode
 				stz SRC.AM.StrBuf
@@ -366,7 +393,7 @@ SRC.ParseLine.AMCheck
 *				>PUSHW L.SRC.AM.StrBuf
 *				>LDYA L.MSG.PSTRCRLF
 *				>SYSCALL PrintF.YA
-				
+*				>DEBUG
 				lda SRC.AM.StrBuf
 				beq SRC.ParseLine.OPAMCheckFF
 				
@@ -424,7 +451,7 @@ SRC.ParseLine.OPAMCheck
 .10				lda (ZPOpDefPtr)
 
 .1				>CMP.G SRC.AMID
-				beq .3
+				beq SRC.ParseLine.Emit
 				
 				ldy #1
 				lda (ZPOpDefPtr),y
@@ -440,8 +467,9 @@ SRC.ParseLine.OPAMCheck
 .99				lda #ERR.INV.AM.4.OC
 				sec
 				rts
-				
-.3				stz SRC.ACCTMP			index in ACC
+*---------------------------------------			
+SRC.ParseLine.Emit
+				stz SRC.ACCTMP			index in ACC
 
 				ldy #1
 				lda (ZPOpDefPtr),y
@@ -450,7 +478,8 @@ SRC.ParseLine.OPAMCheck
 				
 .4				lda (ZPOpDefPtr),y
 				cmp #'a
-				bcs .5
+				bcs .5					lowercase, go compute address
+				
 				jsr SRC.IsDigit16
 				asl
 				asl
@@ -469,10 +498,11 @@ SRC.ParseLine.OPAMCheck
 				iny
 				dec SRC.ACCTMP+1
 				bne .4
+
 				clc
 				rts
 				
-.5				bne .6
+.5				bne .6					cmp #'a'....
 				
 				ldx SRC.ACCTMP
 				inc SRC.ACCTMP
@@ -480,27 +510,136 @@ SRC.ParseLine.OPAMCheck
 				bra .50
 
 .6				cmp #'r
-				bne .99
+				bne .7
+				
+				lda SRC.ACC.SIZE
+				beq .50					Emit 00 if pending symbol (pass #1)
+				
+				jsr SRC.ComputeRel8
+				bcs .91
+				bra .50
+				
+.7				cmp #'l
+				bne .90
 
-				ldx SRC.ACCTMP
-				inc SRC.ACCTMP
-				lda ASM.PC,x
-				sec
-				sbc SRC.ACC,x
-				pha
+				lda SRC.ACC.SIZE
+				bne .71
 				
+				jsr OUT.EmitByte		Emit 00 00 if pending symbol (pass #1)
+				bcs .9
+				lda #0
 				
+				bra .50
 				
-				pla
+.71				jsr SRC.ComputeRel16
+				bcs .91
+				
+				lda SRC.ACC
+				jsr OUT.EmitByte
+				bcs .9
+				
+				lda SRC.ACC+1
 				bra .50
 
 .8				clc
 .9				rts
+
+.90				lda #ERR.INV.T.FILE
+				sec
+				rts
+				
+.91				lda #ERR.RANGE
+				sec
+				rts
 *---------------------------------------
 SRC.AddToBuf	inc SRC.AM.StrBuf
 				ldy SRC.AM.StrBuf
 				sta SRC.AM.StrBuf,y
 				rts
+*---------------------------------------
+SRC.ComputeRel8	jsr SRC.ComputeRel
+
+				bcc .1
+				
+* positive : check 0<r<0000007F
+
+				lda SRC.ACC+3
+				ora SRC.ACC+2
+				ora SRC.ACC+1
+				bne .9
+				lda SRC.ACC
+				bmi .9
+				clc
+				rts
+
+* negative : check FFFFFF80<r<FFFFFFFF
+
+.1				lda SRC.ACC+3
+				and SRC.ACC+2
+				and SRC.ACC+1
+				inc
+				bne .9
+				lda SRC.ACC
+				bpl .9
+				clc
+				rts
+				
+.9				sec
+				rts
+*---------------------------------------
+SRC.ComputeRel16
+				jsr SRC.ComputeRel
+
+				bcc .1
+				
+* positive : check 0<r<00007FFF
+
+				lda SRC.ACC+3
+				ora SRC.ACC+2
+				bne .9
+				lda SRC.ACC+1
+				bmi .9
+				clc
+				rts
+
+* negative : check FFFF8000<r<FFFFFFFF
+
+.1				lda SRC.ACC+3
+				and SRC.ACC+2
+				inc
+				bne .9
+				lda SRC.ACC+1
+				bpl .9
+				clc
+				rts
+				
+.9				sec
+				rts
+*---------------------------------------
+SRC.ComputeRel	phy
+
+				ldy #ASM.PC
+				
+				clc
+				
+				lda SRC.ACC
+				sbc (pData),y
+				sta SRC.ACC
+				iny
+				lda SRC.ACC+1
+				sbc (pData),y
+				sta SRC.ACC+1
+				iny
+				lda SRC.ACC+2
+				sbc (pData),y
+				sta SRC.ACC+2
+				iny
+				lda SRC.ACC+3
+				sbc (pData),y
+				sta SRC.ACC+3
+				
+				ply
+				rts			
 *---------------------------------------
 SRC.GetDecimal	jsr SRC.GetChar
 				beq .99
@@ -596,12 +735,7 @@ SRC.GetHex		jsr SRC.GetNextChar	skip '$'
 				sta SRC.ACC
 				bra .1
 				
-.8				lda #SYMG.F.RESOLVED
-				sta SRC.ACC.F
-				lda #2
-				sta SRC.ACC.SIZE
-				
-				clc
+.8				clc
 				rts
 				
 .9				lda #ERR.VAL.TOO.BIG

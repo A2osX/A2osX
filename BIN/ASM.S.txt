@@ -17,37 +17,45 @@ ZPLinePtr		.EQ ZPBIN+6
 ZPNameBuf		.EQ ZPBIN+8
 ZPGlobalBuf		.EQ ZPBIN+10
 ZPLookupBuf		.EQ ZPBIN+12
-ZPMacroBuf		.EQ ZPBIN+14
 
-ZPTmpBuf		.EQ ZPBIN+16
+ZPMacroBuf		.EQ ZPBIN+14
+ZPCtxBuf		.EQ ZPBIN+16
 
 ZPAMPtr			.EQ ZPBIN+18
 ZPRPtr			.EQ ZPBIN+20
 ZPOpsPtr		.EQ ZPBIN+22
 ZPOpDefPtr		.EQ ZPBIN+24
+
+ZPTmpBuf		.EQ ZPBIN+16
 *---------------------------------------
 SYMG.LEN		.EQ 0
 SYMG.F			.EQ 1
-SYMG.F.RESOLVED		.EQ %10000000
-SYMG.F.RW			.EQ %01000000
+SYMG.F.RW			.EQ %10000000
 SYMG.F.SIZE			.EQ %00000111
 SYMG.V			.EQ 2
 *
-SYMG.SIZE		.EQ 6
+SYMG.SIZE		.EQ 5
 *---------------------------------------
 SYML.ID			.EQ 0
 SYML.V			.EQ 1
 *
 SYML.SIZE		.EQ 5
 *---------------------------------------
+MCTX.LEN		.EQ 0
+MCTX.PTR		.EQ 1
+MCTX.ID			.EQ 2
+MCTX.ARGS		.EQ 4
+*---------------------------------------
 ASM.T.AM		.EQ 0
 ASM.T.R			.EQ 2
 ASM.T.O			.EQ 4
 *---------------------------------------
-SRC.DO.MAXDEPTH	.EQ 8
-SRC.IN.MAXDEPTH	.EQ 7
+DO.MAXDEPTH		.EQ 8
+IN.MAXDEPTH		.EQ 7
+MA.MAXDEPTH		.EQ 8
 *---------------------------------------
 ERR.INV.ARGS		.EQ $80
+ERR.INV.T.FILE		.EQ $81
 ERR.SRC.INV.TYPE	.EQ $90
 ERR.SRC.TOO.MANY.IN	.EQ $91
 ERR.SRC.UNEXP.EOF	.EQ $92
@@ -71,6 +79,8 @@ ERR.MISSING.EXP		.EQ $B0
 ERR.EXP.SYN.ERROR	.EQ $B1
 ERR.MACRO.INV.DEF	.EQ $E0
 ERR.MACRO.TOO.BIG	.EQ $E1
+ERR.MACRO.INV		.EQ $E2
+ERR.MACRO.TOO.MANY	.EQ $E3
 *--------------------------------------
 *			File Header (16 Bytes)
 *--------------------------------------
@@ -235,25 +245,28 @@ CS.INIT			ldy #S.PS.ARGC
 .9					rts
 *--------------------------------------
 CS.RUN			>SYSCALL GetChar
-				bcs .11				no char
+				bcs .13					no char
 			
-				cmp #$03			Ctrl-C
-				beq .99				Abort....beq=CS
-			
-				cmp #$13			Ctrl-S
+				cmp #$03				Ctrl-C
+				beq .99					Abort....beq=CS
+					
+				cmp #$13				Ctrl-S
 				bne .11
 
-				ldy #bPause
-				lda (pData),y
+				>LDA.G bPause
 				eor	#$ff
 				sta (pData),y
 			
-.11				ldy #bPause
-				lda (pData),y
-				bne .8
+				bpl .12
+				clc
+				rts
 				
-				ldy #SRC.COUNT		root file is already opened?
-				lda (pData),y
+.13				>LDA.G bPause
+				bmi .8
+				
+.11				>STZ.G bPause
+
+.12				>LDA.G SRC.COUNT		root file is already opened?
 				bne .10 
 				
 				>LDA.G ASM.PASS
@@ -272,10 +285,11 @@ CS.RUN			>SYSCALL GetChar
 				
 				jsr DIR.Reset
 				jsr SYM.Reset
+				jsr MAC.Reset
 				
 .10				jsr FIO.ReadLine
 				bcc .2
-				cmp #$4C			End Of File?
+				cmp #$4C				End Of File?
 				bne .9
 				
 				jsr FIO.FileClose
@@ -414,7 +428,7 @@ T.LI			>PSTR "ON"
 ASM..T.			.AZ ".T."
 ASM.6502		.AZ "6502"
 MSG.HELP		.AZ "A2osX-Macro Assembler (S-C MASM 3.0 Based)\r\nUsage : ASM <src file> [type TXT ($04) or S-C/BAS ($FA)]\r\n"
-MSG.PASS		.AZ "Pass:#%d\r\n"
+MSG.PASS		.AZ "*** Pass:#%d\r\n"
 MSG.SRC.FILE	.AZ "*** Reading SRC File:%s\r\n"
 MSG.OBJ.FILE	.AZ "*** Writing OBJ File:%s, Type=%02x\r\n"
 MSG.T.FILE		.AZ "*** Loading CPU File:%s\r\n"
@@ -427,7 +441,7 @@ MSG.EQU1		.AZ "   [      %h]"
 MSG.EQU2		.AZ "   [    %h%h]"
 MSG.EQU3		.AZ "   [  %h%h%h]"
 MSG.EQU4		.AZ "   [%h%h%h%h]"
-MSG.LSYMBOL		.AZ ", .%d %h%h%h%h"
+MSG.LSYMBOL		.AZ ", .%d=%h%h%h%h"
 MSG.SRCLINE		.AZ " %05D %s\r\n"
 MSG.ERROR		.AZ "*** Fatal Error $%h "
 MSG.SYMBOLS		.AZ "Symbol Table:\r\n"
@@ -443,11 +457,9 @@ ASM.T.FILENAME	.BS 65
 
 FIO.Stat		.BS S.STAT
 
-SRC.ACC.F		.BS 1
 SRC.ACC.SIZE	.BS 1
 SRC.ACC			.BS 4
 
-SRC.ARG.F		.BS 1
 SRC.ARG.SIZE	.BS 1
 SRC.ARG			.BS 4
 
@@ -464,8 +476,8 @@ SRC.hLineBuf	.BS 1
 SRC.hTmpBuf		.BS 1
 
 SRC.COUNT		.BS 1
-SRC.hFILES		.BS SRC.IN.MAXDEPTH
-SRC.hFILETYPES	.BS SRC.IN.MAXDEPTH
+SRC.hFILES		.BS IN.MAXDEPTH
+SRC.hFILETYPES	.BS IN.MAXDEPTH
 
 SRC.LINENUM		.BS 2
 SRC.AMID		.BS 1
@@ -482,20 +494,29 @@ EXP.Modifier	.BS 1
 EXP.Prefix		.BS 1
 EXP.Operator	.BS	1
 
-
 ASM.T.hMem		.BS 1
 
 ASM.PASS		.BS 1
-ASM.DO.StackPtr	.BS 1
-ASM.DO.Stack	.BS SRC.DO.MAXDEPTH
+
 ASM.DO.ON		.BS 1
+ASM.DO.StackPtr	.BS 1
+ASM.DO.Stack	.BS DO.MAXDEPTH
+
+ASM.DU.ON		.BS 1
 ASM.PH.ON		.BS 1
+
 ASM.LI.ON		.BS 1
 ASM.LI.CON		.BS 1
 ASM.LI.MON		.BS 1
 ASM.LI.XON		.BS 1
+
+ASM.MA.ON		.BS 1
+ASM.MA.StackPtr	.BS 1
+ASM.MA.Stack	.BS MA.MAXDEPTH
+
 ASM.PC			.BS 4
 ASM.PC.PH		.BS 4
+ASM.PC.DU		.BS 4
 
 SYM.hGlobalList	.BS 1
 SYM.hNameBuf	.BS 1
@@ -506,9 +527,11 @@ SYM.hLookupBuf	.BS 1
 
 SYM.LocalID		.BS 2
 
-MAC.hMacros		.BS 1
-MAC.hBuf		.BS 1
-MAC.bAdd		.BS 1
+MAC.hMacroList	.BS 1
+MAC.hMacroBuf	.BS 1
+MAC.hCtxList	.BS 1
+MAC.hCtxBuf		.BS 1
+MAC.CtxID		.BS 2
 
 OUT.PC			.BS 4
 OUT.Buf			.BS 4

@@ -11,6 +11,10 @@ AUTO 4,1
 *  2-5 : 32 bits Value
 *  6+  : Local Symbols.....
 *---------------------------------------
+* Local Symbol Record: (5 bytes)
+*  0 : Local ID (1->255)
+*  1-4 : 32 bits Value (PC)
+*---------------------------------------
 SYM.Init		>SYSCALL SListNew
 				bcs .9
 
@@ -119,8 +123,7 @@ SYM.Dump		stz ZPLinePtr
 				>LDYA L.MSG.PSTR
 				>SYSCALL PrintF.YA
 				bcs .9
-				>DEBUG
-				ldy #SYMG.SIZE-1
+				ldy #SYMG.SIZE
 
 .4				tya
 				
@@ -142,7 +145,7 @@ SYM.Dump		stz ZPLinePtr
 				pla
 				>PUSHA
 				phy
-				>LDYA L.MSG.PSTR
+				>LDYA L.MSG.LSYMBOL
 				>SYSCALL PrintF.YA
 				ply
 				bne .4
@@ -167,7 +170,7 @@ SYM.NewGlobal	jsr SYM.LookupGlobal	Pass #1; try to add global...
 				
 				jsr SYM.PC2Global		A=PC Size
 
-				lda #SYMG.SIZE-1
+				lda #SYMG.SIZE
 				sta (ZPGlobalBuf)
 				clc
 				rts
@@ -212,8 +215,7 @@ SYM.LookupGlobal
 				bcc .8
 				
 				inc ZPLinePtr+1
-				clc		
-				
+				clc			
 .8	
 .9				rts
 *---------------------------------------
@@ -228,15 +230,19 @@ SYM.FlushGlobal	lda (ZPGlobalBuf)
 				>PUSHW ZPNameBuf
 				>PUSHW ZPGlobalBuf
 				>SYSCALL SListAdd
-				rts
+				bra .3
 				
 .2				>PUSHW.G SYM.GlobalID
 				>PUSHW ZPGlobalBuf
 				>SYSCALL SListUpdateByID
+				
+.3				bcs .9
+				lda #0
+				sta (ZPGlobalBuf)
 				rts
 				
 .8				clc
-				rts
+.9				rts
 *---------------------------------------
 SYM.GetName		jsr SRC.GetChar
 				bcs .9
@@ -295,7 +301,6 @@ SYM.PC2Global	ldx #4
 
 .4				txa
 
-				ora #SYMG.F.RESOLVED
 				ldy #SYMG.F
 				sta (ZPGlobalBuf),y
 
@@ -303,112 +308,132 @@ SYM.PC2Global	ldx #4
 
 				rts
 *---------------------------------------
-SYM.Acc2Global	ldx #3
-				ldy #SYMG.V+3
+SYM.Acc2Global	ldx #4
+				ldy #SYMG.F+4
 				
-.1				lda SRC.ACC,x
+.1				lda SRC.ACC.SIZE,x
 				sta (ZPGlobalBuf),y
 				dey
 				dex
 				bpl .1
-				
-				lda SRC.ACC.SIZE			
-
-				ora SRC.ACC.F
-
-				sta (ZPGlobalBuf),y
 				
 				clc
 				rts
 *---------------------------------------
-SYM.Lookup2Acc	ldy #SYMG.V+3
-				ldx #3
+SYM.Lookup2Acc	ldy #SYMG.F+4
+				ldx #4
 				
 .1				lda (ZPLookupBuf),y
-				sta SRC.ACC,x
+				sta SRC.ACC.SIZE,x
 				dey
 				dex
-				bpl .1
+				bne .1
 				
 				lda (ZPLookupBuf),y
 				and #SYMG.F.SIZE
 				sta SRC.ACC.SIZE
 
-				lda (ZPLookupBuf),y
-				and #SYMG.F.SIZE^$ff
-				sta SRC.ACC.F
-
 				clc
 				rts
 *---------------------------------------
-* Local Symbol Record: (6 bytes)
+* Local Symbol Record: (5 bytes)
 *  0 : Local ID (1->255)
-*  1 : Flags:
-*		b7=0=pending,1=resolved
-*  2-5 : 32 bits Value (PC)
+*  1-4 : 32 bits Value (PC)
 *---------------------------------------
 SYM.NewOrGetLocalA
 				tax						Save ID
-
-				>LDA.G ASM.PASS
-				bne SYM.GetLocal		Pass #2: should be already defined...
-
+				
+				lda (ZPGlobalBuf)		not in a global label
+				bne .1
+				
+				lda #ERR.INV.LABEL				
 				clc
 				rts
-*---------------------------------------
-SYM.AddLocal	lda (ZPGlobalBuf)
+	
+.1				>LDA.G ASM.PASS
+				bne SYM.LookupLocal.1	Pass #2: should be already defined...
+
+SYM.NewLocal	jsr SYM.LookupLocal.1	Pass #1; try to add
+				bcc .9					Already Defined
+
+				lda (ZPGlobalBuf)
 				tay
 				clc
 				adc #SYML.SIZE
-				bcs .9
+				bcs .90
+				
+				ldy #ASM.PC+4
+				
+.1				dey
+				lda (pData),y
+				pha
+				cpy #ASM.PC
+				bne .1					
+
+				lda (ZPGlobalBuf)
+				tay
+				iny
 				
 				txa						Get Back ID
+				
 				sta (ZPGlobalBuf),y
 				
-				iny
-				phy
-				
 				ldx #4
-				
-				ldy #ASM.PC+3
-				
-.1				lda (pData),y
-				pha
-				dey
-				dex
-				bne .1					
-				
-				ldx #4
-				
-				ply
 				
 .2				pla
-				sta (ZPGlobalBuf),y
 				iny
+				sta (ZPGlobalBuf),y
 				dex
 				bne .2
 
-				lda #0
-				sta (ZPGlobalBuf),y
 				tya
 				sta (ZPGlobalBuf)
 				
-*				clc
+				clc
 				rts
 				
-.9				lda #ERR.TOO.MANY.LOCAL
+.90				lda #ERR.TOO.MANY.LOCAL
 *				sec
 				rts
-*---------------------------------------
-SYM.GetLocal
 
-
+.9				lda #ERR.SYMBOL.REDEF
+				sec
+				rts		
 *---------------------------------------
-SYM.LookupLocal	lda #2
-				sta SRC.ACC.SIZE
-				lda #$FF
-				sta SRC.ACC
-				sta SRC.ACC+1
+SYM.LookupLocal	tax
+SYM.LookupLocal.1
+				ldy #SYMG.SIZE
+				
+				tya
+				
+.1				cmp (ZPGlobalBuf)
+				beq .9					CS if =
+	
+				txa
+				iny
+				cmp (ZPGlobalBuf),y
+				beq .2
+	
+				tya
+				clc
+				adc #SYML.SIZE-1
+				tay
+				bcc .1
+				
+.9				lda #ERR.UNDEF.SYMBOL
+*				sec
+				rts
+	
+.2				ldx #0
+
+.3				iny
+
+				lda (ZPGlobalBuf),y
+				sta SRC.ACC,x
+				inx
+				cpx #4
+				bne .3
+
 				clc
 				rts
 *---------------------------------------
@@ -425,14 +450,6 @@ SYM.AddPrivate
 				rts
 *---------------------------------------
 SYM.LookupPrivate
-				clc
-				rts
-*---------------------------------------
-SYM.AddMacro
-				clc
-				rts
-*---------------------------------------
-SYM.LookupMacro
 				clc
 				rts
 *---------------------------------------
