@@ -1,0 +1,403 @@
+NEW
+PREFIX /A2OSX.BUILD
+AUTO 4,1
+				.OP	65C02
+				.OR $2000
+*--------------------------------------
+				.DO SSCIRQ=1
+				.TF /A2OSX.BUILD/DRV/SSC.I.DRV
+				.ELSE
+				.TF /A2OSX.BUILD/DRV/SSC.DRV
+				.FIN
+*--------------------------------------
+				.DO SSCIRQ=1
+BUF.SIZE		.EQ $40
+BUF.MASK		.EQ $3F
+				.FIN
+*--------------------------------------
+ZPTmpPtr1		.EQ ZPDRV
+*--------------------------------------
+*			File Header (16 Bytes)
+*--------------------------------------
+CS.START		cld
+				jmp Dev.Detect			cld,jmp abs=DRV
+				.DA #$61				6502,Level 1 (65c02)
+				.DA #1					DRV Layout Version 1
+				.DA 0
+				.DA CS.END-CS.START			Code Length
+				.DA DEV.HEADER-CS.START		Device Header Offset
+				.DA DRV.CS.START-CS.START	Driver Code Offset
+				.DA DRV.CS.END-DRV.CS.START	Drv Code Length
+*--------------------------------------
+* Relocation Table
+*--------------------------------------
+L.MSG.DETECT	.DA MSG.DETECT
+L.MSG.DETECT.OK	.DA MSG.DETECT.OK
+L.MSG.DETECT.KO	.DA MSG.DETECT.KO
+L.DEV.HEADER.NAME	.DA DEV.HEADER.NAME
+				.DA 0					End Of Reloc Table
+*--------------------------------------
+Dev.Detect		>STYA ARGS
+
+				>LDYA L.MSG.DETECT
+				>SYSCALL PrintF.YA
+				
+				stz ZPTmpPtr1
+				lda #$C1
+				sta ZPTmpPtr1+1
+				
+.1				and #$0f
+				tay
+				lda A2osX.S,y
+				bne .3
+
+				ldx #DEVSIG.Length-1
+
+.2				ldy DEVSIG.Offset,x
+				lda (ZPTmpPtr1),y
+				cmp DEVSIG.Value,x
+				bne .3
+				dex
+				bpl .2
+				bra .4
+				
+.3				inc ZPTmpPtr1+1			no match, try next slot....
+				lda ZPTmpPtr1+1
+				cmp #$C8
+				bne .1	
+				
+				>LDYA L.MSG.DETECT.KO
+				>SYSCALL PrintF.YA
+
+				lda #MLI.E.NODEV		Not Found in any slot, exiting
+				sec
+				rts	
+
+.4				lda ZPTmpPtr1+1
+				and #$0F
+				pha
+				tay
+				lda #A2osX.S.COM
+				sta A2osX.S,y
+				pla
+				ora #$30
+				sta DEV.HEADER.NAME+3
+				asl
+				asl
+				asl
+				asl
+				clc
+				adc #$8F
+				sta DEVSLOTn08F
+
+				>PUSHW L.DEV.HEADER.NAME
+				>LDYA L.MSG.DETECT.OK
+				>SYSCALL PrintF.YA
+				clc
+				rts
+*--------------------------------------
+CS.END
+DEVSIG.Offset	.HS 05070B0C
+DEVSIG.Value	.HS 38180131
+DEVSIG.Length	.EQ DEVSIG.Value-DEVSIG.Offset
+MSG.DETECT		.DO SSCIRQ=1
+				.AZ "Apple SSC (Super Serial Card,//c Serial Port) Driver (IRQ Enabled).\r\n"
+				.ELSE
+				.AZ "Apple SSC (Super Serial Card,//c Serial Port) Driver.\r\n"				
+				.FIN
+MSG.DETECT.OK	.AZ "SSC Installed As Device : %s\r\n"
+MSG.DETECT.KO	.AZ "No SSC Found.\r\n"
+ARGS			.BS 2
+*--------------------------------------
+*			Device Header (16 Bytes)
+*--------------------------------------
+DEV.HEADER		cld
+				jmp (DRV.CS.START,x)
+				.DO SSCIRQ=1
+				.DA #S.DEV.S.WRITE+S.DEV.S.READ+S.DEV.S.IRQ
+				.ELSE
+				.DA #S.DEV.S.WRITE+S.DEV.S.READ
+				.FIN
+				.BS 6
+DEV.HEADER.NAME	.AZ "COM1"			NAME
+*--------------------------------------
+*			Driver Code
+*--------------------------------------
+DRV.CS.START	.DA STATUS
+				.DA A2osX.BADCALL
+				.DA A2osX.BADCALL
+				.DA A2osX.BADCALL
+				.DA CONTROL
+				.DA A2osX.BADCALL
+				.DA OPEN
+				.DA CLOSE
+				.DA READ
+				.DA WRITE
+				.DO SSCIRQ=1
+				.DA IRQ
+				.FIN
+L.STAT			.DA STAT
+				.DA 0					end or relocation
+*--------------------------------------
+STATUS			>LDYA L.STAT
+				clc
+				rts
+*--------------------------------------
+CONTROL			clc
+				rts
+*--------------------------------------
+OPEN			php
+				sei
+				ldx DEVSLOTn08F
+				
+				stz SSC.RESET-$8F,x 
+
+				.DO SSCIRQ=1
+				
+				stz INBUF.HEAD
+				stz INBUF.TAIL
+				stz OUTBUF.HEAD
+				stz OUTBUF.TAIL
+			
+				lda #SSC.CTL.CLKINT+SSC.CTL.B9600+SSC.CTL.8D+SSC.CTL.1S+SSC.CMD.NOP
+				sta SSC.CTL-$8F,x
+				
+				lda #SSC.CMD.TEIRQ+SSC.CMD.TE+SSC.CMD.DTR
+				sta SSC.CMD-$8F,x
+
+				.ELSE
+				
+				lda #SSC.CTL.CLKINT+SSC.CTL.B9600+SSC.CTL.8D+SSC.CTL.1S+SSC.CMD.NOP
+				sta SSC.CTL-$8F,x
+				
+				lda #SSC.CMD.RIRQDIS+SSC.CMD.TE+SSC.CMD.DTR
+				sta SSC.CMD-$8F,x
+				
+				.FIN
+
+				lda SSC.DATA-$8F,x			discard any garbage byte
+				lda SSC.STATUS-$8F,x		clear any IRQ pending
+
+				plp
+				clc
+				rts
+*--------------------------------------
+CLOSE			php
+				sei
+				ldx DEVSLOTn08F
+				stz SSC.RESET-$8F,x 
+				plp
+				clc
+				rts
+*--------------------------------------
+READ			.DO SSCIRQ=1
+				
+				php
+				sei
+				ldx INBUF.TAIL
+				cpx INBUF.HEAD
+				beq .9
+				
+				lda INBUF,x
+				inx
+				cpx #BUF.SIZE
+				bne .1
+				
+				ldx #0
+				
+.1				stx INBUF.TAIL
+				
+				plp
+				clc
+				rts
+				
+.9				plp
+				lda #0
+				sec
+				rts
+				
+				.ELSE
+				
+				ldx DEVSLOTn08F
+				lda SSC.STATUS-$8F,x
+				bmi *
+
+				and #SSC.STATUS.RDRF	incoming char?
+				beq	.9
+				
+				lda SSC.DATA-$8F,x
+				clc
+				rts
+				
+.9				lda #0
+				sec
+				rts
+				
+				.FIN
+*--------------------------------------
+WRITE			.DO SSCIRQ=1
+				
+				php
+				sei
+				tay						save char in Y
+
+				ldx DEVSLOTn08F
+
+*				lda SSC.STATUS-$8F,x
+*				bit #SSC.STATUS.DCD+SSC.STATUS.DSR		true when 0
+*				bne .9
+				
+				lda OUTBUF.HEAD
+				cmp OUTBUF.TAIL			Buffer Empty?
+				bne .11					not empty, queue char
+
+				lda SSC.STATUS-$8F,x
+				
+				and #SSC.STATUS.TDRE 	Register Empty ?
+				beq .10					not empty, queue char
+				
+				tya						yes, write directly to ACIA
+				sta SSC.DATA-$8F,x
+				
+				plp
+				clc
+				rts
+	
+.10				lda OUTBUF.HEAD
+				
+.11				tax
+				inc
+				and #BUF.MASK
+				cmp OUTBUF.TAIL	
+				beq .9					Buffer Full!!
+
+				sta OUTBUF.HEAD
+				
+				tya
+				sta OUTBUF,x
+				
+*				ldx DEVSLOTn08F
+*				lda #SSC.CMD.TEIRQ+SSC.CMD.DTR
+*				sta SSC.CMD-$8F,x
+				plp
+				clc
+				rts
+				
+.9				plp
+				sec
+				rts
+				
+				.ELSE
+				
+				pha
+				
+				ldx DEVSLOTn08F
+				
+.1				lda SSC.STATUS-$8F,x
+
+*				and #SSC.STATUS.DCD+SSC.STATUS.DSR
+*				beq .9
+				
+				and #SSC.STATUS.TDRE	Outgoing char?
+				beq .1
+				
+				pla
+				sta SSC.DATA-$8F,x
+				
+				clc
+				rts
+				
+.9				pla
+				sec
+				rts
+				
+				.FIN
+*--------------------------------------
+* IRQ Handler
+* on exit, CC if handled
+*--------------------------------------
+				.DO SSCIRQ=1				
+IRQ				ldx DEVSLOTn08F
+				lda SSC.STATUS-$8F,x
+				
+*				and #SSC.STATUS.IRQ		Useless
+				bpl .9					IRQ from this device ? no, exit !!!!Applewin bug #308!!!!
+
+				bit #SSC.STATUS.RDRF	incoming char?
+				beq .3					
+
+*------------ IRQ In
+
+.1				lda INBUF.HEAD
+				tay						save actual head for later
+				
+				inc
+				and #BUF.MASK
+				cmp INBUF.TAIL				
+				beq .2					buffer full, discard and exit
+				
+				sta INBUF.HEAD
+
+				lda SSC.DATA-$8F,x			read data to clear IRQ
+				sta INBUF,y
+
+.2				lda SSC.STATUS-$8F,x
+				bit #SSC.STATUS.RDRF	incoming char?
+				bne .1
+				
+*------------ IRQ Out
+				
+.3				bit #SSC.STATUS.TDRE
+				beq .8					no transmition possible....
+
+.4				ldy OUTBUF.TAIL			something to transmit ?
+				cpy OUTBUF.HEAD
+				beq .8					in that case, HOW TO CLEAR IRQ ????
+				
+				lda OUTBUF,y
+				sta SSC.DATA-$8F,x			write data to clear IRQ
+				
+				tya
+				inc
+				and #BUF.MASK
+				
+				sta OUTBUF.TAIL	
+				
+				lda SSC.STATUS-$8F,x
+				bit #SSC.STATUS.TDRE
+				bne .4
+				
+.8				clc
+				rts
+				
+.9				sec
+				rts
+				.FIN
+*--------------------------------------
+DRV.CS.END
+DEVSLOTn08F		.BS 1
+				.DO SSCIRQ=1
+INBUF.TAIL		.BS 1
+INBUF.HEAD		.BS 1
+OUTBUF.TAIL		.BS 1
+OUTBUF.HEAD		.BS 1
+INBUF			.BS BUF.SIZE
+OUTBUF			.BS BUF.SIZE
+				.FIN
+*--------------------------------------
+STAT			.DO SSCIRQ=1
+				.DA #S.DSTAT.S.WRITE+S.DSTAT.S.READ+S.DEV.S.IRQ
+				.ELSE
+				.DA #S.DSTAT.S.WRITE+S.DSTAT.S.READ
+				.FIN
+				.DA #0,#0,#0
+				>PSTR "Serial Card/Port"
+				.DA #S.DSTAT.T.CHAR
+				.DA #0
+				.DA #0
+				.DA #91
+*--------------------------------------
+MAN
+SAVE /A2OSX.SRC/DRV/X.SSC.DRV.S
+LOAD /A2OSX.SRC/DRV/SSC.I.DRV.S
+ASM
