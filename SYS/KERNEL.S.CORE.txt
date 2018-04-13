@@ -29,7 +29,7 @@ CORE.Run		lda CORE.PSCount
 				and #$FF^S.PS.F.HOLD	unmark as HOLD
 				sta (pPs)
 				
-.2				jsr CORE.PSEnter		Restore at least ZP & Ptrs
+.2				jsr CORE.PSSelect		Restore at least ZP & Ptrs
 
 				lda (pPs)				get S.PS.F again
 				bit #S.PS.F.SLEEP		Is this PS sleeping?
@@ -39,7 +39,7 @@ CORE.Run		lda CORE.PSCount
 				sta (pPS)
 				
 				jsr CORE.Resume			Restore PC....and JMP to
-
+				dec IRQ.InKernel
 				bcc .7
 				bcs .5
 				
@@ -54,7 +54,7 @@ CORE.Run		lda CORE.PSCount
 				.HS 2C					BIT abs
 .4				ldx #TSKMGR.RUN
 
-				jsr pCodeJmp			Call INIT/RUN function
+				jsr CORE.pCodeJmp		Call INIT/RUN function
 				dec IRQ.InKernel
 				bcc .7					INIT/RUN/RESUME said CS=QUIT?
 
@@ -77,7 +77,7 @@ CORE.Run		lda CORE.PSCount
 				sta (ZPPtr1),y
 				
 .6				ldx #TSKMGR.QUIT		Quit this process
-				jsr pCodeJmp			Call QUIT function
+				jsr CORE.pCodeJmp		Call QUIT function
 				dec IRQ.InKernel
 				ldy #S.PS.PID
 				lda (pPs),y
@@ -238,7 +238,7 @@ CORE.Dispatch	lda CORE.PSCount
 				bit #S.PS.F.EVENT		Accept Events ?
 				beq .5
 
-				jsr CORE.PSEnter
+				jsr CORE.PSSelect
 
 				lda #Evt.Table
 				sta pEvent				Select first event in list
@@ -250,7 +250,7 @@ CORE.Dispatch	lda CORE.PSCount
 				beq .3
 				
 				ldx #TSKMGR.DOEVENT
-				jsr pCodeJmp			Call DOEVENT function
+				jsr CORE.pCodeJmp		Call DOEVENT function
 				dec IRQ.InKernel
 				bcs .3					not for this PS, try next event in list
 				
@@ -277,17 +277,6 @@ CORE.Dispatch	lda CORE.PSCount
 				
 .8				clc
 				rts
-*--------------------------------------			
-pCodeJmp		lda pCode+1
-				pha
-				lda pCode
-				pha
-				php
-				sei
-				inc IRQ.InKernel
-				rti
-				
-				jmp (pCode)
 *--------------------------------------
 CORE.Quit		clc
 				rts
@@ -429,7 +418,7 @@ CORE.PSSelect0	>LDYAI CORE.S.PS0		Select PS0
 				>STYA pStack
 				rts
 *--------------------------------------
-CORE.PSEnter	ldy #S.PS.ZP+ZPBIN.SIZE-1
+CORE.PSSelect	ldy #S.PS.ZP+ZPBIN.SIZE-1
 				ldx #ZPBIN.SIZE-1
 				
 .1				lda (pPs),y
@@ -451,12 +440,21 @@ CORE.PSLeave	ldy #S.PS.ZP+ZPBIN.SIZE-1
 				
 				rts
 *--------------------------------------
+CORE.Switch		php
+				sec
+				.HS 2C					BIT ABS
+*--------------------------------------
 CORE.Sleep		php
-				dec IRQ.InKernel
+				clc
 				
 				phy
 				ldy #S.PS.A
 				sta (pPs),y
+				
+				lda #S.PS.F.SLEEP
+				adc #0					C=S.PS.F.PREEMPTED
+				ora (pPs)
+				sta (pPs)
 				
 				txa
 				iny						#S.PS.X
@@ -481,15 +479,14 @@ CORE.Sleep		php
 				iny						#S.PS.PC+1
 				sta (pPs),y
 
-				iny						#S.PS.S
 				tsx
 				
 				inx
 				inx
 				inx
 				txa
-				sta (pPs),y
-
+				tay						Save !Byte count for later
+				
 				beq .8
 				
 .1				pla
@@ -497,25 +494,23 @@ CORE.Sleep		php
 				inx
 				bne .1
 	
-.8				lda (pPs)
-				ora #S.PS.F.SLEEP
-				sta (pPs)
-						
+.8				tya						push CPU Stack BC to restorre on top of Soft Stack 
+				>PUSHA
+
 				clc						exit to kernel with CC
 				rts
 *--------------------------------------
-CORE.Resume		ldy #S.PS.S
-				lda (pPs),y
-				beq .2
-				
+CORE.Resume		>PULLA					Get !BC 
 				tax
-				
+
+				beq .2
+
 .1				>PULLA
 				pha
 				inx
 				bne .1
 				
-.2				dey						#S.PS.PC+1
+.2				ldy #S.PS.PC+1
 				lda (pPs),y
 				pha
 				
@@ -539,9 +534,11 @@ CORE.Resume		ldy #S.PS.S
 				lda (pPs),y
 
 				ply
-				sei
 				inc IRQ.InKernel
 				rti
+*--------------------------------------			
+CORE.pCodeJmp	inc IRQ.InKernel
+				jmp (pCode)
 *--------------------------------------
 TSKMGR.EVENTCNT	.BS 1
 *--------------------------------------
@@ -564,7 +561,7 @@ CORE.Tick10t	.BS 1
 CORE.Counter	.BS 1
 CORE.PSCount	.DA #0
 CORE.LastPSID	.DA #0
-CORE.S.PS0		.BS S.PS.hARGS+1
+CORE.S.PS0		.BS S.PS.STATS+1
 *--------------------------------------
 MAN
 SAVE /A2OSX.SRC/SYS/KERNEL.S.CORE
