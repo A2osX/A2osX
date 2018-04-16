@@ -54,7 +54,7 @@ And return, if found, the full path to it.
 ## OUT:
 + Y,A = S.DSTAT
 
-# K.DevIOCTL
+# K.IOCTL
 
 ## IN: 
 + PUSHB = DevID
