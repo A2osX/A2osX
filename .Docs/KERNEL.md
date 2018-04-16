@@ -288,12 +288,23 @@ Create a new copy of this C-String
 
 ## In:
 + PUSHB = hSList
-+ PUSHW = Key Ptr
-+ PUSHW = Data Ptr
 + PUSHW = KeyID
++ PUSHW = Data Ptr
++ PUSHW = Key Ptr
 
 ## Out:
 + X,Y = Next KeyID
+
+# SListUpdateByID
+
+## In:
++ PUSHB = hSList
++ PUSHW = KeyID
++ PUSHW = Data Ptr
+
+## Out:
++ A = Key Length
++ X,Y = KeyID
 
 # SListAdd
 
@@ -311,17 +322,6 @@ Create a new copy of this C-String
 ## In:
 + PUSHB = hSList
 + PUSHW = Key Ptr
-+ PUSHW = Data Ptr
-
-## Out:
-+ A = Key Length
-+ X,Y = KeyID
-
-# SListUpdateByID
-
-## In:
-+ PUSHB = hSList
-+ PUSHW = KeyID
 + PUSHW = Data Ptr
 
 ## Out:

@@ -1,8 +1,6 @@
-PR#3
-PREFIX /A2OSX.BUILD
 NEW
-INC 1
-AUTO 6
+PREFIX /A2OSX.BUILD
+AUTO 4,1
 				.LIST OFF
 				.OP	65C02
 				.OR	$2000
@@ -17,6 +15,7 @@ CONN.MAX		.EQ 16
 *--------------------------------------
 ZPIPCfgPtr		.EQ ZPBIN
 ZPSktPtr		.EQ ZPBIN+2
+ZPLinePtr		.EQ ZPBIN+4
 *--------------------------------------
 *			File Header (16 Bytes)
 *--------------------------------------
@@ -25,9 +24,10 @@ CS.START		cld
 				.DA #$61				6502,Level 1 (65c02)
 				.DA #1					BIN Layout Version 1
 				.DA 0
-				.DA CS.END-CS.START		Code Length To Relocate
-				.DA DS.END-DS.START		Data Segment to Allocate
-				.DA 0
+				.DA CS.END-CS.START		CS
+				.DA DS.END-DS.START		DS
+				.DA #64					SS
+				.DA #6					ZP
 				.DA 0
 *--------------------------------------
 * Relocation Table
@@ -48,7 +48,7 @@ L.HTTP.200OK	.DA HTTP.200OK
 				.DA 0				
 *--------------------------------------
 CS.INIT			>LDYA L.LIBTCPIP
-				>SYSCALL LoadLibYA
+				>SYSCALL LoadLib.YA
 				sta hLIBTCPIP
 
 				lda (pPs)
@@ -72,20 +72,26 @@ CS.RUN			jsr Init.Timeout
 				>SLEEP
 				jsr Wait.Timeout
 				bcc .1
-				>SYSCALL GetC
+				>SYSCALL GetChar
 				bcs .1
 				cmp #$03
 				bne .1
-				jmp CS.RUN.ABORT
+				
+				>LDYA L.MSG.ABORT
+				>SYSCALL PrintF.YA
+				lda #0
+				clc
+				rts
 				
 .99				>LDYA L.MSG.TCPIPERR
 				>SYSCALL PrintF.YA
 				lda #K.E.SYN
 				sec	
-				rts
+CS.RUN.RTS		rts
 				
 CS.RUN.INIT		ldx #3
 				ldy #S.IPCFG.IP+3
+				
 .1				lda (ZPIPCfgPtr),y
 				sta Socket.Src.Addr,x
 				dey
@@ -94,15 +100,23 @@ CS.RUN.INIT		ldx #3
 				
 				>PUSHW L.Socket
 				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.New
-				bcs .9
+				bcs CS.RUN.RTS
 				txa
 				ldy #hSrvSocket
 				sta (pData),y
 				
+				>LDYAI 256
+				>SYSCALL GetMem.YA
+				bcs CS.RUN.RTS
+				
+				>STYA ZPLinePtr
+				txa
+				>STA.G hLineBuf
+				
 				>LDYA L.MSG.INITOK
 				>SYSCALL PrintF.YA
 
-.2				>SLEEP
+CS.RUN.LOOP		>SLEEP
 				jsr CS.RUN.SERVER
 				bcs CS.RUN.ERR
 				
@@ -124,17 +138,13 @@ CS.RUN.INIT		ldx #3
 				
 .4				sta (pData),y		
 				
-				bra .2
+				bra CS.RUN.LOOP
 				
 .9				>LDYA L.MSG.SKTERR
 				>SYSCALL PrintF.YA
 				lda #K.E.SYN
 				sec	
 				rts
-				
-CS.RUN.ABORT	>LDYA L.MSG.ABORT
-				>SYSCALL PrintF.YA
-				lda #0
 				
 CS.RUN.ERR		sec	
 				rts
@@ -183,13 +193,14 @@ CS.RUN.SERVER	ldy #hSrvSocket
 .9				rts
 *--------------------------------------
 CS.RUN.CLIENT	sta hClntSocket
+
 				>PUSHA					hSocket
-				>PUSHWI UsrBuf256
+				>PUSHW ZPLinePtr
 				>PUSHWI 256
 				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.GetS
 				bcs .1
 				
-				>LDYAI UsrBuf256
+				>PUSHW ZPLinePtr
 				>SYSCALL PrintF.YA
 				
 				>PUSHB hClntSocket
@@ -222,8 +233,13 @@ CS.QUIT			ldx #CONN.MAX
 				lda (pData),y
 				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.CLOSEA
 				
-				lda hLIBTCPIP
-				>SYSCALL UnloadLibA
+				>LDA.G hLineBuf
+				beq .3
+				
+				>SYSCALL FreeMem.A
+				
+.3				lda hLIBTCPIP
+				>SYSCALL UnloadLib.A
 				clc
 				rts
 *--------------------------------------
@@ -241,7 +257,7 @@ Wait.TimeOut	sec
 *--------------------------------------
 CS.END
 *--------------------------------------
-LIBTCPIP		>PSTR "libtcpip.o"
+LIBTCPIP		.AZ "libtcpip.o"
 MSG.TCPWAIT		.AZ "HTTPD:Waiting for TCP/IP initializing...\r\n"
 MSG.INITOK		.AZ "HTTPD:Init Ok, Listening.\r\n"
 MSG.TCPIPERR	.AZ "HTTPD:TCP/IP Not initialized properly\r\n"
@@ -251,7 +267,7 @@ MSG.INCOMING	.AZ "HTTPD:Incoming Connection [SKT=%h] From : %d.%d.%d.%d\r\n"
 hLIBTCPIP		.BS 1
 hClntSocket		.BS 1
 *--------------------------------------
-HTTP.200OK		>PSTR "HTTP/1.1 200 OK\r\n"
+HTTP.200OK		.AZ "HTTP/1.1 200 OK\r\n"
 *--------------------------------------
 Socket			.DA #S.SOCKET.SOCK.STREAM
 				.DA #S.SOCKET.SO.ACCEPTCONN
@@ -266,6 +282,7 @@ Socket.Dst.Port	.BS 2
 				.OR 0
 DS.START
 hSockets		.BS	CONN.MAX			pData
+hLineBuf		.BS 1
 SktIndex		.BS 1
 hSrvSocket		.BS 1
 TimeOut			.BS 1
