@@ -10,13 +10,11 @@ AUTO 4,1
 				.INB /A2OSX.BUILD/INC/A2OSX.I
 				.INB /A2OSX.BUILD/INC/LIBCRYPT.I
 *--------------------------------------
-ZPTmpPtr1		.EQ ZPLIB
-ZPTmpPtr2		.EQ ZPLIB+2
-ZPTmpPtr3		.EQ ZPLIB+4
-ZPTmpPtr4		.EQ ZPLIB+6
-ZPDataPtr		.EQ ZPLIB+8
-ZPDataLen		.EQ ZPLIB+10
-ZPChunkLen		.EQ ZPLIB+12
+ZPCtxPtr		.EQ ZPLIB
+ZPDataPtr		.EQ ZPLIB+2
+ZPDataLen		.EQ ZPLIB+4
+ZPChunkLen		.EQ ZPLIB+6
+ZPHashPtr		.EQ ZPLIB+8
 *--------------------------------------
 * DWORD Macros : Do NOT disturb carry with cpx, cpy...
 *--------------------------------------
@@ -103,88 +101,90 @@ CS.START		cld
 *--------------------------------------
 .1				.DA LIB.LOAD
 				.DA LIB.UNLOAD
-				.DA MD5PStrA
+				.DA MD5
 				.DA MD5Init
 				.DA MD5Update
-				.DA MD5FinalizeA
+				.DA MD5Finalize
 				.DA 0
 *--------------------------------------
 LIB.LOAD
 LIB.UNLOAD		clc
 				rts
-*--------------------------------------
-* MD5PStrA
-*  in :
-*   A = hMem To PSTR
-*  out :
-*   A = hMem To MessageDigest
-*--------------------------------------
-MD5PStrA		>SYSCALL GetMemPtr.A
-				>STYA ZPTmpPtr3		1 and 2 used by other MD5 functions
-				ldy #0
-				lda (ZPTmpPtr3),y		get PStr len
-				sta ZPTmpPtr4			ZPTmpPtr4 = str len
-				stz ZPTmpPtr4+1		0,PSTR len <= 255
-				inc ZPTmpPtr3
-				bne .1
-				inc ZPTmpPtr3+1		Make DATA skip PSTR Len Byte
+*/--------------------------------------
+* # MD5
+*  Return MD5 Hash for input String
+* ## In :
+*   PUSHW = PTR to Src String
+*   PUSHW = PTR to Dst MessageDigest Buffer
+* ## Out :
+*   CC
+*\--------------------------------------
+MD5				>PULLW ZPHashPtr
+				>PULLYA
+				>STYA ZPDataPtr
+				
+				>SYSCALL StrLen.YA
+				>STYA ZPDataLen
+				
 .1				jsr MD5Init
 				bcs .9
+				
 				pha						save MD5 Context hMem
-				>PUSHW ZPTmpPtr4		Push LEN
-				>PUSHW ZPTmpPtr3		Push DATA
+
+				jsr MD5Update.I
+				jsr MD5Finalize
+				
 				pla
-				pha						
-				>PUSHA					Push MD5 Context
-				jsr MD5Update
-				pla						get back MD5 Context
-				pha
-				jsr MD5FinalizeA
-				plx						get back MD5 Context hMem
-				pha						save MessageDigest hMem
-				txa	
-				>SYSCALL FreeMem.A	Free MD5 Context
-				pla						get back MessageDigest hMem
+				>SYSCALL FreeMem.A		Free MD5 Context
+				
 				clc
 .9				rts
-*--------------------------------------
-* MD5Init
-*  In :
-*  Out :
+*/--------------------------------------
+* # MD5Init
+* ## In :
+* ##  Out :
 *   A = hMem To S.MD5
-*--------------------------------------
+*\--------------------------------------
 MD5Init			>LDYAI S.MD5.SIZE
 				>SYSCALL GetMem.YA
 				bcs .9
-				>STYA ZPTmpPtr1
+				
+				>STYA ZPCtxPtr
+				
 				ldy #0
+				
 .1				lda MD5.ABCDINIT,y
-				sta (ZPTmpPtr1),y
+				sta (ZPCtxPtr),y
 				iny
 				cpy #16
 				bne .1
+				
 				lda #0
-.2				sta	(ZPTmpPtr1),y
+				
+.2				sta	(ZPCtxPtr),y
 				iny
 				cpy #S.MD5.SIZE			Includes S.MD5.FINALIZED Flag
 				bne .2
+				
 				txa
 				clc
 .9				rts
-*--------------------------------------
-* MD5Update (Append "$80" & Padding & original size)
-*  In:
-*	PULLB MD5 Context hMem
-*	PULLW DATA PTR
-*	PULLW DATA LEN
-*--------------------------------------
+*/--------------------------------------
+* # MD5Update (Append "$80" & Padding & original size)
+* ## In:
+*	PUSHW DATA LEN
+*	PUSHW DATA PTR
+*	PUSHB MD5 Context hMem
+* ##  Out :
+*\--------------------------------------
 MD5Update		>PULLA					get MD5 Context
 				>SYSCALL GetMemPtr.A
-				>STYA ZPTmpPtr1		get MD5 Context
+				>STYA ZPCtxPtr			get MD5 Context
 				>PULLW ZPDataPtr		get DATA
 				>PULLW ZPDataLen		get LEN
-				ldy #S.MD5.FINALIZED
-				lda (ZPTmpPtr1),y
+				
+MD5Update.I		ldy #S.MD5.FINALIZED
+				lda (ZPCtxPtr),y
 				beq .1
 				sec
 				rts
@@ -218,7 +218,7 @@ MD5Update		>PULLA					get MD5 Context
 				bra .52
 .53				ldy #S.MD5.EXTRABIT		Mark MD5 Context as Appended
 				lda #$80
-				sta (ZPTmpPtr1),y
+				sta (ZPCtxPtr),y
 				lda ZPChunkLen
 				cmp #56					Enough room for BITCOUNT ?
 				bcs .58					no
@@ -238,53 +238,58 @@ MD5Update		>PULLA					get MD5 Context
 				bcc .82
 				inc ZPDataPtr+1
 .82				bra .1
-*--------------------------------------
-* MD5FinalizeA
-*  In : 
-*    A = hMem To S.MD5
-*  Out:
-*    A = MessageDigest (PSTR, 16 Bytes, 32 Chars)
-*--------------------------------------
-MD5FinalizeA	>SYSCALL GetMemPtr.A
-				>STYA ZPTmpPtr1		get MD5 Context
-				ldy #S.MD5.FINALIZED
-				lda (ZPTmpPtr1),y
+*/--------------------------------------
+* # MD5Finalize
+* ## In : 
+*    PUSHW = MessageDigest (PSTR, 16 Bytes, 32 Chars) +Ending 0
+*    PUSHB = hMem To S.MD5
+* ## Out:
+*\--------------------------------------
+MD5Finalize		>PULLA
+				>SYSCALL GetMemPtr.A
+				>STYA ZPCtxPtr			get MD5 Context
+				
+				>PULLW ZPHashPtr
+				
+MD5Finalize.I	ldy #S.MD5.FINALIZED
+
+				lda (ZPCtxPtr),y
 				bne .11
+				
 				jsr MD5ExtraChunk
-.11				>LDYAI 33				Len + 32 Digits 
-				>SYSCALL GetMem.YA
-				bcs .9
-				>STYA ZPTmpPtr2
-				phx						save hMem for return
-				lda #32
-				sta (ZPTmpPtr2)
-				inc ZPTmpPtr2
-				bne .10
-				inc ZPTmpPtr2+1
-.10				ldy #S.MD5.ABCD0
-.1				lda (ZPTmpPtr1),y
+				
+.11				ldy #S.MD5.ABCD0
+
+.1				lda (ZPCtxPtr),y
 				lsr
 				lsr
 				lsr
 				lsr
 				tax
 				lda MD5.DIGITS,x
-				sta (ZPTmpPtr2)
-				inc ZPTmpPtr2
+				sta (ZPHashPtr)
+				inc ZPHashPtr
 				bne .2
-				inc ZPTmpPtr2+1
-.2				lda (ZPTmpPtr1),y
+				
+				inc ZPHashPtr+1
+				
+.2				lda (ZPCtxPtr),y
 				and #$0F
 				tax
 				lda MD5.DIGITS,x
-				sta (ZPTmpPtr2)
-				inc ZPTmpPtr2
+				sta (ZPHashPtr)
+				inc ZPHashPtr
 				bne .3
-				inc ZPTmpPtr2+1
+				
+				inc ZPHashPtr+1
+				
 .3				iny
 				cpy #S.MD5.ABCD0+16
 				bne .1
-				pla						get back hMem
+				
+				lda #0
+				sta (ZPHashPtr)
+				
 				clc
 .9				rts
 *--------------------------------------
@@ -292,12 +297,12 @@ MD5FinalizeA	>SYSCALL GetMemPtr.A
 *--------------------------------------
 * MD5AppendBitCount
 *  In :
-*   ZPTmpPtr1 = MD5 Context
+*   ZPCtxPtr = MD5 Context
 *--------------------------------------
 MD5AppendBitCount
 				ldx #56
 				ldy #S.MD5.BITCOUNT		Append 8 Bytes of BITCOUNT
-.1				lda (ZPTmpPtr1),y
+.1				lda (ZPCtxPtr),y
 				sta MD5.BUFFER64,x
 				inx
 				iny
@@ -305,13 +310,13 @@ MD5AppendBitCount
 				bne .1
 				ldy #S.MD5.FINALIZED	Mark MD5 Context as Finalized
 				lda #$80
-				sta (ZPTmpPtr1),y
+				sta (ZPCtxPtr),y
 				rts
 *--------------------------------------
 * MD5UpdateBitCount
 *  In :
 *   CL = Size (in bytes) to add to MD5 context
-*   ZPTmpPtr1 = MD5 Context
+*   ZPCtxPtr = MD5 Context
 *--------------------------------------
 MD5UpdateBitCount
 				stz ZPChunkLen+1
@@ -324,17 +329,17 @@ MD5UpdateBitCount
 				rol ZPChunkLen+1
 				clc
 				ldy #S.MD5.BITCOUNT
-				adc (ZPTmpPtr1),y
-				sta (ZPTmpPtr1),y
+				adc (ZPCtxPtr),y
+				sta (ZPCtxPtr),y
 				iny
 				lda ZPChunkLen+1
-				adc (ZPTmpPtr1),y
-				sta (ZPTmpPtr1),y
+				adc (ZPCtxPtr),y
+				sta (ZPCtxPtr),y
 				bcc .8
 .1				iny
-				lda (ZPTmpPtr1),y
+				lda (ZPCtxPtr),y
 				inc
-				sta (ZPTmpPtr1),y
+				sta (ZPCtxPtr),y
 				bne .8
 				cpy #7
 				bne .1
@@ -342,18 +347,18 @@ MD5UpdateBitCount
 *--------------------------------------
 * MD5ExtraChunk
 *  In : 
-*   ZPTmpPtr1 = MD5 Context
+*   ZPCtxPtr = MD5 Context
 *--------------------------------------
 MD5ExtraChunk	ldy #S.MD5.FINALIZED
 				lda #$80
-				sta (ZPTmpPtr1),y		Mark MD5 Context as "finalized"
+				sta (ZPCtxPtr),y		Mark MD5 Context as "finalized"
 				ldx #0
 				ldy #S.MD5.EXTRABIT		Extra Bit already appended ?
-				lda (ZPTmpPtr1),y
+				lda (ZPCtxPtr),y
 				bne .1
 				lda #$80
 				sta MD5.BUFFER64		Add extra bit to buffer
-				sta (ZPTmpPtr1),y		Mark Extrabit added
+				sta (ZPCtxPtr),y		Mark Extrabit added
 				inx
 .1				stz MD5.BUFFER64,x		pad with "0"...
 				inx
@@ -364,13 +369,13 @@ MD5ExtraChunk	ldy #S.MD5.FINALIZED
 *--------------------------------------
 * MD5UpdateABCD0
 *  In: 
-*   ZPTmpPtr1 = MD5 Context
+*   ZPCtxPtr = MD5 Context
 *--------------------------------------
 MD5UpdateABCD0	ldy #0
 .1				clc						ADC32 A+A0->A0, B, C, D.... 
 .2				lda MD5.ABCD,y
-				adc (ZPTmpPtr1),y
-				sta (ZPTmpPtr1),y
+				adc (ZPCtxPtr),y
+				sta (ZPCtxPtr),y
 				iny
 				tya
 				and #3
@@ -381,13 +386,13 @@ MD5UpdateABCD0	ldy #0
 *--------------------------------------
 * MD5Transform 
 *  In: 
-*   ZPTmpPtr1 = MD5 Context
+*   ZPCtxPtr = MD5 Context
 *   512 Bits Padded chunk in MD5.BUFFER64
 *  Out:
 *   Updated MD5.ABCD
 *--------------------------------------
 MD5Transform	ldy #15					init ABCD Chunk with Context ABCD0
-.1				lda (ZPTmpPtr1),y
+.1				lda (ZPCtxPtr),y
 				sta MD5.ABCD,y
 				dey
 				bpl .1
@@ -466,18 +471,6 @@ MD5.NEXTi		>MOV32 MD5.D,MD5.DTemp
 				jmp MD5.0015
 *--------------------------------------
 CS.END
-MD5.ABCD
-MD5.A			.BS 4					Chunk Level,A,B,C,D
-MD5.B			.BS 4
-MD5.C			.BS 4
-MD5.D			.BS 4
-MD5.DTemp		.BS 4
-MD5.F			.BS	4
-MD5.F1			.BS	4
-MD5.F2			.BS	4
-MD5.i			.BS 1
-MD5.BUFFER64	.BS 64
-*--------------------------------------
 MD5.ABCDINIT	.HS 01234567.89ABCDEF.FEDCBA98.76543210
 *--------------------------------------
 MD5.s			.DA #7,#12,#17,#22,#7,#12,#17,#22,#7,#12,#17,#22,#7,#12,#17,#22
@@ -508,6 +501,18 @@ MD5.K			.HS 78A46AD7.56B7C7E8.DB702024.EECEBDC1
 				.HS 827E53F7.35F23ABD.BBD2D72A.91D386EB
 *--------------------------------------
 MD5.DIGITS		.AS "0123456789ABCDEF"
+*--------------------------------------
+MD5.ABCD
+MD5.A			.BS 4					Chunk Level,A,B,C,D
+MD5.B			.BS 4
+MD5.C			.BS 4
+MD5.D			.BS 4
+MD5.DTemp		.BS 4
+MD5.F			.BS 4
+MD5.F1			.BS 4
+MD5.F2			.BS 4
+MD5.i			.BS 1
+MD5.BUFFER64	.BS 64
 *--------------------------------------
 MAN
 SAVE /A2OSX.SRC/LIB/LIBCRYPT.S
