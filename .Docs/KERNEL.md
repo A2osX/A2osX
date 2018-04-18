@@ -46,7 +46,7 @@ And return, if found, the full path to it.
 + X = DEVID
 + Y,A = DEVSLOT
 
-# K.GetDevStatus.A
+# GetDevStatus.A
 
 ## IN: 
 + A = DevID
@@ -54,7 +54,7 @@ And return, if found, the full path to it.
 ## OUT:
 + Y,A = S.DSTAT
 
-# K.IOCTL
+# IOCTL
 
 ## IN: 
 + PUSHB = DevID

@@ -234,6 +234,7 @@ note : '$VAR' does NOT expand Variable
 | CHGRP | In Progress | -C : Continue On Error | 0.9 |
 | | | -R : Recurse subdirectories | |
 | FORMAT | In Progress | -L : Low-Level Format | 0.9.1 |
+| MD5 | In Progress | -D : String Input | 0.9.1 |
 | EDIT | Working | still missing : find/replace | 0.9.1 |
 | NSCUTIL | Working | Tool for setting time in NSC/DL1216E | 0.9 |
 | ---- | ------ | ------- | ----- |

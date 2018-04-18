@@ -17,7 +17,7 @@
 ##  Out :
  + A = hMem To S.MD5
 
-# MD5Update (Append "$80" & Padding & original size)
+# MD5Update
 
 ## In:
 *	PUSHW DATA LEN
