@@ -5,6 +5,8 @@
 
 ## In :
 + PUSHW = DevSize (in 512b blocks)
++ PUSHB = Catalog Size (in blocks)
++ PUSHB = Options
 
 ## Out : 
 + X=BlockCount (max 22)
@@ -14,12 +16,14 @@
 
 ## In :
 + PUSHW = DevSize (in 512b blocks)
++ PUSHB = Catalog Size (in blocks)
++ PUSHB = Options
 + PUSHW = VolName (PSTR)
 + PUSHW = DstBuf (Zero filled)
  + Blk0 : ProDOS.BootBlk
  + Blk1 : SOS.BootBlk
- + Blk2,3,4,5 : Volume Directory
- + Blk6....   : Volume Bitmap (4096/Blk)
+ + Blk2...n : Volume Directory
+ + Blkn+1.. : Volume Bitmap (4096/Blk)
  + max devSize = 65535 ->  max 16 Bitmap Blk
  + absolute MAX DstBuf size=
  + 7 for Disk II(280blk),3.5(1600),3.5HD(2880)
