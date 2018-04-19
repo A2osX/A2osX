@@ -41,14 +41,15 @@ L.MSG.ERR		.DA MSG.ERR
 *--------------------------------------
 CS.INIT			ldy #S.PS.ARGC
 				lda (pPs),y
-				beq .99
-
+				beq .90
+				
 .1				>INC.G ArgIndex
 				
 				>SYSCALL GetArg.A
-				bcs .7
+				bcc .11
+				jmp .8
 				
-				>STYA ZPPtr1
+.11				>STYA ZPPtr1
 				
 				lda (ZPPtr1)
 				cmp #'-'
@@ -56,20 +57,24 @@ CS.INIT			ldy #S.PS.ARGC
 				
 				ldy #1 
 				lda (ZPPtr1),y
-				beq .99
+				beq .90
 
-				ldx OptionList
+				cmp #'0'
+				bcc .20
+				cmp #'9'+1
+				bcs .20
+				
+				and #$0F
+				>STA.G CatSize
+				bra .1
+				
+.20				ldx OptionList
 				
 .2				cmp OptionList,x
 				beq .3
 				dex
 				bne .2
-
-.99				>LDYA L.MSG.USAGE
-				>SYSCALL PrintF.YA
-				lda #K.E.SYN
-				sec
-				rts
+.90				bra .99
 				
 .3				ldy OptionVars-1,x
 				lda #$80
@@ -99,18 +104,63 @@ CS.INIT			ldy #S.PS.ARGC
 				>PUSHEA.G VolName
 				>SYSCALL StrCpy
 				jmp .1					success, scan for any other args
+
+.8				>LDYA L.LIBBLKDEV
+				>SYSCALL LoadLib.YA
+				sta hLIBBLKDEV
 				
-.7				>LDA.G VolName
+*				lda (pPs)
+*				ora #S.PS.F.EVENT		Now accept events
+*				sta (pPs)
+				
+				clc
+				rts
+				
+.99				>LDYA L.MSG.USAGE
+				>SYSCALL PrintF.YA
+				lda #K.E.SYN
+				sec
+				rts							
+*--------------------------------------
+CS.RUN			jsr CS.RUN.InitCat
+				bcs .9
+				
+				jsr CS.RUN.BuildCat
+				bcs .9
+
+				jsr CS.RUN.WriteCat
+				bcs .9
+				
+				>LDYA L.MSG.OK
+				>SYSCALL PrintF.YA
+				lda #0
+				sec
+				rts
+				
+.9				pha
+				>PUSHA
+				>LDYA L.MSG.ERR
+				>SYSCALL PrintF.YA
+				pla
+				sec
+				rts
+*--------------------------------------
+CS.RUN.InitCat	>LDA.G CatSize
+				bne .1
+				lda #4
+				sta (pData),y
+
+.1				>LDA.G VolName
 				bne .8					Volume name ok
 
 				ldx #$ff
 				ldy #VolName-1
 				
-.71				inx
+.2				inx
 				iny
 				lda BLANK,x
 				sta (pData),y
-				bne .71
+				bne .2
 				
 				lda A2osX.TIMER16
 				jsr A2CharAX
@@ -147,35 +197,7 @@ CS.INIT			ldy #S.PS.ARGC
 				lda #0
 				sta (pData),y
 				
-.8				>LDYA L.LIBBLKDEV
-				>SYSCALL LoadLib.YA
-				sta hLIBBLKDEV
-				
-*				lda (pPs)
-*				ora #S.PS.F.EVENT		Now accept events
-*				sta (pPs)
-				
-				clc
-				rts
-*--------------------------------------
-CS.RUN			jsr CS.RUN.BuildCat
-				bcs .9
-
-				jsr CS.RUN.WriteCat
-				bcs .9
-				
-				>LDYA L.MSG.OK
-				>SYSCALL PrintF.YA
-				lda #0
-				sec
-				rts
-				
-.9				pha
-				>PUSHA
-				>LDYA L.MSG.ERR
-				>SYSCALL PrintF.YA
-				pla
-				sec
+.8				clc
 				rts
 *--------------------------------------
 CS.RUN.BuildCat	>LDA.G hDev
@@ -210,7 +232,8 @@ CS.RUN.BuildCat	>LDA.G hDev
 				>SYSCALL PrintF.YA
 .99				bcs .9
 
-				>PUSHW.G SizeInBlocks
+				jsr .7
+
 				>LIBCALL hLIBBLKDEV,LIBBLKDEV.GetProDOSCatSize			
 				bcs .9
 
@@ -221,7 +244,7 @@ CS.RUN.BuildCat	>LDA.G hDev
 				pla
 				ply
 				
-				>SYSCALL GetMem0.YA			BufferSize
+				>SYSCALL GetMem0.YA		BufferSize
 				bcs .9
 				
 				phx
@@ -229,11 +252,17 @@ CS.RUN.BuildCat	>LDA.G hDev
 				pla
 				>STA.G hBuf
 				
-				>PUSHW.G SizeInBlocks
+				jsr .7
+				
 				>PUSHEA.G VolName
 				>PUSHW.G BlkParams.Ptr
 				>LIBCALL hLIBBLKDEV,LIBBLKDEV.BuildProDOSCat
 .9				rts
+
+.7				>PUSHW.G SizeInBlocks
+				>PUSHB.G CatSize
+				>PUSHB.G CatOptions
+				rts
 *--------------------------------------
 CS.RUN.WriteCat	>PUSHB.G hDev
 				>PUSHBI DEVMGR.WRITEBLOCK		
@@ -297,7 +326,9 @@ CS.END
 OptionList		>PSTR "Ll"
 OptionVars		.DA #bLL,#bLL
 *--------------------------------------
-MSG.USAGE		.AZ "Usage : FORMAT <BLOCKDEV> [VOLUME.NAME]\r\n   -L : Low-Level Format\r\n"
+MSG.USAGE		.AS "Usage : FORMAT <BLOCKDEV> [VOLUME.NAME]\r\n"
+				.AS "   -L : Low-Level Format\r\n"
+				.AZ " -1-9 : Catalog Size (Blocks)\r\n"
 MSG.OK			.AZ "[OK]\r\n"
 MSG.ERR			.AZ "[%h]\r\n"
 MSG.INIT		.AZ "Formatting %s (%D Blks),Volname:%s..."
@@ -314,6 +345,8 @@ bLL				.BS 1
 VolName			.BS 16
 hDev			.BS 5
 SizeInBlocks	.BS 2
+CatSize			.BS 1
+CatOptions		.BS 1
 BlkCnt			.BS 1
 BlkParams.Ptr	.BS 2
 BlkParams.Num	.BS 2
