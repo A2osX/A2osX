@@ -10,9 +10,10 @@ CORE.Run		lda CORE.PSCount
 				
 .1				ldx CORE.Counter
 				lda PS.Table.PID-1,x
-				beq .8
+				bne .11
+				jmp .8
 				
-				lda PS.Table.hMem-1,x
+.11				lda PS.Table.hMem-1,x
 				jsr K.GetMemPtr.A
 				>STYA pPs
 				
@@ -26,7 +27,7 @@ CORE.Run		lda CORE.PSCount
 				bcc .8					yes, still running....
 				
 				lda (pPs)				get S.PS.F again
-				and #$FF^S.PS.F.HOLD	unmark as HOLD
+				eor #S.PS.F.HOLD		unmark as HOLD
 				sta (pPs)
 				
 .2				jsr CORE.PSSelect		Restore at least ZP & Ptrs
@@ -35,7 +36,7 @@ CORE.Run		lda CORE.PSCount
 				bit #S.PS.F.SLEEP		Is this PS sleeping?
 				beq .3					no, call INIT/RUN
 				
-				and #$FF^S.PS.F.SLEEP	unmark as SLEEP
+				eor #S.PS.F.SLEEP		unmark as SLEEP
 				sta (pPS)
 				
 				jsr CORE.Resume			Restore PC....and JMP to
@@ -46,8 +47,7 @@ CORE.Run		lda CORE.PSCount
 .3				bit #S.PS.F.INIT
 				beq .4
 
-				and #$FF^S.PS.F.INIT	unmark as INIT
-				ora #S.PS.F.RUN			mark as RUN
+				eor #S.PS.F.INIT+S.PS.F.RUN	unmark as INIT,mark as RUN
 				sta (pPS)
 				
 				ldx #TSKMGR.INIT
@@ -76,9 +76,14 @@ CORE.Run		lda CORE.PSCount
 				ldy #S.PS.RC			give it RC
 				sta (ZPPtr1),y
 				
-.6				ldx #TSKMGR.QUIT		Quit this process
+.6				lda (pPs)
+				eor #S.PS.F.RUN+S.PS.F.QUIT
+				sta (pPs)
+				
+				ldx #TSKMGR.QUIT		Quit this process
 				jsr CORE.pCodeJmp		Call QUIT function
 				dec IRQ.InKernel
+				
 				ldy #S.PS.PID
 				lda (pPs),y
 				jsr CORE.PSFree.A
@@ -218,9 +223,13 @@ CORE.GetEvents	lda #Evt.Table
 *	CS: Not Dispatched
 *	CC: Event Cleared 
 *--------------------------------------
-CORE.Dispatch	lda CORE.PSCount
-				sta CORE.Counter
+CORE.Dispatch	lda CORE.EvtCount
 				beq .9
+				
+				lda CORE.PSCount
+				beq .9
+
+				sta CORE.Counter
 				
 .1				ldx CORE.Counter
 				
@@ -249,9 +258,18 @@ CORE.Dispatch	lda CORE.PSCount
 .2				lda (pEvent)			Empty event, select next
 				beq .3
 				
+				lda (pPs)
+				ora #S.PS.F.DOEVENT
+				sta (pPs)
+				
 				ldx #TSKMGR.DOEVENT
 				jsr CORE.pCodeJmp		Call DOEVENT function
 				dec IRQ.InKernel
+				
+				lda (pPs)
+				eor #S.PS.F.DOEVENT
+				sta (pPs)
+
 				bcs .3					not for this PS, try next event in list
 				
 				jsr CORE.DestroyEvent	this PS handled the EVT, destroy it...
@@ -447,12 +465,15 @@ CORE.Switch		php
 CORE.Sleep		php
 				clc
 				
+				sei
+				cld
+				
 				phy
 				ldy #S.PS.A
 				sta (pPs),y
 				
 				lda #S.PS.F.SLEEP
-				adc #0					C=S.PS.F.PREEMPTED
+
 				ora (pPs)
 				sta (pPs)
 				
@@ -469,13 +490,16 @@ CORE.Sleep		php
 				sta (pPs),y
 
 				pla						get PC LO
-				clc
-				adc #1					Advance one byte because of return by RTI
-				iny						#S.PS.PC
+				plx						get PC HI
+				
+				inc						Advance one byte because of return by RTI
+				bne .1
+				inx
+				
+.1				iny						#S.PS.PC
 				sta (pPs),y
 
-				pla						get PC HI
-				adc #0
+				txa
 				iny						#S.PS.PC+1
 				sta (pPs),y
 
@@ -489,25 +513,27 @@ CORE.Sleep		php
 				
 				beq .8
 				
-.1				pla
+.2				pla
 				>PUSHA
 				inx
-				bne .1
+				bne .2
 	
-.8				tya						push CPU Stack BC to restorre on top of Soft Stack 
+.8				tya						push CPU Stack BC to restore on top of Soft Stack 
 				>PUSHA
 
 				clc						exit to kernel with CC
 				rts
 *--------------------------------------
-CORE.Resume		>PULLA					Get !BC 
-				tax
+CORE.Resume		sei
+				
+				>PULLA					Get !BC 
+				tay
 
 				beq .2
 
 .1				>PULLA
 				pha
-				inx
+				iny
 				bne .1
 				
 .2				ldy #S.PS.PC+1
@@ -537,8 +563,14 @@ CORE.Resume		>PULLA					Get !BC
 				inc IRQ.InKernel
 				rti
 *--------------------------------------			
-CORE.pCodeJmp	inc IRQ.InKernel
-				jmp (pCode)
+CORE.pCodeJmp	lda pCode+1
+				pha
+				lda pCode
+				pha
+				php
+				sei
+				inc IRQ.InKernel
+				rti
 *--------------------------------------
 TSKMGR.EVENTCNT	.BS 1
 *--------------------------------------
