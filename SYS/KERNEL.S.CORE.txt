@@ -3,17 +3,14 @@ PREFIX /A2OSX.BUILD
 AUTO 4,1
 *--------------------------------------
 CORE.Run		lda CORE.PSCount
-				sta CORE.Counter
-*				bne .1					SHOULD NEVER HAPPEN!!!
+				sta CORE.PSIndex
 				
-*				jmp CORE.Events
+				beq CORE.Events			SHOULD NEVER HAPPEN!!!
 				
-.1				ldx CORE.Counter
-				lda PS.Table.PID-1,x
-				bne .11
-				jmp .8
+.1				ldx CORE.PSIndex
+				lda PS.Table.hMem-1,x
+				beq .8
 				
-.11				lda PS.Table.hMem-1,x
 				jsr K.GetMemPtr.A
 				>STYA pPs
 				
@@ -30,37 +27,22 @@ CORE.Run		lda CORE.PSCount
 				eor #S.PS.F.HOLD		unmark as HOLD
 				sta (pPs)
 				
-.2				jsr CORE.PSSelect		Restore at least ZP & Ptrs
+.2				jsr CORE.PSSelect		Restore ZP & Ptrs
 
-				lda (pPs)				get S.PS.F again
-				bit #S.PS.F.SLEEP		Is this PS sleeping?
-				beq .3					no, call INIT/RUN
-				
-				eor #S.PS.F.SLEEP		unmark as SLEEP
-				sta (pPS)
-				
-				jsr CORE.Resume			Restore PC....and JMP to
-				bra .41
-				
-.3				bit #S.PS.F.INIT
-				beq .4
-
-				eor #S.PS.F.INIT+S.PS.F.RUN	unmark as INIT,mark as RUN
-				sta (pPS)
-				
-				ldx #TSKMGR.INIT
-				.HS 2C					BIT abs
-.4				ldx #TSKMGR.RUN
-
-				jsr CORE.pCodeJmp		Call INIT/RUN function
+				jsr CORE.PSExec			INIT/RUN/QUIT/RESUME
 				dec IRQ.InKernel
-.41				bcc .7					INIT/RUN/RESUME said CS=QUIT?
+				
+				bcc .61					Error ?
 
-.5				tax						save RC
+.5				tax						Yes, From INIT or RUN,save RC
+
 				ldy #S.PS.PPID			Notify Parent Process for exit code...
 				lda (pPs),y
+				beq .6					no parent process
+				
 				jsr CORE.GetPSByID.A	X unmodified
 				bcs .6					parent is dead.....skipping...
+
 				>STYA ZPPtr1
 				
 				lda (ZPPtr1)			Parent PS is HOLD? 
@@ -75,12 +57,24 @@ CORE.Run		lda CORE.PSCount
 				sta (ZPPtr1),y
 				
 .6				lda (pPs)
-				eor #S.PS.F.RUN+S.PS.F.QUIT
+				and #$3F				$ff^S.PS.F.INIT+S.PS.F.RUN
+				ora #S.PS.F.QUIT
 				sta (pPs)
+				bra .7
 				
-				ldx #TSKMGR.QUIT		Quit this process
-				jsr CORE.pCodeJmp		Call QUIT function
-				dec IRQ.InKernel
+.61				lda (pPs)
+				bit #S.PS.F.SLEEP
+				bne .7
+				
+				bit #S.PS.F.INIT
+				beq .62
+				
+				eor #S.PS.F.INIT+S.PS.F.RUN   go from INIT to RUN
+				sta (pPs)
+				bra .7
+				
+.62				bit #S.PS.F.QUIT
+				beq .7			
 				
 				ldy #S.PS.PID
 				lda (pPs),y
@@ -89,9 +83,8 @@ CORE.Run		lda CORE.PSCount
 				
 .7				jsr CORE.PSLeave		Save ZP & Ptrs
 				
-.8				dec CORE.Counter
-				beq CORE.Events
-				jmp .1				
+.8				dec CORE.PSIndex
+				bne .1				
 *--------------------------------------
 CORE.Events		jsr CORE.GetEvents
 				
@@ -110,7 +103,7 @@ CORE.Events		jsr CORE.GetEvents
 				
 				bmi .2					Ignore & Discard any timer event
 				
-				jsr CORE.DumpEvent
+*				jsr CORE.DumpEvent
 				
 .2				jsr CORE.DestroyEvent
 
@@ -227,19 +220,18 @@ CORE.Dispatch	lda CORE.EvtCount
 				lda CORE.PSCount
 				beq .9
 
-				sta CORE.Counter
+				sta CORE.PSIndex
 				
-.1				ldx CORE.Counter
-				
-				lda PS.Table.PID-1,x
-				beq .5
+.1				ldx CORE.PSIndex
 				
 				lda PS.Table.hMem-1,x
+				beq .5
+				
 				jsr K.GetMemPtr.A
 				>STYA pPS
 			
 				lda (pPs)				get S.PS.F
-				bit #S.PS.F.INIT+S.PS.F.HOLD	Init or Waiting for Another Task to Terminate?
+				bit #S.PS.F.INIT+S.PS.F.HOLD+S.PS.F.QUIT	Init or Waiting for Another Task to Terminate?
 				bne .5
 
 				bit #S.PS.F.EVENT		Accept Events ?
@@ -251,7 +243,7 @@ CORE.Dispatch	lda CORE.EvtCount
 				sta pEvent				Select first event in list
 				
 				lda CORE.EvtCount
-				sta TSKMGR.EVENTCNT
+				sta CORE.EvtIndex
 
 .2				lda (pEvent)			Empty event, select next
 				beq .3
@@ -259,11 +251,10 @@ CORE.Dispatch	lda CORE.EvtCount
 				lda (pPs)
 				ora #S.PS.F.DOEVENT
 				sta (pPs)
-				
-				ldx #TSKMGR.DOEVENT
-				jsr CORE.pCodeJmp		Call DOEVENT function
+
+				jsr CORE.PSDoEvent
 				dec IRQ.InKernel
-				
+
 				lda (pPs)
 				eor #S.PS.F.DOEVENT
 				sta (pPs)
@@ -271,10 +262,11 @@ CORE.Dispatch	lda CORE.EvtCount
 				bcs .3					not for this PS, try next event in list
 				
 				jsr CORE.DestroyEvent	this PS handled the EVT, destroy it...
-				lda CORE.EvtCount
-				beq .8					no more event, exit
 
-.3				dec TSKMGR.EVENTCNT
+				lda CORE.EvtCount
+				beq .4					no more event, exit
+
+.3				dec CORE.EvtIndex
 				beq .4					all EVT submitted to this PS, try other PS
 				
 				lda pEvent				try next EVT to this PS
@@ -285,16 +277,13 @@ CORE.Dispatch	lda CORE.EvtCount
 
 .4				jsr CORE.PSLeave
 				
-.5				dec CORE.Counter
+.5				dec CORE.PSIndex
 				bne .1
 				
 .9				sec
 				rts
 				
 .8				clc
-				rts
-*--------------------------------------
-CORE.Quit		clc
 				rts
 *--------------------------------------
 * PS.Free.A
@@ -338,7 +327,8 @@ CORE.PSFree.A	sta .1+1				Save PS ID
 				bra *
 				
 .3				stz PS.Table.PID-1,x
-				lda PS.TABLE.hMem-1,x 
+				lda PS.TABLE.hMem-1,x
+				stz PS.TABLE.hMem-1,x
 .4				jmp K.FreeMem.A
 
 .8				lda (ZPPtr1),y
@@ -351,6 +341,7 @@ CORE.GetPSByID.A
 				jsr CORE.GetPSStatus.A
 				bcs .9
 				lda PS.TABLE.hMem-1,y
+				beq *
 				jmp K.GetMemPtr.A
 .9				rts				
 *--------------------------------------
@@ -370,16 +361,16 @@ CORE.GetPSStatus.A
 .8				clc
 				rts
 *--------------------------------------
-CORE.DumpEvent	ldy #S.EVT-1
+*CORE.DumpEvent	ldy #S.EVT-1
 				
-.1				>PUSHB (pEvent),y
-				dey
-				bpl .1
+*.1				>PUSHB (pEvent),y
+*				dey
+*				bpl .1
 				
-				>LDYAI .2
-				jmp K.PrintF.YA
+*				>LDYAI .2
+*				jmp K.PrintF.YA
 				
-.2				.AZ "!Evt:F=%b,Dev=$%h,LO=$%h,HI=$%h,W1=$%H,W2=$%H\n"
+*.2				.AZ "!Evt:F=%b,Dev=$%h,LO=$%h,HI=$%h,W1=$%H,W2=$%H\n"
 *--------------------------------------
 CORE.ScrSel		and #$0F
 				cmp A2osX.ASCREEN		Same as active screen...nothing to do
@@ -436,7 +427,7 @@ CORE.PSSelect0	>LDYAI CORE.S.PS0		Select PS0
 *--------------------------------------
 CORE.PSSelect	ldy #S.PS.ZP+ZPBIN.SIZE-1
 				ldx #ZPBIN.SIZE-1
-				
+
 .1				lda (pPs),y
 				sta pCode,x
 				dey
@@ -444,7 +435,7 @@ CORE.PSSelect	ldy #S.PS.ZP+ZPBIN.SIZE-1
 				bpl .1
 
 				rts
-*--------------------------------------							
+*--------------------------------------
 CORE.PSLeave	ldy #S.PS.ZP+ZPBIN.SIZE-1
 				ldx #ZPBIN.SIZE-1
 				
@@ -456,19 +447,84 @@ CORE.PSLeave	ldy #S.PS.ZP+ZPBIN.SIZE-1
 				
 				rts
 *--------------------------------------
-CORE.Sleep		php
+CORE.PSExec		lda (pPS)
+				bit #S.PS.F.SLEEP
+				bne CORE.PSResume
+				
+				bit #S.PS.F.RUN
+				bne .2
+
+				bit #S.PS.F.INIT
+				bne .1
+
+				ldx #TSKMGR.QUIT
+				.HS 2C					BIT ABS				
+.1				ldx #TSKMGR.INIT
+				.HS 2C					BIT ABS
+.2				ldx #TSKMGR.RUN
+				.HS 2C					BIT ABS
+				
+CORE.PSDoEvent	ldx #TSKMGR.DOEVENT
+				
+				lda pCode+1
+				pha
+				lda pCode
+				pha
+				php
+				sei
+				inc IRQ.InKernel
+				rti
+*--------------------------------------
+CORE.PSResume	sei
+
+				eor #S.PS.F.SLEEP		unmark as SLEEP
+				sta (pPS)
+
+				>PULLA					Get !BC 
+				tax
+
+				beq .2
+
+.1				>PULLA
+				pha
+
+				inx
+				bne .1
+				
+.2				ldy #S.PS.PC+1
+				lda (pPs),y
+				pha
+				
+				dey						#S.PS.PC
+				lda (pPs),y
+				pha
+				
+				dey						#S.PS.P
+				lda (pPs),y
+				pha
+				
+				dey						#S.PS.Y
+				lda (pPs),y
+				pha
+				
+				dey						#S.PS.X
+				lda (pPs),y
+				tax
+				
+				dey						#S.PS.A
+				lda (pPs),y
+
+				ply
+				inc IRQ.InKernel
+				rti
+*--------------------------------------
+CORE.PSSleep	php
 				
 				sei
-				cld
-				
+
 				phy
 				ldy #S.PS.A
 				sta (pPs),y
-				
-				lda #S.PS.F.SLEEP
-
-				ora (pPs)
-				sta (pPs)
 				
 				txa
 				iny						#S.PS.X
@@ -498,92 +554,50 @@ CORE.Sleep		php
 
 				tsx
 				
+				inx						skip P
+				inx						skip PC HI,LO
 				inx
-				inx
-				inx
+				
 				txa
-				tay						Save !Byte count for later
 				
 				beq .8
+
+				tay						Save !Byte count for later
 				
 .2				pla
 				>PUSHA
 				inx
 				bne .2
+				
+				tya
 	
-.8				tya						push CPU Stack BC to restore on top of Soft Stack 
-				>PUSHA
+.8				>PUSHA					push CPU Stack BC to restore on top of Soft Stack
 
-				clc						exit to kernel with CC
-				rts
-*--------------------------------------
-CORE.Resume		sei
+				lda (pPs)
+				ora #S.PS.F.SLEEP
+				sta (pPs)
 				
-				>PULLA					Get !BC 
-				tay
-
-				beq .2
-
-.1				>PULLA
+				lda #0					cld,clc,cli
 				pha
-				iny
-				bne .1
-				
-.2				ldy #S.PS.PC+1
-				lda (pPs),y
-				pha
-				
-				dey						#S.PS.PC
-				lda (pPs),y
-				pha
-				
-				dey						#S.PS.P
-				lda (pPs),y
-				pha
-				
-				dey						#S.PS.Y
-				lda (pPs),y
-				pha
-				
-				dey						#S.PS.X
-				lda (pPs),y
-				tax
-				
-				dey						#S.PS.A
-				lda (pPs),y
-
-				ply
-				inc IRQ.InKernel
-				rti
-*--------------------------------------			
-CORE.pCodeJmp	lda pCode+1
-				pha
-				lda pCode
-				pha
-				php
-				sei
-				inc IRQ.InKernel
-				rti
-*--------------------------------------
-TSKMGR.EVENTCNT	.BS 1
+				rti						exit to kernel with CC
 *--------------------------------------
 DevMgr.Stat		.DA DevMgr.FreeMem
 DevMgr.Free		.DA DevMgr.FreeMem
 				.DA DevMgr.HiMem
 DevMgr.Count	.DA #2					NUL,SYS
 *--------------------------------------
-CORE.EvtCount	.BS 1
-
 CORE.VBLState	.BS 1
-
 CORE.IRQMode	.BS 1
-
 CORE.TickPerSec	.BS 1
 CORE.TickPer10t	.BS 1
 CORE.TickSec	.BS 1
 CORE.Tick10t	.BS 1
+CORE.CPUStat	.BS 1
+CORE.InKernelStat	.BS 1
 *--------------------------------------
-CORE.Counter	.BS 1
+CORE.EvtIndex	.BS 1
+CORE.EvtCount	.BS 1
+CORE.PSIndex	.BS 1
 CORE.PSCount	.DA #0
 CORE.LastPSID	.DA #0
 CORE.S.PS0		.BS S.PS.hStdErr+1
