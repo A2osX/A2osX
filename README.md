@@ -1,13 +1,23 @@
 # A2osX (0.9.1) Multi-Tasking OS for Apple II  
 
-...preemtive ? soon !
-
 ## Disk images :  
 
 + **A2OSX.BOOT.po**   :  **(0.9.1)**  140k BOOT disk image with all binaries  
 + **A2OSX.DEV.po**    :  **(0.9.1)**  140k disk image with ASM binaries, Debug Tools & INClude files  
 + **A2OSX.BUILD.po**  :  **(0.9.1)**  800k BOOT disk image with S-C MASM 3.0 and all binaries (BOOT+DEV)  
 + **A2OSX.SRC.po**    :  **(0.9.1)**  800k disk image with all sources  
+
+## Latest News 2018-04-29
+
+Kernel 0.9.1 is now preemptive. All you need is a "tick" source, see below for supported hardware. 
+For now, only SBIN/BIN executables are "switcheable". 
+
+Roadmap is as follow: 
+
+ + Check all BIN/SBIN sources to make them preemptive compliant, most of them are NOT. 
+ + Add a way to make LIB also interruptible and reentrant.
+ + Add more supported hardware for system clock.
+ + ...and  still hoping finding few contributors.... :-(
 
 ## Latest News 2017-11-08
 
@@ -36,10 +46,10 @@ Kernel 0.9.1 stable enough to resume building.
  + Per process Stack Segment __(done!)__
  + Larger S.PS structure __(done!)__
  + ...
- + to allow...Preemtive!
+ + to allow...Preemptive!
 
 
-**"System Tick" sources for preemtive mode :**
+**"System Tick" sources for preemptive mode :**
 
 | Hardware                 | Resolution | Status      | Comment |
 | -------------------------| ---------- | ----------- | ------- |
