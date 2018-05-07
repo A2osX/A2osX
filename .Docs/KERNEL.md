@@ -212,14 +212,6 @@ Return Float rounded into a long
 + PUSHW = X (*Float)
 + Y,A = Dest (*long)
 
-# GetMemStat.YA
-
-## In:
-+ Y,A = Ptr to 24 bytes buffer
-
-## Out:
-+ Buffer filled with memory stats
-
 # GetMem0.YA
 
 ## In: 
@@ -342,18 +334,14 @@ Create a new copy of this C-String
 
 ## Out:
 
-# LoadStkObj
-Load a file in AUX memory (Stock Objects)
+# GetStkObjProperty.AY
 
 ## In:
-+ PUSHW = AUXTYPE (Handled by....
-+ PUSHB = TYPE  ...
-+ PUSHB = MODE  ...
-+ PUSHW = PATH ...FOpen)
++ A = hObject (AUX Memory)
++ Y = Property Index
 
 ## Out:
-+ Y,A = File Length
-+ X = hMem of Loaded Object in AUX mem
++ Y,A = Property Value
 
 # NewStkObj.YA
 
@@ -376,6 +364,19 @@ Load a file in AUX memory (Stock Objects)
 + none.
 + (X,Y unmodified)
 
+# LoadStkObj
+Load a file in AUX memory (Stock Objects)
+
+## In:
++ PUSHW = AUXTYPE (Handled by....
++ PUSHB = TYPE  ...
++ PUSHB = MODE  ...
++ PUSHW = PATH ...FOpen)
+
+## Out:
++ Y,A = File Length
++ X = hMem of Loaded Object in AUX mem
+
 # ExecPSNewEnv.YA
 
 # ExecPS.YA (Blocking Parent PID)
@@ -389,6 +390,30 @@ Load a file in AUX memory (Stock Objects)
 
 ## Out:
  + A = Child PSID
+
+# GetMemStat.YA
+
+## In:
++ Y,A = Ptr to 24 bytes buffer
+
+## Out:
++ Buffer filled with memory stats
+
+# GetPSStatus.A
+
+## In:
++ A = PID
+
+## Out:
++ A = Status Byte
+
+# GetPSStat.YA
+
+## In:
++ Y,A = Ptr to 24 bytes buffer
+
+## Out:
++ Buffer filled with PS stats
 
 # Stat
 Return information about a file
