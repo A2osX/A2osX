@@ -125,9 +125,13 @@ Kernel Configuration Utility...
 
 ![](./.screen-shots/ScreenShot.KCONFIG.png)
 
-Color ANSI/VT100 Support !!!
+Color ANSI/VT100 Support...
 
 ![](./.screen-shots/PuTTY.png)
+
+DHGR Mixed-Mode Graphic primitives....
+
+![](./.screen-shots/ScreenShot.GFX.png)
 
 ## General Information:
 

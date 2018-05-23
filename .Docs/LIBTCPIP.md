@@ -56,7 +56,7 @@
 
 ## In:
 + PUSHW = PTR to IP
-+ PUSHW = hostname PSTR to Add
++ PUSHW = hostname CSTR to Add
 
 # DNS.GetCAche
 + Return a Ptr to DNS Cache Table

@@ -624,14 +624,20 @@ Rename a file
 
 ## Out :
 
-# SScanF
+# SScanF.YA
 Scan a C-String (in progress)
 
 ## In:
-+ PUSHW PTR to target buffer
-+ PUSHW PSTR pattern	(ex: "%d.%d.%d.%d")
++ PUSHW PTR to target var
++ ...
++ PUSHW PTR pattern (ex: "%d.%d.%d.%d")
+ + %i : short int
  + %d : byte
-+ PUSHW PSTR to scan (ex: "192.168.1.5")
+ + %I : int
+ + %D : word
+*	%L : long int
+*	%U : dword
++ Y,A = PTR to String to scan (ex: "192.168.1.5") 
 
 ## Out:
 
