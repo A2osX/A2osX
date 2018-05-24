@@ -161,8 +161,8 @@ OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
 | SHELL   | Working     | (See Internal Shell commands) | 0.9.1 |
 | KCONFIG | Working     | Kernel Configuration Utility | 0.9.1 |
 | ----    | ------      | ------- | ----- |
-| TCPIPD  | Working     | Socket API.ARP,IP,ICMP,UDP & TCP ok | 0.9 |
-| DHCPCLNT| Working     | rewritten to use new Socket API | 0.9 |
+| TCPIPD  | Working     | Socket API.ARP,IP,ICMP,UDP & TCP ok | 0.9.1 |
+| DHCPCLNT| Working     | rewritten to use new Socket API | 0.9.1 |
 | TELNETD | In Progress |  | 0.9 |
 | HTTPD   | In Progress |  | 0.9 |
 
@@ -253,11 +253,11 @@ note : '$VAR' does NOT expand Variable
 | EDIT | Working | still missing : find/replace | 0.9.1 |
 | NSCUTIL | Working | Tool for setting time in NSC/DL1216E | 0.9 |
 | ---- | ------ | ------- | ----- |
-| ARP | Working | dump ARP cache, setup a static ARP entry | 0.9 |
-| PING | Working | | 0.9 |
-| DNSINFO | Working | dump DNS cache, setup a static DNS entry | 0.9 |
-| IPCONFIG | Working | renamed from NETINFO | 0.9 |
-| NETSTAT | Working | | 0.9 |
+| ARP | Working | dump ARP cache, setup a static ARP entry | 0.9.1 |
+| PING | Working | | 0.9.1 |
+| DNSINFO | Working | dump DNS cache, setup a static DNS entry | 0.9.1 |
+| IPCONFIG | Working | renamed from NETINFO | 0.9.1 |
+| NETSTAT | Working | | 0.9.1 |
 
 ## BIN,External DEV Shell commands:
 | Name | Status | Comment | K.Ver |
@@ -265,7 +265,7 @@ note : '$VAR' does NOT expand Variable
 | ASM | In Progress | S-C MASM based multi CPU assembler | 0.9.1 |
 | MEMDUMP | Working | | 0.9.1 |
 | ---- | ------ | ------- | ----- |
-| RPCDUMP | Working | tool based on UDP socket API, renamed from RPCINFO | 0.9 |
+| RPCDUMP | Working | tool based on UDP socket API, renamed from RPCINFO | 0.9.1 |
 
 ## Misc
 
