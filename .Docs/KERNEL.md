@@ -637,6 +637,8 @@ Scan a C-String (in progress)
  + %D : word
 *	%L : long int
 *	%U : dword
+ + %h : HEX byte
+ + %H : HEX word
 + Y,A = PTR to String to scan (ex: "192.168.1.5") 
 
 ## Out:
@@ -662,14 +664,14 @@ Specifiers :
  + %B : pull 2 bytes to Print BIN
  + %d : pull 1 byte unsigned DEC 0..255
  + %D : pull 2 bytes unsigned DEC 0..65535
- + %u : pull 2 bytes PTR to 4 bytes long unsigned DEC 0..4294967295
- + %e : pull 2 bytes PTR to 5 Bytes float (-)1.23456789e+12
- + %f : pull 2 bytes PTR to 5 Bytes float (-)3.1415
+ + %u : pull 4 bytes long unsigned DEC 0..4294967295
+ + %e : pull 5 Bytes float (-)1.23456789e+12
+ + %f : pull 5 Bytes float (-)3.1415
  + %h : pull 1 byte to Print HEX
  + %H : pull 2 bytes to Print HEX
  + %i : pull 1 byte to Print signed DEC -128..127
  + %I : pull 2 bytes to Print signed DEC -32768..32767
- + %L : pull 2 bytes PTR to 4 bytes signed DEC -2147483648..2147483647
+ + %L : pull 4 bytes signed DEC -2147483648..2147483647
  + %n : pull 1 byte to Print low Nibble HEX
  + %N : pull 1 byte to Print high Nibble HEX
  + %s : pull 2 bytes ptr to C-Style String
