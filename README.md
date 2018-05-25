@@ -18,7 +18,7 @@ If you want to enable preemptive mode, all you need is a "tick" source to get 'V
 
 Then you must explicitly ENABLE it using KCONFIG utility. (see screenshot below)
 
-You can monitor the kernel state on the 'SYS' screen (OA-1, or SHIFT-OA-1 on french keyboards) and look at the upper right corner, ytou should see a blincking 'P', 'V' or 'C', showing you the current kernel state..
+You can monitor the kernel state on the 'SYS' screen (OA-1, or SHIFT-OA-1 on french keyboards) and look at the upper right corner, you should see a blincking 'P', 'V' or 'C', showing you the current kernel state..
 
 If you enabled preemptive mode, you should see an additional blinking 'S', each time the kernel switch from one PS to another.
 
@@ -70,10 +70,12 @@ Kernel 0.9.1 stable enough to resume building.
 
 | Hardware                 | Resolution | Status      | Comment |
 | -------------------------| ---------- | ----------- | ------- |
-| //c,//c+,IIgs Mouse port | 50/50 Hz   | Working     | Supported at Kernel level, no conflict with GUI's Mouse.DRV (not required to be loaded), requires setting "Machine Timing" properly in KConfig Utility |
-| IIe Mouse Card           | 50/50 Hz   | Working     | (same as above) |
+| //c,//c+,IIgs Mouse port | 50/60 Hz   | Working     | Supported at Kernel level, no conflict with GUI's Mouse.DRV (not required to be loaded), requires setting "Machine Timing" properly in KConfig Utility |
+| IIe Mouse Card           | 50/60 Hz   | Working     | (same as above) |
 | ThunderClock Plus        | 64 Hz      | Working     | gave up fixing this faulty H/W, thanx to JACE emulator! |
-| ... Any suggestion ?     |            |             |  |
+| Super Serial Card |      ?      | Idea, from EtchedPixels | #31 |
+| MockingBoard     |      ?      | Idea, from Michael |  |
+| ... Any Other suggestion ?     |            |             |  |
 
 ## !!!HELP NEEDED!!!
 
