@@ -9,7 +9,24 @@
 
 ## Latest News 2018-04-29
 
-Kernel 0.9.1 is now preemptive. All you need is a "tick" source, see below for supported hardware. 
+Kernel 0.9.1 is now preemptive. 
+
+It defaults to cooperative mode ('P'olling mode). For this, no particular hardware needed (except 65c02 and 128k, of course!)
+
+If you want to enable preemptive mode, all you need is a "tick" source to get 'V'BL or 'C'lock Mode.
+(see below for supported hardware)
+
+Then you must explicitly ENABLE it using KCONFIG utility. (see screenshot below)
+
+You can monitor the kernel state on the 'SYS' screen (OA-1, or SHIFT-OA-1 on french keyboards) and look at the upper right corner, ytou should see a blincking 'P', 'V' or 'C', showing you the current kernel state..
+
+If you enabled preemptive mode, you should see an additional blinking 'S', each time the kernel switch from one PS to another.
+
+Reminder : 
+ + (SHIFT)-OA-1 : Kernel SYS Screen
+ + (SHIFT)-OA-2 : Console Screen (Shell...)
+ + (SHIFT)-OA-3 : DHGR Screen (if loaded)
+
 For now, only SBIN/BIN executables are "switcheable". 
 
 Roadmap is as follow: 
