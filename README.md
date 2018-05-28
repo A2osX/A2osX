@@ -75,6 +75,7 @@ Kernel 0.9.1 stable enough to resume building.
 | ThunderClock Plus        | 64 Hz      | Working     | gave up fixing this faulty H/W, thanx to JACE emulator! |
 | Super Serial Card |      ?      | Idea, from EtchedPixels | #31 |
 | MockingBoard     |      ?      | Idea, from Michael |  |
+| GOES Irq Card  |      ?      | Idea, from Oliver | #34 |
 | ... Any Other suggestion ?     |            |             |  |
 
 ## !!!HELP NEEDED!!!
