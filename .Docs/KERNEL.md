@@ -454,7 +454,8 @@ return a hFILE to a new FIFO
 + A = hFILE
 
 # FPutC.AY
-Print A (char) to Node
+int fputc ( int character, hFILE stream );
+Print A (char) to hFILE
 
 ## In:
 + A : char to print
@@ -464,10 +465,32 @@ Print A (char) to Node
 + CC = success
 
 # PutChar.A
+int putchar ( int character );
 Print A (char) to StdOut
 
 ## In:
 + A : char to print
+
+## Out: 
++ CC = success
+
+# FPutS
+int fputs ( const char * str, hFILE stream );
+Write Str to FILE
+
+## In:
++ PUSHW : CPtr 
++ PUSHB : hFILE
+
+## Out: 
++ CC = success
+
+# PutS.YA
+int puts ( const char * str );
+Write Str to StdOut, appends '\n'
+
+## In:
++ Y,A : CPtr 
 
 ## Out: 
 + CC = success
@@ -486,30 +509,11 @@ Get char from StdIn
 Get char from Node
 
 ## In:
-+ A = hFILE
++ A = hNODE
 
 ## Out: 
 + CC = success
  + A = char
-
-# FPutS
-Write String to FILE
-
-## In:
-+ PUSHW : CPtr 
-+ PUSHB : hFILE
-
-## Out: 
-+ CC = success
-
-# PutS.YA
-Write String to StdOut
-
-## In:
-+ Y,A : CPtr 
-
-## Out: 
-+ CC = success
 
 # FOpen
 Open a file
@@ -537,26 +541,8 @@ Close a file
 
 ## Out :
 
-# FRead.A
-Read ONE byte (A) from file (Y)
-
-## In :
-+ A = hFILE
-
-## Out :
-+ A = Byte Read
-
-# FWrite.AY
-Write ONE byte (A) To file (Y)
-
-## In:
-+ A = hFILE
-+ Y = char
-
-# Out:
-+ Y,A = Bytes Written
-
 # FRead
+int fread ( void * ptr, int count, FILE * stream );
 Read bytes from file
 
 ## In :
@@ -568,6 +554,7 @@ Read bytes from file
 + Y,A = Bytes Read
 
 # FWrite
+int fwrite ( const void * ptr, int count, FILE * stream );
 Write bytes to file
 
 ## In:

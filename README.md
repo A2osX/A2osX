@@ -7,7 +7,22 @@
 + **A2OSX.BUILD.po**  :  **(0.9.1)**  800k BOOT disk image with S-C MASM 3.0 and all binaries (BOOT+DEV)  
 + **A2OSX.SRC.po**    :  **(0.9.1)**  800k disk image with all sources  
 
-## Latest News 2018-04-29
+## Latest News 2018-05-29
+
+Time to work on STDIO : 
+
+ + Buffered IO to link TCP/IP stream sockets properly to STDIN,STDOUT,STDERR (TELNETD)
+ + Implement missing STDIO functions (Puts, FPuts...)
+ + Faster Console output
+ + Better 'C-Like' API
+
+Scope : KERNEL.STDIO, All drivers, CDEV, FIFO,...
+
+Goal : TELNETD & HTTPD working.
+
+Wanna play ? 
+
+## News 2018-04-29
 
 Kernel 0.9.1 is now preemptive. 
 
@@ -36,7 +51,7 @@ Roadmap is as follow:
  + Add more supported hardware for system clock.
  + ...and  still hoping finding few contributors.... :-(
 
-## Latest News 2017-11-08
+## News 2017-11-08
 
 Kernel 0.9.1 stable enough to resume building.
 
@@ -50,9 +65,9 @@ Kernel 0.9.1 stable enough to resume building.
  
  + Math API (Hacked from APPLESOFT ROM ;-)
 
- + CSH Script engine in progress within Shell (In progress)
+ + CSH Script engine within Shell (In progress)
  
-## Latest News 2017-09-22
+## News 2017-09-22
 
 (once Kernel 0.9.1 stable enough, BOOT & DEV will be updated) __(done!)__
 
