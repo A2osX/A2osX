@@ -2,18 +2,18 @@ NEW
 PREFIX /A2OSX.BUILD
 AUTO 4,1
 */--------------------------------------
-* # FPutC.AY
+* # FPutC.A
 * int fputc ( int character, hFILE stream );
 * Print A (char) to hFILE
 * ## In:
+*  PUSHB : hFILE
 *  A : char to print
-*  Y = hFILE
 * ## Out: 
 *  CC = success
 *\--------------------------------------
 K.FPutC.AY		sta K.IOBuf
 
-				tya
+				>PULLA
 				bra K.PutChar.A.1
 */--------------------------------------
 * # PutChar.A
@@ -29,30 +29,546 @@ K.PutChar.A		sta K.IOBuf
 				ldy #S.PS.hStdOut
 				lda	(pPs),y
 				
-K.PutChar.A.1	sta K.PutC.Node
-				jsr K.GetMemPtr.A
-				>STYA pDev
+K.PutChar.A.1	jsr K.GetMemPtr.A
+				>STYA pNode
+				>LDYAI K.IOBuf
+				>STYA pIOBuf
+				lda #1
+				sta STDIO.Out.Cnt
+				stz STDIO.Out.Cnt+1
+				jmp STDIO.Out
+*/--------------------------------------
+* # PutS.YA
+* int puts ( const char * str );
+* Write Str to StdOut, appends '\r\n'
+* ## In:
+*  Y,A : CPtr 
+* ## Out: 
+*  CC = success
+*\--------------------------------------
+K.PutS.YA		>STYA pIOBuf
+				ldy #S.PS.hStdOut
+				lda	(pPs),y
+				jsr K.FPutS.YA.1
+				bcs .9
+
+				lda #13
+				jsr K.PutChar.A
+				bcs .9
+				lda #10
+				jmp K.PutChar.A
+.9				rts
+*/--------------------------------------
+* # FPutS.YA
+* int fputs ( const char * str, hFILE stream );
+* Write Str to FILE
+* ## In:
+*  PUSHB : hFILE
+*  Y,A: CPtr 
+* ## Out: 
+*  CC = success
+*\--------------------------------------
+K.FPutS.YA		>STYA pIOBuf
+				>PULLA
+				
+K.FPutS.YA.1	jsr K.GetMemPtr.A
+				>STYA pNode
 								
+				ldy #0
+				
+				ldx #0
+				lda pIOBuf+1
+				pha
+				
+.1				lda (pIOBuf),y
+				beq .2
+				
+				iny
+				bne .1
+				inx
+				inc pIOBuf+1
+				bra .1
+				
+.2				pla
+				sta pIOBuf+1
+				sty STDIO.Out.Cnt
+				stx STDIO.Out.Cnt+1
+				jmp STDIO.Out
+*/--------------------------------------
+* # PrintF.YA
+* int printf ( const char * format, ... );
+* # SPrintF.YA
+* int sprintf ( char * str, const char * format, ... );
+* # FPrintF.A
+* int fprintf ( FILE * stream, const char * format, ... );
+*
+* Prints C-Style String
+* ## In:
+* PrintF.YA :
+*   PUSH ...
+*   Y,A = PTR to CStr
+* SPrintF.YA : 
+*   PUSH ...
+*   PUSHW = PTR to CStr
+*   Y,A = Ptr to Dst Buffer
+* FPrintF.YA : 
+*   PUSH ...
+*   PUSHW = PTR to CStr
+*   A = hFILE
+*
+* ## Out:
+*  CC : success
+*  CS : error code from Output
+* Specifiers :
+*   %b : pull 1 byte to Print BIN 
+*   %B : pull 2 bytes to Print BIN
+*   %d : pull 1 byte unsigned DEC 0..255
+*   %D : pull 2 bytes unsigned DEC 0..65535
+*   %u : pull 4 bytes long unsigned DEC 0..4294967295
+*   %e : pull 5 Bytes float (-)1.23456789e+12
+*   %f : pull 5 Bytes float (-)3.1415
+*   %h : pull 1 byte to Print HEX
+*   %H : pull 2 bytes to Print HEX
+*   %i : pull 1 byte to Print signed DEC -128..127
+*   %I : pull 2 bytes to Print signed DEC -32768..32767
+*   %L : pull 4 bytes signed DEC -2147483648..2147483647
+*   %n : pull 1 byte to Print low Nibble HEX
+*   %N : pull 1 byte to Print high Nibble HEX
+*   %s : pull 2 bytes ptr to C-Style String
+*   %S : pull 2 bytes ptr to P-Style String
+*   \b : Print 'BS' (08)
+*   \e : Print 'ESC' ($1B,27)
+*   \f : Print 'FF' ($0C,12)
+*   \n : Print 'LF' ($0A,10)
+*   \r : Print 'CR' ($0D,13)
+*   \\\\ : Print \
+*   \% : Print %
+* Modifiers for len and padding : 
+*   %d	  : '9'  '12'
+*   %2d	  : ' 9' '12'   				
+*   %02d  : '09' '12'
+*   %11s  : 'ABCDEFGH   '	
+*   %011s : 'ABCDEFGH000'
+*   %2f	  :	'3.14'
+*\--------------------------------------
+K.SPrintF.YA	>STYA pIOBuf			Out Buffer
+				>PULLW ZPPtr1			format
+				bra K.PrintF.1
+				
+K.FPrintF.A		jsr K.GetMemPtr.A		A = hFILE
+				>STYA pNode
+				>PULLW ZPPtr1			format
+				bra K.PrintF.1
+
+K.PrintF.YA		>STYA ZPPtr1			format
+				ldy #S.PS.hStdOut
+				lda	(pPs),y
+				jsr K.GetMemPtr.A
+				>STYA pNode
+				
+K.PrintF.1		ldy	#0				
+				
+.1				lda (ZPPtr1),y
+				beq .99
+				iny
+				cmp #'%'
+				bne .10
+						
+				stz K.PrintF.PadL
+				lda #' '
+				sta K.PrintF.PadC
+				
+.2				ldx	#PrintFTBL2-PrintFTBL1-1
+				lda (ZPPtr1),y
+				beq .99
+				iny
+				
+.3				cmp PrintFTBL1,x		do we have a %x command?
+				beq .8					yes, jmp to it!
+				dex
+				bpl	.3					no valid letter...
+				
+				cmp #'0'				...a 0...mmm... padding char?
+				bne .4
+				
+				ldx K.PrintF.PadL				K.PrintF.PadL is not nul, so this 0 is second digit
+				bne .5
+				
+*				lda #'0'
+				sta K.PrintF.PadC				no, this is the first 0, so make it K.PrintF.PadC
+				bra .2
+
+.4				jsr MEM.IsDigit
+				bcs .99		
+				
+.5				and #$0F				we have a digit
+				pha						save it...
+				lda K.PrintF.PadL				starts K.PrintF.PadL * 10
+				asl 
+				asl 					A=times 4
+				adc K.PrintF.PadL				CC by ASL, A=times 5			
+				asl						times 10
+				sta K.PrintF.PadL
+
+				pla						get back digit
+				adc K.PrintF.PadL
+				sta K.PrintF.PadL
+				bra .2					go get next char...
+
+.8				phy
+				txa
+				asl
+				tax
+				jsr PrintFESC
+				ply
+				bcc .1
+				rts
+
+.10				cmp #'\'
+				bne .20
+				
+				ldx	#PrintFTBL2.OUT-PrintFTBL2-1
+				lda (ZPPtr1),y
+				beq .99
+				iny
+				
+.12				cmp PrintFTBL2,x
+				beq .13
+				dex
+				bpl	.12
+				bra .1
+				
+.13				lda	PrintFTBL2.OUT,x	
+
+.20				jsr	STDIO.COut
+				bcc	.1
+.99				rts
+*--------------------------------------
+PrintFESC		jmp	(PrintFJMP,x)
+*--------------------------------------
+PrintFTBL1		.AS	"bBdDuefhHiILnNsS"
+PrintFTBL2		.AS	"befnr\%"
+PrintFTBL2.OUT	.HS 08.1B.0C.0A.0D		\b\e\f\n\r
+				.DA #'\'				\\
+				.DA #'%'				\%
+PrintFJMP		.DA PrintF.B,PrintF.BB
+				.DA PrintF.D,PrintF.DD,PrintF.U
+				.DA PrintF.E,PrintF.F
+				.DA PrintF.H,PrintF.HH
+				.DA PrintF.I,PrintF.II,PrintF.L
+				.DA PrintF.N,PrintF.NN
+				.DA PrintF.S,PrintF.SS
+*--------------------------------------
+PrintF.BB		>PULLA
+				pha
+				jsr PrintF.B
+				pla
+				bcc PrintF.B.1
+PrintF.BB.RTS	rts
+*--------------------------------------
+PrintF.B		>PULLA
+				
+PrintF.B.1		ldx #8
+				
+.1				asl
+				pha
+				lda #'0'
+				adc #0					add Carry
+				jsr STDIO.COut
+				pla
+				bcs PrintF.BB.RTS
+				dex
+				bne .1
+				rts
+*--------------------------------------
+PrintF.I		sec						signed short
+				.HS 90					BCC
+PrintF.D		clc						unsigned short (BYTE)
+				ldx #0					one byte
+				
+				>PULLB HEXBUF
+				stz HEXBUF+1
+				bra PrintF.DD.1
+				
+PrintF.II		sec						signed int
+				.HS 90					BCC
+PrintF.DD		clc						unsigned int (WORD)
+				ldx #1					two bytes
+				
+				>PULLW HEXBUF
+
+PrintF.DD.1		stz HEXBUF+2
+				stz HEXBUF+3
+				bra PrintF.U.1
+
+PrintF.L		sec						signed long
+				.HS 90					BCC
+PrintF.U		clc						unsigned long (DWORD)
+				ldx #3					4 bytes
+				
+				>PULLW HEXBUF
+				>PULLW HEXBUF+2
+				
+PrintF.U.1		bcc PrintF.Hex2Dec		unsigned, nothing to check
+		
+				lda HEXBUF,x			get sign
+				bpl PrintF.Hex2Dec
+				
+*				sec
+
+				ldy #0
+				
+.1				lda HEXBUF,y			two's complement of X bytes
+				eor #$ff
+				adc #0
+				sta HEXBUF,y
+				iny
+				dex
+				bpl .1
+				
+				sec						tell to print a "-" sign....
+*--------------------------------------
+* Convert HEXBUF to ASCBUF decimal padded with 0
+*--------------------------------------
+PrintF.Hex2Dec	ror	.31+1
+
+				ldx #4
+
+.1				stz BCDBUF,x	Clear all 5 bytes
+				dex
+				bpl .1
+				
+				sed				switch to BCD mode
+
+				ldx #32			let's roll 32 bits
+				
+.2				asl HEXBUF
+				rol HEXBUF+1
+				rol HEXBUF+2
+				rol HEXBUF+3
+
+				ldy #4
+				
+.3				lda BCDBUF,y
+				adc BCDBUF,y
+				sta BCDBUF,y
+				dey
+				bpl .3
+				
+				dex
+				bne .2
+				
+				cld
+
+.31				bit #$ff				SELF MODIFIED -sign to print before digits ?
+				bpl .9
+				lda #'-'
+				jsr STDIO.COut
+				
+.9				lda K.PrintF.PadL		any Len format ?
+				beq .4					no
+				
+				lda #10
+				sec						yes, Print only digits starting at pos 10-K.PrintF.PadL
+				sbc K.PrintF.PadL
+				
+.4				tax						x=0 if no K.PrintF.PadL, or x=10-K.PrintF.PadL
+
+.5				txa						X range 0 to 9
+				lsr						CS if lo nibble (1,3,5,7,9)
+				tay
+				
+				lda BCDBUF,y
+				
+				bcs .6
+				
+				lsr
+				lsr
+				lsr
+				lsr
+				
+.6				and #$0F
+				ora #$30
+				cmp #$30
+
+				beq .7				a zero?
+				
+				inc K.PrintF.PadL			found a non zero, Print all digits, even if 0, next time
+				ldy #'0'
+				sty K.PrintF.PadC
+				bra .8
+				
+.7				cpx #9				last digit ?
+				beq .8				Print always
+				
+				ldy K.PrintF.PadL			no pad to fill, do not Print 0
+				beq .10
+				
+				lda K.PrintF.PadC			fill with K.PrintF.PadC
+				
+.8				jsr STDIO.COut
+				bcs .99
+
+.10				inx
+				cpx #10
+				bne .5
+				
+				clc
+.99				rts
+*--------------------------------------	
+*       EXP(8) 1(s) 1significants(31)
+* http://apple2.org.za/gswv/a2zine/GS.WorldView/Resources/GS.TECH.INFO/AppleSoft/
+*--------------------------------------		
+PrintF.E		sec						Force "E+12"
+				.HS 90					BCC
+PrintF.F		clc
+				lda pStack+1
+				sta INDEX+1
+				
+				lda pStack
+				sta INDEX
+				
+				clc
+				adc #5
+				sta pStack
+				>ROMCALL SETFAC
+		
+				ldy #3					In order not to trash A2osX.SaveSM,A2osX.SaveSX
+				>ROMCALL FOUT
+				
+				ldy #0
+				
+.2				lda $102,y
+				beq .8
+				
+				jsr STDIO.COut
+
+				iny
+				bne .2
+				
+.8				clc
+			
+.9				rts
+*--------------------------------------
+PrintF.HH		>PULLA
+				pha
+				jsr PrintF.H
+				pla
+				bra PrintF.H.1
+*--------------------------------------
+PrintF.H		>PULLA
+PrintF.H.1		pha
+				jsr PrintF.NN.1
+				pla
+				bra PrintF.N.1
+*--------------------------------------
+PrintF.N		>PULLA
+PrintF.N.1		and #$0F
+				bra PrintF.NN.2
+
+PrintF.NN		>PULLA
+PrintF.NN.1		lsr
+				lsr
+				lsr
+				lsr
+				
+PrintF.NN.2		ora #$30
+				cmp #$3A
+				bcc .1
+				adc #6
+.1				jmp STDIO.COut
+*--------------------------------------
+PrintF.S		ldy #$ff				CSTR
+				.HS 2C					bit abs
+PrintF.SS		ldy #$00				PSTR
+
+				>PULLW ZPPtr2
+			
+				lda (ZPPtr2)			if CSTR:last char=0, if PSTR:len=0
+				beq .8
+				
+				sty .1+1
+			
+.1				lda #$ff				Self Modified
+				bne .11					CSTR
+				
+				tya						PSTR
+				cmp (ZPPtr2)			len check
+				beq .2
+				
+.11				iny
+				
+				lda	(ZPPtr2),y
+				beq .2
+		
+				jsr STDIO.COut
+				bcs .9
+
+				lda K.PrintF.PadL
+				beq .1
+				
+				cpy	K.PrintF.PadL
+				bne .1
+				clc
+				rts
+				
+.2				lda K.PrintF.PadL
+				beq .8
+				
+.3				cpy K.PrintF.PadL
+				beq .8
+				
+				lda K.PrintF.PadC				
+				jsr STDIO.COut
+				bcs .9
+				iny
+				bne .3
+				
+.8				clc
+.9				rts
+*--------------------------------------
+STDIO.COut		sta (pIOBuf)
+				inc pIOBuf
+				bne .8
+				
+				lda pIOBuf+1
+				eor K.IOBuf+1
+				beq .1					we are printing to IObuf, flush!
+				
+				inc pIOBuf+1
+				clc
+				rts
+				
+.1								
+*--------------------------------------
+STDIO.Out.Cnt	.BS 2
+*--------------------------------------
+STDIO.Out		phy
+				phx
+
+				plx
+				ply
+				rts
+*STDIO.COut.Ptr	sta $ffff				Self modified
 				ldy #S.NODE.T
-				lda (pDev),y
+				lda (pNode),y
 				asl
 				tax
 *--------------------------------------
-K.PutChar.A.Jmp	jmp (.1,x)
-.1				.DA K.PutChar.A.REG
+				jmp (.1,x)
+.1				.DA STDIO.Out.REG
 				.DA STDIO.IOERR			DIR
-				.DA K.PutChar.A.CDEV
+				.DA STDIO.Out.CDEV
 				.DA STDIO.IOERR			BDEV
 				.DA STDIO.IOERR			LNK
 				.DA STDIO.IOERR			DSOCK
-				.DA K.PutChar.A.SSOCK
-				.DA K.PutChar.A.FIFO
+				.DA STDIO.Out.SSOCK
+				.DA STDIO.Out.FIFO
 *--------------------------------------
-K.PutChar.A.REG	jsr K.GetC.REG.1
+STDIO.Out.REG	jsr K.GetC.REG.1
 				jmp K.FWrite
 *--------------------------------------
-K.PutChar.A.CDEV
-				ldy #S.NODE.DEV.JMP
+STDIO.Out.CDEV	ldy #S.NODE.DEV.JMP
 				lda (pDev),y
 				sta .1+1
 				iny
@@ -62,8 +578,7 @@ K.PutChar.A.CDEV
 				ldx #DEVMGR.WRITE
 .1				jmp $ffff
 *--------------------------------------
-K.PutChar.A.SSOCK
-				lda (pDev)				#S.NODE.HANDLER
+STDIO.Out.SSOCK	lda (pDev)				#S.NODE.HANDLER
 				jsr K.GetMemPtr.A
 				>STYA .1
 				
@@ -76,8 +591,7 @@ K.PutChar.A.SSOCK
 				tax						Function Offset for write
 .1				jmp $ffff
 *--------------------------------------
-K.PutChar.A.FIFO
-				ldy #S.NODE.FIFO.S
+STDIO.Out.FIFO	ldy #S.NODE.FIFO.S
 				lda (pDev),y
 				beq .9					Remote PS did not opened yet the pipe
 				cmp #S.NODE.FIFO.S.Closed
@@ -106,54 +620,12 @@ K.PutChar.A.FIFO
 				.HS 2C					bit abs			
 .99				lda #MLI.E.EOF
 				sec
-				rts				
-*--------------------------------------
-K.PutC.Node		.BS 1			
-*/--------------------------------------
-* # FPutS
-* int fputs ( const char * str, hFILE stream );
-* Write Str to FILE
-* ## In:
-*  PUSHW : CPtr 
-*  PUSHB : hFILE
-* ## Out: 
-*  CC = success
-*\--------------------------------------
-K.FPutS			pha
-				>PULLW pIOBuf
-				pla
-				bra K.PutS.YA.1
-*/--------------------------------------
-* # PutS.YA
-* int puts ( const char * str );
-* Write Str to StdOut, appends '\n'
-* ## In:
-*  Y,A : CPtr 
-* ## Out: 
-*  CC = success
-*\--------------------------------------
-K.PutS.YA		>STYA pIOBuf
-				ldy #S.PS.hStdOut
-				lda	(pPs),y
-				jsr K.PutS.YA.1
-*				bcs .9
-*				lda #13
-*				jsr K.PutChar.A
-*				bcs .9
-*				lda #10
-*				jmp K.PutChar.A
-.9				rts
+				rts
+
+
+
+
 				
-K.PutS.YA.1		jsr K.GetMemPtr.A
-				>STYA pNode
-								
-				ldy #S.NODE.T
-				lda (pDev),y
-				asl
-				tax
-				
-				
-				bra *
 */--------------------------------------
 * # GetChar
 * Get char from StdIn
@@ -229,6 +701,126 @@ K.GetC.SSOCK	lda (pDev)				#S.NODE.HANDLER
 *--------------------------------------
 K.GetC.FIFO
 				bra *
+*--------------------------------------
+*K.PrintF.PadL	.BS 1
+*K.PrintF.PadC	.BS 1
+*HEXBUF			.BS 4
+*BCDBUF			.BS 5					5, enough to handle 10 digits (32bits)
+*--------------------------------------
+HEXBUF			.EQ FAC
+K.PrintF.PadL	.EQ FAC+4
+K.PrintF.PadC	.EQ FAC+5
+BCDBUF			.EQ ARG
+*/--------------------------------------
+* # SScanF.YA
+* Scan a C-String (in progress)
+* ## In:
+*  PUSHW PTR to target var
+*  ...
+*  PUSHW PTR pattern (ex: "%d.%d.%d.%d")
+*   %i : short int
+*   %d : byte
+*   %I : int
+*   %D : word
+*	%L : long int
+*	%U : dword
+*   %h : HEX byte
+*   %H : HEX word
+*  Y,A = PTR to String to scan (ex: "192.168.1.5") 
+* ## Out:
+*\--------------------------------------
+K.SScanF.YA		>STYA ZPPtr2			String to Scan
+				>PULLW ZPPtr1			Pattern
+				
+.1				lda (ZPPtr1)			End Of Pattern?
+				beq .8
+
+				inc ZPPtr1
+				bne .11
+				inc ZPPtr1+1
+
+.11				cmp #'%' 				Escape?
+				beq .2
+				
+				cmp (ZPPtr2)			Same char in string?
+				bne .9
+				
+				inc ZPPtr2
+				bne .1
+				inc ZPPtr2+1
+				bra .1
+				
+.2				lda (ZPPtr1)			Get specifier after %
+				beq .9					unexpected End of pattern after "%" ?
+
+				inc ZPPtr1
+				bne .21
+				inc ZPPtr1+1
+
+.21				ldx #K.SScanFJMP-K.SScanFTBL-2
+				
+.3				cmp K.SScanFTBL,x
+				beq .4
+				dex
+				dex
+				bpl .3
+				
+.9				lda #MLI.E.EOF
+				sec
+				rts
+				
+.4				jsr .5
+
+				bra .1
+				
+.8				clc
+				rts
+*--------------------------------------
+.5				>PULLW ZPPtr3			get VAR Ptr
+
+				lda K.SScanFTBL+1,x		Get VAR size
+				jmp (K.SScanFJMP,x)
+*--------------------------------------
+K.SScanFTBL		.DA #'i,#1,#'d,#1,#'I,#2,#'D,#2,#'l,#4,#'u,#4,#'h,#1,#'H,#2
+K.SScanFJMP		.DA K.SScanF.I
+				.DA K.SScanF.D
+				.DA K.SScanF.II
+				.DA K.SScanF.DD
+				.DA K.SScanF.L
+				.DA K.SScanF.U
+				.DA K.SScanF.H
+				.DA K.SScanF.HH
+*--------------------------------------
+K.SScanF.I		
+K.SScanF.D		
+K.SScanF.II
+K.SScanF.DD
+K.SScanF.L
+K.SScanF.U		pha						Save VAL size
+
+				jsr STDLIB.GetDec
+				bra K.SScanF.GetVAL
+*--------------------------------------
+K.SScanF.HH
+K.SScanF.H		pha
+
+				jsr STDLIB.GetHex
+				
+K.SScanF.GetVAL	tya						Y=char count parsed
+				clc
+				adc ZPPtr2
+				sta ZPPtr2
+				bcc .1
+				inc ZPPtr2+1
+				
+.1				ply						get back VAL size 
+				
+.2				lda STDLIB.32-1,y
+				dey
+				sta (ZPPtr3),y
+				bne .2
+
+.9				rts
 */--------------------------------------
 * # FOpen
 * Open a file
@@ -606,550 +1198,6 @@ K.Rename		jsr PFT.CheckPathSTK
 
 				>MLICALL MLIRENAME
 				rts
-*--------------------------------------
-*K.PrintF.PadL	.BS 1
-*K.PrintF.PadC	.BS 1
-*HEXBUF			.BS 4
-*BCDBUF			.BS 5					5, enough to handle 10 digits (32bits)
-*--------------------------------------
-HEXBUF			.EQ FAC
-K.PrintF.PadL	.EQ FAC+4
-K.PrintF.PadC	.EQ FAC+5
-BCDBUF			.EQ ARG
-*/--------------------------------------
-* # SScanF.YA
-* Scan a C-String (in progress)
-* ## In:
-*  PUSHW PTR to target var
-*  ...
-*  PUSHW PTR pattern (ex: "%d.%d.%d.%d")
-*   %i : short int
-*   %d : byte
-*   %I : int
-*   %D : word
-*	%L : long int
-*	%U : dword
-*   %h : HEX byte
-*   %H : HEX word
-*  Y,A = PTR to String to scan (ex: "192.168.1.5") 
-* ## Out:
-*\--------------------------------------
-K.SScanF.YA		>STYA ZPPtr2			String to Scan
-				>PULLW ZPPtr1			Pattern
-				
-.1				lda (ZPPtr1)			End Of Pattern?
-				beq .8
-
-				inc ZPPtr1
-				bne .11
-				inc ZPPtr1+1
-
-.11				cmp #'%' 				Escape?
-				beq .2
-				
-				cmp (ZPPtr2)			Same char in string?
-				bne .9
-				
-				inc ZPPtr2
-				bne .1
-				inc ZPPtr2+1
-				bra .1
-				
-.2				lda (ZPPtr1)			Get specifier after %
-				beq .9					unexpected End of pattern after "%" ?
-
-				inc ZPPtr1
-				bne .21
-				inc ZPPtr1+1
-
-.21				ldx #K.SScanFJMP-K.SScanFTBL-2
-				
-.3				cmp K.SScanFTBL,x
-				beq .4
-				dex
-				dex
-				bpl .3
-				
-.9				lda #MLI.E.EOF
-				sec
-				rts
-				
-.4				jsr .5
-
-				bra .1
-				
-.8				clc
-				rts
-*--------------------------------------
-.5				>PULLW ZPPtr3			get VAR Ptr
-
-				lda K.SScanFTBL+1,x		Get VAR size
-				jmp (K.SScanFJMP,x)
-*--------------------------------------
-K.SScanFTBL		.DA #'i,#1,#'d,#1,#'I,#2,#'D,#2,#'l,#4,#'u,#4,#'h,#1,#'H,#2
-K.SScanFJMP		.DA K.SScanF.I
-				.DA K.SScanF.D
-				.DA K.SScanF.II
-				.DA K.SScanF.DD
-				.DA K.SScanF.L
-				.DA K.SScanF.U
-				.DA K.SScanF.H
-				.DA K.SScanF.HH
-*--------------------------------------
-K.SScanF.I		
-K.SScanF.D		
-K.SScanF.II
-K.SScanF.DD
-K.SScanF.L
-K.SScanF.U		pha						Save VAL size
-
-				jsr STDLIB.GetDec
-				bra K.SScanF.GetVAL
-*--------------------------------------
-K.SScanF.HH
-K.SScanF.H		pha
-
-				jsr STDLIB.GetHex
-				
-K.SScanF.GetVAL	tya						Y=char count parsed
-				clc
-				adc ZPPtr2
-				sta ZPPtr2
-				bcc .1
-				inc ZPPtr2+1
-				
-.1				ply						get back VAL size 
-				
-.2				lda STDLIB.32-1,y
-				dey
-				sta (ZPPtr3),y
-				bne .2
-
-.9				rts
-*/--------------------------------------
-* # PrintF.YA/SPrintF.YA/FPrintF.YA
-* Prints C-Style String
-* ## In:
-* PrintF.YA : 
-*   Y,A = PTR to CStr
-* SPrintF.YA : 
-*   Y,A = PTR to CStr
-*   PULLW = Ptr to Dst Buffer
-* FPrintF.YA : 
-*   Y,A = PTR to CStr
-*   PULLB = hNode
-* ## Out:
-*  CC : success
-*  CS : error code from Output
-* Specifiers :
-*   %b : pull 1 byte to Print BIN 
-*   %B : pull 2 bytes to Print BIN
-*   %d : pull 1 byte unsigned DEC 0..255
-*   %D : pull 2 bytes unsigned DEC 0..65535
-*   %u : pull 4 bytes long unsigned DEC 0..4294967295
-*   %e : pull 5 Bytes float (-)1.23456789e+12
-*   %f : pull 5 Bytes float (-)3.1415
-*   %h : pull 1 byte to Print HEX
-*   %H : pull 2 bytes to Print HEX
-*   %i : pull 1 byte to Print signed DEC -128..127
-*   %I : pull 2 bytes to Print signed DEC -32768..32767
-*   %L : pull 4 bytes signed DEC -2147483648..2147483647
-*   %n : pull 1 byte to Print low Nibble HEX
-*   %N : pull 1 byte to Print high Nibble HEX
-*   %s : pull 2 bytes ptr to C-Style String
-*   %S : pull 2 bytes ptr to P-Style String
-*   \b : Print 'BS' (08)
-*   \e : Print 'ESC' ($1B,27)
-*   \f : Print 'FF' ($0C,12)
-*   \n : Print 'LF' ($0A,10)
-*   \r : Print 'CR' ($0D,13)
-*   \\\\ : Print \
-*   \% : Print %
-* Modifiers for len and padding : 
-*   %d	  : '9'  '12'
-*   %2d	  : ' 9' '12'   				
-*   %02d  : '09' '12'
-*   %11s  : 'ABCDEFGH   '	
-*   %011s : 'ABCDEFGH000'
-*   %2f	  :	'3.14'
-*\--------------------------------------
-K.SPrintF.YA	
-*				>STYA ZPPtr1
-*				>PULLW STDIO.COut.Ptr+1
-				
-K.FPrintF.YA	
-*				>STYA ZPPtr1
-
-K.PrintF.YA		>STYA ZPPtr1
-				
-				ldy	#0				
-				
-.1				lda (ZPPtr1),y
-				beq .99
-				iny
-				cmp #'%'
-				bne .10
-						
-				stz K.PrintF.PadL
-				lda #' '
-				sta K.PrintF.PadC
-				
-.2				ldx	#PrintFTBL2-PrintFTBL1-1
-				lda (ZPPtr1),y
-				beq .99
-				iny
-				
-.3				cmp PrintFTBL1,x		do we have a %x command?
-				beq .8					yes, jmp to it!
-				dex
-				bpl	.3					no valid letter...
-				
-				cmp #'0'				...a 0...mmm... padding char?
-				bne .4
-				
-				ldx K.PrintF.PadL				K.PrintF.PadL is not nul, so this 0 is second digit
-				bne .5
-				
-*				lda #'0'
-				sta K.PrintF.PadC				no, this is the first 0, so make it K.PrintF.PadC
-				bra .2
-
-.4				jsr MEM.IsDigit
-				bcs .99		
-				
-.5				and #$0F				we have a digit
-				pha						save it...
-				lda K.PrintF.PadL				starts K.PrintF.PadL * 10
-				asl 
-				asl 					A=times 4
-				adc K.PrintF.PadL				CC by ASL, A=times 5			
-				asl						times 10
-				sta K.PrintF.PadL
-
-				pla						get back digit
-				adc K.PrintF.PadL
-				sta K.PrintF.PadL
-				bra .2					go get next char...
-
-.8				phy
-				txa
-				asl
-				tax
-				jsr PrintFESC
-				ply
-				bcc .1
-				rts
-
-.10				cmp #'\'
-				bne .20
-				
-				ldx	#PrintFTBL2.OUT-PrintFTBL2-1
-				lda (ZPPtr1),y
-				beq .99
-				iny
-				
-.12				cmp PrintFTBL2,x
-				beq .13
-				dex
-				bpl	.12
-				bra .1
-				
-.13				lda	PrintFTBL2.OUT,x	
-
-.20				jsr	STDIO.COut
-				bcc	.1
-.99				rts
-*--------------------------------------
-PrintFESC		jmp	(PrintFJMP,x)
-*--------------------------------------
-PrintFTBL1		.AS	"bBdDuefhHiILnNsS"
-PrintFTBL2		.AS	"befnr\%"
-PrintFTBL2.OUT	.HS 08.1B.0C.0A.0D		\b\e\f\n\r
-				.DA #'\'				\\
-				.DA #'%'				\%
-PrintFJMP		.DA PrintF.B,PrintF.BB
-				.DA PrintF.D,PrintF.DD,PrintF.U
-				.DA PrintF.E,PrintF.F
-				.DA PrintF.H,PrintF.HH
-				.DA PrintF.I,PrintF.II,PrintF.L
-				.DA PrintF.N,PrintF.NN
-				.DA PrintF.S,PrintF.SS
-*--------------------------------------
-PrintF.BB		>PULLA
-				pha
-				jsr PrintF.B
-				pla
-				bcc PrintF.B.1
-PrintF.BB.RTS	rts
-*--------------------------------------
-PrintF.B		>PULLA
-				
-PrintF.B.1		ldx #8
-				
-.1				asl
-				pha
-				lda #'0'
-				adc #0					add Carry
-				jsr STDIO.COut
-				pla
-				bcs PrintF.BB.RTS
-				dex
-				bne .1
-				rts
-*--------------------------------------
-PrintF.I		sec						signed short
-				.HS 90					BCC
-PrintF.D		clc						unsigned short (BYTE)
-				ldx #0					one byte
-				
-				>PULLB HEXBUF
-				stz HEXBUF+1
-				bra PrintF.DD.1
-				
-PrintF.II		sec						signed int
-				.HS 90					BCC
-PrintF.DD		clc						unsigned int (WORD)
-				ldx #1					two bytes
-				
-				>PULLW HEXBUF
-
-PrintF.DD.1		stz HEXBUF+2
-				stz HEXBUF+3
-				bra PrintF.U.1
-
-PrintF.L		sec						signed long
-				.HS 90					BCC
-PrintF.U		clc						unsigned long (DWORD)
-				ldx #3					4 bytes
-				
-				>PULLW HEXBUF
-				>PULLW HEXBUF+2
-				
-PrintF.U.1		bcc PrintF.Hex2Dec		unsigned, nothing to check
-		
-				lda HEXBUF,x			get sign
-				bpl PrintF.Hex2Dec
-				
-*				sec
-
-				ldy #0
-				
-.1				lda HEXBUF,y			two's complement of X bytes
-				eor #$ff
-				adc #0
-				sta HEXBUF,y
-				iny
-				dex
-				bpl .1
-				
-				sec						tell to print a "-" sign....
-*--------------------------------------
-* Convert HEXBUF to ASCBUF decimal padded with 0
-*--------------------------------------
-PrintF.Hex2Dec	ror	.31+1
-
-				ldx #4
-
-.1				stz BCDBUF,x	Clear all 5 bytes
-				dex
-				bpl .1
-				
-				sed				switch to BCD mode
-
-				ldx #32			let's roll 32 bits
-				
-.2				asl HEXBUF
-				rol HEXBUF+1
-				rol HEXBUF+2
-				rol HEXBUF+3
-
-				ldy #4
-				
-.3				lda BCDBUF,y
-				adc BCDBUF,y
-				sta BCDBUF,y
-				dey
-				bpl .3
-				
-				dex
-				bne .2
-				
-				cld
-
-.31				bit #$ff				SELF MODIFIED -sign to print before digits ?
-				bpl .9
-				lda #'-'
-				jsr STDIO.COut
-				
-.9				lda K.PrintF.PadL		any Len format ?
-				beq .4					no
-				
-				lda #10
-				sec						yes, Print only digits starting at pos 10-K.PrintF.PadL
-				sbc K.PrintF.PadL
-				
-.4				tax						x=0 if no K.PrintF.PadL, or x=10-K.PrintF.PadL
-
-.5				txa						X range 0 to 9
-				lsr						CS if lo nibble (1,3,5,7,9)
-				tay
-				
-				lda BCDBUF,y
-				
-				bcs .6
-				
-				lsr
-				lsr
-				lsr
-				lsr
-				
-.6				and #$0F
-				ora #$30
-				cmp #$30
-
-				beq .7				a zero?
-				
-				inc K.PrintF.PadL			found a non zero, Print all digits, even if 0, next time
-				ldy #'0'
-				sty K.PrintF.PadC
-				bra .8
-				
-.7				cpx #9				last digit ?
-				beq .8				Print always
-				
-				ldy K.PrintF.PadL			no pad to fill, do not Print 0
-				beq .10
-				
-				lda K.PrintF.PadC			fill with K.PrintF.PadC
-				
-.8				jsr STDIO.COut
-				bcs .99
-
-.10				inx
-				cpx #10
-				bne .5
-				
-				clc
-.99				rts
-*--------------------------------------	
-*       EXP(8) 1(s) 1significants(31)
-* http://apple2.org.za/gswv/a2zine/GS.WorldView/Resources/GS.TECH.INFO/AppleSoft/
-*--------------------------------------		
-PrintF.E		sec						Force "E+12"
-				.HS 90					BCC
-PrintF.F		clc
-				lda pStack+1
-				sta INDEX+1
-				
-				lda pStack
-				sta INDEX
-				
-				clc
-				adc #5
-				sta pStack
-				>ROMCALL SETFAC
-		
-				ldy #3					In order not to trash A2osX.SaveSM,A2osX.SaveSX
-				>ROMCALL FOUT
-				
-				ldy #0
-				
-.2				lda $102,y
-				beq .8
-				
-				jsr STDIO.COut
-
-				iny
-				bne .2
-				
-.8				clc
-			
-.9				rts
-*--------------------------------------
-PrintF.HH		>PULLA
-				pha
-				jsr PrintF.H
-				pla
-				bra PrintF.H.1
-*--------------------------------------
-PrintF.H		>PULLA
-PrintF.H.1		pha
-				jsr PrintF.NN.1
-				pla
-				bra PrintF.N.1
-*--------------------------------------
-PrintF.N		>PULLA
-PrintF.N.1		and #$0F
-				bra PrintF.NN.2
-
-PrintF.NN		>PULLA
-PrintF.NN.1		lsr
-				lsr
-				lsr
-				lsr
-				
-PrintF.NN.2		ora #$30
-				cmp #$3A
-				bcc .1
-				adc #6
-.1				jmp STDIO.COut
-*--------------------------------------
-PrintF.S		ldy #$ff				CSTR
-				.HS 2C					bit abs
-PrintF.SS		ldy #$00				PSTR
-
-				>PULLW ZPPtr2
-			
-				lda (ZPPtr2)			if CSTR:last char=0, if PSTR:len=0
-				beq .8
-				
-				sty .1+1
-			
-.1				lda #$ff				Self Modified
-				bne .11					CSTR
-				
-				tya						PSTR
-				cmp (ZPPtr2)			len check
-				beq .2
-				
-.11				iny
-				
-				lda	(ZPPtr2),y
-				beq .2
-		
-				jsr STDIO.COut
-				bcs .9
-
-				lda K.PrintF.PadL
-				beq .1
-				
-				cpy	K.PrintF.PadL
-				bne .1
-				clc
-				rts
-				
-.2				lda K.PrintF.PadL
-				beq .8
-				
-.3				cpy K.PrintF.PadL
-				beq .8
-				
-				lda K.PrintF.PadC				
-				jsr STDIO.COut
-				bcs .9
-				iny
-				bne .3
-				
-.8				clc
-.9				rts
-*--------------------------------------
-STDIO.COut		phy
-				phx
-				jsr K.PutChar.A
-				plx
-				ply
-				rts
-*STDIO.COut.Ptr	sta $ffff				Self modified
 *--------------------------------------
 STDIO.PullMLIPath
 				>PULLYA
