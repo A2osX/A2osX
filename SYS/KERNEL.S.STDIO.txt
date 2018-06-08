@@ -158,13 +158,16 @@ K.SPrintF.YA	>STYA pIOBuf			Out Buffer
 K.FPrintF.A		jsr K.GetMemPtr.A		A = hFILE
 				>STYA pNode
 				>PULLW ZPPtr1			format
-				bra K.PrintF.1
+				bra K.PrintF.0
 
 K.PrintF.YA		>STYA ZPPtr1			format
 				ldy #S.PS.hStdOut
 				lda	(pPs),y
 				jsr K.GetMemPtr.A
 				>STYA pNode
+	
+K.PrintF.0		>LDYAI K.IOBuf
+				>STYA pIOBuf
 				
 K.PrintF.1		ldy	#0				
 				
@@ -219,7 +222,7 @@ K.PrintF.1		ldy	#0
 				txa
 				asl
 				tax
-				jsr PrintFESC
+				jsr PrintF.ESC
 				ply
 				bcc .1
 				rts
@@ -240,24 +243,24 @@ K.PrintF.1		ldy	#0
 				
 .13				lda	PrintFTBL2.OUT,x	
 
-.20				jsr	STDIO.COut
+.20				jsr	PrintF.COut
 				bcc	.1
 .99				rts
 *--------------------------------------
-PrintFESC		jmp	(PrintFJMP,x)
-*--------------------------------------
-PrintFTBL1		.AS	"bBdDuefhHiILnNsS"
-PrintFTBL2		.AS	"befnr\%"
-PrintFTBL2.OUT	.HS 08.1B.0C.0A.0D		\b\e\f\n\r
-				.DA #'\'				\\
-				.DA #'%'				\%
-PrintFJMP		.DA PrintF.B,PrintF.BB
+PrintF.ESC		jmp	(.1,x)
+.1				.DA PrintF.B,PrintF.BB
 				.DA PrintF.D,PrintF.DD,PrintF.U
 				.DA PrintF.E,PrintF.F
 				.DA PrintF.H,PrintF.HH
 				.DA PrintF.I,PrintF.II,PrintF.L
 				.DA PrintF.N,PrintF.NN
 				.DA PrintF.S,PrintF.SS
+*--------------------------------------
+PrintFTBL1		.AS	"bBdDuefhHiILnNsS"
+PrintFTBL2		.AS	"befnr\%"
+PrintFTBL2.OUT	.HS 08.1B.0C.0A.0D		\b\e\f\n\r
+				.DA #'\'				\\
+				.DA #'%'				\%
 *--------------------------------------
 PrintF.BB		>PULLA
 				pha
@@ -274,7 +277,7 @@ PrintF.B.1		ldx #8
 				pha
 				lda #'0'
 				adc #0					add Carry
-				jsr STDIO.COut
+				jsr PrintF.COut
 				pla
 				bcs PrintF.BB.RTS
 				dex
@@ -363,7 +366,7 @@ PrintF.Hex2Dec	ror	.31+1
 .31				bit #$ff				SELF MODIFIED -sign to print before digits ?
 				bpl .9
 				lda #'-'
-				jsr STDIO.COut
+				jsr PrintF.COut
 				
 .9				lda K.PrintF.PadL		any Len format ?
 				beq .4					no
@@ -406,7 +409,7 @@ PrintF.Hex2Dec	ror	.31+1
 				
 				lda K.PrintF.PadC			fill with K.PrintF.PadC
 				
-.8				jsr STDIO.COut
+.8				jsr PrintF.COut
 				bcs .99
 
 .10				inx
@@ -441,7 +444,7 @@ PrintF.F		clc
 .2				lda $102,y
 				beq .8
 				
-				jsr STDIO.COut
+				jsr PrintF.COut
 
 				iny
 				bne .2
@@ -476,7 +479,7 @@ PrintF.NN.2		ora #$30
 				cmp #$3A
 				bcc .1
 				adc #6
-.1				jmp STDIO.COut
+.1				jmp PrintF.COut
 *--------------------------------------
 PrintF.S		ldy #$ff				CSTR
 				.HS 2C					bit abs
@@ -501,7 +504,7 @@ PrintF.SS		ldy #$00				PSTR
 				lda	(ZPPtr2),y
 				beq .2
 		
-				jsr STDIO.COut
+				jsr PrintF.COut
 				bcs .9
 
 				lda K.PrintF.PadL
@@ -519,7 +522,7 @@ PrintF.SS		ldy #$00				PSTR
 				beq .8
 				
 				lda K.PrintF.PadC				
-				jsr STDIO.COut
+				jsr PrintF.COut
 				bcs .9
 				iny
 				bne .3
@@ -527,30 +530,41 @@ PrintF.SS		ldy #$00				PSTR
 .8				clc
 .9				rts
 *--------------------------------------
-STDIO.COut		sta (pIOBuf)
-				inc pIOBuf
+PrintF.COut		phy
+				
+				ldy STDIO.Out.Cnt
+				sta (pIOBuf),y
+				inc STDIO.Out.Cnt
 				bne .8
 				
 				lda pIOBuf+1
-				eor K.IOBuf+1
-				beq .1					we are printing to IObuf, flush!
+				eor /K.IOBuf
+				bne .7
+
+*				we are printing to IObuf, flush!
+
+				lda STDIO.Out.Cnt+1
+				pha
+				lda #1					Flush $100 bytes
+				sta STDIO.Out.Cnt+1
 				
-				inc pIOBuf+1
+
+				pla
+				inc
+				sta STDIO.Out.Cnt+1
+
+				
+.7				inc pIOBuf+1
+				inc STDIO.Out.Cnt+1
+				
+.8				ply
 				clc
 				rts
-				
-.1								
+*--------------------------------------
 *--------------------------------------
 STDIO.Out.Cnt	.BS 2
 *--------------------------------------
-STDIO.Out		phy
-				phx
-
-				plx
-				ply
-				rts
-*STDIO.COut.Ptr	sta $ffff				Self modified
-				ldy #S.NODE.T
+STDIO.Out		ldy #S.NODE.T
 				lda (pNode),y
 				asl
 				tax
@@ -565,51 +579,56 @@ STDIO.Out		phy
 				.DA STDIO.Out.SSOCK
 				.DA STDIO.Out.FIFO
 *--------------------------------------
-STDIO.Out.REG	jsr K.GetC.REG.1
+STDIO.Out.REG	>PUSHW pIOBuf
+				>PUSHW STDIO.Out.Cnt
+				ldy #S.NODE.REG.REF
+				>PUSHB (pNode),y
+
 				jmp K.FWrite
 *--------------------------------------
 STDIO.Out.CDEV	ldy #S.NODE.DEV.JMP
-				lda (pDev),y
+				lda (pNode),y
 				sta .1+1
 				iny
-				lda (pDev),y
+				lda (pNode),y
 				sta .1+2
+				
 				lda K.IOBuf
 				ldx #DEVMGR.WRITE
 .1				jmp $ffff
 *--------------------------------------
-STDIO.Out.SSOCK	lda (pDev)				#S.NODE.HANDLER
+STDIO.Out.SSOCK	lda (pNode)				#S.NODE.HANDLER
 				jsr K.GetMemPtr.A
 				>STYA .1
 				
 				ldy #S.NODE.SSOCK.HSKT
-				>PUSHB (pDev),y
+				>PUSHB (pNode),y
 				>PUSHB K.IOBuf
 				
 				ldy #S.NODE.SSOCK.WRITE
-				lda (pDev),y
+				lda (pNode),y
 				tax						Function Offset for write
 .1				jmp $ffff
 *--------------------------------------
 STDIO.Out.FIFO	ldy #S.NODE.FIFO.S
-				lda (pDev),y
+				lda (pNode),y
 				beq .9					Remote PS did not opened yet the pipe
 				cmp #S.NODE.FIFO.S.Closed
 				beq .99					Remote PS closed the Pipe
 				
 				ldy #S.NODE.FIFO.hMem
-				lda (pDev),y
+				lda (pNode),y
 				jsr K.GetMemPtr.A
 				>STYA .1+2
 				
 				ldy #S.NODE.FIFO.Head
-				lda (pDev),y
+				lda (pNode),y
 				inc
 				dey						#S.NODE.FIFO.Tail	
-				cmp (pDev),y
+				cmp (pNode),y
 				beq .9					FIFO is full
 				iny
-				sta (pDev),y
+				sta (pNode),y
 				tay
 				lda K.IOBuf
 .1				sta $ffff,y
@@ -620,12 +639,7 @@ STDIO.Out.FIFO	ldy #S.NODE.FIFO.S
 				.HS 2C					bit abs			
 .99				lda #MLI.E.EOF
 				sec
-				rts
-
-
-
-
-				
+				rts	
 */--------------------------------------
 * # GetChar
 * Get char from StdIn
@@ -665,17 +679,15 @@ K.GetC.A		sta K.PutC.Node
 				.DA K.GetC.SSOCK
 				.DA K.GetC.FIFO
 *--------------------------------------
-K.GetC.REG		jsr K.GetC.REG.1
+K.GetC.REG		>PUSHWI K.IOBuf
+				>PUSHWI 1
+				ldy #S.NODE.REG.REF
+				>PUSHB (pDev),y
+				
 				jsr K.FRead
 				bcs .9
 				lda K.Buf256
 .9				rts
-
-K.GetC.REG.1	>PUSHWI K.IOBuf
-				>PUSHWI 1
-				ldy #S.NODE.REG.REF
-				>PUSHB (pDev),y
-				rts
 *--------------------------------------
 K.GetC.CDEV		ldx #DEVMGR.READ
 				ldy #S.NODE.DEV.JMP
