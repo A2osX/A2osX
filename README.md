@@ -1,7 +1,9 @@
 # A2osX (0.9.2) Multi-Tasking OS for Apple II  
 
-**!Version 0.9.1 archived!**
-**USE 0.9.1 CODE LEVEL FOR PREVIEW using this link : https://github.com/burniouf/A2osX/tree/0.9.1** 
+**!Version 0.9.1 archived!**  
+
+**USE 0.9.1 CODE LEVEL FOR PREVIEW here : https://github.com/burniouf/A2osX/tree/0.9.1**
+ 
 ## Disk images :  
 
 + **A2OSX.BOOT.po**   :  **(0.9.1)**  140k BOOT disk image with all binaries  
@@ -18,7 +20,7 @@ Roadmap for 0.9.2:
  + Organize Testing (Testers wellcome)
  + NET : TCPIP Network services, AppleTalk (Coders wellcome)
  + GUI : Window Manager (Coders wellcome)
- + DEV : ASM, CSH, C compiler (Coders wellcome)
+ + DEV : ASM, CSH, C compiler, someone suggested PLASMA (Coders wellcome)
  + release Version 1.0.0
  
 Sub projects:
