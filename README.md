@@ -1,11 +1,49 @@
-# A2osX (0.9.1) Multi-Tasking OS for Apple II  
+# A2osX (0.9.2) Multi-Tasking OS for Apple II  
 
+**!Version 0.9.1 archived!**
+**USE 0.9.1 CODE LEVEL FOR PREVIEW using this link : https://github.com/burniouf/A2osX/tree/0.9.1** 
 ## Disk images :  
 
 + **A2OSX.BOOT.po**   :  **(0.9.1)**  140k BOOT disk image with all binaries  
 + **A2OSX.DEV.po**    :  **(0.9.1)**  140k disk image with ASM binaries, Debug Tools & INClude files  
 + **A2OSX.BUILD.po**  :  **(0.9.1)**  800k BOOT disk image with S-C MASM 3.0 and all binaries (BOOT+DEV)  
 + **A2OSX.SRC.po**    :  **(0.9.1)**  800k disk image with all sources  
+
+## Latest News 2018-06-13
+
+Previous (relatively!) stable version 0.9.1 has been archived, see link above.  
+
+Roadmap for 0.9.2:
+ + Organize this roadmap in projects (anybody interested in a PM job ?)
+ + Organize Testing (Testers wellcome)
+ + NET : TCPIP Network services, AppleTalk (Coders wellcome)
+ + GUI : Window Manager (Coders wellcome)
+ + DEV : ASM, CSH, C compiler (Coders wellcome)
+ + release Version 1.0.0
+ 
+Sub projects:
+ + Finalize enhanced STDIO (Buffered IO)
+ + Link UDP/TCP sockets to new STDIO
+ + Rewrite Driver interface (SmartPort Protocol) and link to STDIO
+ + establish parameter passing convention (C-like Stack frame)
+ + Move all LIBs to this new convention to allow preemtive mode for LIBs
+ + AT commands (Appletalk)
+ + TELNETD/HTTPD/NFSD (STDIO)
+ + GUI : Window Manager, Controls...
+ + Assembler (AUX mem manager) will allow A2osX to build entirely itself every night!
+ + Shell CSH (MATH API, AUX mem manager)
+ + C compiler (Stack Frame, MATH API, AUX mem manager)
+ + Disk II format (LIBBLKDEV)
+ + Simple compression API (LIBPAK)
+ + CSH+LIBPACK -> A2osX Installer
+ + TCPIP+SSC DRV+LIBBLKDEV -> ADT Client
+ + /etc/passwd (LIBCRYPT)
+
+I need :
+ + someone able to handle project management so i can focus on code writing
+ + developers interested in one of these subjects above
+ + someone able to build a test plan
+ + ....ideas...help....support....beer, or something stronger! 
 
 ## Latest News 2018-05-29
 
