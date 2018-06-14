@@ -9,28 +9,23 @@
 
 # ARP.Query
 + Query ARP Cache and returns HW address
-
-## In:
+**In:**
 + PUSHW PTR to MAC (to fill)
 + PUSHW PTR to IP
-
-## Out:
+**Out:**
 + CC: hit: MAC filled
 + CS: missed 
 
 # ARP.Add
 + Add a static ARP cache record
-
-## In:
+**In:**
 + PUSHW PTR to MAC
 + PUSHW PTR to IP
 
 # ARP.GetCAche
 + Return a Ptr to ARP Cache Table
-
-## In:
-
-## Out:
+**In:**
+**Out:**
  + Y,A = PTR to ARP.CACHE
 
 # DNS.Clear
@@ -42,28 +37,23 @@
 
 # DNS.Query
 + Query DNS for specified host
-
-## In:
+**In:**
  + PUSHW = PTR to IP to fill with cached data
 *	PUSHW = hostname PTR to PSTR 
-
-## Out:
+**Out:**
  + CC: hit: IP filled with address
  + CS: missed 
 
 # DNS.Add
 + Add a static DNS record
-
-## In:
+**In:**
 + PUSHW = PTR to IP
 + PUSHW = hostname CSTR to Add
 
 # DNS.GetCAche
 + Return a Ptr to DNS Cache Table
-
-## In:
-
-## Out:
+**In:**
+**Out:**
  + Y,A = PTR to DNS.CACHE
 
 # SKT.New
