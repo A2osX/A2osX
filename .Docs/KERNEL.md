@@ -617,7 +617,7 @@ Convert String to 32 bits (unsigned) int
 
 # C
 `long strtol (const char* str, char** endptr, int base);`
-`unsigned long strtol (const char* str, char** endptr, int base);`
+`unsigned long strtoul (const char* str, char** endptr, int base);`
 
 # ASM
 **In:**
@@ -629,15 +629,24 @@ On stack (long)
 
 # AToL
 Convert String to 32 bits int
+
+# C
+`long atol ( const char * str );`
+
+# ASM
 **In:**
-+ PUSHW Source String (C-Sring)
-+ PUSHW PTR to target buffer DWORD
+`>LDYA str`
 **Out:**
+On stack (long)
 
 # AToI.YA
-Convert String to 16 bits int
+
+# C
+`long atol ( const char * str );`
+
+# ASM
 **In:**
-+ Y,A = Source String (C-String)
+`>LDYA str`
 **Out:**
 + Y,A = Int
 
