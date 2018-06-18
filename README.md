@@ -11,6 +11,13 @@
 + **A2OSX.BUILD.po**  :  **(0.9.2)**  800k BOOT disk image with S-C MASM 3.0 and all binaries (BOOT+DEV)  
 + **A2OSX.SRC.po**    :  **(0.9.2)**  800k disk image with all sources  
 
+## Latest News 2018-06-17
+
+Ok, as i'm still the lone developer here, i decided to break the kernel, HAHAHAHAHAHA!!!!
+I updated the Calling Convention (see projects), i now setup the header in each KERNEL.S.* file accordingly to generate doc, then i change the code...
+
+So ....nothing works anymore on the A2OSX.BUILD media...
+
 ## Latest News 2018-06-13
 
 Previous (relatively!) stable version 0.9.1 has been archived, see link above.  

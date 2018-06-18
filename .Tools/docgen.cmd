@@ -70,11 +70,17 @@ for /f %%F in ('dir /b /ogn "%SRCDIR%\%FILTER%"') do (
     )
    if !bInDoc! EQU 1 (
     if !bOut! EQU 1 (
-     if "!line:~0,4!" EQU "*   " set LINE= + !LINE:~4!
-     if "!line:~0,3!" EQU "*  " set LINE=+ !LINE:~3!
      if "!line:~0,2!" EQU "* " set LINE=!LINE:~2!
-	 if "!line:~0,1!" EQU "#" echo.>>!DOCFILE!
+	 if "!line:~0,1!" EQU "+" (
+	  set bInList=1
+	 ) else (
+	  if !bInList! EQU 1 (
+	   echo.>>!DOCFILE!
+	   set bInList=0
+	   )
+	  )
      (echo !LINE!)>>!DOCFILE!
+	 if "!line:~0,1!" EQU "#" echo.>>!DOCFILE!
      )
     )
    )
