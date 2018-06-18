@@ -79,8 +79,8 @@ for /f %%F in ('dir /b /ogn "%SRCDIR%\%FILTER%"') do (
 	   set bInList=0
 	   )
 	  )
-     (echo !LINE!)>>!DOCFILE!
 	 if "!line:~0,1!" EQU "#" echo.>>!DOCFILE!
+     (echo !LINE!  )>>!DOCFILE!
      )
     )
    )
