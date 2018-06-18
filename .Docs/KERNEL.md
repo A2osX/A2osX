@@ -13,11 +13,16 @@ CS : Out Of Bound
 
 Search a file in the provided PATH list
 And return, if found, the full path to it.
+## C
+
+`int filesearch ( char * filename, char * searchpath, char * fullpath, stat * filestat);`
+## ASM
+
 **In:**
-PUSHW = Ptr to Search Path (CSTR) %LIB%;/SYS/SLIB
-PUSHW = Ptr to File Name (CSTR)		
-PUSHW = Ptr to DstBuf
-PUSHW = Ptr to DstStat
+`>PUSHWI filestat`
+`>PUSHWI fullpath`
+`>PUSHWI searchpath`
+`>LDYAI filename`
 **Out:**
 CC : success
 DstBuf = FilePath
@@ -85,7 +90,7 @@ note: X Unmodified
  A = hDIR
 **Out:**
  none, always succeed. 
-# ExpandStr.YA
+# ExpandStr
 
 **In:**
  Y,A = PTR to String to Expand (C-String)
@@ -383,7 +388,7 @@ return a hFILE to a new FIFO
 Print A (char) to hFILE
 ## C
 
-int fputc ( int character, hFILE stream );
+`int fputc ( int character, hFILE stream );`
 ## ASM
 
 **In:**
