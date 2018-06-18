@@ -163,18 +163,22 @@ Load a file in memory
 # FAdd,FSub,FMult,FDiv,FPwr  
 Return X+Y, X-Y, X*Y, X/Y, X^Y  
 
-##ASM  
+## ASM  
 **In:**  
 `>PUSHF X (float)`  
 `>PUSHF Y (float)`  
-`>SYSCALL fadd  
+`>SYSCALL fadd`  
+`>SYSCALL fsub`  
+`>SYSCALL fmult`  
+`>SYSCALL fdiv`  
+`>SYSCALL fpwr`  
 **Out:**  
  On stack (float)  
 
 # Log,Sqr,Exp,Cos,Sin,Tan,ATan  
 Return Log(x), Sqr(x), E^X, Cos(x), Sin(X), Tan(x), ATan(x)  
 
-##C  
+## C  
 `float log ( float x);`  
 `float sqr ( float x);`  
 `float exp ( float x);`  
@@ -183,24 +187,35 @@ Return Log(x), Sqr(x), E^X, Cos(x), Sin(X), Tan(x), ATan(x)
 `float tan ( float x);`  
 `float atan ( float x);`  
 
-##ASM  
+## ASM  
 **In:**  
 `>PUSHF x (Float)`  
 `>SYSCALL log`  
 **Out:**  
  On stack (Float)  
 
-# Float  
+# float  
 Return 'floated' long  
-**In:**  
- PUSHL = X (long)  
-**Out:**  
- On stack (Float)  
 
-# LRIntF  
-Return Float rounded into a long  
+## C  
+`float f = (float)12345678;  
+
+## ASM  
 **In:**  
- PUSHF = X (Float)  
+ `>PUSHL X` (long)  
+**Out:**  
+ On stack (float)  
+
+# lrintf  
+Return float rounded into a long  
+
+## C  
+`long int lrintf (float x);`  
+
+## ASM  
+**In:**  
+`>PUSHF x`  
+`>SYSCALL lrintf`  
 **Out:**  
  On stack (long)  
 
@@ -637,7 +652,7 @@ Rename a file
  PUSHW = Old Name  
 **Out:**  
 
-# StrToF  
+# strtof  
 Convert String to 40 bits Float  
 
 ##C  
@@ -660,6 +675,7 @@ Convert String to 40 bits Float
 ## ASM  
 **In:**  
 `>LDYA str`  
+`>SYSCALL atof`  
 **Out:**  
 On stack (float)  
 
@@ -674,12 +690,13 @@ Convert String to 32 bits (unsigned) int
 **In:**  
 `>PUSHB Base`  
 `>PUSHWI EndPtr`  
-`>LDYA str`  
+`>LDYAI str`  
+`>SYSCALL strtol`  
 **Out:**  
 On stack (long)  
 
-# AToL  
-Convert String to 32 bits int  
+# atol  
+Convert String to 32 bits long  
 
 ## C  
 `long atol ( const char * str );`  
@@ -687,29 +704,38 @@ Convert String to 32 bits int
 ## ASM  
 **In:**  
 `>LDYA str`  
+`>SYSCALL atol`  
 **Out:**  
 On stack (long)  
 
-# AToI.YA  
+# atoi  
+Convert String to 16 bits int  
 
 ## C  
 `int atoi ( const char * str );`  
 
 ## ASM  
 **In:**  
-`>LDYA str`  
+`>LDYAI str`  
+`>SYSCALL atoi`  
 **Out:**  
- Y,A = Int  
+ Y,A = int  
 
-# RealPath.YA  
+# realpath  
 Return the canonicalized absolute pathname  
+
+## C  
+`unsigned short int realpath (const char* str);`  
+
+## ASM  
 **In:**  
- Y,A = Ptr to Relative Filename (C-String)  
+`>LDYA str`  
+`>SYSCALL realpath`  
 **Out:**  
- CC : success  
-  Y,A = Ptr to Full Path (C-String)  
-  X = hMem of Full Path  
- CS : A = Error Code  
+CC : success  
+ Y,A = Ptr to Full Path (C-String)  
+ X = hMem of Full Path  
+CS : A = Error Code  
 
 # StrLen  
 Returns Length of C-String  

@@ -1,5 +1,5 @@
 @echo off
-title Kernel DOC generator
+title A2osX DOC generator
 COLOR 2A
 prompt ]
 SETLOCAL ENABLEEXTENSIONS ENABLEDELAYEDEXPANSION
@@ -9,7 +9,7 @@ for /f %%a in ('copy /Z "%~f0" nul') do set "CR=%%a"
 mode con:cols=80 lines=24
 
 cls
-echo                                 Apple //e
+echo                                   Apple //e
 
 set /a c=0
 
@@ -20,11 +20,6 @@ set SRCDIR=%~dp0..\SYS
 set FILTER=KERNEL.S*.txt
 Call :SCAN
 
-set DOCFILE=%~dp0..\.Docs\LIBTCPIP.md
-set SRCDIR=%~dp0..\LIB
-set FILTER=LIBTCPIP.S*.txt
-Call :SCAN
-
 set DOCFILE=%~dp0..\.Docs\LIBBLKDEV.md
 set SRCDIR=%~dp0..\LIB
 set FILTER=LIBBLKDEV.S*.txt
@@ -33,6 +28,21 @@ Call :SCAN
 set DOCFILE=%~dp0..\.Docs\LIBCRYPT.md
 set SRCDIR=%~dp0..\LIB
 set FILTER=LIBCRYPT.S*.txt
+Call :SCAN
+
+set DOCFILE=%~dp0..\.Docs\LIBGUI.md
+set SRCDIR=%~dp0..\LIB
+set FILTER=LIBGUI.S*.txt
+Call :SCAN
+
+set DOCFILE=%~dp0..\.Docs\LIBPAK.md
+set SRCDIR=%~dp0..\LIB
+set FILTER=LIBPAK.S*.txt
+Call :SCAN
+
+set DOCFILE=%~dp0..\.Docs\LIBTCPIP.md
+set SRCDIR=%~dp0..\LIB
+set FILTER=LIBTCPIP.S*.txt
 Call :SCAN
 
 echo.
@@ -49,7 +59,6 @@ exit 0
 
 echo.
 echo Scanning %FILTER% Files...
-echo.
 
 for /f %%F in ('dir /b /ogn "%SRCDIR%\%FILTER%"') do (
  set FN=%%F
