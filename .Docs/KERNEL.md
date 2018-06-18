@@ -162,16 +162,31 @@ Load a file in memory
 
 # FAdd,FSub,FMult,FDiv,FPwr  
 Return X+Y, X-Y, X*Y, X/Y, X^Y  
+
+##ASM  
 **In:**  
- PUSHF = X (Float)  
- PUSHF = Y (Float)  
+`>PUSHF X (float)`  
+`>PUSHF Y (float)`  
+`>SYSCALL fadd  
 **Out:**  
- On stack (Float)  
+ On stack (float)  
 
 # Log,Sqr,Exp,Cos,Sin,Tan,ATan  
 Return Log(x), Sqr(x), E^X, Cos(x), Sin(X), Tan(x), ATan(x)  
+
+##C  
+`float log ( float x);`  
+`float sqr ( float x);`  
+`float exp ( float x);`  
+`float cos ( float x);`  
+`float sin ( float x);`  
+`float tan ( float x);`  
+`float atan ( float x);`  
+
+##ASM  
 **In:**  
- PUSHF = X (Float)  
+`>PUSHF x (Float)`  
+`>SYSCALL log`  
 **Out:**  
  On stack (Float)  
 
@@ -538,16 +553,21 @@ Y,A = Number of arguments filled.
 
 # FOpen  
 Open a file  
+
+## C  
+`hFILE fopen ( const char * filename, short int mode, short int ftype, int auxtype );`  
 **In:**  
- PUSHW = AUXTYPE  
- PUSHB = TYPE  
- PUSHB = MODE  
-  SYS.FOpen.R : if R and exists -> ERROR  
-  SYS.FOpen.W : if W and exists -> CREATE  
-  SYS.FOpen.A : Append  
-  SYS.FOpen.T : Open/Append in Text mode  
-  SYS.FOpen.X : Create if not exists  
- PUSHW = PATH (PSTR)  
+
+## ASM  
+`>PUSHWI auxtype`  
+`>PUSHBI ftype`  
+`>PUSHBI mode`  
+ + SYS.FOpen.R : if R and exists -> ERROR  
+ + SYS.FOpen.W : if W and exists -> CREATE  
+ + SYS.FOpen.A : Append  
+ + SYS.FOpen.T : Open/Append in Text mode  
+ + SYS.FOpen.X : Create if not exists  
+`>LDYAI filename`  
 **Out:**   
  CC : A = hFILE  
  CS : A = EC  
@@ -620,13 +640,14 @@ Rename a file
 # StrToF  
 Convert String to 40 bits Float  
 
-## C  
+##C  
 `float strtof (const char* str, char** endptr);`  
 
-## ASM  
+##ASM  
 **In:**  
 `>PUSHWI EndPtr`  
 `>LDYA str`  
+`>SYSCALL strtof`  
 **Out:**  
 On stack (float)  
 
