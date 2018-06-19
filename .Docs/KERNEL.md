@@ -420,8 +420,8 @@ Print A (char) to hFILE
 
 ## ASM  
 **In:**  
-Y : character  
-A : stream  
+A : character  
+Y : stream  
 **Out:**   
 CC = success  
 
@@ -443,7 +443,7 @@ Write Str to StdOut, appends '\r\n'
 ## C  
 `int puts ( const char * str );`  
 **In:**  
-Y,A : CPtr   
+Y,A : str   
 **Out:**   
 CC = success  
 
@@ -604,12 +604,16 @@ Read bytes from file
  Y,A = Bytes Read  
 
 # FWrite  
-int fwrite ( const void * ptr, int count, FILE * stream );  
 Write bytes to file  
+
+## C  
+`int fwrite ( const void * ptr, int count, hFILE stream );`  
+
+## ASM  
 **In:**  
- PUSHW = Src Ptr  
- PUSHW = Bytes To Write  
- PUSHB = hFILE  
+`>PUSHB = hFILE`  
+`>PUSHWI ptr`  
+`>LDYA count`  
 
 # Out:  
  Y,A = Bytes Written  
@@ -741,11 +745,12 @@ CS : A = Error Code
 Returns Length of C-String  
 
 ## C  
-`char * strcat ( char * destination, const char * source );`  
+`int strlen ( char * str);`  
 
 ## ASM  
 **In:**   
-Y,A = Ptr to CSTR  
+`>LDYAI str`  
+`>SYSCALL strlen`  
 **Out:**   
 Y,A = String length  
 
