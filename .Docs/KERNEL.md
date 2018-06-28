@@ -10,34 +10,32 @@ CC : success
 Y,A = PTR To Arg[A]  
 CS : Out Of Bound  
 
-# FileSearch  
-Search a file in the provided PATH list  
-And return, if found, the full path to it.  
+# LoadDrv  
 
-## C  
-`int filesearch ( char * filename, char * searchpath, char * fullpath, stat * filestat);`  
-
-## ASM  
+##ASM  
 **In:**  
-`>PUSHWI filestat`  
-`>PUSHWI fullpath`  
-`>PUSHWI searchpath`  
-`>LDYAI filename`  
+ Y,A = PTR to "NAME.DRV [PARAM]" C-String  
 **Out:**  
-CC : success  
-DstBuf = FilePath  
-DstStat = S.STAT  
-CS : not found  
+none  
 
-# GetDevByID.A  
+#K.InsDrv  
+
+##ASM  
+**In:**  
+Y,A = .DRV File Loaded Address  
+Note:  
+ BIN.Load called from K.LoadDrv  
+ Already setup correctly pDrv,  
+ BIN.R.Start,End  
+
+# GetDevByID  
 **In:**   
 A = DevID  
 **Out:**  
 CC = OK, CS = ERROR  
 Y,A = DEVSLOT  
-note: X Unmodified  
 
-# GetDevByName.YA  
+# GetDevByName  
 **In:**   
  Y,A = Ptr to device name (C-String)  
 **Out:**  
@@ -45,7 +43,7 @@ note: X Unmodified
  X = DEVID  
  Y,A = DEVSLOT  
 
-# GetDevStatus.A  
+# GetDevStatus  
 **In:**   
  A = DevID  
 **Out:**  
@@ -65,7 +63,7 @@ note: X Unmodified
 **Out:**  
  Y,A = ...  
 
-# OpenDir.YA  
+# OpenDir  
 **In:**  
  Y,A = PATH (C-String)  
 **Out:**   
@@ -74,7 +72,7 @@ note: X Unmodified
  CS : error  
   A = EC  
 
-# ReadDir.A  
+# ReadDir  
 **In:**   
  A = hDIR  
 **Out:**   
@@ -85,7 +83,7 @@ note: X Unmodified
   A = EC  
   note : A = 0 means no more entry  
 
-# CloseDir.A  
+# CloseDir  
 **In:**   
  A = hDIR  
 **Out:**  
@@ -98,7 +96,26 @@ note: X Unmodified
  X = hMem to Expanded String (C-String)  
  Y,A = PTR to Expanded String   
 
-# PutEnv.YA  
+# FileSearch  
+Search a file in the provided PATH list  
+And return, if found, the full path to it.  
+
+## C  
+`int filesearch ( char * filename, char * searchpath, char * fullpath, stat * filestat);`  
+
+## ASM  
+**In:**  
+`>PUSHWI filestat`  
+`>PUSHWI fullpath`  
+`>PUSHWI searchpath`  
+`>LDYAI filename`  
+**Out:**  
+CC : success  
+DstBuf = FilePath  
+DstStat = S.STAT  
+CS : not found  
+
+# PutEnv  
 **In:**  
  Y,A = PTR to String NAME=VALUE (C-String)  
 **Out:**  
@@ -109,19 +126,19 @@ note: X Unmodified
  PUSHW = PTR To Name (PSTR)  
 **Out:**  
 
-# GetEnv.YA  
+# GetEnv  
 **In:**  
  Y,A = PTR to NAME (PSTR)  
 **Out:**  
  CC : Y,A = PTR to VALUE (PSTR)  
  CS : not found  
 
-# UnsetEnv.YA  
+# UnsetEnv  
 **In:**  
  Y,A = PTR To Name (PSTR)  
 **Out:**  
 
-# LoadTxtFile.YA  
+# LoadTxtFile  
 Load TXT a file in memory (with ending 0)  
 **In:**  
  Y,A = File Path  
@@ -352,31 +369,31 @@ Load a file in AUX memory (Stock Objects)
  Y,A = File Length  
  X = hMem of Loaded Object in AUX mem  
 
-# ExecPSNewEnv.YA  
+# ExecPSNewEnv.  
 
-# ExecPS.YA (Blocking Parent PID)  
+# ExecPS (Blocking Parent PID)  
 
-# CreatePSNewEnv.YA   
+# CreatePSNewEnv   
 
-# CreatePS.YA (Non Blocking)  
+# CreatePS (Non Blocking)  
 **In:**  
   Y,A = PTR To Cmd Line  
 **Out:**  
   A = Child PSID  
 
-# GetMemStat.YA  
+# GetMemStat  
 **In:**  
  Y,A = Ptr to 24 bytes buffer  
 **Out:**  
  Buffer filled with memory stats  
 
-# GetPSStatus.A  
+# GetPSStatus  
 **In:**  
  A = PID  
 **Out:**  
  A = Status Byte  
 
-# GetPSStat.YA  
+# GetPSStat  
 **In:**  
  Y,A = Ptr to 24 bytes buffer  
 **Out:**  
@@ -389,7 +406,7 @@ Return information about a file
  PUSHW = PTR to Filename (C-String)  
 **Out:**  
 
-# MKDir.YA  
+# MKDir  
 **In:**   
  Y,A = DIR name  
 **Out:**  
@@ -397,7 +414,8 @@ Return information about a file
  CS : error  
   A = EC  
 
-# MkNod.YA  
+# MkNod  
+int mknod(const char *pathname, mode_t mode, dev_t dev);  
 return a hFile for a given Device Name  
 **In:**   
  Y,A=DevName  
@@ -406,6 +424,7 @@ return a hFile for a given Device Name
  A = hFILE  
 
 # MKFIFO  
+int mkfifo(const char *pathname, mode_t mode);  
 return a hFILE to a new FIFO  
 **In:**   
 **Out:**  
@@ -587,7 +606,7 @@ Open a file
  CC : A = hFILE  
  CS : A = EC  
 
-# FClose.A  
+# FClose  
 Close a file  
 **In:**  
  A = hFILE  
@@ -618,7 +637,7 @@ Write bytes to file
 # Out:  
  Y,A = Bytes Written  
 
-# FFlush.A  
+# FFlush  
 **In:**  
  A = hFILE  
 
@@ -629,7 +648,7 @@ Set the file-position indicator for hFILE
  PUSHB = From  
  PUSHB = hFILE  
 
-# FEOF.A  
+# FEOF  
 Test the end-of-file indicator for hFILE  
 **In:**  
  A = hFILE  
@@ -647,7 +666,7 @@ Return the current value of the file-position indicator
 **Out:**  
   Offset = Offset  
 
-# Remove.YA  
+# Remove  
 
 # Rename  
 Rename a file  
