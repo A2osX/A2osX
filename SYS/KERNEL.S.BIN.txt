@@ -204,10 +204,10 @@ BIN.Load.1		>PUSHWI K.S.STAT
 				bcs .9
 				
 				>LDYA K.S.STAT+S.STAT.P.AUXTYPE
-				>STYA BIN.R.Start
+				>STYA BIN.R.CS.Start
 
 				>PUSHYA					Push AUXTYPE
-				>PUSHBI 6				S.FI.T.BIN
+				>PUSHBI S.FI.T.BIN
 				>PUSHBI	SYS.FOpen.R
 				>PUSHW BIN.CmdLine
 
@@ -220,10 +220,10 @@ BIN.Load.1		>PUSHWI K.S.STAT
 				tya
 *				clc						CC from bcs .99				
 
-				adc BIN.R.Start			Get AUXTYPE for actual Base Address
+				adc BIN.R.CS.Start			Get AUXTYPE for actual Base Address
 				sta BIN.R.End			compute Range End=AUXTYPE+FILELEN
 				pla
-				adc BIN.R.Start+1
+				adc BIN.R.CS.Start+1
 				sta BIN.R.End+1
 
 				txa
@@ -233,10 +233,10 @@ BIN.Load.1		>PUSHWI K.S.STAT
 				pha						YA = actual load address
 				tya
 				sec
-				sbc BIN.R.Start
+				sbc BIN.R.CS.Start
 				sta BIN.R.Offset		Offset=ZPPtr1-AUXTYPE
 				pla
-				sbc BIN.R.Start+1
+				sbc BIN.R.CS.Start+1
 				sta BIN.R.Offset+1
 				
 				ldy #H.BIN.CODE.LEN		get Code Len
@@ -285,49 +285,31 @@ BIN.hMem		.BS 1
 * #K.InsDrv
 * ##ASM
 * **In:**
-* Y,A = .DRV File Loaded Address
-* Note:
-*  BIN.Load called from K.LoadDrv
-*  Already setup correctly pDrv,
-*  BIN.R.Start,End
+* PUSHW = DRV.END
+* PUSHW = DRV.CS.END
+* Y,A = DRV.CS.START
 *\--------------------------------------
-K.InsDrv		ldy #H.BIN.DRV.CODE.O
-				lda (pDrv),y
-				clc
-				adc BIN.R.Start			Advance start From AUXTYPE to AUXTYPE+DRV code offset
-				sta BIN.R.Start
-				
-				iny
-				lda (pDrv),y
-				adc BIN.R.Start+1
-				sta BIN.R.Start+1
-				
-				lda DevMgr.Free			Offset = Target DRV address-(AUXTYPE+DRV OFFSET)
-				sec
-				sbc BIN.R.Start
-				sta BIN.R.Offset
-				
-				lda DevMgr.Free+1
-				sbc BIN.R.Start+1
-				sta BIN.R.Offset+1
+K.InsDrv		>STYA BIN.R.CS.Start
+				>PULLW BIN.R.CS.End
+				>PULLW BIN.R.End
 				
 				lda	BIN.R.End			Compute DRVLen=End-start
 				sec
-				sbc BIN.R.Start
-				sta BIN.InsDrv.Len
+				sbc BIN.R.CS.Start
+				sta BIN.R.Len
 				
 				lda BIN.R.End+1
-				sbc BIN.R.Start+1
-				sta BIN.InsDrv.Len+1
+				sbc BIN.R.CS.Start+1
+				sta BIN.R.Len+1
 				
-				lda DevMgr.Free
+				lda DevMgr.Free			Compute new DevMgr.Free
 				clc
-				adc BIN.InsDrv.Len
-				sta BIN.InsDrv.End
+				adc BIN.R.Len
+				sta BIN.R.End
 				tay						Save DRVEnd LO
 				lda DevMgr.Free+1
-				adc BIN.InsDrv.Len+1	A = DRVEnd HI
-				sta BIN.InsDrv.End+1
+				adc BIN.R.Len+1			A = DRVEnd HI
+				sta BIN.R.End+1
 				
 				bcs .9					we crossed $FFFF, out of mem
 				
@@ -347,106 +329,100 @@ K.InsDrv		ldy #H.BIN.DRV.CODE.O
 				sec
 				rts
 				
-.10				inc DevMgr.Count
-
-				>SYSCALL GetDevByID
-				>STYA ZPPtr2			setup Ptr2 to dest HEADER
+.10				lda DevMgr.Free			Offset = Target DRV address-Src Address
+				sec
+				sbc BIN.R.CS.Start
+				sta BIN.R.Offset
 				
-				ldy	#H.BIN.DRV.HEADER.O
-				lda (pDrv),y
-				clc
-				adc pDrv
-				sta ZPPtr1
-				iny
-				lda (pDrv),y
-				adc pDrv+1
-				sta ZPPtr1+1			set Ptr1 to Src HEADER
-
-				ldy #S.DEV-1
-				
-.1				lda (ZPPtr1),y			copy header to Dev.Table
-				sta (ZPPtr2),y
-				dey
-				bpl .1
-			
-				ldy #S.DEV.DRV.JMP+1	Setup Main JMP
 				lda DevMgr.Free+1
-				sta (ZPPtr2),y
-				tax
+				sbc BIN.R.CS.Start+1
+				sta BIN.R.Offset+1
+						
+				jsr BIN.Move
+										
+				jsr BIN.RelDrv
 				
-				dey
-				lda DevMgr.Free
-				sta (ZPPtr2),y
-				
-				sta ZPPtr2				set Ptr2 to Dest CODE
-				stx ZPPtr2+1
-				
-				ldy	#H.BIN.DRV.CODE.O
-				lda (pDrv),y
-				clc
-				adc pDrv
-				sta ZPPtr1
-				iny
-				lda (pDrv),y
-				adc pDrv+1
-				sta ZPPtr1+1			set Ptr1 to Src CODE
+				>LDYA BIN.R.End
+				>STYA DevMgr.Free
 
-				lda BIN.InsDrv.Len+1
+				ldx DevMgr.Count
+				lda DevMgr.Free
+				sta Dev.Table
+				inx
+				lda DevMgr.Free+1
+				sta Dev.Table
+				
+				inx
+				stx DevMgr.Count
+				
+				clc
+				rts
+*--------------------------------------
+BIN.Move		lda BIN.R.CS.Start
+				clc
+				sta ZPPtr1
+				adc BIN.R.Offset
+				sta BIN.R.CS.Start
+				sta ZPPtr2
+				
+				lda BIN.R.CS.Start+1
+				sta ZPPtr1+1
+				adc BIN.R.Offset+1
+				sta BIN.R.CS.Start+1
+				sta ZPPtr2+1
+
+				lda BIN.R.Len+1
 				eor #$ff
 				pha
-				lda BIN.InsDrv.Len
+				lda BIN.R.Len
 				eor #$ff
 				tax
 				
 				ldy #0
 				
-.2				inx						Move CODE in LC
-				bne .3
+.1				inx
+				bne .2
 				pla
 				inc
-				beq .4
+				beq .3
 				pha
 				
-.3				lda (ZPPtr1),y
+.2				lda (ZPPtr1),y
 				sta (ZPPtr2),y
 				iny
-				bne .2
+				bne .1
+				
 				inc ZPPtr1+1
 				inc ZPPtr2+1
-				bra .2				
-							
-.4				ldy #H.BIN.DRV.CODE.LEN
-				lda DevMgr.Free				Make Ptr1 = code start
-				sta ZPPtr1
+				bra .1
+				
+.3				lda BIN.R.CS.End
 				clc
-				adc (pDrv),y
-				sta ZPPtr2
-				
-				iny
-				lda DevMgr.Free+1
-				sta ZPPtr1+1
-				adc (pDrv),y
-				sta ZPPtr2+1				Make ZPPtr2 = ZPPtr1 + CodeLen
-				
-				jsr BIN.RelDrv
-				
-				>LDYA BIN.InsDrv.End
-				>STYA DevMgr.Free
+				adc BIN.R.Offset
+				sta BIN.R.CS.End
 
+				lda BIN.R.CS.End+1
+				adc BIN.R.Offset+1
+				sta BIN.R.CS.End+1
+				
+				lda BIN.R.End
 				clc
+				adc BIN.R.Offset
+				sta BIN.R.End
+
+				lda BIN.R.End+1
+				adc BIN.R.Offset+1
+				sta BIN.R.End+1
 				rts
 *--------------------------------------
-BIN.InsDrv.Len	.BS 2
-BIN.InsDrv.End	.BS 2
-*--------------------------------------
 * BIN.Rel___ :
-*  In :
-*  ZPPtr1 = Ptr to Code
-*  ZPPtr2 = End Of Code
 *--------------------------------------
-BIN.R.Start		.BS 2
+BIN.R.CS.Start	.BS 2
+BIN.R.CS.End	.BS 2
 BIN.R.End		.BS 2
 BIN.R.Offset	.BS 2
+*--------------------------------------
+BIN.R.Len		.BS 2
 *--------------------------------------
 BIN.RelExe		ldy #H.BIN.T+1
 				lda (ZPPtr1),y
@@ -509,7 +485,7 @@ BIN.RelDrv		ldy #H.BIN.DRV.REL.TABLE
 .3				lda (ZPPtr1)			get OPCODE
 				lsr						/2
 				tax
-				lda BIN.OPCODES,x		get OPCODE definition
+				lda BIN.65816,x			get OPCODE definition
 				bcs .4					go get LO nibble
 				lsr
 				lsr						move HI -> LO
@@ -529,10 +505,10 @@ BIN.RelDrv		ldy #H.BIN.DRV.REL.TABLE
 				
 				iny						make Y point to HI
 
-				cpx BIN.R.Start
+				cpx BIN.R.CS.Start
 				lda (ZPPtr1),y		Get HI
-				sbc BIN.R.Start+1
-				bcc .5					addr < BIN.R.Start, out of range
+				sbc BIN.R.CS.Start+1
+				bcc .5					addr < BIN.R.CS.Start, out of range
 				
 				txa						Get back LO
 				cpx BIN.R.End
@@ -558,20 +534,40 @@ BIN.RelDrv		ldy #H.BIN.DRV.REL.TABLE
 				bcc .7
 				inc ZPPtr1+1
 				
-.7				eor ZPPtr2			A = ZPPtr1
+.7				eor BIN.R.CS.End		A = ZPPtr1
 				bne .3
 				lda ZPPtr1+1
-				eor ZPPtr2+1
+				eor BIN.R.CS.End+1
 				bne .3					next opcode....
 				
 .8				rts
 *--------------------------------------
-* 65C02 OPCODES
+* 6502/65C02/65816 OPCODES
 * Bit 3 	: 1 = absolute addressing
 * Bit 2-1-0 : opcode + @ length
 *--------------------------------------
 *					0.1.2.3.4.5.6.7.8.9.A.B.C.D.E.F
-BIN.OPCODES		.HS 1.2.2.1.2.2.2.2.1.2.1.1.B.B.B.3
+BIN.65816		.HS 1.2.2.1.2.2.2.2.1.2.1.1.B.B.B.3
+				.HS 2.2.2.1.2.2.2.2.1.B.1.1.B.B.B.3
+				.HS B.2.2.1.2.2.2.2.1.2.1.1.B.B.B.3
+				.HS 2.2.2.1.2.2.2.2.1.B.1.1.B.B.B.3
+				.HS 1.2.2.1.2.2.2.2.1.2.1.1.B.B.B.3
+				.HS 2.2.2.1.2.2.2.2.1.B.1.1.1.B.B.3
+				.HS 1.2.2.1.2.2.2.2.1.2.1.1.B.B.B.3
+				.HS 2.2.2.1.2.2.2.2.1.B.1.1.B.B.B.3
+				.HS 2.2.2.1.2.2.2.2.1.2.1.1.B.B.B.3
+				.HS 2.2.2.1.2.2.2.2.1.B.1.1.B.B.B.3
+				.HS 2.2.2.1.2.2.2.2.1.2.1.1.B.B.B.3
+				.HS 2.2.2.1.2.2.2.2.1.B.1.1.B.B.B.3
+				.HS 2.2.2.1.2.2.2.2.1.2.1.1.B.B.B.3
+				.HS 2.2.2.1.2.2.2.2.1.B.1.1.1.B.B.3
+				.HS 2.2.2.1.2.2.2.2.1.2.1.1.B.B.B.3
+				.HS 2.2.2.1.2.2.2.2.1.B.1.1.1.B.B.3
+*--------------------------------------
+* 65R02 OPCODES
+*--------------------------------------
+*					0.1.2.3.4.5.6.7.8.9.A.B.C.D.E.F
+BIN.65R02		.HS 1.2.2.1.2.2.2.2.1.2.1.1.B.B.B.3
 				.HS 2.2.2.1.2.2.2.2.1.B.1.1.B.B.B.3
 				.HS B.2.2.1.2.2.2.2.1.2.1.1.B.B.B.3
 				.HS 2.2.2.1.2.2.2.2.1.B.1.1.B.B.B.3
