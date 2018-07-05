@@ -23,7 +23,7 @@ DRV.DiskII		cld
 				.DA A2osX.BadCall
 				.DA A2osX.BadCall
 				.DA A2osX.BadCall
-				.DA A2osX.BadCall
+				.DA A2osX.BadCall		IRQ
 *--------------------------------------
 DRV.DiskII.S	>LDYAI DRV.DiskII.Stat
 				clc
@@ -85,7 +85,7 @@ DRV.RamDrive	cld
 				.DA A2osX.BadCall
 				.DA A2osX.BadCall
 				.DA A2osX.BadCall
-				.DA A2osX.BadCall
+				.DA A2osX.BadCall		IRQ
 *--------------------------------------
 DRV.RamDrive.S	jsr DRV.BlkDevice.GetCmdAndDevAX
 				jsr GO.ProDOS
@@ -134,7 +134,7 @@ DRV.BlkDevice	cld
 				.DA A2osX.BadCall
 				.DA A2osX.BadCall
 				.DA A2osX.BadCall
-				.DA A2osX.BadCall
+				.DA A2osX.BadCall		IRQ
 *--------------------------------------
 DRV.BlkDevice.S	jsr DRV.BlkDevice.GetCmdAndDev
 
@@ -158,7 +158,7 @@ DRV.BlkDevice.RW
 DRV.BlkDevice.F	jsr DRV.BlkDevice.GetCmdAndDev
 				
 DRV.BlkDevice.Go
-				ldy #S.NODE.DEV.ROMPTR
+				ldy #S.NODE.DEV.BUSPTR
 				lda (pDev),y
 				sta .8+1
 				iny
@@ -225,6 +225,7 @@ DRV.SmartPort	cld
 				.DA DRV.SmartPort.NP	CLOSE
 				.DA DRV.SmartPort.P		R
 				.DA DRV.SmartPort.P		W
+				.DA A2osX.BADCALL		IRQ
 *--------------------------------------
 DRV.SmartPort.S	jsr DRV.SmartPort.GetDev
 				>LDYAI K.S.DSTAT
@@ -242,7 +243,7 @@ DRV.SmartPort.NP
 				jsr DRV.SmartPort.GetDev
 *--------------------------------------
 DRV.SmartPort.Go
-				ldy #S.NODE.DEV.ROMPTR
+				ldy #S.NODE.DEV.BUSPTR
 				lda (pDev),y
 				sta .8+1
 				iny
@@ -278,27 +279,68 @@ DRV.SmartPort.GetDev
 DRV.SmartPort.Cnt
 				.HS 03030301030101010404
 *--------------------------------------
-* NULL DEVICE
+* NULL DEVICE 
+*  - OPEN,WRITE,CLOSE always succeed.
+*  - READ returns EOF.
 *--------------------------------------
 DRV.NULL	 	cld
 				jmp (.1,x)
 *--------------------------------------
-.1				.DA .2					STATUS
+.1				.DA DRV.NULL.STATUS
 				.DA A2osX.BADCALL		READBLOCK
 				.DA A2osX.BADCALL		WRITEBLOCK
 				.DA A2osX.BADCALL		FORMAT
 				.DA A2osX.BADCALL		CONTROL
 				.DA A2osX.BADCALL		INIT
-				.DA A2osX.BADCALL		OPEN
-				.DA A2osX.BADCALL		CLOSE
-				.DA A2osX.BADCALL		READ
-				.DA .8					WRITE
+				.DA DRV.NULL.OPEN
+				.DA DRV.NULL.CLOSE
+				.DA DRV.NULL.READ
+				.DA DRV.NULL.WRITE
+				.DA A2osX.BADCALL		IRQ
 *--------------------------------------
-.2				>LDYAI .3
-.8				clc
+DRV.NULL.STATUS	>STYA pIOCTL
+
+				ldy #S.IOCTL.STATCODE
+				lda (pIOCTL),y
+				beq .1
+				
+				cmp #S.IOCTL.STATCODE.GETDIB
+				bne .9
+				
+				ldx #15
+				.HS 2C					bit abs
+.1				ldx #3
+
+				ldy #S.IOCTL.BUFPTR
+				lda (pIOCTL),y
+				sta .3+1
+				iny
+				lda (pIOCTL),y
+				sta .3+2
+				
+.2				lda DRV.NULL.DSTAT,x			
+.3				sta $ffff,x				SELF MODIFIED
+				dex
+				bpl .2
+				
+				clc
+				rts
+
+.9				lda #MLI.E.BADCTL
+				sec
+				rts
+				
+DRV.NULL.READ	>STYA pIOCTL
+				
+				ldx #C.EOF
+				jmp DRV.READ.X
+				
+DRV.NULL.OPEN
+DRV.NULL.WRITE
+DRV.NULL.CLOSE	clc
 				rts
 *--------------------------------------
-.3				.DA #S.DSTAT.S.WRITE+S.DSTAT.S.READ
+DRV.NULL.DSTAT	.DA #S.DSTAT.S.WRITE+S.DSTAT.S.READ+S.DSTAT.S.OPENED
 				.DA #0,#0,#0
 				>PSTR "NULL DEVICE"
 				.BS 5
@@ -316,23 +358,24 @@ DRV.SYS			cld
 				.DA A2osX.BADCALL		FORMAT
 				.DA DRV.SYS.Control
 				.DA A2osX.BADCALL		INIT
-				.DA DRV.SYS.Open
-				.DA A2osX.BADCALL		CLOSE
+				.DA DRV.SYS.OPEN
+				.DA DRV.SYS.CLOSE
 				.DA DRV.SYS.Read
 				.DA DRV.SYS.Write
+				.DA A2osX.BADCALL		IRQ
 *--------------------------------------
 .2				>LDYAI .3
 				clc
 				rts
 *--------------------------------------
-.3				.DA #S.DSTAT.S.WRITE+S.DSTAT.S.READ
+.3				.DA #S.DSTAT.S.WRITE+S.DSTAT.S.READ+S.DSTAT.S.OPENED
 				.DA #0,#0,#0
 				>PSTR "A2osX SYS Screen"
 				.DA #S.DSTAT.T.CHAR
 				.DA #0
 				.DA KVER
 *--------------------------------------
-DRV.SYS.Open 	lda #1
+DRV.SYS.Open 	lda #DEVID.SYS
 				sta A2osX.SCRNDEVS+1
 				jsr DRV.SYS.Home
 *--------------------------------------
@@ -343,10 +386,13 @@ DRV.SYS.Control	sta SETTEXT
 				sta SETPAGE2
 				lda #2
 				sta A2osX.ASCREEN
+DRV.SYS.CLOSE				
 				clc
 				rts
 *--------------------------------------
-DRV.SYS.Read	lda A2osX.ASCREEN
+DRV.SYS.Read	>STYA pIOCTL
+
+				lda A2osX.ASCREEN
 				cmp #2					is SYS active?
 				bne .9
 
@@ -358,14 +404,49 @@ DRV.SYS.Read	lda A2osX.ASCREEN
 
 				and #$7F
 
-				clc
-				rts
+				tax
+				jmp DRV.READ.X
 
 .9				lda	#0					Error = no event
 				sec
 				rts
 *--------------------------------------
-DRV.SYS.Write	phx
+DRV.SYS.WRITE	>STYA pIOCTL
+
+				ldy #S.IOCTL.BUFPTR
+				lda (pIOCTL),y
+				
+				sta ZPDRV+4
+				iny 
+				lda (pIOCTL),y
+				sta ZPDRV+5
+				
+				ldy #S.IOCTL.BYTECNT
+				lda (pIOCTL),y
+				eor #$ff
+				tax
+				iny
+				lda (pIOCTL),y
+				eor #$ff
+				tay
+				
+.2				inx
+				bne .3
+				iny
+				bne .3
+				clc
+				rts
+				
+.3				lda (ZPDRV)
+				inc ZPDRV+4
+				bne .4
+				inc ZPDRV+5
+				
+.4				jsr DRV.SYS.COUT
+
+.5				bra .2
+*--------------------------------------
+DRV.SYS.COUT	phx
 				phy
 				cmp #' '
 				bcs .7
@@ -536,6 +617,24 @@ DRV.SYS.CV		.BS 1
 *--------------------------------------
 DRV.SYS.BASEL	.HS	00.80.00.80.00.80.00.80.28.A8.28.A8.28.A8.28.A8.50.D0.50.D0.50.D0.50.D0
 DRV.SYS.BASEH	.HS	08.08.09.09.0A.0A.0B.0B.08.08.09.09.0A.0A.0B.0B.08.08.09.09.0A.0A.0B.0B
+*--------------------------------------
+DRV.READ.X		ldy #S.IOCTL.BYTECNT
+				lda #1
+				sta (pIOCTL),y
+				iny
+				dec
+				sta (pIOCTL),y
+
+				ldy #S.IOCTL.BUFPTR
+				lda (pIOCTL),y
+				sta .1+1
+				iny
+				lda (pIOCTL),y
+				sta .1+2
+				
+.1				stx $ffff				SELF MODIFIED
+				clc
+				rts
 *--------------------------------------
 MAN
 SAVE /A2OSX.SRC/SYS/KERNEL.S.DRV
