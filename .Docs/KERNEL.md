@@ -18,15 +18,19 @@ CS : Out Of Bound
 **Out:**  
 none  
 
-#K.InsDrv  
+#InsDrv  
+
+##C  
+`void * insdrv (void * src, void * crvcsstart, void * drvcsend, void * drvend);`  
 
 ##ASM  
 **In:**  
-Y,A = .DRV File Loaded Address  
-Note:  
- BIN.Load called from K.LoadDrv  
- Already setup correctly pDrv,  
- BIN.R.Start,End  
+>PUSHW  DRV.END  
+>PUSHW  DRV.CS.END  
+>PUSHW  DRV.CS.START  
+>LDYA L.SRC  
+**Out:**  
+Y,A = Ptr to installed driver  
 
 # GetDevByID  
 **In:**   
@@ -41,7 +45,7 @@ Y,A = DEVSLOT
 **Out:**  
  CC = OK, CS = ERROR  
  X = DEVID  
- Y,A = DEVSLOT  
+ Y,A = FD  
 
 # GetDevStatus  
 **In:**   
@@ -49,19 +53,11 @@ Y,A = DEVSLOT
 **Out:**  
  Y,A = S.DSTAT  
 
-# IOCTL  
-
-## C  
-`int ioctl ( short int id, short int op, void *param);`  
-
-## ASM  
+# MKDev  
 **In:**   
-`PUSHWI param`  
-`lda #op`  
-`ldy id`  
-`>SYSCALL IOCTL`  
+ Y,A = Ptr to FD.DEV  
 **Out:**  
- Y,A = ...  
+ A = DEVID  
 
 # OpenDir  
 **In:**  
@@ -176,6 +172,42 @@ Load a file in memory
 **In:**  
  PUSHW = GID  
  PUSHW = PATH  
+
+# open  
+
+## C  
+`int open(const char *pathname, int flags);`  
+
+## ASM  
+**In:**  
+`>PUSHB flags`  
+`>LDYA pathname`  
+`>SYSCALL open`  
+**Out:**  
+A = hFD  
+note : if file is created on ProDOS : T=TXT,X=$0000  
+
+# IOCTL  
+
+## C  
+`int ioctl(int fd, unsigned long request, void * param );`  
+
+## ASM  
+**In:**   
+`PUSHWI param`  
+`lda #request`  
+`ldy fd`  
+`>SYSCALL IOCTL`  
+**Out:**  
+ Y,A = ...  
+
+# pipe  
+
+## C  
+`int pipe(int pipefd[2]);`  
+
+## ASM  
+**In:**   
 
 # FAdd,FSub,FMult,FDiv,FPwr  
 Return X+Y, X-Y, X*Y, X/Y, X^Y  
@@ -601,6 +633,15 @@ Open a file
  + SYS.FOpen.A : Append  
  + SYS.FOpen.T : Open/Append in Text mode  
  + SYS.FOpen.X : Create if not exists  
+http://man7.org/linux/man-pages/man3/fopen.3.html  
+r  = O_RDONLY  
+w  = O_WRONLY | O_CREAT | O_TRUNC  
+a  = O_WRONLY | O_CREAT | O_APPEND  
+r+ = O_RDWR  
+w+ = O_RDWR | O_CREAT | O_TRUNC  
+a+ = O_RDWR | O_CREAT | O_APPEND  
+*  
+TODO: mode="w+t=TYP,x=AUXTYPE"  
 `>LDYAI filename`  
 **Out:**   
  CC : A = hFILE  
@@ -608,6 +649,11 @@ Open a file
 
 # FClose  
 Close a file  
+
+## C  
+int fclose ( FILE * stream );  
+
+## ASM  
 **In:**  
  A = hFILE  
 **Out:**  

@@ -280,34 +280,39 @@ BIN.Load.1		>PUSHWI K.S.STAT
 BIN.CmdLine		.BS 2
 BIN.hMem		.BS 1
 */--------------------------------------
-* #K.InsDrv
+* #InsDrv
+* ##C
+* `void * insdrv (void * src, void * crvcsstart, void * drvcsend, void * drvend);`
 * ##ASM
 * **In:**
-* PUSHW = DRV.END
-* PUSHW = DRV.CS.END
-* Y,A = DRV.CS.START
+* >PUSHW  DRV.END
+* >PUSHW  DRV.CS.END
+* >PUSHW  DRV.CS.START
+* >LDYA L.SRC
+* **Out:**
+* Y,A = Ptr to installed driver
 *\--------------------------------------
-K.InsDrv		>STYA BIN.R.CS.Start
+K.InsDrv		>STYA ZPPtr1
+
+				>PULLW BIN.R.CS.Start
 				>PULLW BIN.R.CS.End
 				>PULLW BIN.R.End
-				
+
 				lda	BIN.R.End			Compute DRVLen=End-start
 				sec
 				sbc BIN.R.CS.Start
-				sta BIN.R.Len
+				sta BIN.Move.Len
 				
 				lda BIN.R.End+1
 				sbc BIN.R.CS.Start+1
-				sta BIN.R.Len+1
+				sta BIN.Move.Len+1
 				
 				lda DevMgr.Free			Compute new DevMgr.Free
 				clc
-				adc BIN.R.Len
-				sta BIN.R.End
+				adc BIN.Move.Len
 				tay						Save DRVEnd LO
 				lda DevMgr.Free+1
-				adc BIN.R.Len+1			A = DRVEnd HI
-				sta BIN.R.End+1
+				adc BIN.Move.Len+1		A = DRVEnd HI
 				
 				bcs .9					we crossed $FFFF, out of mem
 				
@@ -315,67 +320,48 @@ K.InsDrv		>STYA BIN.R.CS.Start
 				sbc /DevMgr.HiMem
 				bcs .9					No More Room to load Driver....
 
-				lda DevMgr.DevCnt
-				cmp #K.DEV.MAX
-				bne .10					No Device Handle Left
+				>LDYA DevMgr.Free
+				jsr BIN.MoveToYA
 				
-				lda #K.E.OOH
-				sec
-				rts				
-								
-.9				lda #K.E.OOM
-				sec
-				rts
-				
-.10				lda DevMgr.Free			Offset = Target DRV address-Src Address
+				lda DevMgr.Free
+				sta ZPPtr1
 				sec
 				sbc BIN.R.CS.Start
 				sta BIN.R.Offset
 				
 				lda DevMgr.Free+1
+				sta ZPPtr1+1
 				sbc BIN.R.CS.Start+1
 				sta BIN.R.Offset+1
-				
-				jsr BIN.Move
-										
-				>LDYA BIN.R.CS.Start
-				>STYA ZPPtr1
-				
+
 				jsr BIN.RelDrv
 				
-				>LDYA BIN.R.End
-				>STYA DevMgr.Free
-
-				ldx DevMgr.DevCnt
 				lda DevMgr.Free
-				sta FD.Table.PTRLO,x
-				inx
+				tay
+				clc
+				adc BIN.Move.Len
+				sta DevMgr.Free
 				lda DevMgr.Free+1
-				sta FD.Table.PTRHI,x
-				
-				inx
-				stx DevMgr.DevCnt
+				pha
+				adc BIN.Move.Len+1
+				sta DevMgr.Free+1
+				pla
 				
 				clc
 				rts
-*--------------------------------------
-BIN.Move		lda BIN.R.CS.Start
-				clc
-				sta ZPPtr1
-				adc BIN.R.Offset
-				sta BIN.R.CS.Start
-				sta ZPPtr2
-				
-				lda BIN.R.CS.Start+1
-				sta ZPPtr1+1
-				adc BIN.R.Offset+1
-				sta BIN.R.CS.Start+1
-				sta ZPPtr2+1
 
-				lda BIN.R.Len+1
+.9				lda #K.E.OOM
+				sec
+				rts				
+*--------------------------------------
+BIN.Move.Len	.BS 2
+*--------------------------------------
+BIN.MoveToYA	>STYA ZPPtr2
+
+				lda BIN.Move.Len+1
 				eor #$ff
 				pha
-				lda BIN.R.Len
+				lda BIN.Move.Len
 				eor #$ff
 				tax
 				
@@ -397,24 +383,7 @@ BIN.Move		lda BIN.R.CS.Start
 				inc ZPPtr2+1
 				bra .1
 				
-.3				lda BIN.R.CS.End
-				clc
-				adc BIN.R.Offset
-				sta BIN.R.CS.End
-
-				lda BIN.R.CS.End+1
-				adc BIN.R.Offset+1
-				sta BIN.R.CS.End+1
-				
-				lda BIN.R.End
-				clc
-				adc BIN.R.Offset
-				sta BIN.R.End
-
-				lda BIN.R.End+1
-				adc BIN.R.Offset+1
-				sta BIN.R.End+1
-				rts
+.3				rts
 *--------------------------------------
 * BIN.Rel___ :
 *--------------------------------------
@@ -422,8 +391,6 @@ BIN.R.CS.Start	.BS 2
 BIN.R.CS.End	.BS 2
 BIN.R.End		.BS 2
 BIN.R.Offset	.BS 2
-*--------------------------------------
-BIN.R.Len		.BS 2
 *--------------------------------------
 BIN.RelExe		ldy #H.BIN.T+1
 				lda (ZPPtr1),y
@@ -452,7 +419,7 @@ BIN.RelExe		ldy #H.BIN.T+1
 				.HS 2C					bit abs
 *--------------------------------------					
 BIN.RelDrv		ldy #H.BIN.DRV.REL.TABLE
-				
+
 .1				lda (ZPPtr1),y			Start Relocate JMP table
 				tax						LO in X
 				iny
@@ -501,31 +468,31 @@ BIN.RelDrv		ldy #H.BIN.DRV.REL.TABLE
 				pha
 				
 				ldy #1
-				lda (ZPPtr1),y		Get LO
+				lda (ZPPtr1),y			Get LO
 				tax						save LO in X
 				
 				iny						make Y point to HI
+				lda (ZPPtr1),y			Get HI
 
 				cpx BIN.R.CS.Start
-				lda (ZPPtr1),y		Get HI
 				sbc BIN.R.CS.Start+1
 				bcc .5					addr < BIN.R.CS.Start, out of range
 				
 				txa						Get back LO
 				cpx BIN.R.End
-				lda (ZPPtr1),y		Get HI
+				lda (ZPPtr1),y			Get HI
 				sbc BIN.R.End+1
 				bcs .5					addr > BIN.R.End, out of range
 				
 				txa						Get back LO
 *				clc						CC from bcs .6
-				adc BIN.R.Offset	add Offset to abs address
+				adc BIN.R.Offset		add Offset to abs address
 				dey
-				sta (ZPPtr1),y		store relocated addr LO
+				sta (ZPPtr1),y			store relocated addr LO
 				iny
-				lda (ZPPtr1),y		Get HI
+				lda (ZPPtr1),y			Get HI
 				adc BIN.R.Offset+1
-				sta (ZPPtr1),y		store relocated addr HI
+				sta (ZPPtr1),y			store relocated addr HI
 				
 .5				pla						get back Opcode length...
 
