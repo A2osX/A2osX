@@ -25,10 +25,11 @@ none
 
 ##ASM  
 **In:**  
->PUSHW  DRV.END  
->PUSHW  DRV.CS.END  
->PUSHW  DRV.CS.START  
->LDYA L.SRC  
+`>PUSHW DRV.END`  
+`>PUSHW DRV.CS.END`  
+`>PUSHW DRV.CS.START`  
+`>LDYA L.SRC`  
+`SYSCALL insdrv`  
 **Out:**  
 Y,A = Ptr to installed driver  
 
@@ -37,7 +38,7 @@ Y,A = Ptr to installed driver
 A = DevID  
 **Out:**  
 CC = OK, CS = ERROR  
-Y,A = DEVSLOT  
+Y,A = FD  
 
 # GetDevByName  
 **In:**   
@@ -48,10 +49,16 @@ Y,A = DEVSLOT
  Y,A = FD  
 
 # GetDevStatus  
+
+## C   
+`int getdevstatus ( int devid, S.DIB * dstat );`  
+
+## ASM  
 **In:**   
- A = DevID  
+ `>PUSHWI S.DIB`  
+ `lda DevID`  
+ `>SYSCALL GetDevStatus`  
 **Out:**  
- Y,A = S.DSTAT  
 
 # MKDev  
 **In:**   
@@ -187,16 +194,21 @@ Load a file in memory
 A = hFD  
 note : if file is created on ProDOS : T=TXT,X=$0000  
 
+# read  
+
+## C  
+`int read(int fd, void *buf, size_t count);`  
+
 # IOCTL  
 
 ## C  
-`int ioctl(int fd, unsigned long request, void * param );`  
+`int ioctl(int devid, int request, void * param );`  
 
 ## ASM  
 **In:**   
 `PUSHWI param`  
-`lda #request`  
-`ldy fd`  
+`PUSHBI request`  
+`lda devid`  
 `>SYSCALL IOCTL`  
 **Out:**  
  Y,A = ...  
