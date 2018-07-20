@@ -67,8 +67,14 @@ Y,A = FD
  A = DEVID  
 
 # OpenDir  
+
+## C  
+`int hDIR opendir (const char * dirpath);`  
+
+## ASM  
 **In:**  
- Y,A = PATH (C-String)  
+`>LDYA dirpath`  
+`>SYSCALL opendir`   
 **Out:**   
  CC : success  
   A = hDIR  
@@ -76,8 +82,15 @@ Y,A = FD
   A = EC  
 
 # ReadDir  
-**In:**   
- A = hDIR  
+
+## C  
+`int readdir (int hDIR, S.DIRENT * dirent);`  
+
+## ASM  
+**In:**  
+`>PUSHW dirent`  
+`lda hDIR`  
+`>SYSCALL readdir`  
 **Out:**   
  CC : success  
   X = hDIRENT  
@@ -87,8 +100,14 @@ Y,A = FD
   note : A = 0 means no more entry  
 
 # CloseDir  
+
+## C  
+`void closedir(hDIR);`  
+
+## ASM  
 **In:**   
- A = hDIR  
+`lda hDIR`  
+`>SYSCALL closedir`  
 **Out:**  
  none, always succeed.   
 
@@ -445,9 +464,15 @@ Load a file in AUX memory (Stock Objects)
 
 # Stat  
 Return information about a file  
+
+## C  
+`int stat(const char *pathname, struct stat *statbuf);`  
+
+## ASM  
 **In:**  
- PUSHW = PTR to S.STAT buffer  
- PUSHW = PTR to Filename (C-String)  
+`>PUSHW statbuf`  
+`>LDYA pathname`  
+`>SYSCALL stat`  
 **Out:**  
 
 # MKDir  

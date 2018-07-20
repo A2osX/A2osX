@@ -304,23 +304,24 @@ note : '$VAR' does NOT expand Variable
 | LSDEV | Working | | 0.92 |
 | PS | Working | | 0.92 |
 | MD | Working | | 0.92 |
-| LS | Working | -A : Do Not Print . & .. | 0.9.1 |
+| LS | Working | -A : Do Not Print . & .. | 0.92 |
 | | | -L : long listing with size/date... | |
 | | | -R : Recurse subdirectories | |
-| RM | Working | -C : Continue On Error | 0.9.1 |
+| RM | Working | -C : Continue On Error | 0.92 |
 | | | -Q : Quiet | |
 | | | -R : Recurse subdirectories | |
-| CP | Working | -C : Continue On Error | 0.9.1 |
+| CP | Working | -C : Continue On Error | 0.92 |
 | | | -Q : Quiet | |
 | | | -R : Recurse subdirectories | |
 | | | -Y : Dont't Prompt For Override | |
-| MV | Working | -C : Continue On Error | 0.9.1 |
+| MV | Working | -C : Continue On Error | 0.92 |
 | | | -Q : Quiet | |
 | | | -R : Recurse subdirectories | |
 | | | -Y : Dont't Prompt For Override | |
 | CAT | Working | -A : Show All non printable caracters | 0.92 |
 | | | -N : Number all output lines | |
 | | | -S : Suppress repeated empty output lines | |
+| EDIT | Working | still missing : find/replace | 0.92 |
 | CHTYP | Working | -C : Continue On Error | 0.9.1 |
 | | | -R : Recurse subdirectories | |
 | CHMOD | In Progress | -C : Continue On Error | 0.9 |
@@ -332,8 +333,10 @@ note : '$VAR' does NOT expand Variable
 | FORMAT | In Progress | -L : Low-Level Format | 0.9.1 |
 | | | -1..9 : Catalog Size (block count) | |
 | MD5 | In Progress | -D : String Input | 0.9.1 |
-| EDIT | Working | still missing : find/replace | 0.92 |
 | NSCUTIL | Working | Tool for setting time in NSC/DL1216E | 0.9 |
+
+## Network (TCPIP) tools:
+| Name | Status | Comment | K.Ver |
 | ---- | ------ | ------- | ----- |
 | ARP | Working | dump ARP cache, setup a static ARP entry | 0.9.1 |
 | PING | Working | | 0.9.1 |
@@ -341,7 +344,7 @@ note : '$VAR' does NOT expand Variable
 | IPCONFIG | Working | renamed from NETINFO | 0.9.1 |
 | NETSTAT | Working | | 0.9.1 |
 
-## BIN,External DEV Shell commands:
+## DEV tools:
 | Name | Status | Comment | K.Ver |
 | ---- | ------ | ------- | ----- |
 | ASM | In Progress | S-C MASM based multi CPU assembler | 0.9.1 |
