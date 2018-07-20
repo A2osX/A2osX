@@ -1,4 +1,4 @@
-# A2osX (0.9.2) Multi-Tasking OS for Apple II  
+# A2osX (0.92) Multi-Tasking OS for Apple II  
 
 **!Version 0.9.1 archived!**  
 
@@ -237,10 +237,10 @@ OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
 
 | Name    | Status      | Comment | K.Ver |
 | ----    | ------      | ------- | ------|
-| INSDRV  | Working     |         | 0.9.1 |
-| GETTY   | Working     |         | 0.9.1 |
-| LOGIN   | In Progress | no auth using /etc/passd yet | 0.9.1 |
-| SHELL   | Working     | (See Internal Shell commands) | 0.9.1 |
+| INSDRV  | Working     |         | 0.92 |
+| GETTY   | Working     |         | 0.92 |
+| LOGIN   | In Progress | no auth using /etc/passd yet | 0.92 |
+| SHELL   | Working     | (See Internal Shell commands) | 0.92 |
 | KCONFIG | Working     | Kernel Configuration Utility | 0.9.1 |
 | ----    | ------      | ------- | ----- |
 | TCPIPD  | Working     | Socket API.ARP,IP,ICMP,UDP & TCP ok | 0.9.1 |
@@ -285,7 +285,7 @@ note : '$VAR' does NOT expand Variable
 
 | Name | Status | Comment | K.Ver |
 | ---- | ------ | ------- | ----- |
-| Console.DRV | Working | ANSI support in Progress. | 0.9.1 |
+| Console.DRV | Working | ANSI support in Progress. | 0.92 |
 | SSC.DRV     | Working | Apple "Super Serial Card" Driver | 0.9.1 |
 | SSC.I.DRV   | Working | Apple "Super Serial Card" Driver (IRQ enabled) | 0.9.1 |
 | PIC.DRV | In Progress | Apple "Parallel Interface Card" Driver, renamed from PPIC.DRV | 0.9 |
@@ -300,10 +300,10 @@ note : '$VAR' does NOT expand Variable
 ## BIN,External Shell commands:
 | Name | Status | Comment | K.Ver |
 | ---- | ------ | ------- | ----- |
-| MEM | Working | Old dump behavior is now MEMDUMP.  New MEM command displays MEMSTAT (Main, Aux & Kernel Memory) | 0.9.1 |
-| LSDEV | Working | | 0.9.1 |
-| PS | Working | | 0.9.1 |
-| MD | Working | | 0.9.1 |
+| MEM | Working | Old dump behavior is now MEMDUMP.  New MEM command displays MEMSTAT (Main, Aux & Kernel Memory) | 0.92 |
+| LSDEV | Working | | 0.92 |
+| PS | Working | | 0.92 |
+| MD | Working | | 0.92 |
 | LS | Working | -A : Do Not Print . & .. | 0.9.1 |
 | | | -L : long listing with size/date... | |
 | | | -R : Recurse subdirectories | |
@@ -318,7 +318,7 @@ note : '$VAR' does NOT expand Variable
 | | | -Q : Quiet | |
 | | | -R : Recurse subdirectories | |
 | | | -Y : Dont't Prompt For Override | |
-| CAT | Working | -A : Show All non printable caracters | 0.9.1 |
+| CAT | Working | -A : Show All non printable caracters | 0.92 |
 | | | -N : Number all output lines | |
 | | | -S : Suppress repeated empty output lines | |
 | CHTYP | Working | -C : Continue On Error | 0.9.1 |
@@ -332,7 +332,7 @@ note : '$VAR' does NOT expand Variable
 | FORMAT | In Progress | -L : Low-Level Format | 0.9.1 |
 | | | -1..9 : Catalog Size (block count) | |
 | MD5 | In Progress | -D : String Input | 0.9.1 |
-| EDIT | Working | still missing : find/replace | 0.9.1 |
+| EDIT | Working | still missing : find/replace | 0.92 |
 | NSCUTIL | Working | Tool for setting time in NSC/DL1216E | 0.9 |
 | ---- | ------ | ------- | ----- |
 | ARP | Working | dump ARP cache, setup a static ARP entry | 0.9.1 |
