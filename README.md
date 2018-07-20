@@ -6,7 +6,7 @@
  
 ## Disk images :  
 
-+ **A2OSX.BOOT.po**   :  **(0.9.1)**  140k BOOT disk image with all binaries  
++ **A2OSX.BOOT.po**   :  **(0.92)**  140k BOOT disk image with all binaries  
 + **A2OSX.DEV.po**    :  **(0.9.1)**  140k disk image with ASM binaries, Debug Tools & INClude files  
 + **A2OSX.BUILD.po**  :  **(0.92)**  800k BOOT disk image with S-C MASM 3.0 and all binaries (BOOT+DEV)  
 + **A2OSX.SRC.po**    :  **(0.92)**  800k disk image with all sources  
@@ -14,7 +14,6 @@
 ## Latest News 2018-07-20
 
 Kernel & some BINs/SBINs migrated to 0.92.
-A2OSX.BOOT.po 0.92 coming soon ... 
 
 ## News 2018-06-17
 
