@@ -8,17 +8,22 @@
 
 + **A2OSX.BOOT.po**   :  **(0.9.1)**  140k BOOT disk image with all binaries  
 + **A2OSX.DEV.po**    :  **(0.9.1)**  140k disk image with ASM binaries, Debug Tools & INClude files  
-+ **A2OSX.BUILD.po**  :  **(0.9.2)**  800k BOOT disk image with S-C MASM 3.0 and all binaries (BOOT+DEV)  
-+ **A2OSX.SRC.po**    :  **(0.9.2)**  800k disk image with all sources  
++ **A2OSX.BUILD.po**  :  **(0.92)**  800k BOOT disk image with S-C MASM 3.0 and all binaries (BOOT+DEV)  
++ **A2OSX.SRC.po**    :  **(0.92)**  800k disk image with all sources  
 
-## Latest News 2018-06-17
+## Latest News 2018-07-20
+
+Kernel & some BINs/SBINs migrated to 0.92.
+A2OSX.BOOT.po 0.92 coming soon ... 
+
+## News 2018-06-17
 
 Ok, as i'm still the lone developer here, i decided to break the kernel, HAHAHAHAHAHA!!!!
 I updated the Calling Convention (see projects), i now setup the header in each KERNEL.S.* file accordingly to generate doc, then i change the code...
 
 So ....nothing works anymore on the A2OSX.BUILD media...
 
-## Latest News 2018-06-13
+## News 2018-06-13
 
 Previous (relatively!) stable version 0.9.1 has been archived, see link above.  
 
@@ -54,7 +59,7 @@ I need :
  + someone able to build a test plan
  + ....ideas...help....support....beer, or something stronger! 
 
-## Latest News 2018-05-29
+## News 2018-05-29
 
 Time to work on STDIO : 
 
@@ -322,7 +327,9 @@ note : '$VAR' does NOT expand Variable
 | | | -N : Number all output lines | |
 | | | -S : Suppress repeated empty output lines | |
 | EDIT | Working | still missing : find/replace | 0.92 |
-| CHTYP | Working | -C : Continue On Error | 0.9.1 |
+| FORMAT | In Progress | -L : Low-Level Format | 0.92 |
+| | | -1..9 : Catalog Size (block count) | |
+| CHTYP | Working | -C : Continue On Error | 0.92 |
 | | | -R : Recurse subdirectories | |
 | CHMOD | In Progress | -C : Continue On Error | 0.9 |
 | | | -R : Recurse subdirectories | |
@@ -330,8 +337,6 @@ note : '$VAR' does NOT expand Variable
 | | | -R : Recurse subdirectories | |
 | CHGRP | In Progress | -C : Continue On Error | 0.9 |
 | | | -R : Recurse subdirectories | |
-| FORMAT | In Progress | -L : Low-Level Format | 0.9.1 |
-| | | -1..9 : Catalog Size (block count) | |
 | MD5 | In Progress | -D : String Input | 0.9.1 |
 | NSCUTIL | Working | Tool for setting time in NSC/DL1216E | 0.9 |
 
