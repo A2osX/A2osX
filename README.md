@@ -245,9 +245,9 @@ OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
 | GETTY   | Working     |         | 0.92 |
 | LOGIN   | In Progress | no auth using /etc/passd yet | 0.92 |
 | SHELL   | Working     | (See Internal Shell commands) | 0.92 |
-| KCONFIG | Working     | Kernel Configuration Utility | 0.9.1 |
+| KCONFIG | Working     | Kernel Configuration Utility | 0.92 |
 | ----    | ------      | ------- | ----- |
-| TCPIPD  | Working     | Socket API.ARP,IP,ICMP,UDP & TCP ok | 0.9.1 |
+| TCPIPD  | Working     | Socket API.ARP,IP,ICMP,UDP & TCP ok | 0.92 |
 | DHCPCLNT| Working     | rewritten to use new Socket API | 0.9.1 |
 | TELNETD | In Progress |  | 0.9 |
 | HTTPD   | In Progress |  | 0.9 |
@@ -297,7 +297,7 @@ note : '$VAR' does NOT expand Variable
 | DHGR.DRV | Working | 560x192 Mono/16 colors Mixed-Mode support | 0.9.1 |
 | ---- | ------ | ------- | ----- |
 | LanCeGS.DRV | Working | | 0.9.1 |
-| Uthernet.DRV  | Working | | 0.9.1 |
+| Uthernet.DRV  | Working | | 0.92 |
 | Uthernet2.DRV | Working | | 0.9.1 |
 | Uther2.AI.DRV | In Progress | With ARP/IP Offloading | 0.9 |
 
@@ -336,17 +336,17 @@ note : '$VAR' does NOT expand Variable
 | | | -R : Recurse subdirectories | |
 | CHGRP | In Progress | -C : Continue On Error | 0.9 |
 | | | -R : Recurse subdirectories | |
-| MD5 | In Progress | -D : String Input | 0.9.1 |
+| MD5 | In Progress | -D : String Input | 0.92 |
 | NSCUTIL | Working | Tool for setting time in NSC/DL1216E | 0.9 |
 
 ## Network (TCPIP) tools:
 | Name | Status | Comment | K.Ver |
 | ---- | ------ | ------- | ----- |
+| IPCONFIG | Working | renamed from NETINFO | 0.92 |
+| NETSTAT | Working | | 0.92 |
 | ARP | Working | dump ARP cache, setup a static ARP entry | 0.9.1 |
-| PING | Working | | 0.9.1 |
 | DNSINFO | Working | dump DNS cache, setup a static DNS entry | 0.9.1 |
-| IPCONFIG | Working | renamed from NETINFO | 0.9.1 |
-| NETSTAT | Working | | 0.9.1 |
+| PING | Working | | 0.9.1 |
 
 ## DEV tools:
 | Name | Status | Comment | K.Ver |
