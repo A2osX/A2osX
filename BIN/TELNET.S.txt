@@ -1,0 +1,211 @@
+NEW
+PREFIX /A2OSX.BUILD
+AUTO 4,1
+				.LIST OFF
+				.OP	65C02
+				.OR	$2000
+				.TF BIN/TELNET
+*--------------------------------------
+				.INB INC/MACROS.I
+				.INB INC/A2OSX.I
+				.INB INC/ETH.I
+				.INB INC/LIBTCPIP.I
+*--------------------------------------
+TIMEOUT.MAX		.EQ 20					2 sec.
+*--------------------------------------
+ZPFrameBase		.EQ ZPBIN
+ZPFrameLen		.EQ ZPBIN+2
+ZPFramePtr1		.EQ ZPBIN+4
+ZPIPCfgPtr		.EQ ZPBIN+6
+*--------------------------------------
+*			File Header (16 Bytes)
+*--------------------------------------
+CS.START		cld
+				jmp (.1,x)
+				.DA #$61				6502,Level 1 (65c02)
+				.DA #1					BIN Layout Version 1
+				.DA 0
+				.DA CS.END-CS.START		Code Length To Relocate
+				.DA DS.END-DS.START		Data Segment to Allocate
+				.DA #16					SS
+				.DA #8					ZP
+				.DA 0
+*--------------------------------------
+.1				.DA CS.INIT
+				.DA CS.RUN
+				.DA CS.DOEVENT		
+				.DA	CS.QUIT
+L.LIBTCPIP		.DA LIBTCPIP
+L.Socket		.DA Socket
+L.MSG.IPKO		.DA MSG.IPKO
+L.MSG.USAGE		.DA MSG.USAGE
+L.MSG.UNKNOWN	.DA MSG.UNKNOWN
+L.MSG.HOSTOK	.DA MSG.HOSTOK
+L.MSG.SKTKO		.DA MSG.SKTKO
+				.DA 0
+*--------------------------------------
+CS.INIT			>LDYA L.LIBTCPIP
+				>SYSCALL LoadLib
+				bcs .9
+				sta hLIBTCPIP
+
+				lda (pPs)
+				ora #S.PS.F.EVENT		Now accept events
+				sta (pPs)
+				
+				clc
+
+.9				rts
+*--------------------------------------
+CS.RUN			>LIBCALL hLIBTCPIP,LIBTCPIP.GET.IPCFG	is TCPIP loaded ?
+				>STYA ZPIPCfgPtr
+				
+				lda (ZPIPCfgPtr)		Configured ?
+				bmi CS.RUN.IPOK
+				
+				>LDYA L.MSG.IPKO
+				>SYSCALL printf
+				lda #K.E.SYN
+				sec				
+				rts
+				
+CS.RUN.IPOK		ldy #S.PS.ARGC
+				lda (pPs),y
+
+				beq .9
+				
+				jsr Init.Timeout
+
+.2				>PUSHW pData			DST.IP
+				lda #1
+				>SYSCALL GetArg
+				>PUSHYA
+				>LIBCALL hLIBTCPIP,LIBTCPIP.HST.GETBYNAME
+				bcc CS.RUN.HOSTOK	
+				>SLEEP
+				jsr Wait.Timeout
+				bcc .2
+
+				lda #1
+				>SYSCALL GetArg
+				>PUSHYA
+				>LDYA L.MSG.UNKNOWN
+				bra .99
+				
+.9				>LDYA L.MSG.USAGE
+.99				>SYSCALL printf
+				lda #K.E.SYN
+				sec				
+				rts
+
+CS.RUN.HOSTOK	lda #1
+				>SYSCALL GetArg
+				>PUSHYA
+				
+				ldy #DST.IP+3
+				ldx #3
+				
+.1				lda (pData),y
+				sta Socket.Dst.Addr,x
+				>PUSHA
+				dey
+				dex
+				bpl .1
+				
+				>LDYA L.MSG.HOSTOK
+				>SYSCALL printf
+		
+CS.RUN.OPENSKT	ldx #3
+				ldy #S.IPCFG.IP+3
+				
+.1				lda (ZPIPCfgPtr),y
+				sta Socket.Src.Addr,x
+				dey
+				dex
+				bpl .1
+				
+				>PUSHW L.Socket
+				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.New
+				bcc .2
+				
+				>LDYA L.MSG.SKTKO
+				>SYSCALL printf
+				lda #K.E.SYN
+				sec				
+				rts
+				
+.2				txa
+				ldy #hSocket
+				sta (pData),y
+				
+.9				lda #0
+				sec
+CS.RUN.ERR		rts
+*--------------------------------------
+CS.DOEVENT		lda (pEvent)
+				bpl .9					is it a TIMER event?
+				
+				ldy #TimeOut
+				lda (pData),y
+				beq .9
+				
+				dec
+				sta (pData),y
+				
+.9				sec						do not discard TIMER event
+				rts
+*--------------------------------------
+CS.QUIT			ldy #hSocket
+				lda (pData),y
+				beq .1
+
+				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.Close
+				
+.1				lda hLIBTCPIP
+				>SYSCALL UnloadLib
+				clc
+				rts
+*--------------------------------------
+Init.Timeout	ldy #TimeOut
+				lda #TIMEOUT.MAX
+				sta (pData),y
+				rts
+*--------------------------------------
+Wait.TimeOut	sec
+				ldy #TimeOut
+				lda (pData),y
+				beq .9
+
+				clc
+.9				rts
+*--------------------------------------
+CS.END
+LIBTCPIP		.AZ "libtcpip.o"
+MSG.IPKO		.AZ "TCP/IP Not Loaded/Configured.\r\n"
+MSG.USAGE		.AZ "Usage : TELNET <ip|host> [port]\r\n"
+MSG.UNKNOWN		.AZ "%s: Unknown host\r\n"
+MSG.HOSTOK		.AZ "Connecting to %d.%d.%d.%d (%s) ...\r\n"
+MSG.SKTKO		.AZ "Failed to Open Socket.\r\n"
+hLIBTCPIP		.BS 1
+TimeOut.ms		.BS 2
+Socket			.DA #S.SOCKET.SOCK.STREAM
+				.BS 1
+				.DA #S.IP.PROTOCOL.TCP
+				.BS 1
+Socket.Src.Addr	.BS 4
+Socket.Src.Port	.DA 0					Dynamic
+Socket.Dst.Addr	.BS 4
+Socket.Dst.Port	.DA TCP.PORT.TELNET
+*--------------------------------------
+				.DUMMY
+				.OR 0
+DS.START
+DST.IP			.BS 4
+hSocket			.BS 1
+TimeOut			.BS 1
+DS.END
+				.ED
+*--------------------------------------
+MAN
+SAVE /A2OSX.SRC/BIN/TELNET.S
+ASM

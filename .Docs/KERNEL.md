@@ -694,7 +694,7 @@ TODO: mode="w+t=TYP,x=AUXTYPE"
 Close a file  
 
 ## C  
-int fclose ( FILE * stream );  
+int fclose ( hFILE streamm );  
 
 ## ASM  
 **In:**  
@@ -702,12 +702,13 @@ int fclose ( FILE * stream );
 **Out:**  
 
 # FRead  
-int fread ( void * ptr, int count, FILE * stream );  
+int fread (hFILE stream, void * ptr, int count );  
 Read bytes from file  
 **In:**  
- PUSHW = Dest Ptr  
- PUSHW = Bytes To Read  
- PUSHB = hFILE  
+`>PUSHWI count`  
+`>PUSHW ptr`  
+`lda hFILE`  
+`>SYSCALL fread`  
 **Out:**  
  Y,A = Bytes Read  
 
@@ -715,13 +716,14 @@ Read bytes from file
 Write bytes to file  
 
 ## C  
-`int fwrite ( const void * ptr, int count, hFILE stream );`  
+`int fwrite (hFILE stream, const void * ptr, int count );`  
 
 ## ASM  
 **In:**  
-`>PUSHB = hFILE`  
-`>PUSHWI ptr`  
-`>LDYA count`  
+`>PUSHWI count`  
+`>PUSHW ptr`  
+`lda hFILE`  
+`>SYSCALL fwrite`  
 
 # Out:  
  Y,A = Bytes Written  
