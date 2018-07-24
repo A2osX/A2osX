@@ -2,6 +2,11 @@
 
 # GetProDOSCatSize  
  Compute space needed for ProDOS Catalog  
+
+## C  
+int getprodoscatsize (short int options, short int catsize, int devsize );    
+
+## ASM  
 **In:**  
  PUSHW = DevSize (in 512b blocks)  
  PUSHB = Catalog Size (in blocks)  

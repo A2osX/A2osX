@@ -558,18 +558,21 @@ Prints C-Style String
 **In:**  
 PrintF : (example is for printing Y,A as integer : format="Y,A= %I", 2 bytes)    
 `>PUSHYA`  
-`>PUSHBI 2`  
+`...`  
+`>PUSHBI bytecount`  
 `>LDYAI format`  
 `>SYSCALL printf`  
 SPrintF :   
 `>PUSHYA`  
-`>PUSHBI 2`  
+`...`  
+`>PUSHBI bytecount`  
 `>PUSHWI format`  
 `>LDYAI str`  
 `>SYSCALL sprintf`  
 FPrintF :   
 `>PUSHYA`  
-`>PUSHBI 2`  
+`...`  
+`>PUSHBI bytecount`  
 `>PUSHWI format`  
 `lda hFILE`  
 `>SYSCALL fprintf`  
@@ -635,12 +638,11 @@ Get char from Node
 Read formatted data from string  
 
 ## C  
-`int sscanf ( const char * s, const char * format, ...);`  
+`int sscanf ( const char * s, const char * format, ... );`  
 
 ## ASM  
 **In:**  
 `>PUSHBI Argument Byte count`  
-`>PUSHWI format`  
 + %i : short int  
 + %d : byte  
 + %I : int  
@@ -650,6 +652,10 @@ Read formatted data from string
 + %h : HEX byte  
 + %H : HEX word  
 
+`>PUSHW ptr`  
+`...`  
+`>PUSHBI bytecount`  
+`>PUSHWI format`  
 `>LDYA s`  
 **Out:**  
 Y,A = Number of arguments filled.  

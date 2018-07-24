@@ -60,13 +60,13 @@
  YA = PTR to new S.SOCKET  
  X = hSocket  
 
-# SKT.CloseA  
+# SKT.Close  
  Close socket  
 **In:**   
  A = hSocket  
 **Out:**   
 
-# SKT.GetA  
+# SKT.Get  
  Get Ptr to socket  
 **In:**   
  A = hSocket  
@@ -79,14 +79,14 @@
 **Out:**   
  Y,A = pS.SOCKET  
 
-# SKT.AcceptA  
+# SKT.Accept  
  Check for an incoming connection  
 **In:**   
  A = hListeningSocket  
 **Out:**   
  A = hSocket  
 
-# SKT.MkNodA  
+# SKT.MkNod  
  Create a new file from TCP socket  
 **In:**   
  A = hSocket  
@@ -101,7 +101,7 @@
  PUSHW = len  
 **Out:**   
 
-# SKT.ReadA (DGRAM,RAW)  
+# SKT.ReadFrame (DGRAM,RAW)  
 **In:**   
  A = hSocket  
 **Out:**   
