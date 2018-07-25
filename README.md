@@ -248,7 +248,7 @@ OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
 | KCONFIG | Working     | Kernel Configuration Utility | 0.92 |
 | ----    | ------      | ------- | ----- |
 | TCPIPD  | Working     | Socket API.ARP,IP,ICMP,UDP & TCP ok | 0.92 |
-| DHCPCLNT| Working     | rewritten to use new Socket API | 0.9.1 |
+| DHCPCLNT| Working     | rewritten to use new Socket API | 0.92 |
 | TELNETD | In Progress |  | 0.9 |
 | HTTPD   | In Progress |  | 0.9 |
 
@@ -344,9 +344,9 @@ note : '$VAR' does NOT expand Variable
 | ---- | ------ | ------- | ----- |
 | IPCONFIG | Working | renamed from NETINFO | 0.92 |
 | NETSTAT | Working | | 0.92 |
-| ARP | Working | dump ARP cache, setup a static ARP entry | 0.9.1 |
-| DNSINFO | Working | dump DNS cache, setup a static DNS entry | 0.9.1 |
-| PING | Working | | 0.9.1 |
+| ARP | Working | dump ARP cache, setup a static ARP entry | 0.92 |
+| DNSINFO | Working | dump DNS cache, setup a static DNS entry | 0.92 |
+| PING | Working | | 0.92 |
 
 ## DEV tools:
 | Name | Status | Comment | K.Ver |
