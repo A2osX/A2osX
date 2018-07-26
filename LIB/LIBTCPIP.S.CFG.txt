@@ -5,23 +5,43 @@ AUTO 4,1
 *--------------------------------------
 *  PULLW = PTR to S.IPCFG
 *--------------------------------------
-SET.IPCFG		>PULLW ZPTmpPtr1		IPCFG
+CFG.Init		>LDYA L.DEVNAME
+				>SYSCALL GetDevByName
+				bcc .1
+				inc DEVNAME+3
+				lda DEVNAME+3
+				cmp #'8'
+				bne CFG.Init
 
+				>LDYA L.MSG.DEV.KO
+				>SYSCALL printf
+				
+				lda #MLI.E.NODEV
+.9				sec
+				rts
+				
+.1				stx IPCFG+S.IPCFG.HDEV
+				
+				>PUSHW L.DEVNAME
+				>LDYA L.MSG.DEV.OK
+				>SYSCALL printf
+				
+				>PUSHWI 0
+				>PUSHBI IOCTL.OPEN
+				lda IPCFG+S.IPCFG.HDEV
+				>SYSCALL IOCTL
+				bcs .9
+				
 				>LDYA L.DCB.NIC
 				>STYA IOCTL+S.IOCTL.BUFPTR
 				lda #S.IOCTL.STATCODE.GETDCB
 				sta IOCTL+S.IOCTL.STATCODE
 				
-				ldx #IOCTL.STATUS
-				jsr SET.IPCFG.IOCTL
-				
-				ldy #0
-				
-.1				lda (ZPTmpPtr1),y
-				sta IPCFG,y
-				iny
-				cpy #S.IPCFG
-				bne .1
+				>PUSHW L.IOCTL
+				>PUSHBI IOCTL.STATUS
+				lda IPCFG+S.IPCFG.HDEV
+				>SYSCALL IOCTL
+				bcs .9
 				
 				ldx #5
 				
@@ -43,34 +63,421 @@ SET.IPCFG		>PULLW ZPTmpPtr1		IPCFG
 				dex
 				bpl .3
 				
-				lda DCB.NIC+S.DCB.NIC.FLAGS
-				and #S.DCB.NIC.FLAGS.ARPOFFLOAD
+CFG.EtcFiles	>LDYA L.MSG.CFG
+				>SYSCALL printf
+
+				jsr CFG.Read.HOSTNAME
+				jsr CFG.Read.Result
+
+				lda IPCFG+S.IPCFG.HOSTNAME
+				bne .4
+
+				ldy #$ff
+				
+.2				iny
+				lda DefaultHostName,y
+				sta IPCFG+S.IPCFG.HOSTNAME,y
+				bne .2
+			
+.3				lda A2osX.TIMER16
+				jsr CFG.A2CharAX
+				sta IPCFG+S.IPCFG.HOSTNAME+6
+				stx IPCFG+S.IPCFG.HOSTNAME+7
+				
+				lda A2osX.TIMER16+1
+				jsr CFG.A2CharAX
+				sta IPCFG+S.IPCFG.HOSTNAME+8
+				stx IPCFG+S.IPCFG.HOSTNAME+9
+				
+.4				>PUSHW L.TCPIP.CONF
+				>LDYA L.MSG.CFG
+				>SYSCALL printf
+
+				jsr CFG.Read.TCPIP.CONF
+				jsr CFG.Read.Result
+				
+				>PUSHW L.HOSTS
+				>LDYA L.MSG.CFG
+				>SYSCALL printf
+
+				jsr CFG.Read.HOSTS
+				jsr CFG.Read.Result
+
+				jmp SET.IPCFG.I	
+*--------------------------------------
+CFG.Read.Result	bcc .1
+				>PUSHA
+				>LDYA L.MSG.CFG.KO
+				bra .2
+.1				>LDYA L.MSG.CFG.OK
+.2				>SYSCALL printf
+				rts
+*--------------------------------------
+CFG.Read.HOSTNAME
+				>LDYA L.HOSTNAME
+				jsr CFG.Read.LoadFile
+				bcs .9
+				
+* read 15 chars MAX, until CR or EOF
+
+				ldx #$15
+				lda CFG.FileLen+1
+				bne .1					File is more than 256....?
+				
+				ldx CFG.FileLen
+				beq .9					len is 0 !!!
+				
+.1				ldy #0
+
+.2				lda (ZPTmpPtr1),y
+				cmp #13
+				beq .8					A CR, end of name
+				
+				sta IPCFG+S.IPCFG.HOSTNAME,y
+				iny
+				dex
+				bne .2
+				
+.8				lda #0
+				sta IPCFG+S.IPCFG.HOSTNAME,y
+
+				jsr CFG.Read.CleanUp
+				clc
+				rts
+				
+.9				jsr CFG.Read.CleanUp
+				sec
+				rts
+*--------------------------------------
+CFG.Read.TCPIP.CONF
+				>LDYA L.TCPIP.CONF
+				jsr CFG.Read.LoadFile
+				bcs .9
+
+.1				jsr CFG.GetLine
+				bcs .8
+				
+				jsr CFG.GetKeyword
+				bcs .1
+
+				lda CFG.Keyword
+				bne .3
+				
+				ldy UsrBuf256
+
+				lda UsrBuf256+1,y
+				cmp #35					DOMAIN too long!!!
+				bcs .1
+				
+				sta IPCFG+S.IPCFG.DOMAIN
+				ldx #0
+				
+.2				lda UsrBuf256+2,y
+				sta IPCFG+S.IPCFG.DOMAIN,x
+				beq .1
+				inx
+				iny
+				bne .2
+				bra .1
+				
+.9				jsr CFG.Read.CleanUp
+				sec
+				rts
+
+.3				jsr CFG.ScanIP
+				bcs .1
+				
+				ldy CFG.Keyword
+				lda CFG.Keyword.Map,y
+				tax
+				ldy #0
+				
+.4				lda CFG.IP+1,y
+				sta IPCFG,x
+				inx
+				iny
+				cpy #4
+				bne .4
+				lda CFG.Keyword
+				cmp #1
+				bne .1
+				lda #S.IPCFG.STATUS.OK
+				sta IPCFG
+				bra .1
+				
+.8				jsr CFG.Read.CleanUp
+				clc
+				rts
+*--------------------------------------
+CFG.Read.HOSTS	>LDYA L.HOSTS
+				
+				jsr CFG.Read.LoadFile
+				bcs .9
+			
+
+.8				jsr CFG.Read.CleanUp
+				clc
+				rts				
+				
+.9				jsr CFG.Read.CleanUp
+				sec
+				rts
+*--------------------------------------
+CFG.Read.LoadFile
+				stz CFG.hCfgFile
+				stz CFG.hCfgPath
+				
+				>SYSCALL ExpandStr
+				bcs .9
+				
+				stx CFG.hCfgPath
+				pha
+				
+				>PUSHWI 0				Aux type
+				>PUSHBI 4				S.FI.T.TXT
+				>PUSHBI	SYS.FOpen.R
+				pla
+				>SYSCALL LoadFile
+				bcs .9
+				
+				stx CFG.hCfgFile
+				>STYA CFG.FileLen
+				txa
+				>SYSCALL GetMemPtr
+				>STYA ZPTmpPtr1
+.9				rts
+*--------------------------------------
+CFG.Read.CleanUp
+				pha
+				lda CFG.hCfgPath
+				beq .1
+				>SYSCALL FreeMem
+				
+.1				lda CFG.hCfgFile
+				beq .8
+				>SYSCALL FreeMem
+				
+.8				pla
+				rts
+*--------------------------------------
+CFG.GetLine		stz UsrBuf256
+				ldx #0
+				ldy #0
+				
+.1				jsr CFG.GetChar
+				bne .2					end of file?
+				txa
+				bne .8
+				sec
+				rts
+				
+.2				cmp #$0D
+				beq .8					end of line
+				inx
+				sta UsrBuf256,x
+				cmp #'='
+				bne .3
+				txa
+				dec
+				tay
+.3				cpx #64					line too long ?
+				bne .1
+				sec
+				rts
+				
+.8				tya						= found ?
+				beq .9
+				
+				sta UsrBuf256
+				txa
+				sec
+				sbc UsrBuf256
+				sta UsrBuf256+1,y
+				stz UsrBuf256+1,x	End with 0 for ScanIP
+				clc
+				rts
+				
+.9				sec
+				rts		
+*--------------------------------------
+CFG.GetChar		lda CFG.FileLen
+				bne .1
+				lda CFG.FileLen+1
+				beq .9
+				dec CFG.FileLen+1
+.1				dec CFG.FileLen
+				lda (ZPTmpPtr1)
+				inc ZPTmpPtr1
+				bne .9
+				inc ZPTmpPtr1+1			NZ
+.9				rts				
+*--------------------------------------
+CFG.GetKeyword	stz CFG.Keyword
+				
+				ldx #0
+				
+.1				phx
+				ldy #0
+				
+.2				lda CFG.Keywords,x
+				cmp UsrBuf256,y
+				bne .3
+				cpy UsrBuf256
 				beq .4
+				inx
+				iny
+				bne .2
+				plx
+				sec
+				rts
+				
+.3				inc CFG.Keyword
+				plx
+				txa
+				sec
+				adc CFG.Keywords,x
+				tax
+				lda CFG.Keywords,x
+				bne .1
+				sec
+				rts
+				
+.4				plx
+				clc
+				rts
+*--------------------------------------
+CFG.ScanIP		stz CFG.IP
+
+				ldx UsrBuf256
+				
+.1				ldy #0
+.11				lda UsrBuf256+2,x
+				beq .3
+				cmp #'0'
+				bcc .2
+				cmp #'9'+1
+				bcs .2
+				cpy #3
+				beq .9
+				iny
+				sta CFG.StrBuf,y
+				inx
+				bra .11
+				
+.2				cmp #'.'
+				bne .9
+				
+.3				sty CFG.StrBuf
+				lda CFG.IP
+				cmp #4
+				beq .9
+				jsr CFG.Dec2Hex
+				bcs .9
+				lda CFG.HexByte
+				inc CFG.IP
+				ldy CFG.IP
+				sta CFG.IP,y
+				inx
+				lda UsrBuf256+1,x
+				bne .1
+				clc
+				rts
+				
+.9				sec
+				rts
+*--------------------------------------
+CFG.Dec2Hex		sec
+				ldy CFG.StrBuf
+				beq .9
+				
+				lda CFG.StrBuf+1
+				and #$0f
+				sta CFG.HexByte
+				
+				ldy #1
+				
+.1				cpy CFG.StrBuf
+				beq .8
+				iny
+				lda CFG.HexByte
+				asl CFG.HexByte
+				bcs .9
+				asl CFG.HexByte
+				bcs .9
+				adc CFG.HexByte
+				bcs .9
+				asl
+				bcs .9
+				sta CFG.HexByte
+				lda CFG.StrBuf,y
+				and #$0f
+				adc CFG.HexByte
+				sta CFG.HexByte
+				bcc .1
+.9				rts
+				
+.8				clc
+				rts
+*--------------------------------------
+CFG.A2CharAX	pha
+				lsr
+				lsr
+				lsr
+				lsr
+				ora #$30
+				cmp #'9'+1
+				bcc .1
+				adc #6
+.1				tax
+				pla
+				and #$0F
+				ora #$30
+				cmp #'9'+1
+				bcc .8
+				adc #6
+.8				rts
+*--------------------------------------
+SET.IPCFG		>PULLW ZPTmpPtr1		IPCFG
+				
+				ldy #0
+				
+.1				lda (ZPTmpPtr1),y
+				sta IPCFG,y
+				iny
+				cpy #S.IPCFG
+				bne .1
+				
+SET.IPCFG.I		lda DCB.NIC+S.DCB.NIC.FLAGS
+				and #S.DCB.NIC.FLAGS.ARPOFFLOAD
+				beq .2
 				
 				ldx #11
 				
-.31				lda IPCFG+S.IPCFG.IP,x
+.1				lda IPCFG+S.IPCFG.IP,x
 				sta DCB.NIC+S.DCB.NIC.IP,x
 				dex
-				bpl .31
+				bpl .1
 				
-*				lda S.IOCTL.CTRLCODE.SETDCB		same as lda S.IOCTL.STATCODE.GETDCB
-*				sta S.IOCTL.CTRLCODE			same as sta S.IOCTL.STATCODE
+				lda S.IOCTL.CTRLCODE.SETDCB
+				sta S.IOCTL.CTRLCODE
 
-				ldx #IOCTL.CONTROL
-				jsr SET.IPCFG.IOCTL
+				>PUSHW L.IOCTL
+				>PUSHBI IOCTL.CONTROL
+				lda IPCFG+S.IPCFG.HDEV
+				>SYSCALL IOCTL
+				bcs .9
 				
-.4				lda hDNSSocket1
-				beq .41
+.2				lda hDNSSocket1
+				beq .3
 				jsr SKT.Close
 				stz hDNSSocket1
 				
-.41				lda hDNSSocket2
-				beq .42
+.3				lda hDNSSocket2
+				beq .4
 				jsr SKT.Close
 				stz hDNSSocket2
 				
-.42				lda IPCFG+S.IPCFG.DNS1
+.4				lda IPCFG+S.IPCFG.DNS1
 				beq .6
 				
 				ldx #3
@@ -110,13 +517,6 @@ SET.IPCFG		>PULLW ZPTmpPtr1		IPCFG
 				
 .8				clc
 .9				rts
-
-SET.IPCFG.IOCTL	>PUSHW L.IOCTL
-				txa
-				>PUSHA
-				lda IPCFG+S.IPCFG.HDEV
-				>SYSCALL IOCTL
-				rts
 *--------------------------------------
 * grab a copy on the fly for lib function
 * OUT :
