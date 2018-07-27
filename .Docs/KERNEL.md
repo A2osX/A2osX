@@ -174,7 +174,7 @@ Load a file in memory
  PUSHW = AUXTYPE (Handled by....  
  PUSHB = TYPE  ...  
  PUSHB = MODE  ...  
- PUSHW = PATH ...FOpen)  
+ LDYA = PATH ...FOpen)  
 **Out:**  
  Y,A = File Length  
  X = hMem of Loaded File  
@@ -531,7 +531,10 @@ Write Str to StdOut, appends '\r\n'
 ## C  
 `int puts ( const char * str );`  
 **In:**  
-Y,A : str   
+
+## ASM  
+`>LDYAI str`  
+`>SYSCALL puts`  
 **Out:**   
 CC = success  
 
@@ -539,10 +542,13 @@ CC = success
 Write Str to FILE  
 
 ## C  
-`int fputs ( const char * str, hFILE stream );`  
+`int fputs (hFILE stream, const char * str );`  
+
+## ASM  
 **In:**  
-PUSHB : hFILE  
-Y,A: str   
+`>PUSHW str`  
+`lda stream`  
+`>SYSCALL fputs`  
 **Out:**   
 CC = success  
 
@@ -613,6 +619,25 @@ Modifiers for len and padding :
 + %2f	  :	'3.14'  
 
 
+# FGetS  
+read bytes from stream into the array  
+pointed to by s, until n-1 bytes are read, or a <newline> is read and  
+transferred to s, or an end-of-file condition is encountered. The  
+string is then terminated with a null byte.  
+
+## C  
+`char *fgets(hFILE stream, char * s, int n);`  
+
+## ASM  
+**In:**  
+`>PUSHW n`  
+`>PUSHW s`  
+`lda hFILE`  
+`>SYSCALL fgets`  
+**Out:**   
+ Y,A: s   
+CC = success  
+
 # GetChar  
 Get char from StdIn  
 **In:**  
@@ -651,6 +676,7 @@ Read formatted data from string
 + %U : dword  
 + %h : HEX byte  
 + %H : HEX word  
++ %s : string  
 
 `>PUSHW ptr`  
 `...`  
@@ -729,11 +755,21 @@ Write bytes to file
  Y,A = Bytes Written  
 
 # FFlush  
+
+## C  
+int fflush(hFILE stream);  
+
+## ASM  
 **In:**  
  A = hFILE  
 
 # FSeek  
 Set the file-position indicator for hFILE  
+
+## C  
+`int fseek(hFILE stream, long offset, int whence);`  
+
+## ASM  
 **In:**  
  PUSHW = Ptr to Offset (DWORD)  
  PUSHB = From  
@@ -751,6 +787,11 @@ Test the end-of-file indicator for hFILE
 
 # FTell  
 Return the current value of the file-position indicator  
+
+## C  
+`long ftell(hFILE stream);`  
+
+## ASM  
 **In:**  
  PUSHW = Ptr to Offset (DWORD)  
  PUSHB = hFILE  

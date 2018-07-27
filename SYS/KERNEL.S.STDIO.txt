@@ -47,7 +47,9 @@ K.PutChar.X		>LDYAI K.IOBuf
 * ## C
 * `int puts ( const char * str );`
 * **In:**
-* Y,A : str 
+* ## ASM
+* `>LDYAI str`
+* `>SYSCALL puts`
 * **Out:** 
 * CC = success
 *\--------------------------------------
@@ -71,19 +73,28 @@ K.PutS			>STYA K.S.IOCTL+S.IOCTL.BUFPTR
 * Write Str to FILE
 * ## C
 * `int fputs (hFILE stream, const char * str );`
+* ## ASM
 * **In:**
-* PUSHB : hFILE
-* Y,A: str 
+* `>PUSHW str`
+* `lda stream`
+* `>SYSCALL fputs`
 * **Out:** 
 * CC = success
 *\--------------------------------------
-K.FPutS			>STYA K.S.IOCTL+S.IOCTL.BUFPTR
-				>STYA ZPPtr1
-				
+K.FPutS			pha
+
 				>PULLA
+				sta K.S.IOCTL+S.IOCTL.BUFPTR
+				sta ZPPtr1
+				>PULLA
+				sta K.S.IOCTL+S.IOCTL.BUFPTR+1
+				sta ZPPtr1+1
+				
+				pla
 				
 K.FPutS.I		jsr IO.SELECT
-								
+				bcs *
+				
 				ldy #0		
 				ldx #0
 				
@@ -99,28 +110,6 @@ K.FPutS.I		jsr IO.SELECT
 .2				sty K.S.IOCTL+S.IOCTL.BYTECNT
 				stx K.S.IOCTL+S.IOCTL.BYTECNT+1
 				jmp IO.Write.I
-*/--------------------------------------
-* # FGetS
-* read bytes from stream into the array
-* pointed to by s, until n-1 bytes are read, or a <newline> is read and
-* transferred to s, or an end-of-file condition is encountered. The
-* string is then terminated with a null byte.
-* ## C
-* `char *fgets(hFILE stream, char * s, int n);`
-* ## ASM
-* **In:**
-* `>PUSHW n`
-* `>PUSHW s`
-* `lda hFILE`
-* `>SYSCALL fgets`
-* **Out:** 
-*  Y,A: s 
-* CC = success
-*\--------------------------------------
-K.FGetS					
-
-				clc
-				rts
 */--------------------------------------
 * # PrintF/SPrintF/FPrintF
 * Prints C-Style String
@@ -604,6 +593,67 @@ PrintF.COut		phy
 *--------------------------------------
 PrintF.Flush	jmp IO.Write.I
 */--------------------------------------
+* # FGetS
+* read bytes from stream into the array
+* pointed to by s, until n-1 bytes are read, or a <newline> is read and
+* transferred to s, or an end-of-file condition is encountered. The
+* string is then terminated with a null byte.
+* ## C
+* `char *fgets(hFILE stream, char * s, int n);`
+* ## ASM
+* **In:**
+* `>PUSHW n`
+* `>PUSHW s`
+* `lda hFILE`
+* `>SYSCALL fgets`
+* **Out:** 
+*  Y,A: s 
+* CC = success
+*\--------------------------------------
+K.FGetS			pha
+				>PULLA
+				sec
+				sbc #2
+				eor #$ff
+				sta	ZPPtr2				!n
+				>PULLA
+				sbc #0
+				eor #$ff
+				sta	ZPPtr2+1			!n
+				
+				>PULLW ZPPtr1			s
+				pla
+				jsr IO.SELECT
+				bcs .9
+
+				jsr K.GetC.I
+				bcs .9
+				
+.1				lda K.IOBuf
+				cmp #C.CR
+				beq .8
+				
+				sta (ZPPtr1)
+				inc ZPPtr1
+				bne .2
+				inc ZPPtr1+1
+				
+.2				inc ZPPtr2
+				bne .3
+				inc ZPPtr2+1
+				beq .8
+				
+.3				jsr IO.READ.I
+				bcc .1
+				
+.8				clc
+				
+.9				pha
+				lda #0
+				sta (ZPPtr1)
+				pla
+				rts
+*/--------------------------------------
 * # GetChar
 * Get char from StdIn
 * **In:**
@@ -625,19 +675,19 @@ K.GetChar		ldy #S.PS.hStdIn
 * **Out:** 
 *  CC = success
 *   A = char
-*\--------------------------------------
+*\-----------a---------------------------
 K.GetC			jsr IO.SELECT
-				bcs .9
+				bcs K.GetC.9
 				
-				>LDYAI K.IOBuf
+K.GetC.I		>LDYAI K.IOBuf
 				>STYA K.S.IOCTL+S.IOCTL.BUFPTR
 				lda #1
 				sta K.S.IOCTL+S.IOCTL.BYTECNT
 				stz K.S.IOCTL+S.IOCTL.BYTECNT+1
 				jsr IO.READ.I
-				bcs .9
+				bcs K.GetC.9
 				lda K.IOBuf
-.9				rts				
+K.GetC.9		rts				
 *--------------------------------------
 *K.PrintF.PadL	.BS 1
 *K.PrintF.PadC	.BS 1
@@ -675,9 +725,8 @@ BCDBUF			.EQ ARG
 *\--------------------------------------
 K.SScanF		>STYA ZPPtr2			String to Scan
 				>PULLW ZPPtr1			format
-				>PULLB K.SScanF.ByteCnt
 				
-				stz K.SScanF.ByteIdx
+				stz .5+1
 				
 .1				lda (ZPPtr1)			End Of format?
 				beq .8
@@ -704,10 +753,11 @@ K.SScanF		>STYA ZPPtr2			String to Scan
 				bne .21
 				inc ZPPtr1+1
 
-.21				ldx #K.SScanFCNT-K.SScanFTBL-1
+.21				ldx #K.SScanFJMP-K.SScanFTBL-2
 				
 .3				cmp K.SScanFTBL,x
 				beq .4
+				dex
 				dex
 				bpl .3
 				
@@ -717,35 +767,33 @@ K.SScanF		>STYA ZPPtr2			String to Scan
 				rts
 				
 .4				jsr .5
-				bcs .9
+				bcs .9					out of Ptr on stack
 				
 				bra .1
 				
 .8				lda pStack
-				clc
-				adc K.SScanF.ByteCnt	...
+				sec						ByteCnt byte
+				adc (pStack)			... ByteCnt
 				sta pStack				CC
 .99				rts
 *--------------------------------------
-.5				ldy K.SScanF.ByteIdx
-				cpy K.SScanF.ByteCnt
+.5				lda #$FF				SELF MODIFIED
+				cmp (pStack)
 				beq .99					CS
 				
+				tay
+				iny
 				lda (pStack),y
 				sta ZPPtr3
+				
 				iny
 				lda (pStack),y
 				sta ZPPtr3+1			get VAR Ptr
-				iny
-				sty K.SScanF.ByteIdx
+				sty .5+1
 				
 				jmp (K.SScanFJMP,x)
 *--------------------------------------
-K.SScanF.ByteCnt	.BS 1
-K.SScanF.ByteIdx	.BS 1
-*--------------------------------------
-K.SScanFTBL		.DA #'i,#'d,#'I,#'D,#'l,#'u,#'h,#'H,#'s
-K.SScanFCNT		.DA #1, #1, #2, #2, #4, #4, #1, #2
+K.SScanFTBL		.DA #'i,#1,#'d,#1,#'I,#2,#'D,#2,#'l,#4,#'u,#4,#'h,#1,#'H,#2,#'s,#2
 K.SScanFJMP		.DA K.SScanF.I
 				.DA K.SScanF.D
 				.DA K.SScanF.II
