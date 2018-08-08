@@ -18,7 +18,7 @@ K.Open			jsr PFT.CheckPathYA		check if not /mnt
 
 K.Open.I		jsr IO.SetMLIPathYA		local pathname...
 
-				ldx #5					/DEV/ 
+				ldx #5					$/DEV/ 
 				cpx K.MLI.PATH
 				bcs K.Open.REG
 				
@@ -28,44 +28,47 @@ K.Open.I		jsr IO.SetMLIPathYA		local pathname...
 				dex
 				bne .1
 				
-K.Open.DEV		ldy #K.MLI.PATH+6		skip L/DEV/
-				lda /K.MLI.PATH+6
+K.Open.DEV		>LDYAI K.MLI.PATH+6		skip $/DEV/
 	
 				jsr K.GetDevByName
 				bcs .9
 				
 				>STYA pFD
-				stx .8+1				DEVID
+				stx .1+1				DEVID
 				
 				ldy #S.FD.DEV.DRVPTR
 				lda (pFD),y
-				sta .1+1
+				sta .2+1
 				iny
 				lda (pFD),y
-				sta .1+2
+				sta .2+2
 				
 				>PULLA					get flags
-				lda .8+1				pass A=DEVID To Driver
+				
+.1				lda #$ff				SELF MODIFIED pass A=DEVID To Driver
 				ldx #IOCTL.OPEN
-.1				jsr $ffff				SELF MODIFIED			
+.2				jsr $ffff				SELF MODIFIED pDRV	
 				bcs .99
 				
-.8				lda #$ff				SELF MODIFIED
+				ldx .1+1
+				lda Dev.Table.hFD,x
 .99				rts				
 				
 .9				>RET 1					discard flags			
 	
 K.Open.REG		>LDYAI K.MLI.PATH
 				>STYA K.MLI.PARAMS+1
-				
+				bra *
 				lda (pStack)
 *				sta K.S.IOCTL
 
 				>RET 1
 *--------------------------------------
-* int close(int fd);
+* int close(short int hFD);
 *--------------------------------------
 K.Close			jsr K.GetMemPtr
+				bcs .9
+				
 				>STYA pFD
 
 				lda (pFD)				#S.FD.T
@@ -80,6 +83,10 @@ K.Close			jsr K.GetMemPtr
 				.DA STDIO.IOERR			DSOCK
 				.DA IO.CLOSE.SSOCK
 				.DA IO.CLOSE.FIFO
+
+.9				lda #MLI.E.NODEV
+				sec
+				rts
 *--------------------------------------
 IO.CLOSE.REG
 *--------------------------------------
@@ -94,9 +101,11 @@ IO.CLOSE.FIFO	clc
 * ## C
 * `int read(int fd, void *buf, size_t count);`
 *\--------------------------------------
-K.Read			jsr IO.SELECT
-				bcs K.Read.9
+K.Read			jsr K.GetMemPtr
+				bcs K.Write.9
 
+				>STYA pFD
+				
 				>PULLW K.S.IOCTL+S.IOCTL.BUFPTR
 				>PULLW K.S.IOCTL+S.IOCTL.BYTECNT				
 				
@@ -112,14 +121,14 @@ IO.Read.I		lda (pFD)				#S.FD.T
 				.DA STDIO.IOERR			DSOCK
 				.DA IO.READ.SSOCK
 				.DA IO.READ.FIFO
-
-K.Read.9		>RET 4
 *--------------------------------------
 * int write(int fd, const void *buf, size_t count);
 *--------------------------------------
-K.Write			jsr IO.SELECT
+K.Write			jsr K.GetMemPtr
 				bcs K.Write.9
 				
+				>STYA pFD
+
 				>PULLW K.S.IOCTL+S.IOCTL.BUFPTR
 				>PULLW K.S.IOCTL+S.IOCTL.BYTECNT
 				
@@ -136,20 +145,24 @@ IO.Write.I		lda (pFD)				#S.FD.T
 				.DA IO.WRITE.SSOCK
 				.DA IO.WRITE.FIFO
 				
-K.Write.9		>RET 4				
+K.Write.9		lda #MLI.E.NODEV
+				>RET 4				
 *--------------------------------------
-IO.READ.REG		clc
-				.HS B0					BCS
+IO.READ.REG		ldx #MLIREAD
+				.HS 2C					BIT ABS
 *--------------------------------------
-IO.WRITE.REG	sec
-				>PUSHW K.S.IOCTL+S.IOCTL.BYTECNT
-				>PUSHW K.S.IOCTL+S.IOCTL.BUFPTR
+IO.WRITE.REG	ldx #MLIWRITE
 				ldy #S.FD.REG.REF
 				lda (pFD),y
-				bcs .1
-				
-				jmp K.FRead
-.1				jmp K.FWrite
+				sta K.MLI.PARAMS+1
+				>LDYA K.S.IOCTL+S.IOCTL.BUFPTR
+				>STYA K.MLI.PARAMS+2
+				>LDYA K.S.IOCTL+S.IOCTL.BYTECNT
+				>STYA K.MLI.PARAMS+4
+
+				lda #4					Param Count = 4 for MLIREAD & MLIWRITE
+				jsr GP.MLICall
+				rts
 *--------------------------------------
 IO.READ.CDEV	ldx #IOCTL.READ
 				.HS 2C					BIT ABS
@@ -223,18 +236,20 @@ IO.WRITE.FIFO	ldy #S.FD.FIFO.S
 */--------------------------------------
 * # IOCTL
 * ## C
-* `int ioctl(int devid, int request, void * param );`
+* `int ioctl(short int hFD, int request, void * param );`
 * ## ASM
 * **In:** 
 * `PUSHWI param`
 * `PUSHBI request`
-* `lda devid`
+* `lda hFD`
 * `>SYSCALL IOCTL`
 * **Out:**
 *  Y,A = ...
 *\--------------------------------------
-K.IOCTL			jsr IO.SELECT
+K.IOCTL			jsr K.GetMemPtr
 				bcs .9
+				
+				>STYA pFD
 				
 				ldy #S.FD.DEV.DRVPTR
 				lda (pFD),y
@@ -248,28 +263,19 @@ K.IOCTL			jsr IO.SELECT
 				
 				>PULLYA					param
 
-
 .8				jmp $ffff				SELF MODIFIED x = op
 				
-.9				>RET 3
+.9				lda #MLI.E.NODEV
+				>RET 3
 */--------------------------------------
 * # pipe
 * ## C
 * `int pipe(int pipefd[2]);`
 * ## ASM
 * **In:** 
-*\-------------------------------------- 
-IO.SELECT		cmp DevMgr.DevCnt
-				bcs .9
-
-				tax
-				
-				ldy FD.Table.PTRLO,x
-				lda FD.Table.PTRHI,x
-				>STYA pFD
-				rts
-				
-.9				lda #MLI.E.NODEV
+*\--------------------------------------
+K.Pipe
+.9				sec
 				rts				
 *--------------------------------------
 IO.PullMLIPath	>PULLYA

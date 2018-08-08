@@ -5,7 +5,7 @@ AUTO 4,1
 * # FPutC
 * Print A (char) to hFILE
 * ## C
-* `int fputc ( int character, hFILE stream );`
+* `int fputc ( hFILE stream , int character );`
 * ## ASM
 * **In:**
 * A : character
@@ -32,7 +32,10 @@ K.PutChar		sta K.IOBuf
 				ldy #S.PS.hStdOut
 				lda	(pPs),y
 				
-K.PutChar.1		jsr IO.SELECT
+K.PutChar.1		jsr K.GetMemPtr
+				bcs K.PutS.9
+
+				>STYA pFD
 				
 				ldx #1
 				
@@ -59,7 +62,7 @@ K.PutS			>STYA K.S.IOCTL+S.IOCTL.BUFPTR
 				ldy #S.PS.hStdOut
 				lda	(pPs),y
 				jsr K.FPutS.I
-				bcs .9
+				bcs K.PutS.9
 
 				lda #13
 				sta K.IOBuf
@@ -67,7 +70,7 @@ K.PutS			>STYA K.S.IOCTL+S.IOCTL.BUFPTR
 				sta K.IOBuf+1
 				ldx #2
 				bra K.PutChar.X
-.9				rts
+K.PutS.9		rts
 */--------------------------------------
 * # FPutS
 * Write Str to FILE
@@ -92,8 +95,10 @@ K.FPutS			pha
 				
 				pla
 				
-K.FPutS.I		jsr IO.SELECT
-				bcs *
+K.FPutS.I		jsr K.GetMemPtr
+				bcs K.PutS.9
+
+				>STYA pFD
 				
 				ldy #0		
 				ldx #0
@@ -178,14 +183,20 @@ K.SPrintF		>STYA pIOBuf			Out Buffer
 				>PULLW ZPPtr1			format
 				bra K.PrintF.1
 				
-K.FPrintF		jsr IO.SELECT			A = hFILE
+K.FPrintF		jsr K.GetMemPtr			A = hFILE
+
+
+				>STYA pFD
+
 				>PULLW ZPPtr1			format
 				bra K.PrintF.0
 
 K.PrintF		>STYA ZPPtr1			format
 				ldy #S.PS.hStdOut
 				lda	(pPs),y
-				jsr IO.SELECT
+				
+				jsr K.GetMemPtr
+				>STYA pFD
 	
 K.PrintF.0		>LDYAI K.IOBuf
 				>STYA pIOBuf
@@ -610,7 +621,10 @@ PrintF.Flush	jmp IO.Write.I
 *  Y,A: s 
 * CC = success
 *\--------------------------------------
-K.FGetS			pha
+K.FGetS			pha						save hFILE
+
+				>PULLW ZPPtr1			s
+
 				>PULLA
 				sec
 				sbc #2
@@ -621,10 +635,11 @@ K.FGetS			pha
 				eor #$ff
 				sta	ZPPtr2+1			!n
 				
-				>PULLW ZPPtr1			s
 				pla
-				jsr IO.SELECT
-				bcs .9
+				jsr K.GetMemPtr
+				bcs .99
+				
+				>STYA pFD
 
 				jsr K.GetC.I
 				bcs .9
@@ -652,7 +667,7 @@ K.FGetS			pha
 				lda #0
 				sta (ZPPtr1)
 				pla
-				rts
+.99				rts
 */--------------------------------------
 * # GetChar
 * Get char from StdIn
@@ -676,8 +691,10 @@ K.GetChar		ldy #S.PS.hStdIn
 *  CC = success
 *   A = char
 *\-----------a---------------------------
-K.GetC			jsr IO.SELECT
+K.GetC			jsr K.GetMemPtr
 				bcs K.GetC.9
+				
+				>STYA pFD
 				
 K.GetC.I		>LDYAI K.IOBuf
 				>STYA K.S.IOCTL+S.IOCTL.BUFPTR
@@ -705,7 +722,10 @@ BCDBUF			.EQ ARG
 * `int sscanf ( const char * s, const char * format, ... );`
 * ## ASM
 * **In:**
-* `>PUSHBI Argument Byte count`
+* `>PUSHW ptr`
+* `...`
+* `>PUSHBI bytecount`
+* `>PUSHWI format`
 * + %i : short int
 * + %d : byte
 * + %I : int
@@ -715,19 +735,17 @@ BCDBUF			.EQ ARG
 * + %h : HEX byte
 * + %H : HEX word
 * + %s : string
-* `>PUSHW ptr`
-* `...`
-* `>PUSHBI bytecount`
-* `>PUSHWI format`
+* TODO : %10s
 * `>LDYA s`
 * **Out:**
-* Y,A = Number of arguments filled.
+* A = Number of arguments filled.
 *\--------------------------------------
 K.SScanF		>STYA ZPPtr2			String to Scan
 				>PULLW ZPPtr1			format
 				
-				stz .5+1
-				
+				stz .5+1				reset LStack Ptr
+				stz .80+1				rest Arg processed
+
 .1				lda (ZPPtr1)			End Of format?
 				beq .8
 
@@ -735,8 +753,11 @@ K.SScanF		>STYA ZPPtr2			String to Scan
 				bne .11
 				inc ZPPtr1+1
 
-.11				cmp #'%' 				Escape?
+.11				cmp #'%' 				Escape ?
 				beq .2
+				
+				cmp #' '				Space ?
+				beq .12
 				
 				cmp (ZPPtr2)			Same char in string?
 				bne .9
@@ -745,6 +766,14 @@ K.SScanF		>STYA ZPPtr2			String to Scan
 				bne .1
 				inc ZPPtr2+1
 				bra .1
+				
+.12				inc ZPPtr2				Space....
+				bne .14
+				inc ZPPtr2+1
+
+.14				cmp (ZPPtr2)			another one ?
+				beq .12
+				bne .1
 				
 .2				lda (ZPPtr1)			Get specifier after %
 				beq .9					unexpected End of format after "%" ?
@@ -775,9 +804,11 @@ K.SScanF		>STYA ZPPtr2			String to Scan
 				sec						ByteCnt byte
 				adc (pStack)			... ByteCnt
 				sta pStack				CC
+
+.80				lda #$ff				SELF MODIFIED Arg porcessed
 .99				rts
 *--------------------------------------
-.5				lda #$FF				SELF MODIFIED
+.5				lda #$FF				SELF MODIFIED LStack Ptr
 				cmp (pStack)
 				beq .99					CS
 				
@@ -790,7 +821,8 @@ K.SScanF		>STYA ZPPtr2			String to Scan
 				lda (pStack),y
 				sta ZPPtr3+1			get VAR Ptr
 				sty .5+1
-				
+
+				inc .80+1				parsed one more arg!
 				jmp (K.SScanFJMP,x)
 *--------------------------------------
 K.SScanFTBL		.DA #'i,#1,#'d,#1,#'I,#2,#'D,#2,#'l,#4,#'u,#4,#'h,#1,#'H,#2,#'s,#2
@@ -838,15 +870,16 @@ K.SScanF.S		ldy #$ff
 				lda (ZPPtr2),y
 				sta (ZPPtr3),y
 				beq K.SScanF.Fwd
-				cmp #' '
+				eor #' '
 				bne .1
-				iny
+				sta (ZPPtr3),y
 				
 K.SScanF.Fwd	tya						Y=char count parsed
 				clc
 				adc ZPPtr2
 				sta ZPPtr2
 				bcc .8
+				clc
 				inc ZPPtr2+1
 .8				rts
 */--------------------------------------
@@ -910,16 +943,34 @@ K.FOpen			jsr PFT.CheckPathYA
 				bcc K.FOpen.10
 K.FOpen.9		rts
 
-K.FOpen.10		>LDYAI S.FD.REG
+K.FOpen.10		lda #S.FD.REG
+				sec
+				adc K.MLI.PATH
+				tay
+				lda #0
+
 				jsr K.GetMem0
 				bcs K.FOpen.9
 				
-				>STYA ZPPtr1
+				>STYA pFD
 				stx .8+1			
+				
+				ldx #0
+				ldy #S.FD.REG
+				
+.1				inx
+				lda K.MLI.PATH,x
+				sta (pFD),y
+				iny
+				cpx K.MLI.PATH
+				bne .1
+				
+				lda #0
+				sta (pFD),y
 				
 *				ldy #S.FD.T			Done by GetMem0
 *				lda #S.FD.T.REG
-*				sta (ZPPtr1),y
+*				sta (pFD),y
 				
 				jsr STDIO.SetIOBUF
 				bcs .98
@@ -929,7 +980,7 @@ K.FOpen.10		>LDYAI S.FD.REG
 				
 				lda K.MLI.PARAMS+5		get ref_num
 				ldy #S.FD.REG.REF
-				sta (ZPPtr1),y
+				sta (pFD),y
 				
 				sta K.MLI.PARAMS+1		Next MLI Calls are REF_NUM based
 				
@@ -990,16 +1041,16 @@ K.FClose		jsr PFT.CheckNodeA
 				sta .8+1
 				
 				jsr K.GetMemPtr
-				>STYA ZPPtr1
+				>STYA pFD
 
 				ldy #S.FD.REG.REF
-				lda (ZPPtr1),y
+				lda (pFD),y
 				beq .1
 				sta K.MLI.PARAMS+1
 				>MLICALL MLICLOSE
 
-.1				ldy #S.FD.REG.IOBUF				
-				lda (ZPPtr1),y
+.1				ldy #S.FD.REG.IOBUF
+				lda (pFD),y
 				beq .8
 				
 				jsr K.FreeMem
@@ -1033,7 +1084,7 @@ K.FRead			jsr PFT.CheckNodeA
 * `>PUSHW ptr`
 * `lda hFILE`
 * `>SYSCALL fwrite`
-* # Out:
+* **Out:**
 *  Y,A = Bytes Written
 *\--------------------------------------
 K.FWrite		jsr PFT.CheckNodeA
@@ -1063,24 +1114,22 @@ K.FFlush		jsr PFT.CheckNodeA
 * # FSeek
 * Set the file-position indicator for hFILE
 * ## C
-* `int fseek(hFILE stream, long offset, int whence);`
+* `int fseek(hFILE stream, long offset, short int whence);`
 * ## ASM
 * **In:**
-*  PUSHW = Ptr to Offset (DWORD)
-*  PUSHB = From
-*  PUSHB = hFILE
+* `>PUSHBI whence`
+* `>PUSHL offset`
+* `lda stream`
+* `>SYSCALL fseek`
 *\-------------------------------------
-K.FSeek			jsr PFT.CheckNodeSTK
-				>PULLA
+K.FSeek			jsr PFT.CheckNodeA
 				jsr STDIO.GetRefNum
 				>PULLA					FROM
 				tax
-				>PULLW ZPPtr1
+				>PULLW ZPPtr1			offset LW
+				>PULLW ZPPtr2			offset HW
 				cpx #SYS.FSeek.END+1
 				bcs .98
-				txa
-				asl
-				tax
 				
 				jmp (.1,x)
 				
@@ -1108,7 +1157,7 @@ K.FSeek			jsr PFT.CheckNodeSTK
 				clc
 				
 .81				lda K.MLI.PARAMS+2,y
-				adc (ZPPtr1),y
+				adc ZPPtr1,y
 				sta K.MLI.PARAMS+2,y
 
 				iny
@@ -1177,27 +1226,23 @@ K.FEOF.MARK		.BS 3
 * `long ftell(hFILE stream);`
 * ## ASM
 * **In:**
-*  PUSHW = Ptr to Offset (DWORD)
-*  PUSHB = hFILE
+* `lda stream`
+* `>SYSCALL ftell`
 * **Out:**
-*   Offset = Offset
+* On stack (long)
 *\--------------------------------------
-K.FTell			jsr PFT.CheckNodeSTK
-				>PULLA
+K.FTell			jsr PFT.CheckNodeA
 				jsr STDIO.GetRefNum
-				>PULLW ZPPtr1
 				>MLICALL MLIGETMARK
 				bcs .9
 				
-				ldy #3
-				
 				lda #0
-				sta (ZPPtr1),y
+				>PUSHA
 				
-				dey
-
+				ldy #2
+				
 .1				lda K.MLI.PARAMS+2,y
-				sta (ZPPtr1),y
+				>PUSHA
 				dey
 				bpl .1
 				
@@ -1212,13 +1257,17 @@ K.Remove		jsr PFT.CheckPathYA
 */--------------------------------------
 * # Rename
 * Rename a file
+* ## C
+* `int rename(const char *oldpath, const char *newpath);`
+* ## ASM
 * **In:**
-*  PUSHW = New Name
-*  PUSHW = Old Name
+* `>PUSHW newpath`
+* `>LDYA oldpath`
+* `>SYSCALL rename`
 * **Out:**
 *\--------------------------------------
-K.Rename		jsr PFT.CheckPathSTK
-				jsr STDIO.PullMLIPath
+K.Rename		jsr PFT.CheckPathYA
+				jsr STDIO.SetMLIPathYA
 				>PULLW .1+1
 				
 				ldy #0
@@ -1264,13 +1313,13 @@ STDIO.SetIOBUF	>LDYAI 1024				get a ProDOS IOBUF
 				>STYA K.MLI.PARAMS+3	Save Ptr to IOBUF for MLIOPEN call
 				txa
 				ldy #S.FD.REG.IOBUF
-				sta (ZPPtr1),y
+				sta (pFD),y
 .9				rts
 *--------------------------------------
 STDIO.GetRefNum	jsr K.GetMemPtr
-				>STYA ZPPtr1				
+				>STYA pFD				
 				ldy #S.FD.REG.REF
-				lda (ZPPtr1),y
+				lda (pFD),y
 				sta K.MLI.PARAMS+1
 				rts
 *--------------------------------------

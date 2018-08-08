@@ -39,19 +39,20 @@ A = DevID
 **Out:**  
 CC = OK, CS = ERROR  
 Y,A = FD  
+X = hFD  
 
 # GetDevByName  
 **In:**   
  Y,A = Ptr to device name (C-String)  
 **Out:**  
- CC = OK, CS = ERROR  
- X = DEVID  
- Y,A = FD  
+CC = OK, CS = ERROR  
+Y,A = FD  
+X = DevID  
 
 # GetDevStatus  
 
 ## C   
-`int getdevstatus ( int devid, S.DIB * dstat );`  
+`int getdevstatus ( short int hFD, S.DIB * dstat );`  
 
 ## ASM  
 **In:**   
@@ -221,13 +222,13 @@ note : if file is created on ProDOS : T=TXT,X=$0000
 # IOCTL  
 
 ## C  
-`int ioctl(int devid, int request, void * param );`  
+`int ioctl(short int hFD, int request, void * param );`  
 
 ## ASM  
 **In:**   
 `PUSHWI param`  
 `PUSHBI request`  
-`lda devid`  
+`lda hFD`  
 `>SYSCALL IOCTL`  
 **Out:**  
  Y,A = ...  
@@ -504,7 +505,7 @@ return a hFILE to a new FIFO
 Print A (char) to hFILE  
 
 ## C  
-`int fputc ( int character, hFILE stream );`  
+`int fputc ( hFILE stream , int character );`  
 
 ## ASM  
 **In:**  
@@ -667,7 +668,10 @@ Read formatted data from string
 
 ## ASM  
 **In:**  
-`>PUSHBI Argument Byte count`  
+`>PUSHW ptr`  
+`...`  
+`>PUSHBI bytecount`  
+`>PUSHWI format`  
 + %i : short int  
 + %d : byte  
 + %I : int  
@@ -678,13 +682,10 @@ Read formatted data from string
 + %H : HEX word  
 + %s : string  
 
-`>PUSHW ptr`  
-`...`  
-`>PUSHBI bytecount`  
-`>PUSHWI format`  
+TODO : %10s  
 `>LDYA s`  
 **Out:**  
-Y,A = Number of arguments filled.  
+A = Number of arguments filled.  
 
 # FOpen  
 Open a file  
@@ -750,8 +751,7 @@ Write bytes to file
 `>PUSHW ptr`  
 `lda hFILE`  
 `>SYSCALL fwrite`  
-
-# Out:  
+**Out:**  
  Y,A = Bytes Written  
 
 # FFlush  
@@ -767,13 +767,14 @@ int fflush(hFILE stream);
 Set the file-position indicator for hFILE  
 
 ## C  
-`int fseek(hFILE stream, long offset, int whence);`  
+`int fseek(hFILE stream, long offset, short int whence);`  
 
 ## ASM  
 **In:**  
- PUSHW = Ptr to Offset (DWORD)  
- PUSHB = From  
- PUSHB = hFILE  
+`>PUSHBI whence`  
+`>PUSHL offset`  
+`lda stream`  
+`>SYSCALL fseek`  
 
 # FEOF  
 Test the end-of-file indicator for hFILE  
@@ -793,18 +794,24 @@ Return the current value of the file-position indicator
 
 ## ASM  
 **In:**  
- PUSHW = Ptr to Offset (DWORD)  
- PUSHB = hFILE  
+`lda stream`  
+`>SYSCALL ftell`  
 **Out:**  
-  Offset = Offset  
+On stack (long)  
 
 # Remove  
 
 # Rename  
 Rename a file  
+
+## C  
+`int rename(const char *oldpath, const char *newpath);`  
+
+## ASM  
 **In:**  
- PUSHW = New Name  
- PUSHW = Old Name  
+`>PUSHW newpath`  
+`>LDYA oldpath`  
+`>SYSCALL rename`  
 **Out:**  
 
 # strtof  

@@ -5,11 +5,12 @@ AUTO 4,1
 *--------------------------------------
 *  PULLW = PTR to S.IPCFG
 *--------------------------------------
-CFG.Init		>LDYA L.DEVNAME
-				>SYSCALL GetDevByName
+CFG.Init		>PUSHBI 0
+				>LDYA L.DEVNAME
+				>SYSCALL open
 				bcc .1
-				inc DEVNAME+3
-				lda DEVNAME+3
+				inc DEVNAME+8
+				lda DEVNAME+8
 				cmp #'8'
 				bne CFG.Init
 
@@ -20,54 +21,25 @@ CFG.Init		>LDYA L.DEVNAME
 .9				sec
 				rts
 				
-.1				stx IPCFG+S.IPCFG.HDEV
-				
+.1				sta IPCFG+S.IPCFG.hFD
+
 				>PUSHW L.DEVNAME
 				>LDYA L.MSG.DEV.OK
 				>SYSCALL printf
 				
-				>PUSHWI 0
-				>PUSHBI IOCTL.OPEN
-				lda IPCFG+S.IPCFG.HDEV
-				>SYSCALL IOCTL
-				bcs .9
+CFG.EtcFiles	>LDYAI 256
+				>SYSCALL GetMem
+				bcc .1
+				rts
 				
-				>LDYA L.DCB.NIC
-				>STYA IOCTL+S.IOCTL.BUFPTR
-				lda #S.IOCTL.STATCODE.GETDCB
-				sta IOCTL+S.IOCTL.STATCODE
+.1				>STYA ZPTmpPtr1
+				stx CFG.hBuf
 				
-				>PUSHW L.IOCTL
-				>PUSHBI IOCTL.STATUS
-				lda IPCFG+S.IPCFG.HDEV
-				>SYSCALL IOCTL
-				bcs .9
-				
-				ldx #5
-				
-.2				lda DCB.NIC+S.DCB.NIC.MAC,x
-				sta IPCFG+S.IPCFG.MAC,x
-				sta ARP.REQ.SRCMAC,x
-				sta ARP.REQ.SHA,x
-				sta ARP.REP.SRCMAC,x
-				sta ARP.REP.SHA,x
-				dex
-				bpl .2
-				
-				ldx #3
-				
-.3				lda IPCFG+S.IPCFG.IP,x
-				sta ARP.REQ.SPA,x
-				sta ARP.REP.SPA,x
-				sta DNS.SOCKET.SA,x
-				dex
-				bpl .3
-				
-CFG.EtcFiles	>LDYA L.MSG.CFG
+				>PUSHW L.HOSTNAME
+				>LDYA L.MSG.CFG
 				>SYSCALL printf
 
 				jsr CFG.Read.HOSTNAME
-				jsr CFG.Read.Result
 
 				lda IPCFG+S.IPCFG.HOSTNAME
 				bne .4
@@ -75,7 +47,7 @@ CFG.EtcFiles	>LDYA L.MSG.CFG
 				ldy #$ff
 				
 .2				iny
-				lda DefaultHostName,y
+				lda CFG.DefaultHost,y
 				sta IPCFG+S.IPCFG.HOSTNAME,y
 				bne .2
 			
@@ -94,137 +66,273 @@ CFG.EtcFiles	>LDYA L.MSG.CFG
 				>SYSCALL printf
 
 				jsr CFG.Read.TCPIP.CONF
-				jsr CFG.Read.Result
 				
-				>PUSHW L.HOSTS
+				lda IPCFG+S.IPCFG.IP
+				beq .5
+				
+				lda #S.IPCFG.STATUS.OK
+				sta IPCFG+S.IPCFG.STATUS
+				
+.5				>PUSHW L.HOSTS
 				>LDYA L.MSG.CFG
 				>SYSCALL printf
 
 				jsr CFG.Read.HOSTS
-				jsr CFG.Read.Result
 
-				jmp SET.IPCFG.I	
-*--------------------------------------
-CFG.Read.Result	bcc .1
-				>PUSHA
-				>LDYA L.MSG.CFG.KO
-				bra .2
-.1				>LDYA L.MSG.CFG.OK
-.2				>SYSCALL printf
-				rts
+				jsr SET.IPCFG.I
+				
+				lda CFG.hBuf
+				>SYSCALL freemem
+				
+.9				rts				
 *--------------------------------------
 CFG.Read.HOSTNAME
 				>LDYA L.HOSTNAME
-				jsr CFG.Read.LoadFile
+				jsr CFG.Read.Open
+				jsr CFG.Read.Result
 				bcs .9
 				
-* read 15 chars MAX, until CR or EOF
-
-				ldx #$15
-				lda CFG.FileLen+1
-				bne .1					File is more than 256....?
+.1				jsr CFG.Read.GetS
+				bcs .8
 				
-				ldx CFG.FileLen
-				beq .9					len is 0 !!!
+				lda (ZPTmpPtr1)
+				beq .1					empty line...
+				cmp #'#
+				beq .1					comment...
 				
-.1				ldy #0
+				ldy #0
 
 .2				lda (ZPTmpPtr1),y
-				cmp #13
-				beq .8					A CR, end of name
-				
 				sta IPCFG+S.IPCFG.HOSTNAME,y
+				beq .8					end of name
+				
 				iny
-				dex
+				cpy #15
 				bne .2
 				
-.8				lda #0
-				sta IPCFG+S.IPCFG.HOSTNAME,y
-
-				jsr CFG.Read.CleanUp
-				clc
-				rts
-				
-.9				jsr CFG.Read.CleanUp
-				sec
-				rts
+.8				clc
+				.HS B0					BCS
+.9				sec
+				jmp CFG.Read.Close
 *--------------------------------------
 CFG.Read.TCPIP.CONF
 				>LDYA L.TCPIP.CONF
-				jsr CFG.Read.LoadFile
+				jsr CFG.Read.Open
+				jsr CFG.Read.Result
 				bcs .9
-
-.1				jsr CFG.GetLine
+				
+.1				jsr CFG.Read.GetS
 				bcs .8
 				
-				jsr CFG.GetKeyword
-				bcs .1
+				lda (ZPTmpPtr1)
+				beq .1					empty line...
+				cmp #'#
+				beq .1					comment...
+				
+				ldy #$ff
 
-				lda CFG.Keyword
-				bne .3
-				
-				ldy UsrBuf256
-
-				lda UsrBuf256+1,y
-				cmp #35					DOMAIN too long!!!
-				bcs .1
-				
-				sta IPCFG+S.IPCFG.DOMAIN
-				ldx #0
-				
-.2				lda UsrBuf256+2,y
-				sta IPCFG+S.IPCFG.DOMAIN,x
-				beq .1
-				inx
-				iny
+.2				iny
+				lda (ZPTmpPtr1),y
+				beq .3
+				cmp #' '
 				bne .2
+				
+.3				lda L.CFG.Keywords
+				sta ZPTmpPtr2
+				lda L.CFG.Keywords+1
+				sta ZPTmpPtr2+1
+				
+				ldx #0
+
+.4				phy						save keyword len
+
+				tya
+				cmp (ZPTmpPtr2)
+				bne .6
+				
+.5				lda (ZPTmpPtr2),y
+				dey
+				cmp (ZPTmpPtr1),y
+				bne .6
+				tya
+				bne .5
+				
+				ply						discard keyword len
+				jsr .80
 				bra .1
 				
-.9				jsr CFG.Read.CleanUp
+.6				lda (ZPTmpPtr2)
 				sec
+				adc ZPTmpPtr2
+				sta ZPTmpPtr2
+				bcc .7
+				inc ZPTmpPtr2+1
+				
+.7				inx
+				inx
+				ply						reset keyword len
+				
+				lda (ZPTmpPtr2)
+				bne .4
+				
+				bra .1
+				
+.8				clc
+				.HS B0					BCS
+.9				sec
+				jmp CFG.Read.Close
+				
+.80				jmp (J.CFG.Keywords,x)
+*--------------------------------------
+CFG.Read.address
+				ldx #S.IPCFG.IP+3
+				bra CFG.Read.IP
+CFG.Read.netmask
+				ldx #S.IPCFG.MASK+3
+				bra CFG.Read.IP
+CFG.Read.gateway
+				ldx #S.IPCFG.GW+3
+				bra CFG.Read.IP
+CFG.Read.nameserver
+				ldx #S.IPCFG.DNS1+3
+				lda IPCFG,x
+				beq CFG.Read.IP
+				ldx #S.IPCFG.DNS2+3
+				
+CFG.Read.IP		ldy #3
+
+.1				txa
+				clc
+				adc L.IPCFG
+				pha
+				lda L.IPCFG+1
+				adc #0
+				>PUSHA					@IP[3][2][1][0]
+				pla
+				>PUSHA
+				dex
+				dey
+				bpl .1
+								
+				>PUSHBI 8				4 PTRs on stack
+				>PUSHW L.HST.SScanF
+				
+				lda (ZPTmpPtr2)
+				sec
+				adc ZPTmpPtr1
+				tay
+				
+				lda ZPTmpPtr1+1
+				adc #0
+
+				>SYSCALL SScanF
 				rts
 
-.3				jsr CFG.ScanIP
-				bcs .1
+CFG.Read.dnsdomain
+				lda (ZPTmpPtr2)
+				sec
+				adc ZPTmpPtr1
+				sta ZPTmpPtr1
+				bcc .1
+				inc ZPTmpPtr1+1
+
+.1				ldy #$ff
 				
-				ldy CFG.Keyword
-				lda CFG.Keyword.Map,y
-				tax
-				ldy #0
-				
-.4				lda CFG.IP+1,y
-				sta IPCFG,x
-				inx
-				iny
-				cpy #4
-				bne .4
-				lda CFG.Keyword
-				cmp #1
-				bne .1
-				lda #S.IPCFG.STATUS.OK
-				sta IPCFG
-				bra .1
-				
-.8				jsr CFG.Read.CleanUp
-				clc
-				rts
+.2				iny
+				lda (ZPTmpPtr1),y
+				sta IPCFG+S.IPCFG.DOMAIN,y
+				beq .8
+				cpy #K.DNS.MAXLEN
+				bne .2
+				lda #0
+				sta IPCFG+S.IPCFG.DOMAIN,y
+.8				rts
+*--------------------------------------
+
 *--------------------------------------
 CFG.Read.HOSTS	>LDYA L.HOSTS
-				
-				jsr CFG.Read.LoadFile
+				jsr CFG.Read.Open
+				jsr CFG.Read.Result
 				bcs .9
-			
-
-.8				jsr CFG.Read.CleanUp
-				clc
-				rts				
 				
-.9				jsr CFG.Read.CleanUp
-				sec
+.1				jsr CFG.Read.GetS
+				bcs .8
+				
+				lda (ZPTmpPtr1)
+				beq .1					empty line...
+				cmp #'#
+				beq .1					comment...
+				
+				jsr CFG.Read.HOSTS.Scan
+				bcs .1
+				
+				cmp #5
+				bcc	.1					less than 5 parameters, ignore
+				beq .2					no alias
+				
+				>LDYA L.CFG.ALIAS
+				jsr CFG.DNS.Add
+
+.2				>LDYA L.CFG.HOSTNAME
+				jsr CFG.DNS.Add				
+				
+				bra .1
+
+.8				clc
+				.HS B0					BCS
+.9				sec
+				jmp CFG.Read.Close
+*--------------------------------------
+CFG.Read.HOSTS.Scan
+				>PUSHW L.CFG.ALIAS
+				>PUSHW L.CFG.HOSTNAME
+				
+				ldx #3
+				
+.2				txa
+				clc
+				adc L.CFG.IP
+				tay
+				lda L.CFG.IP+1
+				adc #0
+				>PUSHYA					@IP[3][2][1][0]
+
+				dex
+				bpl .2
+								
+				>PUSHBI 12				6 PTRs on stack
+				>PUSHW L.CFG.HOSTS.SScanF
+				>LDYA ZPTmpPtr1
+
+				>SYSCALL SScanF
 				rts
 *--------------------------------------
-CFG.Read.LoadFile
-				stz CFG.hCfgFile
+CFG.DNS.ADD		>STYA ZPTmpPtr1
+
+				>LDYA L.CFG.IP
+				>STYA ZPTmpPtr2
+				
+				>PUSHYA
+				>PUSHW ZPTmpPtr1
+				jsr DNS.Add
+
+				>PUSHW ZPTmpPtr1
+				
+				ldy #3
+				
+.1				lda (ZPTmpPtr2),y
+				>PUSHA
+				dey
+				bpl .1
+				
+				>LDYA L.MSG.DNS.ADD
+				bcc .8
+				>LDYA L.MSG.DNS.ERR
+.8				>SYSCALL printf
+								
+				rts
+*--------------------------------------
+CFG.Read.Open	stz CFG.hCfgFile
 				stz CFG.hCfgPath
 				
 				>SYSCALL ExpandStr
@@ -233,21 +341,19 @@ CFG.Read.LoadFile
 				stx CFG.hCfgPath
 				pha
 				
-				>PUSHWI 0				Aux type
-				>PUSHBI 4				S.FI.T.TXT
+				>PUSHWI 0
+				>PUSHBI 6				S.FI.T.TXT
 				>PUSHBI	SYS.FOpen.R
+				
 				pla
-				>SYSCALL LoadFile
+				>SYSCALL fopen
 				bcs .9
 				
-				stx CFG.hCfgFile
-				>STYA CFG.FileLen
-				txa
-				>SYSCALL GetMemPtr
-				>STYA ZPTmpPtr1
-.9				rts
+				sta CFG.hCfgFile
+*				clc				
+.9				rts				
 *--------------------------------------
-CFG.Read.CleanUp
+CFG.Read.Close	php
 				pha
 				lda CFG.hCfgPath
 				beq .1
@@ -255,168 +361,28 @@ CFG.Read.CleanUp
 				
 .1				lda CFG.hCfgFile
 				beq .8
-				>SYSCALL FreeMem
+				>SYSCALL fclose
 				
 .8				pla
+				plp
 				rts
 *--------------------------------------
-CFG.GetLine		stz UsrBuf256
-				ldx #0
-				ldy #0
-				
-.1				jsr CFG.GetChar
-				bne .2					end of file?
-				txa
-				bne .8
-				sec
-				rts
-				
-.2				cmp #$0D
-				beq .8					end of line
-				inx
-				sta UsrBuf256,x
-				cmp #'='
-				bne .3
-				txa
-				dec
-				tay
-.3				cpx #64					line too long ?
-				bne .1
-				sec
-				rts
-				
-.8				tya						= found ?
-				beq .9
-				
-				sta UsrBuf256
-				txa
-				sec
-				sbc UsrBuf256
-				sta UsrBuf256+1,y
-				stz UsrBuf256+1,x	End with 0 for ScanIP
-				clc
-				rts
-				
-.9				sec
-				rts		
-*--------------------------------------
-CFG.GetChar		lda CFG.FileLen
-				bne .1
-				lda CFG.FileLen+1
-				beq .9
-				dec CFG.FileLen+1
-.1				dec CFG.FileLen
-				lda (ZPTmpPtr1)
-				inc ZPTmpPtr1
-				bne .9
-				inc ZPTmpPtr1+1			NZ
-.9				rts				
-*--------------------------------------
-CFG.GetKeyword	stz CFG.Keyword
-				
-				ldx #0
-				
-.1				phx
-				ldy #0
-				
-.2				lda CFG.Keywords,x
-				cmp UsrBuf256,y
-				bne .3
-				cpy UsrBuf256
-				beq .4
-				inx
-				iny
-				bne .2
-				plx
-				sec
-				rts
-				
-.3				inc CFG.Keyword
-				plx
-				txa
-				sec
-				adc CFG.Keywords,x
-				tax
-				lda CFG.Keywords,x
-				bne .1
-				sec
-				rts
-				
-.4				plx
-				clc
-				rts
-*--------------------------------------
-CFG.ScanIP		stz CFG.IP
-
-				ldx UsrBuf256
-				
-.1				ldy #0
-.11				lda UsrBuf256+2,x
-				beq .3
-				cmp #'0'
-				bcc .2
-				cmp #'9'+1
-				bcs .2
-				cpy #3
-				beq .9
-				iny
-				sta CFG.StrBuf,y
-				inx
-				bra .11
-				
-.2				cmp #'.'
-				bne .9
-				
-.3				sty CFG.StrBuf
-				lda CFG.IP
-				cmp #4
-				beq .9
-				jsr CFG.Dec2Hex
-				bcs .9
-				lda CFG.HexByte
-				inc CFG.IP
-				ldy CFG.IP
-				sta CFG.IP,y
-				inx
-				lda UsrBuf256+1,x
-				bne .1
-				clc
-				rts
-				
-.9				sec
-				rts
-*--------------------------------------
-CFG.Dec2Hex		sec
-				ldy CFG.StrBuf
-				beq .9
-				
-				lda CFG.StrBuf+1
-				and #$0f
-				sta CFG.HexByte
-				
-				ldy #1
-				
-.1				cpy CFG.StrBuf
-				beq .8
-				iny
-				lda CFG.HexByte
-				asl CFG.HexByte
-				bcs .9
-				asl CFG.HexByte
-				bcs .9
-				adc CFG.HexByte
-				bcs .9
-				asl
-				bcs .9
-				sta CFG.HexByte
-				lda CFG.StrBuf,y
-				and #$0f
-				adc CFG.HexByte
-				sta CFG.HexByte
+CFG.Read.Result	php
 				bcc .1
-.9				rts
+				>PUSHA
+				>LDYA L.MSG.CFG.KO
+				bra .2
 				
-.8				clc
+.1				>LDYA L.MSG.CFG.OK
+.2				>SYSCALL printf
+				
+				plp
+				rts
+*--------------------------------------
+CFG.Read.GetS	>PUSHWI 255
+				>PUSHW ZPTmpPtr1
+				lda CFG.hCfgFile
+				>SYSCALL fgets
 				rts
 *--------------------------------------
 CFG.A2CharAX	pha
@@ -447,7 +413,38 @@ SET.IPCFG		>PULLW ZPTmpPtr1		IPCFG
 				cpy #S.IPCFG
 				bne .1
 				
-SET.IPCFG.I		lda DCB.NIC+S.DCB.NIC.FLAGS
+SET.IPCFG.I		>LDYA L.DCB.NIC
+				>STYA IOCTL+S.IOCTL.BUFPTR
+				lda #S.IOCTL.STATCODE.GETDCB
+				sta IOCTL+S.IOCTL.STATCODE
+				
+				>PUSHW L.IOCTL
+				>PUSHBI IOCTL.STATUS
+				lda IPCFG+S.IPCFG.hFD
+				>SYSCALL IOCTL
+				bcs *
+								
+				ldx #5
+
+.10				lda DCB.NIC+S.DCB.NIC.MAC,x
+				sta IPCFG+S.IPCFG.MAC,x
+				sta ARP.REQ.SRCMAC,x
+				sta ARP.REQ.SHA,x
+				sta ARP.REP.SRCMAC,x
+				sta ARP.REP.SHA,x
+				dex
+				bpl .10
+				
+				ldx #3
+				
+.11				lda IPCFG+S.IPCFG.IP,x
+				sta ARP.REQ.SPA,x
+				sta ARP.REP.SPA,x
+				sta DNS.SOCKET.SA,x
+				dex
+				bpl .11
+				
+				lda DCB.NIC+S.DCB.NIC.FLAGS
 				and #S.DCB.NIC.FLAGS.ARPOFFLOAD
 				beq .2
 				
@@ -463,7 +460,7 @@ SET.IPCFG.I		lda DCB.NIC+S.DCB.NIC.FLAGS
 
 				>PUSHW L.IOCTL
 				>PUSHBI IOCTL.CONTROL
-				lda IPCFG+S.IPCFG.HDEV
+				lda IPCFG+S.IPCFG.hFD
 				>SYSCALL IOCTL
 				bcs .9
 				
