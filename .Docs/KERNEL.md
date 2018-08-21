@@ -325,32 +325,32 @@ Return float rounded into a long
  A = hMem To Free  
 **Out:**  
  none.  
- (X,Y unmodified)  
+ (X unmodified)  
 
 # GetMemPtr  
 **In:**  
- A = hMem  
+A = hMem  
 **Out:**  
- Y,A = PTR to MemBlock  
- (X unmodified)  
+Y,A = PTR to MemBlock  
+(X unmodified)  
 
 # GetMemByID  
 **In:**  
- A = hMem  
+A = hMem  
 **Out:**  
- Y,A = ZPMemMgrSPtr = PTR to S.MEM  
- X unmodified  
+Y,A = ZPMemMgrSPtr = PTR to S.MEM  
+(X unmodified)  
 
 # NewStr  
 Create a new copy of this C-String  
 **In:**  
- Y,A = Ptr to source C-String  
+Y,A = Ptr to source C-String  
 **Out:**  
- CC : success   
-  Y,A = PTR to String  
-  X = hMem (PSTR)  
- CS : error  
-  A = SYS error code  
+CC : success   
+ Y,A = PTR to String  
+ X = hMem (PSTR)  
+CS : error  
+ A = SYS error code  
 
 # SListGetByID  
 **In:**  
@@ -883,7 +883,7 @@ Convert String to 16 bits int
 **Out:**  
  Y,A = int  
 
-# realpath  
+# RealPath  
 Return the canonicalized absolute pathname  
 
 ## C  
