@@ -1,6 +1,16 @@
 NEW
 PREFIX /A2OSX.BUILD
 AUTO 4,1
+*--------------------------------------
+*K.PrintF.PadL	.BS 1
+*K.PrintF.PadC	.BS 1
+*HEXBUF			.BS 4
+*BCDBUF			.BS 5					5, enough to handle 10 digits (32bits)
+*--------------------------------------
+HEXBUF			.EQ FAC
+K.PrintF.PadL	.EQ FAC+4
+K.PrintF.PadC	.EQ FAC+5
+BCDBUF			.EQ ARG
 */--------------------------------------
 * # FPutC
 * Print A (char) to hFILE
@@ -184,8 +194,6 @@ K.SPrintF		>STYA pIOBuf			Out Buffer
 				bra K.PrintF.1
 				
 K.FPrintF		jsr K.GetMemPtr			A = hFILE
-
-
 				>STYA pFD
 
 				>PULLW ZPPtr1			format
@@ -205,6 +213,8 @@ K.PrintF.0		>LDYAI K.IOBuf
 K.PrintF.1		stz K.S.IOCTL+S.IOCTL.BYTECNT
 				stz K.S.IOCTL+S.IOCTL.BYTECNT+1
 
+				stz PrintF.GetByte+1
+				
 				ldy	#0				
 
 .1				lda (ZPPtr1),y
@@ -261,9 +271,10 @@ K.PrintF.1		stz K.S.IOCTL+S.IOCTL.BYTECNT
 				jsr PrintF.ESC
 				ply
 				bcc .1
-				rts
+				bcs .99
 				
-.8				jmp PrintF.Flush		
+.8				jsr PrintF.Flush		
+				bra .99
 
 .10				cmp #'\'
 				bne .20
@@ -283,7 +294,16 @@ K.PrintF.1		stz K.S.IOCTL+S.IOCTL.BYTECNT
 
 .20				jsr	PrintF.COut
 				bcc	.1
-.99				rts
+				
+.99				php
+				pha
+				lda pStack
+				sec						ByteCnt byte
+				adc (pStack)			... ByteCnt
+				sta pStack				CC
+				pla
+				plp
+				rts
 *--------------------------------------
 PrintF.ESC		jmp	(.1,x)
 .1				.DA PrintF.B,PrintF.BB
@@ -300,14 +320,16 @@ PrintFTBL2.OUT	.HS 08.1B.0C.0A.0D		\b\e\f\n\r
 				.DA #'\'				\\
 				.DA #'%'				\%
 *--------------------------------------
-PrintF.BB		>PULLA
+PrintF.BB		jsr PrintF.GetByte
+				bcs PrintF.BB.RTS
 				pha
 				jsr PrintF.B
 				pla
 				bcc PrintF.B.1
 PrintF.BB.RTS	rts
 *--------------------------------------
-PrintF.B		>PULLA
+PrintF.B		jsr PrintF.GetByte
+				bcs PrintF.BB.RTS
 				
 PrintF.B.1		ldx #8
 				
@@ -327,7 +349,10 @@ PrintF.I		sec						signed short
 PrintF.D		clc						unsigned short (BYTE)
 				ldx #0					one byte
 				
-				>PULLB HEXBUF
+				jsr PrintF.GetByte
+				bcs PrintF.BB.RTS
+				sta HEXBUF
+				
 				stz HEXBUF+1
 				bra PrintF.DD.1
 				
@@ -336,7 +361,13 @@ PrintF.II		sec						signed int
 PrintF.DD		clc						unsigned int (WORD)
 				ldx #1					two bytes
 				
-				>PULLW HEXBUF
+				jsr PrintF.GetByte
+				bcs PrintF.BB.RTS
+				sta HEXBUF
+
+				jsr PrintF.GetByte
+				bcs PrintF.BB.RTS
+				sta HEXBUF+1
 
 PrintF.DD.1		stz HEXBUF+2
 				stz HEXBUF+3
@@ -345,10 +376,18 @@ PrintF.DD.1		stz HEXBUF+2
 PrintF.L		sec						signed long
 				.HS 90					BCC
 PrintF.U		clc						unsigned long (DWORD)
-				ldx #3					4 bytes
+
+				ldx #$ff
 				
-				>PULLW HEXBUF
-				>PULLW HEXBUF+2
+.1				jsr PrintF.GetByte
+				bcs PrintF.BB.RTS
+				inx
+				sta HEXBUF,x
+
+				cpx #3
+				bne .1
+				
+*				ldx #3					4 bytes
 				
 PrintF.U.1		bcc PrintF.Hex2Dec		unsigned, nothing to check
 		
@@ -463,16 +502,11 @@ PrintF.Hex2Dec	ror	.31+1
 PrintF.E		sec						Force "E+12"
 				.HS 90					BCC
 PrintF.F		clc
-				lda pStack+1
-				sta INDEX+1
-				
-				lda pStack
-				sta INDEX
-				
-				clc
-				adc #5
-				sta pStack
-				
+
+				jsr PrintF.GetFloatPtrYA
+				bcs .9
+				>STYA INDEX
+								
 				ldx #ROM.SETFAC
 				jsr GP.ROMCALL
 				
@@ -494,23 +528,28 @@ PrintF.F		clc
 			
 .9				rts
 *--------------------------------------
-PrintF.HH		>PULLA
+PrintF.HH		jsr PrintF.GetByte
+				bcs PrintF.H.9
 				pha
 				jsr PrintF.H
 				pla
 				bra PrintF.H.1
 *--------------------------------------
-PrintF.H		>PULLA
+PrintF.H		jsr PrintF.GetByte
+				bcs PrintF.H.9
 PrintF.H.1		pha
 				jsr PrintF.NN.1
 				pla
 				bra PrintF.N.1
+PrintF.H.9		rts
 *--------------------------------------
-PrintF.N		>PULLA
+PrintF.N		jsr PrintF.GetByte
+				bcs PrintF.H.9
 PrintF.N.1		and #$0F
 				bra PrintF.NN.2
 
-PrintF.NN		>PULLA
+PrintF.NN		jsr PrintF.GetByte
+				bcs PrintF.H.9
 PrintF.NN.1		lsr
 				lsr
 				lsr
@@ -526,7 +565,13 @@ PrintF.S		ldy #$ff				CSTR
 				.HS 2C					bit abs
 PrintF.SS		ldy #$00				PSTR
 
-				>PULLW ZPPtr2
+				jsr PrintF.GetByte
+				bcs .9
+				sta ZPPtr2
+				
+				jsr PrintF.GetByte
+				bcs .9
+				sta ZPPtr2+1
 			
 				lda (ZPPtr2)			if CSTR:last char=0, if PSTR:len=0
 				beq .8
@@ -569,6 +614,42 @@ PrintF.SS		ldy #$00				PSTR
 				bne .3
 				
 .8				clc
+.9				rts
+*--------------------------------------
+PrintF.GetFloatPtrYA
+				lda PrintF.GetByte+1
+				clc
+				adc #5
+				cmp (pStack)
+				bcc .9
+				
+				pha						Save new Ptr
+				
+				lda PrintF.GetByte+1
+*				sec
+				adc pStack
+				tay
+				
+				pla
+				sta PrintF.GetByte+1
+				
+				lda pStack+1
+*				clc
+				rts
+				
+.9				sec
+				rts
+*--------------------------------------
+PrintF.GetByte	lda #$FF				SELF MODIFIED LStack Ptr
+				cmp (pStack)
+				beq .9					CS
+				phy
+				tay
+				iny
+				lda (pStack),y
+				sty PrintF.GetByte+1
+				ply
+*				clc
 .9				rts
 *--------------------------------------
 PrintF.COut		phy
@@ -705,16 +786,6 @@ K.GetC.I		>LDYAI K.IOBuf
 				bcs K.GetC.9
 				lda K.IOBuf
 K.GetC.9		rts				
-*--------------------------------------
-*K.PrintF.PadL	.BS 1
-*K.PrintF.PadC	.BS 1
-*HEXBUF			.BS 4
-*BCDBUF			.BS 5					5, enough to handle 10 digits (32bits)
-*--------------------------------------
-HEXBUF			.EQ FAC
-K.PrintF.PadL	.EQ FAC+4
-K.PrintF.PadC	.EQ FAC+5
-BCDBUF			.EQ ARG
 */--------------------------------------
 * # SScanF
 * Read formatted data from string
@@ -737,6 +808,7 @@ BCDBUF			.EQ ARG
 * + %s : string
 * TODO : %10s
 * `>LDYA s`
+* `>SYSCALL sscanf`
 * **Out:**
 * A = Number of arguments filled.
 *\--------------------------------------
@@ -1009,11 +1081,11 @@ K.FOpen.10		lda #S.FD.REG
 				
 				lda #$FF
 				sta K.MLI.PARAMS+2
-				lda #$0D
+				lda #C.CR
 				sta K.MLI.PARAMS+3
 				>MLICALL MLINEWLINE				
 				
-.8				lda #$ff				Self Modified
+.8				lda #$ff				Self Modified, hFD
 				clc
 				rts						CC
 
