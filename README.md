@@ -298,7 +298,7 @@ note : '$VAR' does NOT expand Variable
 | ---- | ------ | ------- | ----- |
 | LanCeGS.DRV | Working | | 0.9.1 |
 | Uthernet.DRV  | Working | | 0.92 |
-| Uthernet2.DRV | Working | | 0.9.1 |
+| Uthernet2.DRV | Working | | 0.92 |
 | Uther2.AI.DRV | In Progress | With ARP/IP Offloading | 0.9 |
 
 ## BIN,External Shell commands:
@@ -351,8 +351,8 @@ note : '$VAR' does NOT expand Variable
 ## DEV tools:
 | Name | Status | Comment | K.Ver |
 | ---- | ------ | ------- | ----- |
+| MEMDUMP | Working | Tool to track memory leak| 0.92 |
 | ASM | In Progress | S-C MASM based multi CPU assembler | 0.9.1 |
-| MEMDUMP | Working | | 0.9.1 |
 | ---- | ------ | ------- | ----- |
 | RPCDUMP | Working | tool based on UDP socket API, renamed from RPCINFO | 0.9.1 |
 

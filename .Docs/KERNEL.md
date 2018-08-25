@@ -684,6 +684,7 @@ Read formatted data from string
 
 TODO : %10s  
 `>LDYA s`  
+`>SYSCALL sscanf`  
 **Out:**  
 A = Number of arguments filled.  
 
