@@ -214,10 +214,45 @@ Load a file in memory
 A = hFD  
 note : if file is created on ProDOS : T=TXT,X=$0000  
 
+# close  
+
+## C  
+`int close(hFD fd);`  
+
+## ASM  
+**In:**  
+`lda fd`  
+`>SYSCALL close`  
+
 # read  
 
 ## C  
-`int read(int fd, void *buf, size_t count);`  
+`int read(hFD fd, void *buf, int count);`  
+
+## ASM  
+**In:**  
+`>PUSHWI count`  
+`>PUSHW buf`  
+`lda fd`  
+`>SYSCALL read`  
+**Out:**  
+CC: Y,A = bytes read  
+CS: A = EC  
+
+# write  
+
+## C  
+`int write(hFD fd, const void *buf, int count);`  
+
+## ASM  
+**In:**  
+`>PUSHWI count`  
+`>PUSHW buf`  
+`lda fd`  
+`>SYSCALL write`  
+**Out:**  
+CC: Y,A = bytes written  
+CS: A = EC  
 
 # IOCTL  
 

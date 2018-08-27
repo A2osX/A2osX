@@ -330,13 +330,13 @@ note : '$VAR' does NOT expand Variable
 | | | -1..9 : Catalog Size (block count) | |
 | CHTYP | Working | -C : Continue On Error | 0.92 |
 | | | -R : Recurse subdirectories | |
+| MD5 | Working | -D : String Input | 0.92 |
 | CHMOD | In Progress | -C : Continue On Error | 0.9 |
 | | | -R : Recurse subdirectories | |
 | CHOWN | In Progress | -C : Continue On Error | 0.9 |
 | | | -R : Recurse subdirectories | |
 | CHGRP | In Progress | -C : Continue On Error | 0.9 |
 | | | -R : Recurse subdirectories | |
-| MD5 | In Progress | -D : String Input | 0.92 |
 | NSCUTIL | Working | Tool for setting time in NSC/DL1216E | 0.9 |
 
 ## Network (TCPIP) tools:
@@ -347,6 +347,7 @@ note : '$VAR' does NOT expand Variable
 | ARP | Working | dump ARP cache, setup a static ARP entry | 0.92 |
 | DNSINFO | Working | dump DNS cache, setup a static DNS entry | 0.92 |
 | PING | Working | | 0.92 |
+| TELNET | In Progress | | 0.92 |
 
 ## DEV tools:
 | Name | Status | Comment | K.Ver |
@@ -354,7 +355,7 @@ note : '$VAR' does NOT expand Variable
 | MEMDUMP | Working | Tool to track memory leak| 0.92 |
 | ASM | In Progress | S-C MASM based multi CPU assembler | 0.9.1 |
 | ---- | ------ | ------- | ----- |
-| RPCDUMP | Working | tool based on UDP socket API, renamed from RPCINFO | 0.9.1 |
+| RPCDUMP | In Progress | tool based on UDP socket API, renamed from RPCINFO | 0.9.1 |
 
 ## Misc
 

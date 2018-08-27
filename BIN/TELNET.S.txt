@@ -12,11 +12,10 @@ AUTO 4,1
 				.INB INC/LIBTCPIP.I
 *--------------------------------------
 TIMEOUT.MAX		.EQ 20					2 sec.
+BUFSIZE			.EQ 256
 *--------------------------------------
-ZPFrameBase		.EQ ZPBIN
-ZPFrameLen		.EQ ZPBIN+2
-ZPFramePtr1		.EQ ZPBIN+4
-ZPIPCfgPtr		.EQ ZPBIN+6
+ZPIPCfgPtr		.EQ ZPBIN
+ZPBufPtr		.EQ ZPBIN+2
 *--------------------------------------
 *			File Header (16 Bytes)
 *--------------------------------------
@@ -28,7 +27,7 @@ CS.START		cld
 				.DA CS.END-CS.START		Code Length To Relocate
 				.DA DS.END-DS.START		Data Segment to Allocate
 				.DA #16					SS
-				.DA #8					ZP
+				.DA #2					ZP
 				.DA 0
 *--------------------------------------
 .1				.DA CS.INIT
@@ -42,6 +41,7 @@ L.MSG.USAGE		.DA MSG.USAGE
 L.MSG.UNKNOWN	.DA MSG.UNKNOWN
 L.MSG.HOSTOK	.DA MSG.HOSTOK
 L.MSG.SKTKO		.DA MSG.SKTKO
+L.MSG.SKTOK		.DA MSG.SKTOK
 				.DA 0
 *--------------------------------------
 CS.INIT			>LDYA L.LIBTCPIP
@@ -76,7 +76,7 @@ CS.RUN.IPOK		ldy #S.PS.ARGC
 				
 				jsr Init.Timeout
 
-.2				>PUSHW pData			DST.IP
+.2				>PUSHEA.G DST.IP
 				lda #1
 				>SYSCALL GetArg
 				>PUSHYA
@@ -93,6 +93,7 @@ CS.RUN.IPOK		ldy #S.PS.ARGC
 				bra .99
 				
 .9				>LDYA L.MSG.USAGE
+
 .99				>SYSCALL puts
 				lda #K.E.SYN
 				sec				
@@ -133,10 +134,60 @@ CS.RUN.OPENSKT	ldx #3
 				>SYSCALL puts
 				lda #K.E.SYN
 				sec				
-				rts
+.9				rts
 				
 .2				txa
 				>STA.G hSocket
+
+				>LDYA L.MSG.SKTOK
+				>SYSCALL puts
+				
+				>LDYAI BUFSIZE
+				>SYSCALL getmem
+				bcs .9
+				>STYA ZPBufPtr
+				txa
+				>STA.G hBuf
+
+CS.RUN.LOOP		>PUSHB.G hSocket
+				>PUSHW ZPBufPtr
+				>PUSHWI BUFSIZE
+				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.Read
+				bcc .1
+				
+				tay
+				beq .2					no char
+				rts
+				
+.1				>PUSHYA					len
+				>PUSHW ZPBufPtr
+				ldy #S.PS.hStdOut
+				lda (pPs),y
+				>SYSCALL write
+				bcs CS.RUN.ERR
+				
+.2				>PUSHWI BUFSIZE			
+				>PUSHW ZPBufPtr
+				ldy #S.PS.hStdIn
+				lda (pPs),y
+				>SYSCALL read
+				bcc .3
+				tay
+				beq CS.RUN.LOOP
+				rts
+				
+.3				phy
+				pha
+				>PUSHB.G hSocket
+				>PUSHW ZPBufPtr
+				pla
+				>PUSHA
+				pla
+				>PUSHA
+				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.Write
+				bcs CS.RUN.ERR
+				
+				jmp CS.RUN.LOOP
 				
 .9				lda #0
 				sec
@@ -161,7 +212,12 @@ CS.QUIT			ldy #hSocket
 
 				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.Close
 				
-.1				lda hLIBTCPIP
+.1				>LDA.G hBuf
+				beq .2
+				
+				>SYSCALL freemem
+				
+.2				lda hLIBTCPIP
 				>SYSCALL UnloadLib
 				clc
 				rts
@@ -181,13 +237,14 @@ Wait.TimeOut	sec
 *--------------------------------------
 CS.END
 LIBTCPIP		.AZ "libtcpip.o"
+hLIBTCPIP		.BS 1
 MSG.IPKO		.AZ "TCP/IP Not Loaded/Configured."
 MSG.USAGE		.AZ "Usage : TELNET <ip|host> [port]"
 MSG.UNKNOWN		.AZ "%s: Unknown host\r\n"
 MSG.HOSTOK		.AZ "Connecting to %d.%d.%d.%d (%s) ...\r\n"
 MSG.SKTKO		.AZ "Failed to Open Socket."
-hLIBTCPIP		.BS 1
-TimeOut.ms		.BS 2
+MSG.SKTOK		.AZ "Connected."
+*--------------------------------------
 Socket			.DA #S.SOCKET.SOCK.STREAM
 				.BS 1
 				.DA #S.IP.PROTOCOL.TCP
@@ -201,6 +258,7 @@ Socket.Dst.Port	.DA TCP.PORT.TELNET
 				.OR 0
 DS.START
 DST.IP			.BS 4
+hBuf			.BS 1
 hSocket			.BS 1
 TimeOut			.BS 1
 DS.END
