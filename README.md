@@ -296,10 +296,10 @@ note : '$VAR' does NOT expand Variable
 | Mouse.DRV | Working | Apple Mouse Card,//c Mouse Port | 0.9.1 |
 | DHGR.DRV | Working | 560x192 Mono/16 colors Mixed-Mode support | 0.9.1 |
 | ---- | ------ | ------- | ----- |
-| LanCeGS.DRV | Working | | 0.9.1 |
+| LanCeGS.DRV | Working | | 0.92 |
 | Uthernet.DRV  | Working | | 0.92 |
 | Uthernet2.DRV | Working | | 0.92 |
-| Uther2.AI.DRV | In Progress | With ARP/IP Offloading | 0.9 |
+| Uther2.AI.DRV | In Progress | With ARP/IP Offloading | 0.92 |
 
 ## BIN,External Shell commands:
 | Name | Status | Comment | K.Ver |

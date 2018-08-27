@@ -11,11 +11,9 @@ AUTO 4,1
 				.INB INC/MLI.ERR.I
 				.INB INC/NIC.I
 				.INB INC/NIC.91C96.I
-				.INB INC/LIBTCPIP.I
+				.INB INC/ETH.I
 *--------------------------------------
-ZPTmpPTR		.EQ ZPDRV
-Size			.EQ ZPDRV+2
-Counter			.EQ ZPDRV+4
+ZPArgPtr		.EQ ZPDRV
 *--------------------------------------
 *			File Header (16 Bytes)
 *--------------------------------------
@@ -25,21 +23,31 @@ CS.START		cld
 				.DA #1					DRV Layout Version 1
 				.DA 0
 				.DA CS.END-CS.START			Code Length
-				.DA DEV.HEADER-CS.START		Device Header Offset
-				.DA DRV.CS.START-CS.START	Driver Code Offset
-				.DA DRV.CS.END-DRV.CS.START	Drv Code Length
+				.DA 0
+				.DA 0
+				.DA 0
 *--------------------------------------
 * Relocation Table
 *--------------------------------------
 L.MSG.DETECT	.DA MSG.DETECT
 L.MSG.DETECT.OK	.DA MSG.DETECT.OK
 L.MSG.DETECT.KO	.DA MSG.DETECT.KO
-L.DEV.HEADER.NAME	.DA DEV.HEADER.NAME
+L.DRV.CS.START	.DA DRV.CS.START
+L.FD.DEV		.DA FD.DEV
+L.FD.DEV.NAME	.DA FD.DEV.NAME
+L.SSCANF.MAC	.DA SSCANF.MAC
+L.MAC0			.DA DCB+S.DCB.NIC.MAC
+L.MAC1			.DA DCB+S.DCB.NIC.MAC+1
+L.MAC2			.DA DCB+S.DCB.NIC.MAC+2
+L.MAC3			.DA DCB+S.DCB.NIC.MAC+3
+L.MAC4			.DA DCB+S.DCB.NIC.MAC+4
+L.MAC5			.DA DCB+S.DCB.NIC.MAC+5
 				.DA 0					End Of Reloc Table
 *--------------------------------------
-Dev.Detect		>STYA Args
+Dev.Detect		>STYA ARGS
+
 				>LDYA L.MSG.DETECT
-				>SYSCALL printf
+				>SYSCALL puts
 				
 				ldx #$70
 				ldy #7
@@ -51,7 +59,7 @@ Dev.Detect		>STYA Args
 				cmp #DEVID
 				beq .3
 				
-.2				dec DEV.HEADER.NAME+3
+.2				dec FD.DEV.NAME+3
 				txa
 				sec
 				sbc #$10
@@ -60,7 +68,7 @@ Dev.Detect		>STYA Args
 				bne .1
 				
 				>LDYA L.MSG.DETECT.KO
-				>SYSCALL printf
+				>SYSCALL puts
 
 				lda #MLI.E.NODEV
 				sec
@@ -70,61 +78,128 @@ Dev.Detect		>STYA Args
 				lda #A2osX.S.NIC
 				sta A2osX.S,y
 
-				>LDYA ARGS
-				>STYA ZPTmpPTR
+				jsr Dev.ParseArgs
+				bcs .9
 				
-				lda (ZPTmpPTR)
-				beq .4
-				
-				sec
-				ror USERMAC
-				>SYSCALL GetMemPtr
-				>STYA ZPTmpPTR
-				jsr DecodeMac
-				bcc .4
-				lda #K.E.SYN
-				sec
-				rts
-				
-.4				>PUSHW L.DEV.HEADER.NAME
+.8				>PUSHW L.FD.DEV.NAME
+				>PUSHBI 2
 				>LDYA L.MSG.DETECT.OK
 				>SYSCALL printf
+				
+				>PUSHWI DRV.END
+				>PUSHWI DRV.CS.END
+				>PUSHWI DRV.CS.START
+				>LDYA L.DRV.CS.START
+				>SYSCALL InsDrv
+				bcs .9
+				>STYA FD.DEV+S.FD.DEV.DRVPTR
+				
+				>LDYA L.FD.DEV
+				>SYSCALL MKDEV
+
+.9				rts
+*--------------------------------------
+Dev.ParseArgs	>LDYA ARGS
+				>STYA ZPArgPTR
+				lda (ZPArgPTR)
+				bne .1
+				
+				lda A2osX.RANDOM16
+				eor A2osX.TIMER16
+				sta DCB+S.DCB.NIC.MAC+3
+				eor A2osX.RANDOM16+1
+				sta DCB+S.DCB.NIC.MAC+4
+				eor A2osX.TIMER16+1
+				sta DCB+S.DCB.NIC.MAC+5
 				clc
 				rts
-*--------------------------------------
-				.INB /A2OSX.SRC/DRV/X.NET.DRV.S
+				
+.1				>PUSHW L.MAC5
+				>PUSHW L.MAC4
+				>PUSHW L.MAC3
+				>PUSHW L.MAC2
+				>PUSHW L.MAC1
+				>PUSHW L.MAC0
+				>PUSHBI 12				6 x byte PTRs
+				>PUSHW L.SSCANF.MAC
+				>LDYA ZPArgPtr
+				>SYSCALL sscanf
+				bcc .8
+				
+				lda #K.E.SYN
+				sec
+.8				rts
 *--------------------------------------
 CS.END
-MSG.DETECT		.AZ "LanCeGS/SMSC91C96 Driver.\r\n"
+ARGS			.BS 2
+MSG.DETECT		.AZ "LanCeGS/SMSC91C96 Driver."
 MSG.DETECT.OK	.AZ "LanCeGS/SMSC91C96 Installed As Device : %S\r\n"
-MSG.DETECT.KO	.AZ "Hardware Not Found.\r\n"
-Args			.BS 2
+MSG.DETECT.KO	.AZ "Hardware Not Found."
+SSCANF.MAC		.AZ "%h:%h:%h:%h:%h:%h"
 *--------------------------------------
-*			Device Header (16 Bytes)
-*--------------------------------------
-DEV.HEADER		cld
-				jmp (DRV.CS.START,x)
-				.DA #0
-				.BS 6
-DEV.HEADER.NAME	.AZ "ETH7"
+FD.DEV			.DA #S.FD.T.CDEV
+				.DA #0					HANDLER
+				.DA #0					BUSID
+				.DA #0					DEVID
+				.DA 0					BUSPTR
+				.BS 2					DRVPTR
+FD.DEV.NAME		.AZ "ETH7"				NAME
+				.HS 000000
 *--------------------------------------
 *			Driver Code
 *--------------------------------------
-DRV.CS.START	.DA STATUS
-				.DA READBLOCK
-				.DA WRITEBLOCK
+ZPIOCTL			.EQ ZPDRV
+ZPBufPtr		.EQ ZPDRV+2
+Size			.EQ ZPDRV+4
+Counter			.EQ ZPDRV+6
+*--------------------------------------
+DRV.CS.START	cld
+				jmp (.1,x)
+.1				.DA STATUS
+				.DA A2osX.BADCALL
+				.DA A2osX.BADCALL
 				.DA A2osX.BADCALL
 				.DA A2osX.BADCALL
 				.DA A2osX.BADCALL
 				.DA OPEN
 				.DA CLOSE
-				.DA A2osX.BADCALL
-				.DA A2osX.BADCALL
-L.DEVSTAT		.DA DEVSTAT
+				.DA READ
+				.DA WRITE
+				.DA A2osX.BADCALL		IRQ
 				.DA 0					end or relocation
 *--------------------------------------
-STATUS			lda #S.DIB.NIC.STATUS.10
-				sta LINK.STATUS
+STATUS			>STYA ZPIOCTL
+
+				ldy #S.IOCTL.STATCODE
+				lda (ZPIOCTL),y
+				beq .1
+				
+				cmp #S.IOCTL.STATCODE.GETDIB
+				bne STATUS.DCB
+				
+				ldx #S.DIB-1
+				.HS 2C					bit abs
+.1				ldx #3
+
+				ldy #S.IOCTL.BUFPTR
+				lda (ZPIOCTL),y
+				sta .3+1
+				iny
+				lda (ZPIOCTL),y
+				sta .3+2
+				
+.2				lda DIB,x
+.3				sta $ffff,x				SELF MODIFIED
+				dex
+				bpl .2
+				
+				clc
+				rts
+				
+STATUS.DCB		cmp #S.IOCTL.STATCODE.GETDCB
+				bne STATUS.9
+
+				stz DCB+S.DCB.NIC.LINK
 
 				ldx DEVSLOTx0
 
@@ -133,233 +208,42 @@ STATUS			lda #S.DIB.NIC.STATUS.10
 				lda L91C96.0.EPHSR+1,x
 				and /L91C96.0.EPHSR.LINK
 				beq .1
-				lda LINK.STATUS
-				ora #S.DIB.NIC.STATUS.OK
-				sta LINK.STATUS
+				
+				lda #S.DCB.NIC.LINK.OK
+				tsb DCB+S.DCB.NIC.LINK
 	
-.1				lda L91C96.0.TCR,x
+				lda L91C96.0.TCR,x
 				lda L91C96.0.TCR+1,x
 				and /L91C96.0.TCR.FDSE
-				bne .2
-				lda LINK.STATUS
-				ora #S.DIB.NIC.STATUS.FD
-				sta LINK.STATUS
+				beq .1
+
+				lda #S.DCB.NIC.LINK.FD
+				tsb DCB+S.DCB.NIC.LINK
 				
-.2				>LDYA L.DEVSTAT
+.1				ldy #S.IOCTL.BUFPTR
+				lda (ZPIOCTL),y
+				sta .4+1
+				iny
+				lda (ZPIOCTL),y
+				sta .4+2
+				
+				ldx #S.DCB.NIC-1
+				
+.3				lda DCB,x
+.4				sta $ffff,x				SELF MODIFIED
+				dex
+				bpl .3
+
 				clc
 				rts
-*--------------------------------------
-READBLOCK		ldx DEVSLOTx0
-				lda #2
-				sta L91C96.BSR,x
-
-				lda L91C96.2.IST,x
-				and #L91C96.2.IST.RCV
-				bne READBLOCK.RxOK
-				lda #MLI.E.EOF
-				sec
-				rts
 				
-READBLOCK.RxOK	lda #L91C96.2.PTR.RCVD+L91C96.2.PTR.AUTOI+L91C96.2.PTR.READ
-				sta L91C96.2.PTR,x
-				lda /L91C96.2.PTR.RCVD+L91C96.2.PTR.AUTOI+L91C96.2.PTR.READ
-				sta L91C96.2.PTR+1,x 
-
-				lda L91C96.2.DATA,x		Get Frame Status Word (lo)
-				lda L91C96.2.DATA,x		Get Frame Status Word (HI)
-				
-				asl
-				asl
-				asl 					#$10 = odd?
-				asl						if odd, CS
-				
-				lda L91C96.2.DATA,x		get lo byte count
-				sbc	#5					compute Size
-				sta Size
-				eor #$ff
-				sta Counter
-				tay
-				
-				lda L91C96.2.DATA,x		get hi byte count
-				sbc #0
-				sta Size+1
-				eor #$ff
-				sta Counter+1
-				eor #$ff
-				
-				iny
-				bne .1
-				
-				inc
-.1				iny
-				bne .11
-				
-				inc
-.11				>SYSCALL getmem
-				bcs .99
-				>STYA ZPTmpPTR
-				stx .8+1
-				sty .8+3
-				sta .8+5
-								
-				lda Size
-				sta (ZPTmpPTR)
-				ldy #1
-				lda Size+1
-				sta (ZPTmpPTR),y
-
-				iny
-				
-				ldx DEVSLOTx0
-				
-.2				inc Counter
-				bne .21
-				inc Counter+1
-				beq .4
-				
-.21				lda L91C96.2.DATA,x
-				sta (ZPTmpPTR),y
-				iny
-				bne .3
-				inc ZPTmpPTR+1
-				
-.3				inc Counter
-				bne .31
-				inc Counter+1
-				beq .4
-				
-.31				lda L91C96.2.DATA,x
-				sta (ZPTmpPTR),y
-				iny
-				bne .2
-				inc ZPTmpPTR+1
-				bra .2
-
-.4				lda #L91C96.2.MMUCR.REMREL
-				sta L91C96.2.MMUCR,x
-				
-.8				ldx	#$ff				hMem
-				ldy	#$ff				PtrLO
-				lda #$ff				PtrHI
-				clc
-.99				rts
-*--------------------------------------				
-WRITEBLOCK		>STYA ZPTmpPTR
-				
-				ldx DEVSLOTx0
-				lda #2
-				sta L91C96.BSR,x
-			
-				lda (ZPTmpPTR)
-				sta Size
-				eor #$ff
-				sta Counter
-				eor #$ff
-				
-				clc
-				adc #6					3 WORDs more Status, len & Control
-
-				bne .10
-				clc						LO byte is 0, no need for an extra empty page
-				
-.10				ldy #1
-				lda (ZPTmpPTR),y
-				sta Size+1
-				eor #$ff
-				sta Counter+1
-				eor #$ff
-				
-				adc #0
-				
-.1				ora #L91C96.2.MMUCR.ALLOC
-				sta L91C96.2.MMUCR,x
-
-				ldy #0
-				
-.2				lda L91C96.2.IST,x
-				and #L91C96.2.IST.ALLOC
-				bne .3
-				dey
-				bne .2
-				
-				lda #MLI.E.EOF
+STATUS.9		lda #MLI.E.BADCTL
 				sec
 				rts				
-				
-.3				lda L91C96.2.AAR,x
-				sta L91C96.2.PNR,x
-				
-				lda #L91C96.2.PTR.AUTOI
-				sta L91C96.2.PTR,x
-				lda /L91C96.2.PTR.AUTOI
-				sta L91C96.2.PTR+1,x
-				
-				ldy #S.ETH.SRCMAC+5		Add Src MAC Address
-				ldx #5
-.4				lda MAC,x
-				sta (ZPTmpPTR),y
-				dey
-				dex
-				bpl .4
-
-				ldx DEVSLOTx0
-				stz L91C96.2.DATA,x		write fake status word
-				stz L91C96.2.DATA,x
-				
-				lda Size
-				pha
-				eor #$01
-				lsr
-				pla
-				adc #$05				add 5 if odd, 6 if even
-				sta L91C96.2.DATA,x
-				lda Size+1
-				adc #$00
-				sta L91C96.2.DATA,x
-				
-				ldy #2
-				
-.5				inc Counter
-				bne .51
-				inc Counter+1
-				beq .70
-				
-.51				lda (ZPTmpPTR),y
-				iny
-				bne .6
-				inc ZPTmpPTR+1
-				
-.6				inc Counter
-				bne .61
-				inc Counter+1
-				beq .71
-				
-.61				sta L91C96.2.DATA,x
-				lda (ZPTmpPTR),y
-				sta L91C96.2.DATA,x
-				iny
-				bne .5
-				inc ZPTmpPTR+1
-				bra .5
-				
-.70				lda #0
-				sta L91C96.2.DATA,x
-				sta L91C96.2.DATA,x
-				bra .8
-				
-.71				sta L91C96.2.DATA,x
-				lda #%00100000			signal an extra (odd) byte
-				sta L91C96.2.DATA,x
-				
-.8				lda #L91C96.2.MMUCR.NQPKT
-				sta L91C96.2.MMUCR,x 
-				clc
-				rts
-				
-.9				sec
-				rts
 *--------------------------------------
 OPEN			jsr CLOSE
+
+*				ldx DEVSLOTx0			Done by CLOSE
 
 				lda #L91C96.0.TCR.FDSE+L91C96.0.TCR.FUDPLX+L91C96.0.TCR.PADEN+L91C96.0.TCR.TXENA
 				sta L91C96.0.TCR,x
@@ -384,14 +268,14 @@ OPEN			jsr CLOSE
 				bmi .2
 	
 .1				lda L91C96.1.IAR,x
-				sta MAC,y
+				sta S.DCB.NIC.MAC,y
 				inx
 				iny
 				cpy #6
 				bne .1
 				bra .3
 
-.2				lda MAC,y
+.2				lda S.DCB.NIC.MAC,y
 				sta L91C96.1.IAR,x
 				inx
 				iny
@@ -428,23 +312,254 @@ CLOSE			ldx DEVSLOTx0
 				
 				clc
 				rts
+*--------------------------------------
+READ			php
+				sei
+
+				>STYA ZPIOCTL
+				
+				ldx DEVSLOTx0
+				lda #2
+				sta L91C96.BSR,x
+
+				lda L91C96.2.IST,x
+				and #L91C96.2.IST.RCV
+				bne .1
+				lda #MLI.E.EOF
+				
+.9				plp
+				sec
+				rts
+				
+.1				lda #L91C96.2.PTR.RCVD+L91C96.2.PTR.AUTOI+L91C96.2.PTR.READ
+				sta L91C96.2.PTR,x
+				lda /L91C96.2.PTR.RCVD+L91C96.2.PTR.AUTOI+L91C96.2.PTR.READ
+				sta L91C96.2.PTR+1,x 
+
+				lda L91C96.2.DATA,x		Get Frame Status Word (lo)
+				lda L91C96.2.DATA,x		Get Frame Status Word (HI)
+				
+				asl
+				asl
+				asl 					#$10 = odd?
+				asl						if odd, CS
+				
+				lda L91C96.2.DATA,x		get lo byte count
+				sbc	#5					compute Size
+				sta Size
+				pha
+				ldy #S.IOCTL.BYTECNT
+				sta (ZPIOCTL),y
+				eor #$ff
+				sta Counter
+				
+				lda L91C96.2.DATA,x		get hi byte count
+				sbc #0
+				sta Size+1
+				iny
+				sta (ZPIOCTL),y
+				eor #$ff
+				sta Counter+1
+				eor #$ff
+				
+				ply
+				
+				>SYSCALL getmem
+				bcs .9
+				>STYA ZPBufPtr
+				stx .8+1
+								
+				phy
+				ldy #S.IOCTL.BUFPTR+1
+				sta (ZPIOCTL),y
+				dey
+				pla
+				sta (ZPIOCTL),y
+				
+				ldx DEVSLOTx0
+
+				ldy #0
+				
+.2				inc Counter
+				bne .21
+				inc Counter+1
+				beq .4
+				
+.21				lda L91C96.2.DATA,x
+				sta (ZPBufPtr),y
+				iny
+				bne .3
+				inc ZPBufPtr+1
+				
+.3				inc Counter
+				bne .31
+				inc Counter+1
+				beq .4
+				
+.31				lda L91C96.2.DATA,x
+				sta (ZPBufPtr),y
+				iny
+				bne .2
+				inc ZPBufPtr+1
+				bra .2
+
+.4				lda #L91C96.2.MMUCR.REMREL
+				sta L91C96.2.MMUCR,x
+				
+.8				ldx	#$ff				hMem
+
+				plp
+				clc
+				rts
+*--------------------------------------				
+WRITE			php
+				sei
+				
+				>STYA ZPIOCTL
+
+				ldx DEVSLOTx0
+				
+				lda #2
+				sta L91C96.BSR,x
+			
+				ldy #S.IOCTL.BYTECNT
+				lda (ZPIOCTL),y
+				sta Size
+				eor #$ff
+				sta Counter
+				eor #$ff
+				
+				clc
+				adc #6					3 WORDs more Status, len & Control
+
+				bne .10
+				clc						LO byte is 0, no need for an extra empty page
+				
+.10				iny
+				lda (ZPIOCTL),y
+				sta Size+1
+				eor #$ff
+				sta Counter+1
+				eor #$ff
+				
+				adc #0
+				
+.1				ora #L91C96.2.MMUCR.ALLOC
+				sta L91C96.2.MMUCR,x
+
+				ldy #0
+				
+.2				lda L91C96.2.IST,x
+				and #L91C96.2.IST.ALLOC
+				bne .3
+				dey
+				bne .2
+				
+				lda #MLI.E.EOF
+				
+.9				plp
+				sec
+				rts				
+				
+.3				lda L91C96.2.AAR,x
+				sta L91C96.2.PNR,x
+				
+				lda #L91C96.2.PTR.AUTOI
+				sta L91C96.2.PTR,x
+				lda /L91C96.2.PTR.AUTOI
+				sta L91C96.2.PTR+1,x
+				
+				ldy #S.IOCTL.BUFPTR
+				lda (ZPIOCTL),y
+				sta ZPBufPtr
+				iny
+				lda (ZPIOCTL),y
+				sta ZPBufPtr+1
+				
+				ldy #S.ETH.SRCMAC+5		Add Src MAC Address
+				ldx #5
+.4				lda S.DCB.NIC.MAC,x
+				sta (ZPBufPtr),y
+				dey
+				dex
+				bpl .4
+
+				ldx DEVSLOTx0
+				stz L91C96.2.DATA,x		write fake status word
+				stz L91C96.2.DATA,x
+				
+				lda Size
+				pha
+				eor #$01
+				lsr
+				pla
+				adc #$05				add 5 if odd, 6 if even
+				sta L91C96.2.DATA,x
+				lda Size+1
+				adc #$00
+				sta L91C96.2.DATA,x
+				
+				ldy #2
+				
+.5				inc Counter
+				bne .51
+				inc Counter+1
+				beq .70
+				
+.51				lda (ZPBufPtr),y
+				iny
+				bne .6
+				inc ZPBufPtr+1
+				
+.6				inc Counter
+				bne .61
+				inc Counter+1
+				beq .71
+				
+.61				sta L91C96.2.DATA,x
+				lda (ZPBufPtr),y
+				sta L91C96.2.DATA,x
+				iny
+				bne .5
+				inc ZPBufPtr+1
+				bra .5
+				
+.70				lda #0
+				sta L91C96.2.DATA,x
+				sta L91C96.2.DATA,x
+				bra .8
+				
+.71				sta L91C96.2.DATA,x
+				lda #%00100000			signal an extra (odd) byte
+				sta L91C96.2.DATA,x
+				
+.8				lda #L91C96.2.MMUCR.NQPKT
+				sta L91C96.2.MMUCR,x
+				
+				plp
+				clc
+				rts
 *--------------------------------------	
 DRV.CS.END
 DEVSLOTx0		.BS 1
 USERMAC			.BS 1
 *--------------------------------------
-DEVSTAT			.DA #0
-				.BS 3					size
+DIB				.DA #0
+				.DA #0,#0,#0			size
 				>PSTR "LanCEGS/L91C96"
 				.BS 1
-				.DA #S.DIB.T.NET
+				.DA #S.DIB.T.NIC
 				.BS 1					Subtype
 				.BS 2					Version
-*--------------------------------------	
-FLAGS			.DA #0
-LINK.STATUS		.BS 1					OK/DUPLEX/SPEED
-MAC				.BS 6
 *--------------------------------------
+DCB				.DA #S.DCB.T.NIC
+				.BS 1					FLAGS
+				.BS 1					LINK
+				.DA #S.DCB.NIC.SPEED.10
+				.HS 000E3A123456		MAC
+				.BS 12					IP/MASK/GW
+*--------------------------------------
+DRV.END
 MAN
 SAVE /A2OSX.SRC/DRV/LANCEGS.DRV.S
 ASM
