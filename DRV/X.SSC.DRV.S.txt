@@ -15,7 +15,7 @@ BUF.SIZE		.EQ $40
 BUF.MASK		.EQ $3F
 				.FIN
 *--------------------------------------
-ZPTmpPtr1		.EQ ZPDRV
+ZPArgPtr		.EQ ZPDRV
 *--------------------------------------
 *			File Header (16 Bytes)
 *--------------------------------------
@@ -25,26 +25,28 @@ CS.START		cld
 				.DA #1					DRV Layout Version 1
 				.DA 0
 				.DA CS.END-CS.START			Code Length
-				.DA DEV.HEADER-CS.START		Device Header Offset
-				.DA DRV.CS.START-CS.START	Driver Code Offset
-				.DA DRV.CS.END-DRV.CS.START	Drv Code Length
+				.DA 0
+				.DA 0
+				.DA 0
 *--------------------------------------
 * Relocation Table
 *--------------------------------------
 L.MSG.DETECT	.DA MSG.DETECT
 L.MSG.DETECT.OK	.DA MSG.DETECT.OK
 L.MSG.DETECT.KO	.DA MSG.DETECT.KO
-L.DEV.HEADER.NAME	.DA DEV.HEADER.NAME
+L.DRV.CS.START	.DA DRV.CS.START
+L.FD.DEV		.DA FD.DEV
+L.FD.DEV.NAME	.DA FD.DEV.NAME
 				.DA 0					End Of Reloc Table
 *--------------------------------------
 Dev.Detect		>STYA ARGS
 
 				>LDYA L.MSG.DETECT
-				>SYSCALL printf
+				>SYSCALL puts
 				
-				stz ZPTmpPtr1
+				stz ZPArgPtr
 				lda #$C1
-				sta ZPTmpPtr1+1
+				sta ZPArgPtr+1
 				
 .1				and #$0f
 				tay
@@ -54,34 +56,33 @@ Dev.Detect		>STYA ARGS
 				ldx #DEVSIG.Length-1
 
 .2				ldy DEVSIG.Offset,x
-				lda (ZPTmpPtr1),y
+				lda (ZPArgPtr),y
 				cmp DEVSIG.Value,x
 				bne .3
 				dex
 				bpl .2
 				bra .4
 				
-.3				inc ZPTmpPtr1+1			no match, try next slot....
-				lda ZPTmpPtr1+1
+.3				inc FD.DEV.NAME+3
+				inc ZPArgPtr+1			no match, try next slot....
+				lda ZPArgPtr+1
 				cmp #$C8
 				bne .1	
 				
 				>LDYA L.MSG.DETECT.KO
-				>SYSCALL printf
+				>SYSCALL puts
 
 				lda #MLI.E.NODEV		Not Found in any slot, exiting
 				sec
 				rts	
 
-.4				lda ZPTmpPtr1+1
+.4				lda ZPArgPtr+1
 				and #$0F
 				pha
 				tay
 				lda #A2osX.S.COM
 				sta A2osX.S,y
 				pla
-				ora #$30
-				sta DEV.HEADER.NAME+3
 				asl
 				asl
 				asl
@@ -89,53 +90,66 @@ Dev.Detect		>STYA ARGS
 				clc
 				adc #$8F
 				sta DEVSLOTn08F
-
-				>PUSHW L.DEV.HEADER.NAME
+				
+				jsr Dev.ParseArgs
+				bcs .9
+				
+.8				>PUSHW L.FD.DEV.NAME
+				>PUSHBI 2
 				>LDYA L.MSG.DETECT.OK
 				>SYSCALL printf
-				clc
+				
+				>PUSHWI DRV.END
+				>PUSHWI DRV.CS.END
+				>PUSHWI DRV.CS.START
+				>LDYA L.DRV.CS.START
+				>SYSCALL InsDrv
+				bcs .9
+				>STYA FD.DEV+S.FD.DEV.DRVPTR
+				
+				>LDYA L.FD.DEV
+				>SYSCALL MKDEV
+
+.9				rts
+*--------------------------------------
+Dev.ParseArgs	>LDYA ARGS
+				>STYA ZPArgPTR
+				lda (ZPArgPTR)
+				beq .8
+				
+				
+.8				clc
 				rts
 *--------------------------------------
 CS.END
 DEVSIG.Offset	.HS 05070B0C
 DEVSIG.Value	.HS 38180131
 DEVSIG.Length	.EQ DEVSIG.Value-DEVSIG.Offset
-
 MSG.DETECT		.DO SSCIRQ=1
-
-				.AZ "Apple SSC (Super Serial Card,//c Serial Port) Driver (IRQ Enabled).\r\n"
-
+				.AZ "Apple SSC (Super Serial Card,//c Serial Port) Driver (IRQ Enabled)."
 				.ELSE
-				
-				.AZ "Apple SSC (Super Serial Card,//c Serial Port) Driver.\r\n"				
-
+				.AZ "Apple SSC (Super Serial Card,//c Serial Port) Driver."				
 				.FIN
-				
 MSG.DETECT.OK	.AZ "SSC Installed As Device : %s\r\n"
-MSG.DETECT.KO	.AZ "No SSC Found.\r\n"
+MSG.DETECT.KO	.AZ "No SSC Found."
 ARGS			.BS 2
 *--------------------------------------
-*			Device Header (16 Bytes)
-*--------------------------------------
-DEV.HEADER		cld
-				jmp (DRV.CS.START,x)
-
-				.DO SSCIRQ=1
-
-				.DA #S.DEV.S.WRITE+S.DEV.S.READ+S.DEV.S.IRQ
-
-				.ELSE
-
-				.DA #S.DEV.S.WRITE+S.DEV.S.READ
-
-				.FIN
-
-				.BS 6
-DEV.HEADER.NAME	.AZ "COM1"			NAME
+FD.DEV			.DA #S.FD.T.CDEV
+				.DA #0					HANDLER
+				.DA #0					BUSID
+				.DA #0					DEVID
+				.DA 0					BUSPTR
+				.BS 2					DRVPTR
+FD.DEV.NAME		.AZ "COM1"				NAME
+				.HS 000000
 *--------------------------------------
 *			Driver Code
 *--------------------------------------
-DRV.CS.START	.DA STATUS
+ZPIOCTL			.EQ ZPDRV
+*--------------------------------------
+DRV.CS.START	cld
+				jmp (.1,x)
+.1				.DA STATUS
 				.DA A2osX.BADCALL
 				.DA A2osX.BADCALL
 				.DA A2osX.BADCALL
@@ -145,22 +159,85 @@ DRV.CS.START	.DA STATUS
 				.DA CLOSE
 				.DA READ
 				.DA WRITE
-
 				.DO SSCIRQ=1
-
 				.DA IRQ
-
+				.ELSE
+				.DA A2osX.BADCALL
 				.FIN
-
-L.STAT			.DA STAT
 				.DA 0					end or relocation
 *--------------------------------------
-STATUS			>LDYA L.STAT
+STATUS			>STYA ZPIOCTL
+
+				ldy #S.IOCTL.STATCODE
+				lda (ZPIOCTL),y
+				beq .1
+				
+				cmp #S.IOCTL.STATCODE.GETDIB
+				bne STATUS.DCB
+				
+				ldx #S.DIB-1
+				.HS 2C					bit abs
+.1				ldx #3
+
+				ldy #S.IOCTL.BUFPTR
+				lda (ZPIOCTL),y
+				sta .3+1
+				iny
+				lda (ZPIOCTL),y
+				sta .3+2
+				
+.2				lda DIB,x
+.3				sta $ffff,x				SELF MODIFIED
+				dex
+				bpl .2
+				
 				clc
 				rts
-*--------------------------------------
-CONTROL			clc
+
+STATUS.DCB		cmp #S.IOCTL.STATCODE.GETDCB
+				bne STATUS.9
+
+				ldy #S.IOCTL.BUFPTR
+				lda (ZPIOCTL),y
+				sta .3+1
+				iny
+				lda (ZPIOCTL),y
+				sta .3+2
+				
+				ldx #S.DCB.COM-1
+				
+.2				lda DCB,x
+.3				sta $ffff,x				SELF MODIFIED
+				dex
+				bpl .2
+
+				clc
 				rts
+				
+STATUS.9		lda #MLI.E.BADCTL
+				sec
+				rts				
+*--------------------------------------
+CONTROL			>STYA ZPIOCTL
+
+				ldy #S.IOCTL.CTRLCODE
+				lda (ZPIOCTL),y
+				cmp #S.IOCTL.CTRLCODE.SETDCB
+				bne STATUS.9
+				
+.1				ldy #S.IOCTL.BUFPTR
+				lda (ZPIOCTL),y
+				sta .2+1
+				iny
+				lda (ZPIOCTL),y
+				sta .2+2
+				
+				ldx #S.DCB.COM-1
+				
+.2				lda $ffff,x				SELF MODIFIED
+				sta DCB,x
+				dex
+				bpl .2
 *--------------------------------------
 OPEN			php
 				sei
@@ -203,8 +280,9 @@ CLOSE			php
 				clc
 				rts
 *--------------------------------------
-READ			.DO SSCIRQ=1
-				
+READ			>STYA ZPIOCTL
+
+				.DO SSCIRQ=1
 				php
 				sei
 				ldx INBUF.TAIL
@@ -234,9 +312,7 @@ READ			.DO SSCIRQ=1
 .90				plp
 				sec
 				rts
-				
 				.ELSE
-				
 				ldx DEVSLOTn08F
 				lda SSC.STATUS-$8F,x
 
@@ -250,11 +326,11 @@ READ			.DO SSCIRQ=1
 .9				lda #0
 				sec
 				rts
-				
 				.FIN
 *--------------------------------------
-WRITE			.DO SSCIRQ=1
-				
+WRITE			>STYA ZPIOCTL
+
+				.DO SSCIRQ=1
 				php
 				sei
 				tay						save char in Y
@@ -302,9 +378,7 @@ WRITE			.DO SSCIRQ=1
 .9				plp
 				sec
 				rts
-				
 				.ELSE
-				
 				pha
 				
 				ldx DEVSLOTn08F
@@ -326,14 +400,12 @@ WRITE			.DO SSCIRQ=1
 .9				pla
 				sec
 				rts
-				
 				.FIN
 *--------------------------------------
 * IRQ Handler
 * on exit, CC if handled
 *--------------------------------------
 				.DO SSCIRQ=1
-				
 IRQ				ldx DEVSLOTn08F
 				lda SSC.STATUS-$8F,x
 				
@@ -385,40 +457,39 @@ IRQ				ldx DEVSLOTn08F
 				
 .9				sec
 				rts
-				
 				.FIN
 *--------------------------------------
 DRV.CS.END
 DEVSLOTn08F		.BS 1
-
 				.DO SSCIRQ=1
-
 INBUF.TAIL		.BS 1
 INBUF.HEAD		.BS 1
 OUTBUF.TAIL		.BS 1
 OUTBUF.HEAD		.BS 1
 INBUF			.BS BUF.SIZE
 OUTBUF			.BS BUF.SIZE
-
 				.FIN
 *--------------------------------------
-STAT			.DO SSCIRQ=1
-
-				.DA #S.DIB.S.WRITE+S.DIB.S.READ+S.DEV.S.IRQ
-
+DIB				.DO SSCIRQ=1
+				.DA #S.DIB.S.WRITE+S.DIB.S.READ+S.DIB.S.IRQ
 				.ELSE
-
 				.DA #S.DIB.S.WRITE+S.DIB.S.READ
-
 				.FIN
-
 				.DA #0,#0,#0
 				>PSTR "Serial Card/Port"
 				.DA #S.DIB.T.CHAR
 				.DA #0
-				.DA #0
-				.DA #91
+				.DA K.VER
 *--------------------------------------
+DCB				.DA #S.DCB.T.COM
+				.DA #0					FLAGS
+				.DA >9600				BAUD (DWORD)
+				.DA #8					DATA
+				.DA #1					STOP
+				.DA #S.DCB.COM.P.NONE	PARITY
+				.DA #S.DCB.COM.C.XONXOFF
+*--------------------------------------
+DRV.END
 MAN
 SAVE /A2OSX.SRC/DRV/X.SSC.DRV.S
 LOAD /A2OSX.SRC/DRV/SSC.I.DRV.S
