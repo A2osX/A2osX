@@ -146,6 +146,9 @@ FD.DEV.NAME		.AZ "COM1"				NAME
 *			Driver Code
 *--------------------------------------
 ZPIOCTL			.EQ ZPDRV
+ZPBufPtr		.EQ ZPDRV+2
+ZPCount			.EQ ZPDRV+4
+ZPCount2		.EQ ZPDRV+6
 *--------------------------------------
 DRV.CS.START	cld
 				jmp (.1,x)
@@ -282,59 +285,134 @@ CLOSE			php
 *--------------------------------------
 READ			>STYA ZPIOCTL
 
-				.DO SSCIRQ=1
 				php
 				sei
-				ldx INBUF.TAIL
-				cpx INBUF.HEAD
+				ldy #S.IOCTL.BUFPTR
+				lda (ZPIOCTL),y
+				sta ZPBufPtr
+				iny 
+				lda (ZPIOCTL),y
+				sta ZPBufPtr+1
+				
+*				ldy #S.IOCTL.BYTECNT
+				iny
+
+				lda (ZPIOCTL),y
+				eor #$ff
+				sta ZPCount
+				iny
+				lda (ZPIOCTL),y
+				eor #$ff
+				sta ZPCount+1
+
+				stz ZPCount2
+				stz ZPCount2+1
+				
+				ldx DEVSLOTn08F
+				
+.10				inc ZPCount
+				bne .11
+				inc ZPCount+1
+				beq .8							
+				
+.11				.DO SSCIRQ=1
+				ldy INBUF.TAIL
+				cpy INBUF.HEAD
 				beq .2
 				
-				lda INBUF,x
-				inx
-				cpx #BUF.SIZE
+				lda INBUF,y
+				iny
+				cpy #BUF.SIZE
 				bne .1
 				
-				ldx #0
+				ldy #0
 				
-.1				stx INBUF.TAIL
-				
-				plp
-				clc
-				rts
-				
-.2				ldx DEVSLOTn08F
-				lda SSC.STATUS-$8F,x
-				and #SSC.STATUS.nDSR	true when 0
-				beq .90
+.1				sty INBUF.TAIL
 
-				lda #C.EOF
+				sta (ZPBufPtr)
+				inc ZPBufPtr
+				bne .12
+				inc ZPBufPtr+1
 				
-.90				plp
-				sec
-				rts
-				.ELSE
+.12				inc ZPCount2
+				bne .10
+				inc ZPCount2+1
+				bra .10				
+
+				.FIN
+				
+.2				lda SSC.STATUS-$8F,x
+				bit #SSC.STATUS.nDSR	true when 0
+				bne .9
+				
 				ldx DEVSLOTn08F
 				lda SSC.STATUS-$8F,x
 
 				and #SSC.STATUS.RDRF	incoming char?
-				beq	.9
+				beq	.8
 				
-				lda SSC.DATA-$8F,x
+				sta (ZPBufPtr)
+				inc ZPBufPtr
+				bne .13
+				inc ZPBufPtr+1
+				
+.13				inc ZPCount2
+				bne .2
+				inc ZPCount2+1
+				bra .2
+				
+.8				lda ZPCount2
+				bne .81
+				ldx ZPCount2+1
+				beq .99
+				
+.81				ldy #S.IOCTL.BYTECNT
+				sta (ZPIOCTL),y
+				iny
+				txa
+				sta (ZPIOCTL),y
+
+				plp
 				clc
-				rts
+				rts				
 				
-.9				lda #0
+.90				lda #0
+				.HS 2C					BIT ABS
+.9				lda #C.EOF
+.99				plp
 				sec
-				rts
-				.FIN
+				rts				
 *--------------------------------------
 WRITE			>STYA ZPIOCTL
 
-				.DO SSCIRQ=1
 				php
 				sei
-				tay						save char in Y
 
+				ldy #S.IOCTL.BUFPTR
+				lda (ZPIOCTL),y
+				
+				sta ZPBufPtr
+				iny 
+				lda (ZPIOCTL),y
+				sta ZPBufPtr+1
+				
+*				ldy #S.IOCTL.BYTECNT
+
+				iny
+				lda (ZPIOCTL),y
+				eor #$ff
+				sta ZPCount
+				iny
+				lda (ZPIOCTL),y
+				eor #$ff
+				sta ZPCount+1
+				
+.2				inc ZPCount
+				bne .3
+				inc ZPCount+1
+				beq .8
+				
+.3				.DO SSCIRQ=1
 				ldx DEVSLOTn08F
 
 				lda SSC.STATUS-$8F,x
@@ -343,23 +421,25 @@ WRITE			>STYA ZPIOCTL
 				
 				lda OUTBUF.HEAD
 				cmp OUTBUF.TAIL			Buffer Empty?
-				bne .11					not empty, queue char
+				bne .6					not empty, queue char
 
 				lda SSC.STATUS-$8F,x
 				
 				and #SSC.STATUS.TDRE 	Register Empty ?
-				beq .10					not empty, queue char
+				beq .5					not empty, queue char
 				
-				tya						yes, write directly to ACIA
-				sta SSC.DATA-$8F,x
+				lda (ZPBufPtr)			yes, write directly to ACIA
+				inc ZPBufPtr
+				bne .4
+				inc ZPBufPtr+1
+
+.4				sta SSC.DATA-$8F,x
 				
-				plp
-				clc
-				rts
+				bra .2
 	
-.10				lda OUTBUF.HEAD
+.5				lda OUTBUF.HEAD
 				
-.11				tax
+.6				tax
 				inc
 				and #BUF.MASK
 				cmp OUTBUF.TAIL	
@@ -367,40 +447,46 @@ WRITE			>STYA ZPIOCTL
 
 				sta OUTBUF.HEAD
 				
-				tya
-				sta OUTBUF,x
+				lda (ZPBufPtr)
+				inc ZPBufPtr
+				bne .7
+				inc ZPBufPtr+1
 				
-				plp
-				clc
-				rts
-
-.90				lda #C.EOF
-.9				plp
-				sec
-				rts
+.7				sta OUTBUF,x
+				
+				bra .2
 				.ELSE
-				pha
 				
 				ldx DEVSLOTn08F
 				
-.1				lda SSC.STATUS-$8F,x
+.4				lda SSC.STATUS-$8F,x
 
-*				and #SSC.STATUS.DCD+SSC.STATUS.DSR
+*				and #SSC.STATUS.DCD+SSC.STATUS.nDSR
 *				beq .9
 				
 				and #SSC.STATUS.TDRE	Outgoing char?
-				beq .1
+				beq .4
 				
-				pla
-				sta SSC.DATA-$8F,x
+				lda (ZPBufPtr)
+				inc ZPBufPtr
+				bne .5
+				inc ZPBufPtr+1
 				
+.5				sta SSC.DATA-$8F,x
+				
+				bra .2
+				.FIN
+				
+.8				plp
 				clc
-				rts
+				rts				
 				
-.9				pla
+.90				lda #0
+				.HS 2C					BIT ABS
+.9				lda #C.EOF
+				plp
 				sec
 				rts
-				.FIN
 *--------------------------------------
 * IRQ Handler
 * on exit, CC if handled
