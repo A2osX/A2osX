@@ -57,7 +57,7 @@
 **In:**   
  PUSHW = PTR to S.SOCKET template  
 **Out:**   
- YA = PTR to new S.SOCKET  
+ Y,A = PTR to new S.SOCKET  
  X = hSocket  
 
 # SKT.Close  
@@ -93,50 +93,6 @@
 **Out:**   
  A = hFile  
 
-# SKT.Write (DGRAM,STREAM,RAW)  
- Send block of data  
-**In:**   
- PUSHB = hSocket  
- PUSHW = pBuf  
- PUSHW = len  
-**Out:**   
-
-# SKT.ReadFrame (DGRAM,RAW)  
-**In:**   
- A = hSocket  
-**Out:**   
- A = hFrame  
-
-# SKT.PutC (STREAM)  
- Write a Char To Stream  
-**In:**   
- PUSHB = hSocket  
- PUSHB = Char  
-**Out:**   
-
-# SKT.PutS (STREAM)  
- Write Line in pBuf  
-**In:**   
- PUSHB = hSocket  
- PUSHW = PSTR  
-**Out:**  
-
-# SKT.GetC.A (STREAM)  
- Read a Char From Stream in A  
-**In:**   
- A = hSocket  
-**Out:**   
- A = char  
-
-# SKT.GetS (STREAM)  
- Read a CR terminated Line in pBuf  
-**In:**   
- PUSHB = hSocket  
- PUSHW = pBuf  
- PUSHW = len  
-**Out:**  
- Y,A = bytes read  
-
 # SKT.Read (STREAM)  
  Read data in pBuf  
 **In:**   
@@ -145,3 +101,23 @@
  PUSHW = len  
 **Out:**  
  Y,A = bytes transfered  
+
+# SKT.Write (STREAM)  
+ Send block of data  
+**In:**   
+ PUSHB = hSocket  
+ PUSHW = pBuf  
+ PUSHW = len  
+**Out:**   
+
+# SKT.Rcvd (DGRAM,RAW)  
+**In:**   
+ A = hSocket  
+**Out:**   
+ A = hFrame  
+
+# SKT.Send (DGRAM,RAW)  
+**In:**   
+ A = hSocket  
+**Out:**   
+ A = hFrame  

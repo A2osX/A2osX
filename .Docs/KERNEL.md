@@ -203,7 +203,7 @@ Load a file in memory
 # open  
 
 ## C  
-`int open(const char *pathname, int flags);`  
+`hFD open(const char *pathname, int flags);`  
 
 ## ASM  
 **In:**  
@@ -977,13 +977,19 @@ Copy string
 Y,A = destination  
 
 # StrMatch  
-Compare a String against pattern  
+Compare a String against pattern (e.g. '*test?.txt')  
+
+## C  
+`int * strmatch ( char * s, const char * pattern );`  
+
+## ASM  
 **In:**   
-  PUSHW = PTR to Pattern (e.g. '*test?.txt')  
-  PUSHW = PTR to Src String   
+`>PUSHWI pattern`  
+`>LDYAI s`  
+`>SYSCALL strmatch`  
 **Out:**   
-  CC : match  
-  CS : no match  
+CC : match  
+CS : no match  
 
 # StrUpr/StrLwr  
 Convert string to UPPERCASE/lowercase  
