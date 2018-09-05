@@ -181,9 +181,17 @@ Load a file in memory
  X = hMem of Loaded File  
 
 # ChTyp  
+Change The type of a ProDOS File  
+
+## C  
+`int chtyp(const char *filepath, const char filetype);`  
+
+## ASM  
 **In:**  
- PUSHB = TYPE  
- PUSHW = PATH  
+`>PUSHBI filetype`  
+`>LDYA filepath`  
+`>SYSCALL chtyp`  
+**Out:**  
 
 # ChMod  
 **In:**  
@@ -192,7 +200,7 @@ Load a file in memory
 
 # ChOwn  
 **In:**  
- PUSHW = UID  
+ PUSHW = mod  
  PUSHW = PATH  
 
 # ChGrp  
@@ -757,7 +765,7 @@ TODO: mode="w+t=TYP,x=AUXTYPE"
 Close a file  
 
 ## C  
-int fclose ( hFILE streamm );  
+int fclose ( hFILE stream );  
 
 ## ASM  
 **In:**  
@@ -1019,7 +1027,7 @@ Compare 2 strings
 Get System Time in Buffer  
 
 ## C  
-`time_t time (time_t* timer);`  
+`time_t time (S.TIME* timer);`  
 
 ##ASM  
 **In:**  
@@ -1031,19 +1039,27 @@ S.TIME filled with System date/time
  Convert ProDOS Time To S.TIME  
 
 ## C  
-`time_t time (long ptime, time_t* timer);`  
+`int PTime2Time (long* ptime, S.TIME* timer);`  
 
 ##ASM  
 **In :**   
- PUSHW = Dst PTR To S.TIME  
- PUSHW = Src PTR to ProDOS DATE/TIME (DWORD)  
+`>PUSHW timer`  
+`>LDYA ptime`  
+`>SYSCALL PTime2Time`  
 **Out:**  
 
 # CTime2Time  
- Convert CTIME to S.TIME  
-**In:**   
- PUSHW = Dst PTR To S.TIME  
- PUSHW = Src CTIME DWORD  
+ Convert CTime Time To S.TIME  
+
+## C  
+`int CTime2Time (long* ctime, S.TIME* timer);`  
+
+##ASM  
+**In :**   
+`>PUSHW timer`  
+`>LDYA ctime`  
+`>SYSCALL CTime2Time`  
+**Out:**  
 
 # StrFTime  
 
