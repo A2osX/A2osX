@@ -52,13 +52,13 @@ X = DevID
 # GetDevStatus  
 
 ## C   
-`int getdevstatus ( short int hFD, S.DIB * dstat );`  
+`int getdevstatus(short int hFD, S.DIB* dstat);`  
 
 ## ASM  
 **In:**   
- `>PUSHWI S.DIB`  
- `lda DevID`  
- `>SYSCALL GetDevStatus`  
+`>PUSHWI S.DIB`  
+`lda DevID`  
+`>SYSCALL GetDevStatus`  
 **Out:**  
 
 # MKDev  
@@ -139,26 +139,55 @@ DstStat = S.STAT
 CS : not found  
 
 # PutEnv  
+Change or add an environment variable, string is 'NAME=VALUE'  
+
+## C  
+`int putenv(char *string);`  
+
+## ASM  
 **In:**  
- Y,A = PTR to String NAME=VALUE (C-String)  
+`>LDYA string`  
+`>SYSCALL putenv`  
 **Out:**  
 
 # SetEnv  
+Change or add an environment variable  
+
+## C  
+`int setenv(const char *name, const char *value);`  
+
+## ASM  
 **In:**  
- PUSHW = PTR To Value (PSTR)  
- PUSHW = PTR To Name (PSTR)  
+`>PUSHW value`  
+`>LDYA name`  
+`>SYSCALL setenv`  
 **Out:**  
 
 # GetEnv  
+searches the environment list to find the environment variable name,   
+and returns a pointer to the corresponding value string.  
+
+## C  
+`char *getenv(const char *name);`  
+
+## ASM  
 **In:**  
- Y,A = PTR to NAME (PSTR)  
+`>LDYA name`  
+`>SYSCALL gerenv`  
 **Out:**  
- CC : Y,A = PTR to VALUE (PSTR)  
+ CC : Y,A = PTR to VALUE (C-String)  
  CS : not found  
 
 # UnsetEnv  
+Remove an environment variable  
+
+## C  
+`int unsetenv(const char *name);`  
+
+## ASM  
 **In:**  
- Y,A = PTR To Name (PSTR)  
+`>LDYA name`  
+`>SYSCALL unsetenv`  
 **Out:**  
 
 # LoadTxtFile  
