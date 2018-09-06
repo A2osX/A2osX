@@ -9,7 +9,8 @@
 
 ## Latest News 2018-09-06
 
-0.92 stable enough to resume play with.
+0.92 stable enough to resume playing with.
+Many 0.9.1 bugs already corrected in this version, please check & close opened issues.
 
 ## News 2018-07-20
 
