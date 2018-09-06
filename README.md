@@ -1,9 +1,5 @@
 # A2osX (0.92) Multi-Tasking OS for Apple II  
 
-**!Version 0.9.1 archived!**  
-
-**USE 0.9.1 CODE LEVEL FOR PREVIEW here : https://github.com/burniouf/A2osX/tree/0.9.1**
- 
 ## Disk images :  
 
 + **A2OSX.BOOT.po**   :  **(0.92)**  140k BOOT disk image with all binaries  
@@ -11,7 +7,11 @@
 + **A2OSX.BUILD.po**  :  **(0.92)**  800k BOOT disk image with S-C MASM 3.0 and all binaries (BOOT+DEV)  
 + **A2OSX.SRC.po**    :  **(0.92)**  800k disk image with all sources  
 
-## Latest News 2018-07-20
+## Latest News 2018-09-06
+
+0.92 stable enough to resume play with.
+
+## News 2018-07-20
 
 Kernel & some BINs/SBINs migrated to 0.92.
 
