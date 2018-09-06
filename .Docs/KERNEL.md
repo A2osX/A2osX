@@ -1001,25 +1001,51 @@ CS : no match
 
 # StrUpr/StrLwr  
 Convert string to UPPERCASE/lowercase  
-**In:**  
-Y,A = PTR to String (CSTR)  
-**Out:**  
+
+## C  
+`int strupr ( char * str);`  
+`int strlwr ( char * str);`  
+
+## ASM  
+**In:**   
+`>LDYAI str`  
+`>SYSCALL strupr`  
+`>SYSCALL strlwr`  
+**Out:**   
 Uppercased/lowercased String in Buffer  
+Y,A = str  
 
 # StrCmp  
 Compare 2 strings  
-**In:**   
- PUSHW = Ptr to String1 (CSTR)  
- PUSHW = Ptr to String2 (CSTR)  
-**Out:**   
- DST = SRC  
 
-# StrICmp  
-Compare 2 strings  
+## C  
+`int strcmp(const char *s1, const char *s2);`  
+
+## ASM  
 **In:**   
- PUSHW = Ptr to String1 (CSTR)  
- PUSHW = Ptr to String2 (CSTR)  
+`>PUSHWI s2`  
+`>LDYAI s1`  
+`>SYSCALL strcmp`  
 **Out:**   
+CC : match  
+CS : no match  
+ CC, Y,A=0  
+ CS, Y,A > 0 or < 0  
+
+# StrCaseCmp  
+Compare 2 strings, ignoring case  
+
+## C  
+`int strcasecmp(const char *s1, const char *s2);`  
+
+## ASM  
+**In:**   
+`>PUSHWI s2`  
+`>LDYAI s1`  
+`>SYSCALL strcasecmp`  
+**Out:**   
+CC : match  
+CS : no match  
  CC, Y,A=0  
  CS, Y,A > 0 or < 0  
 
