@@ -291,8 +291,8 @@ note : '$VAR' does NOT expand Variable
 | Name | Status | Comment | K.Ver |
 | ---- | ------ | ------- | ----- |
 | Console.DRV | Working | ANSI support in Progress. | 0.92 |
-| SSC.DRV     | Working | Apple "Super Serial Card" Driver | 0.9.1 |
-| SSC.I.DRV   | Working | Apple "Super Serial Card" Driver (IRQ enabled) | 0.9.1 |
+| SSC.DRV     | Working | Apple "Super Serial Card" Driver | 0.92 |
+| SSC.I.DRV   | Working | Apple "Super Serial Card" Driver (IRQ enabled) | 0.92 |
 | PIC.DRV | In Progress | Apple "Parallel Interface Card" Driver, renamed from PPIC.DRV | 0.9 |
 | Mouse.DRV | Working | Apple Mouse Card,//c Mouse Port | 0.9.1 |
 | DHGR.DRV | Working | 560x192 Mono/16 colors Mixed-Mode support | 0.9.1 |
@@ -348,7 +348,7 @@ note : '$VAR' does NOT expand Variable
 | ARP | Working | dump ARP cache, setup a static ARP entry | 0.92 |
 | DNSINFO | Working | dump DNS cache, setup a static DNS entry | 0.92 |
 | PING | Working | | 0.92 |
-| TELNET | In Progress | | 0.92 |
+| TELNET | Working | | 0.92 |
 
 ## DEV tools:
 | Name | Status | Comment | K.Ver |
