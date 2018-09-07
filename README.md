@@ -3,7 +3,7 @@
 ## Disk images :  
 
 + **A2OSX.BOOT.po**   :  **(0.92)**  140k BOOT disk image with all binaries  
-+ **A2OSX.DEV.po**    :  **(0.9.1)**  140k disk image with ASM binaries, Debug Tools & INClude files  
++ **A2OSX.DEV.po**    :  **(0.92)**  140k disk image with ASM binaries, Debug Tools & INClude files  
 + **A2OSX.BUILD.po**  :  **(0.92)**  800k BOOT disk image with S-C MASM 3.0 and all binaries (BOOT+DEV)  
 + **A2OSX.SRC.po**    :  **(0.92)**  800k disk image with all sources  
 
@@ -356,7 +356,7 @@ note : '$VAR' does NOT expand Variable
 | MEMDUMP | Working | Tool to track memory leak| 0.92 |
 | ASM | In Progress | S-C MASM based multi CPU assembler | 0.9.1 |
 | ---- | ------ | ------- | ----- |
-| RPCDUMP | In Progress | tool based on UDP socket API, renamed from RPCINFO | 0.9.1 |
+| RPCDUMP | In Progress | tool based on UDP socket API, renamed from RPCINFO | 0.92 |
 
 ## Misc
 
