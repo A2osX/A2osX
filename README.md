@@ -347,7 +347,7 @@ note : '$VAR' does NOT expand Variable
 | NETSTAT | Working | | 0.92 |
 | ARP | Working | dump ARP cache, setup a static ARP entry | 0.92 |
 | DNSINFO | Working | dump DNS cache, setup a static DNS entry | 0.92 |
-| PING | Working | | 0.92 |
+| PING | Working | -1..9 : Ping Count | 0.92 |
 | TELNET | Working | | 0.92 |
 
 ## DEV tools:
