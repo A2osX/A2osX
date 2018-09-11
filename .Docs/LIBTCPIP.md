@@ -94,21 +94,34 @@
  A = hFile  
 
 # SKT.Read (STREAM)  
- Read data in pBuf  
-**In:**   
- PUSHB = hSocket  
- PUSHW = pBuf  
- PUSHW = len  
+
+## C  
+`int skt.read(hFD fd, void *buf, int count);`  
+
+## ASM  
+**In:**  
+`>PUSHWI count`  
+`>PUSHW buf`  
+`lda fd`  
+`>SYSCALL read`  
 **Out:**  
- Y,A = bytes transfered  
+CC: Y,A = bytes read  
+CS: A = EC  
 
 # SKT.Write (STREAM)  
- Send block of data  
-**In:**   
- PUSHB = hSocket  
- PUSHW = pBuf  
- PUSHW = len  
-**Out:**   
+
+## C  
+`int skt.write(hFD fd, const void *buf, int count);`  
+
+## ASM  
+**In:**  
+`>PUSHWI count`  
+`>PUSHW buf`  
+`lda fd`  
+`>SYSCALL write`  
+**Out:**  
+CC: Y,A = bytes written  
+CS: A = EC  
 
 # SKT.Rcvd (DGRAM,RAW)  
 **In:**   
