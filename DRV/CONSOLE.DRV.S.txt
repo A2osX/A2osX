@@ -99,7 +99,9 @@ J.EscCodes		.DA Scroll.Dn			M
 				.DA Scroll.Up			D
 				.DA RESET				c
 *--------------------------------------
-J.EscSequences	.DA Esc.DispAttr		m
+J.EscSequences	.DA Esc.LWEnable		h
+				.DA Esc.LWDisable		l
+				.DA Esc.DispAttr		m
 				.DA Esc.Query			n
 				.DA Esc.Scroll			r
 				.DA Esc.Erase			K
@@ -158,14 +160,6 @@ OPEN			sta A2osX.SCRNDEVS		DEV.ID in A
 				stz OutCnt
 
 				jsr RESET
-
-				ldy #0
-				
-.1				lda TelnetOpt,y
-				jsr Char.Out.Put
-				iny
-				cpy #TelnetOpt.LEN
-				bne .1
 *--------------------------------------
 CONTROL			sta SETTEXT
 				sta SETALTCHAR
@@ -304,9 +298,15 @@ WRITE.COUT		bit bEscMode
 *--------------------------------------
 FS				ldx CH
 				cpx #79
-				beq FS.8
+				bne .1
+
+				bit LWFLG
+				bpl FS.8
 				
-				inc CH
+				stz CH
+				jmp LF
+				
+.1				inc CH
 				
 FS.8			clc
 				rts
@@ -353,20 +353,19 @@ COUT.EscMode	bit bEscModeCSI
 				
 .1				stz bEscMode
 				
-				ldy #0
-				ldx #0
+				ldx #EscCodes.Cnt-1
 
-.2				iny
-				cmp EscCodes,y
+.2				cmp EscCodes,x
 				beq .3
-				inx
-				inx
-				cpy EscCodes
+				dex
 				bne .2
 				clc
 				rts
 
-.3				jmp (J.EscCodes,x)
+.3				txa
+				asl
+				tax
+				jmp (J.EscCodes,x)
 *--------------------------------------
 COUT.EscModeCSI	inc EscSeq
 				ldx EscSeq
@@ -442,20 +441,20 @@ COUT.ExecEscSeq	stz EscSeqParamCnt
 				stz bEscModeCSI
 				stz bEscMode
 				
-				ldy #0
-				ldx #0
+				ldx #EscSeqCmds.Cnt-1
 
-.4				iny
-				cmp EscSeqCmds,y
+.4				cmp EscSeqCmds,x
 				beq .5
-				inx
-				inx
-				cpy EscSeqCmds
+				dex
 				bne .4
+				
 				clc
 				rts
 
-.5				jmp (J.EscSequences,x)
+.5				txa
+				asl
+				tax
+				jmp (J.EscSequences,x)
 *--------------------------------------
 COUT.IAC		inc IACBuf
 				ldx IACBuf
@@ -591,10 +590,12 @@ COUT.IAC.DONT
 				rts
 *--------------------------------------
 RESET			jsr CLRSCR
-				lda #0
-				sta SCROLLTOP
 				lda #23
 				sta SCROLLBOT
+				lda #0
+				sta SCROLLTOP
+				dec
+				sta LWFLG
 *--------------------------------------
 RESETATTR		lda #$80
 				sta INVFLG
@@ -643,8 +644,6 @@ ClrScr			stz CH
 
 				lda #" "
 
-*				php
-*				sei
 				sta SETWRITEAUX
 
 				ldy #39
@@ -653,7 +652,6 @@ ClrScr			stz CH
 				bpl .2
 
 				sta CLRWRITEAUX
-*				plp
 
 				ldy #39
 .3				sta (ZPBaseL1),y		
@@ -672,7 +670,7 @@ CROUT			jsr CLREOL
 				rts
 *--------------------------------------
 LF				ldy CV
-				cpy #23
+				cpy SCROLLBOT
 				beq SCROLL.UP
 				inc CV
 				clc
@@ -728,6 +726,24 @@ SCROLL.DN		ldx SCROLLBOT
 				bne .1			
 
 				clc
+				rts
+*--------------------------------------
+Esc.LWEnable	sec
+				.HS 90					BCC 
+*--------------------------------------
+Esc.LWDisable	clc
+				ldx EscSeqParamCnt
+				beq .8
+				dex
+				bne .8
+
+				lda EscSeqParam
+				eor #7
+				bne .8
+
+				ror LWFLG
+				
+.8				clc
 				rts
 *--------------------------------------
 Esc.DispAttr	ldx EscSeqParamCnt
@@ -1065,8 +1081,10 @@ BASEH			.HS	04.04.05.05.06.06.07.07.04.04.05.05.06.06.07.07.04.04.05.05.06.06.07
 CtrlChars		.HS 05080A0C0D151B
 CtrlChars.Cnt	.EQ *-CtrlChars
 *--------------------------------------
-EscCodes		>PSTR "MDc" 
-EscSeqCmds		>PSTR "mnrKH"
+EscCodes		.AZ "MDc"
+EscCodes.Cnt	.EQ *-EscCodes
+EscSeqCmds		.AS "hlmnrKH"
+EscSeqCmds.Cnt	.EQ *-EscSeqCmds
 ENQ.String		.AZ "XTERM"
 *--------------------------------------
 KeyRemapped		.HS 05080A0B0D15		L,D,U,CR,R
@@ -1078,18 +1096,15 @@ KeyRemappedUP	.HS 1B5B4100			esc[A
 KeyRemappedCR	.HS 0D0A00				crlf
 KeyRemappedRGHT	.HS 1B5B4300			esc[C
 *--------------------------------------
-TelnetOpt		.DA #IAC,#DO,#TELOPT.ECHO
-TelnetOpt.LEN	.EQ *-TelnetOpt
-*--------------------------------------
 TELOPS.STATUS	
 *--------------------------------------
 WILLDO			.DA #TELOPT.BINARY,#TELOPT.SGA
 WILLDO.CNT		.EQ *-WILLDO
 WILLDONT		.DA #TELOPT.TSPEED,#TELOPT.LINEMODE,#TELOPT.STATUS
 WILLDONT.CNT	.EQ *-WILLDONT
-DOWILL			.DA #TELOPT.BINARY,#TELOPT.SGA,#TELOPT.NAWS,#TELOPT.TTYPE,#TELOPT.NAWS
+DOWILL			.DA #TELOPT.BINARY,#TELOPT.SGA,#TELOPT.TTYPE,#TELOPT.NAWS
 DOWILL.CNT		.EQ *-DOWILL
-DOWONT			.DA #TELOPT.NEWENVIRON,#TELOPT.XDISPLOC,#TELOPT.TSPEED,#TELOPT.LFLOW
+DOWONT			.DA #TELOPT.ECHO,#TELOPT.NEWENVIRON,#TELOPT.XDISPLOC,#TELOPT.TSPEED,#TELOPT.LFLOW
 DOWONT.CNT		.EQ *-DOWONT
 SB.IS.TTYPE		.DA #IAC,#SB,#TELOPT.TTYPE,#SB.IS
 				.AS 'XTERM'
@@ -1103,6 +1118,7 @@ SB.IS.NAWS.LEN	.EQ *-SB.IS.NAWS
 *--------------------------------------
 CH				.BS 1
 CV				.BS 1
+LWFLG			.BS 1
 INVFLG			.BS 1
 SCROLLTOP		.BS 1
 SCROLLBOT		.BS 1
