@@ -35,7 +35,7 @@ L.MSG.USAGE		.DA MSG.USAGE
 L.MSG.GREETINGS .DA MSG.GREETINGS
 L.TELNETOPTS	.DA TELNETOPTS
 L.TELNETOPT.TTYPE	.DA TELNETOPT.TTYPE
-L.TELNETOPT.LINEMODE	.DA TELNETOPT.LINEMODE
+L.TELNETOPT.LMODE	.DA TELNETOPT.LMODE
 L.ENV.TERM		.DA ENV.TERM
 L.MSG.DEBUG		.DA MSG.DEBUG
 				.DA 0					End Of Reloc Table
@@ -79,68 +79,66 @@ CS.INIT			ldy #S.PS.ARGC
 				sec
 .9				rts
 *--------------------------------------
-CS.RUN			>PUSHWI TELNETOPTS.LEN
+CS.RUN			>LDYA L.ENV.TERM
+				>SYSCALL UnSetEnv
+
+				>PUSHWI TELNETOPTS.LEN
 				>PUSHW L.TELNETOPTS
 				ldy #S.PS.hStdOut
 				lda (pPs),y
 				>SYSCALL write
-				bcs CS.RUN.8
+				bcs CS.RUN.9
 							
 				>PUSHWI K.VER
 				>PUSHBI 2
 				>LDYA L.MSG.GREETINGS
 				>SYSCALL printf
 				
-				bcs CS.RUN.8			unable to send greetings...reset..
+				bcs CS.RUN.9			unable to send greetings...reset..
 
 				jsr Init.Timeout
 			
-CS.RUN.LOOP
-				>SLEEP
+CS.RUN.LOOP		>SLEEP
 				
-.1				>SYSCALL GetChar
-				bcs .2
+				>SYSCALL GetChar
+				bcs .1
+				
 				cmp #IAC
 				beq CS.RUN.IACMODE
 				>SYSCALL PutChar
-				bcc .8
+				bcc .2
+				
 				bra CS.RUN.8
 				
-.2				jsr Wait.Timeout
+.1				jsr Wait.Timeout
 				bcc CS.RUN.LOOP
 				
-				
-.8				lda #2
+.2				lda #2
 				>SYSCALL GetArg
-				>SYSCALL ExecPS
+				>SYSCALL ExecPSNewEnv
 
-CS.RUN.8		clc
+CS.RUN.8				
+CS.RUN.9		clc
 				rts
 *--------------------------------------
-CS.RUN.IACMODE	jsr PrintHEX
-
-				>SLEEP			Wait for IAC VERB (or SB)
+CS.RUN.IACMODE	>SLEEP			Wait for IAC CMD (or SB)
 				>SYSCALL GetChar
 				bcs CS.RUN.IACMODE
 
-				jsr PrintHEX
-
 				>STA.G IAC.CMD
 				
-.1				>SLEEP			Wait for IAC OPT
+.1				>SLEEP			Wait for IAC SUBCMD
 				>SYSCALL GetChar
 				bcs .1
 
-				jsr PrintHEX
-				
 				>STA.G IAC.SUBCMD
 				tax
 				
 				>LDA.G IAC.CMD
 				cmp #SB
-				beq CS.RUN.IACSB
+				beq CS.RUN.IAC.SB
 *--------------------------------------			
-CS.RUN.IACVERB	cmp #WILL
+CS.RUN.IAC.CMD	cmp #WILL
 				bne .8
 				
 				cpx #TELOPT.TTYPE
@@ -153,8 +151,8 @@ CS.RUN.IACVERB	cmp #WILL
 .2				cpx #TELOPT.LINEMODE
 				bne .8
 				
-				>PUSHWI TELNETOPT.LINEMODE.LEN
-				>PUSHW L.TELNETOPT.LINEMODE
+				>PUSHWI TELNETOPT.LMODE.LEN
+				>PUSHW L.TELNETOPT.LMODE
 				
 .7				ldy #S.PS.hStdOut
 				lda (pPs),y
@@ -162,45 +160,41 @@ CS.RUN.IACVERB	cmp #WILL
 				
 .8				jmp CS.RUN.LOOP
 *--------------------------------------
-CS.RUN.IACSB  				
-.1				>SLEEP
+CS.RUN.IAC.SB  	
+.1				>SLEEP					Wait for IAC SB.IS or SEND
 				>SYSCALL GetChar
 				bcs .1
-
-				jsr PrintHEX
-				>STA.G IAC.SB
 				
-				lda #0
-				sta (pData)				reset IAC.SB.DATA
+				>STA.G IAC.SB.CMD
+				
+				>STZ.G IAC.SB.LEN
 				
 .2				>SLEEP
 				>SYSCALL GetChar
 				bcs .2
 
-				jsr PrintHEX
 				cmp #IAC
 				beq .4					end of DATA, go wait SE
 				
 				pha
 				
-				ldy #IAC.SB.DATA-1
-				
-.3				iny
-				lda (pData),y
-				bne .3
+				>LDA.G IAC.SB.LEN
+				clc
+				adc #IAC.SB.DATA
+				tay
 				
 				pla
 				sta (pData),y
 				iny
 				lda #0
 				sta (pData),y
+				
+				>INC.G IAC.SB.LEN
 				bra .2
 				
 .4				>SLEEP
 				>SYSCALL GetChar
 				bcs .4
-				
-				jsr PrintHEX
 				
 				cmp #SE
 				bne .8
@@ -209,7 +203,7 @@ CS.RUN.IACSB
 				cmp #TELOPT.TTYPE
 				bne .8
 				
-				>LDA.G IAC.SB
+				>LDA.G IAC.SB.CMD
 				cmp #SB.IS
 				bne .8
 
@@ -249,13 +243,13 @@ Wait.TimeOut	sec
 				clc
 .9				rts
 *--------------------------------------
-PrintHEX		pha
-				>PUSHA
-				>PUSHBI 1
-				>LDYA L.MSG.DEBUG
-				>SYSCALL printf
-				pla
-				rts
+*PrintHEX		pha
+*				>PUSHA
+*				>PUSHBI 1
+*				>LDYA L.MSG.DEBUG
+*				>SYSCALL printf
+*				pla
+*				rts
 *--------------------------------------
 CS.END
 MSG.USAGE		.AZ "Usage : GETTY <DEV> <PROGRAM>"
@@ -270,22 +264,24 @@ TELNETOPTS		.DA #IAC,#WILL,#TELOPT.BINARY
 				.DA #IAC,#DO,#TELOPT.TTYPE
 				.DA #IAC,#DO,#TELOPT.LINEMODE
 TELNETOPTS.LEN	.EQ *-TELNETOPTS
+*--------------------------------------
 TELNETOPT.TTYPE	.DA #IAC,#SB,#TELOPT.TTYPE,#SB.SEND,#IAC,#SE
 TELNETOPT.TTYPE.LEN	.EQ *-TELNETOPT.TTYPE
-TELNETOPT.LINEMODE
-				.DA #IAC,#SB,#TELOPT.LINEMODE,#SB.SEND,#0,#IAC,#SE
-TELNETOPT.LINEMODE.LEN
+*--------------------------------------
+TELNETOPT.LMODE	.DA #IAC,#SB,#TELOPT.LINEMODE,#SB.SEND,#0,#IAC,#SE
+TELNETOPT.LMODE.LEN .EQ *-TELNETOPT.LMODE
 ENV.TERM		.AZ "TERM"
 *--------------------------------------
 				.DUMMY
 				.OR 0
 DS.START
-IAC.SB.DATA		.BS 64				
-IAC.CMD			.BS 1
-IAC.SUBCMD		.BS 1
-IAC.SB			.BS 1
 hDEV			.BS 1
 TimeOut			.BS 1
+IAC.CMD			.BS 1
+IAC.SUBCMD		.BS 1
+IAC.SB.CMD		.BS 1
+IAC.SB.LEN		.BS 1
+IAC.SB.DATA		.BS 32
 DS.END			.ED
 MAN
 SAVE /A2OSX.SRC/SBIN/GETTY.S
