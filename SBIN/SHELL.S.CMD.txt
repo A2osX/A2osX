@@ -71,7 +71,7 @@ Cmd.Parse.NextC	lda (ZPPtr1)
 *--------------------------------------
 * ZPCMDBuf-> Command line (formatted & not empty)
 *--------------------------------------
-Cmd.Exec		lda #0
+CMD.Exec		lda #0
 				>STA.G CMD.bStartProc
 				>STA.G CMD.hFullpath
 
@@ -88,7 +88,7 @@ Cmd.Exec		lda #0
 				
 				txa
 				>STA.G CMD.hCmdLine
-				>LDYA L.INTCMDS
+				>LDYA L.CMD.INT
 				>STYA ZPPtr2
 				
 				ldx #0
@@ -136,8 +136,8 @@ Cmd.Exec		lda #0
 				inc ZPPtr2+1
 				bra .3
 
-.8				jsr Cmd.Exec.Split		X unmodified
-				jmp (J.INTCMDS,x)		Found an internal Cmd...
+.8				jsr Cmd.Exec.GetArgs	X unmodified
+				jmp (J.CMD.INT,x)		Found an internal Cmd...
 *--------------------------------------
 Cmd.Exec.Done	php
 				pha			
@@ -152,7 +152,7 @@ Cmd.Exec.Done	php
 				plp
 				rts
 *--------------------------------------
-Cmd.Exec.EXT	jsr Cmd.Exec.Split
+Cmd.Exec.EXT	jsr Cmd.Exec.GetArgs
 
 				lda (ZPPtr1)
 				cmp #'/'				Command line is already full path, no search
@@ -490,7 +490,8 @@ Cmd.Exec.READ	lda (ZPPtr2)
 
 				lda #0
 				>STA.G bSecureRead
-
+				>STA.G CMD.VarName.LEN
+				
 				lda pData
 				clc
 				adc #CMD.VarName
@@ -499,72 +500,87 @@ Cmd.Exec.READ	lda (ZPPtr2)
 				adc #0
 				sta ZPPTR1+1
 				
-				ldy #0
-				
-.1				lda (ZPPtr2),y
+.1				lda (ZPPtr2)
 				beq .8
-				iny
+
 				cmp #' '
-				beq .1
-				cmp #'-'
+				bne .11
+				jsr Cmd.Exec.GetNextP2
+				bra .1
+				
+.11				cmp #'-'
 				bne .7
 				
-				lda (ZPPtr2),y
+				jsr Cmd.Exec.GetNextP2
 				beq .9
-				iny
+
 				cmp #'S'
 				bne .2
 				
 				lda #$80
 				>STA.G bSecureRead
+				
+				jsr Cmd.Exec.GetNextP2
+				beq .8
+				cmp #' '
+				bne .9
+				
 				bra .1
 				
 .2				cmp #'P'			
 				bne .9
 				
-				lda (ZPPtr2),y
+				jsr Cmd.Exec.GetNextP2
 				beq .9
-				iny
+
 				cmp #' '
 				bne .9
 				
-				lda (ZPPtr2),y
+				jsr Cmd.Exec.GetNextP2
 				beq .9
-				iny
+
 				cmp #'"'
 				bne .9
 				
-.3				lda (ZPPtr2),y
+.3				jsr Cmd.Exec.GetNextP2
 				beq .9
-				iny
+
 				cmp #'"'
 				beq .1
 				
-				phy
 				>SYSCALL PutChar
-				ply
 				bcs .99
 				bra .3
 				
 .9				jmp Cmd.Exec.ERRSYN			
 				
-.70				lda (ZPPtr2),y
+.7				>LDA.G CMD.VarName.LEN
+				cmp #VarLen.MAX
+				beq .9
+				pha
+				
+				inc
+				sta (pData),y
+				
+				ply
+				lda (ZPPtr2)
+				sta (ZPPTR1),y
+				iny
+				lda #0
+				sta (ZPPTR1),y
+				
+				jsr Cmd.Exec.GetNextP2
+				beq .1
 				cmp #' '
 				beq .1
 				
-.7				lda (ZPPTR1)
-				cmp #VarLen.MAX
-				beq .9
-				inc
-				sta (ZPPTR1)
-				tay
-				lda (ZPPtr2),y
-				sta (ZPPTR1),y
-
-				bne .70
+				bra .7
 				
-.8				lda (ZPPTR1)			No var name ? SYNERR
+.8				>LDA.G CMD.VarName.LEN	No var name ? SYNERR
 				beq .9
+				
+				lda #$ff
+				>STA.G bReadMode
 				
 				clc
 .99				jmp Cmd.Exec.Done		
@@ -572,12 +588,12 @@ Cmd.Exec.READ	lda (ZPPtr2)
 Cmd.Exec.SLEEP	lda (ZPPtr2)
 				beq .9
 
-				>PUSHW ZPPtr2
-				>PUSHEA.G Sleep
+				>LDYA ZPPtr2
 				>SYSCALL AToL
-				
 				bcs .9
-			
+
+				>PULLL.G Sleep
+				
 				jmp Cmd.Exec.Done
 .9				jmp Cmd.Exec.ERRSYN				
 *--------------------------------------
@@ -591,7 +607,48 @@ Cmd.Exec.EXIT	lda #$FF
 				clc
 				jmp Cmd.Exec.Done
 *--------------------------------------
-Cmd.Exec.Split	ldy #$ff				CMD Len
+Cmd.Exec.IF		>STZ.G CMD.IFNOT
+
+				lda (ZPPtr2)
+				beq .9
+
+				cmp #'!'
+				bne .1
+				
+				lda #$ff
+				sta (pData),y			Y = #CMD.IFNOT
+				
+				jsr Cmd.Exec.GetNextP2NB
+				beq .9
+				
+				cmp #'('
+				bne .9
+				
+				jsr Cmd.Exec.GetNextP2NB
+				beq .9
+				
+				cmp #'-'				-d -e -f
+				bne .1
+				
+				jsr Cmd.Exec.GetNextP2NB
+				beq .9
+				
+				
+				
+.1				>DEBUG
+
+
+
+
+
+				>LDYA ZPPtr2
+				>SYSCALL puts
+
+				jmp Cmd.Exec.Done
+.9				jmp Cmd.Exec.ERRSYN	
+*--------------------------------------
+Cmd.Exec.GetArgs
+				ldy #$ff				CMD Len
 				
 .1				iny
 				lda (ZPPtr1),y			Get CMD char...
@@ -611,7 +668,35 @@ Cmd.Exec.Split	ldy #$ff				CMD Len
 				lda ZPPtr1+1
 				adc #0
 				sta ZPPtr2+1			ZPPtr2->ARGS or CMD ending 0 if empty
+
+*				>LDYA L.CMD.IOR
+*				>STYA ZPPtr2
+				
+*				ldx #0
+				
+*.3				lda (ZPPtr2)
+
+
+				
 				rts
+*--------------------------------------
+Cmd.Exec.GetArg1
+				
+*--------------------------------------
+Cmd.Exec.GetNextP2NB
+.1				jsr Cmd.Exec.GetNextP2
+				beq .9
+				cmp #C.SPACE
+				beq .1
+				
+.9				rts				
+*--------------------------------------
+Cmd.Exec.GetNextP2
+				inc ZPPtr2
+				bne .1
+				inc ZPPtr2+1
+.1				lda (ZPPtr2)
+				rts				
 *--------------------------------------
 MAN
 SAVE /A2OSX.SRC/SBIN/SHELL.S.CMD
