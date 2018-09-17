@@ -4,21 +4,27 @@ AUTO 4,1
 				.LIST OFF	
 */--------------------------------------
 * # SKT.New
-*  Create a new socket
-* **In:** 
-*  PUSHW = PTR to S.SOCKET template
-* **Out:** 
-*  Y,A = PTR to new S.SOCKET
-*  X = hSocket
+* Create a new socket
+* ## C
+* `hSOCKET skt.new(void *template);`
+* ## ASM
+* **In:**
+* `>LDYA template`
+* `>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.New`
+* **Out:**
+* CC: A = hSOCKET
+* CS: A = EC
 *\--------------------------------------
-SKT.New			>PULLW ZPTmpPtr1
-				ldy #S.SOCKET.SRC.PORT+1
+SKT.New			>STYA ZPTmpPtr1
+				ldy #S.SOCKET.SRC.PORT
 				lda (ZPTmpPtr1),y
-				dey
+				iny
 				ora (ZPTmpPtr1),y
 				bne .1
 				
 				jsr GetDynPort
+				
+				ldy #S.SOCKET.SRC.PORT
 				sta (ZPTmpPtr1),y
 				txa
 				iny
@@ -101,8 +107,7 @@ SKT.New			>PULLW ZPTmpPtr1
 				
 .8				lda TmpByte
 				ora #$80
-				tax
-				>LDYA ZPPtrSKT
+				
 				clc
 				rts
 				
@@ -293,33 +298,20 @@ SKT.Accept		jsr SKT.Get.I
 .9				rts
 */--------------------------------------
 * # SKT.MkNod
-*  Create a new file from TCP socket
-* **In:** 
-*  A = hSocket
-* **Out:** 
-*  A = hFile
+* ## C
+* `hFD skt.mknod(hSOCKET *s);`
+* ## ASM
+* **In:**
+* `>LDYA s`
+* `>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.MkNod`
+* **Out:**
+* CC: A = hFD
+* CS: A = EC
 *\--------------------------------------
-SKT.MkNod		sta .1+1
+SKT.MkNod		sta FD.SSOCK+S.FD.SSOCK.HSKT
+
 				>LDYAI S.FD.SSOCK
 				>SYSCALL getmem0
-				bcs .9
-				
-				>STYA ZPTmpPtr1
-			
-				ldy #S.FD.T
-				lda #S.FD.T.SSOCK
-				sta (ZPTmpPtr1),y
-				
-				ldy #S.FD.SSOCK.HSKT
-.1				lda #$ff
-				
-				sta (ZPTmpPtr1),y
-				>LDYA ZPTmpPtr1
-				rts
-
-
-
-
 				bcs .9
 				
 				>STYA ZPTmpPtr1
@@ -330,6 +322,7 @@ SKT.MkNod		sta .1+1
 				sta (ZPTmpPtr1),y
 				dey
 				bpl .2
+				
 				txa
 *				clc
 				
@@ -343,7 +336,7 @@ SKT.MkNod		sta .1+1
 * `>PUSHWI count`
 * `>PUSHW buf`
 * `lda fd`
-* `>SYSCALL read`
+* `>LIBCALL hLIBTCPIP,LIBTCPIP.skt.read`
 * **Out:**
 * CC: Y,A = bytes read
 * CS: A = EC
@@ -393,7 +386,7 @@ SKT.Read.I		jsr SKT.Get.I
 * `>PUSHWI count`
 * `>PUSHW buf`
 * `lda fd`
-* `>SYSCALL write`
+* `>LIBCALL hLIBTCPIP,LIBTCPIP.skt.write`
 * **Out:**
 * CC: Y,A = bytes written
 * CS: A = EC
@@ -475,17 +468,25 @@ SKT.Rcvd		jsr SKT.Get.I
 .9				rts
 */--------------------------------------
 * # SKT.Send (DGRAM,RAW)
-* **In:** 
-*  A = hSocket
-* **Out:** 
-*  A = hFrame
+* ## C
+* `int skt.send(hFD fd, const void *buf, int count);`
+* ## ASM
+* **In:**
+* `>PUSHWI count`
+* `>PUSHW buf`
+* `lda fd`
+* `>LIBCALL hLIBTCPIP,LIBTCPIP.skt.send`
+* **Out:**
+* CC: Y,A = bytes written
+* CS: A = EC
 *\--------------------------------------
-SKT.Send		>PULLW ZPDataInLen
+SKT.Send		pha
 				>PULLW ZPDataInPtr
-				>PULLA
+				>PULLW ZPDataInLen
+				pla
 
 				jsr SKT.Get.I
-				bcs .9
+				bcs SKT.Send.9
 
 				cmp #S.SOCKET.SOCK.DGRAM
 				beq SKT.Send.UDP
@@ -495,7 +496,7 @@ SKT.Send		>PULLW ZPDataInLen
 				
 				lda #ERR.SKT.BAD
 				sec
-.9				rts
+SKT.Send.9		rts
 *--------------------------------------
 SKT.Send.RAW	ldy #S.SOCKET.RAW.PROTO
 				lda (ZPPtrSKT),y
@@ -503,50 +504,22 @@ SKT.Send.RAW	ldy #S.SOCKET.RAW.PROTO
 				tax
 				>LDYA ZPDataInLen
 				jsr FRM.NewIP
-				bcs .9
+				bcs SKT.Send.9
 				
-				jsr SKT.SetFrameOutDstIP
-				
-				jsr SKT.CopyDataInToOut
-								
-				jmp FRM.SendIP
-				
-.9				rts
+				bra SKT.Send.UDP.8
 *--------------------------------------
 SKT.Send.UDP	ldx #S.IP.PROTOCOL.UDP
 				>LDYA ZPDataInLen
 				jsr FRM.NewIP
-				bcs .9
+				bcs SKT.Send.9
 				
-				jsr SKT.SetFrameOutDstIP
+				jsr SKT.SetFrameOutTCPUDPPorts
 				
-				ldy #S.SOCKET.SRC.PORT
-				lda (ZPPtrSKT),y
-				tax
-				iny
-				lda (ZPPtrSKT),y
- 				ldy #S.UDP.SRCPORT
-				sta (ZPFrameOutPtr),y
-				iny
-				txa
-				sta (ZPFrameOutPtr),y
+SKT.Send.UDP.8	jsr SKT.SetFrameOutDstIP
 				
-				ldy #S.SOCKET.DST.PORT
-				lda (ZPPtrSKT),y
-				tax
-				iny
-				lda (ZPPtrSKT),y
- 				ldy #S.UDP.DSTPORT
-				sta (ZPFrameOutPtr),y
-				iny
-				txa
-				sta (ZPFrameOutPtr),y
-
 				jsr SKT.CopyDataInToOut				
 
 				jmp FRM.SendIP
-
-.9				rts
 *--------------------------------------
 *  PRIVATE
 *--------------------------------------
@@ -1183,6 +1156,31 @@ SKT.SetFrameOutDstIP
 				dey
 				dex
 				bne .2
+				rts
+*--------------------------------------
+SKT.SetFrameOutTCPUDPPorts
+				ldy #S.SOCKET.SRC.PORT
+				lda (ZPPtrSKT),y
+				tax
+				iny
+				lda (ZPPtrSKT),y
+ 				ldy #S.TCPUDP.SRCPORT
+				sta (ZPFrameOutPtr),y
+				iny
+				txa
+				sta (ZPFrameOutPtr),y
+				
+				ldy #S.SOCKET.DST.PORT
+				lda (ZPPtrSKT),y
+				tax
+				iny
+				lda (ZPPtrSKT),y
+ 				ldy #S.TCPUDP.DSTPORT
+				sta (ZPFrameOutPtr),y
+				iny
+				txa
+				sta (ZPFrameOutPtr),y
+
 				rts
 *--------------------------------------
 SKT.CopyDataInToOut

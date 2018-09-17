@@ -11,8 +11,8 @@ AUTO 4,1
 				.INB INC/ETH.I
 				.INB INC/LIBTCPIP.I
 *--------------------------------------
-TIMEOUT.MAX		.EQ 30					30 sec.
 CONN.MAX		.EQ 16
+TIMEOUT.MAX		.EQ 30					30 sec.
 *--------------------------------------
 ZPIPCfgPtr		.EQ ZPBIN
 ZPSktPtr		.EQ ZPBIN+2
@@ -23,7 +23,8 @@ CS.START		cld
 				jmp (.1,x)
 				.DA #$61				6502,Level 1 (65c02)
 				.DA #1					BIN Layout Version 1
-				.DA 0
+				.DA #S.PS.F.EVENT		S.PS.F
+				.DA #0
 				.DA CS.END-CS.START		CS
 				.DA DS.END-DS.START		DS
 				.DA #64					SS
@@ -44,7 +45,6 @@ L.MSG.TCPIPERR	.DA MSG.TCPIPERR
 L.MSG.SKTERR	.DA MSG.SKTERR
 L.MSG.ABORT		.DA MSG.ABORT
 L.MSG.INCOMING	.DA MSG.INCOMING
-L.MSG.BYTE		.DA MSG.BYTE
 				.DA 0				
 *--------------------------------------
 CS.INIT			>LDYA L.LIBTCPIP
@@ -54,13 +54,14 @@ CS.INIT			>LDYA L.LIBTCPIP
 				lda (pPs)
 				ora #S.PS.F.EVENT		Now accept events
 				sta (pPs)
+				
 				clc
 				rts
 *--------------------------------------
 CS.RUN			jsr Init.Timeout
 
 				>LDYA L.MSG.TCPWAIT
-				>SYSCALL printf
+				>SYSCALL puts
 				
 .1				>LIBCALL hLIBTCPIP,LIBTCPIP.GET.IPCFG	is TCPIP loaded ?
 				bcs .99
@@ -78,9 +79,10 @@ CS.RUN			jsr Init.Timeout
 				bne .1
 				jmp CS.RUN.ABORT
 				
-.99				>LDYA L.MSG.TCPIPERR
-				>SYSCALL printf
-				lda #K.E.SYN
+.99				pha
+				>LDYA L.MSG.TCPIPERR
+				>SYSCALL puts
+				pla
 				sec	
 				rts
 				
@@ -92,42 +94,46 @@ CS.RUN.INIT		ldx #3
 				dex
 				bpl .1
 				
-				>PUSHW L.Socket
+				>LDYA L.Socket
 				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.New
 				bcs .9
-				txa
-				ldy #hSrvSocket
-				sta (pData),y
+
+				>STA.G hSrvSocket
 				
 				>LDYA L.MSG.INITOK
-				>SYSCALL printf
+				>SYSCALL puts
 
 .2				>SLEEP
 				jsr CS.RUN.SERVER
 				bcs CS.RUN.ERR
+
+*				>SYSCALL GetChar
+*				bcs .2
 				
-				jsr CS.RUN.CLIENT
+*				cmp #$03
+*				beq CS.RUN.ABORT
+
 				bra .2
 				
-.9				>LDYA L.MSG.SKTERR
-				>SYSCALL printf
-				lda #K.E.SYN
+.9				pha
+				>LDYA L.MSG.SKTERR
+				>SYSCALL puts
+				pla
 				sec	
 				rts
 				
 CS.RUN.ABORT	>LDYA L.MSG.ABORT
-				>SYSCALL printf
-				lda #0
+				>SYSCALL puts
+				lda #3
 				
 CS.RUN.ERR		sec	
 				rts
 *--------------------------------------
-CS.RUN.SERVER	ldy #hSrvSocket
-				lda (pData),y
+CS.RUN.SERVER	>LDA.G hSrvSocket
 				
-				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.AcceptA
+				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.Accept
 				bcs .8
-				pha
+				>STA.G hClientSocket
 				
 				ldy #hSockets
 				ldx #CONN.MAX
@@ -138,15 +144,12 @@ CS.RUN.SERVER	ldy #hSrvSocket
 				dex
 				bne .1
 				
-				pla
-				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.CloseA
+				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.Close
 				bra .8
 				
-.2				pla
-				sta (pData),y
-				sta .4+1
-				
-				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.GetA
+.2				sta (pData),y
+
+				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.Get
 				>STYA ZPSktPtr
 
 				ldx #3
@@ -157,74 +160,32 @@ CS.RUN.SERVER	ldy #hSrvSocket
 				dex
 				bpl .3
 				
-.4				lda #$ff
-				>PUSHA
-				
+				>PUSHB.G hClientSocket
+
+				>PUSHBI 5
 				>LDYA L.MSG.INCOMING
 				>SYSCALL printf
+				bcs .9
+				
+				>LDA.G hClientSocket
+				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.MkNod
+				bcs .9
+				
+				
+				
 .8				clc
 .9				rts
 *--------------------------------------
-CS.RUN.CLIENT	ldy #SktIndex
-				lda (pData),y
-				tay
-				lda (pData),y			hSockets
-				beq .8
+CS.DOEVENT		lda (pEvent)
+				bpl .9					is it a TIMER event?
 				
-				sta .1+1				hSocket
-				sta .3+1
+				>LDA.G TimeOut
+				beq .9
 				
-				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.GetC
-				bcc .10
-				
-				tax
-				beq .8				NO DATA
-				cmp #ERR.SKT.BAD
-				bne .8
-				
-				ldy #SktIndex
-				lda (pData),y
-				tay
-				lda #0
+				dec
 				sta (pData),y
-				bra .8
 				
-.10				sta .2+1
-				>PUSHA
-				>LDYA L.MSG.BYTE
-				>SYSCALL printf
-			
-.1				lda #$ff				hSocket
-				>PUSHA
-				
-.2				lda #$ff				data
-				and #$7F
-				ora #$20
-				>PUSHA
-
-				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.PutC
-				
-.3				lda #$ff				hSocket
-				>PUSHA
-				
-				lda #'/'
-				>PUSHA
-
-				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.PutC
-
-.8				ldy #SktIndex
-				lda (pData),y
-				inc
-				cmp #CONN.MAX
-				bne .81
-				lda #0
-				
-.81				sta (pData),y
-
-				clc
-				rts
-*--------------------------------------
-CS.DOEVENT		sec
+.9				sec						do not discard TIMER event
 				rts
 *--------------------------------------
 CS.QUIT			ldx #CONN.MAX
@@ -235,7 +196,7 @@ CS.QUIT			ldx #CONN.MAX
 				
 				phx
 				phy
-				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.CLOSEA
+				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.Close
 				ply
 				plx
 				
@@ -246,7 +207,7 @@ CS.QUIT			ldx #CONN.MAX
 				ldy #hSrvSocket
 				lda (pData),y
 				beq .3
-				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.CLOSEA
+				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.Close
 				
 .3				lda hLIBTCPIP
 				>SYSCALL UnloadLib
@@ -267,15 +228,14 @@ Wait.TimeOut	sec
 *--------------------------------------
 CS.END
 *--------------------------------------
-LIBTCPIP		.AZ "libtcpip.o"
-MSG.TCPWAIT		.AZ "TELNETD:Waiting for TCP/IP initializing...\r\n"
-MSG.INITOK		.AZ "TELNETD:Init Ok, Listening.\r\n"
-MSG.TCPIPERR	.AZ "TELNETD:TCP/IP Not initialized properly\r\n"
-MSG.SKTERR		.AZ "TELNETD:Listen Error\r\n"
-MSG.ABORT		.AZ "TELNETD:User Aborted\r\n"
-MSG.INCOMING	.AZ "TELNETD:Incoming Connection [SKT=%h] From : %d.%d.%d.%d\r\n"
-MSG.BYTE		.AZ "[%h]"
 hLIBTCPIP		.BS 1
+LIBTCPIP		.AZ "libtcpip.o"
+MSG.TCPWAIT		.AZ "TELNETD:Waiting for TCP/IP initializing..."
+MSG.INITOK		.AZ "TELNETD:Init Ok, Listening."
+MSG.TCPIPERR	.AZ "TELNETD:TCP/IP Not initialized properly"
+MSG.SKTERR		.AZ "TELNETD:Listen Error."
+MSG.ABORT		.AZ "TELNETD:User Aborted."
+MSG.INCOMING	.AZ "TELNETD:Incoming Connection [SKT=%h] From : %d.%d.%d.%d\r\n"
 *--------------------------------------
 Socket			.DA #S.SOCKET.SOCK.STREAM
 				.DA #S.SOCKET.SO.ACCEPTCONN
@@ -292,6 +252,7 @@ DS.START
 hSockets		.BS	CONN.MAX			pData
 SktIndex		.BS 1
 hSrvSocket		.BS 1
+hClientSocket	.BS 1
 TimeOut			.BS 1
 DS.END
 				.ED

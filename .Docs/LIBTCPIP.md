@@ -53,12 +53,18 @@
   Y,A = PTR to DNS.CACHE  
 
 # SKT.New  
- Create a new socket  
-**In:**   
- PUSHW = PTR to S.SOCKET template  
-**Out:**   
- Y,A = PTR to new S.SOCKET  
- X = hSocket  
+Create a new socket  
+
+## C  
+`hSOCKET skt.new(void *template);`  
+
+## ASM  
+**In:**  
+`>LDYA template`  
+`>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.New`  
+**Out:**  
+CC: A = hSOCKET  
+CS: A = EC  
 
 # SKT.Close  
  Close socket  
@@ -87,11 +93,17 @@
  A = hSocket  
 
 # SKT.MkNod  
- Create a new file from TCP socket  
-**In:**   
- A = hSocket  
-**Out:**   
- A = hFile  
+
+## C  
+`hFD skt.mknod(hSOCKET *s);`  
+
+## ASM  
+**In:**  
+`>LDYA s`  
+`>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.MkNod`  
+**Out:**  
+CC: A = hFD  
+CS: A = EC  
 
 # SKT.Read (STREAM)  
 
@@ -103,7 +115,7 @@
 `>PUSHWI count`  
 `>PUSHW buf`  
 `lda fd`  
-`>SYSCALL read`  
+`>LIBCALL hLIBTCPIP,LIBTCPIP.skt.read`  
 **Out:**  
 CC: Y,A = bytes read  
 CS: A = EC  
@@ -118,7 +130,7 @@ CS: A = EC
 `>PUSHWI count`  
 `>PUSHW buf`  
 `lda fd`  
-`>SYSCALL write`  
+`>LIBCALL hLIBTCPIP,LIBTCPIP.skt.write`  
 **Out:**  
 CC: Y,A = bytes written  
 CS: A = EC  
@@ -130,7 +142,16 @@ CS: A = EC
  A = hFrame  
 
 # SKT.Send (DGRAM,RAW)  
-**In:**   
- A = hSocket  
-**Out:**   
- A = hFrame  
+
+## C  
+`int skt.send(hFD fd, const void *buf, int count);`  
+
+## ASM  
+**In:**  
+`>PUSHWI count`  
+`>PUSHW buf`  
+`lda fd`  
+`>LIBCALL hLIBTCPIP,LIBTCPIP.skt.send`  
+**Out:**  
+CC: Y,A = bytes written  
+CS: A = EC  
