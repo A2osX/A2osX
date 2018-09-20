@@ -505,7 +505,7 @@ Load a file in AUX memory (Stock Objects)
  Y,A = File Length  
  X = hMem of Loaded Object in AUX mem  
 
-# ExecPSNewEnv.  
+# ExecPSNewEnv  
 
 # ExecPS (Blocking Parent PID)  
 
@@ -549,29 +549,52 @@ Return information about a file
 **Out:**  
 
 # MKDir  
+create a directory  
+
+## C  
+`int mkdir(const char *pathname, int mode);`  
+
+## ASM  
 **In:**   
- Y,A = DIR name  
+`>PUSHW mode`  
+`>LDYA pathname`  
+`>SYSCALL mkdir`  
 **Out:**  
- CC : success  
- CS : error  
-  A = EC  
+CC : success  
+CS : error  
+A = EC  
 
 # MkNod  
-int mknod(const char *pathname, mode_t mode, dev_t dev);  
-return a hFile for a given Device Name  
+return a hFile for a given file descriptor.  
+(CDEV, BDEV, DSOCKS, SSOCK, PIPE)  
+
+## C  
+`hFILE mknod(const char *pathname, int mode, hFD fd);`  
+
+## ASM  
 **In:**   
- Y,A=DevName  
+`>PUSHB fd`  
+`>PUSHW mode`  
+`>LDYA pathname`  
+`>SYSCALL mknod`  
 **Out:**  
- CC = OK, CS = ERROR  
- A = hFILE  
+CC = OK, CS = ERROR  
+A = hFILE  
 
 # MKFIFO  
-int mkfifo(const char *pathname, mode_t mode);  
 return a hFILE to a new FIFO  
+
+## C  
+`hFILE mkfifo(const char *pathname, int mode);`  
+
+## ASM  
 **In:**   
+`>PUSHW mode`  
+`>LDYA pathname`  
+`>SYSCALL mkfifo`  
 **Out:**  
- CC = OK, CS = ERROR  
- A = hFILE  
+CC = OK, CS = ERROR  
+A = hFILE  
 
 # FPutC  
 Print A (char) to hFILE  

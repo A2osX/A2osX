@@ -60,7 +60,7 @@ Create a new socket
 
 ## ASM  
 **In:**  
-`>LDYA template`  
+`>PUSHW template`  
 `>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.New`  
 **Out:**  
 CC: A = hSOCKET  
@@ -95,11 +95,11 @@ CS: A = EC
 # SKT.MkNod  
 
 ## C  
-`hFD skt.mknod(hSOCKET *s);`  
+`hFD skt.mknod(hSOCKET s);`  
 
 ## ASM  
 **In:**  
-`>LDYA s`  
+`lda s`  
 `>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.MkNod`  
 **Out:**  
 CC: A = hFD  
