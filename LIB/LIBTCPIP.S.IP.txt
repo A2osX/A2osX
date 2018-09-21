@@ -22,73 +22,162 @@ IP.IN			ldy #S.IP.PROTOCOL
 				>SYSCALL FreeMem
 				rts
 *--------------------------------------
-* In:
-*  PULLW = Start Offset
-*  PULLW = End Offset
-* Out:
-*  Y,A = CheckSum
-*--------------------------------------
-IP.ComputeChecksum
-				>PULLA
-				clc
-				adc ZPFrameOutPtr
-				sta ZPTmpPtr1
-				>PULLA
-				adc ZPFrameOutPtr+1
-				sta ZPTmpPtr1+1
-
-				>PULLA
-				clc
-				adc ZPFrameOutPtr
-				sta TmpOffset
-				>PULLA
-				adc ZPFrameOutPtr+1
-				sta TmpOffset+1
-
+IP.ComputeICMPChecksum
 				stz IP.CHECKSUM
 				stz IP.CHECKSUM+1
-				stz IP.CHECKSUM+2
-				stz IP.CHECKSUM+3
+
+				lda ZPFrameOutLen
+				sec
+				sbc #S.ICMP.TYPE
+				eor #$ff
+				tax
 				
-				ldy #0
+				lda ZPFrameOutLen+1
+				sbc /S.ICMP.TYPE
+				eor #$ff
 				
-.1				clc
+				ldy #S.ICMP.CHECKSUM
 				
+				jmp IP.ComputeChecksum
+*--------------------------------------
+IP.ComputeUDPChecksum				
+				ldy #S.UDP.LENGTH
+				lda (ZPFrameOutPtr),y
+				clc
+				
+*				adc /S.IP.PROTOCOL.UDP 	(all zero)
+				sta IP.CHECKSUM
+
 				iny
-				lda (ZPTmpPtr1),y
+				lda (ZPFrameOutPtr),y
+				adc #S.IP.PROTOCOL.UDP
+				sta IP.CHECKSUM+1
+				
+				jsr IP.AddSrcDstIPToChecksum
+
+				lda ZPFrameOutLen
+				sec
+				sbc #S.IP
+				eor #$ff
+				tax
+				
+				lda ZPFrameOutLen+1
+				sbc /S.IP
+				eor #$ff
+				
+				ldy #S.UDP.CHECKSUM
+				bra IP.ComputeChecksum
+*--------------------------------------
+IP.ComputeTCPChecksum				
+				lda ZPFrameOutLen
+				sec
+				sbc #S.IP
+				sta ZPDataInLen
+				
+				lda ZPFrameOutLen+1
+				sbc /S.IP
+				sta ZPDataInLen+1
+				
+				clc
+				
+*				lda ZPDataInLen+1
+*				adc /S.IP.PROTOCOL.TCP	 (all zero)
+				sta IP.CHECKSUM
+
+				lda ZPDataInLen
+				adc #S.IP.PROTOCOL.TCP
+				sta IP.CHECKSUM+1
+				
+				jsr IP.AddSrcDstIPToChecksum
+				
+				lda ZPDataInLen
+				eor #$ff
+				tax
+				lda ZPDataInLen+1
+				eor #$ff
+				
+				ldy #S.TCP.CHECKSUM
+*--------------------------------------
+* X,A = !ByteCount, Y = Offset in Frame
+*--------------------------------------
+IP.ComputeChecksum
+				phy						Save Offset
+				pha						Save !ByteCount.HI
+
+				lda #0					Reset Checksum
+				sta (ZPFrameOutPtr),y
+				iny
+				sta (ZPFrameOutPtr),y
+
+				>LDYA ZPFrameOutPtr
+				>STYA ZPTmpPtr1
+
+				ldy #S.IP
+								
+.1				inx
+				bne .11
+				pla
+				inc
+				beq .8
+				
+				pha
+				
+.11				lda (ZPTmpPtr1),y
 				adc IP.CHECKSUM
 				sta IP.CHECKSUM
+
+				iny
+				bne .20
+				inc ZPTmpPtr1+1
 				
-				dey
-				lda (ZPTmpPtr1),y
+.20				inx
+				bne .2
+				pla
+				inc
+				beq .7
+				
+				pha
+
+.2				lda (ZPTmpPtr1),y
+
 				adc IP.CHECKSUM+1
 				sta IP.CHECKSUM+1
 				
-				bcc .3
-				inc IP.CHECKSUM+2
-				bne .3
-				inc IP.CHECKSUM+3
-				
-.3				lda ZPTmpPtr1
-				clc
-				adc #2
-				sta ZPTmpPtr1
-				bcc .4
-				inc ZPTmpPtr1+1
-.4				cmp TmpOffset
-				bne	.1	
-				lda ZPTmpPtr1+1
-				cmp TmpOffset+1
+				iny
 				bne .1
+				inc ZPTmpPtr1+1
+				bra .1
 				
+.7				adc IP.CHECKSUM+1		A=0 from beq .7
+				sta IP.CHECKSUM+1
+				
+.8				ply
 				lda IP.CHECKSUM
-				clc
-				adc IP.CHECKSUM+2
+				adc #0					Don't forget to add last carry!!!
 				eor #$FF
-				tay
+				sta (ZPFrameOutPtr),y
+				iny
 				lda IP.CHECKSUM+1
-				adc IP.CHECKSUM+3
+				adc #0					Don't forget to add last carry!!!
 				eor #$FF
+				sta (ZPFrameOutPtr),y
+				rts
+*--------------------------------------
+IP.AddSrcDstIPToChecksum
+				ldy #S.IP.SRC
+				
+				ldx #4					4 words for SRC & DST IP
+				
+.1				lda (ZPFrameOutPtr),y
+				adc IP.CHECKSUM
+				sta IP.CHECKSUM
+				iny
+				lda (ZPFrameOutPtr),y
+				adc IP.CHECKSUM+1
+				sta IP.CHECKSUM+1
+				iny
+				dex
+				bne .1
 				rts
 *--------------------------------------
 IP.FillSKT.TemplateSrcDstIPP
@@ -179,11 +268,13 @@ IP.SetDestMAC	ldy #S.IP.DST
 				
 				ldx #5
 				ldy #S.ETH.DSTMAC+5
+				
 .11				lda ARP.TmpCache+S.ARPCACHE.MAC,x
 				sta (ZPFrameOutPtr),y
 				dey
 				dex
 				bpl .11
+				
 				clc
 .99				rts
 *--------------------------------------
