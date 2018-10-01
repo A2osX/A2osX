@@ -16,34 +16,72 @@ AUTO 4,1
 * CC: A = hSOCKET
 * CS: A = EC
 *\--------------------------------------
-SKT.Socket		sta FD.SSOCK+S.SOCKET.T		save type
-				tax
+SKT.Socket		tax						type (RAW,DGRAM,SEQPACKET,STREAM)
 				
-				>PULLA						get protocol (RAW)
+				>PULLA					get protocol (RAW)
 				
-				jmp (J.SKT.Socket,x)
+SKT.Socket.I	jmp (J.SKT.Socket,x)
 				
-SKT.Socket.RAW	ldy #S.SOCKET
-				bra SKT.Socket.NEW
+SKT.Socket.RAW	ldy #S.SOCKET			socket.size
+				bra SKT.Socket.DSOCK
 SKT.Socket.DGRAM
 				lda #S.IP.PROTOCOL.UDP
-				ldy #S.SOCKET
-				bra SKT.Socket.NEW
+				ldy #S.SOCKET			socket.size
+				bra SKT.Socket.DSOCK
+SKT.Socket.SEQPACKET
+				lda #S.IP.PROTOCOL.TCP
+				ldy #S.SOCKET.TCP		socket.size
+				
+SKT.Socket.DSOCK
+				stx FD.DSOCK+S.SOCKET.T		save type
+				sta FD.DSOCK+S.SOCKET.PROTO		ICMP,UDP,TCP
+				lda #0					Y = socket.size
+				>SYSCALL GetMem0
+				bcs .99
+				>STYA ZPTmpPtr1
+				stx FD.DSOCK+S.FD.DSOCK.HSKT
+				
+				jsr SKT.Socket.FindFree
+				bcs .9
+
+				ldy #FD.DSOCK.SIZE-1
+				
+.1				lda FD.DSOCK,y
+				sta (ZPTmpPtr1),y
+				dey
+				bpl .1
+				
+				txa
+				clc
+.9				rts
+				
 SKT.Socket.STREAM
 				lda #S.IP.PROTOCOL.TCP
 				ldy #S.SOCKET.TCP
-				bra SKT.Socket.NEW
-SKT.Socket.SEQPACKET
-				lda #S.IP.PROTOCOL.TCP
-				ldy #S.SOCKET.TCP
-				
-SKT.Socket.NEW	sta FD.SSOCK+S.SOCKET.PROTO
-				lda #0
+
+				stx FD.SSOCK+S.SOCKET.T		save type
+				sta FD.SSOCK+S.SOCKET.PROTO		ICMP,UDP,TCP
+				lda #0					Y = socket.size
 				>SYSCALL GetMem0
 				bcs .99
-				>STYA ZPPtrSKT
-				stx FD.SSOCK+S.FD.SOCK.HSKT
+				>STYA ZPTmpPtr1
+				stx FD.SSOCK+S.FD.SSOCK.HSKT
+
+				jsr SKT.Socket.FindFree
+				bcs .9
+					
+				ldy #FD.SSOCK.SIZE-1
 				
+.1				lda FD.SSOCK,y
+				sta (ZPTmpPtr1),y
+				dey
+				bpl .1
+				
+				txa
+				clc
+.9				rts			
+
+SKT.Socket.FindFree
 				ldy #0
 				
 .1				lda SKT.TABLE,y
@@ -56,19 +94,10 @@ SKT.Socket.NEW	sta FD.SSOCK+S.SOCKET.PROTO
 				>SYSCALL freemem
 				lda #K.E.OOH
 				sec
-.99				rts
+				rts
 
 .2				txa						x = hFD
 				sta SKT.TABLE,y
-
-				ldy #FD.SSOCK.SIZE-1
-				
-.3				lda FD.SSOCK,y
-				sta (ZPPtrSKT),y
-				dey
-				bpl .3
-				
-				txa
 				clc
 				rts
 */--------------------------------------
@@ -88,7 +117,7 @@ SKT.Socket.NEW	sta FD.SSOCK+S.SOCKET.PROTO
 SKT.bind		>SYSCALL GetMemPtr
 				>STYA ZPPtrSKT
 
-				jsr SKT.GetLocAddr
+				jsr SKT.PullLocAddr
 				
 				lda SKT.LOC.ADDR+S.SOCKADDR.PORT
 				bne .1
@@ -128,7 +157,7 @@ SKT.bind		>SYSCALL GetMemPtr
 SKT.connect		>SYSCALL GetMemPtr
 				>STYA ZPPtrSKT
 				
-				jsr SKT.GetRemAddr
+				jsr SKT.PullRemAddr
 				
 				ldy #S.SOCKET.T
 				lda (ZPPtrSKT),y
@@ -219,7 +248,7 @@ SKT.listen		>SYSCALL GetMemPtr
 				
 				ldy #S.SOCKET.T
 				lda (ZPPtrSKT),y
-				cmp #S.SOCKET.T.STREAM+1
+				cmp #S.SOCKET.T.SEQPACKET+1
 				bcc .9
 
 				ldy #S.SOCKET.TCP.S
@@ -465,12 +494,12 @@ SKT.Write		>SYSCALL GetMemPtr
 				
 .99				lda #ERR.SKT.BAD
 				sec
-.9				rts
+				rts
 */--------------------------------------
 * # SKT.Recv (RAW,DGRAM,SEQPACKET)
 * # SKT.RecvFrom (RAW,DGRAM,SEQPACKET)
 * hMem recv(hFD fd);
-* hMem recv(hFD fd, const struct sockaddr *addr);
+* hMem recvfrom(hFD fd, struct sockaddr *addr);
 * ## ASM
 * **In:**
 * `>PUSHW addr`		(RecvFrom)
@@ -480,16 +509,26 @@ SKT.Write		>SYSCALL GetMemPtr
 * CC: A = hMem
 * CS: A = EC
 *\--------------------------------------
-SKT.Recv		>SYSCALL GetMemPtr
+SKT.RecvFrom	sec
+				.HS 90					BCC
+SKT.Recv		clc
+				php
+				
+				>SYSCALL GetMemPtr
 				>STYA ZPPtrSKT
 				
+				ldy #S.SOCKET.T
+				lda (ZPPtrSKT),y
+				cmp #S.SOCKET.T.STREAM
+				beq .99
+
 				ldy #S.SOCKET.HQ.TAIL
 				lda (ZPPtrSKT),y
 				tax
 				
 				ldy #S.SOCKET.HQ.HEAD
 				cmp (ZPPtrSKT),y
-				beq .99
+				beq .90
 				
 				inc
 				cmp #S.SOCKET.HQ.MAX
@@ -504,11 +543,28 @@ SKT.Recv		>SYSCALL GetMemPtr
 				adc #S.SOCKET.HQ
 				tay
 				lda (ZPPtrSKT),y
-				clc
-				rts
+				plp
+				bcc .9
+				pha
+				>SYSCALL GetMemPtr
+				>STYA ZPFrameInPtr
 				
-.99				sec
+				>PULLW ZPTmpPtr1	addr
+				
+				
+				pla
+				clc
 .9				rts
+				
+.99				plp
+				lda #ERR.SKT.BAD
+				sec
+				rts				
+				
+.90				plp
+				lda #0					no data
+				sec
+				rts
 */--------------------------------------
 * # SKT.Send (RAW,DGRAM,SEQPACKET)
 * # SKT.SendTo (RAW,DGRAM,SEQPACKET)
@@ -526,23 +582,25 @@ SKT.Recv		>SYSCALL GetMemPtr
 * CC: Y,A = bytes written
 * CS: A = EC
 *\--------------------------------------
-SKT.Send		>SYSCALL GetMemPtr
+SKT.SendTo		sec
+				.HS 90					BCC
+SKT.Send		clc
+				php
+				>SYSCALL GetMemPtr
 				>STYA ZPPtrSKT
-				>PULLW ZPDataInPtr
+				plp
+				
+				bcc .1
+				
+				jsr SKT.PullRemAddr
+				
+.1				>PULLW ZPDataInPtr
 				>PULLW ZPDataInLen
 
 				ldy #S.SOCKET.T
 				lda (ZPPtrSKT),y
-
-				cmp #S.SOCKET.T.DGRAM
-				beq SKT.Send.UDP
-			
-				cmp #S.SOCKET.T.RAW
-				beq SKT.Send.RAW
-				
-				lda #ERR.SKT.BAD
-				sec
-SKT.Send.9		rts
+				tax
+				jmp (J.SKT.send,x)		
 *--------------------------------------
 SKT.Send.RAW	ldy #S.SOCKET.RAW.PROTO
 				lda (ZPPtrSKT),y
@@ -552,20 +610,29 @@ SKT.Send.RAW	ldy #S.SOCKET.RAW.PROTO
 				jsr FRM.NewIP
 				bcs SKT.Send.9
 				
-				bra SKT.Send.UDP.8
+				bra SKT.Send.DGRAM.8
 *--------------------------------------
-SKT.Send.UDP	ldx #S.IP.PROTOCOL.UDP
+SKT.Send.DGRAM	ldx #S.IP.PROTOCOL.UDP
 				>LDYA ZPDataInLen
 				jsr FRM.NewIP
 				bcs SKT.Send.9
 				
 				jsr SKT.SetFrameOutTCPUDPPorts
 				
-SKT.Send.UDP.8	jsr SKT.SetFrameOutDstIP
+SKT.Send.DGRAM.8
+
+				jsr SKT.SetFrameOutDstIP
 				
 				jsr SKT.CopyDataInToOut				
 
 				jmp FRM.SendIP
+*--------------------------------------
+SKT.Send.STREAM	lda #ERR.SKT.BAD
+				sec
+				rts
+*--------------------------------------
+SKT.Send.SEQPACKET
+				bra *
 */--------------------------------------
 * # SKT.GetTable
 * Get socket table
@@ -582,7 +649,7 @@ SKT.GetTable	>LDYA L.SKT.Table
 *--------------------------------------
 *  PRIVATE
 *--------------------------------------				
-SKT.GetLocAddr	>PULLW ZPTmpPtr1
+SKT.PullLocAddr	>PULLW ZPTmpPtr1
 				
 				ldy #S.SOCKADDR-1
 				
@@ -592,7 +659,7 @@ SKT.GetLocAddr	>PULLW ZPTmpPtr1
 				bne .1
 				rts
 *--------------------------------------				
-SKT.GetRemAddr	>PULLW ZPTmpPtr1
+SKT.PullRemAddr	>PULLW ZPTmpPtr1
 				
 				ldy #S.SOCKADDR-1
 				
