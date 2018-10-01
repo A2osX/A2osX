@@ -3,80 +3,43 @@ PREFIX /A2OSX.BUILD
 AUTO 4,1
 				.LIST OFF	
 *--------------------------------------
-TCP.IN			jsr IP.FillSKT.TemplateSrcDstIPP
+TCP.IN			jsr FRM.GetTargetSKT
 				
-				lda hSocketTable
-				>SYSCALL GetMemPtr
+				jsr SKT.FindMatchingLocRem
+				bcs TCP.IN.JMP.CLOSED	no socket, go discard
+				
 				>STYA ZPPtrSKT
 				
-				ldx #0
-				
-.3				lda (ZPPtrSKT)
-				beq .7
-				cmp #S.SOCKET.T.STREAM
-				bne .7
-				
-				ldy #S.SOCKET.SRC.ADDR
-				
-.4				lda SKT.Template,y
-				cmp (ZPPtrSKT),y
-				bne .7						Not for this socket...
-				
-				iny
-				cpy #S.SOCKET.SRC.PORT+2
-				bne .4
-				
-				ldy #S.SOCKET.O
+				ldy #S.SOCKET.PROTO
 				lda (ZPPtrSKT),y
-				and #S.SOCKET.O.ACCEPTCONN		Listening socket?
-				beq .5					no, go check if Dst Match
-	
-				ldy #S.TCP.OPTIONS		yes, only accept SYN packet
-				lda (ZPFrameInPtr),y
-
-				cmp #S.TCP.OPTIONS.SYN	SYN only, if SYN.ACK, pass to regular socket
-				beq TCP.IN.JMP.LISTEN
-			
-.5				ldy #S.SOCKET.DST.ADDR
-
-.6				lda SKT.Template,y		regular socket, check remote ADDR/PORT
-				cmp (ZPPtrSKT),y
-				bne .7
-				iny
-				cpy #S.SOCKET.DST.PORT+2
-				bne .6
+				cmp #S.SOCKET.T.TCP
+				bne TCP.IN.JMP.CLOSED	wrong protocol, go discard
 			
 				ldy #S.TCP.OPTIONS
 				lda (ZPFrameInPtr),y
-				and #S.TCP.OPTIONS.RST		RST ? go Kill this socket.
-				bne TCP.IN.RST
+				and #S.TCP.OPTIONS.RST	RST ? go Kill this socket...
+				bne TCP.IN.RST			...and discard frame
 				
 				ldy #S.SOCKET.TCP.S
 				lda (ZPPtrSKT),y
-				cmp #S.SOCKET.TCP.S.TIMEWT+1
-				bcs *
 				asl
 				tax
-				
 				jmp (J.TCP.IN,x)
-				
-.7				lda ZPPtrSKT
-				clc
-				adc #S.SOCKET
-				sta ZPPtrSKT
-				bcc .8
-				inc ZPPtrSKT+1
-				
-.8				inx
-				cpx #K.SKTTABLE.SIZE
-				bne .3
-				
-.9				clc						Discard frame
+*--------------------------------------
+TCP.IN.RST		jsr SKT.Destroy
+*--------------------------------------
+TCP.IN.JMP.CLOSED
+				lda hFrameIn
+				>SYSCALL FreeMem
 				rts
 *--------------------------------------
-TCP.IN.RST		jmp SKT.Destroy
-*--------------------------------------
 TCP.IN.JMP.LISTEN
+				ldy #S.TCP.OPTIONS		SYN Received, send SYN.ACK packet
+				lda (ZPFrameInPtr),y
+				cmp #S.TCP.OPTIONS.SYN
+				bne TCP.IN.JMP.CLOSED
+				
+				
 				lda #S.SOCKET.T.STREAM
 				sta SKT.Template+S.SOCKET.T
 				stz SKT.Template+S.SOCKET.O
@@ -84,8 +47,6 @@ TCP.IN.JMP.LISTEN
 				lda #S.TCP.OPTIONS.SYN+S.TCP.OPTIONS.ACK
 				sta SKT.Template+S.SOCKET.TCP.O
 				
-				jsr ARP.AddFromFrameInPtr
-
 				>PUSHW L.SKT.Template
 
 				jsr SKT.New				Assign OUTNEXTSEQ
@@ -99,6 +60,8 @@ TCP.IN.JMP.LISTEN
 				
 				bcs .99					Queued successfully ?
 
+				jsr ARP.AddFromFrameInPtr
+				
 .1				lda #$ff
 				sta ZPPtrSKT
 .2				lda #$ff
@@ -289,9 +252,6 @@ TCP.IN.JMP.CLOSING
 				rts
 *--------------------------------------
 TCP.IN.JMP.TIMEWT
-*--------------------------------------
-TCP.IN.JMP.CLOSED
-				jmp SKT.Destroy
 *--------------------------------------
 TCP.IN.ACKTheSYN
 				ldy #S.TCP.SEQNUM+3		Get Remote SEQ
