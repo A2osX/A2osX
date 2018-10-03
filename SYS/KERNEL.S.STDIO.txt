@@ -965,29 +965,31 @@ K.SScanF.Fwd	tya						Y=char count parsed
 * `>PUSHBI mode`
 *  + O.RDONLY : if R and !exists -> ERROR
 *  + O.WRONLY : if W and !exists -> CREATE
+*  + O.TRUNC : Reset Size To 0
 *  + O.APPEND : Append
 *  + O.TEXT   : Open/Append in Text mode
 *  + O.CREATE : Create if not exists
-* http://man7.org/linux/man-pages/man3/fopen.3.html
-* r  = O_RDONLY
-* w  = O_WRONLY | O_CREAT | O_TRUNC
-* a  = O_WRONLY | O_CREAT | O_APPEND
-* r+ = O_RDWR
-* w+ = O_RDWR | O_CREAT | O_TRUNC
-* a+ = O_RDWR | O_CREAT | O_APPEND
-*
-* TODO: mode="w+t=TYP,x=AUXTYPE"
+* TODO: mode="w+,t=TYP,x=AUXTYPE"
+*  + r  = O_RDONLY
+*  + r+ = O_RDWR
+*  + w  = O_WRONLY | O_CREAT | O_TRUNC
+*  + w+ = O_RDWR | O_CREAT | O_TRUNC
+*  + a  = O_WRONLY | O_CREAT | O_APPEND
+*  + a+ = O_RDWR | O_CREAT | O_APPEND
+*  + ,t=123 or t=$ff or t=TXT
+*  + ,x=12345 or x=$ffff
 * `>LDYAI filename`
 * **Out:** 
 *  CC : A = hFILE
 *  CS : A = EC
 *\--------------------------------------
 K.FOpen			jsr PFT.CheckPathYA
+				>STYA K.FOpen.PATH
 				jsr STDIO.SetMLIPathYA
 				>PULLB K.FOpen.MODE
 				>PULLB K.FOpen.TYPE
 				>PULLW K.FOpen.AUXTYPE
-				
+
 K.FOpen.I		>MLICALL MLIGETFILEINFO
 				bcc K.FOpen.10			Already Exists
 				
@@ -1014,31 +1016,14 @@ K.FOpen.I		>MLICALL MLIGETFILEINFO
 				bcc K.FOpen.10
 K.FOpen.9		rts
 
-K.FOpen.10		lda #S.FD.REG
-				sec
-				adc K.MLI.PATH
-				tay
-				lda #0
+K.FOpen.10		>LDYAI S.FD.REG
 				ldx #S.MEM.F.INIT0+S.MEM.F.FD
 				jsr MEM.GetMem.YAX
 				bcs K.FOpen.9
 				
 				>STYA pFD
 				stx .8+1			
-				
-				ldx #0
-				ldy #S.FD.REG
-				
-.1				inx
-				lda K.MLI.PATH,x
-				sta (pFD),y
-				iny
-				cpx K.MLI.PATH
-				bne .1
-				
-				lda #0
-				sta (pFD),y
-				
+								
 *				ldy #S.FD.T			Done by GetMem0
 *				lda #S.FD.T.REG
 *				sta (pFD),y
@@ -1076,25 +1061,29 @@ K.FOpen.10		lda #S.FD.REG
 				
 .20				lda K.FOpen.MODE
 				and #O.TEXT				Text Mode ?
-				beq .8
+				beq .22
 				
 				lda #$FF
 				sta K.MLI.PARAMS+2
 				lda #C.CR
 				sta K.MLI.PARAMS+3
-				>MLICALL MLINEWLINE				
-				
-.8				lda #$ff				Self Modified, hFD
-				clc
-				rts						CC
+				>MLICALL MLINEWLINE
 
+.22				>LDYA K.FOpen.PATH
+ 
+.8				ldx #$ff				Self Modified, hFD
+
+				jsr STDIO.NewHFileYAX
+				bcc .80
+				
 .98				pha						save MLI error
 				lda .8+1
-				jsr K.FClose
+				jsr K.Close
 				pla						get back MLI error
 				sec
-				rts
+.80				rts
 *--------------------------------------
+K.FOpen.PATH	.BS 2
 K.FOpen.MODE	.BS 1
 K.FOpen.TYPE	.BS 1
 K.FOpen.AUXTYPE	.BS 2
@@ -1109,25 +1098,27 @@ K.FOpen.AUXTYPE	.BS 2
 * **Out:**
 *\--------------------------------------
 K.FClose		jsr PFT.CheckNodeA
-				sta .8+1
-				jsr K.GetMemPtr
-				>STYA pFD
+				sta .8+1				save hFILE
+				tax
 
-				ldy #S.FD.REG.REF
-				lda (pFD),y
-				beq .1
-				sta K.MLI.PARAMS+1
-				>MLICALL MLICLOSE
+				lda Nod.Table.hPath,x
+				beq .9
 
-.1				ldy #S.FD.REG.IOBUF
-				lda (pFD),y
-				beq .8
+				stz Nod.Table.hPath,x
+				jsr K.FreeMem			discard filename
 				
-				jsr K.FreeMem
+.1				lda Nod.Table.hFD,x
+				jsr K.Close
 				
-.8				lda #$ff				Self Modified
-				jmp K.FreeMem
-.9				rts
+.8				ldx #$ff				SELF MODIFIED
+				lda Nod.Table.hFD,x
+				
+				stz Nod.Table.hFD,x
+				jmp K.FreeMem			discard filename			
+
+.9				lda #K.E.INVH				
+				sec
+				rts
 */--------------------------------------
 * # FRead
 * int fread (hFILE stream, void * ptr, int count );
@@ -1141,8 +1132,12 @@ K.FClose		jsr PFT.CheckNodeA
 *  Y,A = Bytes Read
 *\--------------------------------------
 K.FRead			jsr PFT.CheckNodeA
-				ldx #MLIREAD
-				bra K.FReadWrite.1
+				jsr STDIO.GetHFile
+				bcs .9
+				
+				jmp K.Read
+				
+.9				
 */--------------------------------------
 * # FWrite
 * Write bytes to file
@@ -1159,7 +1154,9 @@ K.FRead			jsr PFT.CheckNodeA
 *\--------------------------------------
 K.FWrite		jsr PFT.CheckNodeA
 				ldx #MLIWRITE
-K.FReadWrite.1	jsr STDIO.GetRefNum
+K.FReadWrite.1	jsr STDIO.GetHFile
+				bcs .9
+				
 				>PULLW K.MLI.PARAMS+2
 				>PULLW K.MLI.PARAMS+4
 
@@ -1177,7 +1174,7 @@ K.FReadWrite.1	jsr STDIO.GetRefNum
 *  A = hFILE
 *\--------------------------------------
 K.FFlush		jsr PFT.CheckNodeA
-				jsr STDIO.GetRefNum
+				jsr STDIO.GetHFile
 				>MLICALL MLIFLUSH
 				rts
 */-------------------------------------
@@ -1193,7 +1190,7 @@ K.FFlush		jsr PFT.CheckNodeA
 * `>SYSCALL fseek`
 *\-------------------------------------
 K.FSeek			jsr PFT.CheckNodeA
-				jsr STDIO.GetRefNum
+				jsr STDIO.GetHFileREG
 				>PULLA					FROM
 				tax
 				>PULLW ZPPtr1			offset LW
@@ -1262,7 +1259,7 @@ K.FSeek			jsr PFT.CheckNodeA
 *  CS :
 *\--------------------------------------
 K.FEOF			jsr PFT.CheckNodeA
-				jsr STDIO.GetRefNum
+				jsr STDIO.GetHFileREG
 
 				>MLICALL MLIGETMARK
 				bcs .9
@@ -1302,7 +1299,7 @@ K.FEOF.MARK		.BS 3
 * On stack (long)
 *\--------------------------------------
 K.FTell			jsr PFT.CheckNodeA
-				jsr STDIO.GetRefNum
+				jsr STDIO.GetHFileREG
 				>MLICALL MLIGETMARK
 				bcs .9
 				
@@ -1356,6 +1353,66 @@ K.Rename		jsr PFT.CheckPathYA
 				>MLICALL MLIRENAME
 				rts
 *--------------------------------------
+* Y,A = filepath
+* X = hFD
+*--------------------------------------
+STDIO.NewHFileYAX
+				pha
+				stx .4+1				Store hFD
+				
+				ldx #0
+				
+.1				lda Nod.Table.hFD,x
+				beq .2
+				
+				inx
+				cpx #K.NOD.MAX
+				bne .1
+				
+				pla
+				lda #K.E.OOH
+*				sec				
+				rts
+				
+.2				stx .3+1				Store hFILE
+				
+				pla
+				jsr K.NewStr
+				bcs .9
+				txa
+				
+.3				ldx #$ff				SELF MODIFIED
+				sta Nod.Table.hPath,x
+.4				lda #$ff				SELF MODIFIED			
+				sta Nod.Table.hFD,x
+				
+				txa						hFILE
+				
+				clc
+.9				rts
+*--------------------------------------
+STDIO.GetHFile	tay
+				lda Dev.Table.hFD,y
+				beq .9
+
+STDIO.GetHFileREG
+				tay
+				lda Dev.Table.hFD,y
+				beq STDIO.GetHFile.9
+				
+				jsr K.GetMemPtr
+				>STYA pFD
+				
+				ldy #S.FD.REG.REF
+				lda (pFD),y
+				sta K.MLI.PARAMS+1
+				rts
+				
+STDIO.GetHFile.9
+				lda #K.E.INVH
+				sec
+				rts
+*--------------------------------------
 STDIO.SetMLIPathYA
 				>STYA .1+1
 				
@@ -1386,13 +1443,6 @@ STDIO.SetIOBUF	>LDYAI 1024				get a ProDOS IOBUF
 				ldy #S.FD.REG.IOBUF
 				sta (pFD),y
 .9				rts
-*--------------------------------------
-STDIO.GetRefNum	jsr K.GetMemPtr
-				>STYA pFD				
-				ldy #S.FD.REG.REF
-				lda (pFD),y
-				sta K.MLI.PARAMS+1
-				rts
 *--------------------------------------
 STDIO.IOERR		lda #MLI.E.IO
 				sec
