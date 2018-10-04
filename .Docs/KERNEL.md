@@ -565,7 +565,7 @@ CS : error
 A = EC  
 
 # MkNod  
-return a hFile for a given file descriptor.  
+Create a special or ordinary file.  
 (CDEV, BDEV, DSOCKS, SSOCK, PIPE)  
 
 ## C  
@@ -736,8 +736,13 @@ CC = success
 
 # GetChar  
 Get char from StdIn  
+
+## C  
+`int getchar ();`  
+
+## ASM  
 **In:**  
- none.  
+`>SYSCALL getchar`  
 **Out:**   
  CC = success  
   A = char  
@@ -746,11 +751,12 @@ Get char from StdIn
 Get char from Node  
 
 ## C  
-`int getc ( FILE * stream );`  
+`int getc ( hFILE stream );`  
 
 ## ASM  
 **In:**  
- A = hNODE  
+`lda stream`  
+`>SYSCALL getc`  
 **Out:**   
  CC = success  
   A = char  
@@ -794,20 +800,21 @@ Open a file
 `>PUSHWI auxtype`  
 `>PUSHBI ftype`  
 `>PUSHBI mode`  
- + SYS.FOpen.R : if R and exists -> ERROR  
- + SYS.FOpen.W : if W and exists -> CREATE  
- + SYS.FOpen.A : Append  
- + SYS.FOpen.T : Open/Append in Text mode  
- + SYS.FOpen.X : Create if not exists  
-http://man7.org/linux/man-pages/man3/fopen.3.html  
-r  = O_RDONLY  
-w  = O_WRONLY | O_CREAT | O_TRUNC  
-a  = O_WRONLY | O_CREAT | O_APPEND  
-r+ = O_RDWR  
-w+ = O_RDWR | O_CREAT | O_TRUNC  
-a+ = O_RDWR | O_CREAT | O_APPEND  
-*  
-TODO: mode="w+t=TYP,x=AUXTYPE"  
+ + O.RDONLY : if R and exists -> ERROR  
+ + O.WRONLY : if W and exists -> CREATE  
+ + O.TRUNC : Reset Size To 0  
+ + O.APPEND : Append  
+ + O.TEXT   : Open/Append in Text mode  
+ + O.CREATE : Create if not exists  
+TODO: mode="w+,t=TYP,x=AUXTYPE"  
+ + r  = O_RDONLY  
+ + r+ = O_RDWR  
+ + w  = O_WRONLY | O_CREAT | O_TRUNC  
+ + w+ = O_RDWR | O_CREAT | O_TRUNC  
+ + a  = O_WRONLY | O_CREAT | O_APPEND  
+ + a+ = O_RDWR | O_CREAT | O_APPEND  
+ + ,t=123 or t=$ff or t=TXT  
+ + ,x=12345 or x=$ffff  
 `>LDYAI filename`  
 **Out:**   
  CC : A = hFILE  
@@ -821,7 +828,8 @@ int fclose ( hFILE stream );
 
 ## ASM  
 **In:**  
- A = hFILE  
+`lda stream`  
+`>SYSCALL fclose`  
 **Out:**  
 
 # FRead  
@@ -830,7 +838,7 @@ Read bytes from file
 **In:**  
 `>PUSHWI count`  
 `>PUSHW ptr`  
-`lda hFILE`  
+`lda stream`  
 `>SYSCALL fread`  
 **Out:**  
  Y,A = Bytes Read  
@@ -845,7 +853,7 @@ Write bytes to file
 **In:**  
 `>PUSHWI count`  
 `>PUSHW ptr`  
-`lda hFILE`  
+`lda stream`  
 `>SYSCALL fwrite`  
 **Out:**  
  Y,A = Bytes Written  
@@ -857,7 +865,8 @@ int fflush(hFILE stream);
 
 ## ASM  
 **In:**  
- A = hFILE  
+`lda stream`  
+`>SYSCALL fflush`  
 
 # FSeek  
 Set the file-position indicator for hFILE  
@@ -874,12 +883,18 @@ Set the file-position indicator for hFILE
 
 # FEOF  
 Test the end-of-file indicator for hFILE  
+
+## C  
+`int feof(hFILE stream);`  
+
+## ASM  
 **In:**  
- A = hFILE  
+`lda stream`  
+`>SYSCALL feof`  
 **Out:**  
  CC :   
-  A=0 EOF  
-  A =0 NOT EOF  
+ A=0 EOF  
+ A =0 NOT EOF  
  CS :  
 
 # FTell  
@@ -896,6 +911,16 @@ Return the current value of the file-position indicator
 On stack (long)  
 
 # Remove  
+Remove a file or directory  
+
+## C  
+int remove(const char *pathname);  
+
+## ASM  
+**In:**  
+`>LDYA pathname`  
+`>SYSCALL remove`  
+**Out:**  
 
 # Rename  
 Rename a file  

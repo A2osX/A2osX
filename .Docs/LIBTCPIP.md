@@ -20,7 +20,7 @@
  PUSHW PTR to MAC  
  PUSHW PTR to IP  
 
-# ARP.GetCAche  
+# ARP.GetCache  
  Return a Ptr to ARP Cache Table  
 **In:**  
 **Out:**  
@@ -52,58 +52,88 @@
 **Out:**  
   Y,A = PTR to DNS.CACHE  
 
-# SKT.New  
+# SKT.Socket  
 Create a new socket  
 
 ## C  
-`hSOCKET skt.new(void *template);`  
+`hFD socket(short int type, short int protocol);`  
 
 ## ASM  
 **In:**  
-`>PUSHW template`  
-`>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.New`  
+`>PUSHB protocol`  
+`lda type`  
+`>LIBCALL hLIBTCPIP,LIBTCPIP.socket`  
 **Out:**  
 CC: A = hSOCKET  
 CS: A = EC  
 
-# SKT.Close  
- Close socket  
-**In:**   
- A = hSocket  
-**Out:**   
-
-# SKT.Get  
- Get Ptr to socket  
-**In:**   
- A = hSocket  
-**Out:**   
- Y,A = pS.SOCKET  
-
-# SKT.GetTable  
- Get socket table  
-**In:**   
-**Out:**   
- Y,A = pS.SOCKET  
-
-# SKT.Accept  
- Check for an incoming connection  
-**In:**   
- A = hListeningSocket  
-**Out:**   
- A = hSocket  
-
-# SKT.MkNod  
+# SKT.bind  
+bind a name to a socket  
 
 ## C  
-`hFD skt.mknod(hSOCKET s);`  
+`int bind(hFD fd, const struct sockaddr *addr);`  
 
 ## ASM  
 **In:**  
-`lda s`  
-`>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.MkNod`  
+`>PUSHW addr`  
+`lda fd`  
+`>LIBCALL hLIBTCPIP,LIBTCPIP.socket`  
 **Out:**  
-CC: A = hFD  
+CC: A = hSOCKET  
 CS: A = EC  
+
+# SKT.connect  
+Iinitiate a connection on a socket  
+
+## C  
+`int connect(hFD fd, const struct sockaddr *addr);`  
+
+## ASM  
+**In:**  
+`>PUSHW addr`  
+`lda fd`  
+`>LIBCALL hLIBTCPIP,LIBTCPIP.socket`  
+**Out:**  
+CC: A = hSOCKET  
+CS: A = EC  
+
+# SKT.listen  
+Listen for connections on a socket  
+
+## C  
+`int listen(hFD fd);`  
+
+## ASM  
+**In:**  
+`lda fd`  
+`>LIBCALL hLIBTCPIP,LIBTCPIP.listen`  
+**Out:**  
+CS: A = EC  
+
+# SKT.Accept  
+Accept a connection on a socket  
+
+## C  
+`hFD Accept(hFD fd);`  
+
+## ASM  
+**In:**   
+`lda fd`  
+`>LIBCALL hLIBTCPIP,LIBTCPIP.accept`  
+**Out:**   
+A = hSocket  
+
+# SKT.Close  
+Close socket  
+
+## C  
+`int close(int fd);`  
+
+## ASM  
+**In:**  
+`lda fd`  
+`>LIBCALL hLIBTCPIP,LIBTCPIP.close`  
+**Out:**  
 
 # SKT.Read (STREAM)  
 
@@ -135,19 +165,32 @@ CS: A = EC
 CC: Y,A = bytes written  
 CS: A = EC  
 
-# SKT.Rcvd (DGRAM,RAW)  
-**In:**   
- A = hSocket  
-**Out:**   
- A = hFrame  
+# SKT.Recv (RAW,DGRAM,SEQPACKET)  
 
-# SKT.Send (DGRAM,RAW)  
-
-## C  
-`int skt.send(hFD fd, const void *buf, int count);`  
+# SKT.RecvFrom (RAW,DGRAM,SEQPACKET)  
+hMem recv(hFD fd);  
+hMem recvfrom(hFD fd, struct sockaddr *addr);  
 
 ## ASM  
 **In:**  
+`>PUSHW addr`		(RecvFrom)  
+`lda fd`  
+`>LIBCALL hLIBTCPIP,LIBTCPIP.skt.Recv`  
+**Out:**  
+CC: A = hMem  
+CS: A = EC  
+
+# SKT.Send (RAW,DGRAM,SEQPACKET)  
+
+# SKT.SendTo (RAW,DGRAM,SEQPACKET)  
+
+## C  
+`int skt.send(hFD fd, const void *buf, int count);`  
+`int skt.sendto(hFD fd, const void *buf, int count, const struct sockaddr *addr);`  
+
+## ASM  
+**In:**  
+`>PUSHW addr`		(SendTo)  
 `>PUSHWI count`  
 `>PUSHW buf`  
 `lda fd`  
@@ -155,3 +198,14 @@ CS: A = EC
 **Out:**  
 CC: Y,A = bytes written  
 CS: A = EC  
+
+# SKT.GetTable  
+Get socket table  
+
+## C  
+`void * skt.gettable();`  
+
+## ASM  
+**In:**  
+`>LIBCALL hLIBTCPIP,LIBTCPIP.skt.GetTable`  
+**Out:**  
