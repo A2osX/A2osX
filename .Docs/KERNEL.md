@@ -240,7 +240,7 @@ Change The type of a ProDOS File
 # open  
 
 ## C  
-`hFD open(const char *pathname, int flags);`  
+`hFD open(const char *pathname, short int flags);`  
 
 ## ASM  
 **In:**  
@@ -249,7 +249,7 @@ Change The type of a ProDOS File
 `>SYSCALL open`  
 **Out:**  
 A = hFD  
-note : if file is created on ProDOS : T=TXT,X=$0000  
+REG File created on ProDOS : T=TXT,X=$0000  
 
 # close  
 
@@ -604,20 +604,22 @@ Print A (char) to hFILE
 
 ## ASM  
 **In:**  
-A : character  
-Y : stream  
+`>PUSHB character`  
+`lda stream`  
+`>SYSCALL fputc`  
 **Out:**   
 CC = success  
 
 # PutChar  
+Print A (char) to StdOut  
 
 ## C  
 `int putchar ( int character );`  
 
 ## ASM  
-Print A (char) to StdOut  
 **In:**  
-A : char to print  
+`lda caracter`  
+`>SYSCALL putchar`  
 **Out:**   
 CC = success  
 
@@ -793,20 +795,20 @@ A = Number of arguments filled.
 Open a file  
 
 ## C  
-`hFILE fopen ( const char * filename, short int mode, short int ftype, int auxtype );`  
+`hFILE fopen ( const char * filename, short int flags, short int ftype, int auxtype );`  
 **In:**  
 
 ## ASM  
 `>PUSHWI auxtype`  
 `>PUSHBI ftype`  
-`>PUSHBI mode`  
+`>PUSHBI flags`  
  + O.RDONLY : if R and exists -> ERROR  
  + O.WRONLY : if W and exists -> CREATE  
  + O.TRUNC : Reset Size To 0  
  + O.APPEND : Append  
  + O.TEXT   : Open/Append in Text mode  
  + O.CREATE : Create if not exists  
-TODO: mode="w+,t=TYP,x=AUXTYPE"  
+TODO: replace flags/ftype/auxtype with mode="w+,t=TYP,x=AUXTYPE"  
  + r  = O_RDONLY  
  + r+ = O_RDWR  
  + w  = O_WRONLY | O_CREAT | O_TRUNC  
@@ -833,8 +835,12 @@ int fclose ( hFILE stream );
 **Out:**  
 
 # FRead  
-int fread (hFILE stream, void * ptr, int count );  
 Read bytes from file  
+
+## C  
+int fread (hFILE stream, void * ptr, int count );  
+
+## ASM  
 **In:**  
 `>PUSHWI count`  
 `>PUSHW ptr`  
@@ -938,10 +944,10 @@ Rename a file
 # strtof  
 Convert String to 40 bits Float  
 
-##C  
+## C  
 `float strtof (const char* str, char** endptr);`  
 
-##ASM  
+## ASM  
 **In:**  
 `>PUSHWI EndPtr`  
 `>LDYA str`  
@@ -1132,7 +1138,7 @@ Get System Time in Buffer
 ## C  
 `time_t time (S.TIME* timer);`  
 
-##ASM  
+## ASM  
 **In:**  
 Y,A = PTR to S.TIME  
 **Out:**  
@@ -1144,7 +1150,7 @@ S.TIME filled with System date/time
 ## C  
 `int PTime2Time (long* ptime, S.TIME* timer);`  
 
-##ASM  
+## ASM  
 **In :**   
 `>PUSHW timer`  
 `>LDYA ptime`  
@@ -1157,7 +1163,7 @@ S.TIME filled with System date/time
 ## C  
 `int CTime2Time (long* ctime, S.TIME* timer);`  
 
-##ASM  
+## ASM  
 **In :**   
 `>PUSHW timer`  
 `>LDYA ctime`  

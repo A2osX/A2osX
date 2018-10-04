@@ -18,22 +18,25 @@ BCDBUF			.EQ ARG
 * `int fputc ( hFILE stream , int character );`
 * ## ASM
 * **In:**
-* A : character
-* Y : stream
+* `>PUSHB character`
+* `lda stream`
+* `>SYSCALL fputc`
 * **Out:** 
 * CC = success
 *\--------------------------------------
-K.FPutC			sta K.IOBuf
-				tya
+K.FPutC			pha
+				>PULLB K.IOBuf
+				pla
 				bra K.PutChar.1
 */--------------------------------------
 * # PutChar
+* Print A (char) to StdOut
 * ## C
 * `int putchar ( int character );`
 * ## ASM
-* Print A (char) to StdOut
 * **In:**
-* A : char to print
+* `lda caracter`
+* `>SYSCALL putchar`
 * **Out:** 
 * CC = success
 *\--------------------------------------
@@ -43,14 +46,13 @@ K.PutChar		sta K.IOBuf
 				lda	(pPs),y
 				
 K.PutChar.1		jsr STDIO.GetHFile
-				bcs K.PutS.9
+				bcs K.PutS.RTS
 
-				ldx #1
+				ldy #1
+K.PutChar.Y		lda #0
 				
-K.PutChar.X		>LDYAI K.IOBuf
-				>STYA K.S.IOCTL+S.IOCTL.BUFPTR
-				stx K.S.IOCTL+S.IOCTL.BYTECNT
-				stz K.S.IOCTL+S.IOCTL.BYTECNT+1
+				>PUSHYA
+				>PUSHWI K.IOBuf
 				jmp IO.Write.I
 */--------------------------------------
 * # PutS
@@ -64,21 +66,22 @@ K.PutChar.X		>LDYAI K.IOBuf
 * **Out:** 
 * CC = success
 *\--------------------------------------
-K.PutS			>STYA K.S.IOCTL+S.IOCTL.BUFPTR
-				>STYA ZPPtr1
+K.PutS			>PUSHYA
 				
 				ldy #S.PS.hStdOut
 				lda	(pPs),y
-				jsr K.FPutS.I
-				bcs K.PutS.9
+				jsr K.FPutS
+				bcs K.PutS.RTS
 
-				lda #13
+				lda #C.CR
 				sta K.IOBuf
-				lda #10
+				lda #C.LF
 				sta K.IOBuf+1
-				ldx #2
-				bra K.PutChar.X
-K.PutS.9		rts
+				
+				ldy #2
+				bra K.PutChar.Y
+
+K.PutS.RTS		rts
 */--------------------------------------
 * # FPutS
 * Write Str to FILE
@@ -92,34 +95,14 @@ K.PutS.9		rts
 * **Out:** 
 * CC = success
 *\--------------------------------------
-K.FPutS			pha
+K.FPutS			jsr STDIO.GetHFile
+				bcs K.PutS.RTS
 
-				>PULLA
-				sta K.S.IOCTL+S.IOCTL.BUFPTR
-				sta ZPPtr1
-				>PULLA
-				sta K.S.IOCTL+S.IOCTL.BUFPTR+1
-				sta ZPPtr1+1
-				
-				pla
-				
-K.FPutS.I		jsr STDIO.GetHFile
-				bcs K.PutS.9
-
-				ldy #0		
-				ldx #0
-				
-.1				lda (ZPPtr1),y
-				beq .2
-				
-				iny
-				bne .1
-				inx
-				inc ZPPtr1+1
-				bra .1
-				
-.2				sty K.S.IOCTL+S.IOCTL.BYTECNT
-				stx K.S.IOCTL+S.IOCTL.BYTECNT+1
+				>PULLYA					Get String
+				>STYA ZPPtr2			Save Buffer
+				>SYSCALL strlen			Get String len in Y,A
+				>PUSHYA					push len
+				>PUSHW ZPPtr2			push buffer
 				jmp IO.Write.I
 */--------------------------------------
 * # PrintF/SPrintF/FPrintF
@@ -189,8 +172,8 @@ K.SPrintF		>STYA pIOBuf			Out Buffer
 				>PULLW ZPPtr1			format
 				bra K.PrintF.1
 				
-K.FPrintF		jsr K.GetMemPtr			A = hFILE
-				>STYA pFD
+K.FPrintF		jsr STDIO.GetHFile
+				bcs K.PutS.RTS
 
 				>PULLW ZPPtr1			format
 				bra K.PrintF.0
@@ -199,15 +182,14 @@ K.PrintF		>STYA ZPPtr1			format
 				ldy #S.PS.hStdOut
 				lda	(pPs),y
 				
-				jsr K.GetMemPtr
-				>STYA pFD
+				jsr STDIO.GetHFile
+				bcs K.PutS.RTS
 	
 K.PrintF.0		>LDYAI K.IOBuf
 				>STYA pIOBuf
-				>STYA K.S.IOCTL+S.IOCTL.BUFPTR
 				
-K.PrintF.1		stz K.S.IOCTL+S.IOCTL.BYTECNT
-				stz K.S.IOCTL+S.IOCTL.BYTECNT+1
+K.PrintF.1		stz PrintF.Cnt
+				stz PrintF.Cnt+1
 
 				stz PrintF.GetByte+1
 				
@@ -269,7 +251,10 @@ K.PrintF.1		stz K.S.IOCTL+S.IOCTL.BYTECNT
 				bcc .1
 				bcs .99
 				
-.8				jsr PrintF.Flush		
+.8				lda pIOBuf+1
+				eor /K.IOBuf
+				bne .99
+				jsr PrintF.Flush		
 				bra .99
 
 .10				cmp #'\'
@@ -299,7 +284,11 @@ K.PrintF.1		stz K.S.IOCTL+S.IOCTL.BYTECNT
 				sta pStack				CC
 				pla
 				plp
-				rts
+				bcs .9
+				
+				>LDYA PrintF.Cnt
+				
+.9				rts
 *--------------------------------------
 PrintF.ESC		jmp	(.1,x)
 .1				.DA PrintF.B,PrintF.BB
@@ -646,9 +635,9 @@ PrintF.GetByte	lda #$FF				SELF MODIFIED LStack Ptr
 *--------------------------------------
 PrintF.COut		phy
 				
-				ldy K.S.IOCTL+S.IOCTL.BYTECNT
+				ldy PrintF.Cnt
 				sta (pIOBuf),y
-				inc K.S.IOCTL+S.IOCTL.BYTECNT
+				inc PrintF.Cnt
 				bne .8
 				
 				lda pIOBuf+1
@@ -657,25 +646,29 @@ PrintF.COut		phy
 
 *				we are printing to IObuf, flush!
 
-				lda K.S.IOCTL+S.IOCTL.BYTECNT+1
+				lda PrintF.Cnt+1
 				pha
 				lda #1					Flush $100 bytes
-				sta K.S.IOCTL+S.IOCTL.BYTECNT+1
+				sta PrintF.Cnt+1
 				
+				jsr PrintF.Flush
 
 				pla
 				inc
-				sta K.S.IOCTL+S.IOCTL.BYTECNT+1
-
+				sta PrintF.Cnt+1
 				
 .7				inc pIOBuf+1
-				inc K.S.IOCTL+S.IOCTL.BYTECNT+1
+				inc PrintF.Cnt+1
 				
 .8				ply
 				clc
 				rts
 *--------------------------------------
-PrintF.Flush	jmp IO.Write.I
+PrintF.Flush	>PUSHW PrintF.Cnt
+				>PUSHWI K.IOBuf
+				jmp IO.Write.I
+*--------------------------------------
+PrintF.Cnt		.BS 2
 */--------------------------------------
 * # FGetS
 * read bytes from stream into the array
@@ -953,19 +946,19 @@ K.SScanF.Fwd	tya						Y=char count parsed
 * # FOpen
 * Open a file
 * ## C
-* `hFILE fopen ( const char * filename, short int mode, short int ftype, int auxtype );`
+* `hFILE fopen ( const char * filename, short int flags, short int ftype, int auxtype );`
 * **In:**
 * ## ASM
 * `>PUSHWI auxtype`
 * `>PUSHBI ftype`
-* `>PUSHBI mode`
+* `>PUSHBI flags`
 *  + O.RDONLY : if R and !exists -> ERROR
 *  + O.WRONLY : if W and !exists -> CREATE
 *  + O.TRUNC : Reset Size To 0
 *  + O.APPEND : Append
 *  + O.TEXT   : Open/Append in Text mode
 *  + O.CREATE : Create if not exists
-* TODO: mode="w+,t=TYP,x=AUXTYPE"
+* TODO: replace flags/ftype/auxtype with mode="w+,t=TYP,x=AUXTYPE"
 *  + r  = O_RDONLY
 *  + r+ = O_RDWR
 *  + w  = O_WRONLY | O_CREAT | O_TRUNC
@@ -979,110 +972,34 @@ K.SScanF.Fwd	tya						Y=char count parsed
 *  CC : A = hFILE
 *  CS : A = EC
 *\--------------------------------------
+K.FOpen.PATH	.BS 2
+*--------------------------------------
 K.FOpen			jsr PFT.CheckPathYA
+
 				>STYA K.FOpen.PATH
-				jsr STDIO.SetMLIPathYA
-				>PULLB K.FOpen.MODE
-				>PULLB K.FOpen.TYPE
-				>PULLW K.FOpen.AUXTYPE
+				pha
+				>PULLB K.Open.FLAGS
+				>PULLB K.Open.TYPE
+				>PULLW K.Open.AUXTYPE
 
-K.FOpen.I		>MLICALL MLIGETFILEINFO
-				bcc K.FOpen.10			Already Exists
+				pla
+				jsr IO.Open.I
+				bcs K.FOpen.RTS
 				
-				bit K.FOpen.MODE		Create if not exists ?
-				bpl K.FOpen.9			No, return MLI error
+				sta .1+1				save hFD
+				tax
 				
-				lda #S.FI.A.FULL				Yes, Create...
-				sta K.MLI.PARAMS+3	Access
-				lda K.FOpen.TYPE
-				sta K.MLI.PARAMS+4	File type
-				>LDYA K.FOpen.AUXTYPE
-				>STYA K.MLI.PARAMS+5	Aux type
-				lda #S.FI.ST.STD
-				sta K.MLI.PARAMS+7
-				
-				ldx #3
-				
-.1				lda DATELO,x
-				sta K.MLI.PARAMS+8,x
-				dex
-				bpl .1
-
-				>MLICALL MLICREATE
-				bcc K.FOpen.10
-K.FOpen.9		rts
-
-K.FOpen.10		>LDYAI S.FD.REG
-				ldx #S.MEM.F.INIT0+S.MEM.F.FD
-				jsr MEM.GetMem.YAX
-				bcs K.FOpen.9
-				
-				>STYA pFD
-				stx .8+1			
-								
-*				ldy #S.FD.T			Done by GetMem0
-*				lda #S.FD.T.REG
-*				sta (pFD),y
-				
-				jsr STDIO.SetIOBUF
-				bcs .98
-
-				>MLICALL MLIOPEN
-				bcs .98
-				
-				lda K.MLI.PARAMS+5		get ref_num
-				ldy #S.FD.REG.REF
-				sta (pFD),y
-				
-				sta K.MLI.PARAMS+1		Next MLI Calls are REF_NUM based
-				
-				lda K.FOpen.MODE
-				bit #O.WRONLY
-				beq .20					Write mode ?
-				
-				and #O.APPEND			Append ?
-				bne .11					yes, go to end of file
-				
-				stz K.MLI.PARAMS+2
-				stz K.MLI.PARAMS+3
-				stz K.MLI.PARAMS+4
-				>MLICALL MLISETEOF		no, reset size to 0
-				bra .21
-				
-.11				>MLICALL MLIGETEOF
-				bcs .98
-				
-				>MLICALL MLISETMARK
-.21				bcs .98
-				
-.20				lda K.FOpen.MODE
-				and #O.TEXT				Text Mode ?
-				beq .22
-				
-				lda #$FF
-				sta K.MLI.PARAMS+2
-				lda #C.CR
-				sta K.MLI.PARAMS+3
-				>MLICALL MLINEWLINE
-
-.22				>LDYA K.FOpen.PATH
- 
-.8				ldx #$ff				Self Modified, hFD
+				>LDYA K.FOpen.PATH
 
 				jsr STDIO.NewHFileYAX
-				bcc .80
+				bcc K.FOpen.RTS
 				
-.98				pha						save MLI error
-				lda .8+1
+				pha						save MLI error
+.1				lda #$ff				SELF MODIFIED
 				jsr K.Close
 				pla						get back MLI error
 				sec
-.80				rts
-*--------------------------------------
-K.FOpen.PATH	.BS 2
-K.FOpen.MODE	.BS 1
-K.FOpen.TYPE	.BS 1
-K.FOpen.AUXTYPE	.BS 2
+K.FOpen.RTS		rts
 */--------------------------------------
 * # FClose
 * Close a file
@@ -1118,8 +1035,10 @@ K.FClose		jsr PFT.CheckNodeA
 				rts
 */--------------------------------------
 * # FRead
-* int fread (hFILE stream, void * ptr, int count );
 * Read bytes from file
+* ## C
+* int fread (hFILE stream, void * ptr, int count );
+* ## ASM
 * **In:**
 * `>PUSHWI count`
 * `>PUSHW ptr`

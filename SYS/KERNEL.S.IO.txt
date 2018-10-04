@@ -4,7 +4,7 @@ AUTO 4,1
 */--------------------------------------
 * # open
 * ## C
-* `hFD open(const char *pathname, int flags);`
+* `hFD open(const char *pathname, short int flags);`
 * ## ASM
 * **In:**
 * `>PUSHB flags`
@@ -12,32 +12,149 @@ AUTO 4,1
 * `>SYSCALL open`
 * **Out:**
 * A = hFD
-* note : if file is created on ProDOS : T=TXT,X=$0000
+* REG File created on ProDOS : T=TXT,X=$0000
 *\--------------------------------------
-K.Open			jsr PFT.CheckPathYA		check if not /mnt
-
-K.Open.I		jsr STDIO.SetMLIPathYA	local pathname...
-				>PULLB K.FOpen.MODE
+K.Open.FLAGS	.BS 1
+K.Open.TYPE		.BS 1
+K.Open.AUXTYPE	.BS 2
+*--------------------------------------		
+K.Open			pha
+				>PULLB K.Open.FLAGS
+				pla
 				
+IO.Open.I		jsr STDIO.SetMLIPathYA
+				
+				lda #S.FI.T.TXT
+				sta K.Open.TYPE
+				stz K.Open.AUXTYPE
+				stz K.Open.AUXTYPE+1
+
 				ldx #5					$/DEV/ 
 				cpx K.MLI.PATH
-				bcs K.Open.REG
+				bcs .2
 				
 .1				lda K.MLI.PATH,x
 				cmp IO.DEVDIR,x
-				bne K.Open.REG
+				bne .2
 				dex
 				bne .1
 *--------------------------------------		
-K.Open.DEV		>LDYAI K.MLI.PATH+6		skip $/DEV/
+* CDEV,BDEV,DSOCK,SSOCK,PIPE
+*--------------------------------------		
+.2				>LDYAI K.MLI.PATH+6		skip $/DEV/
 	
 				jsr K.GetDevByName
-				bcs .9
+				bcs IO.OPEN.RTS
 				
 				>STYA pFD
 				stx .1+1				DEVID
 				
-				jsr K.IOCTL.GetPDrv
+				lda (pFD)				#S.FD.T
+				tax
+				jmp (.3,x)
+				
+.3				.DA STDIO.IOERR			REG
+				.DA STDIO.IOERR			DIR
+				.DA IO.OPEN.CDEV
+				.DA STDIO.IOERR			BDEV
+				.DA STDIO.IOERR			LNK
+				.DA IO.OPEN.DSOCK
+				.DA IO.OPEN.SSOCK
+				.DA IO.OPEN.PIPE
+IO.OPEN.9		sec
+IO.OPEN.RTS		rts				
+*--------------------------------------
+IO.OPEN.REG		>MLICALL MLIGETFILEINFO
+				bcc K.IO.OPEN.REG.E		Already Exists
+				
+				bit K.Open.FLAGS		Create if not exists ?
+				bpl IO.OPEN.9			No, return MLI error
+				
+				lda #S.FI.A.FULL				Yes, Create...
+				sta K.MLI.PARAMS+3		Access
+				lda K.Open.TYPE
+				sta K.MLI.PARAMS+4		File type
+				>LDYA K.Open.AUXTYPE
+				>STYA K.MLI.PARAMS+5	Aux type
+				lda #S.FI.ST.STD
+				sta K.MLI.PARAMS+7
+				
+				ldx #3
+				
+.1				lda DATELO,x
+				sta K.MLI.PARAMS+8,x
+				dex
+				bpl .1
+
+				>MLICALL MLICREATE
+				bcs IO.OPEN.RTS
+
+K.IO.OPEN.REG.E	>LDYAI S.FD.REG
+				ldx #S.MEM.F.INIT0+S.MEM.F.FD
+				jsr MEM.GetMem.YAX
+				bcs IO.OPEN.RTS
+				
+				>STYA pFD
+				stx .8+1				save hFD			
+								
+*				ldy #S.FD.T				Done by GetMem0
+*				lda #S.FD.T.REG
+*				sta (pFD),y
+				
+				jsr STDIO.SetIOBUF
+				bcs .9
+
+				>MLICALL MLIOPEN
+				bcs .9
+				
+				lda K.MLI.PARAMS+5		get ref_num
+				ldy #S.FD.REG.REF
+				sta (pFD),y
+				
+				sta K.MLI.PARAMS+1		Next MLI Calls are REF_NUM based
+				
+				lda K.Open.FLAGS
+				bit #O.WRONLY
+				beq .20					Write mode ?
+				
+				and #O.APPEND			Append ?
+				bne .11					yes, go to end of file
+				
+				stz K.MLI.PARAMS+2
+				stz K.MLI.PARAMS+3
+				stz K.MLI.PARAMS+4
+				>MLICALL MLISETEOF		no, reset size to 0
+				bra .21
+				
+.11				>MLICALL MLIGETEOF
+				bcs .9
+				
+				>MLICALL MLISETMARK
+.21				bcs .9
+				
+.20				lda K.Open.FLAGS
+				and #O.TEXT				Text Mode ?
+				beq .8
+				
+				lda #$FF
+				sta K.MLI.PARAMS+2
+				lda #C.CR
+				sta K.MLI.PARAMS+3
+				>MLICALL MLINEWLINE
+				bcs .9
+				
+.8				lda #$ff
+				rts
+
+.9				pha
+				lda .8+1
+				pha
+				jsr IO.Close.I
+				pla
+				sec
+				rts
+*--------------------------------------
+IO.OPEN.CDEV	jsr K.IOCTL.GetPDrv
 				
 .1				lda #$ff				SELF MODIFIED pass A=DEVID To Driver
 				ldx #IOCTL.OPEN
@@ -48,11 +165,13 @@ K.Open.DEV		>LDYAI K.MLI.PATH+6		skip $/DEV/
 				lda Dev.Table.hFD,x
 .9				rts				
 *--------------------------------------
-K.Open.REG		lda #S.FI.T.TXT
-				sta K.FOpen.TYPE
-				stz K.FOpen.AUXTYPE
-				stz K.FOpen.AUXTYPE+1
-				jmp K.FOpen.I
+IO.OPEN.DSOCK
+*--------------------------------------
+IO.OPEN.SSOCK
+*--------------------------------------
+IO.OPEN.PIPE
+				clc
+				rts
 */--------------------------------------
 * # close
 * ## C
@@ -62,30 +181,26 @@ K.Open.REG		lda #S.FI.T.TXT
 * `lda fd`
 * `>SYSCALL close`
 *\--------------------------------------
-K.Close			jsr K.GetMemPtr
-				bcs .9
-				
+K.Close			pha						save hFD
+				jsr K.GetMemPtr
 				>STYA pFD
 
-				lda (pFD)				#S.FD.T
+IO.Close.I		lda (pFD)				#S.FD.T
 				tax
+				pla
 				jmp (.1,x)
 				
 .1				.DA IO.CLOSE.REG
 				.DA IO.CLOSE.DIR
 				.DA IO.CLOSE.CDEV
-				.DA STDIO.IOERR			BDEV
+				.DA IO.CLOSE.BDEV
 				.DA STDIO.IOERR			LNK
 				.DA IO.CLOSE.DSOCK
 				.DA IO.CLOSE.SSOCK
 				.DA IO.CLOSE.PIPE
-
-.9				lda #MLI.E.NODEV
-				sec
-				rts
 *--------------------------------------
 IO.CLOSE.REG
-IO.CLOSE.DIR
+IO.CLOSE.DIR	pha						save hFD
 				ldy #S.FD.REG.REF
 				lda (pFD),y
 				beq .1
@@ -94,14 +209,15 @@ IO.CLOSE.DIR
 
 .1				ldy #S.FD.REG.IOBUF
 				lda (pFD),y
-				beq .8
+				beq .2
 				
+				jsr K.FreeMem
+				
+.2				pla
 				jmp K.FreeMem
-				
-.8				clc				
-				rts
 *--------------------------------------
 IO.CLOSE.CDEV
+IO.CLOSE.BDEV
 *--------------------------------------
 IO.CLOSE.DSOCK
 IO.CLOSE.SSOCK
