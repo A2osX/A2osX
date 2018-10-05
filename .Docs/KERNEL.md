@@ -62,10 +62,17 @@ X = DevID
 **Out:**  
 
 # MKDev  
-**In:**   
- Y,A = Ptr to FD.DEV  
+Create a hDEV  
+
+## C  
+`hDEV mkdev (S.FD * fd)`  
+
+## ASM  
+**In:**  
+`>LDYA FD.DEV`  
+`>SYSCALL mkdev  
 **Out:**  
- A = DEVID  
+ A = hDEV  
 
 # OpenDir  
 
@@ -660,7 +667,7 @@ Prints C-Style String
 
 ## ASM  
 **In:**  
-PrintF : (example is for printing Y,A as integer : format="Y,A= %I", 2 bytes)    
+PrintF : (example is for printing Y,A as integer : format="%I", 2 bytes)    
 `>PUSHYA`  
 `...`  
 `>PUSHBI bytecount`  
