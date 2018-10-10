@@ -52,7 +52,7 @@
 **Out:**  
   Y,A = PTR to DNS.CACHE  
 
-# SKT.Socket  
+# Socket  
 Create a new socket  
 
 ## C  
@@ -67,7 +67,7 @@ Create a new socket
 CC: A = hSOCKET  
 CS: A = EC  
 
-# SKT.bind  
+# Bind  
 bind a name to a socket  
 
 ## C  
@@ -82,7 +82,7 @@ bind a name to a socket
 CC: A = hSOCKET  
 CS: A = EC  
 
-# SKT.connect  
+# Connect  
 Iinitiate a connection on a socket  
 
 ## C  
@@ -97,7 +97,7 @@ Iinitiate a connection on a socket
 CC: A = hSOCKET  
 CS: A = EC  
 
-# SKT.listen  
+# Listen  
 Listen for connections on a socket  
 
 ## C  
@@ -110,7 +110,7 @@ Listen for connections on a socket
 **Out:**  
 CS: A = EC  
 
-# SKT.Accept  
+# Accept  
 Accept a connection on a socket  
 
 ## C  
@@ -123,19 +123,19 @@ Accept a connection on a socket
 **Out:**   
 A = hSocket  
 
-# SKT.Close  
+# Shutdown  
 Close socket  
 
 ## C  
-`int close(int fd);`  
+`int shutdown(int fd);`  
 
 ## ASM  
 **In:**  
 `lda fd`  
-`>LIBCALL hLIBTCPIP,LIBTCPIP.close`  
+`>LIBCALL hLIBTCPIP,LIBTCPIP.shutdown`  
 **Out:**  
 
-# SKT.Read (STREAM)  
+# Read (STREAM)  
 
 ## C  
 `int skt.read(hFD fd, void *buf, int count);`  
@@ -150,7 +150,7 @@ Close socket
 CC: Y,A = bytes read  
 CS: A = EC  
 
-# SKT.Write (STREAM)  
+# Write (STREAM)  
 
 ## C  
 `int skt.write(hFD fd, const void *buf, int count);`  
@@ -165,11 +165,13 @@ CS: A = EC
 CC: Y,A = bytes written  
 CS: A = EC  
 
-# SKT.Recv (RAW,DGRAM,SEQPACKET)  
+# Recv (RAW,DGRAM,SEQPACKET)  
 
-# SKT.RecvFrom (RAW,DGRAM,SEQPACKET)  
-hMem recv(hFD fd);  
-hMem recvfrom(hFD fd, struct sockaddr *addr);  
+# RecvFrom (RAW,DGRAM,SEQPACKET)  
+
+## C  
+`hMem recv(hFD fd);`  
+`hMem recvfrom(hFD fd, struct sockaddr *addr);`  
 
 ## ASM  
 **In:**  
@@ -180,9 +182,9 @@ hMem recvfrom(hFD fd, struct sockaddr *addr);
 CC: A = hMem  
 CS: A = EC  
 
-# SKT.Send (RAW,DGRAM,SEQPACKET)  
+# Send (RAW,DGRAM,SEQPACKET)  
 
-# SKT.SendTo (RAW,DGRAM,SEQPACKET)  
+# SendTo (RAW,DGRAM,SEQPACKET)  
 
 ## C  
 `int skt.send(hFD fd, const void *buf, int count);`  
@@ -199,11 +201,11 @@ CS: A = EC
 CC: Y,A = bytes written  
 CS: A = EC  
 
-# SKT.GetTable  
+# GetTable  
 Get socket table  
 
 ## C  
-`void * skt.gettable();`  
+`void * gettable();`  
 
 ## ASM  
 **In:**  
