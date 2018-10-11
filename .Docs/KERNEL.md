@@ -5,7 +5,8 @@
 ## ASM  
 **In:**  
 A = argument index.  
-**Out:**   
+
+## RETURN VALUE   
 CC : success  
 Y,A = PTR To Arg[A]  
 CS : Out Of Bound  
@@ -15,7 +16,8 @@ CS : Out Of Bound
 ## ASM  
 **In:**  
  Y,A = PTR to "NAME.DRV [PARAM]" C-String  
-**Out:**  
+
+## RETURN VALUE  
 none  
 
 # InsDrv  
@@ -30,21 +32,22 @@ none
 `>PUSHW DRV.CS.START`  
 `>LDYA L.SRC`  
 `SYSCALL insdrv`  
-**Out:**  
+
+## RETURN VALUE  
 Y,A = Ptr to installed driver  
 
 # GetDevByID  
-**In:**   
 A = DevID  
-**Out:**  
+
+## RETURN VALUE  
 CC = OK, CS = ERROR  
 Y,A = FD  
 X = hFD  
 
 # GetDevByName  
-**In:**   
  Y,A = Ptr to device name (C-String)  
-**Out:**  
+
+## RETURN VALUE  
 CC = OK, CS = ERROR  
 Y,A = FD  
 X = DevID  
@@ -55,11 +58,11 @@ X = DevID
 `int getdevstatus(short int hFD, S.DIB* dstat);`  
 
 ## ASM  
-**In:**   
 `>PUSHWI S.DIB`  
 `lda DevID`  
 `>SYSCALL GetDevStatus`  
-**Out:**  
+
+## RETURN VALUE  
 
 # MKDev  
 Create a hDEV  
@@ -68,10 +71,10 @@ Create a hDEV
 `hDEV mkdev (S.FD * fd)`  
 
 ## ASM  
-**In:**  
 `>LDYA FD.DEV`  
 `>SYSCALL mkdev  
-**Out:**  
+
+## RETURN VALUE  
  A = hDEV  
 
 # OpenDir  
@@ -80,10 +83,10 @@ Create a hDEV
 `int hDIR opendir (const char * dirpath);`  
 
 ## ASM  
-**In:**  
 `>LDYA dirpath`  
 `>SYSCALL opendir`   
-**Out:**   
+
+## RETURN VALUE   
  CC : success  
   A = hDIR  
  CS : error  
@@ -95,11 +98,11 @@ Create a hDEV
 `int readdir (int hDIR, S.DIRENT * dirent);`  
 
 ## ASM  
-**In:**  
 `>PUSHW dirent`  
 `lda hDIR`  
 `>SYSCALL readdir`  
-**Out:**   
+
+## RETURN VALUE   
  CC : success  
   X = hDIRENT  
   Y,A = PTR to S.DIRENT  
@@ -113,16 +116,17 @@ Create a hDEV
 `void closedir(hDIR);`  
 
 ## ASM  
-**In:**   
 `lda hDIR`  
 `>SYSCALL closedir`  
-**Out:**  
+
+## RETURN VALUE  
  none, always succeed.   
 
 # ExpandStr  
 **In:**  
  Y,A = PTR to String to Expand (C-String)  
-**Out:**  
+
+## RETURN VALUE  
  X = hMem to Expanded String (C-String)  
  Y,A = PTR to Expanded String   
 
@@ -139,7 +143,8 @@ And return, if found, the full path to it.
 `>PUSHWI fullpath`  
 `>PUSHWI searchpath`  
 `>LDYAI filename`  
-**Out:**  
+
+## RETURN VALUE  
 CC : success  
 DstBuf = FilePath  
 DstStat = S.STAT  
@@ -155,7 +160,8 @@ Change or add an environment variable, string is 'NAME=VALUE'
 **In:**  
 `>LDYA string`  
 `>SYSCALL putenv`  
-**Out:**  
+
+## RETURN VALUE  
 
 # SetEnv  
 Change or add an environment variable  
@@ -168,7 +174,8 @@ Change or add an environment variable
 `>PUSHW value`  
 `>LDYA name`  
 `>SYSCALL setenv`  
-**Out:**  
+
+## RETURN VALUE  
 
 # GetEnv  
 searches the environment list to find the environment variable name,   
@@ -180,8 +187,9 @@ and returns a pointer to the corresponding value string.
 ## ASM  
 **In:**  
 `>LDYA name`  
-`>SYSCALL gerenv`  
-**Out:**  
+`>SYSCALL getenv`  
+
+## RETURN VALUE  
  CC : Y,A = PTR to VALUE (C-String)  
  CS : not found  
 
@@ -195,13 +203,15 @@ Remove an environment variable
 **In:**  
 `>LDYA name`  
 `>SYSCALL unsetenv`  
-**Out:**  
+
+## RETURN VALUE  
 
 # LoadTxtFile  
 Load TXT a file in memory (with ending 0)  
 **In:**  
  Y,A = File Path  
-**Out:**  
+
+## RETURN VALUE  
  Y,A = File Length (without ending 0)  
  X = hMem of Loaded File  
 
@@ -212,7 +222,8 @@ Load a file in memory
  PUSHB = TYPE  ...  
  PUSHB = MODE  ...  
  LDYA = PATH ...FOpen)  
-**Out:**  
+
+## RETURN VALUE  
  Y,A = File Length  
  X = hMem of Loaded File  
 
@@ -227,7 +238,8 @@ Change The type of a ProDOS File
 `>PUSHBI filetype`  
 `>LDYA filepath`  
 `>SYSCALL chtyp`  
-**Out:**  
+
+## RETURN VALUE  
 
 # ChMod  
 **In:**  
@@ -254,7 +266,8 @@ Change The type of a ProDOS File
 `>PUSHB flags`  
 `>LDYA pathname`  
 `>SYSCALL open`  
-**Out:**  
+
+## RETURN VALUE  
 A = hFD  
 REG File created on ProDOS : T=TXT,X=$0000  
 
@@ -279,7 +292,8 @@ REG File created on ProDOS : T=TXT,X=$0000
 `>PUSHW buf`  
 `lda fd`  
 `>SYSCALL read`  
-**Out:**  
+
+## RETURN VALUE  
 CC: Y,A = bytes read  
 CS: A = EC  
 
@@ -294,7 +308,8 @@ CS: A = EC
 `>PUSHW buf`  
 `lda fd`  
 `>SYSCALL write`  
-**Out:**  
+
+## RETURN VALUE  
 CC: Y,A = bytes written  
 CS: A = EC  
 
@@ -304,12 +319,12 @@ CS: A = EC
 `int ioctl(short int hFD, int request, void * param );`  
 
 ## ASM  
-**In:**   
 `PUSHWI param`  
 `PUSHBI request`  
 `lda hFD`  
 `>SYSCALL IOCTL`  
-**Out:**  
+
+## RETURN VALUE  
  Y,A = ...  
 
 # pipe  
@@ -318,7 +333,6 @@ CS: A = EC
 `int pipe(int pipefd[2]);`  
 
 ## ASM  
-**In:**   
 
 # FAdd,FSub,FMult,FDiv,FPwr  
 Return X+Y, X-Y, X*Y, X/Y, X^Y  
@@ -332,7 +346,8 @@ Return X+Y, X-Y, X*Y, X/Y, X^Y
 `>SYSCALL fmult`  
 `>SYSCALL fdiv`  
 `>SYSCALL fpwr`  
-**Out:**  
+
+## RETURN VALUE  
  On stack (float)  
 
 # Log,Sqr,Exp,Cos,Sin,Tan,ATan  
@@ -351,7 +366,8 @@ Return Log(x), Sqr(x), E^X, Cos(x), Sin(X), Tan(x), ATan(x)
 **In:**  
 `>PUSHF x (Float)`  
 `>SYSCALL log`  
-**Out:**  
+
+## RETURN VALUE  
  On stack (Float)  
 
 # float  
@@ -363,7 +379,8 @@ Return 'floated' long
 ## ASM  
 **In:**  
  `>PUSHL X` (long)  
-**Out:**  
+
+## RETURN VALUE  
  On stack (float)  
 
 # lrintf  
@@ -376,13 +393,14 @@ Return float rounded into a long
 **In:**  
 `>PUSHF x`  
 `>SYSCALL lrintf`  
-**Out:**  
+
+## RETURN VALUE  
  On stack (long)  
 
 # GetMem0  
-**In:**   
  Y,A = Size Requested  
-**Out:**  
+
+## RETURN VALUE  
  CC : success  
   YA = PTR to Mem (ZERO Initialised)  
 *	X = hMem  
@@ -390,9 +408,9 @@ Return float rounded into a long
   A = EC  
 
 # GetMem  
-**In:**   
  Y,A = Size Requested  
-**Out:**  
+
+## RETURN VALUE  
  CC : success  
   YA = PTR to Mem (Uninitialised)  
 *	X = hMem  
@@ -400,31 +418,31 @@ Return float rounded into a long
   A = EC  
 
 # FreeMem  
-**In:**  
  A = hMem To Free  
-**Out:**  
+
+## RETURN VALUE  
  none.  
  (X unmodified)  
 
 # GetMemPtr  
-**In:**  
 A = hMem  
-**Out:**  
+
+## RETURN VALUE  
 Y,A = PTR to MemBlock  
 (X unmodified)  
 
 # GetMemByID  
-**In:**  
 A = hMem  
-**Out:**  
+
+## RETURN VALUE  
 Y,A = ZPMemMgrSPtr = PTR to S.MEM  
 (X unmodified)  
 
 # NewStr  
 Create a new copy of this C-String  
-**In:**  
 Y,A = Ptr to source C-String  
-**Out:**  
+
+## RETURN VALUE  
 CC : success   
  Y,A = PTR to String  
  X = hMem (PSTR)  
@@ -432,62 +450,62 @@ CS : error
  A = SYS error code  
 
 # SListGetByID  
-**In:**  
  PUSHB = hSList  
  PUSHW = KeyID  
  PUSHW = Data Ptr  
  PUSHW = Key Ptr  
-**Out:**  
+
+## RETURN VALUE  
  X,Y = Next KeyID  
 
 # SListUpdateByID  
-**In:**  
  PUSHB = hSList  
  PUSHW = KeyID  
  PUSHW = Data Ptr  
-**Out:**  
+
+## RETURN VALUE  
  A = Key Length  
  X,Y = KeyID  
 
 # SListAdd  
-**In:**  
  PUSHB = hSList  
  PUSHW = Key Ptr  
  PUSHW = Data Ptr  
-**Out:**  
+
+## RETURN VALUE  
  A = Key Length  
  X,Y = KeyID  
 
 # SListLookup  
-**In:**  
  PUSHB = hSList  
  PUSHW = Key Ptr  
  PUSHW = Data Ptr  
-**Out:**  
+
+## RETURN VALUE  
  A = Key Length  
  X,Y = KeyID  
 
 # SListNew  
-**In:**  
-**Out:**  
+
+## RETURN VALUE  
  A=hSList  
 
 # SListFree  
-**In:**  
  A=hSList  
-**Out:**  
+
+## RETURN VALUE  
 
 # GetStkObjProp  
-**In:**  
  A = hObject (AUX Memory)  
  Y = Property Index  
-**Out:**  
+
+## RETURN VALUE  
  Y,A = Property Value  
 
 # NewStkObj  
-**In:**   
  Y,A = Size Requested  
-**Out:**  
+
+## RETURN VALUE  
  CC : success  
   YA = PTR to Mem (Uninitialised)  
 *	X = hMem  
@@ -495,20 +513,20 @@ CS : error
   A = EC  
 
 # FreeStkObj  
-**In:**  
  A = hMem To Free (AUX Memory)  
-**Out:**  
+
+## RETURN VALUE  
  none.  
  (X,Y unmodified)  
 
 # LoadStkObj  
 Load a file in AUX memory (Stock Objects)  
-**In:**  
  PUSHW = AUXTYPE (Handled by....  
  PUSHB = TYPE  ...  
  PUSHB = MODE  ...  
  PUSHW = PATH ...FOpen)  
-**Out:**  
+
+## RETURN VALUE  
  Y,A = File Length  
  X = hMem of Loaded Object in AUX mem  
 
@@ -521,25 +539,43 @@ Load a file in AUX memory (Stock Objects)
 # CreatePS (Non Blocking)  
 **In:**  
   Y,A = PTR To Cmd Line  
-**Out:**  
+
+## RETURN VALUE  
   A = Child PSID  
+
+# Exec  
+
+## C  
+`int exec(const char *path, char *const argv[], short int flage);`  
+
+## ASM  
+`>PUSHB flags`  
+`>PUSHW argv`  
+`>LDYAI path`  
+`>SYSCALL exec`  
+
+## RETURN VALUE  
+A = Child PSID  
 
 # GetMemStat  
 **In:**  
  Y,A = Ptr to 24 bytes buffer  
-**Out:**  
+
+## RETURN VALUE  
  Buffer filled with memory stats  
 
 # GetPSStatus  
 **In:**  
  A = PID  
-**Out:**  
+
+## RETURN VALUE  
  A = Status Byte  
 
 # GetPSStat  
 **In:**  
  Y,A = Ptr to 24 bytes buffer  
-**Out:**  
+
+## RETURN VALUE  
  Buffer filled with PS stats  
 
 # Stat  
@@ -553,7 +589,8 @@ Return information about a file
 `>PUSHW statbuf`  
 `>LDYA pathname`  
 `>SYSCALL stat`  
-**Out:**  
+
+## RETURN VALUE  
 
 # MKDir  
 create a directory  
@@ -566,7 +603,8 @@ create a directory
 `>PUSHW mode`  
 `>LDYA pathname`  
 `>SYSCALL mkdir`  
-**Out:**  
+
+## RETURN VALUE  
 CC : success  
 CS : error  
 A = EC  
@@ -584,7 +622,8 @@ Create a special or ordinary file.
 `>PUSHW mode`  
 `>LDYA pathname`  
 `>SYSCALL mknod`  
-**Out:**  
+
+## RETURN VALUE  
 CC = OK, CS = ERROR  
 A = hFILE  
 
@@ -599,7 +638,8 @@ return a hFILE to a new FIFO
 `>PUSHW mode`  
 `>LDYA pathname`  
 `>SYSCALL mkfifo`  
-**Out:**  
+
+## RETURN VALUE  
 CC = OK, CS = ERROR  
 A = hFILE  
 
@@ -614,7 +654,8 @@ Print A (char) to hFILE
 `>PUSHB character`  
 `lda stream`  
 `>SYSCALL fputc`  
-**Out:**   
+
+## RETURN VALUE   
 CC = success  
 
 # PutChar  
@@ -627,7 +668,8 @@ Print A (char) to StdOut
 **In:**  
 `lda caracter`  
 `>SYSCALL putchar`  
-**Out:**   
+
+## RETURN VALUE   
 CC = success  
 
 # PutS  
@@ -640,7 +682,8 @@ Write Str to StdOut, appends '\r\n'
 ## ASM  
 `>LDYAI str`  
 `>SYSCALL puts`  
-**Out:**   
+
+## RETURN VALUE   
 CC = success  
 
 # FPutS  
@@ -654,7 +697,8 @@ Write Str to FILE
 `>PUSHW str`  
 `lda stream`  
 `>SYSCALL fputs`  
-**Out:**   
+
+## RETURN VALUE   
 CC = success  
 
 # PrintF/SPrintF/FPrintF  
@@ -687,7 +731,8 @@ FPrintF :
 `>PUSHWI format`  
 `lda hFILE`  
 `>SYSCALL fprintf`  
-**Out:**  
+
+## RETURN VALUE  
 CC : success, Y,A = bytes sent  
 CS : error, A = code from Output  
 Specifiers :  
@@ -739,7 +784,8 @@ string is then terminated with a null byte.
 `>PUSHW s`  
 `lda hFILE`  
 `>SYSCALL fgets`  
-**Out:**   
+
+## RETURN VALUE   
  Y,A: s   
 CC = success  
 
@@ -752,7 +798,8 @@ Get char from StdIn
 ## ASM  
 **In:**  
 `>SYSCALL getchar`  
-**Out:**   
+
+## RETURN VALUE   
  CC = success  
   A = char  
 
@@ -766,7 +813,8 @@ Get char from Node
 **In:**  
 `lda stream`  
 `>SYSCALL getc`  
-**Out:**   
+
+## RETURN VALUE   
  CC = success  
   A = char  
 
@@ -795,7 +843,8 @@ Read formatted data from string
 TODO : %10s  
 `>LDYA s`  
 `>SYSCALL sscanf`  
-**Out:**  
+
+## RETURN VALUE  
 A = Number of arguments filled.  
 
 # FOpen  
@@ -825,7 +874,8 @@ TODO: replace flags/ftype/auxtype with mode="w+,t=TYP,x=AUXTYPE"
  + ,t=123 or t=$ff or t=TXT  
  + ,x=12345 or x=$ffff  
 `>LDYAI filename`  
-**Out:**   
+
+## RETURN VALUE   
  CC : A = hFILE  
  CS : A = EC  
 
@@ -839,7 +889,8 @@ int fclose ( hFILE stream );
 **In:**  
 `lda stream`  
 `>SYSCALL fclose`  
-**Out:**  
+
+## RETURN VALUE  
 
 # FRead  
 Read bytes from file  
@@ -853,7 +904,8 @@ int fread (hFILE stream, void * ptr, int count );
 `>PUSHW ptr`  
 `lda stream`  
 `>SYSCALL fread`  
-**Out:**  
+
+## RETURN VALUE  
  Y,A = Bytes Read  
 
 # FWrite  
@@ -868,7 +920,8 @@ Write bytes to file
 `>PUSHW ptr`  
 `lda stream`  
 `>SYSCALL fwrite`  
-**Out:**  
+
+## RETURN VALUE  
  Y,A = Bytes Written  
 
 # FFlush  
@@ -904,7 +957,8 @@ Test the end-of-file indicator for hFILE
 **In:**  
 `lda stream`  
 `>SYSCALL feof`  
-**Out:**  
+
+## RETURN VALUE  
  CC :   
  A=0 EOF  
  A =0 NOT EOF  
@@ -920,7 +974,8 @@ Return the current value of the file-position indicator
 **In:**  
 `lda stream`  
 `>SYSCALL ftell`  
-**Out:**  
+
+## RETURN VALUE  
 On stack (long)  
 
 # Remove  
@@ -933,7 +988,8 @@ int remove(const char *pathname);
 **In:**  
 `>LDYA pathname`  
 `>SYSCALL remove`  
-**Out:**  
+
+## RETURN VALUE  
 
 # Rename  
 Rename a file  
@@ -946,7 +1002,8 @@ Rename a file
 `>PUSHW newpath`  
 `>LDYA oldpath`  
 `>SYSCALL rename`  
-**Out:**  
+
+## RETURN VALUE  
 
 # strtof  
 Convert String to 40 bits Float  
@@ -959,7 +1016,8 @@ Convert String to 40 bits Float
 `>PUSHWI EndPtr`  
 `>LDYA str`  
 `>SYSCALL strtof`  
-**Out:**  
+
+## RETURN VALUE  
 On stack (float)  
 
 # AToF  
@@ -972,7 +1030,8 @@ Convert String to 40 bits Float
 **In:**  
 `>LDYA str`  
 `>SYSCALL atof`  
-**Out:**  
+
+## RETURN VALUE  
 On stack (float)  
 
 # StrToL/StrToUL  
@@ -988,7 +1047,8 @@ Convert String to 32 bits (unsigned) int
 `>PUSHWI EndPtr`  
 `>LDYAI str`  
 `>SYSCALL strtol`  
-**Out:**  
+
+## RETURN VALUE  
 On stack (long)  
 
 # atol  
@@ -1001,7 +1061,8 @@ Convert String to 32 bits long
 **In:**  
 `>LDYA str`  
 `>SYSCALL atol`  
-**Out:**  
+
+## RETURN VALUE  
 On stack (long)  
 
 # atoi  
@@ -1014,7 +1075,8 @@ Convert String to 16 bits int
 **In:**  
 `>LDYAI str`  
 `>SYSCALL atoi`  
-**Out:**  
+
+## RETURN VALUE  
  Y,A = int  
 
 # RealPath  
@@ -1027,7 +1089,8 @@ Return the canonicalized absolute pathname
 **In:**  
 `>LDYA str`  
 `>SYSCALL realpath`  
-**Out:**  
+
+## RETURN VALUE  
 CC : success  
  Y,A = Ptr to Full Path (C-String)  
  X = hMem of Full Path  
@@ -1040,10 +1103,10 @@ Returns Length of C-String
 `int strlen ( char * str);`  
 
 ## ASM  
-**In:**   
 `>LDYAI str`  
 `>SYSCALL strlen`  
-**Out:**   
+
+## RETURN VALUE   
 Y,A = String length  
 
 # StrCat  
@@ -1057,7 +1120,8 @@ Concatenate strings
 `>PUSHWI source`  
 `>LDYAI destination`  
 `>SYSCALL strcat`  
-**Out:**   
+
+## RETURN VALUE   
 Y,A = destination  
 
 # StrCpy  
@@ -1071,7 +1135,8 @@ Copy string
 `>PUSHWI source`  
 `>LDYAI destination`  
 `>SYSCALL strcpy`  
-**Out:**   
+
+## RETURN VALUE   
 Y,A = destination  
 
 # StrMatch  
@@ -1085,7 +1150,8 @@ Compare a String against pattern (e.g. '*test?.txt')
 `>PUSHWI pattern`  
 `>LDYAI s`  
 `>SYSCALL strmatch`  
-**Out:**   
+
+## RETURN VALUE   
 CC : match  
 CS : no match  
 
@@ -1101,7 +1167,8 @@ Convert string to UPPERCASE/lowercase
 `>LDYAI str`  
 `>SYSCALL strupr`  
 `>SYSCALL strlwr`  
-**Out:**   
+
+## RETURN VALUE   
 Uppercased/lowercased String in Buffer  
 Y,A = str  
 
@@ -1116,7 +1183,8 @@ Compare 2 strings
 `>PUSHWI s2`  
 `>LDYAI s1`  
 `>SYSCALL strcmp`  
-**Out:**   
+
+## RETURN VALUE   
 CC : match  
 CS : no match  
  CC, Y,A=0  
@@ -1133,7 +1201,8 @@ Compare 2 strings, ignoring case
 `>PUSHWI s2`  
 `>LDYAI s1`  
 `>SYSCALL strcasecmp`  
-**Out:**   
+
+## RETURN VALUE   
 CC : match  
 CS : no match  
  CC, Y,A=0  
@@ -1146,9 +1215,10 @@ Get System Time in Buffer
 `time_t time (S.TIME* timer);`  
 
 ## ASM  
-**In:**  
-Y,A = PTR to S.TIME  
-**Out:**  
+`>LDYA timer`  
+`>SYSCALL time`  
+
+## RETURN VALUE  
 S.TIME filled with System date/time  
 
 # PTime2Time  
@@ -1158,11 +1228,11 @@ S.TIME filled with System date/time
 `int PTime2Time (long* ptime, S.TIME* timer);`  
 
 ## ASM  
-**In :**   
 `>PUSHW timer`  
 `>LDYA ptime`  
 `>SYSCALL PTime2Time`  
-**Out:**  
+
+## RETURN VALUE  
 
 # CTime2Time  
  Convert CTime Time To S.TIME  
@@ -1171,22 +1241,21 @@ S.TIME filled with System date/time
 `int CTime2Time (long* ctime, S.TIME* timer);`  
 
 ## ASM  
-**In :**   
 `>PUSHW timer`  
 `>LDYA ctime`  
 `>SYSCALL CTime2Time`  
-**Out:**  
+
+## RETURN VALUE  
 
 # StrFTime  
 
 ## C  
 Convert S.TIME struct to CSTR  
-`size_t strftime (char* ptr, size_t maxsize, const char* format, const struct tm* timeptr );`  
+`size_t strftime (char* ptr, const char* format, const struct S.TIME* timeptr );`  
 
 ## ASM  
-**In:**  
-PUSHW = Dst PTR To CSTR Buf  
-PUSHW = Src PTR To Format String  
+`PUSHW timeptr`  
+`PUSHW format`  
 + %a : Abbreviated weekday name : Thu  
 + %A : Full weekday name : Thursday   
 + %b : Abbreviated month name : Aug   
@@ -1202,6 +1271,8 @@ PUSHW = Src PTR To Format String
 + %y : Year, last two digits (00-99)  
 + %Y : Year four digits 2001   
 
-PUSHW = Src PTR To S.Time  
-**Out:**  
+`>LDYA ptr`  
+`>SYSCALL strftime`  
+
+## RETURN VALUE  
   none. always succeed.  

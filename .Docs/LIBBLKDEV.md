@@ -11,7 +11,8 @@ int getprodoscatsize (short int options, short int catsize, int devsize );
  PUSHW = DevSize (in 512b blocks)  
  PUSHB = Catalog Size (in blocks)  
  PUSHB = Options  
-**Out:**   
+
+## RETURN VALUE   
  X=BlockCount (max 22)  
  Y,A=BufSize  (max $4400)  
 
@@ -37,7 +38,8 @@ Write a track (16 sectors)
  PUSHW = Ptr to 16*256 buffer  
  PUSHB = TrackNum * 4	: 0->140+	  
  PUSHB = DSSS0000  
-**Out:**  
+
+## RETURN VALUE  
  CC : success  
  CS : A = Error  
       A=0, currently starting/seeking...  
@@ -48,7 +50,8 @@ Write a track (NIBBLE)
  PUSHW = Ptr to NIBBLE buffer (0 ended)  
  PUSHB = TrackNum * 4	: 0->140+	  
  PUSHB = DSSS0000  
-**Out:**  
+
+## RETURN VALUE  
  CC : success  
  CS : A = Error  
       A=0, currently starting/seeking...  

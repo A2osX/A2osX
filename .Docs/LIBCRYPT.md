@@ -10,7 +10,8 @@ Return MD5 Hash for input String
 **In:**  
 `>PUSHW digest`  
 `>LDYA str`  
-**Out:**  
+
+## RETURN VALUE  
 CC  
 
 ## MD5Init  
@@ -21,7 +22,8 @@ Initialize a MD5 computation
 
 # ASM  
 **In:**  
-**Out:**  
+
+## RETURN VALUE  
 A = hMem To S.MD5  
 
 ## MD5Update  
@@ -35,7 +37,8 @@ Add Data to MD5 computation
 `>PUSHW len`  
 `>PUSHW data`  
 `>LDA.G md5`  
-**Out:**  
+
+## RETURN VALUE  
 
 ## MD5Finalize  
 
@@ -46,4 +49,5 @@ Add Data to MD5 computation
 **In:**  
 `>PUSHW digest`  
 `>LDA.G md5`  
-**Out:**  
+
+## RETURN VALUE  

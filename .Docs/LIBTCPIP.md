@@ -3,14 +3,16 @@
 # ARP.Clear  
  Clear ARP Cache  
 **In:**   
-**Out:**   
+
+## RETURN VALUE   
 
 # ARP.Query  
  Query ARP Cache and returns HW address  
 **In:**  
  PUSHW PTR to MAC (to fill)  
  PUSHW PTR to IP  
-**Out:**  
+
+## RETURN VALUE  
  CC: hit: MAC filled  
  CS: missed   
 
@@ -23,20 +25,23 @@
 # ARP.GetCache  
  Return a Ptr to ARP Cache Table  
 **In:**  
-**Out:**  
+
+## RETURN VALUE  
   Y,A = PTR to ARP.CACHE  
 
 # DNS.Clear  
  Clear DNS Cache  
 **In:**   
-**Out:**   
+
+## RETURN VALUE   
 
 # DNS.Query  
  Query DNS for specified host  
 **In:**  
   PUSHW = PTR to IP to fill with cached data  
 *	PUSHW = hostname PTR to PSTR   
-**Out:**  
+
+## RETURN VALUE  
   CC: hit: IP filled with address  
   CS: missed   
 
@@ -49,7 +54,8 @@
 # DNS.GetCAche  
  Return a Ptr to DNS Cache Table  
 **In:**  
-**Out:**  
+
+## RETURN VALUE  
   Y,A = PTR to DNS.CACHE  
 
 # Socket  
@@ -63,7 +69,8 @@ Create a new socket
 `>PUSHB protocol`  
 `lda type`  
 `>LIBCALL hLIBTCPIP,LIBTCPIP.socket`  
-**Out:**  
+
+## RETURN VALUE  
 CC: A = hSOCKET  
 CS: A = EC  
 
@@ -78,7 +85,8 @@ bind a name to a socket
 `>PUSHW addr`  
 `lda fd`  
 `>LIBCALL hLIBTCPIP,LIBTCPIP.socket`  
-**Out:**  
+
+## RETURN VALUE  
 CC: A = hSOCKET  
 CS: A = EC  
 
@@ -93,7 +101,8 @@ Iinitiate a connection on a socket
 `>PUSHW addr`  
 `lda fd`  
 `>LIBCALL hLIBTCPIP,LIBTCPIP.socket`  
-**Out:**  
+
+## RETURN VALUE  
 CC: A = hSOCKET  
 CS: A = EC  
 
@@ -107,7 +116,8 @@ Listen for connections on a socket
 **In:**  
 `lda fd`  
 `>LIBCALL hLIBTCPIP,LIBTCPIP.listen`  
-**Out:**  
+
+## RETURN VALUE  
 CS: A = EC  
 
 # Accept  
@@ -120,7 +130,8 @@ Accept a connection on a socket
 **In:**   
 `lda fd`  
 `>LIBCALL hLIBTCPIP,LIBTCPIP.accept`  
-**Out:**   
+
+## RETURN VALUE   
 A = hSocket  
 
 # Shutdown  
@@ -133,7 +144,8 @@ Close socket
 **In:**  
 `lda fd`  
 `>LIBCALL hLIBTCPIP,LIBTCPIP.shutdown`  
-**Out:**  
+
+## RETURN VALUE  
 
 # Read (STREAM)  
 
@@ -146,7 +158,8 @@ Close socket
 `>PUSHW buf`  
 `lda fd`  
 `>LIBCALL hLIBTCPIP,LIBTCPIP.skt.read`  
-**Out:**  
+
+## RETURN VALUE  
 CC: Y,A = bytes read  
 CS: A = EC  
 
@@ -161,7 +174,8 @@ CS: A = EC
 `>PUSHW buf`  
 `lda fd`  
 `>LIBCALL hLIBTCPIP,LIBTCPIP.skt.write`  
-**Out:**  
+
+## RETURN VALUE  
 CC: Y,A = bytes written  
 CS: A = EC  
 
@@ -178,7 +192,8 @@ CS: A = EC
 `>PUSHW addr`		(RecvFrom)  
 `lda fd`  
 `>LIBCALL hLIBTCPIP,LIBTCPIP.skt.Recv`  
-**Out:**  
+
+## RETURN VALUE  
 CC: A = hMem  
 CS: A = EC  
 
@@ -197,7 +212,8 @@ CS: A = EC
 `>PUSHW buf`  
 `lda fd`  
 `>LIBCALL hLIBTCPIP,LIBTCPIP.skt.send`  
-**Out:**  
+
+## RETURN VALUE  
 CC: Y,A = bytes written  
 CS: A = EC  
 
@@ -210,4 +226,5 @@ Get socket table
 ## ASM  
 **In:**  
 `>LIBCALL hLIBTCPIP,LIBTCPIP.skt.GetTable`  
-**Out:**  
+
+## RETURN VALUE  
