@@ -530,28 +530,14 @@ Load a file in AUX memory (Stock Objects)
  Y,A = File Length  
  X = hMem of Loaded Object in AUX mem  
 
-# ExecPSNewEnv  
-
-# ExecPS (Blocking Parent PID)  
-
-# CreatePSNewEnv   
-
-# CreatePS (Non Blocking)  
-**In:**  
-  Y,A = PTR To Cmd Line  
-
-## RETURN VALUE  
-  A = Child PSID  
-
 # Exec  
 
 ## C  
-`int exec(const char *path, char *const argv[], short int flage);`  
+`int exec(const char* argv[], short int flags);`  
 
 ## ASM  
 `>PUSHB flags`  
-`>PUSHW argv`  
-`>LDYAI path`  
+`>LDYA argv`  
 `>SYSCALL exec`  
 
 ## RETURN VALUE  

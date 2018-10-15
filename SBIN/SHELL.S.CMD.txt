@@ -24,21 +24,24 @@ CMD.Quit		>LDA.G hCmdBuf
 *--------------------------------------
 Cmd.Parse		>LDYA ZPCMDBuf
 				>SYSCALL ExpandStr
+				bcs .99
+				
 				>STYA ZPPtr1			Ptr to expanded CMD ARGS\0
 				
 				txa
 				>STA.G CMD.hCmdLine
 				
 *				SET +X				
-				>LDYA ZPCMDBuf
+				>LDYA ZPPtr1
 				>SYSCALL puts
+				bcs .90
 				
 				ldy #0
 
 				lda (ZPPtr1)			empty line...quit
 				beq .9
 				
-.1				jsr Cmd.Parse.NextC
+.1				jsr Cmd.NextCharPtr1
 				beq .8					no more char, exit
 				
 				cmp #' '				skip leading spaces
@@ -50,17 +53,17 @@ Cmd.Parse		>LDYA ZPCMDBuf
 .3				sta (ZPCMDBuf),y		add char to buffer
 				iny
 				
-				jsr Cmd.Parse.NextC
+				jsr Cmd.NextCharPtr1
 				beq .8
 				
 				cmp #' '
 				bne .3
 				
 				lda #0
-				sta (ZPCMDBuf),y		add One \0 to buffer
+				sta (ZPCMDBuf),y		add \0 to buffer
 				iny
 				
-.5				jsr Cmd.Parse.NextC
+.5				jsr Cmd.NextCharPtr1
 				beq .8
 				
 				cmp #' '
@@ -73,24 +76,15 @@ Cmd.Parse		>LDYA ZPCMDBuf
 .9				tya
 				>STA.G CmdBuflen
 				
-				>LDA.G CMD.hCmdLine
+.90				>LDA.G CMD.hCmdLine
 				>SYSCALL FreeMem
 				
-				rts
-
-Cmd.Parse.NextC	lda (ZPPtr1)
-				beq .8
-				
-				inc ZPPtr1
-				bne .8
-				inc ZPPtr1+1			never Z
-.8				rts
+.99				rts
 *--------------------------------------
 * ZPCMDBuf-> argv[] (formatted & not empty)
 *--------------------------------------
-CMD.Exec		lda #0
-				>STA.G CMD.bStartProc
-				>STA.G CMD.hFullpath
+CMD.Exec		lda #S.PS.F.HOLD+S.PS.F.DUPENV
+				>STA.G CMD.PSFlags
 
 				>LDYA L.CMD.INT
 				>STYA ZPPtr2
@@ -102,167 +96,148 @@ CMD.Exec		lda #0
 				>PUSHW ZPPtr2
 				>LDYA ZPCMDBuf
 				>SYSCALL StrCaseCmp
-				plx
-				bcc .8
+				bcs .2
 				
-				inx
-				inx
+				ldx #0
+				jsr Cmd.RemoveStrAtX	Remove CMD...
+				
+				plx
+				jmp (J.CMD.INT,x)		Found an internal Cmd...
+				
+.2				jsr Cmd.NextStrPtr2
 				
 				lda (ZPPtr2)
 				beq Cmd.Exec.EXT		Array Ending 0, must be an external Cmd....
 
-				sec
-				adc ZPPtr2
-				sta ZPPtr2
-				bcc .1
-				inc ZPPtr2+1
+				plx
+				inx
+				inx
 				bra .1
-
-.8				jsr Cmd.Exec.GetArgs	X unmodified
-				jmp (J.CMD.INT,x)		Found an internal Cmd...
 *--------------------------------------
-Cmd.Exec.Done	php
-				pha			
-				>LDA.G CMD.hFullpath
-				beq .1
-				>SYSCALL FreeMem
-				>STZ.G CMD.hFullpath
-.1				pla
-				plp
-				rts
-*--------------------------------------
-Cmd.Exec.EXT	jsr Cmd.Exec.GetArgs
+Cmd.Exec.EXT	ldy #0
 
-				lda (ZPPtr1)
-				cmp #'/'				Command line is already full path, no search
-				bne .1
+.10				lda (ZPCMDBuf),y
+				beq .1					no / found, search...
+				cmp #'/'
+				beq .11					found /, some path specified, no search
+				iny
+				bra .10
 				
-				>PUSHEA.G CMD.Stat
-				>LDYA ZPPtr1
+.11				>LDYA ZPCMDBuf
+				>SYSCALL realpath
+				bcs .99
+
+				phy
+				pha
+				txa
+				>STA.G CMD.hCmdLine
+				pla
+				ply
+				>PUSHEA.G CMD.Stat		Command line is already full path, no search
+				>LDYA ZPCMDBuf
 				>SYSCALL STAT
-				bcs Cmd.Exec.Done
+				bcc .2
+				rts
 				
-				>LDYA ZPPtr1
-				bra .4
-
-.1				>LDYA L.ENV.PATH		push ENVNAME=PATH for search
+.1				>LDYAI 256				Get a buffer for found path
+				>SYSCALL GetMem
+				bcs .99
+				txa
+				>STA.G CMD.hCmdLine
+				
+				>LDYA L.ENV.PATH		push ENVNAME=PATH for search
 				>SYSCALL GetEnv			get value for ENV=PATH
-				bcs .2					No PATH, try in CD
+				bcs .99					No PATH, try in CD
 
 				jsr Cmd.Exec.EXT.Search
-				bcc .3
+				bcc .2
 
-.2				ldy #S.PS.hPREFIX		not found, try in CD
+				ldy #S.PS.hPREFIX		not found, try in CD
 				lda (pPs),y
 				>SYSCALL GetMemPtr
 				jsr Cmd.Exec.EXT.Search
-				bcs .99
-			
-.3				>LDYA ZPCMDBuf
-
-.4				>SYSCALL NewStr
-				bcs .99
-				txa
-				>STA.G CMD.hFullpath
-
-				lda #0
-				sta (ZPCMDBuf)			reset ZPCMDBuf for final CMD
+				bcc .2
 				
+				pha
+				>LDA.G CMD.hCmdLine
+				>SYSCALL FreeMem
+				pla
+				
+				sec
+.99				rts
+				
+* CMD.hCmdLine = /path/bin
+
+.2				ldx #0
+				jsr Cmd.RemoveStrAtX
+	
+				>LDA.G CMD.hCmdLine
+				>SYSCALL GetMemPtr
+				ldx #0
+				jsr CMD.InsertStrYAAtX
+				
+				>LDA.G CMD.hCmdLine
+				>SYSCALL FreeMem
+	
 				ldy #CMD.Stat+S.STAT.P.TYPE
 				lda (pData),y
-				cmp #$04				TXT File ?
+				cmp #S.FI.T.TXT
 				beq Cmd.Exec.EXT.TXT
-				cmp #$06				BIN File ?
+				cmp #S.FI.T.BIN
 				beq Cmd.Exec.EXT.BIN
-				cmp #$ff				SYS File ?
+				cmp #S.FI.T.SYS
 				bne .9
 				
 				bra *
 				
 .9				lda #K.E.SYN
 				sec	
-.99				jmp Cmd.Exec.Done
-*--------------------------------------
-* TXT : Launch "/PATH/SHELL /PATH/CMD ARGS"
-*--------------------------------------
-Cmd.Exec.EXT.TXT
-				lda #0					Get arg[0] = /PATH/SHELL
-				
-				>SYSCALL GetArg
-				>PUSHYA
-				>LDYA ZPCMDBuf
-				>SYSCALL StrCat
-				
-				jsr Cmd.Exec.EXT.SEP	Add a space....
-*--------------------------------------
-* BIN : Launch "/PATH/CMD ARGS"
-*--------------------------------------
-Cmd.Exec.EXT.BIN
-				>LDA.G CMD.hFullpath
-				>SYSCALL GetMemPtr
-				>PUSHYA
-				>LDYA ZPCMDBuf
-				>SYSCALL StrCat
-
-				lda (ZPPTR2)			Some ARGS ?
-				beq .1
-
-				jsr Cmd.Exec.EXT.SEP	Add a space....
-				
-				>PUSHW ZPPTR2
-				>LDYA ZPCMDBuf
-				>SYSCALL StrCat
-								
-.1				>LDA.G CMD.bStartProc
-				asl
-				>LDYA ZPCMDBuf
-				bcs .2					startproc
-				
-				>SYSCALL ExecPSNewEnv
-				jmp Cmd.Exec.Done
-
-.2				>SYSCALL CreatePSNewEnv
-				jmp Cmd.Exec.Done
+				rts
 *--------------------------------------
 Cmd.Exec.EXT.Search
 				pha
 				phy
 				>PUSHEA.G CMD.Stat
-				>PUSHW ZPCMDBuf			push dest full path
+				>LDA.G CMD.hCmdLine
+				>SYSCALL GetMemPtr
+				>PUSHYA					push dest full path
 				ply
 				pla
 				>PUSHYA					push search list
-				>LDYA ZPPtr1			push CMD
+				>LDYA ZPCMDBuf			push CMD
 				>SYSCALL FileSearch
 				rts
 *--------------------------------------
-Cmd.Exec.EXT.SEP
-				ldy #$ff
-.1				iny
-				lda (ZPCMDBuf),y
-				bne .1
-				
-				lda #' '
-				sta (ZPCMDBuf),y
-				iny
+* TXT : Launch "/PATH/SHELL /PATH/CMD ARGS"
+*--------------------------------------
+Cmd.Exec.EXT.TXT
 				lda #0
-				sta (ZPCMDBuf),y
+				>SYSCALL GetArg
+				ldx #0
+				jsr Cmd.InsertStrYAAtX
+*--------------------------------------
+* BIN : Launch "/PATH/CMD ARGS"
+*--------------------------------------
+Cmd.Exec.EXT.BIN
+				>PUSHB.G CMD.PSFlags
+				>LDYA ZPCMDBuf
+				>SYSCALL Exec
 				rts
 *--------------------------------------
 * Internal Commands
 *--------------------------------------
-Cmd.Exec.PWD	ldy #S.PS.hPREFIX
+Cmd.INT.PWD		ldy #S.PS.hPREFIX
 				lda (pPs),y
 				>SYSCALL GetMemPtr
 				>SYSCALL puts
-				jmp Cmd.Exec.Done
+				rts
 *--------------------------------------			
-Cmd.Exec.CD		lda (ZPPTR2)
+Cmd.INT.CD		lda (ZPCMDBuf)
 				bne .1
 
 				>LDYA L.ENV.HOME
 				>SYSCALL GetEnv
-				bcs Cmd.Exec.PWD
+				bcs Cmd.INT.PWD
 				
 				>SYSCALL ExpandStr
 				bcs .9
@@ -271,30 +246,30 @@ Cmd.Exec.CD		lda (ZPPTR2)
 				
 .1				ldy #0
 
-.2				lda (ZPPTR2),y
+.2				lda (ZPCMDBuf),y
 				tax
 				iny
-				lda (ZPPTR2),y
+				lda (ZPCMDBuf),y
 				bne .2
 				cpx #'/'
 				beq .3
 				
 				lda #'/'
-				sta (ZPPTR2),y
+				sta (ZPCMDBuf),y
 				iny
 				lda #0
-				sta (ZPPTR2),y
+				sta (ZPCMDBuf),y
 
-.3				>LDYA ZPPTR2			Get ARG
+.3				>LDYA ZPCMDBuf			Get ARG0
 				>SYSCALL RealPath
 				bcs .9
 				
-.4				>STYA ZPPTR2
+.4				>STYA ZPCMDBuf
 				txa
-				>STA.G CMD.hFullpath
+				>STA.G CMD.hCmdLine
 				
 				ldy #1
-				lda (ZPPTR2),y
+				lda (ZPCMDBuf),y
 				beq .8					we have '/'
 				
 				>PUSHEA.G CMD.Stat
@@ -307,7 +282,7 @@ Cmd.Exec.CD		lda (ZPPTR2)
 				cmp #$0F				Directory ?
 				bne Cmd.Exec.ERRSYN
 				
-.8				>LDYA ZPPTR2
+.8				>LDYA ZPCMDBuf
 				>SYSCALL NewStr
 				bcs .9
 				phx
@@ -322,25 +297,24 @@ Cmd.Exec.CD		lda (ZPPTR2)
 				sta (pPs),y
 				jsr SetPWD
 				clc
-.9				jmp Cmd.Exec.Done
+.9				rts
 *--------------------------------------
 Cmd.Exec.ERRSYN	lda #K.E.SYN
 				sec
-				jmp Cmd.Exec.Done
+				rts
 *--------------------------------------
-Cmd.Exec.STARTPROC
-				lda (ZPPTR2)
+Cmd.INT.STARTPROC
+				lda (ZPCMDBuf)
 				beq Cmd.Exec.ERRSYN
-				lda #$ff
-				>STA.G CMD.bStartProc
-
-				>LDYA ZPPTR2
-				>STYA ZPPTR1
+				
+				>LDA.G CMD.PSFlags
+				and #$ff^S.PS.F.HOLD
+				sta (pData),y
 				
 				jmp Cmd.Exec.EXT
 *--------------------------------------
-Cmd.Exec.SET	lda (ZPPTR2)
-				bne Cmd.Exec.SETVAR
+Cmd.INT.SET		lda (ZPCMDBuf)
+				bne Cmd.INT.SETVAR
 
 * No arg, print all ENV
 
@@ -368,7 +342,7 @@ Cmd.Exec.SET	lda (ZPPTR2)
 				
 				>PUSHW ZPPTR2			Push value
 				>PUSHW ZPPTR1			Push name
-				jsr Cmd.Exec.SET.PRINT
+				jsr Cmd.INT.SET.PRINT
 
 				bcs .9
 
@@ -388,60 +362,60 @@ Cmd.Exec.SET	lda (ZPPTR2)
 				bra .1
 				
 .8				clc
-.9				jmp Cmd.Exec.Done
+.9				rts
 *--------------------------------------
-Cmd.Exec.SETVAR	cmp #'='				string is '=value' ?
+Cmd.INT.SETVAR	cmp #'='				string is '=value' ?
 				beq .99					syntax error
 				
 				ldy #0
 
 .1				iny
-				lda (ZPPTR2),y
+				lda (ZPCMDBuf),y
 				beq .3					no =, GetEnv
 				
 				cmp #'='				ARGS contains =, PutEnv
 				bne .1
 				
 				iny
-				lda (ZPPTR2),y
+				lda (ZPCMDBuf),y
 				beq .2					"VAR=" go UnsetEnv
 				
-				>LDYA ZPPTR2			String is VAR=VALUE...	
+				>LDYA ZPCMDBuf			String is VAR=VALUE...	
 				>SYSCALL PutEnv
-				jmp Cmd.Exec.Done
+				rts
 				
 .2				dey						String is "VAR=", Remove ending '='
 				lda #0
-				sta (ZPPTR2),y
+				sta (ZPCMDBuf),y
 				
-				>LDYA ZPPTR2			String is "VAR"...	
+				>LDYA ZPCMDBuf			String is "VAR"...	
 				>SYSCALL UnsetEnv
-				jmp Cmd.Exec.Done
+				rts
 
 * Print requested VAR
 				
-.3				>LDYA ZPPTR2
+.3				>LDYA ZPCMDBuf
 				>SYSCALL GetEnv
 				bcs .8
 				
 				>PUSHYA					push value
-				>PUSHW ZPPTR2			push name
-				jsr Cmd.Exec.SET.PRINT
+				>PUSHW ZPCMDBuf			push name
+				jsr Cmd.INT.SET.PRINT
 				
 .8				clc
-.9				jmp Cmd.Exec.Done
+.9				rts
 
 .99				jmp Cmd.Exec.ERRSYN
 *--------------------------------------
-Cmd.Exec.SET.PRINT
+Cmd.INT.SET.PRINT
 				>PUSHBI 4
 				>LDYA L.MSG.PRINTENV
 				>SYSCALL printf
 				rts
 *--------------------------------------
-Cmd.Exec.DATE	sec
+Cmd.INT.DATE	sec
 				.HS 90					bcc
-Cmd.Exec.TIME	clc
+Cmd.INT.TIME	clc
 				php
 				>LEA.G CMD.Time
 				>SYSCALL Time
@@ -459,13 +433,13 @@ Cmd.Exec.TIME	clc
 				
 				>LDYA ZPCMDBuf
 				>SYSCALL puts
-				jmp Cmd.Exec.Done
+				rts
 *--------------------------------------
-Cmd.Exec.ECHO	>LDYA ZPPtr2
+Cmd.INT.ECHO	>LDYA ZPCMDBuf
 				>SYSCALL puts
-				jmp Cmd.Exec.Done
+				rts
 *--------------------------------------
-Cmd.Exec.READ	lda (ZPPtr2)
+Cmd.INT.READ	lda (ZPCMDBuf)
 				beq .9 
 
 				lda #0
@@ -485,13 +459,13 @@ Cmd.Exec.READ	lda (ZPPtr2)
 
 				cmp #' '
 				bne .11
-				jsr Cmd.Exec.GetNextP2
+				jsr Cmd.NextCharPtr2
 				bra .1
 				
 .11				cmp #'-'
 				bne .7
 				
-				jsr Cmd.Exec.GetNextP2
+				jsr Cmd.NextCharPtr2
 				beq .9
 
 				cmp #'S'
@@ -500,7 +474,7 @@ Cmd.Exec.READ	lda (ZPPtr2)
 				lda #$80
 				>STA.G bSecureRead
 				
-				jsr Cmd.Exec.GetNextP2
+				jsr Cmd.NextCharPtr2
 				beq .8
 				cmp #' '
 				bne .9
@@ -510,19 +484,19 @@ Cmd.Exec.READ	lda (ZPPtr2)
 .2				cmp #'P'			
 				bne .9
 				
-				jsr Cmd.Exec.GetNextP2
+				jsr Cmd.NextCharPtr2
 				beq .9
 
 				cmp #' '
 				bne .9
 				
-				jsr Cmd.Exec.GetNextP2
+				jsr Cmd.NextCharPtr2
 				beq .9
 
 				cmp #'"'
 				bne .9
 				
-.3				jsr Cmd.Exec.GetNextP2
+.3				jsr Cmd.NextCharPtr2
 				beq .9
 
 				cmp #'"'
@@ -549,7 +523,7 @@ Cmd.Exec.READ	lda (ZPPtr2)
 				lda #0
 				sta (ZPPTR1),y
 				
-				jsr Cmd.Exec.GetNextP2
+				jsr Cmd.NextCharPtr2
 				beq .1
 				cmp #' '
 				beq .1
@@ -563,33 +537,34 @@ Cmd.Exec.READ	lda (ZPPtr2)
 				>STA.G bReadMode
 				
 				clc
-.99				jmp Cmd.Exec.Done		
+.99				rts
 *--------------------------------------
-Cmd.Exec.SLEEP	lda (ZPPtr2)
+Cmd.INT.SLEEP	lda (ZPCMDBuf)
 				beq .9
 
-				>LDYA ZPPtr2
+				>LDYA ZPCMDBuf
 				>SYSCALL AToL
 				bcs .9
 
 				>PULLL.G Sleep
+				clc
+				rts
 				
-				jmp Cmd.Exec.Done
 .9				jmp Cmd.Exec.ERRSYN				
 *--------------------------------------
-Cmd.Exec.PAUSE	lda #$FF
+Cmd.INT.PAUSE	lda #$FF
 				>STA.G bPause
 				clc
-				jmp Cmd.Exec.Done
+				rts
 *--------------------------------------
-Cmd.Exec.EXIT	lda #$FF
+Cmd.INT.EXIT	lda #$FF
 				>STA.G bExit
 				clc
-				jmp Cmd.Exec.Done
+				rts
 *--------------------------------------
-Cmd.Exec.IF		>STZ.G CMD.IFNOT
+Cmd.INT.IF		>STZ.G CMD.IFNOT
 
-				lda (ZPPtr2)
+				lda (ZPCMDBuf)
 				beq .9
 
 				cmp #'!'
@@ -598,19 +573,19 @@ Cmd.Exec.IF		>STZ.G CMD.IFNOT
 				lda #$ff
 				sta (pData),y			Y = #CMD.IFNOT
 				
-				jsr Cmd.Exec.GetNextP2NB
+				jsr Cmd.NextCharPtr2NB
 				beq .9
 				
 				cmp #'('
 				bne .9
 				
-				jsr Cmd.Exec.GetNextP2NB
+				jsr Cmd.NextCharPtr2NB
 				beq .9
 				
 				cmp #'-'				-d -e -f
 				bne .1
 				
-				jsr Cmd.Exec.GetNextP2NB
+				jsr Cmd.NextCharPtr2NB
 				beq .9
 				
 				
@@ -621,57 +596,144 @@ Cmd.Exec.IF		>STZ.G CMD.IFNOT
 
 
 
-				>LDYA ZPPtr2
+				>LDYA ZPCMDBuf
 				>SYSCALL puts
 
-				jmp Cmd.Exec.Done
+				rts
+				
 .9				jmp Cmd.Exec.ERRSYN	
 *--------------------------------------
-Cmd.Exec.GetArgs
-				ldy #$ff				CMD Len
+Cmd.InsertStrYAAtX
+				>STYA ZPPtr3			new string to insert
 				
-.1				iny
-				lda (ZPPtr1),y			Get CMD char...
-				beq .2
-								
-				cmp #' '				we reached blank between CMD ARGS
-				bne .1
+				>LDYA ZPCMDBuf
+				>STYA ZPPtr1
 				
-				lda #0
-				sta (ZPPtr1),y			Cut CMD with the ending 0
-				iny
+.1				dex
+				bmi .2
 				
-.2				tya						Y=CMD len+0, if ARGS="" Y=
-				clc
+				jsr Cmd.NextStrPtr1
+				>STYA ZPPtr1
+				bra .1
+				
+.2				>LDYA ZPPtr1
+				>STYA ZPPtr4			Save Arg[x] ptr
+				
+				>LDYA ZPPtr3
+				>SYSCALL strlen
+				pha
+				tya
+				sec						+1
 				adc ZPPtr1
 				sta ZPPtr2
-				lda ZPPtr1+1
-				adc #0
-				sta ZPPtr2+1			ZPPtr2->ARGS or CMD ending 0 if empty
-
-*				>LDYA L.CMD.IOR
-*				>STYA ZPPtr2
 				
-*				ldx #0
+				pla
+				adc ZPPtr1+1
+				lda ZPPtr2+1
 				
-*.3				lda (ZPPtr2)
-
-
+				ldy #0
 				
+.3				lda (ZPPtr1),y
+				sta (ZPPtr2),y
+				beq .4
+				iny
+				bne .3
+				
+.4				tay
+				beq .5
+				
+				jsr Cmd.NextStrPtr1
+				>STYA ZPPtr1
+				jsr Cmd.NextStrPtr2
+				>STYA ZPPtr2
+				bra .3
+				
+.5				ldy #0
+
+.6				lda (ZPPtr3),y
+				sta (ZPPtr4),y
+				beq .8
+				iny
+				bne .6
+
+.8				rts
+*--------------------------------------
+Cmd.RemoveStrAtX
+				>LDYA ZPCMDBuf
+				>STYA ZPPtr1
+				
+.1				dex
+				bmi .2
+				
+				jsr Cmd.NextStrPtr1
+				>STYA ZPPtr1
+				bra .1
+				
+.2				jsr Cmd.NextStrPtr1
+				>STYA ZPPtr2				
+
+				ldy #0
+				
+.3				lda (ZPPtr2),y
+				sta (ZPPtr1),y
+				beq .4
+				iny
+				bra .3
+				
+.4				tay						we moved the ending \0
+				beq .8
+				
+				jsr Cmd.NextStrPtr2
+				>STYA ZPPtr2
+
+				jsr Cmd.NextStrPtr1
+				>STYA ZPPtr1
+				bra .1
+				
+.8				rts
+*--------------------------------------
+Cmd.NextStrPtr1	>LDYA ZPPtr1
+				>SYSCALL strlen
+				pha
+				tya
+				sec						+1
+				adc ZPPtr1
+				tay
+				
+				pla
+				adc ZPPtr1+1
 				rts
 *--------------------------------------
-Cmd.Exec.GetArg1
+Cmd.NextStrPtr2	>LDYA ZPPtr2
+				>SYSCALL strlen
+				pha
+				tya
+				sec						+1
+				adc ZPPtr2
+				tay
 				
+				pla
+				adc ZPPtr2+1
+				rts
 *--------------------------------------
-Cmd.Exec.GetNextP2NB
-.1				jsr Cmd.Exec.GetNextP2
+Cmd.NextCharPtr1
+				lda (ZPPtr1)
+				beq .8
+				
+				inc ZPPtr1
+				bne .8
+				inc ZPPtr1+1			never Z
+.8				rts
+*--------------------------------------
+Cmd.NextCharPtr2NB
+.1				jsr Cmd.NextCharPtr2
 				beq .9
 				cmp #C.SPACE
 				beq .1
 				
 .9				rts				
 *--------------------------------------
-Cmd.Exec.GetNextP2
+Cmd.NextCharPtr2
 				inc ZPPtr2
 				bne .1
 				inc ZPPtr2+1

@@ -1,35 +1,29 @@
 NEW
 PREFIX /A2OSX.BUILD
 AUTO 4,1
+*--------------------------------------
+PS.Flags		.BS 1
+PS.Args			.BS 2
 */--------------------------------------
-* # ExecPSNewEnv
-* # ExecPS (Blocking Parent PID)
-* # CreatePSNewEnv 
-* # CreatePS (Non Blocking)
-* **In:**
-*   Y,A = PTR To Cmd Line
+* # Exec
+* ## C
+* `int exec(const char* argv[], short int flags);`
+* ## ASM
+* `>PUSHB flags`
+* `>LDYA argv`
+* `>SYSCALL exec`
 * ## RETURN VALUE
-*   A = Child PSID
+* A = Child PSID
 *\--------------------------------------
-K.ExecPSNewEnv	ldx #S.PS.F.DUPENV+S.PS.F.HOLD
-				.HS 2C					bit abs
-K.ExecPS		ldx #S.PS.F.HOLD
-				.HS 2C					bit abs
-K.CreatePSNewEnv 
-				ldx #S.PS.F.DUPENV
-				.HS 2C					bit abs
-K.CreatePS		ldx #0
-				stx PS.Flags
-				>STYA PS.CL
+K.Exec			>STYA PS.Args
+				>PULLB PS.Flags
 
-				jsr PS.CreateChild		Child S.PS at ZPPtr3
+K.Exec.I		jsr PS.CreateChild		Child S.PS at ZPPtr3
 				bcs .9
 
 				sta .8+1
 				
-				>LDYA PS.CL
-				jsr PS.CmdLine2Args		Y,A = Args[0]
-				bcs .9
+				>LDYA PS.Args			/path/cmd \0
 
 				jsr PS.Load
 				bcc .8
@@ -43,29 +37,6 @@ K.CreatePS		ldx #0
 
 .8				lda #$ff				self modified
 .9				rts
-*--------------------------------------
-PS.Flags		.BS 1
-PS.CL			.BS 2
-PS.Args			.BS 2
-*/--------------------------------------
-* # Exec
-* ## C
-* `int exec(const char *path, char *const argv[], short int flage);`
-* ## ASM
-* `>PUSHB flags`
-* `>PUSHW argv`
-* `>LDYAI path`
-* `>SYSCALL exec`
-* ## RETURN VALUE
-* A = Child PSID
-*\--------------------------------------
-Exec			
-*				>STYA PS.CL
-*				>PULLB PS.Flags
-*				>PULLW PS.Args
-				
-				clc
-				rts
 *--------------------------------------
 * PS.CreateChild
 *  in :
@@ -125,7 +96,7 @@ PS.CreateChild	ldx #0
 				sta (ZPPtr3),y
 
 				lda #S.PS.F.DUPENV
-				bit PS.Flags	need to create ENV & Prefix ?	
+				bit PS.Flags			need to create ENV & Prefix ?	
 				beq .6					no...
 				
 				sta (ZPPtr3)			Mark this PS with DUPENV flag
@@ -159,7 +130,16 @@ PS.CreateChild	ldx #0
 				lda (pPs),y
 				sta (ZPPtr3),y
 				
-.8				ldy #S.PS.hStdIn
+.8				>LDYA PS.Args
+				jsr PS.DupArgs
+				
+				ldy #S.PS.hARGS
+				sta (ZPPtr3),y
+				dey						S.PS.ARGC
+				txa
+				sta (ZPPtr3),y
+
+				ldy #S.PS.hStdIn
 
 .81				lda (pPs),y
 				sta (ZPPtr3),y
@@ -178,7 +158,7 @@ PS.CreateChild	ldx #0
 				beq .82
 				
 				ora (pPs)
-				sta (pPs)				HOLD parent PS if ExecPS
+				sta (pPs)				HOLD parent PS
 				
 .82				lda #S.PS.F.INIT
 				ora (ZPPtr3)
@@ -190,88 +170,6 @@ PS.CreateChild	ldx #0
 
 				clc						Exit with A=PSID
 .9				rts
-*--------------------------------------
-PS.CmdLine2Args	>STYA ZPPtr1
-
-				ldy #0
-
-.1				lda (ZPPtr1),y			compute strlen in Y,X
-				beq .2
-				iny
-				bne .1					max 255
-
-.2				tya						+2 for ending 0 for last string, and ending 0 for array
-				clc
-				adc #2
-				tay
-				lda #0
-				bcc .3
-				inc
-				
-.3				jsr K.GetMem
-				bcs .9
-
-				phy					save PTR.LO
-				pha					save PTR.HI
-				>STYA ZPPtr2
-
-				txa
-				ldy #S.PS.hARGS
-				sta (ZPPtr3),y
-				
-				jsr PS.SetMemOwner	Set Ownership
-				
-				stz PS.bInQuote
-				
-				ldy #$ff
-				ldx #0				Arg Count
-				
-.4				iny
-				lda (ZPPtr1),y
-				beq .7
-				
-				cmp #'"'			found a quote ?
-				bne .5
-				lda PS.bInQuote
-				eor #$ff
-				sta PS.bInQuote
-				bra .4
-				
-.5				cmp #' '
-				bne .6
-				
-				bit PS.bInQuote
-				bmi .6
-				
-				inx					Found one arg !!!
-				lda #0				set this token End
-				
-.6				sta (ZPPtr2) 
-
-				inc ZPPtr2
-				bne .4
-				inc ZPPtr2+1
-				bra .4
-				
-.7				sta (ZPPtr2)		set Arg Ending 0
-	
-				inc ZPPtr2
-				bne .8
-				inc ZPPtr2+1
-				
-.8				sta (ZPPtr2)		set Array Ending 0
-				
-				txa
-				ldy #S.PS.ARGC
-				sta (ZPPtr3),y				
-				
-				pla					get back PTR.HI
-				ply					get back PTR.LO
-
-				clc
-.9				rts
-
-PS.bInQuote		.BS 1
 *--------------------------------------
 PS.Load			jsr BIN.Load			Y,A=filename full path
 				bcs .9
@@ -368,42 +266,44 @@ PS.Load			jsr BIN.Load			Y,A=filename full path
 *   Y,A = Ptr To Args[]
 *  Out:
 *   A = hMem
+*   X = Count
 *--------------------------------------
 PS.DupArgs		>STYA ZPPtr1
 				
-				>STYA ZPPtr3
+				>STYA ZPPtr2
 				
-				lda #1					for array ending 0
-				sta ZPPtr2
-				stz ZPPtr2+1
+				lda #1
+				sta .7+1
+				lda #0
+				sta .8+1			len = 1 for array ending 0
 				
-.1				lda (ZPPtr3)
+.1				lda (ZPPtr2)
 				beq .8
 				
 				ldy #0
 				
 .2				iny
-				lda (ZPPtr3),y
+				lda (ZPPtr2),y
 				bne .2
 				
 				tya
 				sec
-				adc ZPPtr2
-				sta ZPPtr2
+				adc .7+1
+				sta .7+1
 				bcc .3
 				
-				clc
-				inc ZPPtr2+1
+				inc .8+1
 				
 .3				tya
 				sec
-				adc ZPPtr3
-				sta ZPPtr3
+				adc ZPPtr2
+				sta ZPPtr2
 				bcc .1
-				inc ZPPtr3+1
+				inc ZPPtr2+1
 				bra .1
-								
-.8				>LDYA ZPPtr2
+
+.7				ldy #$ff				SELF MODIFIED
+.8				lda #$ff				SELF MODIFIED
 				bra PS.Dup.I
 *--------------------------------------
 * PS.DupEnv
@@ -411,6 +311,7 @@ PS.DupArgs		>STYA ZPPtr1
 *   A = ENV hMem To Duplicate
 *  Out:
 *   A = hMem to new ENV
+*   X = Count
 *--------------------------------------
 PS.DupEnv		jsr K.GetMemPtr
 				>STYA ZPPtr1
@@ -421,31 +322,42 @@ PS.Dup.I		jsr K.GetMem
 				bcs .9
 				
 				>STYA ZPPtr2
+				phx						save hMem
 				
 				jsr PS.SetMemOwner		Set Ownership
 				
+				ldx #0					Count
+				
+.1				lda (ZPPtr1)
+				sta (ZPPtr2)
+				beq .8					Ending \0
+				
+				inx
+				
 				ldy #0
 				
-.1				lda (ZPPtr1),y
-				sta (ZPPtr2),y
-				beq .8
-				
 .2				iny
-				bne .3
-				inc ZPPtr1+1
-				inc ZPPtr2+1
-				
-.3				lda (ZPPtr1),y
+				lda (ZPPtr1),y
 				sta (ZPPtr2),y
 				bne .2
 				
-				iny
-				bne .1
+				tya
+				sec
+				adc ZPPtr1
+				sta ZPPtr1
+				bcc .3
+				
 				inc ZPPtr1+1
+				
+.3				tya
+				sec
+				adc ZPPtr2
+				sta ZPPtr2
+				bcc .1
 				inc ZPPtr2+1
 				bra .1
 				
-.8				txa						hMem
+.8				pla						hMem
 				
 				clc
 .9				rts
