@@ -530,15 +530,28 @@ Load a file in AUX memory (Stock Objects)
  Y,A = File Length  
  X = hMem of Loaded Object in AUX mem  
 
-# Exec  
+# ExecL  
 
 ## C  
-`int exec(const char* argv[], short int flags);`  
+`int execl(const char* cmdline, short int flags);`  
+
+## ASM  
+`>PUSHB flags`  
+`>LDYA cmdline`  
+`>SYSCALL execl`  
+
+## RETURN VALUE  
+A = Child PSID  
+
+# ExecV  
+
+## C  
+`int execv(const char* argv[], short int flags);`  
 
 ## ASM  
 `>PUSHB flags`  
 `>LDYA argv`  
-`>SYSCALL exec`  
+`>SYSCALL execv`  
 
 ## RETURN VALUE  
 A = Child PSID  
@@ -559,7 +572,7 @@ A = Child PSID
 
 # GetPSStat  
 **In:**  
- Y,A = Ptr to 24 bytes buffer  
+ Y,A = Ptr to K.PS.MAX*2+1 bytes buffer  
 
 ## RETURN VALUE  
  Buffer filled with PS stats  
