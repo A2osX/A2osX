@@ -3,7 +3,7 @@ PREFIX /A2OSX.BUILD
 AUTO 4,1
 				.LIST OFF	
 *--------------------------------------
-CMD.Init		>LDYAI CmdLine.MAX+1
+CMD.Init		>LDYAI 256
 				>SYSCALL GetMem
 				bcs .9
 				>STYA ZPCMDBuf
@@ -22,9 +22,12 @@ CMD.Quit		>LDA.G hCmdBuf
 * ZPCMDBuf : Remove extra SPACE & comment
 * ZPCMDBuf : cmd\0 arg1\0 arg2\0 ... \0
 *--------------------------------------
-Cmd.Parse		>LDYA ZPCMDBuf
+Cmd.Parse		lda #S.PS.F.HOLD+S.PS.F.DUPENV
+				>STA.G CMD.PSFlags
+
+				>LDYA ZPCMDBuf
 				>SYSCALL ExpandStr
-				bcs .99
+				bcs .9
 				
 				phx						save expanded string
 				pha
@@ -34,52 +37,52 @@ Cmd.Parse		>LDYA ZPCMDBuf
 				plx
 				>SYSCALL FreeMem
 				
-.99				rts
+				>LDYAI 256
+				>SYSCALL GetMem
+				bcs .9
+				>STYA ZPArgVBuf
+				txa
+				>STA.G hArgVBuf
+			
+				lda #0
+				sta (ZPArgVBuf)
+				
+.1				lda (ZPCMDBuf)
+				beq .8
+				
+				>LDA.G CMD.hCmdLine
+				bne .6					we already have Cmd
+				
+				jsr CMD.CheckExternal
+				bcs .9
+				
+				
+.6				jsr CMD.AddToArgV
+				bcs .9
+
+.7				jsr CMD.NextCmdBufToken
+				bra .1
+				
+.8				clc				
+				rts
+				
+.9				rts				
 *--------------------------------------
 * ZPCMDBuf-> argv[] (formatted & not empty)
 *--------------------------------------
-CMD.Exec		lda #S.PS.F.HOLD+S.PS.F.DUPENV
-				>STA.G CMD.PSFlags
+Cmd.Exec.CheckExternal
 
-				>LDYA L.CMD.INT
-				>STYA ZPPtr2
+				ldy #$ff
 
-				ldx #0
-				
-.1				phx
-				
-				>PUSHW ZPPtr2
-				>LDYA ZPCMDBuf
-				>SYSCALL StrCaseCmp
-				bcs .2
-				
-				ldx #0
-				jsr Cmd.RemoveStrAtX	Remove CMD...
-				
-				plx
-				jmp (J.CMD.INT,x)		Found an internal Cmd...
-				
-.2				jsr Cmd.NextStrPtr2
-				>STYA ZPPtr2
-				plx
-				inx
-				inx
-				
-				lda (ZPPtr2)			Array Ending 0, must be an external Cmd....
-				bne .1
-*--------------------------------------
-Cmd.Exec.EXT	ldy #0
-
-.10				lda (ZPCMDBuf),y
-				beq .1					no / found, search...
+.1				iny
+				lda (ZPCMDBuf),y
+				beq .2					no / found, search...
 				cmp #'/'
-				beq .11					found /, some path specified, no search
-				iny
-				bra .10
+				bne .1
 				
-.11				>LDYA ZPCMDBuf
+				>LDYA ZPCMDBuf			found /, some path specified, no search
 				>SYSCALL realpath
-				bcs .99
+				bcs .9
 
 				phy
 				pha
@@ -90,26 +93,26 @@ Cmd.Exec.EXT	ldy #0
 				>PUSHEA.G CMD.Stat		Command line is already full path, no search
 				>LDYA ZPCMDBuf
 				>SYSCALL STAT
-				bcs .99
+				bcs .9
 				
-.1				>LDYAI 256				Get a buffer for found path
+.2				>LDYAI 256				Get a buffer for found path
 				>SYSCALL GetMem
-				bcs .99
+				bcs .9
 				txa
 				>STA.G CMD.hCmdLine
 				
 				>LDYA L.ENV.PATH		push ENVNAME=PATH for search
 				>SYSCALL GetEnv			get value for ENV=PATH
-				bcs .99					No PATH, try in CD
+				bcs .9					No PATH, try in CD
 
 				jsr Cmd.Exec.EXT.Search
-				bcc .2
+				bcc Cmd.Exec.EXT.ARGS
 
 				ldy #S.PS.hPREFIX		not found, try in CD
 				lda (pPs),y
 				>SYSCALL GetMemPtr
 				jsr Cmd.Exec.EXT.Search
-				bcc .2
+				bcc Cmd.Exec.EXT.ARGS
 				
 				pha
 				>LDA.G CMD.hCmdLine
@@ -117,11 +120,12 @@ Cmd.Exec.EXT	ldy #0
 				pla
 				
 				sec
-.99				rts
-				
+.9				rts
+*--------------------------------------			
 * CMD.hCmdLine = /path/bin
-
-.2				ldx #0
+*--------------------------------------
+Cmd.Exec.EXT.ARGS
+				ldx #0
 				jsr Cmd.RemoveStrAtX
 	
 				>LDYA ZPCMDBuf
@@ -187,6 +191,42 @@ Cmd.Exec.EXT.BIN
 *--------------------------------------
 * Internal Commands
 *--------------------------------------
+CMD.Exec.INT	>LDYA L.CMD.INT
+				>STYA ZPPtr2
+
+				ldx #0
+				
+.1				phx
+				
+				>PUSHW ZPPtr2
+				>LDYA ZPCMDBuf
+				>SYSCALL StrCaseCmp
+				bcs .2
+				
+				plx
+				jmp (J.CMD.INT,x)		Found an internal Cmd...
+				
+.2				inc ZPPtr2
+				bne .3
+				inc ZPPtr2+1
+
+.3				lda (ZPPtr2)
+				bne .2
+				
+				inc ZPPtr2
+				bne .4
+				inc ZPPtr2+1
+								
+.4				plx
+				inx
+				inx
+				
+				lda (ZPPtr2)			Array Ending 0, must be an external Cmd....
+				bne .1
+				
+				sec
+				rts
+*--------------------------------------			
 Cmd.INT.PWD		ldy #S.PS.hPREFIX
 				lda (pPs),y
 				>SYSCALL GetMemPtr
@@ -597,23 +637,72 @@ Cmd.INT.IF		>STZ.G CMD.IFNOT
 				
 .9				jmp Cmd.Exec.ERRSYN	
 *--------------------------------------
-Cmd.InsertStrYAAtX
-				>STYA ZPPtr3			new string to insert
+CMD.NextCmdBufToken
+				lda (ZPCMDBuf)
+				inc ZPCMDBuf
+				bne .1
+				inc ZPCMDBuf+1
+.1				tax
+				bne CMD.NextCmdBuf
+				rts
+*--------------------------------------
+CMD.AddToArgV	>LDYA ZPArgVBuf
+				>STYA ZPPtr1
 				
-				jsr Cmd.GetStrAtX
+.1				lda (ZPPtr1)			scan to end of argV
+				beq .6
+				
+.2				inc ZPPtr1
+				bne .3
+				inc ZPPtr1+1
+.3				lda (ZPPtr1)
+				bne .2
+
+				inc ZPPtr1
+				bne .4
+				inc ZPPtr1+1
+.4				lda (ZPPtr1)
+				bne .2
+				
+.6				ldy #$ff
+
+.7				iny
+				beq .9
+				lda (ZPCMDBuf),y
+				sta (ZPPtr1),y
+				bne .7					including str ending \0
+
+				iny
+				beq .9
+				sta (ZPPtr1),y			arg[] ending \0
+				
+				clc
+				rts
+				
+.9				lda #K.E.BUF	
+				sec				
+				rts
+*--------------------------------------
+Cmd.InsertStrYAAtX
+				>STYA ZPPtr3			new str to insert
+				
+				jsr Cmd.GetStrAtX		get ptr1=arg[x]
 				bcs .9
 				
-				>STYA ZPPtr4			Save Arg[x] ptr
+				>STYA ZPPtr4			Save ptr where to insert
 				
-				>LDYA ZPPtr3
-				>SYSCALL strlen
-				pha
+				ldy $ff
+				
+.1				iny						get new str len
+				lda (ZPPtr3),y
+				bne .1
+				
 				tya
 				sec						+1
 				adc ZPPtr1
 				sta ZPPtr2
 				
-				pla
+				lda #0
 				adc ZPPtr1+1
 				lda ZPPtr2+1
 				
@@ -634,12 +723,11 @@ Cmd.InsertStrYAAtX
 				>STYA ZPPtr2
 				bra .3
 				
-.5				ldy #0
+.5				ldy #ff					copy new str in hole created
 
-.6				lda (ZPPtr3),y
+.6				iny
+				lda (ZPPtr3),y
 				sta (ZPPtr4),y
-				beq .8
-				iny
 				bne .6
 
 .8				clc
