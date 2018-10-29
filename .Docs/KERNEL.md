@@ -452,6 +452,13 @@ A = hMem
 Y,A = ZPMemMgrSPtr = PTR to S.MEM  
 (X unmodified)  
 
+# GetMemStat  
+**In:**  
+ Y,A = Ptr to 24 bytes buffer  
+
+## RETURN VALUE  
+ Buffer filled with memory stats  
+
 # NewStr  
 Create a new copy of this C-String  
 Y,A = Ptr to source C-String  
@@ -569,13 +576,6 @@ A = Child PSID
 
 ## RETURN VALUE  
 A = Child PSID  
-
-# GetMemStat  
-**In:**  
- Y,A = Ptr to 24 bytes buffer  
-
-## RETURN VALUE  
- Buffer filled with memory stats  
 
 # GetPSStatus  
 **In:**  

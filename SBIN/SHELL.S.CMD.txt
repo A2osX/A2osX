@@ -8,10 +8,22 @@ CMD.Init		>LDYAI 256
 				bcs .9
 				>STYA ZPCMDBuf
 				txa
-				>STA.G hCmdBuf
+				>STA.G CMD.hCmdBuf
+				
+				>LDYAI 256
+				>SYSCALL GetMem
+				bcs .9
+				>STYA ZPArgVBuf
+				txa
+				>STA.G CMD.hArgVBuf
+				
 .9				rts				
 *--------------------------------------
-CMD.Quit		>LDA.G hCmdBuf
+CMD.Quit		>LDA.G CMD.hArgVBuf
+				beq .1
+				>SYSCALL FreeMem
+				
+.1				>LDA.G CMD.hCmdBuf
 				beq .9
 				>SYSCALL FreeMem
 .9				rts	
@@ -24,7 +36,7 @@ CMD.Quit		>LDA.G hCmdBuf
 * - or -
 * intcmd\0 arg1\0 arg2\0 ... \0
 *--------------------------------------
-Cmd.Parse		>STZ.G CMD.bCmd
+Cmd.Parse		>STZ.G CMD.IntCmd
 
 				lda #S.PS.F.HOLD+S.PS.F.DUPENV
 				>STA.G CMD.PSFlags
@@ -34,13 +46,6 @@ Cmd.Parse		>STZ.G CMD.bCmd
 
 				>SYSCALL Args2ArgV
 				
-				>LDYAI 256
-				>SYSCALL GetMem
-				bcs .9
-				>STYA ZPArgVBuf
-				txa
-				>STA.G CMD.hArgVBuf
-			
 				lda #0
 				sta (ZPArgVBuf)
 				
@@ -50,7 +55,7 @@ Cmd.Parse		>STZ.G CMD.bCmd
 .1				cmp #'#'				comment ?
 				beq .8					yes, ignore remaining
 
-				>LDA.G CMD.bCmd
+				>LDA.G CMD.IntCmd
 				bne .6					we already have Cmd, go check args
 				
 				ldy #2
@@ -72,7 +77,7 @@ Cmd.Parse		>STZ.G CMD.bCmd
 
 				rts
 				
-.6				jsr CMD.AddTokenToArgV
+.6				jsr CMD.AddCmdBufTokenToArgV
 				bcs .9
 
 .7				jsr CMD.NextCmdBufToken
@@ -107,13 +112,19 @@ Cmd.CheckCmd	ldy #$ff
 				
 				phx
 				plx
-				beq .3					if STARTPROC, skip keyword
+				bne .3
 				
-				jsr CMD.AddYAToArgV		X unmodified
+				>LDA.G CMD.PSFlags		if STARTPROC, skip keyword...
+				and #$ff^S.PS.F.HOLD
+				sta (pData),y			...and toggle S.PS.F.HOLD flag
+				clc
+				rts
+				
+.3				jsr CMD.AddYAToArgV		X unmodified
 				bcs .9
-				
-.3				txa
-				>STA.G CMD.bCmd
+
+				txa
+				>STA.G CMD.IntCmd
 
 				clc
 .9				rts
@@ -143,6 +154,9 @@ Cmd.CheckCmd	ldy #$ff
 				>SYSCALL GetMemPtr
 				>SYSCALL STAT
 				bcs Cmd.CheckCmd.90
+				
+				lda #$ff
+				>STA.G CMD.IntCmd
 				
 				ldy #CMD.Stat+S.STAT.P.TYPE
 				lda (pData),y
@@ -180,9 +194,7 @@ Cmd.CheckCmd.BIN
 				>LDA.G CMD.hCmdLine
 				>SYSCALL GetMemPtr
 				jsr CMD.AddYAToArgV
-				bcs Cmd.CheckCmd.90
-				lda #$ff
-				>STA.G CMD.bCmd
+
 				bra Cmd.CheckCmd.90
 *--------------------------------------
 Cmd.CheckCmd.SYS
@@ -202,11 +214,8 @@ Cmd.SearchExt	pha
 				>SYSCALL FileSearch
 				rts
 *--------------------------------------			
-Cmd.Exec		lda (ZPArgVBuf)
-				cmp #'/'
-				beq .1
-				
-				>LDA.G CMD.bCmd
+Cmd.Exec		>LDA.G CMD.IntCmd
+				bmi .1
 				tax
 				jmp (J.CMD.INT,x)
 				
@@ -218,10 +227,6 @@ Cmd.Exec		lda (ZPArgVBuf)
 * STARTPROC : intcmd = 0
 *--------------------------------------
 Cmd.INT.STARTPROC
-				>LDA.G CMD.PSFlags
-				and #$ff^S.PS.F.HOLD
-				sta (pData),y
-				
 				clc
 				rts
 *--------------------------------------			
@@ -262,6 +267,23 @@ Cmd.INT.CD		ldx #1
 				>LDA.G CMD.Stat+S.STAT.P.TYPE
 				cmp #S.FI.T.DIR
 				bne Cmd.Exec.ERRSYN
+				
+				ldy #0
+				
+.5				iny
+				lda (ZPCMDBuf),y
+				bne .5
+				
+				dey
+				lda #'/'
+				cmp (ZPCMDBuf),y
+				beq .8
+				
+				iny
+				sta (ZPCMDBuf),y
+				iny
+				lda #0
+				sta (ZPCMDBuf),y
 				
 .8				>LDYA ZPCMDBuf
 				>SYSCALL NewStr
@@ -370,7 +392,6 @@ Cmd.INT.SETVAR	>STYA ZPPTR1
 				sta (ZPPTR1),y
 				
 				>LDYA ZPPTR1			String is "VAR"...	
-				>DEBUG
 				>SYSCALL UnsetEnv
 				rts
 
@@ -450,10 +471,10 @@ Cmd.INT.ECHO	ldx #1
 .71				>LDA.G bECHO.N
 				bmi .8
 				
-*				>PUSHBI 0
-*				>LDYA L.MSG.ECHOCRLF
-*				>SYSCALL printf
-*				rts
+				>PUSHBI 0
+				>LDYA L.MSG.ECHOCRLF
+				>SYSCALL printf
+				rts
 
 .8				clc
 .9				rts
@@ -632,7 +653,7 @@ CMD.NextCmdBufToken
 				bne CMD.NextCmdBufToken
 				rts
 *--------------------------------------
-CMD.AddTokenToArgV
+CMD.AddCmdBufTokenToArgV
 				>LDYA ZPCmdBuf
 CMD.AddYAToArgV	>STYA ZPPtr1
 
