@@ -91,7 +91,7 @@ CC: A = hSOCKET
 CS: A = EC  
 
 # Connect  
-Iinitiate a connection on a socket  
+Initiate a connection on a socket  
 
 ## C  
 `int connect(hFD fd, const struct sockaddr *addr);`  
