@@ -217,6 +217,33 @@ CS: A = EC
 CC: Y,A = bytes written  
 CS: A = EC  
 
+# GetSockOpt  
+Set Socket Options  
+
+## C  
+`int getsockopt(hFD fd);`  
+
+## ASM  
+**In:**  
+`lda fd`  
+`>LIBCALL hLIBTCPIP,LIBTCPIP.GetSockOpt`  
+
+## RETURN VALUE  
+
+# SetSockOpt  
+Set Socket Options  
+
+## C  
+`int setsockopt(hFD fd, short int opts);`  
+
+## ASM  
+**In:**  
+`>PUSHWI opts`  
+`lda fd`  
+`>LIBCALL hLIBTCPIP,LIBTCPIP.SetSockOpt`  
+
+## RETURN VALUE  
+
 # GetTable  
 Get socket table  
 
@@ -225,6 +252,6 @@ Get socket table
 
 ## ASM  
 **In:**  
-`>LIBCALL hLIBTCPIP,LIBTCPIP.skt.GetTable`  
+`>LIBCALL hLIBTCPIP,LIBTCPIP.GetTable`  
 
 ## RETURN VALUE  

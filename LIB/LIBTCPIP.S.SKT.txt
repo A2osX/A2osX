@@ -123,14 +123,39 @@ SKT.bind		>SYSCALL GetMemPtr
 				sta SKT.LOC.ADDR+S.SOCKADDR.PORT
 				stx SKT.LOC.ADDR+S.SOCKADDR.PORT+1
 
-.1				jsr SKT.FindMatchingLoc
-				bcc .9
+.1				ldx #0
+
+.2				lda SKT.TABLE,x
+				beq .7
+
+				phx
+				>SYSCALL GetMemPtr
+				>STYA ZPTmpPtr1
+				plx
+
+				ldy #S.SOCKET.AF
+				lda (ZPTmpPtr1),y
+				cmp #AF.INET
+				bne .7
+
+				ldy #S.SOCKET.LOC.ADDR
+
+.3				lda (ZPTmpPtr1),y
+				cmp SKT.LOC.ADDR+S.SOCKADDR.ADDR-S.SOCKET.LOC.ADDR,y
+				bne .7
+				iny
+				cpy #S.SOCKET.LOC.PORT+2
+				bne .3
+
+				lda #ERR.SKT.BUSY
+*				sec
+				rts
+				
+.7				inx
+				cpx #K.SKTTABLE.SIZE
+				bne .2
 
 				jmp SKT.SetLocAddr
-
-.9				lda #ERR.SKT.BUSY
-				sec
-				rts
 */--------------------------------------
 * # Connect
 * Initiate a connection on a socket
@@ -359,10 +384,7 @@ SKT.shutdown.STREAM
 * CC: Y,A = bytes read
 * CS: A = EC
 *\--------------------------------------
-SKT.Read 		>SYSCALL GetMemPtr
-				>STYA ZPPtrSKT
-				>PULLW ZPDataInPtr		!!!DataOut trashed when sending ACK in TCP.OUT	
-				>PULLW ZPDataInLen		!!!use DataInPtr/Len
+SKT.Read 		jsr SKT.PullhFDDataInPtrLen
 
 				ldy #S.SOCKET.T
 				lda (ZPPtrSKT),y
@@ -409,10 +431,7 @@ SKT.Read 		>SYSCALL GetMemPtr
 * CC: Y,A = bytes written
 * CS: A = EC
 *\--------------------------------------
-SKT.Write		>SYSCALL GetMemPtr
-				>STYA ZPPtrSKT
-				>PULLW ZPDataInPtr
-				>PULLW ZPDataInLen
+SKT.Write		jsr SKT.PullhFDDataInPtrLen
 
 				ldy #S.SOCKET.T
 				lda (ZPPtrSKT),y
@@ -575,11 +594,8 @@ SKT.SendTo		sec
 				.HS 90					BCC
 SKT.Send		clc
 				php
-				>SYSCALL GetMemPtr
-				>STYA ZPPtrSKT
+				jsr SKT.PullhFDDataInPtrLen
 				plp
-				>PULLW ZPDataInPtr
-				>PULLW ZPDataInLen	
 				bcc .1
 				jsr SKT.PullRemAddr
 				jsr SKT.SetRemAddr
@@ -663,6 +679,13 @@ SKT.GetTable	>LDYA L.SKT.Table
 				clc
 				rts
 *--------------------------------------
+SKT.PullhFDDataInPtrLen
+				>SYSCALL GetMemPtr
+				>STYA ZPPtrSKT
+				>PULLW ZPDataInPtr		!!!DataOut trashed when sending ACK in TCP.OUT	
+				>PULLW ZPDataInLen		!!!use DataInPtr/Len
+				rts
+*--------------------------------------
 SKT.PullLocAddr	>PULLW ZPTmpPtr1
 				ldy #S.SOCKADDR-1
 .1				lda (ZPTmpPtr1),y
@@ -696,7 +719,9 @@ SKT.SetRemAddr	ldy #S.SOCKET.REM.PORT+1
 				rts
 *--------------------------------------
 SKT.FindMatchingLocRem
+				.DO IPDEBUG=1
 				jsr FRM.Dump
+				.FIN
 				ldx #0
 
 .1				lda SKT.TABLE,x
@@ -705,7 +730,9 @@ SKT.FindMatchingLocRem
 				phx
 				>SYSCALL GetMemPtr
 				>STYA ZPPtrSKT
+				.DO IPDEBUG=1
 				jsr SKT.Dump
+				.FIN
 				plx
 
 				ldy #S.SOCKET.AF
@@ -748,22 +775,20 @@ SKT.FindMatchingLocRem
 				and #S.SOCKET.O.BROADCAST
 				beq .9					this socket does not accept broadcast
 
-				ldy #S.SOCKET.REM.PORT	Boradcast, check port only
-				bra .5
+				bra .43
 				
 .41				ldy #S.SOCKET.REM.ADDR
 
 .5				lda (ZPPtrSKT),y
 
 				cmp #$ff				accept 255.255.255.255 ?
-				bne .43
+				bne .42
 				
-				ldy #S.SOCKET.REM.PORT	Boradcast, check port only
-				bra .43
+.43				ldy #S.SOCKET.REM.PORT	Boradcast, check port only
 		
 .42				lda (ZPPtrSKT),y
 
-.43				cmp SKT.REM.ADDR+S.SOCKADDR.ADDR-S.SOCKET.REM.ADDR,y
+				cmp SKT.REM.ADDR+S.SOCKADDR.ADDR-S.SOCKET.REM.ADDR,y
 				bne .8					wrong remote host, exit....
 				iny
 				cpy #S.SOCKET.REM.PORT+2
@@ -779,42 +804,6 @@ SKT.FindMatchingLocRem
 
 .9				sec
 				rts
-*--------------------------------------
-SKT.FindMatchingLoc
-				ldx #0
-
-.1				lda SKT.TABLE,x
-				beq .7
-
-				phx
-				>SYSCALL GetMemPtr
-				>STYA ZPTmpPtr1
-				plx
-
-				ldy #S.SOCKET.AF
-				lda (ZPTmpPtr1),y
-				cmp #AF.INET
-				bne .7
-
-				ldy #S.SOCKET.LOC.ADDR
-
-.2				lda (ZPTmpPtr1),y
-				cmp SKT.LOC.ADDR+S.SOCKADDR.ADDR-S.SOCKET.LOC.ADDR,y
-				bne .7
-				iny
-				cpy #S.SOCKET.LOC.PORT+2
-				bne .2
-
-				>LDYA ZPTmpPtr1			x = SKT.TABLE index
-				clc
-				rts
-
-.7				inx
-				cpx #K.SKTTABLE.SIZE
-				bne .1
-
-*				sec
-.9				rts
 *--------------------------------------
 SKT.AddToQueueA pha
 				ldy #S.SOCKET.HQ.HEAD
@@ -925,23 +914,8 @@ SKT.AddDataToSktIn
 .9				sec
 				rts
 
-.8				lda SKT.Cache+S.SOCKET.TCP.INFREE
-				sec 
-				sbc ZPDataInLen
-				sta SKT.Cache+S.SOCKET.TCP.INFREE
-
-				lda SKT.Cache+S.SOCKET.TCP.INFREE+1
-				sbc ZPDataInLen+1
-				sta SKT.Cache+S.SOCKET.TCP.INFREE+1
-
-				lda SKT.Cache+S.SOCKET.TCP.INUSED
-				clc 
-				adc ZPDataInLen
-				sta SKT.Cache+S.SOCKET.TCP.INUSED
-
-				lda SKT.Cache+S.SOCKET.TCP.INUSED+1
-				adc ZPDataInLen+1
-				sta SKT.Cache+S.SOCKET.TCP.INUSED+1
+.8				>SBC16 SKT.Cache+S.SOCKET.TCP.INFREE,ZPDataInLen
+				>ADC16 SKT.Cache+S.SOCKET.TCP.INUSED,ZPDataInLen
 
 				clc
 
@@ -1058,21 +1032,8 @@ SKT.GetDataFromSktIn
 				ora ZPTmpPtr3+1
 				beq .9
 
-				lda SKT.Cache+S.SOCKET.TCP.INFREE
-				clc
-				adc ZPTmpPtr3
-				sta SKT.Cache+S.SOCKET.TCP.INFREE
-				lda SKT.Cache+S.SOCKET.TCP.INFREE+1
-				adc ZPTmpPtr3+1
-				sta SKT.Cache+S.SOCKET.TCP.INFREE+1
-
-				lda SKT.Cache+S.SOCKET.TCP.INUSED
-				sec
-				sbc ZPTmpPtr3
-				sta SKT.Cache+S.SOCKET.TCP.INUSED
-				lda SKT.Cache+S.SOCKET.TCP.INUSED+1
-				sbc ZPTmpPtr3+1
-				sta SKT.Cache+S.SOCKET.TCP.INUSED+1
+				>ADC16 SKT.Cache+S.SOCKET.TCP.INFREE,ZPTmpPtr3
+				>SBC16 SKT.Cache+S.SOCKET.TCP.INUSED,ZPTmpPtr3
 
 				lda SKT.Cache+S.SOCKET.TCP.OUTACKNUM+3
 				clc 
@@ -1175,29 +1136,9 @@ SKT.AddDataToSktOut
 .9				sec
 				rts
 
-.8				lda SKT.Cache+S.SOCKET.TCP.OUTFREE
-				sec 
-				sbc ZPDataInLen
-				sta SKT.Cache+S.SOCKET.TCP.OUTFREE
-				lda SKT.Cache+S.SOCKET.TCP.OUTFREE+1
-				sbc ZPDataInLen+1
-				sta SKT.Cache+S.SOCKET.TCP.OUTFREE+1
-
-				lda SKT.Cache+S.SOCKET.TCP.OUTUSED
-				clc 
-				adc ZPDataInLen
-				sta SKT.Cache+S.SOCKET.TCP.OUTUSED
-				lda SKT.Cache+S.SOCKET.TCP.OUTUSED+1
-				adc ZPDataInLen+1
-				sta SKT.Cache+S.SOCKET.TCP.OUTUSED+1
-
-				lda SKT.Cache+S.SOCKET.TCP.OUTTOSEND
-				clc 
-				adc ZPDataInLen
-				sta SKT.Cache+S.SOCKET.TCP.OUTTOSEND
-				lda SKT.Cache+S.SOCKET.TCP.OUTTOSEND+1
-				adc ZPDataInLen+1
-				sta SKT.Cache+S.SOCKET.TCP.OUTTOSEND+1
+.8				>SBC16 SKT.Cache+S.SOCKET.TCP.OUTFREE,ZPDataInLen
+				>ADC16 SKT.Cache+S.SOCKET.TCP.OUTUSED,ZPDataInLen
+				>ADC16 SKT.Cache+S.SOCKET.TCP.OUTTOSEND,ZPDataInLen
 				jmp SKT.StoreTCB
 *--------------------------------------
 * From TCP.OUT
@@ -1262,13 +1203,7 @@ SKT.GetDataFromSktOut
 				sta ZPTmpPtr2+1
 				bra .1
 
-.8				lda SKT.Cache+S.SOCKET.TCP.OUTTOSEND
-				sec
-				sbc ZPDataOutLen
-				sta SKT.Cache+S.SOCKET.TCP.OUTTOSEND
-				lda SKT.Cache+S.SOCKET.TCP.OUTTOSEND+1
-				sbc ZPDataOutLen+1
-				sta SKT.Cache+S.SOCKET.TCP.OUTTOSEND+1
+.8				>SBC16 SKT.Cache+S.SOCKET.TCP.OUTTOSEND,ZPDataOutLen
 
 				clc
 				rts
@@ -1307,6 +1242,7 @@ SKT.AckDataToSktOut
 				adc SKT.Cache+S.SOCKET.TCP.OUTTAIL+1
 				and /K.TCP.WSIZE-1
 				sta SKT.Cache+S.SOCKET.TCP.OUTTAIL+1
+				
 				lda SKT.Cache+S.SOCKET.TCP.OUTFREE
 				clc
 				adc TmpDWord+3
