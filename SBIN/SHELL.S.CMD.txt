@@ -28,274 +28,6 @@ CMD.Quit		>LDA.G CMD.hArgVBuf
 				>SYSCALL FreeMem
 .9				rts	
 *--------------------------------------
-* in:
-* ZPCMDBuf : CString command line
-* out:
-* ZPArgVBuf : 
-* /path/excmd\0 arg1\0 arg2\0 ... \0
-* - or -
-* intcmd\0 arg1\0 arg2\0 ... \0
-*--------------------------------------
-Cmd.Parse		>STZ.G CMD.IntCmd
-
-				lda #S.PS.F.HOLD+S.PS.F.DUPENV
-				>STA.G CMD.PSFlags
-
-				>PUSHW ZPCMDBuf
-				>LDYA ZPCMDBuf
-
-				>SYSCALL Args2ArgV
-				
-				lda #0
-				sta (ZPArgVBuf)
-				
-				lda (ZPCMDBuf)
-				beq .8
-				
-.1				cmp #'#'				comment ?
-				beq .8					yes, ignore remaining
-
-				>LDA.G CMD.IntCmd
-				bne .6					we already have Cmd, go check args
-				
-				ldy #2
-				lda (ZPCMDBuf),y		only one char ?
-				bne .2
-				
-				dey
-				lda (ZPCMDBuf),y
-				cmp #'.'				leading dot ?
-				bne .2
-				
-				>lda.G CMD.PSFlags		yes, child process will run in same ENV
-				and #S.PS.F.DUPENV
-				sta (pData),y
-				bra .7					and skip this token
-				
-.2				jsr CMD.CheckCmd
-				bcc .7					success, skip token, already added by CheckCmd
-
-				rts
-				
-.6				jsr CMD.CheckIO
-				bcc .7
-				tay
-				bne .9
-				
-				jsr CMD.AddCmdBufTokenToArgV
-				bcs .9
-
-.7				jsr CMD.NextCmdBufToken
-				lda (ZPCMDBuf)
-				bne .1
-				
-.8				clc
-				
-.9				rts				
-*--------------------------------------
-* ZPCMDBuf-> argv[] (formatted & not empty)
-*--------------------------------------
-Cmd.CheckCmd	ldy #$ff
-
-.1				iny
-				lda (ZPCMDBuf),y
-				beq .2
-				cmp #'/'
-				bne .1
-				
-				>LDYA ZPCMDBuf			found /, some path specified, External, no search
-				>SYSCALL realpath
-				bcs .9
-
-				txa
-				>STA.G CMD.hCmdLine
-				bra .6					go check type...
-				
-.2				>PUSHW ZPCMDBuf
-				>LDYA L.CMD.INT
-				jsr CMD.Search			no / found, search internal...
-				bcs .4					not internal, search PATH
-				
-				phx
-				plx
-				bne .3
-				
-				>LDA.G CMD.PSFlags		if STARTPROC, skip keyword...
-				and #$ff^S.PS.F.HOLD
-				sta (pData),y			...and toggle S.PS.F.HOLD flag
-				clc
-.9				rts
-				
-.3				jsr CMD.AddYAToArgV		X unmodified
-				bcs .9
-
-				txa
-				>STA.G CMD.IntCmd
-
-				clc
-				rts
-
-.4				>LDYAI 256				Get a buffer for found path
-				>SYSCALL GetMem
-				bcs .9
-				
-				txa
-				>STA.G CMD.hCmdLine
-				
-				>LDYA L.ENV.PATH		push ENVNAME=PATH for search
-				>SYSCALL GetEnv			get value for ENV=PATH
-				bcs .5					no PATH, try workdir
-
-				jsr Cmd.SearchExt
-				bcc .6					found in PATH, go check Type
-
-.5				ldy #S.PS.hPREFIX		not found, try in CD
-				lda (pPs),y
-				>SYSCALL GetMemPtr
-				jsr Cmd.SearchExt
-				bcs Cmd.CheckCmd.90
-				
-.6				>PUSHEA.G CMD.Stat
-				>LDA.G CMD.hCmdLine
-				>SYSCALL GetMemPtr
-				>SYSCALL STAT
-				bcs Cmd.CheckCmd.90
-				
-				lda #$ff
-				>STA.G CMD.IntCmd
-				
-				ldy #CMD.Stat+S.STAT.P.TYPE
-				lda (pData),y
-				cmp #S.FI.T.TXT
-				beq Cmd.CheckCmd.TXT
-				cmp #S.FI.T.BIN
-				beq Cmd.CheckCmd.BIN
-				cmp #S.FI.T.SYS
-				beq	Cmd.CheckCmd.SYS
-				
-				lda #E.SYN
-				sec
-				
-Cmd.CheckCmd.90	php
-				pha
-				>LDA.G CMD.hCmdLine
-				>SYSCALL FreeMem
-				pla
-				
-				plp
-Cmd.CheckCmd.RTS
-				rts
-*--------------------------------------
-* TXT : add "/PATH/SHELL" "/PATH/CMD"
-*--------------------------------------
-Cmd.CheckCmd.TXT
-				lda #0
-				>SYSCALL ArgV
-				jsr CMD.AddYAToArgV
-				bcs Cmd.CheckCmd.90
-*--------------------------------------
-* BIN : add "/PATH/CMD"
-*--------------------------------------
-Cmd.CheckCmd.BIN
-				>LDA.G CMD.hCmdLine
-				>SYSCALL GetMemPtr
-				jsr CMD.AddYAToArgV
-
-				bra Cmd.CheckCmd.90
-*--------------------------------------
-Cmd.CheckCmd.SYS
-*--------------------------------------
-				bra *
-*--------------------------------------
-Cmd.SearchExt	pha
-				phy
-				>PUSHEA.G CMD.Stat
-				>LDA.G CMD.hCmdLine
-				>SYSCALL GetMemPtr
-				>PUSHYA					push dest full path
-				ply
-				pla
-				>PUSHYA					push search list
-				>LDYA ZPCMDBuf			push CMD
-				>SYSCALL FileSearch
-				rts
-*--------------------------------------
-CMD.CheckIO		>PUSHW ZPCMDBuf
-				>LDYA L.CMD.IO
-				jsr CMD.Search
-				bcs .9					not a IO token...should be an arg....
-				phx
-				
-				jsr CMD.NextCmdBufToken	skip this IO token
-				
-				plx
-				jmp (J.CMD.IO,x)
-		
-.9				lda #0
-				rts
-*--------------------------------------
-CMD.IO.AMP		>LDA.G CMD.PSFlags
-				and #$ff^S.PS.F.HOLD
-				sta (pData),y
-				clc
-				rts
-
-CMD.IO.PIPE
-				clc
-				rts
-				
-CMD.IO.IN		lda #O.RDONLY+O.TEXT
-				jsr CMD.IO.Open
-				bcs .9
-				jsr IO.Set.In
-
-				jsr CMD.NextCmdBufToken skip arg
-				clc
-.9				rts
-				
-CMD.IO.OUTA
-CMD.IO.1OUTA	lda #O.WRONLY+O.APPEND+O.CREATE+O.TEXT
-				bra CMD.IO.OUT.1
-CMD.IO.OUT		
-CMD.IO.1OUT		lda #O.WRONLY+O.TRUNC+O.CREATE+O.TEXT
-
-CMD.IO.OUT.1	jsr CMD.IO.Open
-				bcs .9
-				jsr IO.Set.Out
-
-				jsr CMD.NextCmdBufToken skip arg
-				clc
-.9				rts
-
-CMD.IO.2OUTA	lda #O.WRONLY+O.APPEND+O.CREATE+O.TEXT
-				bra CMD.IO.2OUT.1
-CMD.IO.2OUT		lda #O.WRONLY+O.TRUNC+O.CREATE+O.TEXT
-
-CMD.IO.2OUT.1	jsr CMD.IO.Open
-				bcs .9
-				jsr IO.Set.Err
-
-				jsr CMD.NextCmdBufToken skip arg
-				clc
-.9				rts
-*--------------------------------------
-CMD.IO.Open		pha
-				lda (ZPCMDBuf)
-				beq .9					no arg left....
-				
-				>PUSHWI 0				Aux type
-				>PUSHBI S.FI.T.TXT		ftype
-				pla
-				>PUSHA					flags
-				>LDYA ZPCMDBuf
-				>SYSCALL fopen
-				rts
-				
-.9				pla
-				lda #E.SYN
-				sec
-				rts				
-*--------------------------------------
 * Input : ZPArgVBuf
 *--------------------------------------
 Cmd.Exec		>LDA.G CMD.IntCmd
@@ -681,7 +413,7 @@ Cmd.INT.SLEEP	ldx #1
 				clc
 				rts
 				
-.9				jmp Cmd.Exec.ERRSYN				
+.9				jmp Cmd.Exec.ERRSYN
 *--------------------------------------
 Cmd.INT.PAUSE	lda #$FF
 				>STA.G bPause
@@ -693,13 +425,44 @@ Cmd.INT.EXIT	lda #$FF
 				clc
 				rts
 *--------------------------------------
+Cmd.INT.MD		ldx #1
+				jsr Cmd.GetArgX
+				bcs .9
+				
+				>SYSCALL MKDir
+				rts
+				
+.9				jmp Cmd.Exec.ERRSYN
+*--------------------------------------
+Cmd.INT.RD		ldx #1
+				jsr Cmd.GetArgX
+				bcs .9
+				phy
+				pha
+				>PUSHEA.G CMD.Stat
+				pla
+				ply
+				>SYSCALL STAT
+				bcs .99
+				
+				>LDA.G CMD.Stat+S.STAT.P.TYPE
+				cmp #S.FI.T.DIR
+				bne .9
+				
+				ldx #1
+				jsr Cmd.GetArgX
+				>SYSCALL Remove
+.99				rts
+				
+.9				jmp Cmd.Exec.ERRSYN
+*--------------------------------------
 Cmd.INT.IF		ldx #1
 				jsr Cmd.GetArgX
 				beq .9
 				
 				>PUSHYA
 				>LDYA L.CMD.IF.TOKEN1
-				jsr CMD.Search
+				jsr Lookup
 
 				bcs .9
 				
@@ -716,7 +479,7 @@ Cmd.INT.IF		ldx #1
 				
 				>PUSHYA
 				>LDYA L.CMD.IF.TOKEN2	-d -e -f ?
-				jsr CMD.Search
+				jsr Lookup
 				bcs .1
 				
 				jmp (J.CMD.IF.TOKEN2,x)
@@ -732,94 +495,6 @@ CMD.IF.D
 CMD.IF.E
 CMD.IF.F
 				clc
-				rts
-*--------------------------------------
-CMD.NextCmdBufToken
-				lda (ZPCMDBuf)
-				inc ZPCMDBuf
-				bne .1
-				inc ZPCMDBuf+1
-.1				tax
-				bne CMD.NextCmdBufToken
-				rts
-*--------------------------------------
-CMD.AddCmdBufTokenToArgV
-				>LDYA ZPCmdBuf
-CMD.AddYAToArgV	>STYA ZPPtr1
-
-				>LDYA ZPArgVBuf
-				>STYA ZPPtr2
-				
-.1				lda (ZPPtr2)			scan to end of argV
-				beq .6
-
-.2				inc ZPPtr2
-				bne .3
-				inc ZPPtr2+1
-.3				lda (ZPPtr2)
-				bne .2
-
-				inc ZPPtr2
-				bne .4
-				inc ZPPtr2+1
-.4				lda (ZPPtr2)
-				bne .2
-				
-.6				ldy #$ff
-
-.7				iny
-*				beq .9
-				lda (ZPPtr1),y
-				sta (ZPPtr2),y
-				bne .7					including str ending \0
-
-				iny
-*				beq .9
-				sta (ZPPtr2),y			arg[] ending \0
-				
-				clc
-				rts
-				
-.9				lda #E.BUF	
-				sec				
-				rts
-*--------------------------------------
-CMD.Search		>STYA ZPPtr2
-				>PULLW ZPPtr1
-
-				ldx #0
-				
-.1				phx
-				
-				>PUSHW ZPPtr2
-				>LDYA ZPPtr1
-				>SYSCALL StrCaseCmp
-				bcs .2
-				
-				plx
-				>LDYA ZPPtr2
-				clc
-				rts
-				
-.2				inc ZPPtr2
-				bne .3
-				inc ZPPtr2+1
-
-.3				lda (ZPPtr2)
-				bne .2
-				
-				inc ZPPtr2
-				bne .4
-				inc ZPPtr2+1
-								
-.4				plx
-				inx
-				inx
-				
-				lda (ZPPtr2)			Array Ending 0, must be an external Cmd....
-				bne .1
-				
-				sec
 				rts
 *--------------------------------------
 Cmd.GetArgX		>LDYA ZPArgVBuf

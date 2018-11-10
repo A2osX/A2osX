@@ -258,6 +258,8 @@ OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
 | Name      | Status  | Comment |
 | ----      | ------  | ------- |
 | CD        | Working | Improved syntax : now, 'CD ../BIN' works |
+| MD        | Working | Create a directory |
+| RD        | Working | Delete an empty directory |
 | PWD       | Working | |
 | DATE      | Working | |
 | ECHO      | Working | \b,\e,\f,\n,\\\ and \\% supported |
@@ -324,7 +326,7 @@ note : '$VAR' does NOT expand Variable
 | LSDEV | Working | Dump device Drivers | 0.92 |
 | LSOF | Working | List Open Files | 0.92 |
 | PS | Working | List Processes| 0.92 |
-| MD | Working | Make Directory| 0.92 |
+| MKDIR | Working | Make Directory| 0.92 |
 | LS | Working | -A : Do Not Print . & .. | 0.92 |
 | | | -L : long listing with size/date... | |
 | | | -R : Recurse subdirectories | |
