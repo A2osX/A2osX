@@ -7,7 +7,12 @@
 + **A2OSX.BUILD.po**  :  **(0.92)**  800k BOOT disk image with S-C MASM 3.0 and all binaries (BOOT+DEV)  
 + **A2OSX.SRC.po**    :  **(0.92)**  800k disk image with all sources  
 
-## Latest News 2018-09-06
+## Latest News 2018-11-10
+
+My loneliness has been broken, new resources have signed onto the project.  I welcome Patrick Kloepfer
+who is helping with product management, recruitment, testing and feedback. 
+
+## News 2018-09-06
 
 0.92 stable enough to resume playing with.
 Many 0.9.1 bugs already corrected in this version, please check & close opened issues.
