@@ -56,13 +56,23 @@ TCP.CLOSE		ldx #0
 				ldy #S.SOCKET.TCP.S
 				lda (ZPTmpPtr1),y
 				cmp #S.SOCKET.TCP.S.TIMEWT
-				bcc .8
+				bne .8
+				
+				ldy #S.SOCKET.SQ.hInMem
+				lda (ZPTmpPtr1),y
+				>SYSCALL freemem
+				ldy #S.SOCKET.SQ.hOutMem
+				lda (ZPTmpPtr1),y
+				>SYSCALL freemem
 				
 				plx
 				phx
-				
 				lda SKT.TABLE,x
-				jsr SKT.Shutdown
+				>SYSCALL freemem
+				
+				plx
+				phx
+				stz SKT.TABLE,x
 				
 .8				plx
 				inx
@@ -105,8 +115,7 @@ TCP.IN.JMP.LISTEN
 				bcs .9
 
 				lda #S.SOCKET.TCP.S.SYNRCVD
-				sta	SKT.Cache+S.SOCKET.TCP.S
-				jmp SKT.StoreTCB
+				jmp SKT.StoreTCB.S
 				
 .9				lda #ERR.SKT.OOS
 .99				rts
@@ -141,8 +150,7 @@ TCP.IN.JMP.SYNSENT
 				bcs .9
 				
 				lda #S.SOCKET.TCP.S.ESTBLSH
-				sta	SKT.Cache+S.SOCKET.TCP.S
-				jmp SKT.StoreTCB
+				jmp SKT.StoreTCB.S
 				
 .9				lda #S.TCP.OPTIONS.RST
 				jsr TCP.OUT.SendOptA
@@ -175,8 +183,7 @@ TCP.IN.JMP.SYNRCVD
 				bpl .1
 				
 				lda #S.SOCKET.TCP.S.ESTBLSH
-				sta SKT.Cache+S.SOCKET.TCP.S
-				jmp SKT.StoreTCB
+				jmp SKT.StoreTCB.S
 			
 .8				clc
 .9				rts
@@ -209,13 +216,12 @@ TCP.IN.JMP.ESTBLSH
 				beq .8
 
 				jsr TCP.IN.ACKTheFIN
-				
+				lda #S.TCP.OPTIONS.FIN+S.TCP.OPTIONS.ACK
+				jsr TCP.OUT.SendOptA	FIN received, Send FIN.ACK		
 				bcs .9
 				
-				ldy #S.SOCKET.TCP.S
 				lda #S.SOCKET.TCP.S.CLWAIT
-				sta (ZPPtrSKT),y
-				jmp SKT.StoreTCB
+				jmp SKT.StoreTCB.S
 				
 .8				clc
 .9				rts
@@ -230,30 +236,38 @@ TCP.IN.JMP.LASTACK
 				bit #S.TCP.OPTIONS.ACK
 				beq .8
 				
-				ldx SKT.Index
-				lda SKT.TABLE,x
-				jmp SKT.shutdown
+				ldy #S.SOCKET.TCP.S
+				lda #S.SOCKET.TCP.S.TIMEWT
+				sta (ZPPtrSKT),y
 				
 .8				clc
 				rts
 *--------------------------------------
 TCP.IN.JMP.FINWT1
-				ldy #S.TCP.OPTIONS		only accept ACK packet
+				jsr SKT.GetTCB
+				
+				ldy #S.TCP.OPTIONS		FIN sent, accept ACK or FIN/ACK packet
 				lda (ZPFrameInPtr),y
 				bit #S.TCP.OPTIONS.FIN
-				beq .8
-				
-				ldy #S.SOCKET.TCP.O
-				lda #S.TCP.OPTIONS.FIN	send FIN
-				sta (ZPPtrSKT),y
-				jsr TCP.IN.ACKTheFIN
+				bne .1
+
+				lda #S.TCP.OPTIONS.FIN+S.TCP.OPTIONS.ACK
+				jsr TCP.OUT.SendOptA	Send FIN.ACK		
 				bcs .9
-				
-				ldy #S.SOCKET.TCP.S
+
 				lda #S.SOCKET.TCP.S.FINWT2
-				sta (ZPPtrSKT),y
+				jmp SKT.StoreTCB.S
+
+.1				jsr TCP.IN.ACKTheFIN	FIN/ACK
+
+				lda #S.TCP.OPTIONS.FIN+S.TCP.OPTIONS.ACK
+				jsr TCP.OUT.SendOptA	Send FIN.ACK		
+				bcs .9
+
+				lda #S.SOCKET.TCP.S.TIMEWT
+				jmp SKT.StoreTCB.S
 				
-.8				clc
+*				clc
 .9				rts
 *--------------------------------------
 TCP.IN.JMP.FINWT2
@@ -263,12 +277,15 @@ TCP.IN.JMP.FINWT2
 				bit #S.TCP.OPTIONS.FIN
 				beq .8
 				
+				jsr SKT.GetTCB
 				jsr TCP.IN.ACKTheFIN
-				bcs .9
 
-				ldy #S.SOCKET.TCP.S
+				lda #S.TCP.OPTIONS.ACK
+				jsr TCP.OUT.SendOptA	FIN received, Send ACK		
+				bcs .9
+			
 				lda #S.SOCKET.TCP.S.TIMEWT
-				sta (ZPPtrSKT),y
+				jmp SKT.StoreTCB.S
 				
 .8				clc
 .9				rts
@@ -311,21 +328,27 @@ TCP.IN.ACKTheFIN
 				ora #S.TCP.OPTIONS.ACK	
 				sta (ZPPtrSKT),y
 				
-				jsr SKT.GetTCB
-				
 				ldx #3
-				ldy #S.TCP.ACKNUM+3
+
+				sec
+				
+.2				lda	SKT.Cache+S.SOCKET.TCP.INLASTSEQNUM,x
+				adc #0
+				sta	SKT.Cache+S.SOCKET.TCP.INLASTSEQNUM,x
+				dex
+				bpl .2
+
+				ldx #3
 
 				sec
 				
 .3				lda	SKT.Cache+S.SOCKET.TCP.OUTACKNUM,x
 				adc #0
 				sta	SKT.Cache+S.SOCKET.TCP.OUTACKNUM,x
-				dey
 				dex
 				bpl .3
 
-				jmp TCP.OUT.I			ACK the FIN
+				rts
 *--------------------------------------
 TCP.IN.SetDataInPtrAndLen
 				ldy #S.IP.TOTAL.LENGTH+1
