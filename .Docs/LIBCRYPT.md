@@ -7,9 +7,8 @@ Return MD5 Hash for input String
 `void md5 (const char* str, char* digest);`  
 
 # ASM  
-**In:**  
 `>PUSHW digest`  
-`>LDYA str`  
+`>PUSHW str`  
 
 ## RETURN VALUE  
 CC  
@@ -18,10 +17,10 @@ CC
 Initialize a MD5 computation  
 
 # C  
-`HANDLE md5init ();`  
+`hMD5 md5init ();`  
 
 # ASM  
-**In:**  
+`>LIBCALL hLIBCRYPT,LIBCRYPT.MD5Init`  
 
 ## RETURN VALUE  
 A = hMem To S.MD5  
@@ -30,24 +29,24 @@ A = hMem To S.MD5
 Add Data to MD5 computation  
 
 # C  
-`int md5update (HANDLE md5, char* data, int len);`  
+`void md5update (hMD5 md5, char* data, int len);`  
 
 # ASM  
-**In:**  
 `>PUSHW len`  
 `>PUSHW data`  
 `>LDA.G md5`  
+`>hLIBCRYPT,LIBCRYPT.MD5Update`  
 
 ## RETURN VALUE  
 
 ## MD5Finalize  
 
 # C  
-`int md5finalize (HANDLE md5, char* digest);`  
+`void md5finalize (hMD5 md5, char* digest);`  
 
 # ASM  
-**In:**  
 `>PUSHW digest`  
 `>LDA.G md5`  
+`>LIBCALL hLIBCRYPT,LIBCRYPT.MD5Finalize`  
 
 ## RETURN VALUE  
