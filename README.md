@@ -255,7 +255,7 @@ OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
 | ----    | ------      | ------- | ----- |
 | TCPIPD  | Working     | Socket API.ARP,IP,ICMP,UDP & TCP ok | 0.92 |
 | DHCPCLNT| Working     | rewritten to use new Socket API | 0.92 |
-| TELNETD | In Progress |  | 0.9 |
+| TELNETD | In Progress |  | 0.92 |
 | HTTPD   | In Progress |  | 0.9 |
 
 ## Internal Shell commands:
@@ -265,17 +265,20 @@ OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
 | CD        | Working | Improved syntax : now, 'CD ../BIN' works |
 | MD        | Working | Create a directory |
 | RD        | Working | Delete an empty directory |
-| PWD       | Working | |
+| PWD       | Working | Print Working Directory |
 | DATE      | Working | |
 | ECHO      | Working | \b,\e,\f,\n,\\\ and \\% supported |
-| EXIT      | Working | |
-| PAUSE     | Working | |
+| EXIT      | Working | exit shell |
+| PAUSE     | Working | Wait until CR |
 | READ      | Working | -S : no echo (password) |
 |           |         | -P : "prompt message"   |
 | TIME      | Working | |
-| SET       | Working | |
-| SLEEP     | Working | |
+| SET       | Working | -X toggle debug mode |
+| SLEEP     | Working | Wait <count> 10th sec |
 | STARTPROC | Working | Used in A2osX.startup |
+| IF ELSE FI | Working | [ -d direxists ] |
+|           |         | [ -e fileordirexists ] |
+|           |         | [ -f fileexists ] |
 
 ## Shell variables:
 
