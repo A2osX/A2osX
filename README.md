@@ -249,7 +249,7 @@ OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
 | ----    | ------      | ------- | ------|
 | INSDRV  | Working     |         | 0.92 |
 | GETTY   | Working     |         | 0.92 |
-| LOGIN   | In Progress | no auth using /etc/passd yet | 0.92 |
+| LOGIN   | In Progress | no auth using /etc/passwd yet | 0.92 |
 | SHELL   | Working     | (See Internal Shell commands) | 0.92 |
 | KCONFIG | Working     | Kernel Configuration Utility | 0.92 |
 | ----    | ------      | ------- | ----- |
@@ -279,6 +279,15 @@ OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
 | IF ELSE FI | Working | [ -d direxists ] |
 |           |         | [ -e fileordirexists ] |
 |           |         | [ -f fileexists ] |
+|           |         | [ string1 = string2 ] |
+|           |         | [ string1 != string2 ] |
+|           |         | [ int32 -eq int32 ] |
+|           |         | [ int32 -ne int32 ] |
+|           |         | [ int32 -lt int32 ] |
+|           |         | [ int32 -le int32 ] |
+|           |         | [ int32 -gt int32 ] |
+|           |         | [ int32 -ge int32 ] |
+
 
 ## Shell variables:
 
