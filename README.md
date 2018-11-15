@@ -263,6 +263,7 @@ OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
 | Name      | Status  | Comment |
 | ----      | ------  | ------- |
 | CD        | Working | Improved syntax : now, 'CD ../BIN' works |
+| REN       | Working | Rename a file, directorey or volume |
 | MD        | Working | Create a directory |
 | RD        | Working | Delete an empty directory |
 | PWD       | Working | Print Working Directory |
