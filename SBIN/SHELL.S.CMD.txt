@@ -17,11 +17,7 @@ CMD.Init		>LDYAI 256
 				>STYA ZPArgVBuf
 				txa
 				>STA.G CMD.hArgVBuf
-				
-				lda #CMD.STACK.PTR
-				tay
-				sta (pData),y
-				
+								
 .9				rts				
 *--------------------------------------
 CMD.Quit		ldy #CMD.hArgVBuf
@@ -40,19 +36,19 @@ Cmd.Exec		>LDA.G CMD.IntCmd
 				bmi .2					External
 				
 				tax
-				cpx #C.ELSE
+				cpx #C.ELSE				always execute ELSE,FI
 				bcs .1
 				
-				>LDA.G CMD.STACK.PTR
-
-				cmp #CMD.STACK.PTR
-				beq .1					no IF pending...
+				jsr CMD.StkGet
+				bcs .1					no particular context
 				
-				tay
-				lda (pData),y
-				bpl .8 					FALSE
+				bpl .8 					context is FALSE, skip line
 				
 .1				jmp (J.CMD.INT,x)
+
+.99				lda #E.SYN
+				sec
+				rts
 				
 .2				>PUSHB.G CMD.PSFlags
 				>LDYA ZPArgVBuf
@@ -397,11 +393,9 @@ Cmd.INT.READ	lda #1
 				>LDA.G hVarName
 				beq .9
 				clc
-				rts
-				
-.9				lda #E.SYN
-				sec
 .99				rts
+				
+.9				jmp Cmd.Exec.ERRSYN
 *--------------------------------------
 Cmd.INT.SLEEP	ldx #1
 				jsr Cmd.GetArgX
@@ -469,13 +463,12 @@ Cmd.INT.RD		ldx #1
 				
 .9				jmp Cmd.Exec.ERRSYN
 *--------------------------------------
-Cmd.INT.IF		>LDA.G CMD.STACK.PTR
-				cmp #CMD.STACK.PTR+CMD.STACK.MAX
-				beq .9
-				inc
-				sta (pData),y
-				
-				ldx #1
+Cmd.INT.FOR
+
+.9				jmp Cmd.Exec.ERRSYN
+*--------------------------------------
+Cmd.INT.WHILE	
+Cmd.INT.IF		ldx #1
 				jsr Cmd.GetArgX
 				beq .9
 				
@@ -490,10 +483,10 @@ Cmd.INT.IF		>LDA.G CMD.STACK.PTR
 				dex
 				dex						1 or $ff
 				
-				>LDA.G CMD.STACK.PTR
-				tay
 				txa
-				sta (pData),y			true or false
+				and #$80				true or false
+				eor #$80
+				>STA.G CMD.Test
 				
 				ldx #2
 				jsr Cmd.GetArgX
@@ -511,10 +504,8 @@ Cmd.INT.IF		>LDA.G CMD.STACK.PTR
 				jsr CMD.IF.UNARY
 				bcs .9
 				
-				>LDA.G CMD.STACK.PTR
-				tay
-				txa
-				eor (pData),y
+				>LDA.G CMD.Test
+				eor #$80
 				sta (pData),y
 				
 				ldx #4					go check ]
@@ -522,7 +513,7 @@ Cmd.INT.IF		>LDA.G CMD.STACK.PTR
 				
 .9				lda #E.SYN
 				sec
-				rts
+.99				rts
 				
 .1				ldx #3
 				jsr Cmd.GetArgX
@@ -537,12 +528,6 @@ Cmd.INT.IF		>LDA.G CMD.STACK.PTR
 				
 				jsr CMD.IF.BINARY
 				bcs .9
-				
-				>LDA.G CMD.STACK.PTR
-				tay
-				txa
-				eor (pData),y
-				sta (pData),y
 
 				ldx #5					go check ]
 				
@@ -558,9 +543,19 @@ Cmd.INT.IF		>LDA.G CMD.STACK.PTR
 				ldy #1
 				lda (ZPPTR1),y
 				bne .9
-
-				clc
-				rts
+				
+				>LDA.G CMD.IntCmd
+				cmp #C.WHILE
+				bne .81
+				tax
+				
+				jsr CMD.StkPushPtr
+				bcs .99
+				
+				txa
+				
+.81				>ORA.G CMD.Test
+				jmp CMD.StkPush
 *--------------------------------------
 CMD.IF.UNARY 	ldx #3
 				jsr Cmd.GetArgX
@@ -599,7 +594,7 @@ CMD.IF.DEF.7	>PUSHEA.G CMD.Stat
 				>SYSCALL STAT
 				rts
 			
-CMD.IF.DEF.8	ldx #$ff				true
+CMD.IF.DEF.8	ldx #$80				true
 				clc
 				rts
 
@@ -620,7 +615,7 @@ CMD.IF.BINARY	ldx #2
 
 				cmp #2					!=
 				bne CMD.IF.BINARY.NUM
-				lda #$ff
+				lda #$80
 				>STA.G CMD.Operator
 				
 .1				ldx #2
@@ -709,7 +704,7 @@ CMD.IF.BINARY.NUM
 				eor CMD.IF.TOKEN3.BITS,x
 				bne .80
 
-				ldx #$ff				true
+				ldx #$80				true
 				clc
 				rts
 				
@@ -721,15 +716,32 @@ CMD.IF.BINARY.NUM
 				sec
 				rts				
 *--------------------------------------
-Cmd.INT.ELSE	>LDA.G CMD.STACK.PTR
-
-				cmp #CMD.STACK.PTR
-				beq .9
+Cmd.INT.ELSE	jsr CMD.StkGet
+				bcs .9
+				pha
+				and #$7F
 				
-				tay
-				lda (pData),y
-				eor #$ff
+				cmp #C.IF
+				bne .9
+				
+				pla
+				eor #$80
 				sta (pData),y
+				
+				clc
+				rts
+				
+.9				pla
+				lda #E.SYN
+				sec
+				rts
+*--------------------------------------
+Cmd.INT.FI		jsr CMD.StkPull
+				bcs .9
+				
+				and #$7F
+				cmp #C.IF
+				bne .9
 				
 				clc
 				rts
@@ -738,19 +750,28 @@ Cmd.INT.ELSE	>LDA.G CMD.STACK.PTR
 				sec
 				rts
 *--------------------------------------
-Cmd.INT.FI		>LDA.G CMD.STACK.PTR
-				cmp #CMD.STACK.PTR
-				beq .9
+Cmd.INT.NEXT	
+.9				jmp Cmd.Exec.ERRSYN
+*--------------------------------------
+Cmd.INT.LOOP	jsr CMD.StkPull
+				bcs .9
+				tax
+				and #$7F
+				cmp #C.WHILE
+				bne .9
 				
-				dec
-				>STA.G CMD.STACK.PTR
+				txa
+				bpl .1
 				
-				clc
-				rts
+				jmp CMD.StkPullPtr
 				
-.9				lda #E.SYN
+.1				jsr CMD.StkPull
+				bcs .99
+				jmp CMD.StkPull
+				
+.9				lda #E.NOWHILE
 				sec
-				rts
+.99				rts				
 *--------------------------------------
 Cmd.GetArgX		>LDYA ZPArgVBuf
 				
@@ -812,6 +833,80 @@ CMD.IsSwitch	>STYA ZPPtr1
 				
 .9				>LDYA ZPPtr1
 				sec				
+				rts
+*--------------------------------------
+CMD.StkPushPtr	>LDA.G CMD.FileBufPtr
+				jsr CMD.StkPush
+				bcs .9
+				>LDA.G CMD.FileBufPtr+1
+				jmp CMD.StkPush
+.9				rts				
+*--------------------------------------
+CMD.StkPullPtr	jsr CMD.StkPull
+				bcs .9
+				sta ZPFileBufPtr+1
+				jsr CMD.StkPull
+				bcs .9
+				sta ZPFileBufPtr
+.9				rts				
+*--------------------------------------
+CMD.StkGetPtr	lda (pData)				StackPtr
+				beq .9
+				dec
+				beq .9
+				
+				tay
+
+				lda (pData),y
+				sta ZPFileBufPtr
+				iny
+				lda (pData),y
+				sta ZPFileBufPtr+1
+				
+				clc
+				rts
+				
+.9				lda #E.SYNTAX
+				sec
+				rts
+*--------------------------------------
+CMD.StkPush		pha
+				lda (pData)				StackPtr
+				inc
+				cmp #CMD.STACK.MAX
+				beq .9
+				sta (pData)				StackPtr
+				tay
+				pla	
+				sta (pData),y
+*				clc
+				rts
+				
+.9				pla
+				lda #E.STKOVERFLOW
+*				sec
+				rts
+*--------------------------------------
+CMD.StkPull		jsr CMD.StkGet
+				bcs .9
+				
+				dey
+				pha
+				tya
+				sta (pData)				StackPtr
+				pla
+				
+.9				rts				
+*--------------------------------------
+CMD.StkGet		lda (pData)				StackPtr
+				beq .9
+				tay
+				lda (pData),y
+				clc
+				rts
+				
+.9				lda #E.SYNTAX
+				sec
 				rts
 *--------------------------------------
 MAN
