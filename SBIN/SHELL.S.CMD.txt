@@ -39,17 +39,13 @@ Cmd.Exec		>LDA.G CMD.IntCmd
 				cpx #C.ELSE				always execute ELSE,FI
 				bcs .1
 				
-				jsr CMD.StkGet
+				jsr CMD.StkGet			IF,WHILE,FOR ?
 				bcs .1					no particular context
 				
 				bpl .8 					context is FALSE, skip line
 				
 .1				jmp (J.CMD.INT,x)
 
-.99				lda #E.SYN
-				sec
-				rts
-				
 .2				>PUSHB.G CMD.PSFlags
 				>LDYA ZPArgVBuf
 				>SYSCALL execv
@@ -59,7 +55,7 @@ Cmd.Exec		>LDA.G CMD.IntCmd
 				
 				>LDA.G CMD.PSFlags
 				and #S.PS.F.HOLD
-				bne .3
+				bne .4
 				
 				txa
 				>PUSHA
@@ -68,45 +64,53 @@ Cmd.Exec		>LDA.G CMD.IntCmd
 				>SYSCALL printf
 				rts
 				
-.3				>SLEEP					Suspend this PID				
+.4				>SLEEP					Suspend this PID				
 				
 				ldy #S.PS.RC
 				lda (pPs),y
-				bne .9
+				bne .99
+
 .8				clc
 .9				rts
+
+.99				sec
+				rts
 *--------------------------------------
 * STARTPROC : intcmd = 0
 *--------------------------------------
 Cmd.INT.STARTPROC
 				clc
 				rts
-*--------------------------------------			
+*--------------------------------------
+Cmd.INT.SHIFT	lda #1
+				jmp ShiftA
+*--------------------------------------
 Cmd.INT.PWD		ldy #S.PS.hPREFIX
 				lda (pPs),y
 				>SYSCALL GetMemPtr
 				>SYSCALL puts
-Cmd.INT.PWD.RTS	rts
+				rts
 *--------------------------------------
 Cmd.INT.CD		ldx #1
 				jsr Cmd.GetArgX
-				bcc Cmd.INT.CD.ARG
+				bcs Cmd.INT.CD.HOME
 
+				>SYSCALL RealPath
+				bcc Cmd.INT.CD.1
+
+Cmd.INT.CD.RTS	rts
+				
 Cmd.INT.CD.HOME >LDYA L.ENV.HOME
 				>SYSCALL GetEnv
 				bcc .1
 				
 				>LDYA L.ENV.ROOT
 				>SYSCALL GetEnv
-				bcs Cmd.INT.PWD.RTS
+				bcs Cmd.INT.PWD
 				
 .1				>SYSCALL ExpandStr
-				bcs Cmd.INT.PWD.RTS
-				bra Cmd.INT.CD.1
-				
-Cmd.INT.CD.ARG	>SYSCALL RealPath
-				bcs Cmd.INT.PWD.RTS
-				
+				bcs Cmd.INT.CD.RTS
+
 Cmd.INT.CD.1	>STYA ZPPtr1
 				txa
 				>STA.G CMD.hCmdLine
@@ -170,7 +174,7 @@ Cmd.Exec.ERRSYN	lda #E.SYN
 *--------------------------------------
 Cmd.INT.SET		ldx #1
 				jsr Cmd.GetArgX
-				bcc Cmd.INT.SETVAR
+				bcc Cmd.INT.SET.1
 
 * No arg, print all ENV
 
@@ -220,8 +224,19 @@ Cmd.INT.SET		ldx #1
 .8				clc
 .9				rts
 *--------------------------------------
-Cmd.INT.SETVAR	jsr CMD.IsSwitch
-				bcs .10
+* SET +X VAR = VALUE1 op VALUE2 op VALUE3 ...
+*--------------------------------------
+Cmd.INT.SET.1	>STZ.G CMD.Varname
+
+				lda #1
+				>STA.G CMD.ArgIndex
+
+.1				tax
+				jsr Cmd.GetArgX
+				bcs .8
+				
+				jsr CMD.IsSwitch
+				bcs .2
 				
 				cmp #'X'
 				bne .99
@@ -229,49 +244,67 @@ Cmd.INT.SETVAR	jsr CMD.IsSwitch
 				lda #$ff
 				>EOR.G bSET.X
 				sta (pData),y
+				>INC.G CMD.ArgIndex
+				tax
+				bra .1
+				
+.2				>LDA.G CMD.ArgIndex
+				>STA.G CMD.Varname
+
+				>INC.G CMD.ArgIndex
+				tax
+				jsr Cmd.GetArgX
+				bcs Cmd.INT.SET.GET
+				
+				>STYA ZPPTR1
+				
+				lda (ZPPTR1)
+				
+				cmp #'='
+				bne .99
+				
+				ldy #1
+				lda (ZPPTR1),y
+				bne .99
+				
+				>INC.G CMD.ArgIndex
+				tax
+				jsr Cmd.GetArgX
+				bcs Cmd.INT.SET.UNSET
+				
+				>PUSHYA
+				>LDA.G CMD.Varname
+				tax
+				jsr Cmd.GetArgX
+				>SYSCALL SetEnv
+				rts
+
 .8				clc
 				rts
 				
-.10				lda (ZPPTR1)			set by CMD.IsSwitch
-				cmp #'='				string is '=value' ?
-				beq .99					syntax error
-				
-				ldy #0
-
-.1				iny
-				lda (ZPPTR1),y
-				beq .3					no =, GetEnv
-				
-				cmp #'='				ARGS contains =, PutEnv
-				bne .1
-				
-				iny
-				lda (ZPPTR1),y
-				beq .2					"VAR=" go UnsetEnv
-				
-				>LDYA ZPPTR1			String is VAR=VALUE...	
-				>SYSCALL PutEnv
-				rts
-				
-.2				dey						String is "VAR=", Remove ending '='
-				lda #0
-				sta (ZPPTR1),y
-				
-				>LDYA ZPPTR1			String is "VAR"...	
-				>SYSCALL UnsetEnv
-				rts
-
 .99				lda #E.SYN
 				sec
 				rts
-* Print requested VAR
 				
-.3				>LDYA ZPPTR1
+Cmd.INT.SET.UNSET
+				>LDA.G CMD.Varname
+				tax
+				jsr Cmd.GetArgX
+				>SYSCALL UnsetEnv
+				rts
+
+Cmd.INT.SET.GET
+				>LDA.G CMD.Varname
+				tax
+				jsr Cmd.GetArgX
 				>SYSCALL GetEnv
-				bcs .8
+				rts
 				
 				>PUSHYA					push value
-				>PUSHW ZPPTR1			push name
+				>LDA.G CMD.Varname
+				tax
+				jsr Cmd.GetArgX
+				>PUSHYA 				push name
 *--------------------------------------
 Cmd.INT.SET.PRINT
 				>PUSHBI 4
@@ -751,6 +784,9 @@ Cmd.INT.FI		jsr CMD.StkPull
 				rts
 *--------------------------------------
 Cmd.INT.NEXT	
+.9				jmp Cmd.Exec.ERRSYN
+*--------------------------------------
+Cmd.INT.BREAK	
 .9				jmp Cmd.Exec.ERRSYN
 *--------------------------------------
 Cmd.INT.LOOP	jsr CMD.StkPull

@@ -248,14 +248,14 @@ OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
 | Name    | Status      | Comment | K.Ver |
 | ----    | ------      | ------- | ------|
 | INSDRV  | Working     |         | 0.92 |
-| GETTY   | Working     |         | 0.92 |
+| GETTY   | Working     | -E : Exit on remote close | 0.92 |
 | LOGIN   | In Progress | no auth using /etc/passwd yet | 0.92 |
 | SHELL   | Working     | (See Internal Shell commands) | 0.92 |
 | KCONFIG | Working     | Kernel Configuration Utility | 0.92 |
 | ----    | ------      | ------- | ----- |
-| TCPIPD  | Working     | Socket API.ARP,IP,ICMP,UDP & TCP ok | 0.92 |
+| TCPIPD  | Working     | ARP,IP,ICMP,UDP & TCP ok | 0.92 |
 | DHCPCLNT| Working     | rewritten to use new Socket API | 0.92 |
-| TELNETD | In Progress |  | 0.92 |
+| TELNETD | Working  |  | 0.92 |
 | HTTPD   | In Progress |  | 0.9 |
 
 ## Internal Shell commands:
@@ -288,7 +288,8 @@ OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
 |           |         | [ int32 -le int32 ] |
 |           |         | [ int32 -gt int32 ] |
 |           |         | [ int32 -ge int32 ] |
-
+| SHIFT     | Working | Remove $1 from cmd line |
+| WHILE BREAK LOOP | Working | [ same as IF ] |
 
 ## Shell variables:
 
