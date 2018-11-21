@@ -263,7 +263,7 @@ OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
 | Name      | Status  | Comment |
 | ----      | ------  | ------- |
 | CD        | Working | Improved syntax : now, 'CD ../BIN' works |
-| REN       | Working | Rename a file, directorey or volume |
+| REN       | Working | Rename a file, directory or volume |
 | MD        | Working | Create a directory |
 | RD        | Working | Delete an empty directory |
 | PWD       | Working | Print Working Directory |
@@ -320,7 +320,7 @@ note : '$VAR' does NOT expand Variable
 | 1>>    | Working |  |
 | 1>   | Working |  |
 | 2>>    | Working | StdErr redirection |
-| 2>>    | Working |  |
+| 2>     | Working |  |
 
 ## DRV,Drivers:
 
@@ -375,7 +375,7 @@ note : '$VAR' does NOT expand Variable
 | | | -R : Recurse subdirectories | |
 | CHGRP | In Progress | -C : Continue On Error | 0.9 |
 | | | -R : Recurse subdirectories | |
-| NSCUTIL | Working | Tool for setting time in NSC/DL1216E | 0.9 |
+| NSCUTIL | Working | Tool for setting time in NSC/DL1216E | 0.92 |
 
 ## Network (TCPIP) tools:
 | Name | Status | Comment | K.Ver |
