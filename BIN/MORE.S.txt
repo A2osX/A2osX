@@ -11,6 +11,8 @@ AUTO 4,1
 				.INB INC/MLI.I
 				.INB INC/MLI.E.I
 *--------------------------------------
+PG.SIZE			.EQ 22
+*--------------------------------------
 ZPPTR1			.EQ ZPBIN
 ZPBufPtr		.EQ ZPBIN+2
 *--------------------------------------
@@ -35,9 +37,10 @@ CS.START		cld
 				.DA CS.DOEVENT		
 				.DA	CS.QUIT
 L.MSG.USAGE		.DA MSG.USAGE
-L.MSG.CR		.DA MSG.CR
-L.MSG.LINENUM	.DA MSG.LINENUM
+L.MSG.NUMLINECR	.DA MSG.NUMLINECR
+L.MSG.LINECR	.DA MSG.LINECR
 L.MSG.Pause		.DA MSG.Pause
+L.MSG.PauseErase	.DA MSG.PauseErase
 				.DA 0
 *--------------------------------------
 CS.INIT			clc
@@ -101,46 +104,7 @@ CS.RUN
 				
 CS.RUN.LOOP		>SLEEP
 
-				>LDA.G hFILE
-				bne .1
-	
-				ldy #S.PS.hStdErr
-				lda (pPS),y
-				>SYSCALL GetC
-				bra .2
-	
-.1				>SYSCALL GetChar
-.2				bcs .10					no char
-
-				cmp #$03				Ctrl-C
-				bne .3
-				
-				sec						Abort....
-				rts
-				
-.3				cmp #C.SPACE
-				bne .10
-				
-				>LDA.G bPause
-				eor	#$ff
-				sta (pData),y
-				bne .8
-				
-.10				>LDA.G bPause
-				bne .8					Pause...
-				
-				>LDA.G hFile
-				bra .12
-				
-.11				ldy #S.PS.hStdIn
-				lda (pPS),y
-				bra .12
-				
-.12				pha
-				>PUSHWI	256
-				>PUSHW ZPBufPtr
-				pla
-				>SYSCALL fgets
+				jsr CS.RUN.GETLINE
 				bcs .13
 				
 				>INCW.G LineNum
@@ -156,17 +120,13 @@ CS.RUN.LOOP		>SLEEP
 .22				jsr CS.RUN.PRINT
 
 				>INC.G LineCount
-				cmp #23
+				cmp #PG.SIZE
 				bne .8
 				lda #0
 				sta (pData),y
 				
-				dec
-				>STA.G bPause
-
-				>PUSHBI 0
-				>LDYA L.MSG.Pause
-				>SYSCALL printf
+				jsr CS.RUN.PAUSE
+				bcs .9
 				
 .8				jmp CS.RUN.LOOP
 				
@@ -190,24 +150,106 @@ CS.RUN.OPEN		pha
 
 .9				rts
 *--------------------------------------
+CS.RUN.PAUSE	>PUSHBI 0
+				>PUSHW L.MSG.Pause
+				ldy #S.PS.hStdErr
+				lda (pPS),y
+				>SYSCALL fprintf
+				
+.10				>SLEEP
+
+				jsr CS.RUN.GETC
+				bcs .10					no char
+
+				cmp #'Q'
+				beq .9
+				
+.3				cmp #C.SPACE
+				bne .4
+				
+				jmp CS.RUN.ERASE
+
+.4				cmp #C.CR
+				bne .10
+
+				jsr CS.RUN.ERASE
+				jsr CS.RUN.GETLINE
+				jsr CS.RUN.PRINT
+
+				bra CS.RUN.PAUSE
+				
+.9				jsr CS.RUN.ERASE
+				lda #0
+.99				sec
+				rts				
+*--------------------------------------
+CS.RUN.ERASE	>PUSHBI 0
+				>PUSHW L.MSG.PauseErase
+				ldy #S.PS.hStdErr
+				lda (pPS),y
+				>SYSCALL fprintf
+				rts
+*--------------------------------------
+CS.RUN.GETC		>LDA.G hFILE
+				bne .1
+	
+				ldy #S.PS.hStdErr
+				lda (pPS),y
+				>SYSCALL GetC
+				bra .2
+	
+.1				>SYSCALL GetChar
+.2				rts
+*--------------------------------------
+CS.RUN.GETLINE	>LDA.G hFile
+				bne .1
+				
+				ldy #S.PS.hStdIn
+				lda (pPS),y
+				
+.1				pha
+				>PUSHWI	256
+				>PUSHW ZPBufPtr
+				pla
+				>SYSCALL fgets
+				bcs .9
+				
+				ldy #$ff
+				
+.2				iny
+				lda (ZPBufPtr),y
+				bne .2
+				
+.3				tya
+				beq .8
+				
+				dey
+				lda (ZPBufPtr),y
+				cmp #C.LF
+				beq .3
+				cmp #C.CR
+				beq .3
+				lda #0
+				iny
+.8				sta (ZPBufPtr),y
+				
+				clc				
+.9				rts
+*--------------------------------------
 CS.RUN.PRINT	clc
 				>LDA.G bLineNum
 				bpl .1
 
+				>PUSHW ZPBufPtr
 				>PUSHW.G LineNum
-
-				>PUSHBI 2
-				>LDYA L.MSG.LINENUM
+				>PUSHBI 4
+				>LDYA L.MSG.NUMLINECR
 				>SYSCALL printf
-				bcs .9
+				rts
 	
-.1				>PUSHBI 0
-				>LDYA ZPBufPtr
-				>SYSCALL printf
-				bcs .9
-				
-				>PUSHBI 0
-				>LDYA L.MSG.CR
+.1				>PUSHW ZPBufPtr
+				>PUSHBI 2
+				>LDYA L.MSG.LINECR
 				>SYSCALL printf
 .9				rts
 *--------------------------------------
@@ -237,9 +279,10 @@ MSG.USAGE		.AS "Usage : MORE <File>\r\n"
 				.AS "   -H : This help screen\r\n"
 				.AS "   -N : Number all output lines\r\n"
 				.AS "   -P : Page mode, no scroll"
-MSG.CR			.AZ "\r\n"
-MSG.LINENUM		.AZ "%5D:"
-MSG.Pause		.AZ "\e[7m --- More --- \e[0m\r"
+MSG.NUMLINECR	.AZ "%5D:%s\r"
+MSG.LINECR		.AZ "%s\r"
+MSG.Pause		.AZ "\r\e[7m --- 'SPACE' for more, 'CR' one line, 'Q' to quit --- \e[0m"
+MSG.PauseErase	.AZ "\r\e[2K"
 *--------------------------------------
 				.DUMMY
 				.OR 0
@@ -248,7 +291,6 @@ ArgCount		.BS 1
 hFile			.BS 1
 LineCount		.BS 1
 LineNum			.BS 2
-bPause			.BS 1
 bLineNum		.BS 1
 bPage			.BS 1
 bHelp			.BS 1
@@ -258,5 +300,5 @@ DS.END
 				.ED
 *--------------------------------------
 MAN
-SAVE USR/SRC/BIN/BIN/MORE.S
+SAVE USR/SRC/BIN/MORE.S
 ASM
