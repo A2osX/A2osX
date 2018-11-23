@@ -59,14 +59,11 @@ K.ExecV			>STYA PS.ArgV
 				
 PS.Exec			stz PS.Load.hBIN
 				
-				jsr PS.CreateChild		Child S.PS at ZPPtr3
+				jsr PS.CreateChild		Child S.PS at ZPPtr3,PS.Load.hMem
 				bcs .9
-
-				sta .8+1
 
 				jsr PS.Load
 				bcs .90
-
 				jsr PS.AddArgV
 				bcc .8
 				
@@ -82,7 +79,7 @@ PS.Exec			stz PS.Load.hBIN
 				sec
 				rts
 
-.8				lda #$ff				self modified
+.8				lda PS.Load.hMem
 .9				rts
 *--------------------------------------
 * PS.CreateChild
@@ -131,6 +128,7 @@ PS.CreateChild	ldx CORE.PSCount
 				bcs .99
 				
 				>STYA ZPPtr3
+				stx PS.Load.hMem
 				txa
 				plx
 				sta PS.Table.hPS,x
@@ -217,17 +215,17 @@ PS.Load			>PUSHWI K.S.STAT
 				cmp #S.FI.T.BIN
 				beq PS.LoadBIN
 				cmp #S.FI.T.TXT
-				beq .10
-				cmp #S.FI.T.SYS
 				bne .98
-				
-				bra *
+
+*				beq .10
+*				cmp #S.FI.T.SYS
+*				bra *
 
 .10				jsr PS.LoadGetHeader
 				bcs .99
 
 				>LDYAI PS.Load.ROOT
-				jsr K.GetEnv
+				jsr K.GetEnv			ZPPtr3 Trashed
 				bcs .97
 
 				>STYA .21+1
@@ -235,8 +233,8 @@ PS.Load			>PUSHWI K.S.STAT
 				ldx #$ff
 			
 .2				inx
-.21				lda $ffff,x		
-				sta K.Buf256,x
+.21				lda $ffff,x				SELF MODIFIED
+				sta K.IOBuf,x
 				bne .2
 				
 				ldy #0
@@ -251,10 +249,19 @@ PS.Load			>PUSHWI K.S.STAT
 .4				iny
 				inx
 				lda K.IOBuf+128-1,y
-				sta K.Buf256-1,x
+				sta K.IOBuf-1,x
 				bne .4
 				
-				>LDYAI K.Buf256
+				>PUSHWI K.S.STAT
+				>LDYAI K.IOBuf
+				>SYSCALL stat			BANK 1
+				bcs .99
+				
+				lda PS.Load.hMem		Restore ZPPtr3 trashed by GetEnv
+				jsr K.GetMemPtr
+				>STYA ZPPtr3
+				
+				>LDYAI K.IOBuf
 				>SYSCALL NewStr
 				bcs .99
 				stx PS.Load.hBIN
@@ -271,7 +278,7 @@ PS.LoadBIN		>LDYA PS.ArgV
 PS.LoadBIN.YA	jsr BIN.Load
 				bcs .9
 				>STYA ZPPtr4			save PTR to Code Segment
-				
+
 				phy
 				ldy #S.PS.ZP.CODE+1
 				sta (ZPPtr3),y			save pCode HI...
@@ -364,7 +371,7 @@ PS.LoadGetHeader
 				>PUSHBI	O.RDONLY
 				>LDYA PS.ArgV
 				>SYSCALL fopen
-				bcs .99
+				bcs PS.LoadGetHeader.RTS
 				sta .1+1
 				
 				>PUSHWI 128
@@ -378,12 +385,14 @@ PS.LoadGetHeader
 				>SYSCALL fclose
 				pla
 				plp
-.99				rts
+PS.LoadGetHeader.RTS
+				rts
 *--------------------------------------
 PS.Load.ROOT	.AZ "ROOT"
 PS.Load.HEADER	.AZ "#!/"
 PS.Load.hBIN	.BS 1
 PS.Load.ArgSize	.BS 2
+PS.Load.hMem	.BS 1
 *--------------------------------------
 * hBIN + PS.ArgV -> #S.PS.hARGV
 *--------------------------------------
@@ -394,19 +403,25 @@ PS.AddArgV		stz PS.Load.ArgSize
 				beq .10
 				
 				jsr K.GetMemPtr
+				jsr K.strlen
+				iny						+1 for \0
 				>STYA PS.Load.ArgSize
+				ldx #0					ARGC-1
+				.HS 2C
 
+.10				ldx #$ff				ARGC-1
 				>LDYA PS.ArgV
 				>STYA ZPPtr1
-				>STYA ZPPtr2
 
-.1				lda (ZPPtr2)
+.1				lda (ZPPtr1)
 				beq .4
+				
+				inx
 				
 				ldy #0
 				
 .2				iny
-				lda (ZPPtr2),y
+				lda (ZPPtr1),y
 				bne .2
 				
 				tya
@@ -417,83 +432,45 @@ PS.AddArgV		stz PS.Load.ArgSize
 				
 				inc PS.Load.ArgSize+1
 				
-.3				tya
-				sec
-				adc ZPPtr2
-				sta ZPPtr2
-				bcc .1
-				inc ZPPtr2+1
+.3				jsr PS.AddYp1ToPtr1
 				bra .1
 
-.4				>LDYA PS.Load.ArgSize
+.4				txa
+				ldy #S.PS.ARGC
+				sta (ZPPtr3),y
+				
+				>LDYA PS.Load.ArgSize	Add 1 for ending 0
 				iny
 				bne .5
 				inc
 
-				jsr K.GetMem
-				bcs .9
+.5				jsr K.GetMem
+				bcs PS.LoadGetHeader.RTS
 				
-				
-				
-
-
-				bcs .9
+				>STYA ZPPtr2			Target Buffer
+				txa
 				ldy #S.PS.hARGV
 				sta (ZPPtr3),y
 
-				dey						S.PS.ARGC
-				txa
-				dec						don't include $0
-				sta (ZPPtr3),y
+				lda PS.Load.hBIN
+				beq .6
 				
-*				clc
+				jsr K.GetMemPtr
+				>STYA ZPPtr1
+				jsr PS.AddPtr1ToStrV
+				
+.6				>LDYA PS.ArgV
+				>STYA ZPPtr1
+
+.7				lda (ZPPtr1)
+				sta (ZPPtr2)
+				beq .8					Ending \0
+
+				jsr PS.AddPtr1ToStrV
+				bra .7
+				
+.8				clc
 .9				rts				
-*--------------------------------------
-* PS.DupArgs
-*  In:
-*   Y,A = Ptr To Args[]
-*  Out:
-*   A = hMem
-*   X = Count
-*--------------------------------------
-PS.DupArgs		>STYA ZPPtr1
-				
-				>STYA ZPPtr2
-
-				lda #1
-				sta .7+1
-				lda #0
-				sta .8+1			len = 1 for array ending 0
-			
-.1				lda (ZPPtr2)
-				beq .7
-				
-				ldy #0
-				
-.2				iny
-				lda (ZPPtr2),y
-				bne .2
-				
-				tya
-				sec
-				adc .7+1
-				sta .7+1
-				bcc .3
-				
-				inc .8+1
-				
-.3				tya
-				sec
-				adc ZPPtr2
-				sta ZPPtr2
-				bcc .1
-				inc ZPPtr2+1
-				bra .1
-
-.7				ldy #$ff				SELF MODIFIED
-.8				lda #$ff				SELF MODIFIED
-
-				bra PS.DupStrV
 *--------------------------------------
 * PS.DupEnv
 *  In:
@@ -507,22 +484,27 @@ PS.DupEnv		jsr K.GetMemPtr
 				
 				>LDYAI K.ENV.SIZE
 				
-PS.DupStrV		jsr K.GetMem
+				jsr K.GetMem
 				bcs .9
 				
-				>STYA ZPPtr2
+				>STYA ZPPtr2			Target Buffer
 				phx						save hMem
 				
 				jsr PS.SetMemOwner		Set Ownership
-				
-				ldx #0					Count
 				
 .1				lda (ZPPtr1)
 				sta (ZPPtr2)
 				beq .8					Ending \0
 				
-				inx
+				jsr PS.AddPtr1ToStrV
+				bra .1
 				
+.8				pla						hMem
+				
+				clc
+.9				rts
+*--------------------------------------
+PS.AddPtr1ToStrV
 				ldy #0
 				
 .2				iny
@@ -530,26 +512,26 @@ PS.DupStrV		jsr K.GetMem
 				sta (ZPPtr2),y
 				bne .2
 				
+				jsr PS.AddYp1ToPtr1
+				
 				tya
-				sec
-				adc ZPPtr1
-				sta ZPPtr1
-				bcc .3
-				
-				inc ZPPtr1+1
-				
-.3				tya
 				sec
 				adc ZPPtr2
 				sta ZPPtr2
-				bcc .1
+				bcc .8
 				inc ZPPtr2+1
-				bra .1
+
+.8				rts
+*--------------------------------------
+PS.AddYp1ToPtr1	tya
+				sec
+				adc ZPPtr1
+				sta ZPPtr1
+				bcc .8
 				
-.8				pla						hMem
+				inc ZPPtr1+1
 				
-				clc
-.9				rts
+.8				rts
 *--------------------------------------
 PS.SetMemOwner	lda CORE.LastPSID
 				ldy #S.MEM.OWNERPID
@@ -567,43 +549,6 @@ K.GetPSStatus	jsr CORE.GetPSByID
 				>STYA ZPPtr1
 				lda (ZPPtr1)
 .9				rts
-*/--------------------------------------
-* # GetPSStat
-* **In:**
-*  Y,A = Ptr to K.PS.MAX*2+1 bytes buffer
-* ## RETURN VALUE
-*  Buffer filled with PS stats
-*\--------------------------------------
-K.GetPSStat		>STYA ZPPtr1
-
-				ldx #0
-				
-				ldy #1
-				lda CORE.InKernelStats
-				sta (ZPPtr1),y
-				
-				iny
-				
-.1				lda PS.Table.PID,x
-				beq .2
-				
-				lda PS.Table.hPS,x
-				sta (ZPPtr1),y
-				iny
-
-				lda PS.Table.Stats,x
-				sta (ZPPtr1),y
-				iny
-				
-.2				inx
-				cpx #K.PS.MAX
-				bne .1
-				
-.9				tya
-				lsr
-				dec
-				sta (ZPPtr1)
-				rts
 *--------------------------------------
 MAN
 SAVE USR/SRC/SYS/KERNEL.S.PS
