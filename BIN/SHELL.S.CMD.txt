@@ -30,23 +30,24 @@ CMD.Quit		ldy #CMD.hArgVBuf
 				>SYSCALL FreeMem
 .9				rts	
 *--------------------------------------
-* Input : ZPArgVBuf
+* Input : CMD.IntCmd,ZPArgVBuf
 *--------------------------------------
-Cmd.Exec		>LDA.G CMD.IntCmd
-				bmi .2					External
-				
+Cmd.Exec		jsr CMD.StkGet			IF,WHILE,FOR ?
+				bcs .3					no particular context, exec...
 				tax
-				cpx #C.ELSE				always execute ELSE,FI
-				bcs .1
-				
-				jsr CMD.StkGet			IF,WHILE,FOR ?
-				bcs .1					no particular context
-				
+				and #$3F
+				cmp #C.FOR
+				bcs .3					FOR...FI : always execute
+		
+				txa
 				bpl .8 					context is FALSE, skip line
-				
-.1				jmp (J.CMD.INT,x)
+				asl
+				bpl .8					parent context is FALSE, skip line
 
-.2				>PUSHB.G CMD.PSFlags
+.3				>LDA.G CMD.IntCmd
+				bpl .80					Internal
+				
+				>PUSHB.G CMD.PSFlags
 				>LDYA ZPArgVBuf
 				>SYSCALL execv
 				bcs .9
@@ -75,6 +76,9 @@ Cmd.Exec		>LDA.G CMD.IntCmd
 
 .99				sec
 				rts
+
+.80				tax
+				jmp (J.CMD.INT,x)
 *--------------------------------------
 * STARTPROC : intcmd = 0
 *--------------------------------------
@@ -168,7 +172,7 @@ Cmd.INT.CD.1	>STYA ZPPtr1
 				plp
 .9				rts
 *--------------------------------------
-Cmd.Exec.ERRSYN	lda #E.SYN
+Cmd.Exec.ERRSYN	lda #E.SYNTAX
 				sec
 				rts
 *--------------------------------------
@@ -302,9 +306,11 @@ Cmd.INT.SET.GET
 				tax
 				jsr Cmd.GetArgX
 				>SYSCALL GetEnv
+				bcc .1
+				clc
 				rts
 				
-				>PUSHYA					push value
+.1				>PUSHYA					push value
 				>LDA.G CMD.Varname
 				tax
 				jsr Cmd.GetArgX
@@ -500,17 +506,119 @@ Cmd.INT.RD		ldx #1
 				
 .9				jmp Cmd.Exec.ERRSYN
 *--------------------------------------
+Cmd.INT.PUSHD
+.9				jmp Cmd.Exec.ERRSYN
+*--------------------------------------
+Cmd.INT.POPD
+.9				jmp Cmd.Exec.ERRSYN
+*--------------------------------------
+Cmd.INT.BREAK	
+.9				jmp Cmd.Exec.ERRSYN
+*--------------------------------------
+Cmd.INT.CONTINUE	
+.9				jmp Cmd.Exec.ERRSYN
+*--------------------------------------
 Cmd.INT.FOR
-
+.9				jmp Cmd.Exec.ERRSYN
+*--------------------------------------
+Cmd.INT.NEXT	
 .9				jmp Cmd.Exec.ERRSYN
 *--------------------------------------
 Cmd.INT.WHILE	
-Cmd.INT.IF		ldx #1
+Cmd.INT.IF		jsr CMD.StkGet
+				bcs .1					no context...
+
+				and #$40				parent is true ?
+				bra .2
+				
+.1				lda #$40
+.2				>STA.G CMD.Test
+				>DEBUG
+				jsr Cmd.Eval
+				bcs .9
+
+				tax
+
+				>LDA.G CMD.IntCmd
+				cmp #C.WHILE
+				bne .8
+				
+				jsr CMD.StkPushPtr
+				bcs .9
+				
+.8				txa
+				
+				>ORA.G CMD.Test
+				jmp CMD.StkPush
+				
+				clc
+.9				rts
+*--------------------------------------
+Cmd.INT.ELSE	jsr CMD.StkGet
+				bcs .9
+
+				>DEBUG
+				bit #$40				parent is true ?
+				beq .8					yes, skip
+
+				tax
+				and #$3F
+				cmp #C.IF
+				bne .9
+				txa
+				eor #$80				toggle and store at stack ptr
+				sta (pData),y
+				
+.8				clc
+				rts
+				
+.9				lda #E.NOIF
+				sec
+				rts
+*--------------------------------------
+Cmd.INT.FI		jsr CMD.StkPull
+				bcs .9
+				
+				and #$3F
+				cmp #C.IF
+				bne .9
+				
+				clc
+				rts
+				
+.9				lda #E.NOIF
+				sec
+				rts
+*--------------------------------------
+Cmd.INT.LOOP	jsr CMD.StkPull
+				bcs .9
+				tax
+				and #$3F
+				cmp #C.WHILE
+				bne .9
+				
+				txa
+				bpl .1
+				
+				jmp CMD.StkPullPtr
+				
+.1				jsr CMD.StkPull
+				bcs .99
+				jmp CMD.StkPull
+				
+.9				lda #E.NOWHILE
+				sec
+.99				rts				
+*--------------------------------------
+Cmd.Eval		lda #$40				Parent = true
+				>STA.G CMD.Test
+				
+				ldx #1
 				jsr Cmd.GetArgX
 				beq .9
 				
 				>PUSHYA
-				>LDYA L.CMD.IF.TOKEN1
+				>LDYA L.CMD.Eval.TOKEN1
 				jsr Lookup
 
 				bcs .9
@@ -530,7 +638,7 @@ Cmd.INT.IF		ldx #1
 				beq .9
 				
 				>PUSHYA
-				>LDYA L.CMD.IF.TOKEN2	-d -e -f ?
+				>LDYA L.CMD.Eval.TOKEN2	-d -e -f ?
 				jsr Lookup
 
 				bcs .1
@@ -538,7 +646,7 @@ Cmd.INT.IF		ldx #1
 				txa
 				>STA.G CMD.Operator
 				
-				jsr CMD.IF.UNARY
+				jsr CMD.Eval.UNARY
 				bcs .9
 				
 				>EOR.G CMD.Test
@@ -556,13 +664,13 @@ Cmd.INT.IF		ldx #1
 				beq .9
 				
 				>PUSHYA
-				>LDYA L.CMD.IF.TOKEN3	-eq -ne .... ?
+				>LDYA L.CMD.Eval.TOKEN3	-eq -ne .... ?
 				jsr Lookup
 				bcs .9
 				txa
 				>STA.G CMD.Operator
 				
-				jsr CMD.IF.BINARY
+				jsr CMD.Eval.BINARY
 				bcs .9
 
 				>EOR.G CMD.Test
@@ -582,66 +690,55 @@ Cmd.INT.IF		ldx #1
 				ldy #1
 				lda (ZPPTR1),y
 				bne .9
-				
-				>LDA.G CMD.IntCmd
-				cmp #C.WHILE
-				bne .81
-				tax
-				
-				jsr CMD.StkPushPtr
-				bcs .99
-				
-				txa
-				
-.81				>ORA.G CMD.Test
-				jmp CMD.StkPush
+				clc
+				rts
 *--------------------------------------
-CMD.IF.UNARY 	ldx #3
+CMD.Eval.UNARY 	ldx #3
 				jsr Cmd.GetArgX
 				bcs .9					we need one arg
 				
 				>LDA.G CMD.Operator
 				tax
-				jmp (J.CMD.IF.TOKEN2,x)
+				jmp (J.CMD.Eval.TOKEN2,x)
 
 .9				lda #E.SYNTAX
 				sec
 				rts
 				
-CMD.IF.D		jsr CMD.IF.DEF.7
-				bcs CMD.IF.DEF.9
+CMD.Eval.D		jsr CMD.Eval.DEF.7
+				bcs CMD.Eval.DEF.9
 				>LDA.G CMD.Stat+S.STAT.P.TYPE
 				cmp #S.FI.T.DIR
-				bne CMD.IF.DEF.9
-				bra CMD.IF.DEF.8
+				bne CMD.Eval.DEF.9
+				bra CMD.Eval.DEF.8
 	
-CMD.IF.E		jsr CMD.IF.DEF.7
-				bcs CMD.IF.DEF.9
-				bra CMD.IF.DEF.8		DIR or FILE exist
+CMD.Eval.E		jsr CMD.Eval.DEF.7
+				bcs CMD.Eval.DEF.9
+				bra CMD.Eval.DEF.8		DIR or FILE exist
 				
-CMD.IF.F		jsr CMD.IF.DEF.7
-				bcs CMD.IF.DEF.9
+CMD.Eval.F		jsr CMD.Eval.DEF.7
+				bcs CMD.Eval.DEF.9
 
 				>LDA.G CMD.Stat+S.STAT.P.TYPE
 				cmp #S.FI.T.DIR
-				beq CMD.IF.DEF.9
-				bra CMD.IF.DEF.8
+				beq CMD.Eval.DEF.9
+				bra CMD.Eval.DEF.8
 
-CMD.IF.DEF.7	>PUSHEA.G CMD.Stat
+CMD.Eval.DEF.7	>PUSHEA.G CMD.Stat
 				ldx #3
 				jsr Cmd.GetArgX
 				>SYSCALL STAT
 				rts
 			
-CMD.IF.DEF.8	lda #$80				true
+CMD.Eval.DEF.8	lda #$80				true
 				clc
 				rts
 
-CMD.IF.DEF.9	lda #0					false
+CMD.Eval.DEF.9	lda #0					false
 				clc
 				rts
 *--------------------------------------
-CMD.IF.BINARY	ldx #2
+CMD.Eval.BINARY	ldx #2
 				jsr Cmd.GetArgX
 				bcs .9
 
@@ -653,7 +750,7 @@ CMD.IF.BINARY	ldx #2
 				beq .1					=
 
 				cmp #2					!=
-				bne CMD.IF.BINARY.NUM
+				bne CMD.Eval.BINARY.NUM
 				lda #$80
 				>STA.G CMD.Operator
 				
@@ -669,11 +766,11 @@ CMD.IF.BINARY	ldx #2
 				clc
 				rts
 				
-.9				lda #E.SYN
+.9				lda #E.SYNTAX
 				sec
 				rts
 *--------------------------------------
-CMD.IF.BINARY.NUM
+CMD.Eval.BINARY.NUM
 				ldx #2
 				jsr Cmd.GetArgX
 				bcs .9
@@ -699,7 +796,7 @@ CMD.IF.BINARY.NUM
 				lsr
 				tax
 				pla
-				eor CMD.IF.TOKEN3.BITS,x
+				eor CMD.Eval.TOKEN3.BITS,x
 				bne .80
 
 				lda #$80				true
@@ -713,66 +810,6 @@ CMD.IF.BINARY.NUM
 .9				lda #E.SYNTAX
 				sec
 				rts				
-*--------------------------------------
-Cmd.INT.ELSE	jsr CMD.StkGet
-				bcs .9
-				pha
-				and #$7F
-				
-				cmp #C.IF
-				bne .9
-				
-				pla
-				eor #$80
-				sta (pData),y
-				
-				clc
-				rts
-				
-.9				pla
-				lda #E.SYNTAX
-				sec
-				rts
-*--------------------------------------
-Cmd.INT.FI		jsr CMD.StkPull
-				bcs .9
-				
-				and #$7F
-				cmp #C.IF
-				bne .9
-				
-				clc
-				rts
-				
-.9				lda #E.SYNTAX
-				sec
-				rts
-*--------------------------------------
-Cmd.INT.NEXT	
-.9				jmp Cmd.Exec.ERRSYN
-*--------------------------------------
-Cmd.INT.BREAK	
-.9				jmp Cmd.Exec.ERRSYN
-*--------------------------------------
-Cmd.INT.LOOP	jsr CMD.StkPull
-				bcs .9
-				tax
-				and #$7F
-				cmp #C.WHILE
-				bne .9
-				
-				txa
-				bpl .1
-				
-				jmp CMD.StkPullPtr
-				
-.1				jsr CMD.StkPull
-				bcs .99
-				jmp CMD.StkPull
-				
-.9				lda #E.NOWHILE
-				sec
-.99				rts				
 *--------------------------------------
 Cmd.GetEXP		>LDA.G CMD.ArgIndex
 				inc
@@ -796,7 +833,7 @@ Cmd.GetEXP		>LDA.G CMD.ArgIndex
 				jsr Cmd.GetEXP.GetNext
 				
 .2				>PUSHYA
-				>LDYA L.CMD.IF.TOKEN4	+ - .... ?
+				>LDYA L.CMD.Eval.TOKEN4	+ - .... ?
 				jsr Lookup
 
 				bcs .9
@@ -834,7 +871,7 @@ Cmd.GetEXP		>LDA.G CMD.ArgIndex
 				
 Cmd.GetEXP.Op	>LDA.G CMD.Operator
 				tax
-				jmp (J.CMD.IF.TOKEN4,x)
+				jmp (J.CMD.Eval.TOKEN4,x)
 *--------------------------------------
 Cmd.GetEXP.GetNext
 				>INC.G CMD.ArgIndex
