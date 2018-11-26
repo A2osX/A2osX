@@ -551,6 +551,13 @@ Load a file in AUX memory (Stock Objects)
  Y,A = File Length  
  X = hMem of Loaded Object in AUX mem  
 
+# GetPSStat  
+**In:**  
+ Y,A = Ptr to K.PS.MAX*2+1 bytes buffer  
+
+## RETURN VALUE  
+ Buffer filled with PS stats  
+
 # ExecL  
 
 ## C  
@@ -583,13 +590,6 @@ A = Child PSID
 
 ## RETURN VALUE  
  A = Status Byte  
-
-# GetPSStat  
-**In:**  
- Y,A = Ptr to K.PS.MAX*2+1 bytes buffer  
-
-## RETURN VALUE  
- Buffer filled with PS stats  
 
 # Stat  
 Return information about a file  
@@ -656,6 +656,20 @@ return a hFILE to a new FIFO
 CC = OK, CS = ERROR  
 A = hFILE  
 
+# PutChar  
+Print A (char) to StdOut  
+
+## C  
+`int putchar ( int character );`  
+
+## ASM  
+**In:**  
+`lda caracter`  
+`>SYSCALL putchar`  
+
+## RETURN VALUE   
+CC = success  
+
 # FPutC  
 Print A (char) to hFILE  
 
@@ -667,20 +681,6 @@ Print A (char) to hFILE
 `>PUSHB character`  
 `lda stream`  
 `>SYSCALL fputc`  
-
-## RETURN VALUE   
-CC = success  
-
-# PutChar  
-Print A (char) to StdOut  
-
-## C  
-`int putchar ( int character );`  
-
-## ASM  
-**In:**  
-`lda caracter`  
-`>SYSCALL putchar`  
 
 ## RETURN VALUE   
 CC = success  
@@ -719,8 +719,8 @@ Prints C-Style String
 
 ## C  
 `int printf ( const char * format, ... );`  
-`int sprintf ( char * str, const char * format, ... );`  
 `int fprintf ( hFILE stream, const char * format, ... );`  
+`int sprintf ( char * str, const char * format, ... );`  
 
 ## ASM  
 **In:**  
@@ -1109,6 +1109,22 @@ CC : success
  X = hMem of Full Path  
 CS : A = Error Code  
 
+# StrMatch  
+Compare a String against pattern (e.g. '*test?.txt')  
+
+## C  
+`int * strmatch ( char * s, const char * pattern );`  
+
+## ASM  
+**In:**   
+`>PUSHWI pattern`  
+`>LDYAI s`  
+`>SYSCALL strmatch`  
+
+## RETURN VALUE   
+CC : match  
+CS : no match  
+
 # StrLen  
 Returns Length of C-String  
 
@@ -1151,22 +1167,6 @@ Copy string
 
 ## RETURN VALUE   
 Y,A = destination  
-
-# StrMatch  
-Compare a String against pattern (e.g. '*test?.txt')  
-
-## C  
-`int * strmatch ( char * s, const char * pattern );`  
-
-## ASM  
-**In:**   
-`>PUSHWI pattern`  
-`>LDYAI s`  
-`>SYSCALL strmatch`  
-
-## RETURN VALUE   
-CC : match  
-CS : no match  
 
 # StrUpr/StrLwr  
 Convert string to UPPERCASE/lowercase  
