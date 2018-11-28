@@ -269,15 +269,21 @@ OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
 | PWD       | Working | Print Working Directory |
 | DATE      | Working | |
 | ECHO      | Working | \b,\e,\f,\n,\\\ and \\% supported |
+|           |         | -N : Suppress \r\n |
 | EXIT      | Working | exit shell |
 | PAUSE     | Working | Wait until CR |
+| PUSHD     | Working | Save actual working directory |
+|           |         | PUSHD <dir> do aslo a CD to <dir> |
+| POPD      | Working | Restore previously saved working directory |
 | READ      | Working | -S : no echo (password) |
 |           |         | -P : "prompt message"   |
 | TIME      | Working | |
 | SET       | Working | -X toggle debug mode |
 | SLEEP     | Working | Wait <count> 10th sec |
 | STARTPROC | Working | Used in A2osX.startup |
-| IF ELSE FI | Working | [ -d direxists ] |
+| SHIFT     | Working | Remove $1 from cmd line |
+| ----      | ------  | ------- |
+| IF .. ELSE .. FI | Working | [ -d direxists ] |
 |           |         | [ -e fileordirexists ] |
 |           |         | [ -f fileexists ] |
 |           |         | [ string1 = string2 ] |
@@ -288,8 +294,9 @@ OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
 |           |         | [ int32 -le int32 ] |
 |           |         | [ int32 -gt int32 ] |
 |           |         | [ int32 -ge int32 ] |
-| SHIFT     | Working | Remove $1 from cmd line |
-| WHILE BREAK LOOP | Working | [ same as IF ] |
+| WHILE .. LOOP | Working | [ same tests as IF ] |
+| BREAK      |  | |
+| CONTINUE   |  | |
 
 ## Shell variables:
 
