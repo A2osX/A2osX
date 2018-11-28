@@ -302,7 +302,6 @@ OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
 
 | Name  | Status  | Comment |
 | ----  | ------  | ------- |
-| $PWD  | Working | 'Working Directory' |
 | $0    | Working | Command Full Path |
 | $1-$9 | Working | Arg[n] |
 | $*    | Working | All Args |
@@ -311,6 +310,8 @@ OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
 | $@    | Working | Parent PID |
 | $$    | Working | PID |
 | $!    | Working | Child PID |
+| $UID  | Working | PS Owner UID |
+| $PWD  | Working | Working Directory |
 
 note : '$VAR' does NOT expand Variable
 
