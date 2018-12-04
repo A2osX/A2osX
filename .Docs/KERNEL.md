@@ -584,6 +584,19 @@ A = Child PSID
 ## RETURN VALUE  
 A = Child PSID  
 
+# ExecL  
+
+## C  
+`int kill(short int pid, short int sig);`  
+
+## ASM  
+`>PUSHB sig`  
+`lda pid`  
+`>SYSCALL kill`  
+
+## RETURN VALUE  
+A = Child PSID  
+
 # GetPSStatus  
 **In:**  
  A = PID  

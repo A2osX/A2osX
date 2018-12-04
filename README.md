@@ -372,6 +372,7 @@ note : '$VAR' does NOT expand Variable
 | | | -N : Number all output lines | |
 | | | -S : Suppress repeated empty output lines | |
 | EDIT | Working | still missing : find/replace | 0.92 |
+| KILL | Working | KILL <signal> PID | 0.92 |
 | FORMAT | In Progress | -L : Low-Level Format | 0.92 |
 | | | -1..9 : Catalog Size (block count) | |
 | CHTYP | Working | -C : Continue On Error | 0.92 |
