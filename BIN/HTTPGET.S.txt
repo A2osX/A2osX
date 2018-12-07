@@ -8,6 +8,7 @@ AUTO 4,1
 *--------------------------------------
 				.INB INC/MACROS.I
 				.INB INC/A2OSX.I
+				.INB INC/MLI.E.I
 				.INB INC/ETH.I
 				.INB INC/LIBTCPIP.I
 				.INB INC/NET.HTTP.I
@@ -18,8 +19,8 @@ TIMEOUT.MAX		.EQ 100					10 sec.
 ZPIPCfgPtr		.EQ ZPBIN
 ZPHostPtr		.EQ ZPBIN+2
 ZPPtr			.EQ ZPBIN+4
-ZPBufPtr		.EQ ZPBIN+6
-ZPBufLen		.EQ ZPBIN+8
+ZPReqBufPtr		.EQ ZPBIN+6
+ZPReqBufLen		.EQ ZPBIN+8
 ZPRespBufPtr	.EQ ZPBIN+10
 *--------------------------------------
 *			File Header (16 Bytes)
@@ -73,7 +74,7 @@ CS.RUN			>LIBCALL hLIBTCPIP,LIBTCPIP.GET.IPCFG	is TCPIP loaded ?
 				>LDYA L.MSG.IPKO
 				>SYSCALL puts
 				lda #E.SYN
-				sec				
+				sec
 				rts
 				
 CS.RUN.IPOK		ldy #S.IPCFG.IP+3
@@ -148,23 +149,26 @@ CS.RUN.HOSTOK	>INC.G ArgIndex
 				>SYSCALL ArgV
 .9				bcs CS.RUN.ESYN
 
-				>STYA ZPBufPtr
+				>STYA ZPReqBufPtr
 				>SYSCALL strlen
-				>STYA ZPBufLen
+				>STYA ZPReqBufLen
 .8				bra CS.RUN.PORTOK
 				
 .2				cmp #'F'
 				bne CS.RUN.ESYN
+				
 				>INC.G ArgIndex
 				>SYSCALL ArgV
 				bcs CS.RUN.RTS
+				
 				>SYSCALL LoadTxtFile
 				bcs .9
-				>STYA ZPBufLen
+				
+				>STYA ZPReqBufLen
 				txa
 				>STA.G hReqBuf
 				>SYSCALL GetMemPtr
-				>STYA ZPBufPtr
+				>STYA ZPReqBufPtr
 				
 CS.RUN.PORTOK	>PUSHW ZPHostPtr			
 				>PUSHW SA.REMOTE+S.SOCKADDR.PORT
@@ -217,32 +221,8 @@ CS.RUN.GET		>SLEEP
 				jsr CS.RUN.REQUEST
 				bcs .99
 
-				jsr Init.Timeout
-				
-.1				>SLEEP
-				
-				>PUSHWI RESP.BUFSIZE
-				>PUSHW ZPRespBufPtr
-				>LDA.G hSocket
-				>LIBCALL hLIBTCPIP,LIBTCPIP.Read
-				bcc .2
-
-				tay
-				bne CS.RUN.SKTERR
-				
-				>SLEEP					no response
-				jsr Wait.Timeout
-				bcc .1
-				jmp CS.RUN.IOERR
-				
-.2				>PUSHYA					len
-				>PUSHW ZPRespBufPtr
-				ldy #S.PS.hStdOut
-				lda (pPs),y
-				>SYSCALL fwrite
-				bcs .99				
-
-				bra .1
+				jsr CS.RUN.RESPONSE
+				bcs .99
 				
 .9				lda #0
 				sec
@@ -266,9 +246,11 @@ CS.RUN.IOERR	pha
 				sec
 				rts
 *--------------------------------------
+CS.RUN.CONNECT
+
+
+*--------------------------------------
 CS.RUN.REQUEST	jsr Init.Timeout
-				>LDYA ZPBufPtr
-				>SYSCALL puts
 				
 .10				>PUSHWI HTTP.GET1.LEN
 				>PUSHW L.HTTP.GET1
@@ -282,11 +264,12 @@ CS.RUN.REQUEST	jsr Init.Timeout
 				jsr Wait.TimeOut
 				bcc .10
 				
-.99				sec
+.99				lda #MLI.E.IO
+				sec
 				rts
 
-.1				>PUSHW ZPBufLen
-				>PUSHW ZPBufPtr
+.1				>PUSHW ZPReqBufLen
+				>PUSHW ZPReqBufPtr
 				jsr .8
 				bcs .9
 				
@@ -308,6 +291,47 @@ CS.RUN.REQUEST	jsr Init.Timeout
 .8				>LDA.G hSocket
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Write
 .9				rts
+*--------------------------------------
+CS.RUN.RESPONSE jsr Init.Timeout
+
+.1				>SLEEP
+				
+				>PUSHWI RESP.BUFSIZE
+				>PUSHW ZPRespBufPtr
+				>LDA.G hSocket
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Read
+				bcc .2
+
+				tay
+				bne .8
+				
+				jsr Wait.Timeout
+				bcc .1
+				
+				bra .80
+				
+.2				>PUSHYA					len
+				>PUSHW ZPRespBufPtr
+				ldy #S.PS.hStdOut
+				lda (pPs),y
+				>SYSCALL fwrite
+				bcs .9
+
+				>INC.G bResponse
+				bra .1
+				
+.8				cmp #MLI.E.IO			SKT Close ?
+				bne .9
+				
+.80				>LDA.G bResponse
+				beq .99
+				clc
+				rts
+				
+.99				lda #MLI.E.IO
+.9				sec
+
+				rts
 *--------------------------------------
 CS.DOEVENT		lda (pEvent)
 				bpl .9					is it a TIMER event?
@@ -398,6 +422,7 @@ DS.START
 ArgIndex		.BS 1
 hReqBuf			.BS 1
 hRespBuf		.BS 1
+bResponse		.BS 1
 hSocket			.BS 1
 TimeOut			.BS 1
 DS.END
