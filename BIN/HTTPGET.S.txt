@@ -16,12 +16,19 @@ AUTO 4,1
 RESP.BUFSIZE	.EQ 1024
 TIMEOUT.MAX		.EQ 100					10 sec.
 *--------------------------------------
-ZPIPCfgPtr		.EQ ZPBIN
-ZPHostPtr		.EQ ZPBIN+2
-ZPPtr			.EQ ZPBIN+4
-ZPReqBufPtr		.EQ ZPBIN+6
-ZPReqBufLen		.EQ ZPBIN+8
-ZPRespBufPtr	.EQ ZPBIN+10
+				.DUMMY
+				.OR ZPBIN
+ZS.START
+ZPIPCfgPtr		.BS 2
+ZPHostPtr		.BS 2
+ZPPtr			.BS 2
+ZPReqBufPtr		.BS 2
+ZPReqBufLen		.BS 2
+ZPEncodedBufPtr	.BS 2
+ZPEncodedBufLen	.BS 2
+ZPRespBufPtr	.BS 2
+ZS.END
+				.ED
 *--------------------------------------
 *			File Header (16 Bytes)
 *--------------------------------------
@@ -34,7 +41,7 @@ CS.START		cld
 				.DA CS.END-CS.START		Code Length To Relocate
 				.DA DS.END-DS.START		Data Segment to Allocate
 				.DA #16					SS
-				.DA #12					ZP
+				.DA #ZS.END-ZS.START	Zero Page Size
 				.DA 0
 *--------------------------------------
 .1				.DA CS.INIT
@@ -216,7 +223,14 @@ CS.RUN.OPENSKT	>PUSHBI 0				no protocol
 				txa
 				>STA.G hRespBuf
 
-CS.RUN.GET		>SLEEP
+CS.RUN.GET		jsr CS.RUN.ENCODE
+				bcs .99
+				
+*				>PUSHW ZPEncodedBufLen
+*				>PUSHW ZPEncodedBufPtr
+*				ldy #S.PS.hStdOut
+*				lda (pPs),y
+*				>SYSCALL fwrite
 				
 				jsr CS.RUN.REQUEST
 				bcs .99
@@ -247,8 +261,96 @@ CS.RUN.IOERR	pha
 				rts
 *--------------------------------------
 CS.RUN.CONNECT
+*--------------------------------------
+CS.RUN.ENCODE	>LDYA ZPReqBufPtr
+				>STYA ZPPtr
 
+.10				lda (ZPPtr)
+				beq .4
 
+				inc ZPEncodedBufLen
+				bne .1
+				inc ZPEncodedBufLen+1
+				
+.1	            inc ZPPtr
+				bne .11
+				inc ZPPtr+1
+				
+.11				jsr CS.RUN.TOENCODE
+				bcc .10
+				
+.3				lda ZPEncodedBufLen
+				clc
+				adc #2
+				sta ZPEncodedBufLen
+				bcc .10
+				inc ZPEncodedBufLen+1
+				bra .10
+
+.4				>LDYA ZPEncodedBufLen
+				>SYSCALL GetMem
+				bcs .9
+				
+				>STYA ZPEncodedBufPtr
+				>STYA ZPPtr
+				txa
+				>STA.G hEncodedBuf
+
+.5				lda (ZPReqBufPtr)
+				beq .8
+				
+				inc ZPReqBufPtr
+				bne .6
+				inc ZPReqBufPtr+1
+				
+.6				jsr CS.RUN.TOENCODE
+				bcc .7
+				
+				jsr CS.RUN.ADDBYTETOBUF
+				bra .5
+				
+.7				jsr CS.RUN.ADDTOBUF
+				bra .5
+				
+.8				clc
+.9				rts				
+*--------------------------------------
+CS.RUN.TOENCODE	ldx #URI.ToEncode.Cnt-1
+				
+.1				cmp URI.ToEncode,x
+				beq .9					CS
+				dex
+				bpl .1
+				clc
+.9				rts
+*--------------------------------------
+CS.RUN.ADDBYTETOBUF
+				pha
+				lda #'%'
+				jsr CS.RUN.ADDTOBUF
+				pla
+				pha
+				lsr
+				lsr
+				lsr
+				lsr
+				ora #$30
+				cmp #$3A
+				bcc .1
+				adc #6
+.1				jsr CS.RUN.ADDTOBUF
+				pla
+				and #$0F
+				ora #$30
+				cmp #$3A
+				bcc CS.RUN.ADDTOBUF
+				adc #6
+*--------------------------------------
+CS.RUN.ADDTOBUF	sta (ZPPtr)
+				inc ZPPtr
+				bne .8
+				inc ZPPtr+1
+.8				rts				
 *--------------------------------------
 CS.RUN.REQUEST	jsr Init.Timeout
 				
@@ -268,8 +370,8 @@ CS.RUN.REQUEST	jsr Init.Timeout
 				sec
 				rts
 
-.1				>PUSHW ZPReqBufLen
-				>PUSHW ZPReqBufPtr
+.1				>PUSHW ZPEncodedBufLen
+				>PUSHW ZPEncodedBufPtr
 				jsr .8
 				bcs .9
 				
@@ -305,10 +407,13 @@ CS.RUN.RESPONSE jsr Init.Timeout
 				tay
 				bne .8
 				
-				jsr Wait.Timeout
-				bcc .1
+				>LDA.G bResponse
+				bne .81
 				
-				bra .80
+				jsr Wait.Timeout
+				bcs .99
+				
+				bra .1
 				
 .2				>PUSHYA					len
 				>PUSHW ZPRespBufPtr
@@ -325,7 +430,7 @@ CS.RUN.RESPONSE jsr Init.Timeout
 				
 .80				>LDA.G bResponse
 				beq .99
-				clc
+.81				clc
 				rts
 				
 .99				lda #MLI.E.IO
@@ -355,12 +460,17 @@ CS.QUIT			>LDA.G hSocket
 				
 				>SYSCALL freemem
 				
-.2				>LDA.G hRespBuf
+.2				>LDA.G hEncodedBuf
 				beq .3
 				
 				>SYSCALL freemem
 				
-.3				lda hLIBTCPIP
+.3				>LDA.G hRespBuf
+				beq .4
+				
+				>SYSCALL freemem
+				
+.4				lda hLIBTCPIP
 				beq .8
 				>SYSCALL UnloadLib
 				
@@ -402,6 +512,10 @@ SA.REMOTE		.DA #AF.INET			S.SOCKADDR.AF
 				.BS 4					S.SOCKADDR.ADDR
 				.DA TCP.PORT.HTTP
 *--------------------------------------
+URI.ToEncode	.DA #C.LF,#C.CR,#C.SPACE,#'"'
+				.AS "%-.\^_`{|}~"
+URI.ToEncode.Cnt	.EQ	*-URI.ToEncode
+*--------------------------------------
 HTTP.GET1		.AS "GET /"
 HTTP.GET1.LEN	.EQ *-HTTP.GET1
 HTTP.GET2		.AS " HTTP/1.1"
@@ -421,6 +535,7 @@ HTTP.GET3.LEN	.EQ *-HTTP.GET3
 DS.START
 ArgIndex		.BS 1
 hReqBuf			.BS 1
+hEncodedBuf		.BS 1
 hRespBuf		.BS 1
 bResponse		.BS 1
 hSocket			.BS 1
