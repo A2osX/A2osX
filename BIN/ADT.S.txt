@@ -1,0 +1,454 @@
+NEW
+PREFIX
+AUTO 4,1
+				.LIST OFF
+				.OP	65C02
+				.OR	$2000
+				.TF BIN/DEV/ADT
+*--------------------------------------
+				.INB INC/MACROS.I
+				.INB INC/A2OSX.I
+				.INB INC/MLI.E.I
+				.INB INC/ETH.I
+				.INB INC/LIBTCPIP.I
+*--------------------------------------
+RESP.BUFSIZE	.EQ 1024
+TIMEOUT.MAX		.EQ 100					10 sec.
+*--------------------------------------
+				.DUMMY
+				.OR ZPBIN
+ZS.START
+ZPIPCfgPtr		.BS 2
+ZPHostPtr		.BS 2
+ZPPtr			.BS 2
+ZPCnt			.BS 2
+ZPReqBufPtr		.BS 2
+ZPReqBufLen		.BS 2
+ZPRespBufPtr	.BS 2
+ZPPayloadPtr	.BS 2
+ZPPayloadLen	.BS 2
+ZS.END
+				.ED
+*--------------------------------------
+*			File Header (16 Bytes)
+*--------------------------------------
+CS.START		cld
+				jmp (.1,x)
+				.DA #$61				6502,Level 1 (65c02)
+				.DA #1					BIN Layout Version 1
+				.DA #S.PS.F.EVENT		S.PS.F
+				.DA #0
+				.DA CS.END-CS.START		Code Length To Relocate
+				.DA DS.END-DS.START		Data Segment to Allocate
+				.DA #16					SS
+				.DA #ZS.END-ZS.START	Zero Page Size
+				.DA 0
+*--------------------------------------
+.1				.DA CS.INIT
+				.DA CS.RUN
+				.DA CS.DOEVENT		
+				.DA	CS.QUIT
+L.LIBTCPIP		.DA LIBTCPIP
+L.SA.LOCAL		.DA SA.LOCAL
+L.SA.REMOTE		.DA SA.REMOTE
+L.SA.REMOTE.AD	.DA SA.REMOTE+S.SOCKADDR.ADDR
+L.MSG.IPKO		.DA MSG.IPKO
+L.MSG.USAGE		.DA MSG.USAGE
+L.MSG.UNKNOWN	.DA MSG.UNKNOWN
+L.MSG.HOSTOK	.DA MSG.HOSTOK
+L.MSG.SKTKO		.DA MSG.SKTKO
+L.MSG.SKTOK		.DA MSG.SKTOK
+L.MSG.SKTERR	.DA MSG.SKTERR
+L.MSG.IOERR		.DA MSG.IOERR
+L.ADT.DIR		.DA ADT.DIR
+				.DA 0
+*--------------------------------------
+CS.INIT			>LDYA L.LIBTCPIP
+				>SYSCALL LoadLib
+				bcs .9
+				sta hLIBTCPIP
+
+.9				rts
+*--------------------------------------
+CS.RUN			>LIBCALL hLIBTCPIP,LIBTCPIP.GET.IPCFG	is TCPIP loaded ?
+				>STYA ZPIPCfgPtr
+				
+				lda (ZPIPCfgPtr)		Configured ?
+				bmi CS.RUN.IPOK
+				
+				>LDYA L.MSG.IPKO
+				>SYSCALL puts
+				lda #E.SYN
+				sec
+				rts
+				
+CS.RUN.IPOK		ldy #S.IPCFG.IP+3
+				ldx #3
+				
+.1				lda (ZPIPCfgPtr),y
+				sta SA.LOCAL+S.SOCKADDR.ADDR,x
+				dey
+				dex
+				bpl .1
+				
+				>INC.G ArgIndex
+				>SYSCALL ArgV
+				bcs .9
+
+				>STYA ZPHostPtr
+				jsr Init.Timeout
+
+.2				>PUSHW L.SA.REMOTE.AD
+				
+				>PUSHW ZPHostPtr
+				>LIBCALL hLIBTCPIP,LIBTCPIP.HST.GETBYNAME
+				bcc CS.RUN.HOSTOK
+				>SLEEP
+				jsr Wait.Timeout
+				bcc .2
+
+				>PUSHW ZPHostPtr
+				>PUSHBI 2
+				>LDYA L.MSG.UNKNOWN
+				>SYSCALL printf
+				bra CS.RUN.ESYN
+				
+.9				>PUSHBI 0
+				>LDYA L.MSG.USAGE
+				>SYSCALL printf
+
+CS.RUN.ESYN		lda #E.SYN
+				sec				
+CS.RUN.RTS		rts
+
+CS.RUN.HOSTOK	>INC.G ArgIndex
+				>SYSCALL ArgV
+				bcc .10
+				jmp CS.RUN.PORTOK
+				
+.10				>STYA ZPPtr
+				lda (ZPPtr)
+				cmp #'-'
+				beq .1
+				
+				>LDYA ZPPtr							
+				>SYSCALL atoi
+				bcs CS.RUN.RTS
+				>STYA SA.REMOTE+S.SOCKADDR.PORT
+				
+				>INC.G ArgIndex
+				>SYSCALL ArgV
+				bcs .8
+				
+				>STYA ZPPtr
+				lda (ZPPtr)
+				cmp #'-'
+				bne CS.RUN.ESYN
+				
+.1				ldy #1
+				lda (ZPPtr),y
+				cmp #'U'
+				bne .2
+				
+				>INC.G ArgIndex
+				>SYSCALL ArgV
+.9				bcs CS.RUN.ESYN
+
+				>STYA ZPReqBufPtr
+				>SYSCALL strlen
+				>STYA ZPReqBufLen
+.8				bra CS.RUN.PORTOK
+				
+.2				cmp #'F'
+				bne CS.RUN.ESYN
+				
+				>INC.G ArgIndex
+				>SYSCALL ArgV
+				bcs CS.RUN.RTS
+				
+CS.RUN.PORTOK	>PUSHW ZPHostPtr			
+				>PUSHW SA.REMOTE+S.SOCKADDR.PORT
+
+				ldx #3
+				
+.1				>PUSHB SA.REMOTE+S.SOCKADDR.ADDR,x
+				dex
+				bpl .1
+				
+				>PUSHBI 8
+				>LDYA L.MSG.HOSTOK
+				>SYSCALL printf
+		
+CS.RUN.OPENSKT	>PUSHBI 0				no protocol
+				lda #S.SOCKET.T.DGRAM
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Socket
+				bcs .9
+
+				>STA.G hSocket
+				pha
+				>PUSHW L.SA.LOCAL
+				pla
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Bind
+				bcc .2
+				
+.9				>LDYA L.MSG.SKTKO
+				>SYSCALL puts
+				lda #E.SYN
+				sec				
+				rts
+				
+.2				>PUSHW L.SA.REMOTE
+				>LDA.G hSocket
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Connect
+				bcs .9
+				
+				>LDYA L.MSG.SKTOK
+				>SYSCALL puts
+				
+				>LDYAI RESP.BUFSIZE
+				>SYSCALL getmem
+				bcs .9
+				>STYA ZPRespBufPtr
+				txa
+				>STA.G hRespBuf
+
+CS.RUN.GET		jsr CS.RUN.DIR
+				bcs .99
+
+				jsr CS.RUN.DIRDECODE
+				bcs .99
+				
+.9				lda #0
+				sec
+.99				rts
+*--------------------------------------
+CS.RUN.SKTERR	pha
+				>PUSHA
+				>PUSHBI 1
+				>LDYA L.MSG.SKTERR
+				>SYSCALL printf
+				pla
+				sec
+				rts
+*--------------------------------------
+CS.RUN.IOERR	pha
+				>PUSHA
+				>PUSHBI 1
+				>LDYA L.MSG.IOERR
+				>SYSCALL printf
+				pla
+				sec
+				rts
+*--------------------------------------
+CS.RUN.DIR		jsr Init.Timeout
+				
+.10				>PUSHWI ADT.DIR.LEN
+				>PUSHW L.ADT.DIR
+
+				>LDA.G hSocket
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Send
+				bcc .8
+				tay
+				bne .99
+				
+				>SLEEP
+				jsr Wait.TimeOut
+				bcc .10
+				
+.99				lda #MLI.E.IO
+				sec
+				rts
+
+.8				clc
+				rts
+*--------------------------------------
+CS.RUN.DIRDECODE
+				jsr Init.Timeout
+
+.1				>SLEEP
+				
+				>LDA.G hSocket
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Recv
+				bcc .2
+
+				tay
+				bne .8
+				
+				>LDA.G bResponse
+				bne .81
+				
+				jsr Wait.Timeout
+				bcs .99
+				
+				bra .1
+				
+.2				>STA.G hFrame
+				>SYSCALL GetMemPtr
+				>STYA ZPRespBufPtr
+
+				ldy #S.UDP+1
+				lda (ZPRespBufPtr),y
+				cmp #$C1
+				bne .99
+				
+				iny
+				lda (ZPRespBufPtr),y
+				sta ZPPayloadLen
+				
+				iny
+				lda (ZPRespBufPtr),y
+				sta ZPPayloadLen+1
+				
+				iny
+				lda (ZPRespBufPtr),y
+				cmp #$D3
+				bne .99
+				
+				>DEBUG
+				jsr CS.RUN.UNRLE
+
+				>PUSHW ZPPayloadLen
+				>PUSHW ZPPayloadPtr
+				ldy #S.PS.hStdOut
+				lda (pPs),y
+				>SYSCALL fwrite
+				
+				>INC.G bResponse
+				bra .1
+				
+.8				cmp #MLI.E.IO			SKT Close ?
+				bne .9
+				
+.80				>LDA.G bResponse
+				beq .99
+.81				clc
+				rts
+				
+.99				lda #MLI.E.IO
+.9				sec
+
+				rts
+*--------------------------------------
+CS.RUN.UNRLE	>LDYA ZPPayloadLen
+				>SYSCALL getmem
+				bcs .9
+				
+				>STYA ZPPayloadPtr
+				>STYA ZPPtr
+				txa
+				>STA.G hPayloadBuf
+				
+				lda ZPPayloadLen
+				eor #$ff
+				sta ZPCnt
+
+				lda ZPPayloadLen+1
+				eor #$ff
+				sta ZPCnt+1
+				
+				ldx #0
+				ldy #S.UDP+8
+				
+.1				inc ZPCnt
+				bne .2
+				inc ZPCnt+1
+				beq .8
+				
+.2				txa
+				clc
+				adc (ZPRespBufPtr),y
+				tax
+				jsr .80
+				iny
+				bne .3
+				inc ZPRespBufPtr+1
+				
+.3				bra .1				
+
+.8				clc				
+.9				rts
+
+.80				sta (ZPPtr)
+				inc ZPPtr
+				bne .81
+				inc ZPPtr+1
+.81				rts
+*--------------------------------------
+CS.DOEVENT		lda (pEvent)
+				bpl .9					is it a TIMER event?
+				
+				>LDA.G TimeOut
+				beq .9
+				
+				dec
+				sta (pData),y
+				
+.9				sec						do not discard TIMER event
+				rts
+*--------------------------------------
+CS.QUIT			>LDA.G hSocket
+				beq .1
+
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Shutdown
+				
+.1				lda hLIBTCPIP
+				beq .8
+				>SYSCALL UnloadLib
+				
+.8				clc
+				rts
+*--------------------------------------
+Init.Timeout	lda #TIMEOUT.MAX
+				>STA.G TimeOut
+				rts
+*--------------------------------------
+Wait.TimeOut	sec
+				>LDA.G TimeOut
+				beq .9
+
+				clc
+.9				rts
+*--------------------------------------
+CS.END
+LIBTCPIP		.AZ "libtcpip"
+hLIBTCPIP		.BS 1
+MSG.IPKO		.AZ "TCP/IP Not Loaded/Configured."
+MSG.USAGE		.AS "Usage : ADT <ip|host> [port]\r\n"
+				.AS "        -U Url\r\n" 
+				.AZ "        -F UrlFile\r\n" 
+MSG.UNKNOWN		.AZ "%s: Unknown host\r\n"
+MSG.HOSTOK		.AZ "Connecting to %d.%d.%d.%d:%D (%s)..."
+MSG.SKTKO		.AZ "Failed to Open Socket."
+MSG.SKTOK		.AZ "Connected."
+MSG.SKTERR		.AZ "Socket Error : $%h\r\n"
+MSG.IOERR		.AZ "I/O Error : $%h\r\n"
+*--------------------------------------
+SA.LOCAL		.DA #AF.INET			S.SOCKADDR.AF
+				.BS 1
+				.BS 4					S.SOCKADDR.ADDR
+				.BS 2					S.SOCKADDR.PORT
+*--------------------------------------
+SA.REMOTE		.DA #AF.INET			S.SOCKADDR.AF
+				.BS 1
+				.BS 4					S.SOCKADDR.ADDR
+				.DA 6502
+*--------------------------------------
+ADT.DIR			.HS C10100C4040101
+ADT.DIR.LEN		.EQ *-ADT.DIR
+*--------------------------------------
+				.DUMMY
+				.OR 0
+DS.START
+ArgIndex		.BS 1
+hSocket			.BS 1
+hFrame			.BS 1
+hPayloadBuf		.BS 1
+hRespBuf		.BS 1
+bResponse		.BS 1
+TimeOut			.BS 1
+DS.END
+				.ED
+*--------------------------------------
+MAN
+SAVE USR/SRC/BIN/ADT.S
+ASM
