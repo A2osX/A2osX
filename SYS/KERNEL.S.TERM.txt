@@ -3,32 +3,33 @@ PREFIX
 AUTO 4,1
 *--------------------------------------
 CURSOR.BLINK.SPEED	.EQ 2
-ESCSEQ.MAXLEN	.EQ 16
+INBUF.MAXLEN	.EQ 32
 OUTBUF.MAXLEN	.EQ 32
-IACBUF.MAXLEN	.EQ 32
 *--------------------------------------
 ZPIOCTL			.EQ ZPDRV
-ZPTTYPtr		.EQ ZPDRV+2
-ZPTmpWord		.EQ ZPDRV+4
-ZPTmpBool		.EQ ZPDRV+6
-ZPBufPtr		.EQ ZPDRV+8
-ZPCount			.EQ ZPDRV+10
-ZPBufBaseL1		.EQ ZPDRV+12
-ZPBufBaseL2		.EQ ZPDRV+14
-ZPScrBaseL1		.EQ ZPDRV+16
-ZPScrBaseL2		.EQ ZPDRV+18
+ZPTTYEnvPtr		.EQ ZPDRV+2
+ZPTTYBufPtr		.EQ ZPDRV+4
+ZPBufPtr		.EQ ZPDRV+10
+ZPCount			.EQ ZPDRV+12
+ZPBufBaseL1		.EQ ZPDRV+14
+ZPBufBaseL2		.EQ ZPDRV+16
+ZPScrBaseL1		.EQ ZPDRV+18
+ZPScrBaseL2		.EQ ZPDRV+20
+ZPTmpWord		.EQ ZPDRV+22
+ZPTmpBool		.EQ ZPDRV+24
 *--------------------------------------
 DRV.TERM		cld
 				>STYA pIOCTL
 
 				ldy #S.FD.DEV.BUFPTR
 				lda (pFD),y
-				sta ZPTTYPtr
+				sta ZPTTYEnvPtr
 				iny
 				lda (pFD),y
-				sta ZPTTYPtr+1
+				sta ZPTTYEnvPtr+1
 				
-				lda (ZPTTYPtr)			S.TTY.DEVID
+				ldy #S.TTY.DEVID
+				lda (ZPTTYEnvPtr),y
 				cmp A2osX.ASCREEN
 				beq .1					CS
 
@@ -47,28 +48,31 @@ DRV.TERM		cld
 				.DA DRV.TERM.READ
 				.DA DRV.TERM.WRITE
 *--------------------------------------
-DRV.TERM.STATUS	ldy #S.IOCTL.STATCODE
+DRV.TERM.STATUS	ldy #S.IOCTL.BUFPTR
+				lda (ZPIOCTL),y
+				sta ZPBufPtr
+				iny
+				lda (ZPIOCTL),y
+				sta ZPBufPtr+1
+				
+				ldy #S.IOCTL.STATCODE
 				lda (ZPIOCTL),y
 				beq .1
 				
 				cmp #S.IOCTL.STATCODE.GETDIB
 				bne .9
 				
-				ldx #S.DIB-1
+				ldy #S.DIB-1
 				.HS 2C					bit abs
-.1				ldx #3
+.1				ldy #3
 
-				ldy #S.IOCTL.BUFPTR
-				lda (ZPIOCTL),y
-				sta .3+1
-				iny
-				lda (ZPIOCTL),y
-				sta .3+2
+.2				lda DRV.TERM.DIB,y
+.3				sta (ZPBufPtr),y		SELF MODIFIED
+				dey
+				bne .2
 				
-.2				lda DRV.TERM.DIB,x
-.3				sta $ffff,x				SELF MODIFIED
-				dex
-				bpl .2
+				ldy #S.TTY.STATUS
+				lda (ZPTTYEnvPtr),y
 				
 				clc
 				rts
@@ -95,16 +99,17 @@ DRV.TERM.OPEN	ldx #0
 				rts
 				
 .2				sta A2osX.SCRNDEVS,x	DEV.ID in A
-				sta (ZPTTYPtr)
+				ldy #S.TTY.DEVID
+				sta (ZPTTYEnvPtr),y
 				
 				ldy #S.TTY.STATUS
 				
-				lda (ZPTTYPtr),y
+				lda (ZPTTYEnvPtr),y
 				bit #S.DIB.S.OPENED
 				bne .9
 				ora #S.DIB.S.OPENED
 				ora DRV.TERM.DIB+S.DIB.S
-				sta (ZPTTYPtr),y
+				sta (ZPTTYEnvPtr),y
 				
 				stz OutPtr
 				stz OutCnt
@@ -117,24 +122,26 @@ DRV.TERM.CONTROL
 				sta SET80DISP
 				sta CLR80STORE
 				sta CLRPAGE2
-				lda (ZPTTYPtr)
+				ldy #S.TTY.DEVID
+				lda (ZPTTYEnvPtr),y
 				sta A2osX.ASCREEN
 
 				clc
 				rts
 *--------------------------------------
 DRV.TERM.CLOSE	ldy #S.TTY.STATUS
-				lda (ZPTTYPtr),y
+				lda (ZPTTYEnvPtr),y
 				bit #S.DIB.S.OPENED
 				beq .9
 				
 				lda DRV.TERM.DIB+S.DIB.S
-				sta (ZPTTYPtr),y
+				sta (ZPTTYEnvPtr),y
 				
 				ldx #0
-
+				ldy #S.TTY.DEVID
+				
 .1				lda A2osX.SCRNDEVS,x
-				cmp (ZPTTYPtr)
+				cmp (ZPTTYEnvPtr),y
 				bne .2
 
 				stz A2osX.SCRNDEVS,x
@@ -150,14 +157,15 @@ DRV.TERM.CLOSE	ldy #S.TTY.STATUS
 				sec
 				rts
 *--------------------------------------
-DRV.TERM.READ	lda A2osX.ASCREEN
-				cmp (ZPTTYPtr)			is screen active?
-				bne .6					no....go check flush...
+DRV.TERM.READ	bit bActive				is screen active?
+				bpl .6					no....go check flush...
 				
 				lda A2osX.TIMER16
 				and #CURSOR.BLINK.SPEED
-				eor CURON
+				ldy #S.TTY.bCURON
+				eor (ZPTTYEnvPtr),y
 				beq .1
+				
 				jsr CURBLNK
 
 .1				lda	OPENAPPLE
@@ -222,35 +230,39 @@ DRV.TERM.READ	lda A2osX.ASCREEN
 *--------------------------------------
 DRV.TERM.WRITE	jsr GetPtrsAndCnt
 				
-.2				inc ZPCount
-				bne .3
+.1				inc ZPCount
+				bne .2
 				inc ZPCount+1
 				beq .8
 				
-.3				lda (ZPBufPtr)
-				inc ZPBufPtr
-				bne .4
-				inc ZPBufPtr+1
+.2				ldy #S.TTY.MODE				
+				lda (ZPTTYEnvPtr),y
+				tax
 				
-.4				jsr DRV.TERM.WRITE.COUT
+				jsr .3
 
-				bra .2
+				inc ZPBufPtr
+				bne .1
+				inc ZPBufPtr+1
+				bra .1
 
+.3				jmp (.4,x)
+.4				.DA DRV.TERM.COUT
+				.DA DRV.TERM.ESC
+				.DA DRV.TERM.CSI
+				.DA DRV.TERM.IAC
+				
 .8				clc
 				rts
 *--------------------------------------
-DRV.TERM.WRITE.COUT
-				bit bEscMode
-				bmi COUT.EscMode
-				bit bIACMode
-				bpl .10
-				
-				jmp COUT.IAC
-				
-.10				cmp #IAC
+DRV.TERM.COUT	lda (ZPBufPtr)
+
+				cmp #IAC
 				bne .1
-				sta bIACMode
-				stz IACBuf
+				
+				lda #S.TTY.MODE.IAC
+				sta (ZPTTYEnvPtr),y
+				stz InBuffer
 				clc
 				rts
 				
@@ -262,38 +274,52 @@ DRV.TERM.WRITE.COUT
 				cmp #C.SPACE
 				bcc COUT.Ctrl
 
-				ora INVFLG
+				ldy #S.TTY.bINVERSE
+				ora (ZPTTYEnvPtr),y
 				jsr SetCharAtCurPos
 *--------------------------------------
-FS				ldx CH
-				cpx #79
+FS				ldy #S.TTY.CH
+				lda (ZPTTYEnvPtr),y
+				cmp #79
 				bne .1
 
-				bit LWFLG
+				ldy #S.TTY.bLINEWRAP
+				lda (ZPTTYEnvPtr),y
 				bpl FS.8
 				
-				stz CH
+				ldy #S.TTY.CH
+				lda #0
+				sta (ZPTTYEnvPtr),y
+				
 				jmp LF
 				
-.1				inc CH
+.1				inc
+				sta (ZPTTYEnvPtr),y
 				
 FS.8			clc
 				rts
 *--------------------------------------
-DEL				ldx CH
+DEL				ldy #S.TTY.CH
+				lda (ZPTTYEnvPtr),y
 				beq .1
-				dec CH
+				dec
+				sta (ZPTTYEnvPtr),y
 				bra .3
 
-.1				ldy CV
+.1				iny						S.TTY.CV
+				lda (ZPTTYEnvPtr),y
 				beq FS.8
 				
+				dec
+				sta (ZPTTYEnvPtr),y
+
+				dey
 				lda #79
-				sta CH
-				dec CV
+				sta (ZPTTYEnvPtr),y		S.TTY.CH
 				
 .3				lda #$20
-				ora INVFLG
+				ldy #S.TTY.bINVERSE
+				ora (ZPTTYEnvPtr),y
 				jmp SetCharAtCurPos
 *--------------------------------------
 COUT.Ctrl		ldx #CtrlChars.Cnt-1
@@ -310,25 +336,19 @@ COUT.Ctrl		ldx #CtrlChars.Cnt-1
 				tax
 				jmp (J.CtrlChars,x)
 *--------------------------------------
-J.CtrlChars		.DA ENQ					5
-				.DA BS					8
-				.DA LF					10
-				.DA	CLRSCR				12
-				.DA CROUT				13
-				.DA FS					21
-				.DA ESC					27
-*--------------------------------------
-COUT.EscMode	bit bEscModeCSI
-				bmi COUT.EscModeCSI
+DRV.TERM.ESC	lda (ZPBufPtr)
+
 				cmp #'['
 				bne .1
 
-				dec bEscModeCSI
-				stz EscSeq
+				lda #S.TTY.MODE.CSI
+				sta (ZPTTYEnvPtr),y
+				stz InBuffer
 				clc
 				rts
 				
-.1				stz bEscMode
+.1				lda #0
+				sta (ZPTTYEnvPtr),y
 				
 				ldx #EscCodes.Cnt-1
 
@@ -349,16 +369,21 @@ J.EscCodes		.DA Scroll.Dn			M
 				.DA Scroll.Up			D
 				.DA RESET				c
 *--------------------------------------
-COUT.EscModeCSI	inc EscSeq
-				ldx EscSeq
-				sta EscSeq,x
+DRV.TERM.CSI	inc InBuffer
+				ldx InBuffer
+				
+				lda (ZPBufPtr)
+				sta InBuffer,x
 				cmp #64					End of Seq ?
 				bcs COUT.ExecEscSeq
-				cpx #ESCSEQ.MAXLEN		too long?
-				bne .1
-				stz bEscModeCSI
-				stz bEscMode
-.1				clc
+				
+				cpx #INBUF.MAXLEN		too long?
+				bne .8
+				
+				lda #0
+				sta (ZPTTYEnvPtr),y
+				
+.8				clc
 				rts
 
 COUT.ExecEscSeq	stz EscSeqParamCnt
@@ -370,7 +395,7 @@ COUT.ExecEscSeq	stz EscSeqParamCnt
 				stz ZPTmpWord+1
 
 .1				inx
-				lda EscSeq,x
+				lda InBuffer,x
 				
 				cmp #'0'
 				bcc .2
@@ -416,12 +441,13 @@ COUT.ExecEscSeq	stz EscSeqParamCnt
 				sta EscSeqParam,y
 				inc EscSeqParamCnt
 
-.3				lda EscSeq,x
+.3				lda InBuffer,x
 				cmp #';'
 				beq .10
 
-				stz bEscModeCSI
-				stz bEscMode
+				lda #0
+				ldy #S.TTY.MODE
+				sta (ZPTTYEnvPtr),y
 				
 				ldx #EscSeqCmds.Cnt-1
 
@@ -446,16 +472,18 @@ J.EscSequences	.DA Esc.LWEnable		h
 				.DA Esc.Erase			K
 				.DA	Esc.Home			H
 *--------------------------------------
-COUT.IAC		inc IACBuf
-				ldx IACBuf
-				cpx #IACBUF.MAXLEN
+DRV.TERM.IAC	inc InBuffer
+				ldx InBuffer
+				cpx #INBUF.MAXLEN
 				beq *
-				sta IACBuf,x
+				
+				lda (ZPBufPtr)
+				sta InBuffer,x
 				
 				cpx #1					CMD ?
 				beq .8					yes, wait for additional bytes
 
-				ldy IACBuf+1			get back CMD
+				ldy InBuffer+1			get back CMD
 				cpy #SB
 				bne .1					not a SB/SE....stop with CMD/SUBCMD
 
@@ -471,13 +499,13 @@ COUT.IAC		inc IACBuf
 				bcc .9
 				asl
 				tax
-				lda IACBuf+2			Get SUBCMD in A
+				lda InBuffer+2			Get SUBCMD in A
 
 				cpx #10
 				bcs *
 				jmp (J.COUT.IAC.CMDS,x)
 				
-.9				stz bIACMode
+.9				bra RESET.MODE
 
 .8				clc
 				rts
@@ -492,7 +520,7 @@ J.COUT.IAC.CMDS	.DA COUT.IAC.SB
 COUT.IAC.SB		cmp #TELOPT.TTYPE
 				bne .9
 				
-				lda IACBuf+3
+				lda InBuffer+3
 				cmp #SB.SEND
 				bne .9
 				
@@ -504,10 +532,7 @@ COUT.IAC.SB		cmp #TELOPT.TTYPE
 				cpy #SB.IS.TTYPE.LEN
 				bne .1
 
-.9				stz bIACMode
-
-				clc
-				rts
+.9				bra RESET.MODE
 *--------------------------------------
 COUT.IAC.WILL	ldx #WILLDO.CNT-1
 
@@ -532,16 +557,10 @@ COUT.IAC.WILL	ldx #WILLDO.CNT-1
 
 				bra COUT.IAC.SendAX
 				
-.9				stz bIACMode
-
-				clc
-				rts
+.9				bra RESET.MODE
 *--------------------------------------
 COUT.IAC.WONT
-.9				stz bIACMode
-
-				clc
-				rts
+				bra RESET.MODE
 *--------------------------------------
 COUT.IAC.DO		ldx #DOWILL.CNT-1
 
@@ -575,40 +594,50 @@ COUT.IAC.SendAX
 				jsr Char.Out.Put
 				
 COUT.IAC.SendAX.9
-				stz bIACMode
-
-				clc
-				rts
+				bra RESET.MODE
 *--------------------------------------
 COUT.IAC.DONT
-.9				stz bIACMode
+				bra RESET.MODE
+*--------------------------------------
+RESET.MODE		lda #0
 
+				ldy #S.TTY.MODE
+				sta (ZPTTYEnvPtr),y
 				clc
 				rts
 *--------------------------------------
-RESET			stz CURON
+RESET			jsr RESET.MODE
+				
+				ldy #S.TTY.bCURON
+				sta (ZPTTYEnvPtr),y
 
-				stz bEscMode
-				stz bEscModeCSI
-				
-				jsr CLRSCR
-				
-				lda #23
-				sta SCROLLBOT
-				lda #0
-				sta SCROLLTOP
 				dec
-				sta LWFLG
+				ldy #S.TTY.bLINEWRAP
+				sta (ZPTTYEnvPtr),y
+				
+				lda #0
+				ldy #S.TTY.SCROLLTOP
+				sta (ZPTTYEnvPtr),y
+				
+				iny
+				lda #23
+				sta (ZPTTYEnvPtr),y
+
+				jsr CLRSCR
 *--------------------------------------
 RESETATTR		lda #$80
-				sta INVFLG
+				ldy #S.TTY.bINVERSE
+				sta (ZPTTYEnvPtr),y
 				clc
 				rts
 *--------------------------------------
-ESC				lda #$80
-				sta bEscMode
-				clc
-				rts
+J.CtrlChars		.DA ENQ					5
+				.DA BS					8
+				.DA LF					10
+				.DA	CLRSCR				12
+				.DA CROUT				13
+				.DA FS					21
+				.DA ESC					27
 *--------------------------------------
 ENQ				ldy #0
 
@@ -621,73 +650,59 @@ ENQ				ldy #0
 .8				clc
 				rts
 *--------------------------------------
-BS 				ldx CH
+BS 				ldy #S.TTY.CH
+				lda (ZPTTYEnvPtr),y
 				beq .1
-				dec CH
-				bra .3
 
-.1				ldy CV
-				bne .2
+				dec
+				sta (ZPTTYEnvPtr),y
 				clc
 				rts
 
-.2				lda #79
-				sta CH
-				dec CV	
+.1				ldy #S.TTY.CV
+				lda (ZPTTYEnvPtr),y
+				beq .2
 
-.3				clc
+				dec
+				sta (ZPTTYEnvPtr),y
+
+				lda #79
+				dey
+				sta (ZPTTYEnvPtr),y
+
+.2				clc
 				rts
 *--------------------------------------
-ClrScr			ldx #23
-
-.1				jsr SETUP.L1X
-
-				lda #" "
-
-				bit bActive
-				bpl .4
-				
-				sta SETWRITEAUX
-
-				ldy #39
-				
-.2				sta (ZPScrBaseL1),y		
-				dey
-				bpl .2
-
-				sta CLRWRITEAUX
-
-				ldy #39
-
-.3				sta (ZPScrBaseL1),y		
-				dey
-				bpl .3
-
-.4				sta SETWRITEAUX
-
-				ldy #79
-				
-.5				sta (ZPBufBaseL1),y		
-				dey
-				bpl .5
-
-				dex
-				bpl .1
-				
-				stz CV
-*--------------------------------------
-CROUT			stz CH
+CROUT			lda #0
+				ldy #S.TTY.CH
+				sta (ZPTTYEnvPtr),y
 				clc
 				rts
 *--------------------------------------
-LF				ldy CV
-				cpy SCROLLBOT
+LF				ldy #S.TTY.CV
+				lda (ZPTTYEnvPtr),y
+				ldy #S.TTY.SCROLLBOT
+				cmp (ZPTTYEnvPtr),y
 				beq SCROLL.UP
-				inc CV
+				
+				inc
+				ldy #S.TTY.CV
+				sta (ZPTTYEnvPtr),y
+				
 				clc
 				rts
 *--------------------------------------
-SCROLL.UP		ldx SCROLLTOP
+ESC				lda #S.TTY.MODE.ESC
+				ldy #S.TTY.MODE
+		
+				sta (ZPTTYEnvPtr),y
+				clc
+				rts
+*--------------------------------------
+SCROLL.UP		ldy #S.TTY.SCROLLTOP
+				lda (ZPTTYEnvPtr),y
+
+				tax
 
 .1				jsr SETUP.L1X
 
@@ -695,10 +710,14 @@ SCROLL.UP		ldx SCROLLTOP
 				
 				jsr COPY.XtoL1
 
-				cpx SCROLLBOT
+				txa
+				ldy #S.TTY.SCROLLBOT
+				cmp (ZPTTYEnvPtr),y
 				bne .1
 *--------------------------------------
-CLREOL			ldy CH					Start
+CLREOL			ldy #S.TTY.CH
+				lda (ZPTTYEnvPtr),y
+				tay						Start
 				ldx #80					End
 				bra CLR
 
@@ -706,34 +725,47 @@ CLRLINE			ldy #0					Start
 				ldx #80					End
 				bra CLR
 
-CLRSOL			ldy #0					Start
-				ldx CH					End
+CLRSOL			ldy #0
+				ldy #S.TTY.CH
+				lda (ZPTTYEnvPtr),y		Start
+				tax						End
 
-CLR				stx .2+1
-
-				ldx CV
-				
-.1				lda #" "
-
+CLR				stx .3+1				Save End
 				phy
+				
+				ldy #S.TTY.CV
+				lda (ZPTTYEnvPtr),y
+				tax
+				
+				ply
+				
+.1				phy
+				
+				lda #" "
 				jsr SetCharAtYX			X unmodified
+				
 				ply
 				iny
-.2				cpy #$ff				Self Modified
+.3				cpy #$ff				Self Modified
 				bne .1
 				
 				clc
 				rts
 *--------------------------------------
-SCROLL.DN		ldx SCROLLBOT
+SCROLL.DN		ldy #S.TTY.SCROLLBOT
+				lda (ZPTTYEnvPtr),y
 
+				tax
+				
 .1				jsr SETUP.L1X
 
 				dex
 				
 				jsr COPY.XtoL1
 
-				cpx SCROLLTOP
+				txa
+				ldy #S.TTY.SCROLLTOP
+				cmp (ZPTTYEnvPtr),y
 				bne .1			
 
 				clc
@@ -752,7 +784,9 @@ Esc.LWDisable	clc
 				eor #7
 				bne .8
 
-				ror LWFLG
+				ror
+				ldy #S.TTY.bLINEWRAP
+				sta (ZPTTYEnvPtr),y
 				
 .8				clc
 				rts
@@ -765,10 +799,12 @@ Esc.DispAttr	ldx EscSeqParamCnt
 				jsr RESETATTR
 				bra .7
 
-.2				cmp #7
+.2				eor #7
 				bne .8
-				stz INVFLG
-
+				
+				ldy #S.TTY.bINVERSE
+				sta (ZPTTYEnvPtr),y
+				
 .7				dex
 				bne .1
 
@@ -786,39 +822,50 @@ Esc.Query		ldx EscSeqParamCnt
 				
 				lda #C.ESC
 				jsr Char.Out.Put
+				
 				lda #'['
 				jsr Char.Out.Put
-				lda CV
+				
+				ldy #S.TTY.CV
+				lda (ZPTTYEnvPtr),y
 				inc
 				jsr Decimal.Out
+				
 				lda #';'
 				jsr Char.Out.Put
-				lda CH
+			
+				ldy #S.TTY.CH
+				lda (ZPTTYEnvPtr),y
 				inc
 				jsr Decimal.Out 
+				
 				lda #'R'
 				jsr Char.Out.Put
 				
 .8				clc
 				rts
 *--------------------------------------
-Esc.Scroll		ldx EscSeqParamCnt
+Esc.Scroll		ldy EscSeqParamCnt
 				bne .1
 				
 				lda #0
-				ldy #23
+				ldx #23
 				bra .8
 				
-.1				cpx #2
+.1				cpy #2
 				bne .9
 				
 				lda EscSeqParam
 				dec
-				ldy EscSeqParam+1
-				dey
+				ldx EscSeqParam+1
+				dex
 				
-.8				sta SCROLLTOP
-				sty SCROLLBOT
+.8				ldy #S.TTY.SCROLLTOP
+				sta (ZPTTYEnvPtr),y
+				iny						S.TTY.SCROLLBOT
+				txa
+				sta (ZPTTYEnvPtr),y
+				
 .9				clc
 				rts
 *--------------------------------------
@@ -839,10 +886,13 @@ Esc.Erase		ldx EscSeqParamCnt
 .9				clc
 				rts
 *--------------------------------------
-Esc.Home		ldx EscSeqParamCnt
+Esc.Home		lda EscSeqParamCnt
 				bne .1
-				stz CH
-				stz CV
+				
+				ldy #S.TTY.CH
+				sta (ZPTTYEnvPtr),y
+				iny
+				sta (ZPTTYEnvPtr),y
 				clc
 				rts
 				
@@ -857,7 +907,9 @@ Esc.Home		ldx EscSeqParamCnt
 				tax
 				
 .2				dex
-				stx CV
+				txa
+				ldy #S.TTY.CV
+				sta (ZPTTYEnvPtr),y
 				
 				dec EscSeqParamCnt
 				beq .8
@@ -874,134 +926,47 @@ Esc.Home		ldx EscSeqParamCnt
 				tax
 				
 .3				dex
-				stx CH
+				txa
+				ldy #S.TTY.CH
+				sta (ZPTTYEnvPtr),y
 				
 .8				clc
 				rts
 *--------------------------------------
-CUROFF			lda CURON
+CUROFF			ldy #S.TTY.bCURON
+				lda (ZPTTYEnvPtr),y
+				
 				beq	CUREXIT.RTS
 				
-CURBLNK			lda A2osX.ASCREEN
-				cmp (ZPTTYPtr)
-				beq CURBLNK1
+CURBLNK			bit bActive
+				bpl CURBLNK1
 				
-				lda CURON
+				ldy #S.TTY.bCURON
+				lda (ZPTTYEnvPtr),y
 				bne	CURBLNK.OFF
 				rts						do not Light if screen is not active
 				
-CURBLNK1		lda CURON
+CURBLNK1		ldy #S.TTY.bCURON
+				lda (ZPTTYEnvPtr),y
 				bne CURBLNK.OFF
 
 				jsr GetCharAtCurPos
-				sta CURCHAR
+				ldy #S.TTY.CURCHAR
+				sta (ZPTTYEnvPtr),y
 				and #$80
 				eor #" "
 				bra CUREXIT
 				
-CURBLNK.OFF		lda CURCHAR
+CURBLNK.OFF		ldy #S.TTY.CURCHAR
+				lda (ZPTTYEnvPtr),y
 				
 CUREXIT			jsr SetCharAtCurPos
 				
-				lda CURON
+				ldy #S.TTY.bCURON
+				lda (ZPTTYEnvPtr),y
 				eor #CURSOR.BLINK.SPEED
-				sta CURON
+				sta (ZPTTYEnvPtr),y
 CUREXIT.RTS		rts
-*--------------------------------------
-SetCharAtCurPos	ldy CH
-				ldx CV
-*--------------------------------------
-SetCharAtYX		cmp #$40
-				bcc .10
-				cmp #$5F
-				bcs .10
-				and #$3F
-				
-.10				pha
-				
-				jsr SETUP.L1X
-				
-				tya
-				lsr
-				tay
-				
-				pla
-				bcs .1
-				
-				sta SETWRITEAUX
-.1				sta (ZPScrBaseL1),y
-				sta CLRWRITEAUX
-				rts
-*--------------------------------------
-GetCharAtCurPos	ldy CH
-				ldx CV
-*--------------------------------------
-GetCharAtYX		jsr SETUP.L1X
-
-				tya
-				lsr
-				tay
-				
-				bcs .1
-	
-				sta SETREADAUX
-.1				lda (ZPScrBaseL1),y
-				sta CLRREADAUX
-				rts
-*--------------------------------------
-SETUP.L1X		lda SCR.BASEL,x
-				clc
-				adc ZPTTYPtr
-				sta ZPBufBaseL1
-				lda SCR.BASEH,x
-				adc ZPTTYPtr+1
-				sta ZPBufBaseL1+1
-				
-				bit bActive
-				bpl .8
-
-				lda SCR.BASEL,x
-				sta ZPScrBaseL1
-				lda SCR.BASEH,x
-				sta ZPScrBaseL1+1
-.8				rts
-*--------------------------------------
-COPY.XtoL1		ldy #79
-
-				sta SETWRITEAUX
-				sta SETREADAUX
-				
-.1				lda (ZPBufBaseL2),y
-				sta (ZPBufBaseL1),y 
-				dey
-				bpl .1
-
-				sta CLRWRITEAUX
-				sta CLRREADAUX
-
-				bit bActive
-				bpl .8
-
-				lda SCR.BASEL,x
-				sta ZPScrBaseL2
-				lda SCR.BASEH,x
-				sta ZPScrBaseL2+1
-				
-				sta SETWRITEAUX
-				sta SETREADAUX
-				
-				jsr .6
-				
-				sta CLRWRITEAUX
-				sta CLRREADAUX
-
-.6				ldy #39
-				
-.7				lda (ZPScrBaseL2),y
-				sta (ZPScrBaseL1),y 
-				dey
-				bpl .7
-.8				rts
 *--------------------------------------
 Decimal.Out		stz ZPTmpWord
 				stz ZPTmpWord+1
@@ -1189,26 +1154,14 @@ SB.IS.NAWS		.DA #IAC,#SB,#TELOPT.NAWS,#SB.IS
 SB.IS.NAWS.LEN	.EQ *-SB.IS.NAWS
 *--------------------------------------
 bActive			.BS 1
+bEscSeqInNum	.BS 1
+EscSeqParamCnt	.BS 1
+EscSeqParam		.BS 4
 *--------------------------------------
-CH				.BS 1
-CV				.BS 1
-LWFLG			.BS 1
-INVFLG			.BS 1
-SCROLLTOP		.BS 1
-SCROLLBOT		.BS 1
-CURON			.BS 1
-CURCHAR			.BS 1
+InBuffer		.BS INBUF.MAXLEN+1
 OutBuffer		.BS OUTBUF.MAXLEN
 OutPtr			.BS 1
 OutCnt			.BS 1
-bIACMode		.BS 1
-IACBuf			.BS OUTBUF.MAXLEN+1
-bEscMode		.BS 1
-bEscModeCSI		.BS 1
-bEscSeqInNum	.BS 1
-EscSeq			.BS ESCSEQ.MAXLEN+1
-EscSeqParamCnt	.BS 1
-EscSeqParam		.BS 4
 *--------------------------------------
 DRV.TERM.DIB	.DA #S.DIB.S.WRITE+S.DIB.S.READ
 				.DA #0,#0,#0
