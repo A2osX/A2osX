@@ -4,37 +4,23 @@ AUTO 4,1
 *--------------------------------------
 CURSOR.BLINK.SPEED	.EQ 2
 *--------------------------------------
-ZPIOCTL			.EQ ZPDRV
-ZPDCBPtr		.EQ ZPDRV+2
-ZPBufPtr		.EQ ZPDRV+10
-ZPCount			.EQ ZPDRV+12
-ZPBufBaseL1		.EQ ZPDRV+14
-ZPBufBaseL2		.EQ ZPDRV+16
-ZPScrBaseL1		.EQ ZPDRV+18
-ZPScrBaseL2		.EQ ZPDRV+20
-ZPTmpWord		.EQ ZPDRV+22
-ZPTmpBool		.EQ ZPDRV+24
+				.DUMMY
+				.OR ZPDRV
+ZPIOCTL			.BS 2
+ZPDCBPtr		.BS 2
+ZPBufPtr		.BS 2
+ZPCount			.BS 2
+ZPBufBaseL1		.BS 2
+ZPBufBaseL2		.BS 2
+ZPScrBaseL1		.BS 2
+ZPScrBaseL2		.BS 2
+ZPTmpWord		.BS 2
+ZPTmpBool		.BS 1
+				.ED
 *--------------------------------------
 DRV.TERM		cld
-				>STYA pIOCTL
-
-				ldy #S.FD.DEV.DCBPTR
-				lda (pFD),y
-				sta ZPDCBPtr
-				iny
-				lda (pFD),y
-				sta ZPDCBPtr+1
-				
-				ldy #S.DCB.TTY.DEVID
-				lda (ZPDCBPtr),y
-				cmp A2osX.ASCREEN
-				beq .1					CS
-
-				clc
-.1				ror bActive
-
-				jmp (.8,x)
-.8				.DA DRV.TERM.STATUS
+				jmp (.1,x)
+.1				.DA DRV.TERM.STATUS
 				.DA A2osX.BADCALL
 				.DA A2osX.BADCALL
 				.DA A2osX.BADCALL
@@ -45,12 +31,9 @@ DRV.TERM		cld
 				.DA DRV.TERM.READ
 				.DA DRV.TERM.WRITE
 *--------------------------------------
-DRV.TERM.STATUS	ldy #S.IOCTL.BUFPTR
-				lda (ZPIOCTL),y
-				sta ZPBufPtr
-				iny
-				lda (ZPIOCTL),y
-				sta ZPBufPtr+1
+DRV.TERM.STATUS	>STYA ZPIOCTL
+
+				jsr GetIOCTLBuf
 				
 				ldy #S.IOCTL.STATCODE
 				lda (ZPIOCTL),y
@@ -68,6 +51,8 @@ DRV.TERM.STATUS	ldy #S.IOCTL.BUFPTR
 				dey
 				bne .2
 				
+				jsr DRV.TERM.GetDCB
+				
 				ldy #S.DCB.TTY.STATUS
 				lda (ZPDCBPtr),y
 				sta (ZPBufPtr)
@@ -79,7 +64,7 @@ DRV.TERM.STATUS	ldy #S.IOCTL.BUFPTR
 				sec
 				rts
 *--------------------------------------
-DRV.TERM.OPEN	ldx #0
+DRV.TERM.OPEN	ldx #0					DEV.ID in A
 
 .1				ldy A2osX.SCRNDEVS,x
 				beq .2
@@ -96,7 +81,11 @@ DRV.TERM.OPEN	ldx #0
 				sec
 				rts
 				
-.2				sta A2osX.SCRNDEVS,x	DEV.ID in A
+.2				pha						DEV.ID in A
+
+				jsr DRV.TERM.GetDCB
+
+				pla
 				ldy #S.DCB.TTY.DEVID
 				sta (ZPDCBPtr),y
 				
@@ -114,14 +103,20 @@ DRV.TERM.OPEN	ldx #0
 DRV.TERM.CONTROL
 				sta SETTEXT
 
+				jsr DRV.TERM.GetDCB
+				
 				ldy #S.DCB.TTY.DEVID
 				lda (ZPDCBPtr),y
 				sta A2osX.ASCREEN
 
+				jsr DRV.TERM.SCRCPY
+				
 				clc
 				rts
 *--------------------------------------
-DRV.TERM.CLOSE	ldy #S.DCB.TTY.STATUS
+DRV.TERM.CLOSE	jsr DRV.TERM.GetDCB
+
+				ldy #S.DCB.TTY.STATUS
 				lda (ZPDCBPtr),y
 				bit #S.DIB.S.OPENED
 				beq .9
@@ -145,13 +140,21 @@ DRV.TERM.CLOSE	ldy #S.DCB.TTY.STATUS
 				clc
 				rts
 				
-.9				lda MLI.E.IO
+.9				lda #MLI.E.IO
 				sec
 				rts
 *--------------------------------------
-DRV.TERM.READ	bit bActive				is screen active?
-				bpl .6					no....go check flush...
+DRV.TERM.READ	>STYA ZPIOCTL
+
+				jsr GetIOCTLBufAndCnt
 				
+				jsr DRV.TERM.GetDCB
+
+				jsr DRV.TERM.GetActive
+				
+				bit bActive				is screen active?
+				bpl .6					no....go check flush...
+
 				lda A2osX.TIMER16
 				and #CURSOR.BLINK.SPEED
 				ldy #S.DCB.TTY.bCURON
@@ -194,7 +197,7 @@ DRV.TERM.READ	bit bActive				is screen active?
 				beq .9					no char in output buffer...
 				
 .7				stz .8+1
-				jsr GetPtrsAndCnt
+				jsr GetIOCTLBufAndCnt
 				
 .70				inc ZPCount
 				bne .71
@@ -224,7 +227,13 @@ DRV.TERM.READ	bit bActive				is screen active?
 				sec
 				rts
 *--------------------------------------
-DRV.TERM.WRITE	jsr GetPtrsAndCnt
+DRV.TERM.WRITE	>STYA ZPIOCTL
+
+				jsr GetIOCTLBufAndCnt
+				
+				jsr DRV.TERM.GetDCB
+
+				jsr DRV.TERM.GetActive
 				
 .1				inc ZPCount
 				bne .2
@@ -639,7 +648,7 @@ RESET			jsr RESET.MODE
 				lda #23
 				sta (ZPDCBPtr),y
 
-				jsr CLRSCR
+				jsr DRV.TERM.CLRSCR
 *--------------------------------------
 RESETATTR		lda #$80
 				ldy #S.DCB.TTY.bINVERSE
@@ -650,7 +659,7 @@ RESETATTR		lda #$80
 J.CtrlChars		.DA ENQ					5
 				.DA BS					8
 				.DA LF					10
-				.DA	CLRSCR				12
+				.DA	DRV.TERM.CLRSCR		12
 				.DA CROUT				13
 				.DA FS					21
 				.DA ESC					27
@@ -1089,15 +1098,26 @@ Char.Out.Get	ldy #S.DCB.TTY.OUTHEAD
 				
 .9				rts				
 *--------------------------------------
-GetPtrsAndCnt	ldy #S.IOCTL.BUFPTR
-				lda (ZPIOCTL),y
-				sta ZPBufPtr
-				iny 
-				lda (ZPIOCTL),y
-				sta ZPBufPtr+1
-				
-*				ldy #S.IOCTL.BYTECNT
+DRV.TERM.GetDCB	ldy #S.FD.DEV.DCBPTR
+				lda (pFD),y
+				sta ZPDCBPtr
 				iny
+				lda (pFD),y
+				sta ZPDCBPtr+1
+				rts
+*--------------------------------------
+DRV.TERM.GetActive
+				ldy #S.DCB.TTY.DEVID
+				lda (ZPDCBPtr),y
+				cmp A2osX.ASCREEN
+				beq .1					CS
+
+				clc
+.1				ror bActive
+				rts
+*--------------------------------------
+GetIOCTLBufAndCnt
+				ldy	#S.IOCTL.BYTECNT
 				
 				lda (ZPIOCTL),y
 				eor #$ff
@@ -1106,17 +1126,25 @@ GetPtrsAndCnt	ldy #S.IOCTL.BUFPTR
 				lda (ZPIOCTL),y
 				eor #$ff
 				sta ZPCount+1
+
+GetIOCTLBuf		ldy #S.IOCTL.BUFPTR
+				lda (ZPIOCTL),y
+				sta ZPBufPtr
+				iny 
+				lda (ZPIOCTL),y
+				sta ZPBufPtr+1
+
 				rts
-*--------------------------------------
+*--------------------------------------			
 SETUP.L1X		clc
 				
 				ldy #S.FD.DEV.BUFPTR
-				lda SCR.BASEL,x
+				lda BUF.BASEL,x
 				adc (pFD),y
 				sta ZPBufBaseL1
 				
 				iny
-				lda SCR.BASEH,x
+				lda BUF.BASEH,x
 				adc (pFD),y
 				sta ZPBufBaseL1+1
 				
@@ -1128,8 +1156,6 @@ SETUP.L1X		clc
 				lda SCR.BASEH,x
 				sta ZPScrBaseL1+1
 .8				rts
-*--------------------------------------
-DRV.CS.END
 *--------------------------------------
 SCR.BASEL		.HS	00.80.00.80.00.80.00.80.28.A8.28.A8.28.A8.28.A8.50.D0.50.D0.50.D0.50.D0
 SCR.BASEH		.HS	04.04.05.05.06.06.07.07.04.04.05.05.06.06.07.07.04.04.05.05.06.06.07.07
