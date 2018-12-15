@@ -16,6 +16,11 @@ ZPScrBaseL1		.BS 2
 ZPScrBaseL2		.BS 2
 ZPTmpWord		.BS 2
 ZPTmpBool		.BS 1
+*--------------------------------------
+bActive			.BS 1
+bCsiInNum		.BS 1
+CsiParamCnt		.BS 1
+CsiParams		.BS 4
 				.ED
 *--------------------------------------
 DRV.TERM		cld
@@ -33,7 +38,7 @@ DRV.TERM		cld
 *--------------------------------------
 DRV.TERM.STATUS	>STYA ZPIOCTL
 
-				jsr GetIOCTLBuf
+				jsr DRV.TERM.GetIOCTLBuf
 				
 				ldy #S.IOCTL.STATCODE
 				lda (ZPIOCTL),y
@@ -81,7 +86,9 @@ DRV.TERM.OPEN	ldx #0					DEV.ID in A
 				sec
 				rts
 				
-.2				pha						DEV.ID in A
+.2				sta A2osX.SCRNDEVS,x
+
+				pha
 
 				jsr DRV.TERM.GetDCB
 
@@ -146,7 +153,7 @@ DRV.TERM.CLOSE	jsr DRV.TERM.GetDCB
 *--------------------------------------
 DRV.TERM.READ	>STYA ZPIOCTL
 
-				jsr GetIOCTLBufAndCnt
+				jsr DRV.TERM.GetIOCTLBufAndCnt
 				
 				jsr DRV.TERM.GetDCB
 
@@ -160,7 +167,7 @@ DRV.TERM.READ	>STYA ZPIOCTL
 				ldy #S.DCB.TTY.bCURON
 				eor (ZPDCBPtr),y
 				beq .1
-				
+
 				jsr CURBLNK
 
 .1				lda	OPENAPPLE
@@ -171,7 +178,7 @@ DRV.TERM.READ	>STYA ZPIOCTL
 				sta KBDSTROBE
 
 				and #$7F
-				
+
 				ldx KeyRemapped
 .2				cmp KeyRemapped,x
 				beq .3
@@ -181,23 +188,22 @@ DRV.TERM.READ	>STYA ZPIOCTL
 				bra .7					and flush
 				
 .3				lda KeyRemappedIdx,x
-				tay
+				tax
 				
-.4				lda KeyRemappedTbl,y
+.4				lda KeyRemappedTbl,x
 				beq .7					end of remap....flush
 				jsr Char.Out.Put
-				iny
+				inx
 				bra .4
 	
-.6				ldy #S.DCB.TTY.OUTHEAD
+.6				ldy #S.DCB.TTY.OUTTAIL
 				lda (ZPDCBPtr),y
-				dey						OUTTAIL
-				cmp (ZPDCBPtr),y
+				iny						
+				cmp (ZPDCBPtr),y		OUTHEAD
 				
 				beq .9					no char in output buffer...
 				
 .7				stz .8+1
-				jsr GetIOCTLBufAndCnt
 				
 .70				inc ZPCount
 				bne .71
@@ -229,7 +235,7 @@ DRV.TERM.READ	>STYA ZPIOCTL
 *--------------------------------------
 DRV.TERM.WRITE	>STYA ZPIOCTL
 
-				jsr GetIOCTLBufAndCnt
+				jsr DRV.TERM.GetIOCTLBufAndCnt
 				
 				jsr DRV.TERM.GetDCB
 
@@ -240,7 +246,7 @@ DRV.TERM.WRITE	>STYA ZPIOCTL
 				inc ZPCount+1
 				beq .8
 				
-.2				ldy #S.DCB.TTY.MODE				
+.2				ldy #S.DCB.TTY.MODE
 				lda (ZPDCBPtr),y
 				tax
 				
@@ -357,11 +363,12 @@ DRV.TERM.ESC	lda (ZPBufPtr)
 				clc
 				rts
 				
-.1				lda #0
+.1				lda #0					y = #S.DCB.TTY.MODE
 				sta (ZPDCBPtr),y
 				
 				ldx #EscCodes.Cnt-1
-
+				lda (ZPBufPtr)
+				
 .2				cmp EscCodes,x
 				beq .3
 				dex
@@ -373,9 +380,9 @@ DRV.TERM.ESC	lda (ZPBufPtr)
 .3				txa
 				asl
 				tax
-				jmp (J.EscCodes,x)
-*--------------------------------------
-J.EscCodes		.DA Scroll.Dn			M
+				jmp (.4,x)
+				
+.4				.DA Scroll.Dn			M
 				.DA Scroll.Up			D
 				.DA RESET				c
 *--------------------------------------
@@ -388,7 +395,7 @@ DRV.TERM.CSI	ldy #S.DCB.TTY.INBUFFER
 				lda (ZPBufPtr)
 				sta (ZPDCBPtr),y
 				cmp #64					End of Seq ?
-				bcs COUT.ExecEscSeq
+				bcs DRV.TERM.CSI.Exec
 				
 				cpy #S.DCB.TTY.INBUFFER.MAX-1	buffer full?
 				bne .8
@@ -400,12 +407,11 @@ DRV.TERM.CSI	ldy #S.DCB.TTY.INBUFFER
 .8				clc
 				rts
 
-COUT.ExecEscSeq	stz EscSeqParamCnt
-				stz bEscSeqInNum
+DRV.TERM.CSI.Exec
+				stz CsiParamCnt
+				stz bCsiInNum
 				
 				ldy #S.DCB.TTY.INBUFFER			EscSeq Ptr
-				lda (ZPDCBPtr),y
-				tay
 				
 .10				stz ZPTmpWord
 				stz ZPTmpWord+1
@@ -418,19 +424,23 @@ COUT.ExecEscSeq	stz EscSeqParamCnt
 				cmp #'9'+1
 				bcs .2
 
-				dec bEscSeqInNum
+				dec bCsiInNum
+				
 				and #$0F
 				pha
+				
 				lda ZPTmpWord
-				ldy ZPTmpWord+1
+				ldx ZPTmpWord+1
+				
 				asl ZPTmpWord	    param=param*10
 				rol ZPTmpWord+1
 				asl ZPTmpWord
 				rol ZPTmpWord+1
+				
 				clc
 				adc ZPTmpWord
 				sta ZPTmpWord
-				tya
+				txa
 				adc ZPTmpWord+1
 				sta ZPTmpWord+1
 				asl ZPTmpWord
@@ -444,30 +454,34 @@ COUT.ExecEscSeq	stz EscSeqParamCnt
 				inc ZPTmpWord+1
 				bra .1
 
-.2				bit bEscSeqInNum
+.2				bit bCsiInNum
 				bpl .3
 
-				stz bEscSeqInNum
+				stz bCsiInNum
 				lda #255
 				ldx ZPTmpWord+1
 				bne .21
 
 				lda ZPTmpWord
-.21				ldx EscSeqParamCnt
-				sta EscSeqParam,x
-				inc EscSeqParamCnt
+.21				ldx CsiParamCnt
+				sta CsiParams,x
+				inc CsiParamCnt
 
 .3				lda (ZPDCBPtr),y
 				cmp #';'
 				beq .10
 
+				pha
+				
 				lda #0
 				ldy #S.DCB.TTY.MODE
 				sta (ZPDCBPtr),y
 				
-				ldx #EscSeqCmds.Cnt-1
+				pla
+				
+				ldx #CsiCodes.Cnt-1
 
-.4				cmp EscSeqCmds,x
+.4				cmp CsiCodes,x
 				beq .5
 				dex
 				bne .4
@@ -478,15 +492,178 @@ COUT.ExecEscSeq	stz EscSeqParamCnt
 .5				txa
 				asl
 				tax
-				jmp (J.EscSequences,x)
+				jmp (.8,x)
+
+.8				.DA Csi.LWEnable		h
+				.DA Csi.LWDisable		l
+				.DA Csi.DispAttr		m
+				.DA Csi.Query			n
+				.DA Csi.Scroll			r
+				.DA Csi.Erase			K
+				.DA	Csi.Home			H
 *--------------------------------------
-J.EscSequences	.DA Esc.LWEnable		h
-				.DA Esc.LWDisable		l
-				.DA Esc.DispAttr		m
-				.DA Esc.Query			n
-				.DA Esc.Scroll			r
-				.DA Esc.Erase			K
-				.DA	Esc.Home			H
+Csi.LWEnable	sec
+				.HS 90					BCC 
+*--------------------------------------
+Csi.LWDisable	clc
+				ldx CsiParamCnt
+				beq .8
+				dex
+				bne .8
+
+				lda CsiParams
+				eor #7
+				bne .8
+
+				ror
+				ldy #S.DCB.TTY.bLINEWRAP
+				sta (ZPDCBPtr),y
+				
+.8				clc
+				rts
+*--------------------------------------
+Csi.DispAttr	ldx CsiParamCnt
+				beq .8
+
+.1				lda CsiParams-1,x
+				bne .2
+				
+				jsr RESETATTR
+				bra .7
+
+.2				eor #7
+				bne .8
+
+				ldy #S.DCB.TTY.bINVERSE
+				sta (ZPDCBPtr),y
+				
+.7				dex
+				bne .1
+
+.8				clc
+				rts
+*--------------------------------------
+Csi.Query		ldx CsiParamCnt
+				beq .8
+				dex
+				bne .8
+
+				lda CsiParams
+				cmp #6
+				bne .8
+				
+				lda #C.ESC
+				jsr Char.Out.Put
+				
+				lda #'['
+				jsr Char.Out.Put
+				
+				ldy #S.DCB.TTY.CV
+				lda (ZPDCBPtr),y
+				inc
+				jsr Decimal.Out
+				
+				lda #';'
+				jsr Char.Out.Put
+			
+				ldy #S.DCB.TTY.CH
+				lda (ZPDCBPtr),y
+				inc
+				jsr Decimal.Out 
+				
+				lda #'R'
+				jsr Char.Out.Put
+				
+.8				clc
+				rts
+*--------------------------------------
+Csi.Scroll		ldy CsiParamCnt
+				bne .1
+				
+				lda #0
+				ldx #23
+				bra .8
+				
+.1				cpy #2
+				bne .9
+				
+				lda CsiParams
+				dec
+				ldx CsiParams+1
+				dex
+				
+.8				ldy #S.DCB.TTY.SCROLLTOP
+				sta (ZPDCBPtr),y
+				iny						S.DCB.TTY.SCROLLBOT
+				txa
+				sta (ZPDCBPtr),y
+				
+.9				clc
+				rts
+*--------------------------------------
+Csi.Erase		ldx CsiParamCnt
+
+				bne .1
+				jmp CLREOL
+				
+.1				lda CsiParams
+				cmp #1
+				bne .2
+				jmp CLRSOL
+
+.2				cmp #2
+				bne .9
+				jmp CLRLINE
+
+.9				clc
+				rts
+*--------------------------------------
+Csi.Home		lda CsiParamCnt
+				bne .1
+				
+				ldy #S.DCB.TTY.CH
+				sta (ZPDCBPtr),y
+				iny
+				sta (ZPDCBPtr),y
+				clc
+				rts
+				
+.1				ldx #1
+				lda CsiParams
+				beq .2
+				
+				ldx #24
+				cmp #24
+				bcs .2
+				
+				tax
+				
+.2				dex
+				txa
+				ldy #S.DCB.TTY.CV
+				sta (ZPDCBPtr),y
+				
+				dec CsiParamCnt
+				beq .8
+				
+				ldx #1
+				lda CsiParams+1
+				beq .3
+				
+				ldx #80
+				cmp #80
+				
+				bcs .3
+				
+				tax
+				
+.3				dex
+				txa
+				ldy #S.DCB.TTY.CH
+				sta (ZPDCBPtr),y
+				
+.8				clc
+				rts
 *--------------------------------------
 DRV.TERM.IAC	ldy #S.DCB.TTY.INBUFFER
 				lda (ZPDCBPtr),y
@@ -534,7 +711,6 @@ J.COUT.IAC.CMDS	.DA COUT.IAC.SB
 				.DA COUT.IAC.WONT
 				.DA COUT.IAC.DO
 				.DA COUT.IAC.DONT
-				.DA 0					end of relocation
 *--------------------------------------
 COUT.IAC.SB		cmp #TELOPT.TTYPE
 				bne .9
@@ -544,12 +720,12 @@ COUT.IAC.SB		cmp #TELOPT.TTYPE
 				cmp #SB.SEND
 				bne .9
 				
-				ldy #0
+				ldx #0
 				
-.1				lda SB.IS.TTYPE,y
+.1				lda SB.IS.TTYPE,x
 				jsr Char.Out.Put
-				iny
-				cpy #SB.IS.TTYPE.LEN
+				inx
+				cpx #SB.IS.TTYPE.LEN
 				bne .1
 
 .9				bra RESET.MODE
@@ -648,6 +824,13 @@ RESET			jsr RESET.MODE
 				lda #23
 				sta (ZPDCBPtr),y
 
+				lda #S.DCB.TTY.OUTBUFFER
+				
+				ldy #S.DCB.TTY.OUTTAIL
+				sta (ZPDCBPtr),y
+				iny
+				sta (ZPDCBPtr),y
+				
 				jsr DRV.TERM.CLRSCR
 *--------------------------------------
 RESETATTR		lda #$80
@@ -664,12 +847,12 @@ J.CtrlChars		.DA ENQ					5
 				.DA FS					21
 				.DA ESC					27
 *--------------------------------------
-ENQ				ldy #0
+ENQ				ldx #0
 
-.1				lda ENQ.String,y
+.1				lda ENQ.String,x
 				beq .8
 				jsr Char.Out.Put
-				iny
+				inx
 				bne .1
 				
 .8				clc
@@ -729,7 +912,7 @@ SCROLL.UP		ldy #S.DCB.TTY.SCROLLTOP
 
 				tax
 
-.1				jsr SETUP.L1X
+.1				jsr DRV.TERM.SETUP.L1X
 
 				inx
 				
@@ -782,7 +965,7 @@ SCROLL.DN		ldy #S.DCB.TTY.SCROLLBOT
 
 				tax
 				
-.1				jsr SETUP.L1X
+.1				jsr DRV.TERM.SETUP.L1X
 
 				dex
 				
@@ -796,175 +979,13 @@ SCROLL.DN		ldy #S.DCB.TTY.SCROLLBOT
 				clc
 				rts
 *--------------------------------------
-Esc.LWEnable	sec
-				.HS 90					BCC 
-*--------------------------------------
-Esc.LWDisable	clc
-				ldx EscSeqParamCnt
-				beq .8
-				dex
-				bne .8
-
-				lda EscSeqParam
-				eor #7
-				bne .8
-
-				ror
-				ldy #S.DCB.TTY.bLINEWRAP
-				sta (ZPDCBPtr),y
-				
-.8				clc
-				rts
-*--------------------------------------
-Esc.DispAttr	ldx EscSeqParamCnt
-				beq .8
-
-.1				lda EscSeqParam-1,x
-				bne .2
-				jsr RESETATTR
-				bra .7
-
-.2				eor #7
-				bne .8
-				
-				ldy #S.DCB.TTY.bINVERSE
-				sta (ZPDCBPtr),y
-				
-.7				dex
-				bne .1
-
-.8				clc
-				rts
-*--------------------------------------
-Esc.Query		ldx EscSeqParamCnt
-				beq .8
-				dex
-				bne .8
-
-				lda EscSeqParam
-				cmp #6
-				bne .8
-				
-				lda #C.ESC
-				jsr Char.Out.Put
-				
-				lda #'['
-				jsr Char.Out.Put
-				
-				ldy #S.DCB.TTY.CV
-				lda (ZPDCBPtr),y
-				inc
-				jsr Decimal.Out
-				
-				lda #';'
-				jsr Char.Out.Put
-			
-				ldy #S.DCB.TTY.CH
-				lda (ZPDCBPtr),y
-				inc
-				jsr Decimal.Out 
-				
-				lda #'R'
-				jsr Char.Out.Put
-				
-.8				clc
-				rts
-*--------------------------------------
-Esc.Scroll		ldy EscSeqParamCnt
-				bne .1
-				
-				lda #0
-				ldx #23
-				bra .8
-				
-.1				cpy #2
-				bne .9
-				
-				lda EscSeqParam
-				dec
-				ldx EscSeqParam+1
-				dex
-				
-.8				ldy #S.DCB.TTY.SCROLLTOP
-				sta (ZPDCBPtr),y
-				iny						S.DCB.TTY.SCROLLBOT
-				txa
-				sta (ZPDCBPtr),y
-				
-.9				clc
-				rts
-*--------------------------------------
-Esc.Erase		ldx EscSeqParamCnt
-
-				bne .1
-				jmp CLREOL
-				
-.1				lda EscSeqParam
-				cmp #1
-				bne .2
-				jmp CLRSOL
-
-.2				cmp #2
-				bne .9
-				jmp CLRLINE
-
-.9				clc
-				rts
-*--------------------------------------
-Esc.Home		lda EscSeqParamCnt
-				bne .1
-				
-				ldy #S.DCB.TTY.CH
-				sta (ZPDCBPtr),y
-				iny
-				sta (ZPDCBPtr),y
-				clc
-				rts
-				
-.1				ldx #1
-				lda EscSeqParam
-				beq .2
-				
-				ldx #24
-				cmp #24
-				bcs .2
-				
-				tax
-				
-.2				dex
-				txa
-				ldy #S.DCB.TTY.CV
-				sta (ZPDCBPtr),y
-				
-				dec EscSeqParamCnt
-				beq .8
-				
-				ldx #1
-				lda EscSeqParam+1
-				beq .3
-				
-				ldx #80
-				cmp #80
-				
-				bcs .3
-				
-				tax
-				
-.3				dex
-				txa
-				ldy #S.DCB.TTY.CH
-				sta (ZPDCBPtr),y
-				
-.8				clc
-				rts
-*--------------------------------------
 CUROFF			ldy #S.DCB.TTY.bCURON
 				lda (ZPDCBPtr),y
 				
 				beq	CUREXIT.RTS
 				
 CURBLNK			bit bActive
-				bpl CURBLNK1
+				bmi CURBLNK1
 				
 				ldy #S.DCB.TTY.bCURON
 				lda (ZPDCBPtr),y
@@ -1042,12 +1063,12 @@ Decimal.Out		stz ZPTmpWord
 *--------------------------------------
 Char.Out.Put30	ora #$30
 
-Char.Out.Put	pha
+Char.Out.Put	pha						save char
 
 				ldy #S.DCB.TTY.OUTHEAD
 				lda (ZPDCBPtr),y
 				
-				pha
+				pha						save actual HEAD
 				inc
 				
 				cmp #S.DCB.TTY.OUTBUFFER.MAX
@@ -1055,9 +1076,9 @@ Char.Out.Put	pha
 				
 				lda #S.DCB.TTY.OUTBUFFER
 
-.1				dey
+.1				dey						OUTTAIL
 				
-				cmp (ZPDCBPtr),y
+				cmp (ZPDCBPtr),y		HEAD+1 = TAIL ?
 				beq .9					CS, full!
 				
 				iny
@@ -1073,9 +1094,9 @@ Char.Out.Put	pha
 				pla
 				rts
 *--------------------------------------
-Char.Out.Get	ldy #S.DCB.TTY.OUTHEAD
+Char.Out.Get	ldy #S.DCB.TTY.OUTTAIL
 				lda (ZPDCBPtr),y
-				dey						OUTTAIL
+				iny						OUTHEAD
 				cmp (ZPDCBPtr),y
 				beq .9					CS
 				
@@ -1116,7 +1137,7 @@ DRV.TERM.GetActive
 .1				ror bActive
 				rts
 *--------------------------------------
-GetIOCTLBufAndCnt
+DRV.TERM.GetIOCTLBufAndCnt
 				ldy	#S.IOCTL.BYTECNT
 				
 				lda (ZPIOCTL),y
@@ -1127,7 +1148,8 @@ GetIOCTLBufAndCnt
 				eor #$ff
 				sta ZPCount+1
 
-GetIOCTLBuf		ldy #S.IOCTL.BUFPTR
+DRV.TERM.GetIOCTLBuf
+				ldy #S.IOCTL.BUFPTR
 				lda (ZPIOCTL),y
 				sta ZPBufPtr
 				iny 
@@ -1136,16 +1158,16 @@ GetIOCTLBuf		ldy #S.IOCTL.BUFPTR
 
 				rts
 *--------------------------------------			
-SETUP.L1X		clc
-				
+DRV.TERM.SETUP.L1X
 				ldy #S.FD.DEV.BUFPTR
-				lda BUF.BASEL,x
-				adc (pFD),y
+				lda (pFD),y
+				clc
+				adc BUF.BASEL,x
 				sta ZPBufBaseL1
 				
 				iny
-				lda BUF.BASEH,x
-				adc (pFD),y
+				lda (pFD),y
+				adc BUF.BASEH,x
 				sta ZPBufBaseL1+1
 				
 				bit bActive
@@ -1214,8 +1236,8 @@ CtrlChars.Cnt	.EQ *-CtrlChars
 *--------------------------------------
 EscCodes		.AZ "MDc"
 EscCodes.Cnt	.EQ *-EscCodes
-EscSeqCmds		.AS "hlmnrKH"
-EscSeqCmds.Cnt	.EQ *-EscSeqCmds
+CsiCodes		.AS "hlmnrKH"
+CsiCodes.Cnt	.EQ *-CsiCodes
 ENQ.String		.AZ "XTERM"
 *--------------------------------------
 KeyRemapped		.HS 05080A0B0D15		L,D,U,CR,R
@@ -1226,8 +1248,6 @@ KeyRemappedDOWN	.HS 1B5B4200			esc[B
 KeyRemappedUP	.HS 1B5B4100			esc[A
 KeyRemappedCR	.HS 0D0A00				crlf
 KeyRemappedRGHT	.HS 1B5B4300			esc[C
-*--------------------------------------
-TELOPS.STATUS	
 *--------------------------------------
 WILLDO			.DA #TELOPT.BINARY,#TELOPT.SGA
 WILLDO.CNT		.EQ *-WILLDO
@@ -1246,11 +1266,6 @@ SB.IS.NAWS		.DA #IAC,#SB,#TELOPT.NAWS,#SB.IS
 				.DA 24
 				.DA #IAC,#SE
 SB.IS.NAWS.LEN	.EQ *-SB.IS.NAWS
-*--------------------------------------
-bActive			.BS 1
-bEscSeqInNum	.BS 1
-EscSeqParamCnt	.BS 1
-EscSeqParam		.BS 4
 *--------------------------------------
 DRV.TERM.DIB	.DA #S.DIB.S.WRITE+S.DIB.S.READ
 				.DA #0,#0,#0
