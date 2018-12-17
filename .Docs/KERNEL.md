@@ -82,10 +82,11 @@ X = DevID
 Create a hDEV  
 
 ## C  
-`hDEV mkdev (S.FD * fd)`  
+`hDEV mkdev (S.FD * fd, const char *devname)`  
 
 ## ASM  
-`>LDYA FD.DEV`  
+`>PUSHW devname`  
+`>LDYA fd`  
 `>SYSCALL mkdev  
 
 ## RETURN VALUE  
@@ -1121,22 +1122,6 @@ CC : success
  Y,A = Ptr to Full Path (C-String)  
  X = hMem of Full Path  
 CS : A = Error Code  
-
-# StrMatch  
-Compare a String against pattern (e.g. '*test?.txt')  
-
-## C  
-`int * strmatch ( char * s, const char * pattern );`  
-
-## ASM  
-**In:**   
-`>PUSHWI pattern`  
-`>LDYAI s`  
-`>SYSCALL strmatch`  
-
-## RETURN VALUE   
-CC : match  
-CS : no match  
 
 # StrLen  
 Returns Length of C-String  
