@@ -36,9 +36,7 @@ DRV.TERM		cld
 				.DA DRV.TERM.READ
 				.DA DRV.TERM.WRITE
 *--------------------------------------
-DRV.TERM.STATUS	>STYA ZPIOCTL
-
-				jsr DRV.TERM.GetIOCTLBuf
+DRV.TERM.STATUS	jsr DRV.TERM.GetIOCTLBufAndCnt
 				
 				ldy #S.IOCTL.STATCODE
 				lda (ZPIOCTL),y
@@ -118,6 +116,14 @@ DRV.TERM.CONTROL
 
 				jsr DRV.TERM.SCRCPY
 				
+				lda #0
+
+				ldy #S.DCB.TTY.bCURON
+				sta (ZPDCBPtr),y
+
+				ldy #S.DCB.TTY.bTITLE
+				sta (ZPDCBPtr),y
+				
 				clc
 				rts
 *--------------------------------------
@@ -151,13 +157,8 @@ DRV.TERM.CLOSE	jsr DRV.TERM.GetDCB
 				sec
 				rts
 *--------------------------------------
-DRV.TERM.READ	>STYA ZPIOCTL
-
-				jsr DRV.TERM.GetIOCTLBufAndCnt
-				
+DRV.TERM.READ	jsr DRV.TERM.GetIOCTLBufAndCnt
 				jsr DRV.TERM.GetDCB
-
-				jsr DRV.TERM.GetActive
 				
 				bit bActive				is screen active?
 				bpl .6					no....go check flush...
@@ -168,10 +169,18 @@ DRV.TERM.READ	>STYA ZPIOCTL
 				eor (ZPDCBPtr),y
 				beq .1
 
-				jsr CURBLNK
+				jsr DRV.TERM.CURBLNK
 
 .1				lda	OPENAPPLE
+				bpl .11
+				
+				lda KBD
 				bmi .6					Open apple key, not for us...
+
+				jsr DRV.TERM.Title.ON
+				bra .6
+				
+.11				jsr DRV.TERM.Title.OFF
 
 				lda KBD
 				bpl .6
@@ -233,20 +242,17 @@ DRV.TERM.READ	>STYA ZPIOCTL
 				sec
 				rts
 *--------------------------------------
-DRV.TERM.WRITE	>STYA ZPIOCTL
-
-				jsr DRV.TERM.GetIOCTLBufAndCnt
-				
+DRV.TERM.WRITE	jsr DRV.TERM.GetIOCTLBufAndCnt
 				jsr DRV.TERM.GetDCB
-
-				jsr DRV.TERM.GetActive
 				
 .1				inc ZPCount
 				bne .2
 				inc ZPCount+1
-				beq .8
+				beq FS.8
 				
-.2				ldy #S.DCB.TTY.MODE
+.2				jsr DRV.TERM.CUROFF
+				
+				ldy #S.DCB.TTY.MODE
 				lda (ZPDCBPtr),y
 				tax
 				
@@ -258,13 +264,11 @@ DRV.TERM.WRITE	>STYA ZPIOCTL
 				bra .1
 
 .3				jmp (.4,x)
+
 .4				.DA DRV.TERM.COUT
 				.DA DRV.TERM.ESC
 				.DA DRV.TERM.CSI
 				.DA DRV.TERM.IAC
-				
-.8				clc
-				rts
 *--------------------------------------
 DRV.TERM.COUT	lda (ZPBufPtr)
 
@@ -272,21 +276,12 @@ DRV.TERM.COUT	lda (ZPBufPtr)
 				bne .1
 				
 				lda #S.DCB.TTY.MODE.IAC
-				sta (ZPDCBPtr),y
+				bra DRV.TERM.SETMODE
 				
-				ldy #S.DCB.TTY.INBUFFER
-				lda #S.DCB.TTY.INBUFFER
-				sta (ZPDCBPtr),y
-				clc
-				rts
-				
-.1				pha
-				jsr CUROFF
-				pla
-				cmp #C.DEL
-				beq DEL
+.1				cmp #C.DEL
+				beq DRV.TERM.COUT.DEL
 				cmp #C.SPACE
-				bcc COUT.Ctrl
+				bcc DRV.TERM.COUT.Ctrl
 
 				ldy #S.DCB.TTY.bINVERSE
 				ora (ZPDCBPtr),y
@@ -313,7 +308,8 @@ FS				ldy #S.DCB.TTY.CH
 FS.8			clc
 				rts
 *--------------------------------------
-DEL				ldy #S.DCB.TTY.CH
+DRV.TERM.COUT.DEL
+				ldy #S.DCB.TTY.CH
 				lda (ZPDCBPtr),y
 				beq .1
 				dec
@@ -336,7 +332,8 @@ DEL				ldy #S.DCB.TTY.CH
 				ora (ZPDCBPtr),y
 				jmp SetCharAtCurPos
 *--------------------------------------
-COUT.Ctrl		ldx #CtrlChars.Cnt-1
+DRV.TERM.COUT.Ctrl
+				ldx #CtrlChars.Cnt-1
 
 .1				cmp CtrlChars,x
 				beq .2
@@ -348,14 +345,27 @@ COUT.Ctrl		ldx #CtrlChars.Cnt-1
 .2				txa
 				asl
 				tax
-				jmp (J.CtrlChars,x)
+				jmp (.8,x)
+
+.8				.DA ENQ					5
+				.DA BS					8
+				.DA LF					10
+				.DA	FF					12
+				.DA CROUT				13
+				.DA FS					21
+				.DA ESC					27
+*--------------------------------------
+ESC				lda #S.DCB.TTY.MODE.ESC
+				bra DRV.TERM.SETMODE
 *--------------------------------------
 DRV.TERM.ESC	lda (ZPBufPtr)
 
 				cmp #'['
-				bne .1
+				bne DRV.TERM.ESC1
 
 				lda #S.DCB.TTY.MODE.CSI
+				
+DRV.TERM.SETMODE				
 				sta (ZPDCBPtr),y
 				ldy #S.DCB.TTY.INBUFFER
 				lda #S.DCB.TTY.INBUFFER
@@ -363,7 +373,7 @@ DRV.TERM.ESC	lda (ZPBufPtr)
 				clc
 				rts
 				
-.1				lda #0					y = #S.DCB.TTY.MODE
+DRV.TERM.ESC1	lda #0					y = #S.DCB.TTY.MODE
 				sta (ZPDCBPtr),y
 				
 				ldx #EscCodes.Cnt-1
@@ -802,50 +812,35 @@ RESET.MODE		lda #0
 				clc
 				rts
 *--------------------------------------
-RESET			jsr RESET.MODE
+RESET.VALUES	.DA #0					S.DCB.TTY.MODE
+				.DA #0					S.DCB.TTY.CH
+				.DA #0					S.DCB.TTY.CV
+				.DA #0					S.DCB.TTY.SCROLLTOP
+				.DA #23					S.DCB.TTY.SCROLLBOT
+				.DA #0					S.DCB.TTY.bCURON
+				.DA #0					S.DCB.TTY.CURCHAR
+				.DA #$80				S.DCB.TTY.bINVERSE
+				.DA #$80				S.DCB.TTY.bLINEWRAP
+				.DA #0					S.DCB.TTY.bTITLE
+				.DA #S.DCB.TTY.OUTBUFFER	S.DCB.TTY.OUTTAIL
+				.DA #S.DCB.TTY.OUTBUFFER	S.DCB.TTY.OUTHEAD
+				.DA #S.DCB.TTY.INBUFFER	S.DCB.TTY.INBUFFER			
+*--------------------------------------
+RESET			ldy #1
 				
-				ldy #S.DCB.TTY.OUTTAIL
+.1				iny
+				lda RESET.VALUES-2,y		
 				sta (ZPDCBPtr),y
-				iny
-				sta (ZPDCBPtr),y
-
-				ldy #S.DCB.TTY.bCURON
-				sta (ZPDCBPtr),y
-
-				dec
-				ldy #S.DCB.TTY.bLINEWRAP
-				sta (ZPDCBPtr),y
+				cpy #S.DCB.TTY.INBUFFER
+				bne .1
 				
-				lda #0
-				ldy #S.DCB.TTY.SCROLLTOP
-				sta (ZPDCBPtr),y
-				
-				iny
-				lda #23
-				sta (ZPDCBPtr),y
-
-				lda #S.DCB.TTY.OUTBUFFER
-				
-				ldy #S.DCB.TTY.OUTTAIL
-				sta (ZPDCBPtr),y
-				iny
-				sta (ZPDCBPtr),y
-				
-				jsr DRV.TERM.CLRSCR
+				jmp DRV.TERM.CLRSCR
 *--------------------------------------
 RESETATTR		lda #$80
 				ldy #S.DCB.TTY.bINVERSE
 				sta (ZPDCBPtr),y
 				clc
 				rts
-*--------------------------------------
-J.CtrlChars		.DA ENQ					5
-				.DA BS					8
-				.DA LF					10
-				.DA	DRV.TERM.CLRSCR		12
-				.DA CROUT				13
-				.DA FS					21
-				.DA ESC					27
 *--------------------------------------
 ENQ				ldx #0
 
@@ -881,6 +876,13 @@ BS 				ldy #S.DCB.TTY.CH
 .2				clc
 				rts
 *--------------------------------------
+FF				lda #0
+				ldy #S.DCB.TTY.CV
+				sta (ZPDCBPtr),y
+				dey
+				sta (ZPDCBPtr),y
+				jmp DRV.TERM.CLRSCR
+*--------------------------------------
 CROUT			lda #0
 				ldy #S.DCB.TTY.CH
 				sta (ZPDCBPtr),y
@@ -900,13 +902,6 @@ LF				ldy #S.DCB.TTY.CV
 				clc
 				rts
 *--------------------------------------
-ESC				lda #S.DCB.TTY.MODE.ESC
-				ldy #S.DCB.TTY.MODE
-		
-				sta (ZPDCBPtr),y
-				clc
-				rts
-*--------------------------------------
 SCROLL.UP		ldy #S.DCB.TTY.SCROLLTOP
 				lda (ZPDCBPtr),y
 
@@ -916,7 +911,7 @@ SCROLL.UP		ldy #S.DCB.TTY.SCROLLTOP
 
 				inx
 				
-				jsr COPY.XtoL1
+				jsr DRV.TERM.COPY.XtoL1
 
 				txa
 				ldy #S.DCB.TTY.SCROLLBOT
@@ -969,7 +964,7 @@ SCROLL.DN		ldy #S.DCB.TTY.SCROLLBOT
 
 				dex
 				
-				jsr COPY.XtoL1
+				jsr DRV.TERM.COPY.XtoL1
 
 				txa
 				ldy #S.DCB.TTY.SCROLLTOP
@@ -979,40 +974,37 @@ SCROLL.DN		ldy #S.DCB.TTY.SCROLLBOT
 				clc
 				rts
 *--------------------------------------
-CUROFF			ldy #S.DCB.TTY.bCURON
+DRV.TERM.CUROFF	ldy #S.DCB.TTY.bCURON
 				lda (ZPDCBPtr),y
-				
-				beq	CUREXIT.RTS
-				
-CURBLNK			bit bActive
-				bmi CURBLNK1
+				beq	DRV.TERM.CURBLNK.RTS
+DRV.TERM.CURBLNK
+				bit bActive
+				bpl DRV.TERM.CURBLNK.RTS	do not Light if screen is not active
 				
 				ldy #S.DCB.TTY.bCURON
 				lda (ZPDCBPtr),y
-				bne	CURBLNK.OFF
-				rts						do not Light if screen is not active
-				
-CURBLNK1		ldy #S.DCB.TTY.bCURON
-				lda (ZPDCBPtr),y
-				bne CURBLNK.OFF
+				bne DRV.TERM.CURBLNK.OFF
 
 				jsr GetCharAtCurPos
 				ldy #S.DCB.TTY.CURCHAR
 				sta (ZPDCBPtr),y
 				and #$80
 				eor #" "
-				bra CUREXIT
+				bra DRV.TERM.CURBLNK.SET
 				
-CURBLNK.OFF		ldy #S.DCB.TTY.CURCHAR
+DRV.TERM.CURBLNK.OFF
+				ldy #S.DCB.TTY.CURCHAR
 				lda (ZPDCBPtr),y
 				
-CUREXIT			jsr SetCharAtCurPos
+DRV.TERM.CURBLNK.SET
+				jsr SetCharAtCurPos
 				
 				ldy #S.DCB.TTY.bCURON
 				lda (ZPDCBPtr),y
 				eor #CURSOR.BLINK.SPEED
 				sta (ZPDCBPtr),y
-CUREXIT.RTS		rts
+DRV.TERM.CURBLNK.RTS
+				rts
 *--------------------------------------
 Decimal.Out		stz ZPTmpWord
 				stz ZPTmpWord+1
@@ -1125,9 +1117,7 @@ DRV.TERM.GetDCB	ldy #S.FD.DEV.DCBPTR
 				iny
 				lda (pFD),y
 				sta ZPDCBPtr+1
-				rts
-*--------------------------------------
-DRV.TERM.GetActive
+
 				ldy #S.DCB.TTY.DEVID
 				lda (ZPDCBPtr),y
 				cmp A2osX.ASCREEN
@@ -1138,7 +1128,16 @@ DRV.TERM.GetActive
 				rts
 *--------------------------------------
 DRV.TERM.GetIOCTLBufAndCnt
-				ldy	#S.IOCTL.BYTECNT
+				>STYA ZPIOCTL
+
+				ldy #S.IOCTL.BUFPTR
+				lda (ZPIOCTL),y
+				sta ZPBufPtr
+				iny 
+				lda (ZPIOCTL),y
+				sta ZPBufPtr+1
+
+				iny						#S.IOCTL.BYTECNT
 				
 				lda (ZPIOCTL),y
 				eor #$ff
@@ -1148,88 +1147,62 @@ DRV.TERM.GetIOCTLBufAndCnt
 				eor #$ff
 				sta ZPCount+1
 
-DRV.TERM.GetIOCTLBuf
-				ldy #S.IOCTL.BUFPTR
-				lda (ZPIOCTL),y
-				sta ZPBufPtr
-				iny 
-				lda (ZPIOCTL),y
-				sta ZPBufPtr+1
-
 				rts
-*--------------------------------------			
-DRV.TERM.SETUP.L1X
-				ldy #S.FD.DEV.BUFPTR
-				lda (pFD),y
-				clc
-				adc BUF.BASEL,x
-				sta ZPBufBaseL1
+*--------------------------------------
+DRV.TERM.Title.ON
+				ldy #S.DCB.TTY.bTITLE
+				lda (ZPDCBPtr),y
+				bmi DRV.TERM.Title.RTS
 				
+				lda #$ff
+				sta (ZPDCBPtr),y
+				
+				ldy #S.DCB.TTY.DEVID
+				lda (ZPDCBPtr),y
+				tax
+				lda Dev.Table.hPath,x
+				jsr K.GetMemPtr
+				>STYA ZPTmpWord
+				
+				ldx #0
+				jsr DRV.TERM.SETUP.L1X.SCR
+				
+				ldy #0
+				
+.1				lda (ZPTmpWord),y
+				beq .2
+				
+				cmp #$40
+				bcc .10
+				cmp #$5F
+				bcs .10
+				and #$3F
+				
+.10				phy
+				jsr SetCharAtY.SCR
+				ply
 				iny
-				lda (pFD),y
-				adc BUF.BASEH,x
-				sta ZPBufBaseL1+1
+				bne .1
 				
-				bit bActive
-				bpl .8
+.2				lda #C.SPACE
 
-				lda SCR.BASEL,x
-				sta ZPScrBaseL1
-				lda SCR.BASEH,x
-				sta ZPScrBaseL1+1
-.8				rts
-*--------------------------------------
-SCR.BASEL		.HS	00.80.00.80.00.80.00.80.28.A8.28.A8.28.A8.28.A8.50.D0.50.D0.50.D0.50.D0
-SCR.BASEH		.HS	04.04.05.05.06.06.07.07.04.04.05.05.06.06.07.07.04.04.05.05.06.06.07.07
-*--------------------------------------
-BUF.BASEL		.DA #S.TTYBUF.SCRBUF
-				.DA #S.TTYBUF.SCRBUF+80
-				.DA #S.TTYBUF.SCRBUF+160
-				.DA #S.TTYBUF.SCRBUF+240
-				.DA #S.TTYBUF.SCRBUF+320
-				.DA #S.TTYBUF.SCRBUF+400
-				.DA #S.TTYBUF.SCRBUF+480
-				.DA #S.TTYBUF.SCRBUF+560
-				.DA #S.TTYBUF.SCRBUF+640
-				.DA #S.TTYBUF.SCRBUF+720
-				.DA #S.TTYBUF.SCRBUF+800
-				.DA #S.TTYBUF.SCRBUF+880
-				.DA #S.TTYBUF.SCRBUF+960
-				.DA #S.TTYBUF.SCRBUF+1040
-				.DA #S.TTYBUF.SCRBUF+1120
-				.DA #S.TTYBUF.SCRBUF+1200
-				.DA #S.TTYBUF.SCRBUF+1280
-				.DA #S.TTYBUF.SCRBUF+1360
-				.DA #S.TTYBUF.SCRBUF+1440
-				.DA #S.TTYBUF.SCRBUF+1520
-				.DA #S.TTYBUF.SCRBUF+1600
-				.DA #S.TTYBUF.SCRBUF+1680
-				.DA #S.TTYBUF.SCRBUF+1760
-				.DA #S.TTYBUF.SCRBUF+1840
-BUF.BASEH		.DA /S.TTYBUF.SCRBUF
-				.DA /S.TTYBUF.SCRBUF+80
-				.DA /S.TTYBUF.SCRBUF+160
-				.DA /S.TTYBUF.SCRBUF+240
-				.DA /S.TTYBUF.SCRBUF+320
-				.DA /S.TTYBUF.SCRBUF+400
-				.DA /S.TTYBUF.SCRBUF+480
-				.DA /S.TTYBUF.SCRBUF+560
-				.DA /S.TTYBUF.SCRBUF+640
-				.DA /S.TTYBUF.SCRBUF+720
-				.DA /S.TTYBUF.SCRBUF+800
-				.DA /S.TTYBUF.SCRBUF+880
-				.DA /S.TTYBUF.SCRBUF+960
-				.DA /S.TTYBUF.SCRBUF+1040
-				.DA /S.TTYBUF.SCRBUF+1120
-				.DA /S.TTYBUF.SCRBUF+1200
-				.DA /S.TTYBUF.SCRBUF+1280
-				.DA /S.TTYBUF.SCRBUF+1360
-				.DA /S.TTYBUF.SCRBUF+1440
-				.DA /S.TTYBUF.SCRBUF+1520
-				.DA /S.TTYBUF.SCRBUF+1600
-				.DA /S.TTYBUF.SCRBUF+1680
-				.DA /S.TTYBUF.SCRBUF+1760
-				.DA /S.TTYBUF.SCRBUF+1840
+.3				phy
+				jsr SetCharAtY.SCR
+				ply
+				iny
+				cpy #80
+				bne .3
+DRV.TERM.Title.RTS
+				rts
+
+DRV.TERM.Title.OFF
+				ldy #S.DCB.TTY.bTITLE
+				lda (ZPDCBPtr),y
+				bpl DRV.TERM.Title.RTS
+				
+				lda #$0
+				sta (ZPDCBPtr),y
+				jmp DRV.TERM.LINE0CPY
 *--------------------------------------
 CtrlChars		.HS 05080A0C0D151B
 CtrlChars.Cnt	.EQ *-CtrlChars
