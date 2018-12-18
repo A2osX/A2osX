@@ -50,14 +50,6 @@ none
 ## RETURN VALUE  
 Y,A = Ptr to installed driver  
 
-# GetDevByID  
-A = DevID  
-
-## RETURN VALUE  
-CC = OK, CS = ERROR  
-Y,A = FD  
-X = hFD  
-
 # GetDevByName  
  Y,A = Ptr to device name (C-String)  
 
@@ -552,13 +544,6 @@ Load a file in AUX memory (Stock Objects)
  Y,A = File Length  
  X = hMem of Loaded Object in AUX mem  
 
-# GetPSStat  
-**In:**  
- Y,A = Ptr to K.PS.MAX*2+1 bytes buffer  
-
-## RETURN VALUE  
- Buffer filled with PS stats  
-
 # ExecL  
 
 ## C  
@@ -597,13 +582,6 @@ A = Child PSID
 
 ## RETURN VALUE  
 A = Child PSID  
-
-# GetPSStatus  
-**In:**  
- A = PID  
-
-## RETURN VALUE  
- A = Status Byte  
 
 # Stat  
 Return information about a file  
