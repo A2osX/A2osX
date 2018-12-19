@@ -15,10 +15,15 @@ X.DELETE.SOURCE	.EQ 0
 *--------------------------------------
 MAX.COL			.EQ 4
 *--------------------------------------
-ZPPtr1			.EQ ZPBIN
-ZPPtr2			.EQ ZPBIN+2
-ZPFileName		.EQ ZPBIN+4
-ZPFileStat		.EQ ZPBIN+6
+				.DUMMY
+				.OR ZPBIN
+ZS.START
+ZPPtr1			.BS 2
+ZPPtr2			.BS 2
+ZPFileName		.BS 2
+ZPFileStat		.BS 2
+ZS.END
+				.ED
 *--------------------------------------
 *			File Header (16 Bytes)
 *--------------------------------------
@@ -26,11 +31,12 @@ CS.START		cld
 				jmp (.1,x)
 				.DA #$61				6502,Level 1 (65c02)
 				.DA #1					BIN Layout Version 1
-				.DA 0
-				.DA CS.END-CS.START		CS
-				.DA DS.END-DS.START		DS
-				.DA #64					SS
-				.DA #8					ZP
+				.DA #0					S.PS.F.EVENT
+				.DA #0
+				.DA CS.END-CS.START		Code Size (without Constants)
+				.DA DS.END-DS.START		Data SegmentSize
+				.DA #64					Stack Size
+				.DA #ZS.END-ZS.START	Zero Page Size
 				.DA 0
 *--------------------------------------
 * Relocation Table
@@ -49,7 +55,10 @@ L.PRODOS.FT.TXT	.DA PRODOS.FT.TXT
 L.FMT.DateTime	.DA FMT.DateTime
 				.DA 0
 *--------------------------------------
-CS.INIT			
+CS.INIT			clc
+				rts
+*--------------------------------------
+CS.RUN
 .1				>INC.G ArgCount
 				>SYSCALL ArgV
 				bcs .6
@@ -79,38 +88,38 @@ CS.INIT
 				
 .4				>LDYA ZPPtr1
 				jsr InitSrcDirYA
-				bcs .9
+				bcc .1					scan for any other args
 				
-				bra .1					scan for any other args
+.9				rts				
 				
 .6				>LDA.G index			do we have a Source dir ?
-				bne .8
+				bne CS.RUN.LOOP
 				
-.7				ldy #S.PS.hPREFIX
+				ldy #S.PS.hPREFIX
 				lda (pPs),y
 				>SYSCALL GetMemPtr
 				jsr InitSrcDirYA
-				bcs .9
-				
-.8				clc
-.9				rts
+				bcs .9	
 *--------------------------------------
-CS.RUN			>SYSCALL GetChar
-				bcs .10					no char
+CS.RUN.LOOP		>SLEEP
+
+				>SYSCALL GetChar
+				bcs .2					no char
 				
 				cmp #$03				Ctrl-C
-				beq .92					Abort....
+				bne .1					Abort....
+				rts						CS
 				
-				cmp #$13				Ctrl-S
-				bne .10
+.1				cmp #$13				Ctrl-S
+				bne .2
 
 				>LDA.G bPause
 				eor	#$ff
 				sta (pData),y
-				bne .80
+				bne CS.RUN.LOOP
 				
-.10				>LDA.G bPause
-				bne .80					Pause...
+.2				>LDA.G bPause
+				bne CS.RUN.LOOP
 				
 				jsr GetEntry
 				bcs .9
@@ -143,10 +152,21 @@ CS.RUN			>SYSCALL GetChar
 				cmp #$0F				Directory ?
 				bne .6
 
-				jmp CS.RUN.DIR
-.5				jmp CS.RUN.DEV
-.6				jmp CS.RUN.FILE
+				jsr CS.RUN.PRINT.DIR
+				bcs .99
+				bra .8
 				
+.5				jsr CS.RUN.PRINT.DEV
+				bcs .99
+				bra .8
+
+.6				jsr CS.RUN.PRINT.FILE
+				bcs .99
+
+.8				jsr GetNextEntry
+
+				bcc .92
+
 .9				ldy #bLong
 				lda (pData),y
 				bmi .91
@@ -155,20 +175,20 @@ CS.RUN			>SYSCALL GetChar
 				bcs .99
 
 .91				jsr LeaveSubDir
-				bcs .92
+				bcs .98
 
 				jsr BasePath..
+				jsr GetNextEntry
 				
-.8				jsr GetNextEntry
-.80				clc
-				rts
+.92				jmp CS.RUN.LOOP
 				
-.92				lda #0
+.98				lda #0
 				sec
 .99				rts
 *--------------------------------------
-CS.RUN.DEV		>LDA.G bLong
-				bpl CS.RUN.DIR
+CS.RUN.PRINT.DEV
+				>LDA.G bLong
+				bpl CS.RUN.PRINT.DIR
 				
 				ldy #S.STAT.P.DEVBLOCKS+1
 				>PUSHB (ZPFileStat),y
@@ -197,14 +217,13 @@ CS.RUN.DEV		>LDA.G bLong
 				>LDYA ZPFileName
 				jsr EnterSubDirYA
 				bcs .9
-				jsr CS.RUN.ENTER.MSG
-				rts
+				jmp CS.RUN.ENTER.MSG
 				
-.8				jsr GetNextEntry
-				clc				
+.8				clc				
 .9				rts
 *--------------------------------------
-CS.RUN.DIR		>LDA.G bAllmostAll
+CS.RUN.PRINT.DIR
+				>LDA.G bAllmostAll
 				bmi .10
 				
 				lda (ZPFileName)
@@ -219,7 +238,7 @@ CS.RUN.DIR		>LDA.G bAllmostAll
 				>LDYA L.MSG.DIR
 				>SYSCALL printf
 
-				bcs .9
+				bcs .99
 				
 				ldy #0
 				
@@ -250,7 +269,8 @@ CS.RUN.DIR		>LDA.G bAllmostAll
 				>PUSHBI 8
 				>LDYA L.MSG.DIREXT
 				>SYSCALL printf
-				bcs .9
+
+.99				bcs .9
 				
 .5				ldy #bRecurse
 				lda (pData),y
@@ -266,14 +286,13 @@ CS.RUN.DIR		>LDA.G bAllmostAll
 				>LDYA ZPFileName
 				jsr EnterSubDirYA
 				bcs .9
-				jsr CS.RUN.ENTER.MSG
-				rts
+				jmp CS.RUN.ENTER.MSG
 				
-.8				jsr GetNextEntry
-				clc
+.8				clc
 .9				rts
 *--------------------------------------
-CS.RUN.FILE		ldy #bLong
+CS.RUN.PRINT.FILE
+				ldy #bLong
 				lda (pData),y
 				bmi .1
 				
@@ -283,10 +302,7 @@ CS.RUN.FILE		ldy #bLong
 				>SYSCALL printf
 				bcs .9
 				
-				jsr CS.RUN.UpdateColCnt
-				jsr GetNextEntry
-				clc
-				rts
+				jmp CS.RUN.UpdateColCnt
 				
 .1				jsr CS.RUN.PUSHDATES
 				
@@ -319,10 +335,7 @@ CS.RUN.FILE		ldy #bLong
 				>PUSHBI 16
 				>LDYA L.MSG.FILEEXT
 				>SYSCALL printf
-				bcs .9
-				
-				jsr GetNextEntry
-				clc
+
 .9				rts
 *--------------------------------------
 CS.RUN.PUSHDATES
@@ -379,10 +392,7 @@ CS.RUN.PUSHDATES
 				rts
 *--------------------------------------
 CS.RUN.UpdateColCnt
-				ldy #ColCount
-				lda (pData),y
-				inc
-				sta (pData),y
+				>INC.G ColCount
 				cmp #MAX.COL
 				bne CS.RUN.NewLine.8
 	
@@ -390,8 +400,7 @@ CS.RUN.UpdateColCnt
 				sta (pData),y
 				bra CS.RUN.NewLine.1
 *--------------------------------------
-CS.RUN.NewLine	ldy #ColCount
-				lda (pData),y
+CS.RUN.NewLine	>LDA.G ColCount
 				beq CS.RUN.NewLine.8
 CS.RUN.NewLine.1				
 				lda #13
