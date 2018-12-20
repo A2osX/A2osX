@@ -452,17 +452,6 @@ Y,A = ZPMemMgrSPtr = PTR to S.MEM
 ## RETURN VALUE  
  Buffer filled with memory stats  
 
-# NewStr  
-Create a new copy of this C-String  
-Y,A = Ptr to source C-String  
-
-## RETURN VALUE  
-CC : success   
- Y,A = PTR to String  
- X = hMem (PSTR)  
-CS : error  
- A = SYS error code  
-
 # SListGetByID  
  PUSHB = hSList  
  PUSHW = KeyID  
@@ -1143,6 +1132,17 @@ Copy string
 
 ## RETURN VALUE   
 Y,A = destination  
+
+# StrDup  
+Create a new copy of this C-String  
+Y,A = Ptr to source C-String  
+
+## RETURN VALUE  
+CC : success   
+ Y,A = PTR to String  
+ X = hMem (PSTR)  
+CS : error  
+ A = SYS error code  
 
 # StrUpr/StrLwr  
 Convert string to UPPERCASE/lowercase  
