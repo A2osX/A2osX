@@ -215,8 +215,17 @@ Remove an environment variable
 
 # LoadTxtFile  
 Load TXT a file in memory (with ending 0)  
+
+## C  
+`int loadtxtfile ( const char * filename, short int flags, short int ftype, int auxtype );`  
+
+## ASM  
 **In:**  
- Y,A = File Path  
+`>PUSHW auxtype`  
+`>PUSHB ftype`  
+`>PUSHB flags`  
+`>LDYA filename`  
+`>SYSCALL loadtxtfile`  
 
 ## RETURN VALUE  
  Y,A = File Length (without ending 0)  
@@ -224,11 +233,17 @@ Load TXT a file in memory (with ending 0)
 
 # LoadFile  
 Load a file in memory  
+
+## C  
+`int loadfile ( const char * filename, short int flags, short int ftype, int auxtype );`  
+
+## ASM  
 **In:**  
- PUSHW = AUXTYPE (Handled by....  
- PUSHB = TYPE  ...  
- PUSHB = MODE  ...  
- LDYA = PATH ...FOpen)  
+`>PUSHW auxtype`  
+`>PUSHB ftype`  
+`>PUSHB flags`  
+`>LDYA filename`  
+`>SYSCALL loadfile`  
 
 ## RETURN VALUE  
  Y,A = File Length  
