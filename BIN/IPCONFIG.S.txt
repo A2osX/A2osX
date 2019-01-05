@@ -8,10 +8,15 @@ AUTO 4,1
 *--------------------------------------
 				.INB INC/MACROS.I
 				.INB INC/A2OSX.I
+				.INB INC/KERNEL.I
+				.INB INC/MLI.I
 				.INB INC/MLI.E.I
 				.INB INC/NIC.I
 				.INB INC/ETH.I
 				.INB INC/LIBTCPIP.I
+				.INB INC/NET.DHCP.I
+*--------------------------------------
+TIMEOUT.MAX		.EQ 200					20 sec.
 *--------------------------------------
 				.DUMMY
 				.OR ZPBIN
@@ -20,6 +25,13 @@ ZPPtr1			.BS 2
 pIPCFG			.BS 2
 pFD				.BS 2
 pDEV			.BS 2
+ZPIPCfgPtr		.BS 2
+ZPFrameBase		.BS 2
+ZPFramePtr		.BS 2
+ZPTmpPtr1		.BS 2
+ZPTmpPtr2		.BS 2
+ZPTmpPtr3		.BS 2
+*--------------------------------------
 ZS.END
 				.ED
 *--------------------------------------
@@ -73,7 +85,32 @@ L.MSG.DNS.ADD	.DA MSG.DNS.ADD
 L.HOSTNAME		.DA HOSTNAME
 L.TCPIP.CONF	.DA TCPIP.CONF
 L.HOSTS			.DA HOSTS
+L.IPCFG			.DA IPCFG
+L.IOCTL			.DA IOCTL
+L.DCB.NIC		.DA DCB.NIC
+L.CFG.IP		.DA CFG.IP
+L.HST.SScanF	.DA HST.SScanF
+L.CFG.HOSTS.SScanF	.DA CFG.HOSTS.SScanF
+L.CFG.Keywords	.DA CFG.Keywords
+J.CFG.Keywords	.DA CFG.Read.address
+				.DA CFG.Read.netmask
+				.DA CFG.Read.gateway
+				.DA CFG.Read.nameserver
+				.DA CFG.Read.dnsdomain
 				.DA 0
+*--------------------------------------
+* DHCP
+*--------------------------------------
+L.SA.LOCAL		.DA SA.LOCAL
+L.SA.REMOTE		.DA SA.REMOTE
+L.MSG.DHCP.CFG1	.DA MSG.DHCP.CFG1
+L.MSG.DHCP.CFG2	.DA MSG.DHCP.CFG2
+L.MSG.DHCP.KO	.DA MSG.DHCP.KO
+L.MSG.DHCP.OK	.DA MSG.DHCP.OK
+L.MSG.DHCP.ND	.DA MSG.DHCP.ND
+L.MSG.DHCP.NA	.DA MSG.DHCP.NA
+L.DHCP.DISC		.DA DHCP.DISC
+L.DHCP.REQ		.DA DHCP.REQ
 *--------------------------------------
 CS.INIT			>LDYA L.LIBTCPIP
 				>SYSCALL LoadLib
@@ -164,13 +201,15 @@ CS.RUN.DUMP		>LDYA L.MSG0.L
 
 				>PUSHEA.G DIB+S.DIB.IDS 
 				
-				lda #S.FD.DEV.NAME
-				clc
-				adc pFD
-				tay
-				lda /S.FD.DEV.NAME
-				adc pFD+1
-				
+				>LDA.G FD.ETH
+				ldx #$ff
+
+.11				inx
+				cmp Dev.Table.hFD,x
+				bne .11
+
+				lda Dev.Table.hPath,x
+				>SYSCALL GetMemPtr
 				>PUSHYA
 				
 				>PUSHB.G FD.ETH
@@ -323,7 +362,16 @@ CS.RUN.DONE		lda #0					tell TSKMGR that all done ok, but
 				sec						we do not want to stay in memory
 				rts
 *--------------------------------------
-CS.DOEVENT		sec
+CS.DOEVENT		lda (pEvent)
+				bpl .9					is it a TIMER event?
+				
+				>LDA.G TimeOut
+				beq .9
+				
+				dec
+				sta (pData),y
+				
+.9				sec						do not discard TIMER event
 				rts
 *--------------------------------------
 CS.QUIT			lda hLIBTCPIP
@@ -333,7 +381,18 @@ CS.QUIT			lda hLIBTCPIP
 .8				clc
 				rts
 *--------------------------------------
+Init.Timeout	ldy #TimeOut
+				lda #TIMEOUT.MAX
+				sta (pData),y
+				rts
+*--------------------------------------
+Wait.TimeOut	ldy #TimeOut
+				lda (pData),y
+				rts
+*--------------------------------------
 				.INB USR/SRC/SBIN/IPCONFIG.S.DEV
+				.INB USR/SRC/SBIN/IPCONFIG.S.DHCP
+				.INB USR/SRC/SBIN/IPCONFIG.S.ETC
 *--------------------------------------
 CS.END
 LIBTCPIP		.AZ "libtcpip"
@@ -351,7 +410,7 @@ MSG0.L			.AZ "Loaded"
 MSG0.NL			.AZ "Not Loaded"
 *--------------------------------------
 MSG1.DEV		.AS "Device Configuration :\r\n"
-				.AS	" FD.ETH      : $%h\r\n"
+				.AS	" Device ID   : $%h\r\n"
 				.AS " Device Name : %s\r\n"
 				.AS " Device Type : %S\r\n"
 				.AZ " HW Address  : %02h:%02h:%02h:%02h:%02h:%02h\r\n"
@@ -385,6 +444,7 @@ MSG.DNS.ADD		.AZ " - Adding static host %d.%d.%d.%d %s..."
 HOSTNAME		.AZ "${ROOT}ETC/HOSTNAME"
 TCPIP.CONF		.AZ "${ROOT}ETC/TCPIP.CONF"
 HOSTS			.AZ "${ROOT}ETC/HOSTS"
+HST.SScanF		.AZ "%d.%d.%d.%d"
 *--------------------------------------
 CFG.DefaultHost	.AZ "a2osx-XXXX"
 CFG.Keywords	>PSTR "address"
@@ -400,6 +460,62 @@ CFG.hCfgPath	.BS 1
 CFG.hCfgFile	.BS 1
 CFG.IP			.BS 4
 CFG.HOSTS.SScanF	.AZ "%d.%d.%d.%d %s %s"
+IPCFG			.BS S.IPCFG
+*--------------------------------------
+MSG.DHCP.CFG1	.AZ "Searching for DHCP servers..."
+MSG.DHCP.CFG2	.AZ "Reply from DHCP Server at %d.%d.%d.%d, requesting...\r\n"
+MSG.DHCP.KO		.AZ "Time Out [%h].\r\n"
+MSG.DHCP.OK		.AZ "Success:[IP=%d.%d.%d.%d/%d.%d.%d.%d]\r\n"
+MSG.DHCP.ND		.AZ "No Device, exiting."
+MSG.DHCP.NA		.AZ "TCPIP Already configured, exiting."
+*--------------------------------------
+SA.LOCAL		.DA #AF.INET			S.SOCKADDR.AF
+				.BS 1
+				.HS 00.00.00.00			S.SOCKADDR.ADDR
+				.DA UDP.PORT.DHCPC		S.SOCKADDR.PORT
+*--------------------------------------
+SA.REMOTE		.DA #AF.INET			S.SOCKADDR.AF
+				.BS 1
+				.HS FF.FF.FF.FF			S.SOCKADDR.ADDR
+				.DA UDP.PORT.DHCPS		S.SOCKADDR.PORT
+*--------------------------------------
+DHCP.DISC		.HS 01010600			OP,HTYPE,HLEN,HOPS
+DHCP.DISC.XID	.BS 4
+				.HS 0000				SECS
+				.DA S.DHCP.FLAGS.BRDCST
+				.HS	00000000			CIADDR
+DHCP.DISC.YIADDR	.HS 00000000
+				.HS 00000000			SIADDR
+DHCP.DISC.GIADDR	.HS 00000000			
+DHCP.DISC.CHADDR	.HS 00000000.00000000.00000000.00000000
+				.BS 64					SNAME
+				.BS 128					FILE
+				.HS 63825363			COOKIE
+				.HS 3501				OPT
+				.DA #S.DHCP.OPTIONS.DHCPDiscover
+				.HS 37040103060FFF
+DHCP.DISC.LEN	.EQ *-DHCP.DISC
+*--------------------------------------
+DHCP.REQ		.HS 01010600			OP,HTYPE,HLEN,HOPS
+DHCP.REQ.XID	.BS 4
+				.HS 0000				SECS
+				.DA S.DHCP.FLAGS.BRDCST
+				.HS	00000000			CIADDR
+DHCP.REQ.YIADDR	.HS 00000000
+				.HS 00000000			SIADDR
+DHCP.REQ.GIADDR	.HS 00000000
+DHCP.REQ.CHADDR	.HS 00000000.00000000.00000000.00000000
+				.BS 64					SNAME
+				.BS 128					FILE
+				.HS 63825363			COOKIE
+				.HS 3501				OPT
+				.DA #S.DHCP.OPTIONS.DHCPRequest
+				.HS 3204
+DHCP.REQ.OPT.REQIP	.BS 4
+				.HS 3604
+DHCP.REQ.OPT.SVRIP	.BS 4
+				.HS	FF
+DHCP.REQ.LEN 	.EQ *-DHCP.REQ
 *--------------------------------------
 				.DUMMY
 				.OR 0
@@ -412,6 +528,9 @@ FD.ETH			.BS 1
 IOCTL			.BS S.IOCTL
 DIB				.BS S.DIB
 DCB.NIC			.BS S.DCB.NIC
+TimeOut			.BS 1
+hSocket			.BS 1
+hFrame			.BS 1
 DS.END			.ED
 *--------------------------------------
 MAN
