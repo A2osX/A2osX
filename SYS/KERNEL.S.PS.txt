@@ -8,6 +8,7 @@ PS.Flags		.BS 1
 PS.ArgV			.BS 2
 PS.ArgSize		.BS 2
 PS.hMem			.BS 1
+PS.NewPSPtr		.BS 2
 				.ED
 */--------------------------------------
 * # ExecL
@@ -62,16 +63,16 @@ K.ExecL			sty .1+1
 K.ExecV			>STYA PS.ArgV
 				>PULLB PS.Flags
 				
-PS.Exec			jsr PS.CreateChild		A=PID,Child S.PS at ZPPtr3,PS.Load.hMem
+PS.Exec			jsr PS.CreateChild		A=PID,Child S.PS at PS.NewPSPtr,PS.Load.hMem
 				bcs .9
 				sta .8+1
 
-				stz K.IOBuf
+				stz K.IOBuf				If !=0 after PS.Load, it's a script
 				jsr PS.Load
 				bcs .90
 
-				jsr PS.AddArgV
-				bcc .8
+				jsr PS.AddArgV			K.IOBuf= /.../SHELL, K.Buf256=/.../SCRIPT
+				bcc .8					or K.IOBuf= 0, K.Buf256=/.../BINFILE
 				
 .90				pha						save error code
 				
@@ -130,7 +131,7 @@ PS.CreateChild	ldx CORE.PSCount
 				jsr K.GetMem0			Blank Everything in this S.PS
 				bcs .99
 				
-				>STYA ZPPtr3
+				>STYA PS.NewPSPtr
 				stx PS.hMem
 				txa
 				plx
@@ -140,7 +141,7 @@ PS.CreateChild	ldx CORE.PSCount
 
 				ldy #S.PS.PID
 				lda CORE.LastPSID
-				sta (ZPPtr3),y
+				sta (PS.NewPSPtr),y
 
 				ldy #S.PS.hPREFIX		copy hPREFIX...
 				lda (pPs),y
@@ -152,13 +153,13 @@ PS.CreateChild	ldx CORE.PSCount
 
 				txa
 				ldy #S.PS.hPREFIX
-				sta (ZPPtr3),y
+				sta (PS.NewPSPtr),y
 				
 				lda #S.PS.F.DUPENV
 				bit PS.Flags			need to create ENV ?	
 				beq .6					no...
 				
-				sta (ZPPtr3)			Mark this PS with DUPENV flag
+				sta (PS.NewPSPtr)		Mark this PS with DUPENV flag
 				
 				ldy #S.PS.hENV			dup hENV from parent PS
 				lda (pPs),y
@@ -171,12 +172,12 @@ PS.CreateChild	ldx CORE.PSCount
 .6				ldy #S.PS.hENV			reuse hENV from parent PS
 				lda (pPs),y
 
-.8				sta (ZPPtr3),y
+.8				sta (PS.NewPSPtr),y
 				
 				ldy #S.PS.hStdIn
 
 .81				lda (pPs),y
-				sta (ZPPtr3),y
+				sta (PS.NewPSPtr),y
 				iny
 				cpy #S.PS.hStdErr+1
 				bne .81
@@ -185,7 +186,7 @@ PS.CreateChild	ldx CORE.PSCount
 				lda (pPs),y
 				
 				ldy #S.PS.PPID
-				sta (ZPPtr3),y
+				sta (PS.NewPSPtr),y
 
 				lda #S.PS.F.HOLD
 				bit PS.Flags
@@ -195,8 +196,8 @@ PS.CreateChild	ldx CORE.PSCount
 				sta (pPs)				HOLD parent PS
 				
 .82				lda #S.PS.F.INIT
-				ora (ZPPtr3)
-				sta (ZPPtr3)			Make this PS Init....
+				ora (PS.NewPSPtr)
+				sta (PS.NewPSPtr)			Make this PS Init....
 
 				ldy #S.PS.CPID
 				lda CORE.LastPSID
@@ -213,27 +214,28 @@ PS.Load			ldy #$ff
 				cmp #'/'
 				bne .1
 				
-				>LDYA PS.ArgV			found /, some path specified, no search
-				jsr K.realpath.I.GO		BANK1
-				bcs .99
-
 				>PUSHWI K.S.STAT
-				>LDYAI K.Buf256
+				>LDYA PS.ArgV			found /, some path specified, no search
 				>SYSCALL stat			BANK 1
-				bcc .6	
+				bcc .6					REAL path in K.Buf256
 				
 .99				rts
 				
-.2				>DEBUG
+.2				>LDYA PS.ArgV
+				jsr ENV.Search.PATH		Get fullpath in K.Buf256
+				bcc .6
+				
+				ldy #S.PS.hPREFIX
+				lda (pPS),y
+				jsr K.GetMemPtr
+				>STYA ENV.SearchPath
 				>LDYA PS.ArgV
-				jsr BIN.FindPATH		Get fullpath in K.Buf256
+				jsr ENV.Search.YA
 				bcs .99
-
+				
 .6				lda K.S.STAT+S.STAT.P.TYPE
 				cmp #S.FI.T.BIN
-				bne .7
-				>LDYAI K.Buf256
-				bra PS.LoadBIN
+				beq PS.LoadBIN
 				
 .7				cmp #S.FI.T.TXT
 				beq PS.Load.SCRIPT
@@ -247,65 +249,72 @@ PS.Load.IPATH	lda #E.BADPATH
 				sec
 PS.Load.RTS		rts
 
-PS.Load.SCRIPT	jsr PS.LoadGetHeader
+PS.Load.SCRIPT	ldx #$ff
+
+.10				inx						Save Script name in IOBuf
+				lda K.Buf256,x
+				sta K.IOBuf,x
+				bne .10
+				
+				jsr PS.LoadGetHeader
 				bcs PS.Load.RTS
 
 				>LDYAI PS.Load.ROOT
-				jsr K.GetEnv			ZPPtr3 Trashed
+				jsr K.GetEnv
 				bcs PS.Load.IPATH
 
-				>STYA .21+1
+				>STYA .2+1
 				
 				ldx #$ff
 
-.2				inx
-.21				lda $ffff,x				SELF MODIFIED
-				sta K.IOBuf,x
-				bne .2
+.1				inx
+.2				lda $ffff,x				SELF MODIFIED
+				sta K.Buf256,x			K.Buf256 = "/ROOT/"
+				bne .1
 				
 				ldy #0
 				
-.3				lda K.IOBuf+128,y
+.3				lda K.IOBuf+128,y		Check HEADER= "#!/"
 				cmp PS.Load.HEADER,y
 				bne PS.Load.IBIN
 				iny
 				cpy #3
 				bne .3
 				
-.4				iny
+.4				iny						
 				inx
 				lda K.IOBuf+128-1,y
-				sta K.IOBuf-1,x
+				sta K.Buf256-1,x		K.Buf256 = "/ROOT/BIN/SHELL"
 				beq .5
 				eor #C.CR
 				bne .4 
 	
-				sta K.IOBuf-1,x
+				sta K.Buf256-1,x		K.Buf256 = "/ROOT/BIN/SHELL\0"
 				
 .5				>PUSHWI K.S.STAT
-				>LDYAI K.IOBuf
+				>LDYAI K.Buf256
 				>SYSCALL stat			BANK 1
 				bcs PS.Load.RTS
 				
-				lda PS.hMem				Restore ZPPtr3 trashed by GetEnv
-				jsr K.GetMemPtr
-				>STYA ZPPtr3
-				>LDYAI K.IOBuf	
+				lda K.S.STAT+S.STAT.P.TYPE
+				cmp #S.FI.T.BIN
+				bne PS.Load.IBIN		K.Buf256= /.../SHELL, K.IOBuf=/.../SCRIPT
 *--------------------------------------
-PS.LoadBIN		jsr BIN.Load
+PS.LoadBIN		>LDYAI K.Buf256
+				jsr BIN.Load
 				bcs .9
 				>STYA ZPPtr4			save PTR to Code Segment
 
 				phy
 				ldy #S.PS.ZP.CODE+1
-				sta (ZPPtr3),y			save pCode HI...
+				sta (PS.NewPSPtr),y			save pCode HI...
 				dey
 				pla
-				sta (ZPPtr3),y			save pCode LO...
+				sta (PS.NewPSPtr),y			save pCode LO...
 				
 				txa
 				ldy #S.PS.hCS
-				sta (ZPPtr3),y			save CS hMem in S.PS
+				sta (PS.NewPSPtr),y			save CS hMem in S.PS
 
 *				jsr K.GetMemByID
 *				jsr PS.SetMemOwner		Set Ownership
@@ -315,8 +324,8 @@ PS.LoadBIN		jsr BIN.Load
 				beq .1
 				
 				ldy #S.PS.F				update PS S.PS.F
-				ora (ZPPtr3),y
-				sta (ZPPtr3),y
+				ora (PS.NewPSPtr),y
+				sta (PS.NewPSPtr),y
 
 .1				ldy #H.BIN.DS.SIZE+1
 				lda (ZPPtr4),y			Load DS.SIZE HI
@@ -335,14 +344,14 @@ PS.LoadBIN		jsr BIN.Load
 
 				phy
 				ldy #S.PS.ZP.DATA+1
-				sta (ZPPtr3),y			save pData HI...
+				sta (PS.NewPSPtr),y			save pData HI...
 				dey
 				pla
-				sta (ZPPtr3),y			save pData LO...
+				sta (PS.NewPSPtr),y			save pData LO...
 
 				txa
 				ldy #S.PS.hDS
-				sta (ZPPtr3),y			save DS hMem in S.PS
+				sta (PS.NewPSPtr),y			save DS hMem in S.PS
 
 				jsr PS.SetMemOwner		Set Ownership
 
@@ -350,7 +359,7 @@ PS.LoadBIN		jsr BIN.Load
 				lda (ZPPtr4),y			Load SS.SIZE
 
 				ldy #S.PS.ZP.STACK
-				sta (ZPPtr3),y			save pStack LO...
+				sta (PS.NewPSPtr),y			save pStack LO...
 				
 				tay						
 
@@ -364,11 +373,11 @@ PS.LoadBIN		jsr BIN.Load
 				bcs .9
 
 				ldy #S.PS.ZP.STACK+1
-				sta (ZPPtr3),y			save pStack HI...(LO already set to Stack TOP)
+				sta (PS.NewPSPtr),y			save pStack HI...(LO already set to Stack TOP)
 
 				txa
 				ldy #S.PS.hSS
-				sta (ZPPtr3),y			save SS hMem in S.PS
+				sta (PS.NewPSPtr),y			save SS hMem in S.PS
 
 				jsr PS.SetMemOwner		Set Ownership
 				
@@ -377,7 +386,7 @@ PS.LoadBIN		jsr BIN.Load
 				clc
 				adc #8					Add room for 4 saved PTR
 				ldy #S.PS.ZP.SIZE
-				sta (ZPPtr3),y
+				sta (PS.NewPSPtr),y
 
 				clc
 .9				rts
@@ -386,9 +395,9 @@ PS.LoadGetHeader
 				>PUSHWI 0				Aux type
 				>PUSHBI S.FI.T.TXT
 				>PUSHBI	O.RDONLY
-				>LDYA PS.ArgV
+				>LDYAI K.IOBuf
 				>SYSCALL fopen
-				bcs PS.LoadGetHeader.RTS
+				bcs .9
 				sta .1+1
 
 				>PUSHWI 128
@@ -402,8 +411,7 @@ PS.LoadGetHeader
 				>SYSCALL fclose
 				pla
 				plp
-PS.LoadGetHeader.RTS
-				rts
+.9				rts
 *--------------------------------------
 PS.Load.ROOT	.AZ "ROOT"
 PS.Load.HEADER	.AZ "#!/"
@@ -435,23 +443,42 @@ PS.DupEnv		jsr K.GetMemPtr
 				clc
 .9				rts
 *--------------------------------------
-* hBIN + PS.ArgV -> #S.PS.hARGV
+* K.Buf256= /.../SHELL, K.IOBuf=/.../SCRIPT
+* - or - 
+* K.Buf256=/.../BINFILE,K.IOBuf=0 
+* Buf256+IOBUF(?)+PS.ArgV[1,...] -> #S.PS.hARGV
 *--------------------------------------
-PS.AddArgV		stz PS.ArgSize
-				stz PS.ArgSize+1
-
-				lda K.IOBuf
+PS.AddArgV		ldy #$ff				In both cases, remove ARGV[0]
+				
+.60				iny
+				lda (PS.ArgV),y
+				bne .60
+				
+				tya
+				sec
+				adc PS.ArgV
+				sta PS.ArgV
+				bcc .70
+				
+				inc PS.ArgV+1			Skip old ARGV[0] = scriptename
+				
+.70				>LDYAI K.Buf256
+				jsr K.strlen
+				>STYA PS.ArgSize
+				
+				lda K.IOBuf				is there a /BIN/SHELL ?
 				beq .10
 				
 				>LDYAI K.IOBuf
 				jsr K.strlen
-				iny						+1 for \0
-				>STYA PS.ArgSize
-				ldx #0					ARGC-1
-				.HS 2C
+				jsr PS.AddYAp12ArgSize
 
-.10				ldx #$ff				ARGC-1
-				>LDYA PS.ArgV
+.10				ldx #0					For now, 0 args...
+				lda K.IOBuf
+				beq .11					+1 for scriptpath
+				inx
+				
+.11				>LDYA PS.ArgV
 				>STYA ZPPtr1
 
 .1				lda (ZPPtr1)
@@ -465,20 +492,15 @@ PS.AddArgV		stz PS.ArgSize
 				lda (ZPPtr1),y
 				bne .2
 				
-				tya
-				sec
-				adc PS.ArgSize
-				sta PS.ArgSize
-				bcc .3
-				
-				inc PS.ArgSize+1
+*				lda #0				
+				jsr PS.AddYAp12ArgSize
 				
 .3				jsr MEM.AddYp1ToPtr1
 				bra .1
 
 .4				txa
 				ldy #S.PS.ARGC
-				sta (ZPPtr3),y
+				sta (PS.NewPSPtr),y
 				
 				>LDYA PS.ArgSize		Add 1 for ending 0
 				iny
@@ -491,14 +513,16 @@ PS.AddArgV		stz PS.ArgSize
 				>STYA ZPPtr2			Target Buffer
 				txa
 				ldy #S.PS.hARGV
-				sta (ZPPtr3),y
+				sta (PS.NewPSPtr),y
 
+				>LDYAI K.Buf256
+				jsr PS.AddYAToStrV
+				
 				lda K.IOBuf
 				beq .6
 				
 				>LDYAI K.IOBuf
-				>STYA ZPPtr1
-				jsr PS.AddPtr1ToStrV
+				jsr PS.AddYAToStrV
 				
 .6				>LDYA PS.ArgV
 				>STYA ZPPtr1
@@ -511,6 +535,7 @@ PS.AddPtr1ToStrVUntil0
 				jsr PS.AddPtr1ToStrV
 				bra .1
 *--------------------------------------
+PS.AddYAToStrV	>STYA ZPPtr1
 PS.AddPtr1ToStrV
 				ldy #$ff
 				
@@ -531,9 +556,20 @@ PS.AddPtr1ToStrV
 PS.AddPtr1ToStrV.8
 				rts
 *--------------------------------------
+PS.AddYAp12ArgSize
+				pha
+				tya
+				sec						+1 for \0
+				adc PS.ArgSize
+				sta PS.ArgSize
+				pla
+				adc PS.ArgSize+1
+				sta PS.ArgSize+1
+				rts
+*--------------------------------------
 PS.SetMemOwner	lda CORE.LastPSID
 				ldy #S.MEM.OWNERPID
-				sta (ZPMEMMGR),y
+				sta (ZPMemMgrSPtr),y
 				rts
 */--------------------------------------
 * # ExecL
