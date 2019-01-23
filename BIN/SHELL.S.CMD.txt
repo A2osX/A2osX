@@ -107,7 +107,7 @@ Cmd.INT.PWD		ldy #S.PS.hPREFIX
 *--------------------------------------
 Cmd.INT.PUSHD	>LDA.G PUSHD.STACK
 				cmp #PUSHD.STACK+PUSHD.STACK.MAX
-				beq .9
+				beq Cmd.INT.POPD.CSYN
 				
 				ldy #S.PS.hPREFIX
 				lda (pPs),y
@@ -122,12 +122,7 @@ Cmd.INT.PUSHD	>LDA.G PUSHD.STACK
 				
 				ldx #1
 				jsr Cmd.GetArgX
-				bcs .8
-
-				>SYSCALL RealPath
-				bcs .9
-
-				jmp Cmd.INT.CD.1
+				bcc Cmd.INT.CD.1
 				
 .8				clc
 .9				rts
@@ -138,26 +133,21 @@ Cmd.INT.POPD	>LDA.G PUSHD.STACK
 				
 				tay
 				lda (pData),y
-				jsr Cmd.SetPrefixA
+				pha
+				jsr Cmd.SetPrefixPHA
 				
 				>DEC.G PUSHD.STACK
 				clc
+Cmd.INT.POPD.RTS				
 				rts
 				
 Cmd.INT.POPD.CSYN
-				lda #E.CSYN
-				sec
-				rts
+				jmp Cmd.Exec.CSYN
 *--------------------------------------
 Cmd.INT.CD		ldx #1
 				jsr Cmd.GetArgX
-				bcs Cmd.INT.CD.HOME
-
-				>SYSCALL RealPath
 				bcc Cmd.INT.CD.1
 
-Cmd.INT.CD.RTS	rts
-				
 Cmd.INT.CD.HOME >LDYA L.ENV.HOME
 				>SYSCALL GetEnv
 				bcc Cmd.INT.CD.1
@@ -168,52 +158,64 @@ Cmd.INT.CD.HOME >LDYA L.ENV.HOME
 				
 				jmp Cmd.INT.PWD
 				
-Cmd.INT.CD.1	>STYA ZPPtr1
-
+Cmd.INT.CD.1.9	pla
+				>SYSCALL freemem
+				bra Cmd.INT.POPD.CSYN
+				
+Cmd.INT.CD.1	>SYSCALL realpath
+				bcs Cmd.INT.POPD.RTS
+				>STYA ZPPtr1
+				phx
+				
 				ldy #1
 				lda (ZPPtr1),y
-				beq .8					we have '/'
+				beq Cmd.SetPrefixPHA	we have '/'
 
 				>PUSHEA.G CMD.Stat
 				>LDYA ZPPtr1
 				>SYSCALL STAT
-				bcs .9
+
+				bcs Cmd.INT.CD.1.9
 
 				>LDA.G CMD.Stat+S.STAT.P.TYPE
 				cmp #S.FI.T.DIR
-				bne .90 
+				bne Cmd.INT.CD.1.9
+
+				ldy #$ff
 				
-				ldy #0
-				
-.5				iny
+.1				iny
 				lda (ZPPtr1),y
-				bne .5
+				bne .1
 				
 				dey
-				lda #'/'
-				cmp (ZPPtr1),y
-				beq .8
-				
+				lda (ZPPtr1),y
+				cmp #'/'
+				beq Cmd.SetPrefixPHA	already ends witrh a /
+
 				iny
-				sta (ZPPtr1),y
 				iny
 				lda #0
-				sta (ZPPtr1),y
-				
-.8				>LDYA ZPPtr1
-				>SYSCALL ExpandStr
-				bcs .9
+				>SYSCALL getmem
+				bcs Cmd.INT.CD.1.9
+				>STYA ZPPtr2
 
-				txa
+				ldy #$ff
 				
-				jmp Cmd.SetPrefixA
+.2				iny
+				lda (ZPPtr1),y
+				lda (ZPPtr2),y
+				bne .2
 				
-.90				lda #E.CSYN
-				sec
-.9				rts
+				iny
+				sta (ZPPtr2),y
+				dey
+				lda #'/'
+				sta (ZPPtr2),y
+				pla
+				phx
+				>SYSCALL freemem
 *--------------------------------------
-Cmd.SetPrefixA	pha
-
+Cmd.SetPrefixPHA
 				ldy #S.PS.hPREFIX
 				lda (pPs),y
 				>SYSCALL FreeMem
@@ -298,18 +300,25 @@ Cmd.INT.SET.1	>STZ.G CMD.Varname
 				bcs .8
 				
 				jsr CMD.IsSwitch
-				bcs .2
+				bcs .6
+				
+				cmp #'C'
+				bne .2
+				
+				>LDA.G bSET.C
+				bra .5
 				
 				cmp #'X'
-				bne .99
+.2				bne .99
 				
-				lda #$ff
-				>EOR.G bSET.X
+				>LDA.G bSET.X
+				
+.5				eor #$ff
 				sta (pData),y
 				>INC.G CMD.ArgIndex
 				bra .1
 				
-.2				>LDA.G CMD.ArgIndex
+.6				>LDA.G CMD.ArgIndex
 				>STA.G CMD.Varname
 
 				>INC.G CMD.ArgIndex
@@ -347,9 +356,7 @@ Cmd.INT.SET.1	>STZ.G CMD.Varname
 .8				clc
 				rts
 				
-.99				lda #E.CSYN
-				sec
-				rts
+.99				jmp Cmd.Exec.CSYN
 				
 Cmd.INT.SET.UNSET
 				>LDA.G CMD.Varname
@@ -467,6 +474,31 @@ Cmd.INT.ECHO	>STZ.G bECHO.N
 .99				lda #E.CSYN
 				sec
 				rts
+*--------------------------------------
+Cmd.INT.GETKEY	ldx #1
+				jsr Cmd.GetArgX
+				bcs .99
+
+				>SYSCALL getchar
+				bcc .1
+				tay
+				bne .9
+	
+.1				>PUSHA
+				>PUSHBI 1
+				>PUSHW L.FMT.GETKEY
+				>LEA.G M32.BUF
+				>SYSCALL sprintf
+				bcs .9
+				
+				>PUSHEA.G M32.BUF
+								
+				ldx #1
+				jsr Cmd.GetArgX
+				>SYSCALL SetEnv
+.9				rts
+				
+.99				jmp Cmd.Exec.CSYN			
 *--------------------------------------
 Cmd.INT.READ	lda #1
 				>STA.G CMD.ArgIndex
