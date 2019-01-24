@@ -4,7 +4,7 @@ AUTO 4,1
 *--------------------------------------
 CORE.Run		stz CORE.PSIndex
 
-				ldx #0
+				bra .8					Skip PS0
 				
 .1				lda PS.Table.hPS,x
 				beq .8
@@ -30,48 +30,28 @@ CORE.Run		stz CORE.PSIndex
 .3				jsr CORE.PSExec			INIT/RUN/QUIT/RESUME
 				dec IRQ.InKernel
 				
-				bcc .61					Error ?
+				bcc .4					INIT/RUN Exit ?
 
-.5				tax						Yes, From INIT or RUN,save RC
-
-				ldy #S.PS.PPID			Notify Parent Process for exit code...
-				lda (pPs),y
-				beq .6					no parent process
+				jsr CORE.UpdateParentPS
 				
-				jsr CORE.GetPSByID		X unmodified
-				bcs .6					parent is dead.....skipping...
-
-				>STYA ZPPtr1
-				
-				lda (ZPPtr1)			Parent PS is HOLD? 
-				bit #S.PS.F.HOLD
-				beq .6					no...
-				
-				eor #S.PS.F.HOLD		yes, release hold...
-				sta (ZPPtr1)
-				
-				txa						...probably waiting for this PS to terminate....
-				ldy #S.PS.RC			give it RC
-				sta (ZPPtr1),y
-				
-.6				lda (pPs)
+				lda (pPs)
 				and #$3F				$ff^S.PS.F.INIT+S.PS.F.RUN
 				ora #S.PS.F.QUIT
 				sta (pPs)
 				bra .3					try executing QUIT now...
 				
-.61				lda (pPs)
+.4				lda (pPs)
 				bit #S.PS.F.SLEEP
 				bne .7
 				
 				bit #S.PS.F.INIT
-				beq .62
+				beq .5
 				
 				eor #S.PS.F.INIT+S.PS.F.RUN   go from INIT to RUN
 				sta (pPs)
 				bra .7
 				
-.62				bit #S.PS.F.QUIT
+.5				bit #S.PS.F.QUIT
 				beq .7			
 				
 				ldy #S.PS.PID
@@ -93,8 +73,13 @@ CORE.Events		jsr CORE.GetEvents
 				jsr CORE.Dispatch
 				bcc .4					CC=All Events Dispatched
 
-				jsr CORE.PSSelect0
-
+				lda PS.Table.PID		Select PS0
+				jsr K.GetMemPtr
+				>STYA pPs
+				
+				>LDYAI K.STACKTOP
+				>STYA pStack
+				
 				lda #Evt.Table
 				sta pEvent
 				
@@ -129,6 +114,69 @@ CORE.Events		jsr CORE.GetEvents
 				sta KBDSTROBE
 				jsr CORE.ScrSel
 .8				jmp CORE.Run
+*--------------------------------------
+CORE.UpdateParentPS
+				tax						save RC From INIT or RUN
+
+				ldy #S.PS.PPID			Notify Parent Process for exit code...
+				lda (pPs),y
+				beq .8					no parent process
+				
+				jsr CORE.GetPSByID		X unmodified
+				bcs .8					parent is dead.....skipping...
+
+				>STYA ZPPtr1
+				
+				lda (ZPPtr1)			Parent PS is HOLD? 
+				bit #S.PS.F.HOLD
+				beq .8					no...
+
+				ldy #S.PS.CPID
+				lda (ZPPtr1),y
+				dey						#S.PS.PID
+				cmp (pPs),y
+				bne .8					Hold, but not waiting this PS
+				
+				txa						waiting for this PS to terminate....
+				ldy #S.PS.RC			give it RC
+				sta (ZPPtr1),y
+				
+				lda (ZPPtr1)
+				eor #S.PS.F.HOLD		release Parent PS HOLD...
+				sta (ZPPtr1)
+				
+				lda (pPs)
+				bit #S.PS.F.DUPENV
+				bne .8
+				
+				ldy #S.PS.hENV			no dup, check if updating Parent PS
+
+				jsr .1
+				
+				ldy #S.PS.hPREFIX				
+*--------------------------------------
+.1				lda (pPs),y				hMEM...
+				cmp (ZPPtr1),y
+				beq .8					same, no update
+
+				tax						save new hMEM
+				lda #0
+				sta (pPs),y				reset
+				
+				lda (ZPPtr1),y			get parent hMEM
+				phy
+				jsr K.freemem			discard....
+				ply
+				txa						put new hMEM in parent
+				sta (ZPPtr1),y
+				cpy	#S.PS.hENV
+				bne .8
+				
+				dey						#S.PS.ENVPAGECNT
+				lda (pPs),y				
+				sta (ZPPtr1),y			update page count
+								
+.8				rts
 *--------------------------------------
 * CORE.GetEvents :
 *  IN :
@@ -222,7 +270,7 @@ CORE.GetEvents	lda #Evt.Table
 *--------------------------------------
 CORE.Dispatch	stz CORE.PSIndex
 				
-				ldx #0
+				bra .5					skip PS0
 				
 .1				lda PS.Table.hPS,x
 				beq .5
@@ -288,70 +336,13 @@ CORE.Dispatch	stz CORE.PSIndex
 .8				clc
 				rts
 *--------------------------------------
-* CORE.PSFree
-*   In : A = PID to free
-*--------------------------------------
-CORE.PSFree		sta .10+1				Save PS ID
-
-				jsr CORE.GetPSByID		S.PS in ZPPtr1
-				bcs .9
-				>STYA ZPPtr1
-
-				ldy #S.PS.hSS
-				jsr .8
-				
-				ldy #S.PS.hDS
-				jsr .8
-				
-				ldy #S.PS.hCS
-				jsr .8
-				
-				ldy #S.PS.hARGV
-				jsr .8
-
-				lda (ZPPtr1)			get S.PS.F
-				and #S.PS.F.DUPENV		do we have to discard duplicated env & prefix ?
-				beq .1
-				
-				ldy #S.PS.hENV
-				jsr .8
-				
-.1				ldy #S.PS.hPREFIX
-				jsr .8
-				
-.10				lda #$ff				Self Modified
-
-				ldx #0
-				
-.2				cmp PS.Table.PID,x
-				beq .3
-				inx
-				cpx CORE.PSCount
-				bne .2
-				beq *
-				
-.3				stz PS.Table.PID,x
-				lda PS.TABLE.hPS,x
-				stz PS.TABLE.hPS,x
-.4				jmp K.FreeMem
-
-.8				lda (ZPPtr1),y
-				bne .4
-.9				rts
-*--------------------------------------
 * X unmodified
 *--------------------------------------
-CORE.GetPSByID	tay
-				beq .8
-
-				jsr CORE.GetPS
+CORE.GetPSByID	jsr CORE.GetPS
 				bcs CORE.GetPSByID.RTS
 				
 				lda PS.TABLE.hPS,y
 				jmp K.GetMemPtr
-
-.8				lda CORE.hPS0
-				jsr K.GetMemPtr
 CORE.GetPSByID.8
 				clc				
 CORE.GetPSByID.RTS
@@ -359,11 +350,15 @@ CORE.GetPSByID.RTS
 *--------------------------------------
 * X,A unmodified
 *--------------------------------------
-CORE.GetPS		ldy #0
+CORE.GetPS		tay
+				beq CORE.GetPSByID.8	PS0 requested
+
+				ldy #0
+				bra .2					Skip PS0
 				
 .1				cmp PS.Table.PID,y
 				beq CORE.GetPSByID.8
-				iny
+.2				iny
 				cpy CORE.PSCount
 				bne .1
 				
@@ -422,14 +417,6 @@ CORE.DestroyEvent
 				sta (pEvent)
 				dec CORE.EvtCount
 .9				rts
-*--------------------------------------
-CORE.PSSelect0	lda CORE.hPS0
-				jsr K.GetMemPtr
-				>STYA pPs
-				
-				>LDYAI K.STACKTOP
-				>STYA pStack
-				rts
 *--------------------------------------
 CORE.PSSelect	ldy #S.PS.ZP+ZPBIN.SIZE-1
 				ldx #ZPBIN.SIZE-1
@@ -524,11 +511,56 @@ CORE.PSResume	sei
 				inc IRQ.InKernel
 				rti
 *--------------------------------------
-DevMgr.Stat		.DA DevMgr.FreeMem
-DevMgr.Free		.DA DevMgr.FreeMem
-				.DA DevMgr.HiMem
-DevMgr.DevCnt	.DA #0
-DevMgr.NodCnt	.DA #0
+* CORE.PSFree
+*   In : A = PID to free
+*--------------------------------------
+CORE.PSFree		sta .10+1				Save PS ID
+
+				jsr CORE.GetPSByID		S.PS in ZPPtr1
+				bcs .9
+				>STYA ZPPtr1
+
+				ldy #S.PS.hSS
+				jsr .8
+				
+				ldy #S.PS.hDS
+				jsr .8
+				
+				ldy #S.PS.hCS
+				jsr .8
+				
+				ldy #S.PS.hARGV
+				jsr .8
+
+				lda (ZPPtr1)			get S.PS.F
+				and #S.PS.F.DUPENV		do we have to discard duplicated env ?
+				beq .1
+				
+				ldy #S.PS.hENV
+				jsr .8
+				
+.1				ldy #S.PS.hPREFIX
+				jsr .8
+				
+.10				lda #$ff				Self Modified
+
+				ldx #0
+				
+.2				cmp PS.Table.PID,x
+				beq .3
+				inx
+				cpx CORE.PSCount
+				bne .2
+				beq *
+				
+.3				stz PS.Table.PID,x
+				lda PS.TABLE.hPS,x
+				stz PS.TABLE.hPS,x
+.4				jmp K.FreeMem
+
+.8				lda (ZPPtr1),y
+				bne .4
+.9				rts
 *--------------------------------------
 MAN
 SAVE USR/SRC/SYS/KERNEL.S.CORE
