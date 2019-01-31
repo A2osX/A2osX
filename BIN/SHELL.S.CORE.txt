@@ -6,11 +6,11 @@ AUTO 4,1
 * From hCLBuf or hFileBuf
 * Get Line from buf until ;, CR, \0 (EOL / EOF)
 * :LOOP
-* if previous | : 
+* if CmdSep=| : 
 *    set hStdIn = hStdOut
 *    set hStdOut = Std
 * GetCmd from line until | or EOL
-* if | :
+* if CmdSep=| :
 *     create PIPE
 *     set hStdOut -> PIPE
 *	  CORE.Exec &
@@ -25,11 +25,91 @@ AUTO 4,1
 * set hStdIn = hStdOut
 * set hStdOut = Std
 *--------------------------------------
-CORE.Run
+* Input : ZPInputBufPtr
 *--------------------------------------
-* Input : CORE.IntCmd,ZPArgVBuf
+CORE.Exec		>STZ.G CL.CmdSep
+
+				>STZ.G CORE.IntCmd
+
+				lda #S.PS.F.HOLD+S.PS.F.DUPENV
+				>STA.G CORE.PSFlags
+
+				>PUSHW ZPCLBuf
+				>LDYA ZPCLBuf
+				>STYA ZPCLBufPtr
+
+				>SYSCALL Args2ArgV		TOKENIZE CL in ZPCLBuf
+
+				lda (ZPCLBufPtr)
+				beq .8
+				
+				cmp #'#'				comment ?
+				beq .8
+				
+.10				>LDA.G CL.CmdSep
+				cmp #'|'
+				bne .11
+				
+				PIPE
+				
+.11				>LDYAI 256
+				>SYSCALL GetMem
+				bcs .9
+				>STYA ZPArgVBuf
+				>STYA ZPArgVBufPtr
+				txa
+				>STA.G CORE.hArgVBuf
+				
+.12				lda #0
+				sta (ZPArgVBuf)
+				
+.1				cmp #'#'				comment ?
+				beq .8					yes, ignore remaining
+
+				>LDA.G CORE.IntCmd
+				bne .3					we already have Cmd, go check args
+				
+				ldy #1
+				lda (ZPCLBufPtr),y		only one char ?
+				bne .2
+				
+				lda (ZPCLBufPtr)
+				cmp #'.'				leading dot ?
+				bne .2
+				
+				>LDA.G CORE.PSFlags		yes, child process will run in same ENV
+				and #$ff^S.PS.F.DUPENV
+				sta (pData),y
+				bra .6					and skip this token
+				
+.2				
+				
+.3				jsr CL.CheckIO
+				bcc .7					IO token & related args processed
+				tay						an error ?
+				bne .9					yes...I/O error...
+				
+				jsr CL.AddCLBufPtrToArgV	no...add as cmd or arg
+				bcs .9
+
+.6				jsr CL.NextCLToken
+
+.7				lda (ZPCLBufPtr)
+
+				
+				
+				
+				
+				
+.80				>LDA.G CORE.hArgVBuf
+				>SYSCALL freemem
+				
+.8				clc
+.9				rts				
 *--------------------------------------
-CORE.Exec		jsr CORE.StkGet			IF,WHILE,FOR ?
+* Input : ZPArgVBuf
+*--------------------------------------
+CORE.ExecCmd	jsr CORE.StkGet			IF,WHILE,FOR ?
 				bcs .3					no particular context, exec...
 				tax
 				
@@ -86,7 +166,49 @@ CORE.INT.STARTPROC
 				rts
 *--------------------------------------
 CORE.INT.SHIFT	lda #1
-				jmp ShiftA
+
+CORE.INT.SHIFTA	>SYSCALL ArgV
+				bcs .8
+				
+				>STYA ZPPtr1
+				>STYA ZPPtr2
+
+.10				ldy #$ff
+				
+.1				iny						Compute ArgX len
+				lda (ZPPtr1),y			
+				bne .1
+				
+.2				tya
+				sec
+				adc ZPPtr1
+				sta ZPPtr1
+				bcc .3
+				inc ZPPtr1+1
+				
+.3				ldy #$ff
+				
+.4				iny
+				lda (ZPPtr1),y
+				sta (ZPPtr2),y
+				bne .4
+				tya
+				beq .7
+				
+				sec
+				adc ZPPtr2
+				sta ZPPtr2
+				bcc .2
+				inc ZPPtr2+1
+				bra .2
+				
+.7				ldy #S.PS.ARGC
+				lda (pPS),y
+				dec
+				sta (pPS),y
+				
+.8				clc
+				rts
 *--------------------------------------
 CORE.INT.PWD	ldy #S.PS.hPREFIX
 				lda (pPs),y
@@ -1085,7 +1207,7 @@ CORE.StkGetPtr	lda (pData)				StackPtr
 				sec
 				rts
 *--------------------------------------
-CORE.StkPush		pha
+CORE.StkPush	pha
 				lda (pData)				StackPtr
 				inc
 				cmp #CORE.STACK.MAX
@@ -1102,7 +1224,7 @@ CORE.StkPush		pha
 *				sec
 				rts
 *--------------------------------------
-CORE.StkPull		jsr CORE.StkGet
+CORE.StkPull	jsr CORE.StkGet
 				bcs .9
 				
 				dey
