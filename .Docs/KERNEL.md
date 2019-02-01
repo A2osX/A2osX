@@ -61,7 +61,7 @@ X = DevID
 # GetDevStatus  
 
 ## C   
-`int getdevstatus(short int hFD, S.DIB* dstat);`  
+`int getdevstatus(short int hDEV, S.DIB* dstat);`  
 
 ## ASM  
 `>PUSHWI S.DIB`  
@@ -338,12 +338,12 @@ CS: A = EC
 # IOCTL  
 
 ## C  
-`int ioctl(short int hFD, int request, void * param );`  
+`int ioctl(short int DevID, int request, void * param );`  
 
 ## ASM  
 `PUSHWI param`  
 `PUSHBI request`  
-`lda hFD`  
+`lda hDEV`  
 `>SYSCALL IOCTL`  
 
 ## RETURN VALUE  
@@ -453,69 +453,94 @@ A = hMem
 Y,A = PTR to MemBlock  
 (X unmodified)  
 
-# GetMemByID  
-A = hMem  
+# SListAddData  
+
+## ASM  
+`PUSHB Data`  
+`PUSHW DataID`  
+`lda hSList`  
+`>SYSCALL SListAddData`  
 
 ## RETURN VALUE  
-Y,A = ZPMemMgrSPtr = PTR to S.MEM  
-(X unmodified)  
+ Y,A = Next DataID  
 
-# GetMemStat  
-**In:**  
- Y,A = Ptr to 24 bytes buffer  
+# SListGetData  
+
+## ASM  
+`PUSHB Data`  
+`PUSHW DataID`  
+`lda hSList`  
+`>SYSCALL SListGetData`  
 
 ## RETURN VALUE  
- Buffer filled with memory stats  
+ Y,A = Next DataID  
+
+# SListSetData  
+
+## ASM  
+`PUSHB Data`  
+`PUSHW DataID`  
+`lda hSList`  
+`>SYSCALL SListSetData`  
+
+## RETURN VALUE  
+ Y,A = Next DataID  
 
 # SListGetByID  
- PUSHB = hSList  
- PUSHW = KeyID  
- PUSHW = Data Ptr  
- PUSHW = Key Ptr  
+
+## ASM  
+`PUSHW KeyPtr`  
+`PUSHW KeyID`  
+`lda hSList`  
+`>SYSCALL SListGetByID`  
 
 ## RETURN VALUE  
- X,Y = Next KeyID  
+ Y,A = Next KeyID  
 
-# SListUpdateByID  
- PUSHB = hSList  
- PUSHW = KeyID  
- PUSHW = Data Ptr  
+# SListAddKey  
 
-## RETURN VALUE  
- A = Key Length  
- X,Y = KeyID  
-
-# SListAdd  
- PUSHB = hSList  
- PUSHW = Key Ptr  
- PUSHW = Data Ptr  
+## ASM  
+`PUSHW KeyPtr`  
+`lda hSList`  
+`>SYSCALL SListAddKey`  
 
 ## RETURN VALUE  
  A = Key Length  
  X,Y = KeyID  
 
 # SListLookup  
- PUSHB = hSList  
- PUSHW = Key Ptr  
- PUSHW = Data Ptr  
+
+## ASM  
+`PUSHW KeyPtr`  
+`lda hSList`  
+`>SYSCALL SListLookup`  
 
 ## RETURN VALUE  
- A = Key Length  
- X,Y = KeyID  
+ Y,A = KeyID  
 
 # SListNew  
 
+## ASM  
+`>SYSCALL SListNew`  
+
 ## RETURN VALUE  
- A=hSList  
+A=hSList  
 
 # SListFree  
- A=hSList  
+
+## ASM  
+`lda hSList`  
+`>SYSCALL SListFree`  
 
 ## RETURN VALUE  
 
-# GetStkObjProp  
- A = hObject (AUX Memory)  
- Y = Property Index  
+# GetStkObjData  
+
+## ASM  
+`PUSHW DataLen`  
+`PUSHW DataPtr`  
+`lda hStkObj`  
+`>SYSCALL GetStkObjData`  
 
 ## RETURN VALUE  
  Y,A = Property Value  
@@ -542,7 +567,7 @@ Load a file in AUX memory (Stock Objects)
  PUSHW = AUXTYPE (Handled by....  
  PUSHB = TYPE  ...  
  PUSHB = MODE  ...  
- PUSHW = PATH ...FOpen)  
+ LDYA = PATH ...FOpen)  
 
 ## RETURN VALUE  
  Y,A = File Length  
@@ -564,7 +589,7 @@ A = Child PSID
 # ExecV  
 
 ## C  
-`int exec(const char* argv[], short int flags);`  
+`int execv(const char* argv[], short int flags);`  
 
 ## ASM  
 `>PUSHB flags`  
@@ -586,6 +611,13 @@ A = Child PSID
 
 ## RETURN VALUE  
 A = Child PSID  
+
+# GetMemStat  
+**In:**  
+ Y,A = Ptr to 24 bytes buffer  
+
+## RETURN VALUE  
+ Buffer filled with memory stats  
 
 # Stat  
 Return information about a file  
@@ -1092,10 +1124,11 @@ Convert String to 16 bits int
 Return the canonicalized absolute pathname  
 
 ## C  
-`unsigned short int realpath (const char* str);`  
+`unsigned short int realpath (const char* str, char *resolvedpath);`  
 
 ## ASM  
 **In:**  
+`>PUSHWI resolvedpath`  
 `>LDYA str`  
 `>SYSCALL realpath`  
 
@@ -1255,7 +1288,7 @@ S.TIME filled with System date/time
 
 ## C  
 Convert S.TIME struct to CSTR  
-`size_t strftime (char* ptr, const char* format, const struct S.TIME* timeptr );`  
+`void strftime (char* ptr, const char* format, const struct S.TIME* timeptr );`  
 
 ## ASM  
 `PUSHW timeptr`  
