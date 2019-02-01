@@ -3,8 +3,95 @@ PREFIX
 AUTO 4,1
 				.LIST OFF	
 *--------------------------------------
-* From hCLBuf or hFileBuf
-* Get Line from buf until ;, CR, \0 (EOL / EOF)
+CORE.Init		>LDYAI 256
+				>SYSCALL GetMem
+				bcs .9
+				>STYA ZPArgVBuf
+				txa
+				>STA.G CORE.hArgVBuf
+.9				rts				
+*--------------------------------------
+CORE.Quit		>LDA.G CORE.hArgVBuf
+				beq .9
+				>SYSCALL FreeMem
+
+.9				rts	
+*--------------------------------------
+* Input : ZPCLBuf/ZPFileBufPtr
+* Get Line from buf until ;, CR, \0 (EOL / EOF) -> ZPArgVBuf
+* Tokenize ZPArgVBuf
+*--------------------------------------
+CORE.GetCmdFromFile
+				>LDYA ZPFileBufPtr
+				>STYA ZPFileBufPtrBak
+				
+				lda (ZPFileBufPtr)
+				beq .9
+				
+				ldx #0					not in "
+						
+				ldy #0
+				
+.1				lda (ZPFileBufPtr),y
+				beq .7
+
+				cmp #C.CR
+				beq .6
+				
+				cmp #'"'
+				bne .2
+				
+				txa
+				eor #$80				toggle " switch
+				tax
+				
+				lda #'"'
+				bra .5
+				
+.2				cmp #';'
+				bne .5
+				
+				txa
+				beq .6
+				
+				lda #';'
+				
+.5				sta (ZPCLBuf),y
+				iny
+				cpy #CL.MAX
+				bne .1
+				
+				lda #E.SYN				Line Too long !!!
+*				sec
+				rts
+				
+.6				sec						skip CR or ;
+				.HS 90					BCC
+				
+.7				clc
+				
+				tya
+				adc ZPFileBufPtr
+				sta ZPFileBufPtr
+				bcc .8
+				inc ZPFileBufPtr+1
+				
+.8				lda #0
+				sta (ZPCLBuf),y
+				
+				tya
+				>STA.G CL.Len
+				lda #$ff
+				>STA.G CL.bExec
+
+				clc
+				rts
+				
+.9				lda #C.EOF
+				sec
+				rts
+*--------------------------------------
+* Input : ZPArgVBuf
 * :LOOP
 * if CmdSep=| : 
 *    set hStdIn = hStdOut
@@ -25,54 +112,43 @@ AUTO 4,1
 * set hStdIn = hStdOut
 * set hStdOut = Std
 *--------------------------------------
-* Input : ZPInputBufPtr
-*--------------------------------------
-CORE.Exec		>STZ.G CL.CmdSep
-
-				>STZ.G CORE.IntCmd
-
-				lda #S.PS.F.HOLD+S.PS.F.DUPENV
-				>STA.G CORE.PSFlags
-
-				>PUSHW ZPCLBuf
+CORE.Exec		>PUSHW ZPCLBuf
 				>LDYA ZPCLBuf
 				>STYA ZPCLBufPtr
 
 				>SYSCALL Args2ArgV		TOKENIZE CL in ZPCLBuf
 
-				lda (ZPCLBufPtr)
-				beq .8
+				lda (ZPCLBufPtr)		empty line ?
+				beq .80
 				
 				cmp #'#'				comment ?
-				beq .8
+				beq .80
+
+				>STZ.G CL.CmdSep
 				
-.10				>LDA.G CL.CmdSep
-				cmp #'|'
-				bne .11
-				
-				PIPE
-				
-.11				>LDYAI 256
-				>SYSCALL GetMem
-				bcs .9
-				>STYA ZPArgVBuf
-				>STYA ZPArgVBufPtr
-				txa
-				>STA.G CORE.hArgVBuf
-				
-.12				lda #0
+*************** LOOP Cmd Arg
+					
+.10				lda #0
 				sta (ZPArgVBuf)
+
+				lda #S.PS.F.HOLD+S.PS.F.DUPENV
+				>STA.G CORE.PSFlags
+				
+				>LDA.G CL.CmdSep
+				cmp #'|'
+				bne .1
+				
+*				PIPE
+
+*************** LOOP Token
 				
 .1				cmp #'#'				comment ?
-				beq .8					yes, ignore remaining
+				beq .80					yes, ignore remaining
 
-				>LDA.G CORE.IntCmd
-				bne .3					we already have Cmd, go check args
-				
 				ldy #1
 				lda (ZPCLBufPtr),y		only one char ?
 				bne .2
-				
+
 				lda (ZPCLBufPtr)
 				cmp #'.'				leading dot ?
 				bne .2
@@ -80,36 +156,75 @@ CORE.Exec		>STZ.G CL.CmdSep
 				>LDA.G CORE.PSFlags		yes, child process will run in same ENV
 				and #$ff^S.PS.F.DUPENV
 				sta (pData),y
-				bra .6					and skip this token
-				
-.2				
-				
-.3				jsr CL.CheckIO
+				jsr CORE.NextCLToken		and skip this token		
+
+.2				jsr CORE.IO.Check
 				bcc .7					IO token & related args processed
 				tay						an error ?
-				bne .9					yes...I/O error...
+				bne .90					yes...I/O error...
 				
-				jsr CL.AddCLBufPtrToArgV	no...add as cmd or arg
-				bcs .9
+				jsr CORE.AddCLBufPtrToArgV	no...add as cmd or arg
+				bcs .90
 
-.6				jsr CL.NextCLToken
+.6				jsr CORE.NextCLToken
 
 .7				lda (ZPCLBufPtr)
 
+				beq .71					EOL...
+				cmp #';'
+				bne .70
 				
+				>STA.G CL.CmdSep
+				jsr CORE.NextCLToken		Skip ;
+				bra .72					exec
+
+.70				cmp #'|'
+				bne .1					another token...
+
+				>STA.G CL.CmdSep
 				
+*				PIPE				
+	
+				jsr CORE.NextCLToken		Skip |
+				bra .72					and exec
+	
+				jsr CORE.NextCLToken		Skip ;
+				lda #0
 				
+.71				>STA.G CL.CmdSep
+
+.72				jsr CORE.ExecCmd
+				bcs .90
 				
+				>LDA.G CL.CmdSep
+				bne .10					if sep is ; or |...loop
+
+.80				clc
 				
-.80				>LDA.G CORE.hArgVBuf
-				>SYSCALL freemem
-				
-.8				clc
-.9				rts				
+.90				rts				
 *--------------------------------------
 * Input : ZPArgVBuf
 *--------------------------------------
-CORE.ExecCmd	jsr CORE.StkGet			IF,WHILE,FOR ?
+CORE.ExecCmd	ldy #$ff
+
+.1				iny
+				lda (ZPArgVBuf),y
+				beq .11
+				cmp #'/'
+				bne .1
+				
+				bra .12
+				
+.11				>PUSHW ZPArgVBuf
+				>LDYA L.CORE.INT
+				jsr Lookup				no / found, search internal...
+				bcc .13					not internal
+				
+.12				ldx #$ff				found a / in Arg0 .. external
+.13				txa
+				>STA.G CORE.IntCmd
+
+.10				jsr CORE.StkGet			IF,WHILE,FOR ?
 				bcs .3					no particular context, exec...
 				tax
 				
@@ -157,956 +272,56 @@ CORE.ExecCmd	jsr CORE.StkGet			IF,WHILE,FOR ?
 .9				rts
 
 .80				tax
-				jmp (J.CORE.INT,x)
+				jmp (J.CMD,x)
 *--------------------------------------
-* STARTPROC : intcmd = 0
-*--------------------------------------
-CORE.INT.STARTPROC
-				clc
-				rts
-*--------------------------------------
-CORE.INT.SHIFT	lda #1
-
-CORE.INT.SHIFTA	>SYSCALL ArgV
-				bcs .8
-				
-				>STYA ZPPtr1
-				>STYA ZPPtr2
-
-.10				ldy #$ff
-				
-.1				iny						Compute ArgX len
-				lda (ZPPtr1),y			
+CORE.NextCLToken
+				lda (ZPCLBufPtr)
+				inc ZPCLBufPtr
 				bne .1
-				
-.2				tya
-				sec
-				adc ZPPtr1
-				sta ZPPtr1
-				bcc .3
-				inc ZPPtr1+1
-				
-.3				ldy #$ff
-				
-.4				iny
-				lda (ZPPtr1),y
-				sta (ZPPtr2),y
-				bne .4
-				tya
-				beq .7
-				
-				sec
-				adc ZPPtr2
-				sta ZPPtr2
-				bcc .2
-				inc ZPPtr2+1
-				bra .2
-				
-.7				ldy #S.PS.ARGC
-				lda (pPS),y
-				dec
-				sta (pPS),y
-				
-.8				clc
+				inc ZPCLBufPtr+1
+.1				tax
+				bne CORE.NextCLToken
 				rts
 *--------------------------------------
-CORE.INT.PWD	ldy #S.PS.hPREFIX
-				lda (pPs),y
-				>SYSCALL GetMemPtr
-				>SYSCALL puts
-				rts
-*--------------------------------------
-CORE.INT.PUSHD	>LDA.G PUSHD.STACK
-				cmp #PUSHD.STACK+PUSHD.STACK.MAX
-				beq CORE.INT.POPD.CSYN
-				
-				ldy #S.PS.hPREFIX
-				lda (pPs),y
-				>SYSCALL GetMemPtr
-				>SYSCALL strdup
-				bcs CORE.INT.POPD.CSYN
-				
-				>INC.G PUSHD.STACK
-				tay
-				txa
-				sta (pData),y
-				
-				ldx #1
-				jsr CORE.GetArgX
-				bcc CORE.INT.CD.1
-				
-.8				clc
-.9				rts
-*--------------------------------------
-CORE.INT.POPD	>LDA.G PUSHD.STACK
-				cmp #PUSHD.STACK
-				beq CORE.INT.POPD.CSYN
-				
-				tay
-				lda (pData),y
-				jsr CORE.SetPrefixA
-				
-				>DEC.G PUSHD.STACK
-				clc
-CORE.INT.POPD.RTS				
-				rts
-				
-CORE.INT.POPD.CSYN
-				jmp CORE.Exec.CSYN
-*--------------------------------------
-CORE.INT.CD		ldx #1
-				jsr CORE.GetArgX
-				bcc CORE.INT.CD.1
-
-CORE.INT.CD.HOME >LDYA L.ENV.HOME
-				>SYSCALL GetEnv
-				bcc CORE.INT.CD.1
-				
-				>LDYA L.ENV.ROOT
-				>SYSCALL GetEnv
-				bcc CORE.INT.CD.1
-				
-				jmp CORE.INT.PWD
-				
-CORE.INT.CD.1.9	pla
-				>SYSCALL freemem
-				bra CORE.INT.POPD.CSYN
-				
-CORE.INT.CD.1	>SYSCALL realpath
-				bcs CORE.INT.POPD.RTS
+CORE.AddCLBufPtrToArgV
+				>LDYA ZPCLBufPtr
 				>STYA ZPPtr1
-				phx
-				
-				ldy #1
-				lda (ZPPtr1),y
-				beq CORE.SetPrefixPHA	we have '/'
 
-				>PUSHEA.G StatBuf
-				>LDYA ZPPtr1
-				>SYSCALL STAT
-
-				bcs CORE.INT.CD.1.9
-
-				>LDA.G StatBuf+S.STAT.P.TYPE
-				cmp #S.FI.T.DIR
-				bne CORE.INT.CD.1.9
-
-				ldy #$ff
-				
-.1				iny
-				lda (ZPPtr1),y
-				bne .1
-				
-				dey
-				lda (ZPPtr1),y
-				cmp #'/'
-				beq CORE.SetPrefixPHA	already ends witrh a /
-
-				iny
-				iny
-				lda #0
-				>SYSCALL getmem
-				bcs CORE.INT.CD.1.9
+				>LDYA ZPArgVBuf
 				>STYA ZPPtr2
-
-				ldy #$ff
 				
-.2				iny
-				lda (ZPPtr1),y
-				lda (ZPPtr2),y
-				bne .2
-				
-				iny
-				sta (ZPPtr2),y
-				dey
-				lda #'/'
-				sta (ZPPtr2),y
-				pla
-				phx
-				>SYSCALL freemem
-				pla
-*--------------------------------------
-CORE.SetPrefixA	pha
-CORE.SetPrefixPHA
-				ldy #S.PS.hPREFIX
-				lda (pPs),y
-				>SYSCALL FreeMem
-				
-				pla
-				
-				ldy #S.PS.hPREFIX
-				sta (pPs),y
-				lda #0
-*				clc
-				rts
-*--------------------------------------
-CORE.Exec.CSYN	lda #E.CSYN
-				sec
-				rts
-*--------------------------------------
-CORE.Exec.SSYN	lda #E.SSYN
-				sec
-				rts
-*--------------------------------------
-CORE.INT.SET	ldx #1
-				jsr CORE.GetArgX
-				bcc CORE.INT.SET.1
+.1				lda (ZPPtr2)			scan to end of argV
+				beq .6
 
-* No arg, print all ENV
-
-				ldy #S.PS.hENV
-				lda (pPs),y
-				>SYSCALL GetMemPtr
-				>STYA ZPPTR1
-
-.1				lda (ZPPTR1)
-				beq .8					Ending 0 ?
-
-				ldy #$ff
-
-.2				iny
-				lda (ZPPTR1),y
-				bne .2
-
-				tya
-				sec
-				adc ZPPTR1
-				sta ZPPTR2
-				lda #0
-				adc ZPPTR1+1
-				sta ZPPTR2+1
-				
-				>PUSHW ZPPTR2			Push value
-				>PUSHW ZPPTR1			Push name
-				jsr CORE.INT.SET.PRINT
-
-				bcs .9
-
-				ldy #$ff
-				
-.3				iny
-				lda (ZPPTR2),y
+.2				inc ZPPtr2
 				bne .3
-				
-				tya
-				sec
-				adc ZPPTR2
-				sta ZPPTR1
-				lda #0
-				adc ZPPTR2+1
-				sta ZPPTR1+1
-				bra .1
-				
-.8				clc
-.9				rts
-*--------------------------------------
-* SET +X VAR = VALUE1 op VALUE2 op VALUE3 ...
-*--------------------------------------
-CORE.INT.SET.1	>STZ.G CORE.Varname
+				inc ZPPtr2+1
+.3				lda (ZPPtr2)
+				bne .2
 
-				lda #1
-				>STA.G CORE.ArgIndex
-
-.1				tax
-				jsr CORE.GetArgX
-				bcs .8
-				
-				jsr CORE.IsSwitch
-				bcs .6
-				
-				cmp #'C'
+				inc ZPPtr2
+				bne .4
+				inc ZPPtr2+1
+.4				lda (ZPPtr2)
 				bne .2
 				
-				>LDA.G bSET.C
-				bra .5
-				
-.2				cmp #'X'
-				bne .99
-				
-				>LDA.G bSET.X
-				
-.5				eor #$ff
-				sta (pData),y
-				>INC.G CORE.ArgIndex
-				bra .1
-				
-.6				>LDA.G CORE.ArgIndex
-				>STA.G CORE.Varname
+.6				ldy #$ff
 
-				>INC.G CORE.ArgIndex
-				tax
-				jsr CORE.GetArgX
-				bcs CORE.INT.SET.GET
-				
-				>STYA ZPPTR1
-				
-				lda (ZPPTR1)
-				
-				cmp #'='
-				bne .99
-				
-				ldy #1
-				lda (ZPPTR1),y
-				bne .99
-				
-				>INC.G CORE.ArgIndex
-				tax
-				jsr CORE.GetArgX
-				bcs CORE.INT.SET.UNSET
-				
-				jsr CORE.GetEXP
-				
-				bcs .99
-				
-				>PUSHYA
-				>LDA.G CORE.Varname
-				tax
-				jsr CORE.GetArgX
-				>SYSCALL SetEnv
-				rts
+.7				iny
+*				beq .9
+				lda (ZPPtr1),y
+				sta (ZPPtr2),y
+				bne .7					including str ending \0
 
-.8				clc
-				rts
-				
-.99				jmp CORE.Exec.CSYN
-				
-CORE.INT.SET.UNSET
-				>LDA.G CORE.Varname
-				tax
-				jsr CORE.GetArgX
-				>SYSCALL UnsetEnv
-				rts
-
-CORE.INT.SET.GET
-				>LDA.G CORE.Varname
-				tax
-				jsr CORE.GetArgX
-				>SYSCALL GetEnv
-				bcc .1
-				clc
-				rts
-				
-.1				>PUSHYA					push value
-				>LDA.G CORE.Varname
-				tax
-				jsr CORE.GetArgX
-				>PUSHYA 				push name
-*--------------------------------------
-CORE.INT.SET.PRINT
-				>PUSHBI 4
-				>LDYA L.MSG.PRINTENV
-				>SYSCALL printf
-				rts
-*--------------------------------------
-CORE.INT.DATE	sec
-				.HS 90					bcc
-CORE.INT.TIME	clc
-				php
-				>LEA.G TimeBuf
-				>SYSCALL Time
-
-				>PUSHEA.G TimeBuf
-				
-				plp
-				bcc .1
-				>PUSHW L.FMT.DATE
-				bra .2
-.1				>PUSHW L.FMT.TIME
-
-.2				>LDYA ZPCLBuf
-				>SYSCALL StrFTime
-				
-				>LDYA ZPCLBuf
-				>SYSCALL puts
-				rts
-*--------------------------------------
-CORE.INT.ECHO	>STZ.G bECHO.N
-
-				lda #1
-				>STA.G CORE.ArgIndex
-				
-.1				tax
-				jsr CORE.GetArgX
-				bcs .7
-
-				jsr CORE.IsSwitch
-				bcs .2
-				
-				cmp #'N'
-				bne .99
-				
-				lda #$ff
-				>EOR.G bECHO.N
-				sta (pData),y
-				>INC.G CORE.ArgIndex
-				bra .1				
-				
-.2				pha
-				>PUSHBI 0
-				pla
-				>SYSCALL printf
-				bcs .9
-				
-				>INC.G CORE.ArgIndex
-				tax
-				
-				jsr CORE.GetArgX
-				bcs .7
-				
-.6				lda #C.SPACE
-				>SYSCALL putchar
-				bcs .9
-				
-				>PUSHBI 0
-				
-				>LDA.G CORE.ArgIndex
-				tax
-				jsr CORE.GetArgX
-				
-				>SYSCALL printf
-				bcs .9
-				
-				>INC.G CORE.ArgIndex
-				tax
-				
-				jsr CORE.GetArgX
-				bcc .6
-				
-.7				>LDA.G bECHO.N
-				bmi .8
-				
-				>PUSHBI 0
-				>LDYA L.MSG.ECHOCRLF
-				>SYSCALL printf
-				rts
-
-.8				clc
-.9				rts
-
-.99				lda #E.CSYN
-				sec
-				rts
-*--------------------------------------
-CORE.INT.GETKEY	ldx #1
-				jsr CORE.GetArgX
-				bcs .99
-
-				>SYSCALL getchar
-				bcc .1
-				tay
-				bne .9
-	
-.1				>PUSHA
-				>PUSHBI 1
-				>PUSHW L.FMT.GETKEY
-				>LEA.G M32.BUF
-				>SYSCALL sprintf
-				bcs .9
-				
-				>PUSHEA.G M32.BUF
-								
-				ldx #1
-				jsr CORE.GetArgX
-				>SYSCALL SetEnv
-.9				rts
-				
-.99				jmp CORE.Exec.CSYN
-*--------------------------------------
-CORE.INT.READ	lda #1
-				>STA.G CORE.ArgIndex
-				
-				tax
-				jsr CORE.GetArgX
-				bcs .9 
-
-.1				jsr CORE.IsSwitch
-				bcs .4
-				cmp #'S'
-				bne .2
-				
-				lda #$ff
-				>STA.G bREAD.S
-				
-				bra .7
-				
-.2				cmp #'P'			
-				bne .9
-				
-				>INC.G CORE.ArgIndex
-				tax
-				jsr CORE.GetArgX
-				bcs .9
-				pha
-				>PUSHBI 0
-				pla
-				>SYSCALL printf
-				bcs .99
-				bra .7
-				
-.4				>SYSCALL strdup
-				txa
-				>STA.G hVarName
-				
-.7				>INC.G CORE.ArgIndex
-				tax
-				jsr CORE.GetArgX
-				bcc .1
-				
-				>LDA.G hVarName
-				beq .9
-				clc
-.99				rts
-				
-.9				jmp CORE.Exec.CSYN
-*--------------------------------------
-CORE.INT.SLEEP	ldx #1
-				jsr CORE.GetArgX
-				bcs .9
-
-				>SYSCALL AToL
-				bcs .9
-
-				>PULLL.G Sleep
-				clc
-				rts
-				
-.9				jmp CORE.Exec.CSYN
-*--------------------------------------
-CORE.INT.PAUSE	lda #$FF
-				>STA.G bPause
-				clc
-				rts
-*--------------------------------------
-CORE.INT.EXIT	ldx #1
-				jsr CORE.GetArgX
-				bcs .8					no arg, exit 0
-
-				>SYSCALL AToL
-				bcs .9
-
-				>PULLL.G M32.ACC
-				
-				lda #$FF
-				>STA.G bExit
-				
-				>LDA.G M32.ACC
-				clc
-				rts
-				
-.8				lda #$FF
-				>STA.G bExit
-				inc
-				clc
-.9				rts
-*--------------------------------------
-CORE.INT.MD		ldx #1
-				jsr CORE.GetArgX
-				bcs .9
-				
-				>SYSCALL MKDir
-				rts
-				
-.9				jmp CORE.Exec.CSYN
-*--------------------------------------
-CORE.INT.REN	ldx #2
-				jsr CORE.GetArgX
-				bcs .9
-				>PUSHYA
-				ldx #1
-				jsr CORE.GetArgX
-				
-				>SYSCALL Rename
-				rts
-				
-.9				jmp CORE.Exec.CSYN
-*--------------------------------------
-CORE.INT.RD		ldx #1
-				jsr CORE.GetArgX
-				bcs .9
-				phy
-				pha
-				>PUSHEA.G StatBuf
-				pla
-				ply
-				>SYSCALL STAT
-				bcs .99
-				
-				>LDA.G StatBuf+S.STAT.P.TYPE
-				cmp #S.FI.T.DIR
-				bne .9
-				
-				ldx #1
-				jsr CORE.GetArgX
-				>SYSCALL Remove
-.99				rts
-				
-.9				jmp CORE.Exec.CSYN
-*--------------------------------------
-CORE.INT.BREAK	
-.9				jmp CORE.Exec.SSYN
-*--------------------------------------
-CORE.INT.CONTINUE	
-.9				jmp CORE.Exec.SSYN
-*--------------------------------------
-CORE.INT.FOR
-.9				jmp CORE.Exec.SSYN
-*--------------------------------------
-CORE.INT.NEXT	
-.9				jmp CORE.Exec.SSYN
-*--------------------------------------
-CORE.INT.WHILE	
-CORE.INT.IF		jsr CORE.StkGet
-				bcs .1					no context...
-
-				and #$80				get current..
-				lsr						becomes parent
-				bra .2
-				
-.1				lda #$40				...set Parent = true
-
-.2				>STA.G CORE.Test
-
-				bit #$40				Parent is true ?
-				beq .3
-				
-				jsr CORE.Eval
-				bcs .9
-
-.3				>LDA.G CORE.IntCmd
-				cmp #C.WHILE
-				bne .8
-				
-				jsr CORE.StkPushPtr
-				bcs .9
-				
-.8				>LDA.G CORE.Test
-				>ORA.G CORE.IntCmd
-				jmp CORE.StkPush
-				
-				clc
-.9				rts
-*--------------------------------------
-CORE.INT.ELSE	jsr CORE.StkGet
-				bcs .9
-
-				bit #$40				parent is true ?
-				beq .8					no, skip
-
-				tax
-				and #$3F
-				cmp #C.IF
-				bne .9
-				txa
-				eor #$80				toggle and store at stack ptr
-				sta (pData),y
-				
-.8				clc
-				rts
-				
-.9				lda #E.NOIF
-				sec
-				rts
-*--------------------------------------
-CORE.INT.FI		jsr CORE.StkPull
-				bcs .9
-				
-				and #$3F
-				cmp #C.IF
-				bne .9
+				iny
+*				beq .9
+				sta (ZPPtr2),y			arg[] ending \0
 				
 				clc
 				rts
 				
-.9				lda #E.NOIF
-				sec
-				rts
-*--------------------------------------
-CORE.INT.LOOP	jsr CORE.StkPull
-				bcs .9
-				tax
-				and #$3F
-				cmp #C.WHILE
-				bne .9
-				
-				txa
-				bpl .1
-				
-				jmp CORE.StkPullPtr
-				
-.1				jsr CORE.StkPull
-				bcs .99
-				jmp CORE.StkPull
-				
-.9				lda #E.NOWHILE
-				sec
-.99				rts				
-*--------------------------------------
-CORE.Eval		ldx #1
-				jsr CORE.GetArgX
-				beq .9
-				
-				>PUSHYA
-				>LDYA L.CORE.Eval.TOKEN1
-				jsr Lookup
-
-				bcs .9
-				
-				cpx #4					[ or ![
-				bcs .9
-				dex
-				dex						1 or $ff
-				
-				txa
-
-				and #$80				true or false
-				>ORA.G CORE.Test
-				sta (pData),y
-				
-				ldx #2
-				jsr CORE.GetArgX
-				beq .9
-				
-				>PUSHYA
-				>LDYA L.CORE.Eval.TOKEN2	-d -e -f ?
-				jsr Lookup
-
-				bcs .1
-
-				txa
-				>STA.G CORE.Operator
-				
-				jsr CORE.Eval.UNARY
-				bcs .9
-				
-				>EOR.G CORE.Test
-				sta (pData),y
-				
-				ldx #4					go check ]
-				bra .8
-				
-.9				lda #E.ESYN
-				sec
-.99				rts
-				
-.1				ldx #3
-				jsr CORE.GetArgX
-				beq .9
-				
-				>PUSHYA
-				>LDYA L.CORE.Eval.TOKEN3	-eq -ne .... ?
-				jsr Lookup
-				bcs .9
-				txa
-				>STA.G CORE.Operator
-				
-				jsr CORE.Eval.BINARY
-				bcs .9
-
-				>EOR.G CORE.Test
-				sta (pData),y
-
-				ldx #5					go check ]
-				
-.8				jsr CORE.GetArgX
-				beq .9
-				
-				>STYA ZPPTR1
-				
-				lda (ZPPTR1)
-				cmp #']'
-				bne .9
-				
-				ldy #1
-				lda (ZPPTR1),y
-				bne .9
-				clc
-				rts
-*--------------------------------------
-CORE.Eval.UNARY 	ldx #3
-				jsr CORE.GetArgX
-				bcs .9					we need one arg
-				
-				>LDA.G CORE.Operator
-				tax
-				jmp (J.CORE.Eval.TOKEN2,x)
-
-.9				lda #E.ESYN
-				sec
-				rts
-				
-CORE.Eval.D		jsr CORE.Eval.DEF.7
-				bcs CORE.Eval.DEF.9
-				>LDA.G StatBuf+S.STAT.P.TYPE
-				cmp #S.FI.T.DIR
-				bne CORE.Eval.DEF.9
-				bra CORE.Eval.DEF.8
-	
-CORE.Eval.E		jsr CORE.Eval.DEF.7
-				bcs CORE.Eval.DEF.9
-				bra CORE.Eval.DEF.8		DIR or FILE exist
-				
-CORE.Eval.F		jsr CORE.Eval.DEF.7
-				bcs CORE.Eval.DEF.9
-
-				>LDA.G StatBuf+S.STAT.P.TYPE
-				cmp #S.FI.T.DIR
-				beq CORE.Eval.DEF.9
-				bra CORE.Eval.DEF.8
-
-CORE.Eval.DEF.7	>PUSHEA.G StatBuf
-				ldx #3
-				jsr CORE.GetArgX
-				>SYSCALL STAT
-				rts
-			
-CORE.Eval.DEF.8	lda #$80				true
-				clc
-				rts
-
-CORE.Eval.DEF.9	lda #0					false
-				clc
-				rts
-*--------------------------------------
-CORE.Eval.BINARY	ldx #2
-				jsr CORE.GetArgX
-				bcs .9
-
-				ldx #4
-				jsr CORE.GetArgX
-				bcs .9
-
-				>LDA.G CORE.Operator
-				beq .1					=
-
-				cmp #2					!=
-				bne CORE.Eval.BINARY.NUM
-				lda #$80
-				>STA.G CORE.Operator
-				
-.1				ldx #2
-				jsr CORE.GetArgX
-				>PUSHYA
-				ldx #4
-				jsr CORE.GetArgX
-				>SYSCALL strcmp
-				ror						CS if !=
-				and #$80
-				eor #$80
-				>EOR.G CORE.Operator
-				clc
-				rts
-				
-.9				lda #E.ESYN
-				sec
-				rts
-*--------------------------------------
-CORE.Eval.BINARY.NUM
-				ldx #2
-				jsr CORE.GetArgX
-				bcs .9
-				
-				>SYSCALL AToL
-				bcs .9
-
-				>PULLL.G M32.ACC
-				
-				ldx #4
-				jsr CORE.GetArgX
-				bcs .9
-				
-				>SYSCALL AToL
-				bcs .9
-
-				>PULLL.G M32.ARG
-				
-				jsr M32.Cmp
-				pha
-
-				>LDA.G CORE.Operator
-				lsr
-				tax
-				pla
-				and CORE.Eval.TOKEN3.BITS,x
-				beq .80
-
-				lda #$80				true
-				clc
-				rts
-				
-.80				lda #0					false
-				clc
-				rts
-				
-.9				lda #E.ESYN
-				sec
-				rts				
-*--------------------------------------
-CORE.GetEXP		>LDA.G CORE.ArgIndex
-				inc
-				tax
-				jsr CORE.GetArgX
-				bcc .1
-				
-				>LDA.G CORE.ArgIndex		no op, return text value
-				tax
-				jsr CORE.GetArgX
-				rts
-				
-.1				>LDA.G CORE.ArgIndex
-				tax
-				jsr CORE.GetArgX
-				>SYSCALL AToL
-				bcs .99
-
-				>PULLL.G M32.ACC
-				
-				jsr CORE.GetEXP.GetNext
-				
-.2				>PUSHYA
-				>LDYA L.CORE.Eval.TOKEN4	+ - .... ?
-				jsr Lookup
-
-				bcs .9
-				txa
-				>STA.G CORE.Operator		
-
-				jsr M32.ACC2ARG
-				
-				jsr CORE.GetEXP.GetNext	get next argument in ACC
-.99				bcs .9
-				
-				>SYSCALL AToL
-				bcs .9
-
-				>PULLL.G M32.ACC
-				jsr CORE.GetEXP.Op
-				bcs .9
-				
-				jsr CORE.GetEXP.GetNext	another op ?
-				bcc .2
-				
-.8				>PUSHL.G M32.ACC
-				>PUSHBI 4		
-				>PUSHW L.M32.Printf
-				>LEA.G M32.BUF
-				>SYSCALL sprintf
-				bcs .9
-				
-				>LEA.G M32.Buf
-				
-				rts
-				
-.9				lda #E.BADEXP
-				rts
-				
-CORE.GetEXP.Op	>LDA.G CORE.Operator
-				tax
-				jmp (J.CORE.Eval.TOKEN4,x)
-*--------------------------------------
-CORE.GetEXP.GetNext
-				>INC.G CORE.ArgIndex
-				tax
-				jsr CORE.GetArgX
+.9				lda #E.BUF	
+				sec				
 				rts
 *--------------------------------------
 CORE.GetArgX	>LDYA ZPArgVBuf
@@ -1143,47 +358,19 @@ CORE.GetArgX	>LDYA ZPArgVBuf
 .9				sec
 				rts
 *--------------------------------------
-CORE.IsSwitch	>STYA ZPPtr1
-				lda (ZPPtr1)
-				cmp #'-'
-				bne .9
-				
-				ldy #1
-				lda (ZPPtr1),y
-				beq .9
-				
-				iny
-				lda (ZPPtr1),y
-				bne .9
-				
-				dey
-				lda (ZPPtr1),y
-				cmp #'a'
-				bcc .8
-				cmp #'z'+1
-				bcs .8
-				eor #$20
-				
-.8				clc
-				rts
-				
-.9				>LDYA ZPPtr1
-				sec				
-				rts
-*--------------------------------------
-CORE.StkPushPtr	lda ZPInputBufPtrBak
+CORE.StkPushPtr	lda ZPFileBufPtrBak
 				jsr CORE.StkPush
 				bcs CORE.StkPullPtr.9
-				lda ZPInputBufPtrBak+1
+				lda ZPFileBufPtrBak+1
 				bra CORE.StkPush
 .9				rts				
 *--------------------------------------
 CORE.StkPullPtr	jsr CORE.StkPull
 				bcs CORE.StkPullPtr.9
-				sta ZPInputBufPtr+1
+				sta ZPFileBufPtr+1
 				jsr CORE.StkPull
 				bcs CORE.StkPullPtr.9
-				sta ZPInputBufPtr
+				sta ZPFileBufPtr
 CORE.StkPullPtr.9		
 				rts				
 *--------------------------------------
@@ -1195,10 +382,10 @@ CORE.StkGetPtr	lda (pData)				StackPtr
 				tay
 
 				lda (pData),y
-				sta ZPInputBufPtr
+				sta ZPFileBufPtr
 				iny
 				lda (pData),y
-				sta ZPInputBufPtr+1
+				sta ZPFileBufPtr+1
 				
 				clc
 				rts
@@ -1245,6 +432,78 @@ CORE.StkGet		lda (pData)				StackPtr
 .9				lda #E.SSYN
 				sec
 				rts
+*--------------------------------------
+CORE.IO.Check	>PUSHW ZPCLBufPtr
+				>LDYA L.CORE.IO
+				jsr Lookup
+				bcs .9					not a IO token...should be an arg....
+				phx
+				
+				jsr CORE.NextCLToken		skip this IO token
+				
+				plx
+				jmp (J.CORE.IO,x)
+
+.9				lda #0
+				rts
+*--------------------------------------
+CORE.IO.AMP		>LDA.G CORE.PSFlags
+				and #$ff^S.PS.F.HOLD
+				sta (pData),y
+				clc
+				rts
+				
+CORE.IO.IN		lda #O.RDONLY+O.TEXT
+				jsr CORE.IO.Open
+				bcs .9
+				jsr IO.Set.In
+
+				jsr CORE.NextCLToken 		skip arg
+				clc
+.9				rts
+				
+CORE.IO.OUTA
+CORE.IO.1OUTA		lda #O.WRONLY+O.APPEND+O.CREATE+O.TEXT
+				bra CORE.IO.OUT.1
+CORE.IO.OUT		
+CORE.IO.1OUT		lda #O.WRONLY+O.TRUNC+O.CREATE+O.TEXT
+
+CORE.IO.OUT.1		jsr CORE.IO.Open
+				bcs .9
+				jsr IO.Set.Out
+
+				jsr CORE.NextCLToken 		skip arg
+				clc	
+.9				rts
+
+CORE.IO.2OUTA		lda #O.WRONLY+O.APPEND+O.CREATE+O.TEXT
+				bra CORE.IO.2OUT.1
+CORE.IO.2OUT		lda #O.WRONLY+O.TRUNC+O.CREATE+O.TEXT
+
+CORE.IO.2OUT.1	jsr CORE.IO.Open
+				bcs .9
+				jsr IO.Set.Err
+
+				jsr CORE.NextCLToken	 	skip arg
+				clc
+.9				rts
+*--------------------------------------
+CORE.IO.Open	pha
+				lda (ZPCLBufPtr)
+				beq .9					no arg left....
+				
+				>PUSHWI 0				Aux type
+				>PUSHBI S.FI.T.TXT		ftype
+				pla
+				>PUSHA					flags
+				>LDYA ZPCLBufPtr
+				>SYSCALL fopen
+				rts
+				
+.9				pla
+				lda #E.CSYN
+				sec
+				rts				
 *--------------------------------------
 MAN
 SAVE USR/SRC/BIN/SHELL.S.CORE
