@@ -280,7 +280,7 @@ OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
 | TIME      | Working | |
 | SET       | Working | -X toggle debug mode |
 | SLEEP     | Working | Wait <count> 10th sec |
-| STARTPROC | Working | Used in A2osX.startup |
+| NOHUP     | Working | Start a process with PPID=PS0 (Daemon) |
 | SHIFT     | Working | Remove $1 from cmd line |
 | ----      | ------  | ------- |
 | IF .. ELSE .. FI | Working | [ -d direxists ] |

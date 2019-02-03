@@ -19,20 +19,30 @@ CORE.Quit		>LDA.G CORE.hArgVBuf
 *--------------------------------------
 * Input : ZPCLBuf/ZPFileBufPtr
 * Get Line from buf until ;, CR, \0 (EOL / EOF) -> ZPArgVBuf
-* Tokenize ZPArgVBuf
 *--------------------------------------
-CORE.GetCmdFromFile
+CORE.GetCmdFromFileBuf
 				>LDYA ZPFileBufPtr
 				>STYA ZPFileBufPtrBak
+
+				jsr CORE.GetCmd
+				bcs .9
 				
-				lda (ZPFileBufPtr)
+				>LDYA ZPPtr1
+				>STYA ZPFileBufPtr
+.9				rts
+				
+CORE.GetCmdFromClBuf
+				>LDYA ZPCLBuf
+
+CORE.GetCmd		>STYA ZPPtr1
+				lda (ZPPtr1)
 				beq .9
 				
 				ldx #0					not in "
 						
 				ldy #0
 				
-.1				lda (ZPFileBufPtr),y
+.1				lda (ZPPtr1),y
 				beq .7
 
 				cmp #C.CR
@@ -56,13 +66,12 @@ CORE.GetCmdFromFile
 				
 				lda #';'
 				
-.5				sta (ZPCLBuf),y
+.5				sta (ZPArgVBuf),y
 				iny
-				cpy #CL.MAX
 				bne .1
 				
 				lda #E.SYN				Line Too long !!!
-*				sec
+				sec
 				rts
 				
 .6				sec						skip CR or ;
@@ -71,19 +80,14 @@ CORE.GetCmdFromFile
 .7				clc
 				
 				tya
-				adc ZPFileBufPtr
-				sta ZPFileBufPtr
+				adc ZPPtr1
+				sta ZPPtr1
 				bcc .8
-				inc ZPFileBufPtr+1
+				inc ZPPtr1+1
 				
 .8				lda #0
-				sta (ZPCLBuf),y
+				sta (ZPArgVBuf),y
 				
-				tya
-				>STA.G CL.Len
-				lda #$ff
-				>STA.G CL.bExec
-
 				clc
 				rts
 				
@@ -91,7 +95,8 @@ CORE.GetCmdFromFile
 				sec
 				rts
 *--------------------------------------
-* Input : ZPArgVBuf
+* Input : ZPArgVBuf (String)
+* Tokenize ZPArgVBuf
 * :LOOP
 * if CmdSep=| : 
 *    set hStdIn = hStdOut
@@ -112,13 +117,13 @@ CORE.GetCmdFromFile
 * set hStdIn = hStdOut
 * set hStdOut = Std
 *--------------------------------------
-CORE.Exec		>PUSHW ZPCLBuf
-				>LDYA ZPCLBuf
-				>STYA ZPCLBufPtr
+CORE.Exec		>PUSHW ZPArgVBuf
+				>LDYA ZPArgVBuf
+				>STYA ZPArgVBufPtr
 
-				>SYSCALL Args2ArgV		TOKENIZE CL in ZPCLBuf
+				>SYSCALL Args2ArgV		TOKENIZE CL in ZPArgVBuf
 
-				lda (ZPCLBufPtr)		empty line ?
+				lda (ZPArgVBufPtr)		empty line ?
 				beq .80
 				
 				cmp #'#'				comment ?
@@ -128,10 +133,7 @@ CORE.Exec		>PUSHW ZPCLBuf
 				
 *************** LOOP Cmd Arg
 					
-.10				lda #0
-				sta (ZPArgVBuf)
-
-				lda #S.PS.F.HOLD+S.PS.F.DUPENV
+.10				lda #S.PS.F.HOLD+S.PS.F.DUPENV
 				>STA.G CORE.PSFlags
 				
 				>LDA.G CL.CmdSep
@@ -146,36 +148,33 @@ CORE.Exec		>PUSHW ZPCLBuf
 				beq .80					yes, ignore remaining
 
 				ldy #1
-				lda (ZPCLBufPtr),y		only one char ?
+				lda (ZPArgVBufPtr),y		only one char ?
 				bne .2
 
-				lda (ZPCLBufPtr)
+				lda (ZPArgVBufPtr)
 				cmp #'.'				leading dot ?
 				bne .2
 				
 				>LDA.G CORE.PSFlags		yes, child process will run in same ENV
 				and #$ff^S.PS.F.DUPENV
 				sta (pData),y
-				jsr CORE.NextCLToken		and skip this token		
+				jsr CORE.ShiftArgVToken		and skip this token		
 
 .2				jsr CORE.IO.Check
 				bcc .7					IO token & related args processed
 				tay						an error ?
 				bne .90					yes...I/O error...
 				
-				jsr CORE.AddCLBufPtrToArgV	no...add as cmd or arg
-				bcs .90
+				jsr CORE.NextArgVToken	no...keep as cmd or arg
 
-.6				jsr CORE.NextCLToken
-
-.7				lda (ZPCLBufPtr)
+.7				lda (ZPArgVBufPtr)
 
 				beq .71					EOL...
 				cmp #';'
 				bne .70
 				
 				>STA.G CL.CmdSep
-				jsr CORE.NextCLToken		Skip ;
+				jsr CORE.ShiftArgVToken		Skip ;
 				bra .72					exec
 
 .70				cmp #'|'
@@ -185,10 +184,10 @@ CORE.Exec		>PUSHW ZPCLBuf
 				
 *				PIPE				
 	
-				jsr CORE.NextCLToken		Skip |
+				jsr CORE.ShiftArgVToken		Skip |
 				bra .72					and exec
 	
-				jsr CORE.NextCLToken		Skip ;
+				jsr CORE.ShiftArgVToken		Skip ;
 				lda #0
 				
 .71				>STA.G CL.CmdSep
@@ -241,9 +240,15 @@ CORE.ExecCmd	ldy #$ff
 				bpl .8					parent context is FALSE, skip line
 
 .3				>LDA.G CORE.IntCmd
-				bpl .80					Internal
-				
-				>PUSHB.G CORE.PSFlags
+				bmi CORE.ExecExtCmd
+
+				tax
+				jmp (J.CMD,x)
+
+.8				clc
+.9				rts				
+*--------------------------------------
+CORE.ExecExtCmd	>PUSHB.G CORE.PSFlags
 				>LDYA ZPArgVBuf
 				>SYSCALL execv
 				bcs .9
@@ -270,59 +275,19 @@ CORE.ExecCmd	ldy #$ff
 				
 .8				clc
 .9				rts
-
-.80				tax
-				jmp (J.CMD,x)
 *--------------------------------------
-CORE.NextCLToken
-				lda (ZPCLBufPtr)
-				inc ZPCLBufPtr
+CORE.NextArgVToken
+				lda (ZPArgVBufPtr)
+				inc ZPArgVBufPtr
 				bne .1
-				inc ZPCLBufPtr+1
+				inc ZPArgVBufPtr+1
 .1				tax
-				bne CORE.NextCLToken
+				bne CORE.NextArgVToken
 				rts
 *--------------------------------------
-CORE.AddCLBufPtrToArgV
-				>LDYA ZPCLBufPtr
-				>STYA ZPPtr1
-
-				>LDYA ZPArgVBuf
-				>STYA ZPPtr2
-				
-.1				lda (ZPPtr2)			scan to end of argV
-				beq .6
-
-.2				inc ZPPtr2
-				bne .3
-				inc ZPPtr2+1
-.3				lda (ZPPtr2)
-				bne .2
-
-				inc ZPPtr2
-				bne .4
-				inc ZPPtr2+1
-.4				lda (ZPPtr2)
-				bne .2
-				
-.6				ldy #$ff
-
-.7				iny
-*				beq .9
-				lda (ZPPtr1),y
-				sta (ZPPtr2),y
-				bne .7					including str ending \0
-
-				iny
-*				beq .9
-				sta (ZPPtr2),y			arg[] ending \0
-				
-				clc
-				rts
-				
-.9				lda #E.BUF	
-				sec				
-				rts
+CORE.ShiftArgVToken
+				>LDYA ZPArgVBufPtr
+				jmp RemoveStrFromArgV
 *--------------------------------------
 CORE.GetArgX	>LDYA ZPArgVBuf
 				
@@ -433,13 +398,13 @@ CORE.StkGet		lda (pData)				StackPtr
 				sec
 				rts
 *--------------------------------------
-CORE.IO.Check	>PUSHW ZPCLBufPtr
+CORE.IO.Check	>PUSHW ZPArgVBufPtr
 				>LDYA L.CORE.IO
 				jsr Lookup
 				bcs .9					not a IO token...should be an arg....
 				phx
 				
-				jsr CORE.NextCLToken		skip this IO token
+				jsr CORE.ShiftArgVToken		skip this IO token
 				
 				plx
 				jmp (J.CORE.IO,x)
@@ -458,7 +423,7 @@ CORE.IO.IN		lda #O.RDONLY+O.TEXT
 				bcs .9
 				jsr IO.Set.In
 
-				jsr CORE.NextCLToken 		skip arg
+				jsr CORE.ShiftArgVToken 		skip arg
 				clc
 .9				rts
 				
@@ -472,7 +437,7 @@ CORE.IO.OUT.1		jsr CORE.IO.Open
 				bcs .9
 				jsr IO.Set.Out
 
-				jsr CORE.NextCLToken 		skip arg
+				jsr CORE.ShiftArgVToken 		skip arg
 				clc	
 .9				rts
 
@@ -484,19 +449,19 @@ CORE.IO.2OUT.1	jsr CORE.IO.Open
 				bcs .9
 				jsr IO.Set.Err
 
-				jsr CORE.NextCLToken	 	skip arg
+				jsr CORE.ShiftArgVToken	 	skip arg
 				clc
 .9				rts
 *--------------------------------------
 CORE.IO.Open	pha
-				lda (ZPCLBufPtr)
+				lda (ZPArgVBufPtr)
 				beq .9					no arg left....
 				
 				>PUSHWI 0				Aux type
 				>PUSHBI S.FI.T.TXT		ftype
 				pla
 				>PUSHA					flags
-				>LDYA ZPCLBufPtr
+				>LDYA ZPArgVBufPtr
 				>SYSCALL fopen
 				rts
 				
