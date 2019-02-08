@@ -17,67 +17,6 @@ CORE.Quit		>LDA.G CORE.hArgVBuf
 
 .9				rts	
 *--------------------------------------
-* Input : ZPCLBuf/ZPFileBuf
-* Get Line from buf until ;, CR, \0 (EOL / EOF) -> ZPArgVBuf
-*--------------------------------------
-CORE.GetCmd		>LDYA ZPInputBufPtr		Save Actual cmd for looping
-				>STYA ZPInputCmdPtr
-				
-				lda (ZPInputBufPtr)
-				beq .9
-
-				ldx #0					reset "" flag					
-				ldy #0
-				
-.1				lda (ZPInputBufPtr),y
-				beq .7
-
-				cmp #C.CR
-				beq .6
-				
-				cmp #'"'
-				bne .2
-				
-				txa
-				eor #$80				toggle "" flag
-				tax
-				
-				lda #'"'
-				bra .5
-				
-.2				cmp #';'
-				bne .5
-				
-				txa
-				beq .6					not between ""
-				
-				lda #';'
-				
-.5				sta (ZPArgVBuf),y
-				iny
-				bne .1
-				
-				lda #E.SYN				Line Too long !!!
-.9				sec
-				rts
-				
-.6				sec						skip CR or ;
-				.HS 90					BCC
-				
-.7				clc
-				
-				tya
-				adc ZPInputBufPtr
-				sta ZPInputBufPtr
-				bcc .8
-				inc ZPInputBufPtr+1
-				
-.8				lda #0
-				sta (ZPArgVBuf),y
-				
-				clc
-				rts
-*--------------------------------------
 * Input : ZPArgVBuf (String)
 * Tokenize ZPArgVBuf
 * :LOOP
@@ -144,7 +83,7 @@ CORE.Exec		>PUSHW ZPArgVBuf
 				sta (pData),y
 				jsr CORE.ShiftArgVToken		and skip this token		
 
-.2				jsr CORE.IO.Check
+.2				jsr CMD.IOCheck
 				bcc .7					IO token & related args processed
 				tay						an error ?
 				bne .90					yes...I/O error...
@@ -201,7 +140,7 @@ CORE.ExecCmd	ldy #$ff
 				
 .11				>PUSHW ZPArgVBuf
 				>LDYA L.CORE.CMD
-				jsr Lookup				no / found, search internal...
+				jsr CORE.Lookup			no / found, search internal...
 				bcc .13					not internal
 				
 .12				ldx #$ff				found a / in Arg0 .. external
@@ -235,6 +174,11 @@ CORE.ExecCmd	ldy #$ff
 *--------------------------------------
 CORE.Run		>LDYA ZPInputBufPtr		Save Actual cmd for looping
 				>STYA ZPInputCmdPtr
+
+				>LDYA ZPArgVBuf
+				>STYA ZPArgVBufPtr
+				lda #0
+				sta (ZPArgVBuf)			Reset Arg Buffer
 
 				jsr CORE.GetCharNB
 				bcs CORE.Run.RTS		Ending 0, CS,A=0
@@ -365,7 +309,7 @@ CORE.Lookup		>STYA ZPPtr1
 				lda (ZPInputBufPtr),y
 				beq .3					Src Keyword end
 			
-				jsr CORE.IsSep
+				jsr CORE.IsSpaceOrEndCmd
 				bcc .3					Src Keyword end
 				
 				lda (ZPPtr1),y
@@ -412,16 +356,20 @@ CORE.Lookup		>STYA ZPPtr1
 				sec
 				rts
 *--------------------------------------
-CORE.IsSep		cmp #C.SPACE
-				beq .8
+CORE.IsSpaceOrEndCmd
+				cmp #C.SPACE
+				beq CORE.IsEndCmd.8
+				
+CORE.IsEndCmd	cmp #C.CR
+				beq CORE.IsEndCmd.8
 				cmp #';'
-				beq .8
+				beq CORE.IsEndCmd.8
 				cmp #'|'
-				beq .8
+				beq CORE.IsEndCmd.8
 				sec
 				rts
 				
-.8				clc
+CORE.IsEndCmd.8	clc
 				rts
 *--------------------------------------
 CORE.GetCharNB	jsr CORE.GetChar
@@ -535,79 +483,7 @@ CORE.StkGet		lda (pData)				StackPtr
 				sec
 				rts
 *--------------------------------------
-CORE.IO.Check	>PUSHW ZPArgVBufPtr
-				>LDYA L.CORE.IO
-				jsr Lookup
-				bcs .9					not a IO token...should be an arg....
-				phx
-				
-				jsr CORE.ShiftArgVToken		skip this IO token
-				
-				plx
-				jmp (J.CORE.IO,x)
-
-.9				lda #0
-				rts
-*--------------------------------------
-CORE.IO.AMP		>LDA.G CORE.PSFlags
-				and #$ff^S.PS.F.HOLD
-				sta (pData),y
-				clc
-				rts
-				
-CORE.IO.IN		lda #O.RDONLY+O.TEXT
-				jsr CORE.IO.Open
-				bcs .9
-				jsr IO.Set.In
-
-				jsr CORE.ShiftArgVToken 		skip arg
-				clc
-.9				rts
-				
-CORE.IO.OUTA
-CORE.IO.1OUTA		lda #O.WRONLY+O.APPEND+O.CREATE+O.TEXT
-				bra CORE.IO.OUT.1
-CORE.IO.OUT		
-CORE.IO.1OUT		lda #O.WRONLY+O.TRUNC+O.CREATE+O.TEXT
-
-CORE.IO.OUT.1		jsr CORE.IO.Open
-				bcs .9
-				jsr IO.Set.Out
-
-				jsr CORE.ShiftArgVToken 		skip arg
-				clc	
-.9				rts
-
-CORE.IO.2OUTA		lda #O.WRONLY+O.APPEND+O.CREATE+O.TEXT
-				bra CORE.IO.2OUT.1
-CORE.IO.2OUT		lda #O.WRONLY+O.TRUNC+O.CREATE+O.TEXT
-
-CORE.IO.2OUT.1	jsr CORE.IO.Open
-				bcs .9
-				jsr IO.Set.Err
-
-				jsr CORE.ShiftArgVToken	 	skip arg
-				clc
-.9				rts
-*--------------------------------------
-CORE.IO.Open	pha
-				lda (ZPArgVBufPtr)
-				beq .9					no arg left....
-				
-				>PUSHWI 0				Aux type
-				>PUSHBI S.FI.T.TXT		ftype
-				pla
-				>PUSHA					flags
-				>LDYA ZPArgVBufPtr
-				>SYSCALL fopen
-				rts
-				
-.9				pla
-				lda #E.CSYN
-				sec
-				rts				
-*--------------------------------------
 MAN
-SAVE USR/SRC/BIN/SHELL.S.CORE
-LOAD USR/SRC/BIN/SHELL.S
+SAVE USR/SRC/BIN/SH.S.CORE
+LOAD USR/SRC/BIN/SH.S
 ASM

@@ -349,13 +349,6 @@ CS: A = EC
 ## RETURN VALUE  
  Y,A = ...  
 
-# pipe  
-
-## C  
-`int pipe(int pipefd[2]);`  
-
-## ASM  
-
 # FAdd,FSub,FMult,FDiv,FPwr  
 Return X+Y, X-Y, X*Y, X/Y, X^Y  
 
@@ -683,6 +676,18 @@ return a hFILE to a new FIFO
 ## RETURN VALUE  
 CC = OK, CS = ERROR  
 A = hFILE  
+
+# pipe  
+
+## C  
+`hFD pipe();`  
+
+## ASM  
+`>SYSCALL pipe`  
+
+## RETURN VALUE  
+CC = OK, CS = ERROR  
+A = hFD  
 
 # PutChar  
 Print A (char) to StdOut  
