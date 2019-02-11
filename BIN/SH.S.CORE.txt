@@ -48,21 +48,30 @@ CORE.Run		>LDYA ZPInputBufPtr		Save Actual cmd for looping
 
 				>LDYA ZPArgVBuf
 				>STYA ZPArgVBufPtr
-
+				
+				lda #0					Reset ArgV Buffer
+				sta (ZPArgVBuf)
+				
+				lda #S.PS.F.HOLD+S.PS.F.DUPENV 
+				>STA.G CORE.PSFlags
+				
 				lda #$ff
 				>STA.G CORE.IntCmd		assume external
 
 				jsr CORE.GetCharNB
-				bcs CORE.Run.RTS		Ending 0, CS,A=0
+				bcs .9					Ending 0, CS,A=0
 				
 				cmp #'#'				commented line?
 				bne .2
 
 .1				jsr CORE.GetNextCharNB
-				bcs CORE.Run.RTS		A=0, CS
+				bcs .8					A=0
 				eor #C.CR
 				bne .1
-.9				rts						EOL, CC,A=0
+				jsr CORE.GetNextChar
+
+.8				clc
+.9				rts						EOL, CS,A=0
 				
 .2				cmp #'|'
 				bne .3
@@ -89,18 +98,21 @@ CORE.Run		>LDYA ZPInputBufPtr		Save Actual cmd for looping
 				bcs CORE.Run.RTS		nothing to execute...
 
 .4				>LDYA L.CMD				internal command ?
-				jsr CORE.Lookup
-				bcs .6					external, add token
+				jsr CORE.LookupInputBuf
+				bcs .6					no...assume external...no IO token Expected
+				
+				jsr CORE.SkipCharsA
+				
 				txa
 				>STA.G CORE.IntCmd
 				bra .7					internal, do not add token
 
 .5				>LDYA L.CORE.IO
-				jsr CORE.Lookup
+				jsr CORE.LookupInputBuf
 				bcs .6
 				
-				jsr CORE.GetNextCharNB
-				bcs CORE.Run.CSYN
+				jsr CORE.SkipCharsA
+
 				jsr CORE.IO.JMP
 				bcs CORE.Run.RTS
 				bra .7
@@ -108,33 +120,36 @@ CORE.Run		>LDYA ZPInputBufPtr		Save Actual cmd for looping
 .6				jsr CORE.ArgV.Add
 				
 .7				jsr CORE.GetCharNB
-				bcs CORE.ExecCmd
+				bcs CORE.ExecCmd.1		Nothing to skip
 				
 				jsr CORE.IsEndCmd
 				bcs .5
-				cmp #'|'
-				beq CORE.ExecCmd
 				
-				jsr CORE.GetNextCharNB
+				cmp #'|'
+				bne CORE.ExecCmd		skip CR, ;
 				
 				jsr IO.Pipe.Out
 				bcs CORE.Run.RTS
 				
-				bra CORE.ExecCmd
-				
-.8				clc				
+				bra CORE.ExecCmd.1		Do not skip |
+						
 CORE.Run.RTS	rts				
 *--------------------------------------
 * Input : ZPArgVBuf
 *--------------------------------------
-CORE.ExecCmd	lda #0
-				jsr CORE.ArgV.PutChar
+CORE.ExecCmd	jsr CORE.GetNextCharNB	Skip EoL char
+
+CORE.ExecCmd.1	lda #0
+				sta (ZPArgVBufPtr)
+
+				
+				
+				>LDYA ZPArgVBuf
+				>STYA ZPArgVBufPtr
 
 				>LDA.G CORE.IntCmd
 				bmi CORE.ExecExtCmd
 				tax
-				>LDYA ZPArgVBuf
-				>STYA ZPArgVBufPtr
 
 				jmp (J.CMD,x)
 
@@ -166,18 +181,24 @@ CORE.ExecExtCmd	>PUSHB.G CORE.PSFlags
 .8				clc
 .9				rts
 *--------------------------------------
-* search ZPInputBufPtr in Y,A table
+* search ZPInputBufPtr/ZPArgVBufPtr in Y,A table
 *--------------------------------------
-CORE.Lookup		>STYA ZPPtr1
+CORE.LookupInputBuf
+				>STYA ZPPtr1
+				>LDYA ZPInputBufPtr
+				bra CORE.Lookup
+CORE.LookupArgVBuf				
+				>STYA ZPPtr1
+				>LDYA ZPArgVBufPtr
+				
+CORE.Lookup		>STYA ZPPtr2
 
 				ldx #0
 				
-.1				phx
-				
-				ldy #$ff
+.1				ldy #$ff
 				
 .2				iny
-				lda (ZPInputBufPtr),y
+				lda (ZPPtr2),y
 				beq .3					Src Keyword end
 			
 				jsr CORE.IsSpaceOrEndCmd
@@ -185,24 +206,16 @@ CORE.Lookup		>STYA ZPPtr1
 				
 				lda (ZPPtr1),y
 				beq .4					Table Keyword end
-				cmp (ZPInputBufPtr),y
+				cmp (ZPPtr2),y
 				beq .2
 
 				bra .4
 				
 .3				lda (ZPPtr1),y
 				bne .4
-				plx
 				
-				tya
-				clc
-				adc ZPInputBufPtr
-				sta ZPInputBufPtr
-				bcc .8
-				
-				clc
-				inc ZPInputBufPtr+1
-				
+				tya						Keyword Len
+				clc			
 .8				rts
 				
 .4				inc ZPPtr1
@@ -216,8 +229,7 @@ CORE.Lookup		>STYA ZPPtr1
 				bne .6
 				inc ZPPtr1+1
 								
-.6				plx
-				inx
+.6				inx
 				inx
 				
 				lda (ZPPtr1)			Array Ending 0, must be an external Cmd....
@@ -231,29 +243,29 @@ CORE.Lookup.9	sec
 *--------------------------------------
 CORE.ArgV.Add	jsr CORE.GetCharNB
 				bcs CORE.Lookup.9
-				
-				ldx #0
+
+				ldx #0					reset "" mode 
 				
 .1				cmp #'"'
 				bne .2
 
 				txa
-				eor #$ff
+				eor #$ff				toggle "" mode
 				tax
 				bra .4
 				
 .2				cmp #C.SPACE
 				bne .3
-				txa
-				bpl .8
+				txa						between "" ?
+				beq .8
 				
 .3				jsr CORE.IsEndCmd
-				bcc CORE.Lookup.9
+				bcc .8
 
 				jsr CORE.ArgV.PutChar
 				
 .4				jsr CORE.GetNextChar
-				bra .1
+				bcc .1
 				
 .8				lda #0
 *--------------------------------------
@@ -262,7 +274,7 @@ CORE.ArgV.PutChar
 CORE.ArgV.NextChar
 				inc ZPArgVBufPtr
 				bne .8
-				inc ZPArgVBufPtr
+				inc ZPArgVBufPtr+1
 .8				rts				
 *--------------------------------------
 CORE.ArgV.Next	lda (ZPArgVBufPtr)
@@ -379,6 +391,13 @@ CORE.GetChar	lda (ZPInputBufPtr)
 				
 .9				sec
 				rts
+*--------------------------------------
+CORE.SkipCharsA	clc
+				adc ZPInputBufPtr
+				sta ZPInputBufPtr
+				bcc .8
+				inc ZPInputBufPtr+1
+.8				rts				
 *--------------------------------------
 * Stack
 *--------------------------------------
