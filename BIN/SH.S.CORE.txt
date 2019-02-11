@@ -39,146 +39,18 @@ CORE.Quit		>LDA.G CORE.hArgVBuf
 * set hStdIn = hStdOut
 * set hStdOut = Std
 *--------------------------------------
-CORE.Exec		>PUSHW ZPArgVBuf
-				>LDYA ZPArgVBuf
-				>STYA ZPArgVBufPtr
-
-				>SYSCALL Args2ArgV		TOKENIZE CL in ZPArgVBuf
-
-				>STZ.G CL.CmdSep
+CORE.Run.CSYN	lda #E.CSYN
+				sec
+				rts
 				
-				lda (ZPArgVBufPtr)		empty line ?
-				beq .80
-				
-				cmp #'#'				comment ?
-				beq .80
-
-*************** LOOP Cmd Arg
-					
-.10				lda #S.PS.F.HOLD+S.PS.F.DUPENV
-				>STA.G CORE.PSFlags
-				
-				>LDA.G CL.CmdSep
-				cmp #'|'
-				bne .1
-				
-				jsr IO.Pipe.In
-				bcs .90
-				
-*************** LOOP Token
-				
-.1				cmp #'#'				comment ?
-				beq .80					yes, ignore remaining
-
-				ldy #1
-				lda (ZPArgVBufPtr),y		only one char ?
-				bne .2
-
-				lda (ZPArgVBufPtr)
-				cmp #'.'				leading dot ?
-				bne .2
-				
-				>LDA.G CORE.PSFlags		yes, child process will run in same ENV
-				and #$ff^S.PS.F.DUPENV
-				sta (pData),y
-				jsr CORE.ShiftArgVToken		and skip this token		
-
-.2				jsr CMD.IOCheck
-				bcc .7					IO token & related args processed
-				tay						an error ?
-				bne .90					yes...I/O error...
-				
-				jsr CORE.NextArgVToken	no...keep as cmd or arg
-
-.7				lda (ZPArgVBufPtr)
-
-				beq .71					EOL...
-				cmp #';'
-				bne .70
-				
-				>STA.G CL.CmdSep
-				jsr CORE.ShiftArgVToken		Skip ;
-				bra .72					exec
-
-.70				cmp #'|'
-				bne .1					another token...
-
-				>STA.G CL.CmdSep
-				
-				jsr IO.Pipe.Out
-				bcs .90				
-	
-				jsr CORE.ShiftArgVToken		Skip |
-				bra .72					and exec
-	
-				jsr CORE.ShiftArgVToken		Skip ;
-				lda #0
-				
-.71				>STA.G CL.CmdSep
-
-.72				jsr CORE.ExecCmd
-				bcs .90
-				
-				>LDA.G CL.CmdSep
-				bne .10					if sep is ; or |...loop
-
-.80				clc
-				
-.90				rts				
-*--------------------------------------
-* Input : ZPArgVBuf
-*--------------------------------------
-CORE.ExecCmd	ldy #$ff
-
-.1				iny
-				lda (ZPArgVBuf),y
-				beq .11
-				cmp #'/'
-				bne .1
-				
-				bra .12
-				
-.11				>PUSHW ZPArgVBuf
-				>LDYA L.CORE.CMD
-				jsr CORE.Lookup			no / found, search internal...
-				bcc .13					not internal
-				
-.12				ldx #$ff				found a / in Arg0 .. external
-.13				txa
-				>STA.G CORE.IntCmd
-
-.10				jsr CORE.StkGet			IF,WHILE,FOR ?
-				bcs .3					no particular context, exec...
-				tax
-				
-				>LDA.G CORE.IntCmd
-				bmi .2					external ...
-				
-				and #$3F
-				cmp #C.FOR
-				bcs .3					FOR...FI : always execute
-		
-.2				txa
-				bpl .8 					context is FALSE, skip line
-				asl
-				bpl .8					parent context is FALSE, skip line
-
-.3				>LDA.G CORE.IntCmd
-				bmi CORE.ExecExtCmd
-
-				tax
-				jmp (J.CORE.CMD,x)
-
-.8				clc
-.9				rts				
-*--------------------------------------
 CORE.Run		>LDYA ZPInputBufPtr		Save Actual cmd for looping
 				>STYA ZPInputCmdPtr
 
 				>LDYA ZPArgVBuf
 				>STYA ZPArgVBufPtr
-				lda #0
-				sta (ZPArgVBuf)			Reset Arg Buffer
+
+				lda #$ff
+				>STA.G CORE.IntCmd		assume external
 
 				jsr CORE.GetCharNB
 				bcs CORE.Run.RTS		Ending 0, CS,A=0
@@ -190,15 +62,24 @@ CORE.Run		>LDYA ZPInputBufPtr		Save Actual cmd for looping
 				bcs CORE.Run.RTS		A=0, CS
 				eor #C.CR
 				bne .1
-				rts						EOL, CC,A=0
+.9				rts						EOL, CC,A=0
 				
-.2				cmp #'.'
+.2				cmp #'|'
 				bne .3
+				
+				jsr IO.Pipe.In
+				bcs CORE.Run.RTS
+				
+				jsr CORE.GetNextCharNB
+				bcs CORE.Run.CSYN
+				
+.3				cmp #'.'
+				bne .4
 				
 				ldy #1
 				lda (ZPInputBufPtr),y
 				cmp #C.SPACE
-				bne .1
+				bne .4
 				
 				>LDA.G CORE.PSFlags		yes, child process will run in same ENV
 				and #$ff^S.PS.F.DUPENV
@@ -207,18 +88,56 @@ CORE.Run		>LDYA ZPInputBufPtr		Save Actual cmd for looping
 				jsr CORE.GetNextCharNB	skip ". "
 				bcs CORE.Run.RTS		nothing to execute...
 
-.3				>LDYA L.CORE.CMD		internal command ?
+.4				>LDYA L.CMD				internal command ?
 				jsr CORE.Lookup
-				bcs .4
+				bcs .6					external, add token
+				txa
+				>STA.G CORE.IntCmd
+				bra .7					internal, do not add token
 
-				jmp (J.CORE.CMD,x)
+.5				>LDYA L.CORE.IO
+				jsr CORE.Lookup
+				bcs .6
 				
-.4				
+				jsr CORE.GetNextCharNB
+				bcs CORE.Run.CSYN
+				jsr CORE.IO.JMP
+				bcs CORE.Run.RTS
+				bra .7
 				
+.6				jsr CORE.ArgV.Add
+				
+.7				jsr CORE.GetCharNB
+				bcs CORE.ExecCmd
+				
+				jsr CORE.IsEndCmd
+				bcs .5
+				cmp #'|'
+				beq CORE.ExecCmd
+				
+				jsr CORE.GetNextCharNB
+				
+				jsr IO.Pipe.Out
+				bcs CORE.Run.RTS
+				
+				bra CORE.ExecCmd
 				
 .8				clc				
 CORE.Run.RTS	rts				
 *--------------------------------------
+* Input : ZPArgVBuf
+*--------------------------------------
+CORE.ExecCmd	lda #0
+				jsr CORE.ArgV.PutChar
+
+				>LDA.G CORE.IntCmd
+				bmi CORE.ExecExtCmd
+				tax
+				>LDYA ZPArgVBuf
+				>STYA ZPArgVBufPtr
+
+				jmp (J.CMD,x)
+
 CORE.ExecExtCmd	>PUSHB.G CORE.PSFlags
 				>LDYA ZPArgVBuf
 				>SYSCALL execv
@@ -247,55 +166,7 @@ CORE.ExecExtCmd	>PUSHB.G CORE.PSFlags
 .8				clc
 .9				rts
 *--------------------------------------
-CORE.NextArgVToken
-				lda (ZPArgVBufPtr)
-				inc ZPArgVBufPtr
-				bne .1
-				inc ZPArgVBufPtr+1
-.1				tax
-				bne CORE.NextArgVToken
-				rts
-*--------------------------------------
-CORE.ShiftArgVToken
-				>LDYA ZPArgVBufPtr
-				jmp RemoveStrFromArgV
-*--------------------------------------
-CORE.GetArgX	>LDYA ZPArgVBuf
-				
-				dex
-				bmi .8
-				
-				>STYA ZPPtr1
-				
-.1				lda (ZPPtr1)
-				beq .9
-
-.2				inc ZPPtr1
-				bne .3
-				inc ZPPtr1+1
-.3				lda (ZPPtr1)
-				bne .2
-				
-				inc ZPPtr1
-				bne .4
-				inc ZPPtr1+1
-				
-.4				lda (ZPPtr1)
-				beq .9
-
-				dex
-				bpl .1
-				
-				>LDYA ZPPtr1
-
-.8				clc
-				rts
-
-.9				sec
-				rts
-*--------------------------------------
 * search ZPInputBufPtr in Y,A table
-* 
 *--------------------------------------
 CORE.Lookup		>STYA ZPPtr1
 
@@ -324,7 +195,7 @@ CORE.Lookup		>STYA ZPPtr1
 				plx
 				
 				tya
-				sec
+				clc
 				adc ZPInputBufPtr
 				sta ZPInputBufPtr
 				bcc .8
@@ -353,8 +224,109 @@ CORE.Lookup		>STYA ZPPtr1
 				bne .1
 				
 				lda #E.CSYN
-				sec
+CORE.Lookup.9	sec
 				rts
+*--------------------------------------
+* ArgV
+*--------------------------------------
+CORE.ArgV.Add	jsr CORE.GetCharNB
+				bcs CORE.Lookup.9
+				
+				ldx #0
+				
+.1				cmp #'"'
+				bne .2
+
+				txa
+				eor #$ff
+				tax
+				bra .4
+				
+.2				cmp #C.SPACE
+				bne .3
+				txa
+				bpl .8
+				
+.3				jsr CORE.IsEndCmd
+				bcc CORE.Lookup.9
+
+				jsr CORE.ArgV.PutChar
+				
+.4				jsr CORE.GetNextChar
+				bra .1
+				
+.8				lda #0
+*--------------------------------------
+CORE.ArgV.PutChar
+				sta (ZPArgVBufPtr)
+CORE.ArgV.NextChar
+				inc ZPArgVBufPtr
+				bne .8
+				inc ZPArgVBufPtr
+.8				rts				
+*--------------------------------------
+CORE.ArgV.Next	lda (ZPArgVBufPtr)
+				beq .8
+				
+.1				jsr CORE.ArgV.NextChar
+				lda (ZPArgVBufPtr)
+				bne .1
+				
+				jsr CORE.ArgV.NextChar
+				lda (ZPArgVBufPtr)
+
+.8				rts
+*--------------------------------------
+* IO
+*--------------------------------------
+CORE.IO.JMP		jmp (J.CORE.IO,x)
+
+CORE.IO.AMP		>LDA.G CORE.PSFlags
+				and #$ff^S.PS.F.HOLD
+				sta (pData),y
+				clc
+CORE.IO.RTS		rts
+				
+CORE.IO.IN		lda #O.RDONLY+O.TEXT
+				jsr CORE.IO.Open
+				bcs CORE.IO.RTS
+				jmp IO.Set.In
+CORE.IO.OUTA
+CORE.IO.1OUTA	lda #O.WRONLY+O.APPEND+O.CREATE+O.TEXT
+				bra CORE.IO.OUT.1
+CORE.IO.OUT		
+CORE.IO.1OUT	lda #O.WRONLY+O.TRUNC+O.CREATE+O.TEXT
+
+CORE.IO.OUT.1	jsr CORE.IO.Open
+				bcs CORE.IO.RTS
+				jmp IO.Set.Out
+
+CORE.IO.2OUTA	lda #O.WRONLY+O.APPEND+O.CREATE+O.TEXT
+				bra CORE.IO.2OUT.1
+CORE.IO.2OUT	lda #O.WRONLY+O.TRUNC+O.CREATE+O.TEXT
+
+CORE.IO.2OUT.1	jsr CORE.IO.Open
+				bcs CORE.IO.RTS
+				jmp IO.Set.Err
+*--------------------------------------
+CORE.IO.Open	pha						Open Mode
+				jsr CORE.GetCharNB
+				bcs .9					no arg left....
+				
+				>PUSHWI 0				Aux type
+				>PUSHBI S.FI.T.TXT		ftype
+				pla
+				>PUSHA					flags
+				>LDYA ZPInputBufPtr
+				>SYSCALL fopen
+				rts
+				
+.9				pla
+				lda #E.CSYN
+				sec
+				rts				
+*--------------------------------------
+* Input Buffer
 *--------------------------------------
 CORE.IsSpaceOrEndCmd
 				cmp #C.SPACE
@@ -407,6 +379,8 @@ CORE.GetChar	lda (ZPInputBufPtr)
 				
 .9				sec
 				rts
+*--------------------------------------
+* Stack
 *--------------------------------------
 CORE.StkPushPtr	lda ZPInputCmdPtr
 				jsr CORE.StkPush
