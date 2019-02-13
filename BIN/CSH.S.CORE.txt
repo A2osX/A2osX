@@ -3,11 +3,8 @@ PREFIX
 AUTO 4,1
 				.LIST OFF	
 *--------------------------------------
-CSH.Q.CONST		.EQ %11000000
-CSH.Q.ARRAY		.EQ %10001100			max 3 bounds	
-CSH.Q.POINTER1	.EQ %10000001			max 3 depth
-CSH.Q.POINTER2	.EQ %10000010
-CSH.Q.POINTER3	.EQ %10000011
+CSH.Q.CONST		.EQ %10000000
+CSH.Q.POINTER	.EQ %10000001
 CSH.T.CHAR		.EQ 1
 CSH.T.INT		.EQ 2
 CSH.T.LONG		.EQ 3
@@ -17,34 +14,44 @@ CSH.T.ULONG		.EQ 6
 CSH.T.FLOAT		.EQ 7
 CSH.T.VARIADIC	.EQ $F
 *--------------------------------------
-CSH.Init		lda #$0
+CSH.Init		>LDYAI 256
+				>SYSCALL GetMem0
+				bcs .9
+				>STYA ZPCSHSymbols
+				txa
+				>STA.G CSH.hSymbols
+				
+				>LDYAI 256
+				>SYSCALL GetMem
+				bcs .9
+				>STYA ZPCSHConst
+				txa
+				>STA.G CSH.hConst
+
+				>LDYAI 256
+				>SYSCALL GetMem
+				bcs .9
+				>STYA ZPCSHData
+				txa
+				>STA.G CSH.hData
+				
+				>LDYAI 256
+				>SYSCALL GetMem
+				bcs .9
+				>STYA ZPCSHStack
+				txa
+				>STA.G CSH.hStack
+				
+				lda #$0
 				>STA.G CSH.SymbolsPtr
+				>STA.G CSH.ConstPtr
 				>STA.G CSH.DataPtr
 				>STA.G CSH.StackPtr
 				
-				>LDYAI 256
-				>SYSCALL GetMem0
-				bcs .9
-				txa
-				>STA.G CSH.hSymbols
-				>SYSCALL GetMemPtr
-				>STYA ZPCSHSymbols
-				
-				>LDYAI 256
-				>SYSCALL GetMem
-				bcs .9
-				txa
-				>STA.G CSH.hData
-				>SYSCALL GetMemPtr
-				>STYA ZPCSHData
-				
-				>LDYAI 256
-				>SYSCALL GetMem
-				bcs .9
-				txa
-				>STA.G CSH.hStack
-				>SYSCALL GetMemPtr
-				>STYA ZPCSHStack
+				sta (ZPCSHSymbols)
+				sta (ZPCSHConst)
+				sta (ZPCSHData)
+				sta (ZPCSHStack)
 				
 *				clc
 .9				rts
@@ -62,13 +69,13 @@ CSH.Quit		>LDA.G hFileBuf
 				>SYSCALL FreeMem
 				
 .3				>LDA.G CSH.hSymbols
-				beq .8
+				beq CSH.Quit.RTS
 				>SYSCALL FreeMem
 				
-.8				rts
+CSH.Quit.RTS	rts
 *--------------------------------------
 CSH.Run			jsr CSH.GetCharNB
-				bcs .9
+				bcs CSH.Quit.RTS
 								
 				cmp #'}'				End of block ?
 				bne .1
@@ -107,9 +114,8 @@ CSH.Run			jsr CSH.GetCharNB
 				jmp (J.CSH.KW,x)
 
 .4				jsr CSH.GetVar
-				bcs .9
-				
-				
+				bcs .5
+
 				jsr CSH.GetCharNB
 				bcs .9
 				cmp #'='
@@ -128,6 +134,16 @@ CSH.Run			jsr CSH.GetCharNB
 				cmp #';'
 				bne .99
 				
+				jmp CSH.GetNextCharNB	Skip ;
+				
+.5				>LDYA L.CSH.FN
+				jsr CSH.LookupFn
+				bcs .99
+				
+				>STZ.G CSH.ACCT			no retrun value type check required
+				
+				jsr CSH.FnEval
+				bcs .9
 				jmp CSH.GetNextCharNB	Skip ;
 				
 .99				lda #CSH.E.SYNTAX
@@ -349,23 +365,165 @@ CSH.TYPE		>STA.G CSH.ACCT
 				sec
 .99				rts
 *--------------------------------------
-CSH.FnEval		>STYA ZPFnDefPtr
+CSH.ExpEval		jsr CSH.ZeroACC
+			
+.10				lda #$ff
+				>STA.G CSH.EXPBOP1		Reset BOP1
+
 				jsr CSH.GetCharNB
+				bcs .9
+				
+				jsr CSH.IsLetter		Fnc or Var ?
+				bcs .2
+
+				jsr CSH.GetVar
+				bcs .1
+				
+				jsr CSH.LoadACCFromVar
+				bcs .9
+				bra .11				
+				
+.1				>LDYA L.CSH.FN
+				jsr CSH.LookupFn
+				bcs .9
+
+				jsr CSH.FnEval
+				bcs .99
+				bra .11
+				
+.2				jsr CSH.IsDigit10		number ?
+				bcs .3
+				
+				jsr CSH.GetNumInACC
+				bcs .9
+				
+.11				jsr CSH.GetCharNB
+				bcs .9
+				
+				cmp #')'
+				beq .8
+				cmp #';'
+				beq .8
+				
+				jsr CSH.IsOPChar
+				bcs .9
+
+				>LDYA L.CSH.BOPS
+				jsr CSH.LookupOP
+				bcs .9
+				
+				>LDA.G CSH.EXPBOP1		previous OP...
+				bpl .5					go check precedence
+				
+				txa
+				>STA.G CSH.EXPBOP1
+				jsr CSH.ACC2ARG
+				jsr CSH.GetCharNB
+				bcc .10					go check for an ARG		
+				bra .9
+				
+.3				>DEBUG
+
+				cmp #'"'				String litteral
+				bne .9
+				
+				
+
+				jsr CSH.AddContCharP
+				bcs	.99
+
+				jmp .11
+
+				
+.9				lda #CSH.E.SYNTAX
+				sec
+.99				rts	
+				
+.5				txa
+				>STA.G CSH.EXPBOP2
+				>CMP.G CSH.EXPBOP1		
+				bcs .6					
+				
+* new OP has precedence, stack ACC
+				
+				
+
+				jmp .10
+				
+* Old OP has precedence, compute ACC=ARG <BOP> ACC					
+.6				>LDA.G CSH.EXPBOP1
+				jsr CSH.Compute
+				bcs .9
+				
+				jsr CSH.GetCharNB
+				bcs .9		
+				jmp .10
+				
+.8				>LDA.G CSH.EXPBOP1
+				bmi .80
+				
+				jmp CSH.Compute
+				
+.80				clc
+				rts
+*--------------------------------------
+CSH.AddContCharP
+				ldy #0
+				
+.1				jsr CSH.GetNextChar
+				bcs .9
+				cmp #C.CR
+				beq .9
+				
+				cmp #'"'
+				beq .2
+				sta (ZPCSHConst),y
+				iny 
+				bra .1
+				
+.2				lda #0				
+				sta (ZPCSHConst),y
+				
+				lda ZPCSHConst
+				pha
+				lda ZPCSHConst+1
+				pha
+				
+				tya
+				sec
+				adc ZPCSHConst
+				sta ZPCSHConst
+				bcc .3
+				
+				inc ZPCSHConst+1
+				
+.3				pla
+				ply
+				clc
+				rts
+				
+.9				lda #CSH.E.SYNTAX
+				sec
+				rts
+*--------------------------------------
+CSH.FnEval		jsr CSH.GetCharNB
 
 				bcs .9
 				cmp #'('
 				bne .9
 				
-				lda (ZPFnDefPtr)			Get Return value Type
-				>CMP.G CSH.ACCT			Match with ACC ?
+				>LDA.G CSH.ACCT			Match with ACC ?
+				beq .10					ACC is VOID
+				
+				cmp (ZPFnDefPtr)		Get Return value Type
 				bne .99
 
-				jsr CSH.GetNextCharNB	skip '('
+.10				jsr CSH.GetNextCharNB	skip '('
 				bcs .9
 				
 				jsr CSH.PushACCT		Save Acc & T on stack
 				
-.1				inc ZPFnDefPtr				advance to arg list type
+.1				inc ZPFnDefPtr			advance to arg list type
 				bne .2
 				inc ZPFnDefPtr+1
 
@@ -384,10 +542,10 @@ CSH.FnEval		>STYA ZPFnDefPtr
 .3				>CMP.G CSH.ACCT			Match with ACC ?
 				bne .99				
 				
-				inc ZPFnDefPtr				advance to next arg
+				inc ZPFnDefPtr			advance to next arg
 				bne .4
 				inc ZPFnDefPtr+1
-.4				lda (ZPFnDefPtr)			no more arg in fn definition
+.4				lda (ZPFnDefPtr)		no more arg in fn definition
 				beq .7 
 				
 				jsr CSH.GetNextCharNB
@@ -417,94 +575,6 @@ CSH.FnEval		>STYA ZPFnDefPtr
 				
 .99				lda #CSH.E.TMISMATCH				
 				sec
-				rts
-*--------------------------------------
-CSH.ExpEval		jsr CSH.ZeroACC
-			
-.10				lda #$ff
-				>STA.G CSH.EXPBOP1		Reset BOP1
-
-				jsr CSH.GetCharNB
-				bcs .9
-				
-				jsr CSH.IsLetter		Fnc or Var ?
-				bcs .2
-
-				jsr CSH.GetVar
-				bcs .1
-				
-				jsr CSH.LoadACCFromVar
-				bcs .9
-				bra .11				
-				
-.1				>LDYA L.CSH.FN
-				jsr CSH.LookupFn
-				bcs .9
-				>LDYA ZPPtr1
-				jsr CSH.FnEval
-				bcs .99
-				bra .11
-				
-.2				jsr CSH.IsDigit10		number ?
-				bcs .9
-				
-				jsr CSH.GetNumInACC
-				bcs .9
-				
-.11				jsr CSH.GetCharNB
-				bcs .9
-				
-				cmp #')'
-				beq .8
-				cmp #';'
-				beq .8
-				
-				jsr CSH.IsOPChar
-				bcs .9
-
-				>LDYA L.CSH.BOPS
-				jsr CSH.LookupOP
-				bcs .9
-				
-				>LDA.G CSH.EXPBOP1		previous OP...
-				bpl .5					go check precedence
-				
-				txa
-				>STA.G CSH.EXPBOP1
-				jsr CSH.ACC2ARG
-				jsr CSH.GetCharNB
-				bcc .10					go check for an ARG		
-				
-.9				lda #CSH.E.SYNTAX
-				sec
-.99				rts	
-				
-.5				txa
-				>STA.G CSH.EXPBOP2
-				>CMP.G CSH.EXPBOP1		
-				bcs .3					
-				
-* new OP has precedence, stack ACC
-				
-				
-
-				bra .10
-				
-* Old OP has precedence, compute ACC=ARG <BOP> ACC					
-.3				>LDA.G CSH.EXPBOP1
-				jsr CSH.Compute
-				bcs .9
-				
-				jsr CSH.GetCharNB
-				bcs .9		
-				jmp .10
-				
-.8				>LDA.G CSH.EXPBOP1
-				bmi .80
-				
-				jmp CSH.Compute
-				
-.80				clc
 				rts
 *--------------------------------------
 CSH.SavePtr		>LDYA ZPFileBufPtr
@@ -563,9 +633,10 @@ CSH.Lookup		phy						Y = len
 .31				lda ZPPtr1
 				sec
 				adc (ZPPtr1)
-				sta ZPPtr1
-				bcc .8
-				inc ZPPtr1+1
+				sta ZPFnDefPtr
+				lda ZPPtr1+1
+				adc #0
+				inc ZPFnDefPtr+1
 				
 				clc						
 .8				rts
@@ -599,6 +670,14 @@ CSH.Lookup		phy						Y = len
 .9				pla
 				sec
 				rts
+*--------------------------------------
+CSH.ZPPtr1AddAp1
+				sec
+				adc ZPPtr1 
+				sta ZPPtr1
+				bcc .1
+				inc ZPPtr1+1
+.1				rts
 *--------------------------------------
 CSH.GetNumInACC	>LDA.G CSH.ACCT
 				cmp #CSH.T.FLOAT
