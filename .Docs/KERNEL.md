@@ -61,7 +61,7 @@ X = DevID
 # GetDevStatus  
 
 ## C   
-`int getdevstatus(short int hDEV, S.DIB* dstat);`  
+`int getdevstatus(short int DevID, S.DIB* dstat);`  
 
 ## ASM  
 `>PUSHWI S.DIB`  
@@ -803,6 +803,9 @@ Specifiers :
 + \f : Print 'FF' ($0C,12)  
 + \n : Print 'LF' ($0A,10)  
 + \r : Print 'CR' ($0D,13)  
++ \t : Print 'TAB' ($09,09)  
++ \v : Print 'VT' ($0B,11)  
++ \xHH : Print byte with hexadecimal value HH (1 to 2 digits)  
 + \\\\ : Print \  
 + \\% : Print %  
 
