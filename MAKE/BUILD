@@ -1,0 +1,7 @@
+NEW
+  PREFIX
+AUTO 4,1
+PREFIX B1216
+-a2osx.system
+MAN
+TEXT /MAKE/BUILD
