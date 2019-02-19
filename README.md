@@ -7,6 +7,10 @@
 + **A2OSX.BUILD.po**  :  **(0.92)**  800k BOOT disk image with S-C MASM 3.0 and all binaries (BOOT+DEV)  
 + **A2OSX.SRC.po**    :  **(0.92)**  800k disk image with all sources  
 
+## Latest News 2019-02-19
+
+Major updates have occured to the kernel and many of the APIs to support an enhanced shell with support of many new scripting capabilities, the ability to redirect and eventually piping output.  Current kernel also supports multiple virtual terminals as well as TCP (via TELNETD) and serial (SSC driver) terminals.
+
 ## Latest News 2018-11-10
 
 My loneliness has been cured, new resources have signed onto the project.  I welcome Patrick Kloepfer
@@ -238,54 +242,36 @@ OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
 
 | KM.Name      | Status  | Comment |
 | -------      | ------  | ------- |
+| KM.APPLETALK | Working | AppleTalk Support for ProDOS |
 | KM.NSC       | Working | No-Slot-Clock/DS1216E |
 | KM.RAMWORKS  | Working | AE-Ramworks I,II,III  |
 | KM.VSDRIVE   | Working | ADTPro Virtual Drive for SSC |
-| KM.APPLETALK | Working | AppleTalk Support for ProDOS |
 
 ## SBIN,Daemons/Commands:
 
 | Name    | Status      | Comment | K.Ver |
 | ----    | ------      | ------- | ------|
-| INSDRV  | Working     |         | 0.92 |
+| DHCPCLNT| Working     | rewritten to use new Socket API | 0.92 |
 | GETTY   | Working     | -E : Exit on remote close | 0.92 |
+| HTTPD   | In Progress |  | 0.9 |
+| INSDRV  | Working     |         | 0.92 |
+| KCONFIG | Working     | Kernel Configuration Utility | 0.92 |
 | LOGIN   | In Progress | no auth using /etc/passwd yet | 0.92 |
 | SHELL   | Working     | (See Internal Shell commands) | 0.92 |
-| KCONFIG | Working     | Kernel Configuration Utility | 0.92 |
-| ----    | ------      | ------- | ----- |
 | TCPIPD  | Working     | ARP,IP,ICMP,UDP & TCP ok | 0.92 |
-| DHCPCLNT| Working     | rewritten to use new Socket API | 0.92 |
 | TELNETD | Working  |  | 0.92 |
-| HTTPD   | In Progress |  | 0.9 |
 
 ## Internal Shell commands:
 
 | Name      | Status  | Comment |
 | ----      | ------  | ------- |
+| BREAK      |  | |
 | CD        | Working | Improved syntax : now, 'CD ../BIN' works |
-| REN       | Working | Rename a file, directory or volume |
-| MD        | Working | Create a directory |
-| RD        | Working | Delete an empty directory |
-| PWD       | Working | Print Working Directory |
-| DATE      | Working | |
-| ECHO      | Working | \b,\e,\f,\n,\\\ and \\% supported |
-|           |         | -N : Suppress \r\n |
-| EXIT      | Working | exit shell |
-| PAUSE     | Working | Wait until CR |
-| PUSHD     | Working | Save actual working directory |
-|           |         | PUSHD <dir> do aslo a CD to <dir> |
-| POPD      | Working | Restore previously saved working directory |
-| READ      | Working | -S : no echo (password) |
-|           |         | -P : "prompt message"   |
-| TIME      | Working | |
-| SET       | Working | -X toggle debug mode |
-| SLEEP     | Working | Wait <count> 10th sec |
-| NOHUP     | Working | Start a process with PPID=PS0 (Daemon) |
-| SHIFT     | Working | Remove $1 from cmd line |
-| ----      | ------  | ------- |
-| IF .. ELSE .. FI | Working | [ -d direxists ] |
+| conditions | Working |[ -d direxists ] |
 |           |         | [ -e fileordirexists ] |
 |           |         | [ -f fileexists ] |
+|           |         | [ -n $VAR variable is not empty ] |
+|           |         | [ -z $VAR variable is empty ] |
 |           |         | [ string1 = string2 ] |
 |           |         | [ string1 != string2 ] |
 |           |         | [ int32 -eq int32 ] |
@@ -294,9 +280,32 @@ OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
 |           |         | [ int32 -le int32 ] |
 |           |         | [ int32 -gt int32 ] |
 |           |         | [ int32 -ge int32 ] |
-| WHILE .. LOOP | Working | [ same tests as IF ] |
-| BREAK      |  | |
 | CONTINUE   |  | |
+| DATE      | Working | |
+| ECHO      | Working | \b,\e,\f,\n,\\\ and \\% supported |
+|           |         | -N : Suppress \r\n |
+| ELSE      | Working | Optional branch for IF block |
+| EXIT      | Working | exit shell |
+| FI        | Working | Terminator for IF block |
+| IF        | Working | [ (condition) ] |
+| LOOP      | Working | Terminator for WHILE block |
+| MD        | Working | Create a directory |
+| NOHUP     | Working | Start a process with PPID=PS0 (Daemon) |
+| PAUSE     | Working | Wait until CR |
+| POPD      | Working | Restore previously saved working directory |
+| PUSHD     | Working | Save actual working directory |
+|           |         | PUSHD <dir> do aslo a CD to <dir> |
+| PWD       | Working | Print Working Directory |
+| RD        | Working | Delete an empty directory |
+| READ      | Working | -S : no echo (password) |
+|           |         | -P : "prompt message"   |
+| REN       | Working | Rename a file, directory or volume |
+| SET       | Working | -X toggle debug mode |
+|           |         | -C toggle Control-C break mode |
+| SHIFT     | Working | Remove $1 from cmd line |
+| SLEEP     | Working | Wait <count> 10th sec |
+| TIME      | Working | |
+| WHILE     | Working | [ (condition) ] |
 
 ## Shell variables:
 
@@ -323,8 +332,8 @@ note : '$VAR' does NOT expand Variable
 | & | Working | start proc |
 | \| |  | pipe |
 | <    | Working | StdIn redirection |
-| >>    | Working | StdOut redirection |
-| >    | Working |  |
+| >    | Working | StdOut redirection |
+| >>    | Working | Append StdOut  |
 | 1>>    | Working |  |
 | 1>   | Working |  |
 | 2>>    | Working | StdErr redirection |
@@ -335,13 +344,12 @@ note : '$VAR' does NOT expand Variable
 | Name | Status | Comment | K.Ver |
 | ---- | ------ | ------- | ----- |
 | Console.DRV | Working | ANSI support in Progress. | 0.92 |
+| DHGR.DRV | Working | 560x192 Mono/16 colors Mixed-Mode support | 0.9.1 |
+| LanCeGS.DRV | Working | | 0.92 |
+| Mouse.DRV | Working | Apple Mouse Card,//c Mouse Port | 0.9.1 |
+| PIC.DRV | In Progress | Apple "Parallel Interface Card" Driver, renamed from PPIC.DRV | 0.9 |
 | SSC.DRV     | Working | Apple "Super Serial Card" Driver | 0.92 |
 | SSC.I.DRV   | Working | Apple "Super Serial Card" Driver (IRQ enabled) | 0.92 |
-| PIC.DRV | In Progress | Apple "Parallel Interface Card" Driver, renamed from PPIC.DRV | 0.9 |
-| Mouse.DRV | Working | Apple Mouse Card,//c Mouse Port | 0.9.1 |
-| DHGR.DRV | Working | 560x192 Mono/16 colors Mixed-Mode support | 0.9.1 |
-| ---- | ------ | ------- | ----- |
-| LanCeGS.DRV | Working | | 0.92 |
 | Uthernet.DRV  | Working | | 0.92 |
 | Uthernet2.DRV | Working | | 0.92 |
 | Uther2.AI.DRV | In Progress | With ARP/IP Offloading | 0.92 |
@@ -349,60 +357,77 @@ note : '$VAR' does NOT expand Variable
 ## BIN,External Shell commands:
 | Name | Status | Comment | K.Ver |
 | ---- | ------ | ------- | ----- |
-| MEM | Working | Old dump behavior is now MEMDUMP.  New MEM command displays MEMSTAT (Main, Aux & Kernel Memory) | 0.92 |
-| LSDEV | Working | Dump device Drivers | 0.92 |
-| LSOF | Working | List Open Files | 0.92 |
-| PS | Working | List Processes| 0.92 |
-| MKDIR | Working | Make Directory| 0.92 |
-| LS | Working | -A : Do Not Print . & .. | 0.92 |
-| | | -L : long listing with size/date... | |
+| CAT | Working | -A : Show All non printable caracters | 0.92 |
+| | | -N : Number all output lines | |
+| | | -S : Suppress repeated empty output lines | |
+| CHGRP | In Progress | -C : Continue On Error | 0.9 |
 | | | -R : Recurse subdirectories | |
-| RM | Working | -C : Continue On Error | 0.92 |
-| | | -Q : Quiet | |
+| CHMOD | In Progress | -C : Continue On Error | 0.9 |
+| | | -R : Recurse subdirectories | |
+| CHOWN | In Progress | -C : Continue On Error | 0.9 |
+| | | -R : Recurse subdirectories | |
+| CHTYP | Working | -C : Continue On Error | 0.92 |
 | | | -R : Recurse subdirectories | |
 | CP | Working | -C : Continue On Error | 0.92 |
 | | | -Q : Quiet | |
 | | | -R : Recurse subdirectories | |
 | | | -Y : Dont't Prompt For Override | |
+| EDIT | Working | still missing : find/replace | 0.92 |
+| FORMAT | In Progress | FORMAT \<BLOCKDEV\> [VOLUME.NAME] | 0.92 |
+| | | -L : Low-Level Format *not currently supported | |
+| | | -1..9 : Catalog Size (block count) | |
+| KILL | Working | KILL \<signal\> PID | 0.92 |
+| | | -0 : No Signal | |
+| | | -1 : SIGQUIT | |
+| LS | Working | -A : Print . & .. | 0.92 |
+| | | -L : long listing with size/date... | |
+| | | -R : Recurse subdirectories | |
+| LSDEV | Working | Dump device Drivers | 0.92 |
+| LSOF | Working | List Open Files | 0.92 |
+| MD5 | Working | MD5 \[ -D : String \| file \] | 0.92 |
+| MEM | Working | Old dump behavior is now MEMDUMP.  New MEM command displays MEMSTAT (Main, Aux & Kernel Memory) | 0.92 |
+| MKDIR | Working | Make Directory| 0.92 |
+| MORE | Working | MORE \<File\> | 0.92 |
+| | | -H : This help screen | |
+| | | -N : Number all output lines | |
+| | | -P : Page mode, no scroll | |
+| | | -S : Process ESC codes | |
+| NSCUTIL | Working | NSCUTIL DD/MM/YY,hh:mm:ss | 0.92 |
+| | | Tool for setting time in NSC/DL1216E | |
 | MV | Working | -C : Continue On Error | 0.92 |
 | | | -Q : Quiet | |
 | | | -R : Recurse subdirectories | |
 | | | -Y : Dont't Prompt For Override | |
-| CAT | Working | -A : Show All non printable caracters | 0.92 |
-| | | -N : Number all output lines | |
-| | | -S : Suppress repeated empty output lines | |
-| EDIT | Working | still missing : find/replace | 0.92 |
-| KILL | Working | KILL <signal> PID | 0.92 |
-| FORMAT | In Progress | -L : Low-Level Format | 0.92 |
-| | | -1..9 : Catalog Size (block count) | |
-| CHTYP | Working | -C : Continue On Error | 0.92 |
+| PS | Working | List Processes| 0.92 |
+| RM | Working | RM \[File/Dir, *,? wildcards allowed\] | 0.92 |
+| | | -C : Continue On Error | |
+| | | -Q : Quiet | |
 | | | -R : Recurse subdirectories | |
-| MD5 | Working | -D : String Input | 0.92 |
-| CHMOD | In Progress | -C : Continue On Error | 0.9 |
-| | | -R : Recurse subdirectories | |
-| CHOWN | In Progress | -C : Continue On Error | 0.9 |
-| | | -R : Recurse subdirectories | |
-| CHGRP | In Progress | -C : Continue On Error | 0.9 |
-| | | -R : Recurse subdirectories | |
-| NSCUTIL | Working | Tool for setting time in NSC/DL1216E | 0.92 |
 
 ## Network (TCPIP) tools:
 | Name | Status | Comment | K.Ver |
 | ---- | ------ | ------- | ----- |
-| IPCONFIG | Working | renamed from NETINFO | 0.92 |
-| NETSTAT | Working | | 0.92 |
 | ARP | Working | dump ARP cache, setup a static ARP entry | 0.92 |
 | DNSINFO | Working | dump DNS cache, setup a static DNS entry | 0.92 |
-| PING | Working | -1..9 : Ping Count | 0.92 |
-| TELNET | Working | | 0.92 |
+| HTTPGET | In Progress | HTTPGET <ip\|host> [port] | 0.93 |
+| | | -U Url | |
+| | | -F UrlFile | |
+| IPCONFIG | Working | -D : Try to get IP address from DHCP | 0.92 |
+|  |  | -E : Read ETC files |  |
+|  |  | -S : Set/Reset TCPIP configuration (-E, then -D if required) |  |
+| NETSTAT | Working | | 0.92 |
+| PING | Working | PING <ip\|host> | 0.92 |
+| | | -1..9 : Ping Count | |
+| TELNET | Working | TELNET <ip\|host> [port] | 0.92 |
 
 ## DEV tools:
 | Name | Status | Comment | K.Ver |
 | ---- | ------ | ------- | ----- |
-| MEMDUMP | Working | Tool to track memory leak| 0.92 |
 | ASM | In Progress | S-C MASM based multi CPU assembler | 0.9.1 |
+| MEMDUMP | Working | Tool to track memory leak| 0.92 |
 | ---- | ------ | ------- | ----- |
 | RPCDUMP | In Progress | tool based on UDP socket API, renamed from RPCINFO | 0.92 |
+| | | RPCDUMP <ip\|host> | |
 
 ## Misc
 
