@@ -303,7 +303,7 @@ REG File created on ProDOS : T=TXT,X=$0000
 `lda fd`  
 `>SYSCALL close`  
 
-# read  
+# read (BLOCKING)  
 
 ## C  
 `int read(hFD fd, void *buf, int count);`  
@@ -319,7 +319,7 @@ REG File created on ProDOS : T=TXT,X=$0000
 CC: Y,A = bytes read  
 CS: A = EC  
 
-# write  
+# write (BLOCKING)  
 
 ## C  
 `int write(hFD fd, const void *buf, int count);`  
@@ -665,12 +665,10 @@ A = hFILE
 return a hFILE to a new FIFO  
 
 ## C  
-`hFILE mkfifo(const char *pathname, int mode);`  
+`hFILE mkfifo();`  
 
 ## ASM  
 **In:**   
-`>PUSHW mode`  
-`>LDYA pathname`  
 `>SYSCALL mkfifo`  
 
 ## RETURN VALUE  
@@ -689,7 +687,7 @@ A = hFILE
 CC = OK, CS = ERROR  
 A = hFD  
 
-# PutChar  
+# putchar (BLOCKING)  
 Print A (char) to StdOut  
 
 ## C  
@@ -703,7 +701,7 @@ Print A (char) to StdOut
 ## RETURN VALUE   
 CC = success  
 
-# FPutC  
+# fputc (BLOCKING)  
 Print A (char) to hFILE  
 
 ## C  
@@ -718,7 +716,7 @@ Print A (char) to hFILE
 ## RETURN VALUE   
 CC = success  
 
-# PutS  
+# puts (BLOCKING)  
 Write Str to StdOut, appends '\r\n'  
 
 ## C  
@@ -732,7 +730,7 @@ Write Str to StdOut, appends '\r\n'
 ## RETURN VALUE   
 CC = success  
 
-# FPutS  
+# fputs (BLOCKING)  
 Write Str to FILE  
 
 ## C  
@@ -747,7 +745,11 @@ Write Str to FILE
 ## RETURN VALUE   
 CC = success  
 
-# PrintF/SPrintF/FPrintF  
+# PrintF (BLOCKING)  
+
+# FPrintF (BLOCKING)  
+
+# SPrintF  
 Prints C-Style String  
 
 ## C  
@@ -818,7 +820,7 @@ Modifiers for len and padding :
 + %2f	  :	'3.14'  
 
 
-# FGetS  
+# fgets (BLOCKING)  
 read bytes from stream into the array  
 pointed to by s, until n-1 bytes are read, or a <newline> is read and  
 transferred to s, or an end-of-file condition is encountered. The  
@@ -838,7 +840,7 @@ string is then terminated with a null byte.
  Y,A: s   
 CC = success  
 
-# GetChar  
+# getchar (BLOCKING)  
 Get char from StdIn  
 
 ## C  
@@ -852,7 +854,7 @@ Get char from StdIn
  CC = success  
   A = char  
 
-# GetC  
+# getc (BLOCKING)  
 Get char from Node  
 
 ## C  
@@ -941,7 +943,7 @@ int fclose ( hFILE stream );
 
 ## RETURN VALUE  
 
-# FRead  
+# FRead (BLOCKING)  
 Read bytes from file  
 
 ## C  
@@ -957,7 +959,7 @@ int fread (hFILE stream, void * ptr, int count );
 ## RETURN VALUE  
  Y,A = Bytes Read  
 
-# FWrite  
+# FWrite (BLOCKING)  
 Write bytes to file  
 
 ## C  
