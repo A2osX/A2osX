@@ -352,6 +352,9 @@ IO.WRITE.REG	ldx #MLIWRITE
 				>LDYA K.MLI.PARAMS+6
 .9				rts
 *--------------------------------------
+* (pStack)+2	count
+* (pStack)+0	buf
+*--------------------------------------
 IO.READ.CDEV	ldx #IOCTL.READ
 				.HS 2C					BIT ABS
 *--------------------------------------
@@ -385,69 +388,113 @@ IO.READ.SSOCK	ldy #S.FD.SSOCK.READ
 
 .1				jmp $FFFF				SELF MODIFIED
 *--------------------------------------
-IO.READ.PIPE	>PULLW .3+1				S.IOCTL.BUFPTR
-				>PULLA					S.IOCTL.BYTECNT.LO
+* (pStack)+2	count
+* (pStack)+0	buf
+*--------------------------------------
+IO.READ.PIPE	ldy #S.FD.PIPE.S
+				lda (pFD),y
+				bne .11
+				jmp IO.READ.PIPE.99		Remote PS closed the Pipe
+				
+.11				ldy #S.FD.PIPE.Used+1
+				lda (pFD),y
+				tax
+				dey
+				ora (pFD),y
+				bne .10
+				
+*				lda #0					BLOCKING I/O
+				sec						
+				rts
+				
+.10				>PULLW .3+1				get buf
+				
+				>PULLA					get cnt lo
 				eor #$ff
 				sta IO.Counter
-				>PULLA					S.IOCTL.BYTECNT.HI
+
+				>PULLA					get cnt hi
 				eor #$ff
 				sta IO.Counter+1
-
-				ldy #S.FD.PIPE.S
-				lda (pFD),y
-				beq .99					Remote PS closed the Pipe
 				
 				ldy #S.FD.PIPE.hMem
 				lda (pFD),y
 				jsr K.GetMemPtr
 				>STYA .2+1
 				
+				ldy #S.FD.PIPE.Head
+				lda (pFD),y
+				sta .4+1
+				
+				dey						S.FD.PIPE.Tail
+				lda (pFD),y
+				tay
+				
 				ldx #0
 
 .1				inc IO.Counter
-				bne .11
+				bne .2
 				inc IO.Counter+1
 				beq .8
-				
-.11				ldy #S.FD.PIPE.Tail
-				lda (pFD),y
-
-				iny						#S.FD.PIPE.Head	
-				cmp (pFD),y
-				beq .9					PIPE is empty
-
-				pha
-				inc
-				dey						#S.FD.PIPE.Tail	
-				sta (pFD),y
-				ply
 				
 .2				lda $ffff,y				SELF MODIFIED
 .3				sta $ffff,x				SELF MODIFIED
 				inx
-				bne .1
-	
-.8				txa
-				tay
-				lda #0					Y,A = bytes read
+				beq .5
 				
+				iny
+.4				cpy #$ff				SELF MODIFIED
+				bne .1
+
+.5				sec						moved $100 bytes
+				.HS 90					BCC
+	
+.8				clc
+				lda #0
+				ror
+				sta IO.Counter+1
+				stx IO.Counter
+				
+				tya
+				ldy #S.FD.PIPE.Tail
+				sta (pFD),y
+				
+				txa
+				ldy #S.FD.PIPE.Free
+				clc
+				adc (pFD),y
+				sta (pFD),y
+				iny
+				lda IO.Counter+1
+				adc (pFD),y
+				sta (pFD),y
+				
+				ldy #S.FD.PIPE.Used
+				sec 
+				lda (pFD),y
+				sbc IO.Counter
+				sta (pFD),y
+				iny
+				lda (pFD),y
+				sbc IO.Counter+1
+				sta (pFD),y				
+
+				ldy IO.Counter
+				lda IO.Counter+1		Y,A = bytes read
+
 				clc
 				rts
 
-.9				lda #0
+IO.READ.PIPE.99	lda #MLI.E.EOF
 				sec
-				rts
-
-.99				lda #MLI.E.EOF
-				sec
-				rts					
+				>RET 4					
 *--------------------------------------
-* (pStack)+0	buf
 * (pStack)+2	count
+* (pStack)+0	buf
 *--------------------------------------
 IO.WRITE.PIPE	ldy #S.FD.PIPE.S
 				lda (pFD),y
-				beq .99					Remote PS closed the Pipe
+				beq IO.READ.PIPE.99		Remote PS closed the Pipe
 				
 				sec
 				ldy #S.FD.PIPE.Free
@@ -468,18 +515,19 @@ IO.WRITE.PIPE	ldy #S.FD.PIPE.S
 				txa
 				sta (pFD),y				store new Free
 				
-				clc
-				ldy #2
-				lda (pStack),y
+				>PULLW .2+1				get buf
+				
+				>PULLA					get cnt lo
 				pha 
 				eor #$ff
 				sta IO.Counter
 				pla
 				ldy #S.FD.PIPE.Used
+				clc
 				adc (pFD),y
 				sta (pFD),y
-				ldy #3
-				lda (pStack),y
+				
+				>PULLA					get cnt hi
 				pha 
 				eor #$ff
 				sta IO.Counter+1
@@ -487,39 +535,49 @@ IO.WRITE.PIPE	ldy #S.FD.PIPE.S
 				ldy #S.FD.PIPE.Used+1
 				adc (pFD),y
 				sta (pFD),y
-				 
-				lda (pStack)
-				sta .2+1
-				ldy #1
-				lda (pStack),y
-				sta .2+2
 				
 				ldy #S.FD.PIPE.hMem
 				lda (pFD),y
 				jsr K.GetMemPtr
 				>STYA .3+1
 				
+				ldy #S.FD.PIPE.Head
+				lda (pFD),y
+				tay
+
 				ldx #0
+				
+.1				inc IO.Counter
+				bne .2
+				inc IO.Counter+1
+				beq .8
 				
 .2				lda $ffff,x				SELF MODIFIED
 .3				sta $ffff,y				SELF MODIFIED
 
+				iny
+				
 				inx
 				bne .1
 
-.8				txa
+				sec						moved $100 bytes
+				.HS 90					BCC
+
+.8				clc
+				tya
+				ldy #S.FD.PIPE.Head
+				sta (pFD),y 
+
+				txa
 				tay
 				lda #0					Y,A = bytes written
-				clc
-				>RET 4
+				rol
+*				clc				
+				rts
 				
 .9				lda #0					BLOCKING I/O
 				sec
 				rts
-
-.99				lda #MLI.E.EOF
-				sec
-				>RET 4
 */--------------------------------------
 * # IOCTL
 * ## C
