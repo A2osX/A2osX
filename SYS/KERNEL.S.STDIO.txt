@@ -134,25 +134,25 @@ K.FPutS			jsr PFT.CheckNodeA		set IO.hFD
 * ## ASM
 * **In:**
 * PrintF : (example is for printing Y,A as integer : format="%I", 2 bytes)  
-* `>PUSHYA`
+* `>PUSHYA`		#I
+* `>PUSHBI 2`	#bytecount
 * `...`
-* `>PUSHBI bytecount`
 * `>LDYAI format`
 * `>SYSCALL printf`
-* SPrintF : 
-* `>PUSHYA`
-* `...`
-* `>PUSHBI bytecount`
-* `>PUSHWI format`
-* `>LDYAI str`
-* `>SYSCALL sprintf`
 * FPrintF : 
-* `>PUSHYA`
+* `>PUSHYA`		#I
+* `>PUSHBI 2`	#bytecount
 * `...`
-* `>PUSHBI bytecount`
 * `>PUSHWI format`
 * `lda hFILE`
 * `>SYSCALL fprintf`
+* SPrintF : 
+* `>PUSHYA`		#I
+* `>PUSHBI 2`	#bytecount
+* `...`
+* `>PUSHWI format`
+* `>LDYAI str`
+* `>SYSCALL sprintf`
 * ## RETURN VALUE
 * CC : success, Y,A = bytes sent
 * CS : error, A = code from Output
@@ -191,28 +191,30 @@ K.FPutS			jsr PFT.CheckNodeA		set IO.hFD
 * + %011s : 'ABCDEFGH000'
 * + %2f	  :	'3.14'
 *\--------------------------------------
-				.DUMMY
-				.OR ZPTMP
+*				.DUMMY
+*				.OR ZPTMP
 PrintF.Cnt		.BS 2
-				.ED
+PrintF.hFILE	.BS 1
+*				.ED
 *--------------------------------------
-K.SPrintF		>STYA pIOBuf			Out Buffer
-				>PULLW ZPPtr1			format
+K.SPrintF		>STYA pIOBuf			str
+				jsr K.PrintF.GetFormat
 				bra K.PrintF.1
 				
-K.FPrintF		pha
-				>PULLW ZPPtr1			format
-				pla
-
+K.FPrintF		sta PrintF.hFILE
+				jsr K.PrintF.GetFormat
 				bra K.PrintF.0
 
 K.PrintF		>STYA ZPPtr1			format
+
+				lda pStack
+				sta pLocal
+
 				ldy #S.PS.hStdOut
 				lda	(pPs),y
-				
-K.PrintF.0		sta PrintF.Flush.hFILE+1
+				sta PrintF.hFILE
 	
-				>LDYAI K.IOBuf
+K.PrintF.0		>LDYAI K.IOBuf
 				>STYA pIOBuf
 				
 K.PrintF.1		stz PrintF.Cnt
@@ -221,7 +223,8 @@ K.PrintF.1		stz PrintF.Cnt
 				stz PrintF.GetByte+1
 	
 .1				jsr MEM.GetCharPtr1
-				beq .8					end of format..
+				bne .22
+				jmp .8					end of format..
 
 .22				cmp #'%'
 				bne .10
@@ -272,20 +275,7 @@ K.PrintF.1		stz PrintF.Cnt
 				jsr PrintF.ESC
 				bcc .1
 				bcs .99
-				
-.8				lda pIOBuf+1
-				eor /K.IOBuf
-				beq .11					Writing to File/dev...
-				
-				lda #0					Writing to buffer, append \0
-				ldy PrintF.Cnt
-				sta (pIOBuf),y
-								
-				bra .99
-				
-.11				jsr PrintF.Flush		
-				bra .99
-
+*--------------------------------------	
 .10				cmp #'\'
 				bne .20
 				
@@ -318,20 +308,56 @@ K.PrintF.1		stz PrintF.Cnt
 .20				jsr	PrintF.COut
 				bcs	.99
 				jmp .1
-				
-.99				php
-				pha
-				lda pStack
+*--------------------------------------				
+.99				pha
+				lda pLocal
 				sec						ByteCnt byte
-				adc (pStack)			... ByteCnt
+				adc (pLocal)			... ByteCnt
 				sta pStack				CC
 				pla
-				plp
-				bcs .9
+				sec
+				rts
+*--------------------------------------				
+.8				lda pIOBuf+1
+				eor /K.IOBuf
+				bne .80					Writing to buffer, append \0
 				
+				>PUSHW PrintF.Cnt		Writing to File/dev...
+				>PUSHWI K.IOBuf
+
+				lda PrintF.hFILE
+				jsr K.FWrite
+				bcc .81
+				tay
+				bne .99
+				
+				>RET 4
+				
+.80				lda #0					Writing to buffer, append \0
+				ldy PrintF.Cnt
+				sta (pIOBuf),y
+
+.81				lda pLocal
+				sec						ByteCnt byte
+				adc (pLocal)			... ByteCnt
+				sta pStack				CC
 				>LDYA PrintF.Cnt
+				clc
+				rts
+*--------------------------------------
+K.PrintF.GetFormat
+				lda (pStack)
+				sta ZPPtr1
+				ldy #1
+				lda (pStack),y
+				sta ZPPtr1+1
 				
-.9				rts
+				lda pStack
+				inc
+				inc
+				sta pLocal
+				
+				rts
 *--------------------------------------
 PrintF.ESC		jmp	(.1,x)
 .1				.DA PrintF.B,PrintF.BB
@@ -678,15 +704,20 @@ PrintF.SS		ldy #$00				PSTR
 .9				rts
 *--------------------------------------
 PrintF.GetByte	lda #$FF				SELF MODIFIED LStack Ptr
-				cmp (pStack)
+				cmp (pLocal)
 				beq .9					CS
+
 				phy
+
 				tay
 				iny
-				lda (pStack),y
+				lda (pLocal),y
 				sty PrintF.GetByte+1
+
 				ply
+				
 *				clc
+
 .9				rts
 *--------------------------------------
 PrintF.COut		phy
@@ -698,34 +729,19 @@ PrintF.COut		phy
 				
 				lda pIOBuf+1
 				eor /K.IOBuf
-				bne .7
+				beq .9
 
-*				we are printing to IObuf, flush!
-
-				lda PrintF.Cnt+1
-				pha
-				lda #1					Flush $100 bytes
-				sta PrintF.Cnt+1
-				
-				jsr PrintF.Flush
-
-				pla
-				inc
-				sta PrintF.Cnt+1
-				
-.7				inc pIOBuf+1
+				inc pIOBuf+1
 				inc PrintF.Cnt+1
 				
 .8				ply
 				clc
 				rts
-*--------------------------------------
-PrintF.Flush	>PUSHW PrintF.Cnt
-				>PUSHWI K.IOBuf
-
-PrintF.Flush.hFILE
-				lda #$ff				SELF MODIFIED
-				jmp K.FWrite
+				
+.9				ply
+				lda #E.BUF
+				sec
+				rts		
 */--------------------------------------
 * # fgets (BLOCKING)
 * read bytes from stream into the array
@@ -906,7 +922,7 @@ K.SScanF		jsr MEM.SPtr2PPtr1		ptr2=String to Scan,Ptr1=format
 				adc (pStack)			... ByteCnt
 				sta pStack				CC
 
-.80				lda #$ff				SELF MODIFIED Arg porcessed
+.80				lda #$ff				SELF MODIFIED Arg processed
 .99				rts
 *--------------------------------------
 .5				lda #$FF				SELF MODIFIED LStack Ptr
