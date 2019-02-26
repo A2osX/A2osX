@@ -9,7 +9,7 @@ short int args2argv(char* args, char* argv[])
 ## ASM  
 `>PUSHW argv`  
 `>LDYA args`  
-`>SYSCALL Args2ArgV  
+`>SYSCALL Args2ArgV`  
 
 ## RETURN VALUE  
 A = Arg count  
@@ -45,7 +45,7 @@ none
 `>PUSHW DRV.CS.END`  
 `>PUSHW DRV.CS.START`  
 `>LDYA L.SRC`  
-`SYSCALL insdrv`  
+`>SYSCALL insdrv`  
 
 ## RETURN VALUE  
 Y,A = Ptr to installed driver  
@@ -695,7 +695,7 @@ Print A (char) to StdOut
 
 ## ASM  
 **In:**  
-`lda caracter`  
+`lda character`  
 `>SYSCALL putchar`  
 
 ## RETURN VALUE   
@@ -760,25 +760,25 @@ Prints C-Style String
 ## ASM  
 **In:**  
 PrintF : (example is for printing Y,A as integer : format="%I", 2 bytes)    
-`>PUSHYA`  
+`>PUSHYA`		#I  
+`>PUSHBI 2`	#bytecount  
 `...`  
-`>PUSHBI bytecount`  
 `>LDYAI format`  
 `>SYSCALL printf`  
-SPrintF :   
-`>PUSHYA`  
-`...`  
-`>PUSHBI bytecount`  
-`>PUSHWI format`  
-`>LDYAI str`  
-`>SYSCALL sprintf`  
 FPrintF :   
-`>PUSHYA`  
+`>PUSHYA`		#I  
+`>PUSHBI 2`	#bytecount  
 `...`  
-`>PUSHBI bytecount`  
 `>PUSHWI format`  
 `lda hFILE`  
 `>SYSCALL fprintf`  
+SPrintF :   
+`>PUSHYA`		#I  
+`>PUSHBI 2`	#bytecount  
+`...`  
+`>PUSHWI format`  
+`>LDYAI str`  
+`>SYSCALL sprintf`  
 
 ## RETURN VALUE  
 CC : success, Y,A = bytes sent  
