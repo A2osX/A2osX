@@ -16,7 +16,6 @@ AUTO 4,1
 ZS.START
 ZPPTR1			.BS 2
 ZPBufPtr		.BS 2
-BytesRead		.BS 1
 ByteIndex		.BS 1
 ZS.END			.ED	
 *--------------------------------------
@@ -41,13 +40,17 @@ CS.START		cld
 				.DA CS.DOEVENT		
 				.DA	CS.QUIT
 L.MSG.USAGE		.DA MSG.USAGE
+L.MSG.CRLF		.DA MSG.CRLF
 L.MSG.LINENUM	.DA MSG.LINENUM
 L.MSG.CTRLCHAR	.DA MSG.CTRLCHAR
 L.ASCII			.DA ASCII
 L.MSG.STACK		.DA MSG.STACK
 				.DA 0
 *--------------------------------------
-CS.INIT							
+CS.INIT			clc
+				rts
+*--------------------------------------
+CS.RUN
 .1				>INC.G ArgCount
 				>SYSCALL ArgV
 				bcs .7
@@ -74,7 +77,7 @@ CS.INIT
 				>SYSCALL printf
 				lda #E.SYN
 				sec
-				rts
+.9				rts
 				
 .3				ldy OptionVars-1,x
 				lda #$80
@@ -94,17 +97,19 @@ CS.INIT
 				>STYA ZPBufPtr
 				txa
 				>STA.G hBuf
-			
-				clc
-.9				rts
 *--------------------------------------
-CS.RUN			bra .11
+CS.RUN.LOOP		ldy #S.PS.hStdIn
+				lda (pPS),y
+				>SYSCALL feof
+				bcs .90					IO error
+				tay
+				beq .10					bo char
 
 				>SYSCALL GetChar
-				bcs .10					no char
+				bcs .9					IO error
 				
 				cmp #$03				Ctrl-C
-				beq .99					Abort....
+				beq .9					Abort....
 				
 				cmp #$13				Ctrl-S
 				bne .10
@@ -112,10 +117,10 @@ CS.RUN			bra .11
 				>LDA.G bPause
 				eor	#$ff
 				sta (pData),y
-				bne .8
+				bne CS.RUN.LOOP
 				
 .10				>LDA.G bPause
-				bne .8					Pause...
+				bne CS.RUN.LOOP			Pause...
 
 .11				>LDA.G hFILE
 				bne .2
@@ -133,128 +138,30 @@ CS.RUN			bra .11
 				>LDYA ZPPtr1
 				
 				jsr CS.RUN.OPEN
-				bcs .9
+.90				bcs .9
 				
 				>STA.G hFILE
 
-				clc
-				rts
-				
-.2				pha
-				>PUSHWI	256
+.2				>PUSHWI	256
 				>PUSHW ZPBufPtr
-				pla
-				>SYSCALL fread
+				>LDA.G hFILE
+
+				>SYSCALL fgets
+				bcs .7
+
+				jsr CS.RUN.PRINT
+				bcc CS.RUN.LOOP
 				
-				bcc CS.RUN.PRINT
-				
-				cmp #MLI.E.EOF
+.7				cmp #MLI.E.EOF
 				bne .9
 				
 				jsr CS.RUN.CLOSE
 				
-.8				clc
-				rts
+				jmp CS.RUN.LOOP
 
 .99				lda #0					Exit with no Error
 .9				sec
 				rts
-*--------------------------------------
-CS.RUN.PRINT	sty	BytesRead			Y,A = Bytes read
-				stz ByteIndex
-
-*				jsr PrintStack
-				
-				>INCW.G LineNum
-
-				>LDA.G bSuppressBlankLine
-				bpl .10
-								
-				lda BytesRead
-				beq .12					Empty line ?
-				dec
-				bne .1					Only one CR ?
-				lda (ZPBufPtr)
-				cmp #13
-				bne .1
-				
-.12				>LDA.G bPrintedBlankLine
-				bmi .8
-				
-				lda #$ff
-				sta (pData),y
-				bra .10
-				
-.1				lda #0
-				>STA.G bPrintedBlankLine
-				
-.10				jsr CS.RUN.PRINTNUM
-				bcs .9
-				
-.20				ldy ByteIndex
-				lda (ZPBufPtr),y
-				cmp #' '
-				bcs .6
-				
-				cmp #13					Allow printing of CR even if not bPrintAll
-				beq .4
-				
-				>LDA.G bPrintAll
-				bpl .7
-	
-				>LDYA L.ASCII
-				>STYA ZPPtr1
-				
-				ldy ByteIndex
-				lda (ZPBufPtr),y
-				tax
-				
-.2				dex
-				bmi .3
-				
-				lda ZPPtr1
-				sec
-				adc (ZPPtr1)
-				sta ZPPtr1
-				bcc .2
-				inc ZPPtr1+1
-				bra .2
-				
-.3				>PUSHW ZPPtr1
-
-				>PUSHBI 2
-				>LDYA L.MSG.CTRLCHAR
-				>SYSCALL printf
-				bcs .9
-				
-				bra .7
-				
-.4				lda #13
-				>SYSCALL PutChar
-				bcs .9
-				lda #10
-				
-.6				>SYSCALL PutChar
-				bcs .9
-							
-.7				inc ByteIndex
-				dec BytesRead
-				bne .20
-				
-.8				clc
-				
-.9				rts				
-*--------------------------------------
-CS.RUN.PRINTNUM	clc
-				>LDA.G bLineNum
-				bpl .8
-
-				>PUSHW.G LineNum
-
-				>PUSHBI 2
-				>LDYA L.MSG.LINENUM
-				>SYSCALL printf
-.8				rts
 *--------------------------------------
 CS.RUN.OPEN		phy
 				pha
@@ -270,6 +177,93 @@ CS.RUN.OPEN		phy
 				ply
 				>SYSCALL FOpen
 				rts
+*--------------------------------------
+CS.RUN.PRINT	>INCW.G LineNum
+
+				>LDA.G bSuppressBlankLine
+				bpl .2
+								
+				lda (ZPBufPtr)
+				bne .1					Empty line ?
+
+				>LDA.G bPrintedBlankLine
+				bmi .8
+				
+				lda #$ff
+				sta (pData),y
+				bra .2
+				
+.1				lda #0
+				>STA.G bPrintedBlankLine
+				
+.2				jsr CS.RUN.PRINTNUM
+				bcs .9
+				
+				>LDA.G bPrintAll
+				bmi .3
+	
+				>LDYA ZPBufPtr
+				>SYSCALL puts
+				rts
+	
+.3				>LDYA L.ASCII
+				>STYA ZPPtr1
+				
+				stz ByteIndex
+				
+.4				ldy ByteIndex
+				lda (ZPBufPtr),y
+				cmp #C.SPACE
+				bcc .5
+				
+				>SYSCALL putchar
+				bcs .9
+				bra .7
+
+.8				clc
+				rts
+				
+.5				tax
+				>LDYA L.MSG.CTRLCHAR
+				>STYA ZPPtr1
+				
+.6				dex
+				bmi .61
+				
+				lda ZPPtr1
+				sec
+				adc (ZPPtr1)
+				sta ZPPtr1
+				bcc .6
+				inc ZPPtr1+1
+				bra .6
+				
+.61				>PUSHW ZPPtr1
+
+				>PUSHBI 2
+				>LDYA L.MSG.CTRLCHAR
+				>SYSCALL printf
+				bcs .9
+				
+				iny ByteIndex
+				bne .4
+				
+.7				>PUSHBI 2
+				>LDYA L.MSG.CRLF
+				>SYSCALL printf
+
+.9				rts				
+*--------------------------------------
+CS.RUN.PRINTNUM	clc
+				>LDA.G bLineNum
+				bpl .8
+
+				>PUSHW.G LineNum
+
+				>PUSHBI 2
+				>LDYA L.MSG.LINENUM
+				>SYSCALL printf
+.8				rts
 *--------------------------------------
 CS.QUIT			>LDA.G hBuf
 				beq CS.RUN.CLOSE
@@ -305,7 +299,8 @@ OptionVars		.DA #bPrintAll,#bLineNum,#bSuppressBlankLine,#bPrintAll,#bLineNum,#b
 MSG.USAGE		.AS "Usage : CAT File1 [File2...]\r\n"
 				.AS "   -A : Show All non printable caracters\r\n"
 				.AS "   -N : Number all output lines\r\n"
-				.AZ "   -S : Suppress repeated empty output lines\r\n"
+				.AS "   -S : Suppress repeated empty output lines"
+MSG.CRLF		.AZ "\r\n"
 MSG.LINENUM		.AZ "%5D:"
 MSG.CTRLCHAR	.AZ "[%S]"
 *--------------------------------------
