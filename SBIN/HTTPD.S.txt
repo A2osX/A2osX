@@ -8,7 +8,9 @@ AUTO 4,1
 *--------------------------------------
 				.INB INC/MACROS.I
 				.INB INC/A2OSX.I
+				.INB INC/ETH.I
 				.INB INC/LIBTCPIP.I
+				.INB INC/NET.HTTP.I
 *--------------------------------------
 TIMEOUT.MAX		.EQ 30					30 sec.
 CONN.MAX		.EQ 16
@@ -38,7 +40,7 @@ CS.START		cld
 				.DA CS.DOEVENT
 				.DA	CS.QUIT
 L.LIBTCPIP		.DA LIBTCPIP
-L.Socket		.DA Socket
+L.SA.Local		.DA SA.Local
 L.MSG.TCPWAIT	.DA MSG.TCPWAIT
 L.MSG.INITOK	.DA MSG.INITOK
 L.MSG.TCPIPERR	.DA MSG.TCPIPERR
@@ -60,7 +62,7 @@ CS.RUN			jsr Init.Timeout
 				>LDYA L.MSG.TCPWAIT
 				>SYSCALL printf
 				
-.1				>LIBCALL hLIBTCPIP,LIBTCPIP.GET.IPCFG	is TCPIP loaded ?
+.1				>LIBCALL hLIBTCPIP,LIBTCPIP.GETCFG	is TCPIP loaded ?
 				bcs .99
 				>STYA ZPIPCfgPtr
 				
@@ -91,16 +93,26 @@ CS.RUN.INIT		ldx #3
 				ldy #S.IPCFG.IP+3
 				
 .1				lda (ZPIPCfgPtr),y
-				sta Socket.Src.Addr,x
+				sta SA.LOCAL+S.SOCKADDR.ADDR,x
 				dey
 				dex
 				bpl .1
 				
-				>PUSHW L.Socket
-				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.New
-				bcs CS.RUN.RTS
+				>PUSHBI 0				no protocol
+				lda #S.SOCKET.T.STREAM
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Socket
+				bcs CS.RUN.ERR
 
 				>STA.G hSrvSocket
+				pha
+				>PUSHW L.SA.LOCAL
+				pla
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Bind
+				bcs CS.RUN.ERR
+				
+				>LDA.G hSrvSocket
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Listen
+				bcs CS.RUN.ERR
 				
 				>LDYAI 256
 				>SYSCALL getmem
@@ -141,15 +153,11 @@ CS.RUN.LOOP		>SLEEP
 				>SYSCALL printf
 				lda #E.SYN
 				sec	
-				rts
 				
-CS.RUN.ERR		sec	
-				rts
+CS.RUN.ERR		rts
 *--------------------------------------
-CS.RUN.SERVER	ldy #hSrvSocket
-				lda (pData),y
-				
-				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.AcceptA
+CS.RUN.SERVER	>LDA.G hSrvSocket
+				>LIBCALL hLIBTCPIP,LIBTCPIP.accept
 				bcs .8
 				pha
 				
@@ -163,38 +171,39 @@ CS.RUN.SERVER	ldy #hSrvSocket
 				bne .1
 				
 				pla
-				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.CloseA
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Shutdown
 				bra .8
 				
 .2				pla
 				sta (pData),y
-				sta .4+1
-				
-				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.GetA
+				>STA.G hClntSocket
+				>SYSCALL GetMemPtr
 				>STYA ZPSktPtr
 
 				ldx #3
-				ldy #S.SOCKET.DST.ADDR+3
+				ldy #S.SOCKET.REM.ADDR+3
 				
 .3				>PUSHB (ZPSktPtr),y
 				dey
 				dex
 				bpl .3
 				
-.4				lda #$ff
-				>PUSHA
-				
+				>PUSHB.G hClntSocket
+
+				>PUSHBI 5
 				>LDYA L.MSG.INCOMING
 				>SYSCALL printf
+
 .8				clc
 .9				rts
 *--------------------------------------
-CS.RUN.CLIENT	sta hClntSocket
+CS.RUN.CLIENT	>STA.G hClntSocket
+				pha
 
-				>PUSHA					hSocket
-				>PUSHW ZPLinePtr
 				>PUSHWI 256
-				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.GetS
+				>PUSHW ZPLinePtr
+				pla
+				>LIBCALL hLIBTCPIP,LIBTCPIP.read
 				bcs .1
 				
 				>PUSHW ZPLinePtr
@@ -202,7 +211,8 @@ CS.RUN.CLIENT	sta hClntSocket
 				
 				>PUSHB hClntSocket
 				>PUSHW L.HTTP.200OK
-				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.PutS
+				>LDA.G hClntSocket
+				>LIBCALL hLIBTCPIP,LIBTCPIP.write
 				
 .1				clc
 				rts
@@ -218,7 +228,7 @@ CS.QUIT			ldx #CONN.MAX
 				
 				phx
 				phy
-				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.CLOSEA
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Shutdown
 				ply
 				plx
 				
@@ -228,7 +238,7 @@ CS.QUIT			ldx #CONN.MAX
 				
 				ldy #hSrvSocket
 				lda (pData),y
-				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.CLOSEA
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Shutdown
 				
 				>LDA.G hLineBuf
 				beq .3
@@ -264,18 +274,14 @@ MSG.SKTERR		.AZ "HTTPD:Listen Error\r\n"
 MSG.ABORT		.AZ "HTTPD:User Aborted\r\n"
 MSG.INCOMING	.AZ "HTTPD:Incoming Connection [SKT=%h] From : %d.%d.%d.%d\r\n"
 hLIBTCPIP		.BS 1
-hClntSocket		.BS 1
 *--------------------------------------
-HTTP.200OK		.AZ "HTTP/1.1 200 OK\r\n"
+HTTP.200OK		.AS "HTTP/1.1 200 OK\r\n"
+HTTP.200OK.len	.EQ *-HTTP.200OK
 *--------------------------------------
-Socket			.DA #S.SOCKET.T.STREAM
-				.DA #S.SOCKET.O.ACCEPTCONN
-				.DA #S.SOCKET.TCP.S.LISTEN
+SA.LOCAL		.DA #AF.INET			S.SOCKADDR.AF
 				.BS 1
-Socket.Src.Addr	.BS 4
-Socket.Src.Port	.DA 80
-Socket.Dst.Addr	.BS 4
-Socket.Dst.Port	.BS 2
+				.BS 4					S.SOCKADDR.ADDR
+				.DA TCP.PORT.HTTP
 *--------------------------------------
 				.DUMMY
 				.OR 0
@@ -284,6 +290,7 @@ hSockets		.BS	CONN.MAX			pData
 hLineBuf		.BS 1
 SktIndex		.BS 1
 hSrvSocket		.BS 1
+hClntSocket		.BS 1
 TimeOut			.BS 1
 DS.END
 				.ED
