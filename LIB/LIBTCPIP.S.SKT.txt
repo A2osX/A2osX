@@ -382,44 +382,22 @@ SKT.shutdown.STREAM
 * `>PUSHWI count`
 * `>PUSHW buf`
 * `lda fd`
-* `>LIBCALL hLIBTCPIP,LIBTCPIP.skt.read`
+* `>LIBCALL hLIBTCPIP,LIBTCPIP.read`
 * ## RETURN VALUE
 * CC: Y,A = bytes read
 * CS: A = EC
 *\--------------------------------------
 SKT.Read 		jsr SKT.PullhFDDataInPtrLen
 
-				ldy #S.SOCKET.T
-				lda (ZPPtrSKT),y
-				cmp #S.SOCKET.T.STREAM
-				bne .90					bad skt
+				jsr SKT.EOF.I
+				bcs .9						I/O error
 
-				ldy #S.SOCKET.O
-				lda (ZPPtrSKT),y
-				and #S.SOCKET.O.ACCEPTCONN
-				bne .90					Bad Skt
+				tay
+				beq .9						exit with CC,Y,A = 0
+				
+				jmp SKT.GetDataFromSktIn
 
-				ldy #S.SOCKET.TCP.S
-				lda (ZPPtrSKT),y
-				cmp #S.SOCKET.TCP.S.ESTBLSH
-				bcc .92					Not yet established...no data
-				cmp #S.SOCKET.TCP.S.FINWT2
-				bcs .91					closing...IO err
-
-				jsr SKT.GetDataFromSktIn
-				rts						if CS, No data...
-
-.90				lda #ERR.SKT.BAD
-				sec
-				rts
-
-.91				lda #MLI.E.IO
-				sec
-				rts
-
-.92				lda #0
-				sec
-.99				rts
+.9				rts
 */--------------------------------------
 * # Write (STREAM)
 * ## C
@@ -429,28 +407,15 @@ SKT.Read 		jsr SKT.PullhFDDataInPtrLen
 * `>PUSHWI count`
 * `>PUSHW buf`
 * `lda fd`
-* `>LIBCALL hLIBTCPIP,LIBTCPIP.skt.write`
+* `>LIBCALL hLIBTCPIP,LIBTCPIP.write`
 * ## RETURN VALUE
 * CC: Y,A = bytes written
 * CS: A = EC
 *\--------------------------------------
 SKT.Write		jsr SKT.PullhFDDataInPtrLen
 
-				ldy #S.SOCKET.T
-				lda (ZPPtrSKT),y
-				cmp #S.SOCKET.T.STREAM
-				bne .99
-
-				ldy #S.SOCKET.O
-				lda (ZPPtrSKT),y
-				and #S.SOCKET.O.ACCEPTCONN
-				bne .99
-
-				ldy #S.SOCKET.TCP.S	
-				lda (ZPPtrSKT),y
-				cmp #S.SOCKET.TCP.S.ESTBLSH
-				bcc .90					Not yet established...no data
-				bne .91
+				jsr SKT.CheckStream
+				bcs .9
 				
 				jsr SKT.AddDataToSktOut   will call SKT.GetTCB 
 				bcs .90
@@ -461,15 +426,7 @@ SKT.Write		jsr SKT.PullhFDDataInPtrLen
 
 .90				lda #0					no data transfered
 				sec
-				rts
-
-.91				lda #MLI.E.IO
-				sec
-				rts
-
-.99				lda #ERR.SKT.BAD
-				sec
-				rts
+.9				rts
 */--------------------------------------
 * # Recv (RAW,DGRAM,SEQPACKET)
 * # RecvFrom (RAW,DGRAM,SEQPACKET)
@@ -480,7 +437,7 @@ SKT.Write		jsr SKT.PullhFDDataInPtrLen
 * **In:**
 * `>PUSHW addr`		(RecvFrom)
 * `lda fd`
-* `>LIBCALL hLIBTCPIP,LIBTCPIP.skt.Recv`
+* `>LIBCALL hLIBTCPIP,LIBTCPIP.Recv`
 * ## RETURN VALUE
 * CC: A = hMem
 * CS: A = EC
@@ -589,7 +546,7 @@ SKT.Recv		clc
 * `>PUSHWI count`
 * `>PUSHW buf`
 * `lda fd`
-* `>LIBCALL hLIBTCPIP,LIBTCPIP.skt.send`
+* `>LIBCALL hLIBTCPIP,LIBTCPIP.send`
 * ## RETURN VALUE
 * CC: Y,A = bytes written
 * CS: A = EC
@@ -669,15 +626,47 @@ SKT.setsockopt	>SYSCALL GetMemPtr
 				sta (ZPPtrSKT),y
 *				clc
 				rts
-*--------------------------------------				
+*--------------------------------------
 SKT.EOF			>SYSCALL GetMemPtr
 				>STYA ZPPtrSKT
-				
-				ldy #S.SOCKET.TCP.INUSED
+
+SKT.EOF.I		ldy #S.SOCKET.TCP.INUSED
 				lda (ZPPtrSKT),y
 				iny
 				ora (ZPPtrSKT),y
-				clc
+				bne .8
+				
+				jsr SKT.CheckStream
+				bcs .9
+				
+				lda #0					no DATA
+				
+.8				clc
+.9				rts
+*--------------------------------------
+SKT.CheckStream	ldy #S.SOCKET.T
+				lda (ZPPtrSKT),y
+				cmp #S.SOCKET.T.STREAM
+				bne .99
+
+				ldy #S.SOCKET.O
+				lda (ZPPtrSKT),y
+				and #S.SOCKET.O.ACCEPTCONN
+				bne .99
+
+				ldy #S.SOCKET.TCP.S	
+				lda (ZPPtrSKT),y
+				beq .91
+				cmp #S.SOCKET.TCP.S.CLWAIT
+				bcs .91
+				rts				CC=ESTBLSH...or less
+
+.91				lda #MLI.E.IO
+				sec
+				rts
+
+.99				lda #ERR.SKT.BAD
+				sec
 				rts
 */--------------------------------------
 * # GetTable
@@ -957,13 +946,8 @@ SKT.AddDataToSktIn
 *--------------------------------------
 SKT.GetDataFromSktIn
 				jsr SKT.GetTCB
-				lda SKT.Cache+S.SOCKET.TCP.INUSED
-				ora SKT.Cache+S.SOCKET.TCP.INUSED+1
-				bne .10
-				sec
-				rts						A=0,NO DATA
-
-.10				ldy #S.SOCKET.SQ.hInMem
+				
+				ldy #S.SOCKET.SQ.hInMem
 				lda (ZPPtrSKT),y
 				>SYSCALL GetMemPtr
 				>STYA ZPTmpPtr1			Make ZPTmpPtr1=buffer base
@@ -1042,11 +1026,7 @@ SKT.GetDataFromSktIn
 
 .7				pla						discard byte counter HI
 
-.8				lda ZPTmpPtr3			Do we have transfered something?
-				ora ZPTmpPtr3+1
-				beq .9
-
-				>ADC16 SKT.Cache+S.SOCKET.TCP.INFREE,ZPTmpPtr3
+.8				>ADC16 SKT.Cache+S.SOCKET.TCP.INFREE,ZPTmpPtr3
 				>SBC16 SKT.Cache+S.SOCKET.TCP.INUSED,ZPTmpPtr3
 
 				lda SKT.Cache+S.SOCKET.TCP.OUTACKNUM+3
@@ -1073,10 +1053,6 @@ SKT.GetDataFromSktIn
 
 				>LDYA ZPTmpPtr3
 				clc
-				rts
-.9
-*				lda #0
-				sec
 				rts
 *--------------------------------------
 * From SKT.Write.TCP
