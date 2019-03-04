@@ -52,39 +52,49 @@ L.HTTP.200OK	.DA HTTP.200OK
 *--------------------------------------
 CS.INIT			>LDYA L.LIBTCPIP
 				>SYSCALL LoadLib
+				bcs .9
 				sta hLIBTCPIP
 
-				clc
-				rts
+.9				rts
 *--------------------------------------
 CS.RUN			jsr Init.Timeout
 
 				>LDYA L.MSG.TCPWAIT
-				>SYSCALL printf
+				>SYSCALL puts
 				
-.1				>LIBCALL hLIBTCPIP,LIBTCPIP.GETCFG	is TCPIP loaded ?
+.1				>SLEEP
+				
+				>LIBCALL hLIBTCPIP,LIBTCPIP.GETCFG	is TCPIP loaded ?
 				bcs .99
 				>STYA ZPIPCfgPtr
 				
 				lda (ZPIPCfgPtr)		Configured ?
 				bmi CS.RUN.INIT
 				
-				>SLEEP
 				jsr Wait.Timeout
-				bcc .1
+				bcs .99
+				
+				ldy #S.PS.hStdIn
+				lda (pPs),y
+				>SYSCALL feof
+				bcs CS.RUN.RTS			I/O err
+				tay
+				beq .1
+
 				>SYSCALL GetChar
-				bcs .1
+				bcs CS.RUN.RTS
+
 				cmp #$03
 				bne .1
 				
 				>LDYA L.MSG.ABORT
 				>SYSCALL printf
-				lda #0
+				lda #3
 				clc
 				rts
 				
 .99				>LDYA L.MSG.TCPIPERR
-				>SYSCALL printf
+				>SYSCALL puts
 				lda #E.SYN
 				sec	
 CS.RUN.RTS		rts
@@ -129,24 +139,6 @@ CS.RUN.LOOP		>SLEEP
 				jsr CS.RUN.SERVER
 				bcs CS.RUN.ERR
 				
-				ldy #SktIndex
-				lda (pData),y
-				tay
-				lda (pData),y			hSockets
-				
-				beq .3
-				
-				jsr CS.RUN.CLIENT
-				
-.3				ldy #SktIndex
-				lda (pData),y
-				inc
-				cmp #CONN.MAX
-				bne .4
-				lda #0
-				
-.4				sta (pData),y		
-				
 				bra CS.RUN.LOOP
 				
 .9				>LDYA L.MSG.SKTERR
@@ -159,23 +151,7 @@ CS.RUN.ERR		rts
 CS.RUN.SERVER	>LDA.G hSrvSocket
 				>LIBCALL hLIBTCPIP,LIBTCPIP.accept
 				bcs .8
-				pha
 				
-				ldy #hSockets
-				ldx #CONN.MAX
-				
-.1				lda (pData),y
-				beq .2
-				iny
-				dex
-				bne .1
-				
-				pla
-				>LIBCALL hLIBTCPIP,LIBTCPIP.Shutdown
-				bra .8
-				
-.2				pla
-				sta (pData),y
 				>STA.G hClntSocket
 				>SYSCALL GetMemPtr
 				>STYA ZPSktPtr
@@ -194,58 +170,73 @@ CS.RUN.SERVER	>LDA.G hSrvSocket
 				>LDYA L.MSG.INCOMING
 				>SYSCALL printf
 
+				jsr CS.RUN.CLIENT
+				
 .8				clc
 .9				rts
 *--------------------------------------
-CS.RUN.CLIENT	>STA.G hClntSocket
-				pha
+CS.RUN.CLIENT	>PUSHWI 256
+				>PUSHW ZPLinePtr
+				>LDA.G hClntSocket
+				
+.1				>SLEEP
 
-				>PUSHWI 256
-				>PUSHW ZPLinePtr
-				pla
 				>LIBCALL hLIBTCPIP,LIBTCPIP.read
-				bcs .1
+				bcs .8
 				
+				phy
+				ply
+				bne .2
+				
+				pha
+				pla
+				beq .7
+				
+.2				>DEBUG
+				
+				>PUSHYA
 				>PUSHW ZPLinePtr
-				>SYSCALL printf
+				ldy #S.PS.hStdOut
+				lda (pPS),y
+				>SYSCALL fwrite
+
+				bra .1
 				
-				>PUSHB hClntSocket
+.7				>PUSHWI HTTP.200OK.len
 				>PUSHW L.HTTP.200OK
 				>LDA.G hClntSocket
+
 				>LIBCALL hLIBTCPIP,LIBTCPIP.write
 				
-.1				clc
-				rts
-*--------------------------------------
-CS.DOEVENT		sec
-				rts
-*--------------------------------------
-CS.QUIT			ldx #CONN.MAX
-				ldy #hSockets
-				
-.1				lda (pData),y
-				beq .2
-				
-				phx
-				phy
+.8				>LDA.G hClntSocket
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Shutdown
-				ply
-				plx
+
+				clc
+				rts
+*--------------------------------------
+CS.DOEVENT		lda (pEvent)
+				bpl .9					is it a TIMER event?
 				
-.2				iny
-				dex
-				bne .1
+				>LDA.G TimeOut
+				beq .9
 				
-				ldy #hSrvSocket
+				dec
+				sta (pData),y
+				
+.9				sec						do not discard TIMER event
+				rts
+*--------------------------------------
+CS.QUIT			ldy #hSrvSocket
 				lda (pData),y
+				beq .3
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Shutdown
 				
-				>LDA.G hLineBuf
-				beq .3
+.3				>LDA.G hLineBuf
+				beq .4
 				
 				>SYSCALL FreeMem
 				
-.3				lda hLIBTCPIP
+.4				lda hLIBTCPIP
 				beq .8
 				>SYSCALL UnloadLib
 				
@@ -266,16 +257,28 @@ Wait.TimeOut	sec
 *--------------------------------------
 CS.END
 *--------------------------------------
-LIBTCPIP		.AZ "libtcpip.o"
-MSG.TCPWAIT		.AZ "HTTPD:Waiting for TCP/IP initializing...\r\n"
-MSG.INITOK		.AZ "HTTPD:Init Ok, Listening.\r\n"
-MSG.TCPIPERR	.AZ "HTTPD:TCP/IP Not initialized properly\r\n"
-MSG.SKTERR		.AZ "HTTPD:Listen Error\r\n"
-MSG.ABORT		.AZ "HTTPD:User Aborted\r\n"
-MSG.INCOMING	.AZ "HTTPD:Incoming Connection [SKT=%h] From : %d.%d.%d.%d\r\n"
 hLIBTCPIP		.BS 1
+LIBTCPIP		.AZ "libtcpip"
+MSG.TCPWAIT		.AZ "HTTPD:Waiting for TCP/IP initializing..."
+MSG.INITOK		.AZ "HTTPD:Init Ok, Listening."
+MSG.TCPIPERR	.AZ "HTTPD:TCP/IP Not initialized properly."
+MSG.SKTERR		.AZ "HTTPD:Listen Error."
+MSG.ABORT		.AZ "HTTPD:User Aborted."
+MSG.INCOMING	.AZ "HTTPD:Incoming Connection [SKT=%h] From : %d.%d.%d.%d\r\n"
 *--------------------------------------
-HTTP.200OK		.AS "HTTP/1.1 200 OK\r\n"
+HTTP.200OK		.AS "HTTP/1.1 200 OK"
+				.DA #C.CR,#C.LF
+				.AS "Server: A2osX-HTTPD 0.92"
+				.DA #C.CR,#C.LF
+				.AS "Content-Type: text/html"
+				.DA #C.CR,#C.LF
+				.AS "Content-Length: 34"
+				.DA #C.CR,#C.LF
+				.AS "Connection: Close"
+				.DA #C.CR,#C.LF
+				.DA #C.CR,#C.LF
+				.AS "<HTML><BODY>Hello!</BODY></HTML>"
+				.DA #C.CR,#C.LF
 HTTP.200OK.len	.EQ *-HTTP.200OK
 *--------------------------------------
 SA.LOCAL		.DA #AF.INET			S.SOCKADDR.AF
@@ -286,9 +289,7 @@ SA.LOCAL		.DA #AF.INET			S.SOCKADDR.AF
 				.DUMMY
 				.OR 0
 DS.START
-hSockets		.BS	CONN.MAX			pData
 hLineBuf		.BS 1
-SktIndex		.BS 1
 hSrvSocket		.BS 1
 hClntSocket		.BS 1
 TimeOut			.BS 1
