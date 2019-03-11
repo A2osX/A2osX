@@ -385,6 +385,7 @@ note : '$VAR' does NOT expand Variable
 | | | -1 : SIGQUIT | |
 | LS | Working | -A : Print . & .. | 0.92 |
 | | | -C : Single column listing | |
+| | | -F : with -C, includes full path | |
 | | | -L : long listing with size/date... | |
 | | | -R : Recurse subdirectories | |
 | LSDEV | Working | Dump device Drivers | 0.92 |
