@@ -1,0 +1,264 @@
+NEW
+  PREFIX
+AUTO 4,1
+				.LIST OFF
+				.OP	65C02
+				.OR	$2000
+				.TF BIN/AARP
+*--------------------------------------
+				.INB INC/MACROS.I
+				.INB INC/A2OSX.I
+				.INB INC/ETH.I
+				.INB INC/LIBETALK.I
+*--------------------------------------
+TIMEOUT.MAX		.EQ 40					40*100ms = 4 sec.
+*--------------------------------------
+ZPPTR1			.EQ ZPBIN
+*--------------------------------------
+*			File Header (16 Bytes)
+*--------------------------------------
+CS.START		cld
+				jmp (.1,x)
+				.DA #$61				6502,Level 1 (65c02)
+				.DA #1					BIN Layout Version 1
+				.DA #S.PS.F.EVENT
+				.DA #0
+				.DA CS.END-CS.START		CS
+				.DA DS.END-DS.START		DS
+				.DA #16					SS
+				.DA #2					ZP
+				.DA 0
+*--------------------------------------
+* Relocation Table
+*--------------------------------------
+.1				.DA CS.INIT
+				.DA CS.RUN
+				.DA CS.DOEVENT		
+				.DA	CS.QUIT
+L.LIBETALK		.DA LIBETALK
+L.SSCANF.ADDR	.DA SSCANF.ADDR
+L.SSCANF.MAC	.DA SSCANF.MAC
+L.MSG.Usage		.DA MSG.Usage
+L.MSG0			.DA MSG0
+L.MSG1			.DA MSG1
+L.MSG2			.DA MSG2
+				.DA 0
+*--------------------------------------
+CS.INIT			>LDYA L.LIBETALK
+				>SYSCALL LoadLib
+				bcs .9
+				sta hLIBETALK
+				
+.9				rts
+*--------------------------------------
+CS.RUN			>LIBCALL hLIBETALK,LIBETALK.GETCFG
+				>STYA ZPPTR1
+
+*				lda (ZPPTR1)
+*				bmi .1
+
+*				jmp CS.RUN.ERR
+				
+.1				ldy #S.PS.ARGC
+				lda (pPs),y
+				cmp #1
+				bcs .2
+				jmp CS.RUN.DUMP
+			
+.2				>PUSHEA.G DST.ADDR+3
+				>PUSHEA.G DST.ADDR+1
+				
+				>PUSHBI 4				2 Ptrs
+				
+				>PUSHW L.SSCANF.ADDR
+				lda #1
+				>SYSCALL ArgV
+				>SYSCALL sscanf
+				bcs CS.RUN.ERR
+				
+				ldy #S.PS.ARGC
+				lda (pPs),y
+				cmp #1
+				beq CS.RUN.QUERY
+				
+				cmp #3
+				bne CS.RUN.ERR
+				jmp CS.RUN.ADD
+					
+CS.RUN.ERR		>PUSHBI 0
+				>LDYA L.MSG.Usage
+				>SYSCALL printf
+				
+				lda #E.SYN
+				sec
+				rts
+*--------------------------------------
+CS.RUN.QUERY	jsr Init.Timeout
+
+.1				>PUSHEA.G DST.MAC
+				>PUSHEA.G DST.ADDR
+				>LIBCALL hLIBETALK,LIBETALK.AARP.QUERY
+				bcc .2					success, print & exit
+				
+				jsr Wait.TimeOut
+				bcs .8
+				
+				>SLEEP
+				>SYSCALL GetChar
+				bcs .1
+				cmp #3
+				beq .9
+				bra .1
+				
+.2				ldx #5
+				ldy #DST.MAC+5
+				
+.3				>PUSHB (pData),y
+				dey
+				dex
+				bpl .3
+				
+				ldx #3
+				ldy #DST.ADDR+3
+				
+.4				>PUSHB (pData),y
+				dey
+				dex
+				bne .4
+				
+				>PUSHBI 8
+				>LDYA L.MSG2
+				>SYSCALL printf
+				
+.8				lda #0
+				
+.9				sec
+				rts
+*--------------------------------------
+CS.RUN.ADD		>PUSHEA.G DST.MAC+5
+				>PUSHEA.G DST.MAC+4
+				>PUSHEA.G DST.MAC+3
+				>PUSHEA.G DST.MAC+2
+				>PUSHEA.G DST.MAC+1
+				>PUSHEA.G DST.MAC
+				
+				>PUSHBI 12				6 Ptrs
+				
+				>PUSHW L.SSCANF.MAC
+				lda #2
+				>SYSCALL ArgV
+				
+				>SYSCALL sscanf
+				bcs .9
+
+				>PUSHEA.G DST.MAC
+				>PUSHEA.G DST.ADDR
+				>LIBCALL hLIBETALK,LIBETALK.AARP.ADD
+				clc
+.8				rts
+				
+.9				jmp CS.RUN.ERR
+*--------------------------------------
+CS.RUN.DUMP		>LIBCALL hLIBETALK,LIBETALK.AARP.GETCACHE
+				>STYA ZPPTR1
+				
+				>LDYA L.MSG0
+				>SYSCALL puts
+
+				ldx #K.AARPCACHE.SIZE
+				
+.1				lda (ZPPTR1)
+				beq .4
+				
+				ldy #S.AARPCACHE.ADDR+3
+				>PUSHB (ZPPTR1),y
+				dey
+				>PUSHB (ZPPTR1),y
+				dey
+				>PUSHB (ZPPTR1),y
+				
+				ldy #S.AARPCACHE.MAC+6
+				
+.3				dey
+				>PUSHB (ZPPTR1),y
+				cpy #S.AARPCACHE.MAC
+				bne .3
+				
+				ldy #S.AARPCACHE.TTL+1
+				>PUSHB (ZPPTR1),y
+				dey
+				>PUSHB (ZPPTR1),y
+				
+				>PUSHB (ZPPTR1)
+				
+				>PUSHBI 12
+				>LDYA L.MSG1
+				phx
+				>SYSCALL printf
+				plx
+				>DEBUG
+				
+.4				lda ZPPTR1
+				clc
+				adc #S.AARPCACHE
+				sta ZPPTR1
+				bcc .5
+				inc ZPPTR1+1
+.5				dex
+				bne .1
+				
+.8				lda #0					tell TSKMGR that all done ok, but 
+				sec						we do not want to stay in memory
+				rts
+*--------------------------------------
+CS.DOEVENT		lda (pEvent)
+				bpl .9					is it a TIMER event?
+
+				ldy #TimeOut
+				lda (pData),y
+				beq .9
+				dec 
+				sta (pData),y
+.9				sec						do not discard TIMER event
+				rts
+*--------------------------------------
+CS.QUIT			lda hLIBETALK
+				beq .8
+				>SYSCALL UnloadLib
+				
+.8				clc
+				rts
+*--------------------------------------
+Init.Timeout	ldy #TimeOut
+				lda #TIMEOUT.MAX
+				sta (pData),y
+				rts
+*--------------------------------------
+Wait.TimeOut	sec
+				ldy #TimeOut
+				lda (pData),y
+				beq .9
+				clc
+.9				rts
+*--------------------------------------
+CS.END
+LIBETALK		.AZ "libetalk"
+SSCANF.ADDR		.AZ "%D.%d"
+SSCANF.MAC		.AZ "%h:%h:%h:%h:%h:%h"
+MSG.Usage		.AS "Usage : AARP, display AARP cache\r\n"
+				.AS "        AARP network.nod, query cache or network\r\n"
+				.AZ "        AARP network.nod HH:HH:HH:HH:HH:HH, add a static AARP record in Cache\r\n"
+MSG0			.AZ "STS TTL   MAC Address       network.nod"
+MSG1			.AZ "$%h %5D %h:%h:%h:%h:%h:%h %D.%d\r\n"
+MSG2			.AZ "%D%d is at %h:%h:%h:%h:%h:%h\r\n"
+hLIBETALK		.BS 1
+*--------------------------------------
+DS.START
+DST.ADDR		.BS 4
+DST.MAC			.BS 6
+TimeOut			.BS 1
+DS.END
+*--------------------------------------
+MAN
+SAVE USR/SRC/BIN/AARP.S
+ASM
