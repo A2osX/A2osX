@@ -274,6 +274,10 @@ OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
 |           |         | [ -z $VAR variable is empty ] |
 |           |         | [ string1 = string2 ] |
 |           |         | [ string1 != string2 ] |
+|           |         | [ string1 .< string2 ] |
+|           |         | [ string1 <= string2 ] |
+|           |         | [ string1 .> string2 ] |
+|           |         | [ string1 >= string2 ] |
 |           |         | [ int32 -eq int32 ] |
 |           |         | [ int32 -ne int32 ] |
 |           |         | [ int32 -lt int32 ] |
@@ -330,7 +334,7 @@ note : '$VAR' does NOT expand Variable
 | ----  | ------  | ------- |
 | . | Working | use same env |
 | & | Working | start proc |
-| \| |  | pipe |
+| \| | Working | pipe |
 | <    | Working | StdIn redirection |
 | >    | Working | StdOut redirection |
 | >>    | Working | Append StdOut  |
@@ -380,6 +384,7 @@ note : '$VAR' does NOT expand Variable
 | | | -0 : No Signal | |
 | | | -1 : SIGQUIT | |
 | LS | Working | -A : Print . & .. | 0.92 |
+| | | -C : Single column listing | |
 | | | -L : long listing with size/date... | |
 | | | -R : Recurse subdirectories | |
 | LSDEV | Working | Dump device Drivers | 0.92 |
