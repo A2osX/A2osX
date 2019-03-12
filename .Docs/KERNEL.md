@@ -56,7 +56,7 @@ Y,A = Ptr to installed driver
 ## RETURN VALUE  
 CC = OK, CS = ERROR  
 Y,A = FD  
-X = DevID  
+X = hDev  
 
 # GetDevStatus  
 
@@ -604,6 +604,41 @@ A = Child PSID
 
 ## RETURN VALUE  
 A = Child PSID  
+
+# GetPWUID  
+
+## C  
+`int getpwuid(short int uid, S.PW* passwd );`  
+
+## ASM  
+`>PUSHW passwd`  
+`lda uid`  
+`>SYSCALL getpwuid`  
+
+## RETURN VALUE  
+
+# GetPWName  
+
+## C  
+`int getpwname(const char* name, S.PW* passwd );`  
+
+## ASM  
+`>PUSHW passwd`  
+`>LDYA name`  
+`>SYSCALL getpwname`  
+
+## RETURN VALUE  
+
+# PutPW  
+
+## C  
+`int putpw( S.PW* passwd );`  
+
+## ASM  
+`>LDYA passwd`  
+`>SYSCALL putpw`  
+
+## RETURN VALUE  
 
 # GetMemStat  
 **In:**  

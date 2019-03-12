@@ -157,7 +157,7 @@ Close socket
 `>PUSHWI count`  
 `>PUSHW buf`  
 `lda fd`  
-`>LIBCALL hLIBTCPIP,LIBTCPIP.skt.read`  
+`>LIBCALL hLIBTCPIP,LIBTCPIP.read`  
 
 ## RETURN VALUE  
 CC: Y,A = bytes read  
@@ -173,7 +173,7 @@ CS: A = EC
 `>PUSHWI count`  
 `>PUSHW buf`  
 `lda fd`  
-`>LIBCALL hLIBTCPIP,LIBTCPIP.skt.write`  
+`>LIBCALL hLIBTCPIP,LIBTCPIP.write`  
 
 ## RETURN VALUE  
 CC: Y,A = bytes written  
@@ -191,7 +191,7 @@ CS: A = EC
 **In:**  
 `>PUSHW addr`		(RecvFrom)  
 `lda fd`  
-`>LIBCALL hLIBTCPIP,LIBTCPIP.skt.Recv`  
+`>LIBCALL hLIBTCPIP,LIBTCPIP.Recv`  
 
 ## RETURN VALUE  
 CC: A = hMem  
@@ -211,7 +211,7 @@ CS: A = EC
 `>PUSHWI count`  
 `>PUSHW buf`  
 `lda fd`  
-`>LIBCALL hLIBTCPIP,LIBTCPIP.skt.send`  
+`>LIBCALL hLIBTCPIP,LIBTCPIP.send`  
 
 ## RETURN VALUE  
 CC: Y,A = bytes written  
