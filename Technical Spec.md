@@ -27,9 +27,14 @@
 
 | Name      | Status  | Comment |
 | ----      | ------  | ------- |
-| BREAK      |  | |
-| CD        | Working | Improved syntax : now, 'CD ../BIN' works |
-| conditions | Working |[ -d direxists ] |
+| \<value\> | Working | $VAR \| string \| "string with SPACE" \| 123 \| -456 |
+| \<expression\> | Working | \<value\> [\<op\> \<value\>] ... |
+| \<op\> | Working | \+ signed int32 add |
+|        | Working | \- signed int32 sub |
+|        |   | \* |
+|        |  | div |
+|        |  | mod |
+| \<condition\> | Working |[ -d direxists ] |
 |           |         | [ -e fileordirexists ] |
 |           |         | [ -f fileexists ] |
 |           |         | [ -n $VAR variable is not empty ] |
@@ -46,32 +51,39 @@
 |           |         | [ int32 -le int32 ] |
 |           |         | [ int32 -gt int32 ] |
 |           |         | [ int32 -ge int32 ] |
-| CONTINUE   |  | |
+| FUNC      |  | FUNC fonction_name {body} |
+| RETURN    |  | Exit function with return code |
+| SWITCH    |  | SWITCH <expression> |
+| CASE      |  | CASE <expression> |
+| BREAK     |  | Exit SWITCH/CASE |
+| DEFAULT   |  | |
+| END       |  | End of SWITCH Statement |
+| CD        | Working | Improved syntax : now, 'CD ../BIN' works |
 | DATE      | Working | |
 | ECHO      | Working | \b,\e,\f,\n,\\\ and \\% supported |
 |           |         | -N : Suppress \r\n |
 | ELSE      | Working | Optional branch for IF block |
 | EXIT      | Working | exit shell |
 | FI        | Working | Terminator for IF block |
-| IF        | Working | [ (condition) ] |
+| IF        | Working | [ \<condition\> ] |
 | LOOP      | Working | Terminator for WHILE block |
 | MD        | Working | Create a directory |
 | NOHUP     | Working | Start a process with PPID=PS0 (Daemon) |
 | PAUSE     | Working | Wait until CR |
 | POPD      | Working | Restore previously saved working directory |
 | PUSHD     | Working | Save actual working directory |
-|           |         | PUSHD <dir> do aslo a CD to <dir> |
+|           |         | PUSHD \<dir\> do also a CD to \<dir\> |
 | PWD       | Working | Print Working Directory |
 | RD        | Working | Delete an empty directory |
 | READ      | Working | -S : no echo (password) |
 |           |         | -P : "prompt message"   |
 | REN       | Working | Rename a file, directory or volume |
-| SET       | Working | -X toggle debug mode |
-|           |         | -C toggle Control-C break mode |
+| SET       | Working | -X : toggle debug mode |
+|           |         | -C : toggle Control-C break mode |
 | SHIFT     | Working | Remove $1 from cmd line |
-| SLEEP     | Working | Wait <count> 10th sec |
+| SLEEP     | Working | Wait \<count\> 10th sec |
 | TIME      | Working | |
-| WHILE     | Working | [ (condition) ] |
+| WHILE     | Working | [ \<ondition\> ] |
 
 ## Shell variables:
 
@@ -126,6 +138,12 @@ note : '$VAR' does NOT expand Variable
 | CAT | Working | -A : Show All non printable caracters | 0.92 |
 | | | -N : Number all output lines | |
 | | | -S : Suppress repeated empty output lines | |
+| CUT | Working | CUT \<opt\> "line" or CMD\|CUT \<opt\> | 0.92 |
+| | | -H : This help screen | |
+| | | -F nn : Output field nn | |
+| | | -M nn : Output starting at nn | |
+| | | -N nn : Output Ending at nn | |
+| | | -S ch : Change default SPACE separator to 'ch' | |
 | CHGRP | In Progress | -C : Continue On Error | 0.9 |
 | | | -R : Recurse subdirectories | |
 | CHMOD | In Progress | -C : Continue On Error | 0.9 |
@@ -142,6 +160,10 @@ note : '$VAR' does NOT expand Variable
 | FORMAT | In Progress | FORMAT \<BLOCKDEV\> [VOLUME.NAME] | 0.92 |
 | | | -L : Low-Level Format *not currently supported | |
 | | | -1..9 : Catalog Size (block count) | |
+| GREP | Working | GREP \<opt\> PATTERN FILE or CMD\|GREP \<opt\> PATTERN | 0.92 |
+| | | -H : This help screen | |
+| | | -I : Ignore Case | |
+| | | -N : Print line Number | |
 | KILL | Working | KILL \<signal\> PID | 0.92 |
 | | | -0 : No Signal | |
 | | | -1 : SIGQUIT | |
@@ -155,7 +177,7 @@ note : '$VAR' does NOT expand Variable
 | MD5 | Working | MD5 \[ -D : String \| file \] | 0.92 |
 | MEM | Working | Old dump behavior is now MEMDUMP.  New MEM command displays MEMSTAT (Main, Aux & Kernel Memory) | 0.92 |
 | MKDIR | Working | Make Directory| 0.92 |
-| MORE | Working | MORE \<File\> | 0.92 |
+| MORE | Working | MORE \<File\> or CMD\|MORE \<opt\> | 0.92 |
 | | | -H : This help screen | |
 | | | -N : Number all output lines | |
 | | | -P : Page mode, no scroll | |
