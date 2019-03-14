@@ -449,8 +449,9 @@ Y,A = PTR to MemBlock
 # SListAddData  
 
 ## ASM  
-`PUSHB Data`  
-`PUSHW DataID`  
+`PUSHB DataLen`  
+`PUSHB DataPtr`  
+`PUSHW KeyID`  
 `lda hSList`  
 `>SYSCALL SListAddData`  
 
@@ -460,24 +461,24 @@ Y,A = PTR to MemBlock
 # SListGetData  
 
 ## ASM  
-`PUSHB Data`  
-`PUSHW DataID`  
+`PUSHB DataLen`  
+`PUSHB DataPtr`  
+`PUSHW KeyID`  
 `lda hSList`  
 `>SYSCALL SListGetData`  
 
 ## RETURN VALUE  
- Y,A = Next DataID  
 
 # SListSetData  
 
 ## ASM  
-`PUSHB Data`  
-`PUSHW DataID`  
+`PUSHB DataLen`  
+`PUSHB DataPtr`  
+`PUSHW KeyID`  
 `lda hSList`  
 `>SYSCALL SListSetData`  
 
 ## RETURN VALUE  
- Y,A = Next DataID  
 
 # SListGetByID  
 
@@ -490,16 +491,16 @@ Y,A = PTR to MemBlock
 ## RETURN VALUE  
  Y,A = Next KeyID  
 
-# SListAddKey  
+# SListNewKey  
 
 ## ASM  
 `PUSHW KeyPtr`  
 `lda hSList`  
-`>SYSCALL SListAddKey`  
+`>SYSCALL SListNewKey`  
 
 ## RETURN VALUE  
- A = Key Length  
- X,Y = KeyID  
+ Y,A = KeyID  
+ X = KeyLen  
 
 # SListLookup  
 
@@ -536,7 +537,6 @@ A=hSList
 `>SYSCALL GetStkObjData`  
 
 ## RETURN VALUE  
- Y,A = Property Value  
 
 # NewStkObj  
  Y,A = Size Requested  
