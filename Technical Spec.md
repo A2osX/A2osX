@@ -43,7 +43,7 @@ This is the functional specification for A2osX, its system modules, internal and
 | END       | Working | End of SWITCH Statement |
 | EXIT      | Working | exit script or shell |
 | FI        | Working | Terminator for IF block |
-| FUNC      | In Progress | FUNC fonction_name {body} |
+| FUNC      | In Progress | FUNC fonction_name <br>   \<body\> <br>   END |
 | IF        | Working | [ \<condition\> ] |
 | LOOP      | Working | Terminator for WHILE block |
 | MD        | Working | MD path or relative path <br> Create a directory |
@@ -99,7 +99,6 @@ note : '$VAR' does NOT expand Variable
 
 | Name | Status | Comment | K.Ver |
 | ---- | ------ | ------- | ----- |
-| Console.DRV | Working | ANSI support in Progress. | 0.92 |
 | DHGR.DRV | Working | 560x192 Mono/16 colors Mixed-Mode support | 0.9.1 |
 | LanCeGS.DRV | Working | | 0.92 |
 | Mouse.DRV | Working | Apple Mouse Card,//c Mouse Port | 0.9.1 |
@@ -143,7 +142,7 @@ note : '$VAR' does NOT expand Variable
 | DNSINFO | Working | dump DNS cache, setup a static DNS entry | 
 | HTTPGET | In Progress | HTTPGET <ip\|host> [port] <br> -U Url <br> -F UrlFile |
 | IPCONFIG | Working | -D : Try to get IP address from DHCP <br> -E : Read ETC files <br> -S : Set/Reset TCPIP configuration (-E, then -D if required) |
-| NETSTAT | Working | | 
+| NETSTAT | Working | Display socket status | 
 | PING | Working | PING <ip\|host> <br> -1..9 : Ping Count |
 | TELNET | Working | TELNET <ip\|host> [port] | 
 
