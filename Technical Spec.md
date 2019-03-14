@@ -1,4 +1,6 @@
-# A2osX (0.92) Multi-Tasking OS for Apple II  
+# A2osX (0.92) Multi-Tasking OS for Apple II
+
+This is the functional specification for A2osX, its system modules, internal and external commands and shell language.  Please refer to the other A2osX documentation such as the User Guide, Notes for Developers and Shell Programming Guide for more information.
 
 ## SYS/KM* Supported Hardware At Kernel Level (ProDOS):
 
@@ -29,61 +31,37 @@
 | ----      | ------  | ------- |
 | \<value\> | Working | $VAR \| string \| "string with SPACE" \| 123 \| -456 |
 | \<expression\> | Working | \<value\> [\<op\> \<value\>] ... |
-| \<op\> | Working | \+ signed int32 add |
-|        | Working | \- signed int32 sub |
-|        |   | \* |
-|        |  | div |
-|        |  | mod |
-| \<condition\> | Working |[ -d direxists ] |
-|           |         | [ -e fileordirexists ] |
-|           |         | [ -f fileexists ] |
-|           |         | [ -n $VAR variable is not empty ] |
-|           |         | [ -z $VAR variable is empty ] |
-|           |         | [ string1 = string2 ] |
-|           |         | [ string1 != string2 ] |
-|           |         | [ string1 .< string2 ] |
-|           |         | [ string1 <= string2 ] |
-|           |         | [ string1 .> string2 ] |
-|           |         | [ string1 >= string2 ] |
-|           |         | [ int32 -eq int32 ] |
-|           |         | [ int32 -ne int32 ] |
-|           |         | [ int32 -lt int32 ] |
-|           |         | [ int32 -le int32 ] |
-|           |         | [ int32 -gt int32 ] |
-|           |         | [ int32 -ge int32 ] |
-| FUNC      |  | FUNC fonction_name {body} |
-| RETURN    |  | Exit function with return code |
-| SWITCH    |  | SWITCH <expression> |
-| CASE      |  | CASE <expression> |
-| BREAK     |  | Exit SWITCH/CASE |
-| DEFAULT   |  | |
-| END       |  | End of SWITCH Statement |
-| CD        | Working | Improved syntax : now, 'CD ../BIN' works |
+| \<op\> | Working <br> --- <br> Planned | \+ signed int32 add <br> \- signed int32 sub <br> --- <br>  \* <br> div <br> mod |
+| \<condition\> | Working |[ -D direxists ] <br> [ -E fileordirexists ] <br> [ -F fileexists ]<br> [ -N $VAR variable is not empty ] <br> [ -Z $VAR variable is empty ] <br> [ string1 = string2 ] <br> [ string1 != string2 ] <br> [ string1 .< string2 ] <br> [ string1 <= string2 ] <br> [ string1 .> string2 ] <br> [ string1 >= string2 ] <br> [ int32 -eq int32 ] <br> [ int32 -ne int32 ] <br> [ int32 -lt int32 ] <br> [ int32 -le int32 ] <br> [ int32 -gt int32 ] <br> [ int32 -ge int32 ] |
+| BREAK     | Working | Exit CASE of SWITCH |
+| CASE      | Working | CASE <expression> |
+| CD        | Working | CD path or relative path |
 | DATE      | Working | |
-| ECHO      | Working | \b,\e,\f,\n,\\\ and \\% supported |
-|           |         | -N : Suppress \r\n |
+| DEFAULT   | Working | Default CASE for SWITCH |
+| ECHO      | Working | \b,\e,\f,\n,\\\ and \\% supported <br> -N : Suppress \r\n |
 | ELSE      | Working | Optional branch for IF block |
-| EXIT      | Working | exit shell |
+| END       | Working | End of SWITCH Statement |
+| EXIT      | Working | exit script or shell |
 | FI        | Working | Terminator for IF block |
+| FUNC      | In Progress | FUNC fonction_name {body} |
 | IF        | Working | [ \<condition\> ] |
 | LOOP      | Working | Terminator for WHILE block |
-| MD        | Working | Create a directory |
+| MD        | Working | MD path or relative path <br> Create a directory |
 | NOHUP     | Working | Start a process with PPID=PS0 (Daemon) |
 | PAUSE     | Working | Wait until CR |
 | POPD      | Working | Restore previously saved working directory |
-| PUSHD     | Working | Save actual working directory |
-|           |         | PUSHD \<dir\> do also a CD to \<dir\> |
+| PUSHD     | Working | Save actual working directory <br> PUSHD \<dir\> do also a CD to \<dir\> |
 | PWD       | Working | Print Working Directory |
 | RD        | Working | Delete an empty directory |
-| READ      | Working | -S : no echo (password) |
-|           |         | -P : "prompt message"   |
+| READ      | Working | -S : no echo (password) <br> -P : "prompt message"   |
 | REN       | Working | Rename a file, directory or volume |
-| SET       | Working | -X : toggle debug mode |
-|           |         | -C : toggle Control-C break mode |
+| RETURN    | In Progress | Exit function with return code |
+| SET       | Working | -X : toggle debug mode <br> -C : toggle Control-C break mode |
 | SHIFT     | Working | Remove $1 from cmd line |
 | SLEEP     | Working | Wait \<count\> 10th sec |
+| SWITCH    | Working | SWITCH <expression> |
 | TIME      | Working | |
-| WHILE     | Working | [ \<ondition\> ] |
+| WHILE     | Working | [ \<condition\> ] |
 
 ## Shell variables:
 
@@ -105,15 +83,15 @@ note : '$VAR' does NOT expand Variable
 ## Shell I/O control/redirection:
 
 | Token  | Status  | Comment |
-| ----  | ------  | ------- |
-| . | Working | use same env |
-| & | Working | start proc |
-| \| | Working | pipe |
-| <    | Working | StdIn redirection |
-| >    | Working | StdOut redirection |
-| >>    | Working | Append StdOut  |
+| ----   | ------  | ------- |
+| .      | Working | use same env |
+| &      | Working | start proc |
+| \|     | Working | pipe |
+| <      | Working | StdIn redirection |
+| >      | Working | StdOut redirection |
+| >>     | Working | Append StdOut  |
 | 1>>    | Working |  |
-| 1>   | Working |  |
+| 1>     | Working |  |
 | 2>>    | Working | StdErr redirection |
 | 2>     | Working |  |
 
@@ -133,89 +111,46 @@ note : '$VAR' does NOT expand Variable
 | Uther2.AI.DRV | In Progress | With ARP/IP Offloading | 0.92 |
 
 ## BIN,External Shell commands:
-| Name | Status | Comment | K.Ver |
-| ---- | ------ | ------- | ----- |
-| CAT | Working | -A : Show All non printable caracters | 0.92 |
-| | | -N : Number all output lines | |
-| | | -S : Suppress repeated empty output lines | |
-| CUT | Working | CUT \<opt\> "line" or CMD\|CUT \<opt\> | 0.92 |
-| | | -H : This help screen | |
-| | | -F nn : Output field nn | |
-| | | -M nn : Output starting at nn | |
-| | | -N nn : Output Ending at nn | |
-| | | -S ch : Change default SPACE separator to 'ch' | |
-| CHGRP | In Progress | -C : Continue On Error | 0.9 |
-| | | -R : Recurse subdirectories | |
-| CHMOD | In Progress | -C : Continue On Error | 0.9 |
-| | | -R : Recurse subdirectories | |
-| CHOWN | In Progress | -C : Continue On Error | 0.9 |
-| | | -R : Recurse subdirectories | |
-| CHTYP | Working | -C : Continue On Error | 0.92 |
-| | | -R : Recurse subdirectories | |
-| CP | Working | -C : Continue On Error | 0.92 |
-| | | -Q : Quiet | |
-| | | -R : Recurse subdirectories | |
-| | | -Y : Dont't Prompt For Override | |
-| EDIT | Working | still missing : find/replace | 0.92 |
-| FORMAT | In Progress | FORMAT \<BLOCKDEV\> [VOLUME.NAME] | 0.92 |
-| | | -L : Low-Level Format *not currently supported | |
-| | | -1..9 : Catalog Size (block count) | |
-| GREP | Working | GREP \<opt\> PATTERN FILE or CMD\|GREP \<opt\> PATTERN | 0.92 |
-| | | -H : This help screen | |
-| | | -I : Ignore Case | |
-| | | -N : Print line Number | |
-| KILL | Working | KILL \<signal\> PID | 0.92 |
-| | | -0 : No Signal | |
-| | | -1 : SIGQUIT | |
-| LS | Working | -A : Print . & .. | 0.92 |
-| | | -C : Single column listing | |
-| | | -F : Single column, includes full path | |
-| | | -L : long listing with size/date... | |
-| | | -R : Recurse subdirectories | |
-| LSDEV | Working | Dump device Drivers | 0.92 |
-| LSOF | Working | List Open Files | 0.92 |
-| MD5 | Working | MD5 \[ -D : String \| file \] | 0.92 |
-| MEM | Working | Old dump behavior is now MEMDUMP.  New MEM command displays MEMSTAT (Main, Aux & Kernel Memory) | 0.92 |
-| MKDIR | Working | Make Directory| 0.92 |
-| MORE | Working | MORE \<File\> or CMD\|MORE \<opt\> | 0.92 |
-| | | -H : This help screen | |
-| | | -N : Number all output lines | |
-| | | -P : Page mode, no scroll | |
-| | | -S : Process ESC codes | |
-| NSCUTIL | Working | NSCUTIL DD/MM/YY,hh:mm:ss | 0.92 |
-| | | Tool for setting time in NSC/DL1216E | |
-| MV | Working | -C : Continue On Error | 0.92 |
-| | | -Q : Quiet | |
-| | | -R : Recurse subdirectories | |
-| | | -Y : Dont't Prompt For Override | |
-| PS | Working | List Processes| 0.92 |
-| RM | Working | RM \[File/Dir, *,? wildcards allowed\] | 0.92 |
-| | | -C : Continue On Error | |
-| | | -Q : Quiet | |
-| | | -R : Recurse subdirectories | |
+| Name | Status | Comment | 
+| ---- | ------ | ------- | 
+| CAT | Working | -A : Show All non printable caracters <br> -N : Number all output lines <br> -S : Suppress repeated empty output lines |
+| CUT | Working | CUT \<opt\> "line" or CMD\|CUT \<opt\> <br> -H : This help screen <br> -F nn : Output field nn <br> -M nn : Output starting at nn <br> -N nn : Output Ending at nn <br> -S ch : Change default SPACE separator to 'ch' |
+| CHGRP | In Progress | -C : Continue On Error <br> -R : Recurse subdirectories |
+| CHMOD | In Progress | -C : Continue On Error <br> -R : Recurse subdirectories |
+| CHOWN | In Progress | -C : Continue On Error <br> -R : Recurse subdirectories |
+| CHTYP | Working | -C : Continue On Error <br> -R : Recurse subdirectories |
+| CP | Working | -C : Continue On Error <br> -Q : Quiet <br> -R : Recurse subdirectories <br> -Y : Dont't Prompt For Override |
+| EDIT | Working | still missing : find/replace | 
+| FORMAT | In Progress | FORMAT \<BLOCKDEV\> [VOLUME.NAME] <br> -L : Low-Level Format *not currently supported <br> -1..9 : Catalog Size (block count) |
+| GREP | Working | GREP \<opt\> PATTERN FILE or CMD\|GREP \<opt\> PATTERN <br> -H : This help screen <br> -I : Ignore Case <br> -N : Print line Number |
+| KILL | Working | KILL \<signal\> PID <br> -0 : No Signal <br> -1 : SIGQUIT |
+| LS | Working | -A : Print . & .. <br> -C : Single column listing <br> -F : Single column, includes full path <br> -L : long listing with size/date... <br> -R : Recurse subdirectories |
+| LSDEV | Working | Dump device Drivers | 
+| LSOF | Working | List Open Files | 
+| MD5 | Working | MD5 \[ -D : String \| file \] | 
+| MEM | Working | Old dump behavior is now MEMDUMP.  New MEM command displays MEMSTAT (Main, Aux & Kernel Memory) | 
+| MKDIR | Working | Make Directory| 
+| MORE | Working | MORE \<File\> or CMD\|MORE \<opt\> <br> -H : This help screen <br> -N : Number all output lines <br> -P : Page mode, no scroll <br> -S : Process ESC codes |
+| NSCUTIL | Working | NSCUTIL DD/MM/YY,hh:mm:ss <br> Tool for setting time in NSC/DL1216E |
+| MV | Working | -C : Continue On Error <br> -Q : Quiet <br> -R : Recurse subdirectories <br> -Y : Dont't Prompt For Override |
+| PS | Working | List Processes| 
+| RM | Working | RM \[File/Dir, *,? wildcards allowed\] <br> -C : Continue On Error <br> -Q : Quiet <br> -R : Recurse subdirectories |
 
 ## Network (TCPIP) tools:
-| Name | Status | Comment | K.Ver |
-| ---- | ------ | ------- | ----- |
-| ARP | Working | dump ARP cache, setup a static ARP entry | 0.92 |
-| DNSINFO | Working | dump DNS cache, setup a static DNS entry | 0.92 |
-| HTTPGET | In Progress | HTTPGET <ip\|host> [port] | 0.93 |
-| | | -U Url | |
-| | | -F UrlFile | |
-| IPCONFIG | Working | -D : Try to get IP address from DHCP | 0.92 |
-|  |  | -E : Read ETC files |  |
-|  |  | -S : Set/Reset TCPIP configuration (-E, then -D if required) |  |
-| NETSTAT | Working | | 0.92 |
-| PING | Working | PING <ip\|host> | 0.92 |
-| | | -1..9 : Ping Count | |
-| TELNET | Working | TELNET <ip\|host> [port] | 0.92 |
+| Name | Status | Comment | 
+| ---- | ------ | ------- | 
+| ARP | Working | dump ARP cache, setup a static ARP entry | 
+| DNSINFO | Working | dump DNS cache, setup a static DNS entry | 
+| HTTPGET | In Progress | HTTPGET <ip\|host> [port] <br> -U Url <br> -F UrlFile |
+| IPCONFIG | Working | -D : Try to get IP address from DHCP <br> -E : Read ETC files <br> -S : Set/Reset TCPIP configuration (-E, then -D if required) |
+| NETSTAT | Working | | 
+| PING | Working | PING <ip\|host> <br> -1..9 : Ping Count |
+| TELNET | Working | TELNET <ip\|host> [port] | 
 
 ## DEV tools:
-| Name | Status | Comment | K.Ver |
-| ---- | ------ | ------- | ----- |
-| ASM | In Progress | S-C MASM based multi CPU assembler | 0.9.1 |
-| MEMDUMP | Working | Tool to track memory leak| 0.92 |
-| ---- | ------ | ------- | ----- |
-| RPCDUMP | In Progress | tool based on UDP socket API, renamed from RPCINFO | 0.92 |
-| | | RPCDUMP <ip\|host> | |
+| Name | Status | Comment | 
+| ---- | ------ | ------- | 
+| ASM | In Progress | S-C MASM based multi CPU assembler | 
+| MEMDUMP | Working | Tool to track memory leak| 
+| RPCDUMP | In Progress | Tool based on UDP socket API, renamed from RPCINFO <br> RPCDUMP <ip\|host> | |
 
