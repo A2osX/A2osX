@@ -446,34 +446,35 @@ A = hMem
 Y,A = PTR to MemBlock  
 (X unmodified)  
 
-# SListAddData  
-
-## ASM  
-`PUSHB DataLen`  
-`PUSHB DataPtr`  
-`PUSHW KeyID`  
-`lda hSList`  
-`>SYSCALL SListAddData`  
-
-## RETURN VALUE  
- Y,A = Next DataID  
-
 # SListGetData  
 
 ## ASM  
-`PUSHB DataLen`  
-`PUSHB DataPtr`  
+`PUSHW DataOfs`  
+`PUSHW DataLen`  
+`PUSHW DataPtr`  
 `PUSHW KeyID`  
 `lda hSList`  
 `>SYSCALL SListGetData`  
+
+## RETURN VALUE  
+ Y,A = Byte Count  
+
+# SListAddData  
+
+## ASM  
+`PUSHW DataLen`  
+`PUSHW DataPtr`  
+`PUSHW KeyID`  
+`lda hSList`  
+`>SYSCALL SListAddData`  
 
 ## RETURN VALUE  
 
 # SListSetData  
 
 ## ASM  
-`PUSHB DataLen`  
-`PUSHB DataPtr`  
+`PUSHW DataLen`  
+`PUSHW DataPtr`  
 `PUSHW KeyID`  
 `lda hSList`  
 `>SYSCALL SListSetData`  
@@ -511,6 +512,7 @@ Y,A = PTR to MemBlock
 
 ## RETURN VALUE  
  Y,A = KeyID  
+ X = Key Length  
 
 # SListNew  
 
@@ -525,16 +527,6 @@ A=hSList
 ## ASM  
 `lda hSList`  
 `>SYSCALL SListFree`  
-
-## RETURN VALUE  
-
-# GetStkObjData  
-
-## ASM  
-`PUSHW DataLen`  
-`PUSHW DataPtr`  
-`lda hStkObj`  
-`>SYSCALL GetStkObjData`  
 
 ## RETURN VALUE  
 
@@ -565,6 +557,16 @@ Load a file in AUX memory (Stock Objects)
 ## RETURN VALUE  
  Y,A = File Length  
  X = hMem of Loaded Object in AUX mem  
+
+# GetStkObjData  
+
+## ASM  
+`PUSHW DataLen`  
+`PUSHW DataPtr`  
+`lda hStkObj`  
+`>SYSCALL GetStkObjData`  
+
+## RETURN VALUE  
 
 # ExecL  
 
