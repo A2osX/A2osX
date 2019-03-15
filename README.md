@@ -30,7 +30,7 @@ Much work being done to expand and enhance the documentation for A2osX.  Some of
 
 ### User Guide
 
-A draft of the first A2osX User Guide can be found on GitHub [here](User%20Guide.md).
+A draft of the first A2osX User Guide can be found on GitHub [here](.Docs/User%20Guide.md).
 
 
 __A new attempt using Mouse card VBL IRQ is targeted in 0.9.1.__
