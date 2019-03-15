@@ -1,4 +1,18 @@
-# A2osX (0.92) Multi-Tasking OS for Apple II  
+# A2osX (0.93) Multi-Tasking OS for Apple II  
+
+## Introduction...
+
+A2osX is an operating, programming and execution environment for the 128K Enhanced Apple //e and Apple //gs series of computers.  While layered atop of ProDOS, taking advantage of all ProDOS block devices and MLI calls; A2osX is much more then application or command shell. Written in 65C02 assembly for speed of execution and efficient memory management; A2osX is a multitasking and yes multiuser development environment bringing many of today's features to our venerable vintage 8-bit systems. 
+
+The foundation of A2osX enabling its multiuser multitasking capabilities is that it is build on a reusable set of APIs and LIBs (written in Assembly) that all programs can and do use which make them very lean and fast.  For instance, there is one network API that any program can call which in turn handles the I/O to different LAN cards via drivers.  Key here is that multiple programs can be using the network at the same time such as the TELNETD server and the TELNET client.  A key benefit is that the code for doing each program is smaller because the network API is doing a lot of the work.  And with CORE APIs like printf and LIBs such as Network only loaded once, much like a DLL in Windows, memory is conserved providing the resources needed to support multitasking and multiple users.
+
+A2osX is designed to work on any "stock" 128k Apple //e, with no additional hardware with a 65C02 or newer processor.
+ 
+## Latest News 2019-02-19
+
+Major updates have occured to the kernel and many of the APIs to support an enhanced shell with support of many new scripting capabilities, the ability to redirect and eventually piping output.  Current kernel also supports multiple virtual terminals as well as TCP (via TELNETD) and serial (SSC driver) terminals.
+
+# **Visit us at [A2osX](http://www.a2osx.com)**
 
 ## Disk images :  
 
@@ -7,21 +21,17 @@
 + **A2OSX.BUILD.po**  :  **(0.92)**  800k BOOT disk image with S-C MASM 3.0 and all binaries (BOOT+DEV)  
 + **A2OSX.SRC.po**    :  **(0.92)**  800k disk image with all sources  
 
-## Latest News 2019-02-19
-
-Major updates have occured to the kernel and many of the APIs to support an enhanced shell with support of many new scripting capabilities, the ability to redirect and eventually piping output.  Current kernel also supports multiple virtual terminals as well as TCP (via TELNETD) and serial (SSC driver) terminals.
-
 ## Requires :
 Enhanced IIe (65c02 cpu) with 128k, //c, IIgs
 
-## Introduction...
-A2osX is a cooperative, event-driven multitasking kernel (meaning it is applications that are responsible to give back control to kernel)
-Its principal goal is to collect all "genius" 65c02 pieces of code ever written here and there, concentrated in the same environment.
-(including IP Stack & HTTPD/TELNETD..., GUI & graphical tools...)
-"Complete working place", no needing any more to reboot to switch between tons of diskettes!!!
+## Documentation
 
-A2osX is designed to work on any "stock" 128k Apple //e, with no additional hardware. As VBL signal is NOT available as an IRQ on //e (it is on //c & IIgs)
-it makes preemptive multitasking impossible.
+Much work being done to expand and enhance the documentation for A2osX.  Some of this documentations are still in the rough draft stage but are being provided to bring you as much information about A2osX as soon as possible.  We happily welcome any help and contributions from others to this or any area of the A2osX project.
+
+### User Guide
+
+A draft of the first A2osX User Guide can be found on GitHub [here](User%20Guide.md).
+
 
 __A new attempt using Mouse card VBL IRQ is targeted in 0.9.1.__
 
