@@ -5,27 +5,27 @@
 
 UNIX-Like Shell...
 
-![](./.screen-shots/ScreenShot.LS.png)
+![](../.screen-shots/ScreenShot.LS.png)
 
 TCP/IP Stack...
 
-![](./.screen-shots/ScreenShot.IP1.png)
+![](../.screen-shots/ScreenShot.IP1.png)
 
-![](./.screen-shots/ScreenShot.IP2.png)
+![](../.screen-shots/ScreenShot.IP2.png)
 
 Full screen editor ...
 
-![](./.screen-shots/ScreenShot.EDIT.png)
+![](../.screen-shots/ScreenShot.EDIT.png)
 
 Kernel Configuration Utility...
 
-![](./.screen-shots/ScreenShot.KCONFIG.png)
+![](../.screen-shots/ScreenShot.KCONFIG.png)
 
 Color ANSI/VT100 Support...
 
-![](./.screen-shots/PuTTY.png)
+![](../.screen-shots/PuTTY.png)
 
 DHGR Mixed-Mode Graphic primitives....
 
-![](./.screen-shots/ScreenShot.GFX.png)
+![](../.screen-shots/ScreenShot.GFX.png)
 
