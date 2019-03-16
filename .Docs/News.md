@@ -134,6 +134,27 @@ Kernel 0.9.1 stable enough to resume building.
  + ...
  + to allow...Preemptive!
 
+__A new attempt using Mouse card VBL IRQ is targeted in 0.9.1.__
+
+Kernel, loading in Aux LC on top of ProDOS provide API inspired from Linux/Unix World to allow writing applications & command line tools on top of it.
+This kernel provides an advanced "Memory Manager" able to relocate 65c02 code.
+"Event Manager" makes TCPIP stack able to listen on several ports, manage ARP,DNS...cache expiration and any background processes.
+"Task Manager" is responsible to "distribute" CPU time to several loaded processes.
+"Device Manager" handles event collected from builtin devices as well as devices added by loadable drivers.
+
+If you're 65c02 or Z80 code writer, how to contribute ?
+
+Several subprojects are now indentified :
+
++ Hardware Support : adding drivers to support more & more hardware (RAM cards, storage....)
++ Z80 support : Kernel could pass control to any Z80 detected on the system.
++ TCP/IP stack
++ AppleTalk Support
++ GUI & Printing
++ Archive, Disk Image transfer tools (ADT client!)...
++ Question : Pascal or C Compiler? 
++ --> Answer : C compiler....Next version of Kernel API will be closer to STDLIBC, Genralize the use of C-Strings
++ ...sure there is some more!
 
 **"System Tick" sources for preemptive mode :**
 

@@ -13,6 +13,11 @@ I agree with edward, that the constraint tends to be memory and not processor (w
 
 ASM is needed because at end of day its the most strict mem mgmt (the language that allows you to be stringy on mem use)  so of course the core of A2osX is in ASM.  however after we make out own ASM that makes the OS self making (we talked about this) we plan a CSH which is first step to Interactive C and then a BIn that will make C feed to ASM (the point of 23) so we will get there, but hey stupid, the CORE has to be ASM to be tight with mem
 
+OApple+1,OApple+2,OApple+3 to switch between screens : Kernel Log, text, DHGR.
+(OApple+shift+1,OApple+shift+2,OApple+shift+3 on FR keyboard)
+
+
+
 
 # Notes for Developers
 

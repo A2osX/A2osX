@@ -130,11 +130,8 @@ To Telnet to A2osX running TELNETD.
 
 Use Notepad++ which you can download from....
 
-
-__S-C MASM color scheme for Notepad++__
+#### S-C MASM color scheme for Notepad++
 ...drop _Tools/userDefineLang.xml in %APPDATA%\Notepad++
-;-)
-
 
 
 THere is a userDefinedLang.xlm file in the .Tools dir that you will want to copy to Notepad... then when editing ASM files (.S) you can change your language to S-C MASM 65C02 and notepad++ will do the proper highlighting.
