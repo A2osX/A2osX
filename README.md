@@ -39,7 +39,6 @@ You can use and/or install A2osX from the media found in our Media directory fou
 | BLANK800.po | A formatted empty ProDOS 3.5" 800K disk image, suitable for use with emulators such as AppleWin |
 | BLANK140.dsk | A formatted empty ProDOS 5.25" 140K disk image, suitable for use with emulators such as AppleWin |
 
-
 Please note, we plan to change the media set once 0.93 is officially released.  Currently, the BUILD media is the primary image used by the developers to hold the most current version of the A2osX binaries (and a copy of the source, although of course GitHub is the primary source repository). You can download the BUILD image and run in your favorite Apple II emulator or copy to CFFA, MicroTurbo or other Hard Disk emulator to boot, run, test and develop programs for A2osX.  Once 0.93 is released, we plan to update the media to include RELEASE, STABLE and BUILD editions of the media, like other projects you might find on GitHub; and each of these will include BOOT, INSTALL, SOURCE and EXTRA type media so that users and developers can BOOT or INSTALL A2osX to existing systems as they see fit.
 
 ## Requires :
@@ -47,9 +46,15 @@ Enhanced IIe (65c02 cpu) with 128k, //c, IIgs
 
 ## Documentation
 
-Much work is being done to expand and enhance the documentation for A2osX.  Some of this documentation is still in the rough draft stage, but is provided to bring you as much information about A2osX as quickly as possible.  We happily welcome any help and contributions from others to this or any area of the A2osX project.
+A lot of work is being done to expand and enhance the documentation for A2osX.  Some of this documentation is still in the rough draft stage, but is being provided to bring you as much information about A2osX as quickly as possible.  We happily welcome any help and contributions from others to this or any area of the A2osX project.
 
 The repository all A2osX documentation can be found **[here](.Docs)**.  This directory includes the system generated specifications for all the A2osX APIs as well as all our other documentation. 
+
+### Technical Documentation
+
+There are two types of Technical Documentation available.  First there is the Automatically Generated Documentation that is created from the source code of A2osX.  These documents capture all the internal A2osX APIs and system calls available to the A2osX programmer.  Developers should scan through these documents before beginning any A2osX project.  In addition, please make sure you look at the programming template file that is the best start to any A2osX program; it can be found **[here](.Docs/.TEMPLATE.S.txt)**.
+
+In addition there is the developer generated Technical Specifications that document the internal and external A2osX commands, utilities and shell language.  The master technical spec file can be found **[here](.Docs/Technical%20Spec.md)**.
 
 ### User Guide
 
