@@ -17,17 +17,31 @@ SLIST.GetData	jsr SLIST.Select
 				
 				jsr SLIST.GetDataLen
 				
-				lda ZPMemMgrSize		Get Offset
+				lda ZPSListDataPtr
+				ora ZPSListDataPtr+1
+				bne .10
+				
+				>LDYA SLIST.DataLen
+				>STYA ZPSListDataLen
+				jsr MEM.GetMainBuf
+				bcs .9
+				stx .82+1
+				>STYA ZPSListDataPtr
+				bra .12
+				
+.10				lda ZPMemMgrSize		Get Offset
 				cmp SLIST.DataLen
 				lda ZPMemMgrSize+1
 				sbc SLIST.DataLen+1
-				bcs .99
-				
-				lda ZPMemMgrSize
+				bcc .11
+				lda #E.NODATA
+.9				rts
+
+.11				lda ZPMemMgrSize
 				ldx ZPMemMgrSize+1
 				jsr SLIST.SkipDataAX
 				
-				lda SLIST.DataLen
+.12				lda SLIST.DataLen
 				sec
 				sbc ZPMemMgrSize
 				eor #$ff
@@ -39,7 +53,7 @@ SLIST.GetData	jsr SLIST.Select
 				
 				lda ZPSListDataLen
 				ora ZPSListDataLen
-				clc
+				sec
 				beq .1					String Mode
 				
 				lda ZPSListDataLen
@@ -48,7 +62,7 @@ SLIST.GetData	jsr SLIST.Select
 				lda ZPSListDataLen+1
 				eor #$ff
 				sta SLIST.nBufCnt+1
-				sec
+				clc
 				
 .1				ror SLIST.bStringMode
 
@@ -70,25 +84,37 @@ SLIST.GetData	jsr SLIST.Select
 				bpl .5
 				
 				cmp #C.CR
-				beq .8
+				beq .7
 				
 .5				jsr MEM.SetDataByte
 				inc ZPSListDataLen
 				bne .2
 				inc ZPSListDataLen+1
 				bra .2
-				
-.8				>LDYA ZPSListDataLen
-				clc
-				rts
-				
+
 .99				lda #E.NODATA
 				sec
+				rts
+
+.7				jsr SLIST.GetNextByte
+
+.8				bit SLIST.bStringMode
+				bpl .81
+				
+				lda #0
+				jsr MEM.SetDataByte
+				inc ZPSListDataLen
+				bne .81
+				inc ZPSListDataLen+1
+				
+.81				>LDYA ZPSListDataLen
+.82				ldx #$ff				SELF MODIFIED
+				clc
 				rts
 *--------------------------------------
 SLIST.AddData	jsr SLIST.Select
 				jsr SLIST.SkipKey
-
+				
 				>LDYA SLIST.KeyID		Save DataLen location
 				>STYA ZPSListKeyID		to update later
 
@@ -119,10 +145,11 @@ SLIST.AddData	jsr SLIST.Select
 .2				jsr MEM.GetDataByte
 				
 				jsr SLIST.AddBlockByte
-				bcc .9
+				bcc .1
 				rts
 
-.8				jsr SLIST.Select		go back to DataLen Location
+.8				jsr SLIST.Select.I		go back to DataLen Location
+
 				lda SLIST.DataLen
 				jsr SLIST.SetBlockByte
 				lda SLIST.DataLen+1
@@ -175,9 +202,6 @@ SLIST.GetByID	jsr SLIST.Select
 SLIST.NewKey	jsr SLIST.Search
 				bcc .99
 				
-				>LDYA SLIST.KeyID		Not Found...
-				>STYA ZPSListKeyID		save new KeyID
-				
 				lda SLIST.KeyLen
 				jsr SLIST.AddBlockByte
 				bcs .9
@@ -210,7 +234,7 @@ SLIST.NewKey	jsr SLIST.Search
 SLIST.Lookup	jsr SLIST.Search
 				bcs .9
 
-				>LDYA SLIST.KeyID
+				>LDYA ZPSListKeyID
 				ldx SLIST.KeyLen
 				
 .9				rts
@@ -252,7 +276,7 @@ SLIST.Free		sta .8+1
 SLIST.Select	jsr K.GetMemPtr
 				>STYA ZPSListIBlkPtr
 
-				ldy ZPSListKeyID+1
+SLIST.Select.I	ldy ZPSListKeyID+1
 				sty SLIST.BlockPtr
 				
 				lda (ZPSListIBlkPtr),y				
@@ -267,14 +291,12 @@ SLIST.Search	jsr K.GetMemPtr
 				>STYA ZPSListIBlkPtr
 
 				stz SLIST.BlockPtr
-				stz ZPSListKeyID+1
 				
 				lda (ZPSListIBlkPtr)			
 				jsr K.GetMemPtr
 				>STYA ZPSListDBlkPtr
 				
 				stz SLIST.BytePtr
-				stz	ZPSListKeyID
 				
 				ldy #$ff
 
@@ -284,16 +306,26 @@ SLIST.Search	jsr K.GetMemPtr
 				
 				sty SLIST.KeyLen
 				
-				jsr SLIST.GetBlockByte				
+				ldy SLIST.BlockPtr
+				lda (ZPSListDBlkPtr),y
 				beq .9
 				
-.2				cmp SLIST.KeyLen
+.2				>LDYA SLIST.KeyID
+				>STYA ZPSListKeyID
+				
+				ldy SLIST.BlockPtr
+				lda (ZPSListDBlkPtr),y
+				cmp SLIST.KeyLen
 				bne .5
+				
+				jsr SLIST.GetNextByte	Skip Len
 				
 				ldy #0
 				
-.3				jsr SLIST.GetNextBlockByte
+.3				phy
+				jsr SLIST.GetNextByte
 				sta .4+1
+				ply
 				jsr MEM.GetKeyCharY
 .4				cmp #$ff				SELF MODIFIED				
 				bne .5
@@ -307,8 +339,7 @@ SLIST.Search	jsr K.GetMemPtr
 				
 .5				jsr SLIST.Next			
 				
-				jsr SLIST.GetBlockByte				
-				bne	.2
+				bra	.2
 				
 .9				lda #E.NOKEY
 				sec
@@ -328,6 +359,8 @@ SLIST.SkipDataAX
 				txa
 				adc SLIST.BlockPtr
 				sta SLIST.BlockPtr
+				tay
+				lda (ZPSListIBlkPtr),y
 				jsr K.GetMemPtr
 				>STYA ZPSListDBlkPtr
 
@@ -434,22 +467,21 @@ SLIST.AddBlockByte
 				rts				
 *--------------------------------------
 SLIST.SetBlockByte
-				ldy SLIST.BlockPtr
+				ldy SLIST.BytePtr
 				sta (ZPSListDBlkPtr),y
-				inc SLIST.BlockPtr
+				inc SLIST.BytePtr
 				bne .8
 				
-				inc SLIST.BytePtr 
+				inc SLIST.BlockPtr 
 				
-				ldy SLIST.BytePtr 
+				ldy SLIST.BlockPtr 
 				lda (ZPSListIBlkPtr),y
 
 				jsr K.GetMemPtr
 				>STYA ZPSListDBlkPtr
 *				stz SLIST.BlockPtr
 				
-.8				ply
-				rts
+.8				rts
 *--------------------------------------
 SLIST.KeyLen	.BS 1
 SLIST.DataLen	.BS 2
