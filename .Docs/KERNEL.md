@@ -213,6 +213,75 @@ Remove an environment variable
 
 ## RETURN VALUE  
 
+# NewFIFO  
+
+## C  
+`int getpwuid(short int uid, S.PW* passwd );`  
+
+## ASM  
+`>PUSHW passwd`  
+`>LDYA size`  
+`>SYSCALL getpwuid`  
+
+## RETURN VALUE  
+A = hFIFO  
+
+# GetPWName  
+
+## C  
+`int getpwname(const char* name, S.PW* passwd );`  
+
+## ASM  
+`>PUSHW passwd`  
+`>LDYA name`  
+`>SYSCALL getpwname`  
+
+## RETURN VALUE  
+
+# PutPW  
+
+## C  
+`int putpw( S.PW* passwd );`  
+
+## ASM  
+`>LDYA passwd`  
+`>SYSCALL putpw`  
+
+## RETURN VALUE  
+
+# PutPW  
+
+## C  
+`int putpw( S.PW* passwd );`  
+
+## ASM  
+`>LDYA passwd`  
+`>SYSCALL putpw`  
+
+## RETURN VALUE  
+
+# PutPW  
+
+## C  
+`int putpw( S.PW* passwd );`  
+
+## ASM  
+`>LDYA passwd`  
+`>SYSCALL putpw`  
+
+## RETURN VALUE  
+
+# PutPW  
+
+## C  
+`int putpw( S.PW* passwd );`  
+
+## ASM  
+`>LDYA passwd`  
+`>SYSCALL putpw`  
+
+## RETURN VALUE  
+
 # LoadTxtFile  
 Load TXT a file in memory (with ending 0)  
 
@@ -458,6 +527,7 @@ Y,A = PTR to MemBlock
 
 ## RETURN VALUE  
  Y,A = Byte Count  
+ X = hMem (if DataPtr = 0)  
 
 # SListAddData  
 
