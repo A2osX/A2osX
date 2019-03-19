@@ -46,8 +46,7 @@ SYM.Init		>SYSCALL SListNew
 				
 .9				rts
 *---------------------------------------
-SYM.Reset		lda #0
-				sta (ZPGlobalBuf)
+SYM.Reset		>STZ.G SYM.bNewGlobal
 				rts
 *---------------------------------------
 SYM.Quit		>LDA.G SYM.hLookupBuf
@@ -71,8 +70,8 @@ SYM.Quit		>LDA.G SYM.hLookupBuf
 .8				clc
 				rts				
 *---------------------------------------
-SYM.Dump		stz ZPLinePtr
-				stz ZPLinePtr+1
+SYM.Dump		stz ZPPtr2
+				stz ZPPtr2+1
 
 				>LDA.G ASM.LI.ON
 				bpl .1
@@ -81,7 +80,7 @@ SYM.Dump		stz ZPLinePtr
 				>SYSCALL puts
 
 .1				>PUSHW ZPNameBuf	
-				>PUSHW ZPLinePtr
+				>PUSHW ZPPtr1
 				>LDA.G SYM.hGlobalList
 				>SYSCALL SListGetByID
 				bcc .10
@@ -89,10 +88,24 @@ SYM.Dump		stz ZPLinePtr
 				clc
 				rts
 				
-.10				>STYA ZPLinePtr			Save Next ID
+.10				>STYA ZPPtr2			Save Next ID
 				
-				>LDA.G ASM.LI.ON
-				bpl .1
+				>PUSHW ZPNameBuf		Label (PString)
+				>PUSHBI 2
+				>LDYA L.MSG.PSTR
+				>SYSCALL printf
+				bcs .9
+				
+				>PUSHWI 0				Start
+				>PUSHWI $ffff			End
+				>PUSHWI 0				Allocate
+				>PUSHW ZPPtr1
+				>LDA.G SYM.hGlobalList
+				>SYSCALL SListGetData
+				bcs .9
+				txa
+				
+				>STA.G hBuf
 				
 				ldy #SYMG.F				Get Symbol Size
 				lda (ZPGlobalBuf),y
@@ -117,11 +130,6 @@ SYM.Dump		stz ZPLinePtr
 				lda L.MSG.EQU0+1,x
 				>SYSCALL printf
 
-				>PUSHW ZPNameBuf		Label (PString)
-				>PUSHBI 2
-				>LDYA L.MSG.PSTR
-				>SYSCALL printf
-				bcs .9
 				ldy #SYMG.SIZE
 
 .4				tya
@@ -161,43 +169,45 @@ SYM.Dump		stz ZPLinePtr
 *---------------------------------------
 SYM.NewOrGetGlobal
 				>LDA.G ASM.PASS
-				bne SYM.GetGlobal		Pass #2: should be already defined...
+				bne SYM.GetGlobal
 
-SYM.NewGlobal	jsr SYM.LookupGlobal	Pass #1; try to add global...
-				bcc .9					Already Defined
-				
-				jsr SYM.GetName
-				bcs .99
-				
-				jsr SYM.PC2Global		A=PC Size
-
-				lda #SYMG.SIZE
-				sta (ZPGlobalBuf)
-				clc
-				rts
-				
-.9				lda #ERR.SYMBOL.REDEF
-				sec
-.99				rts					
-*---------------------------------------
-SYM.GetGlobal	>PUSHB.G SYM.hGlobalList
-				>PUSHW ZPLinePtr
-				>PUSHW ZPGlobalBuf
-				>SYSCALL SListLookup
-
-				bcs .9
+SYM.NewGlobal	>PUSHW ZPLinePtr		Pass #1; try to add global...
+				>LDA.G SYM.hGlobalList
+				>SYSCALL SListNewKey
+				bcs .9					Already Defined
+				>STYA.G SYM.GlobalID
+				txa
 				
 				adc ZPLinePtr
 				sta ZPLinePtr
 				bcc .1
 				
 				inc ZPLinePtr+1
-				clc		
 				
-.1				tya
-				>STA.G SYM.GlobalID+1
+.1				lda #$ff
+				>STA.G SYM.bNewGlobal
+
+				jmp SYM.PC2Acc
+				
+.9				lda #ERR.SYMBOL.REDEF
+				sec
+.99				rts					
+*---------------------------------------
+SYM.GetGlobal	>PUSHW ZPLinePtr		Pass #2: should be already defined...
+				>LDA.G SYM.hGlobalList
+				>SYSCALL SListLookup
+				bcs .9
+				>STYA.G SYM.GlobalID
+
 				txa
-				>STA.G SYM.GlobalID
+				adc ZPLinePtr
+				sta ZPLinePtr
+				bcc .1
+				
+				inc ZPLinePtr+1
+				
+.1				
+				clc
 				rts
 	
 .9				lda #ERR.UNDEF.SYMBOL
@@ -220,107 +230,31 @@ SYM.LookupGlobal
 .8	
 .9				rts
 *---------------------------------------
-SYM.FlushGlobal	lda (ZPGlobalBuf)
-				beq .8
-				
-				
-				>LDA.G ASM.PASS
-				bne .2
+SYM.StoreGlobal	>LDA.G ASM.PASS
+				bne .8
 
-				>PUSHW ZPNameBuf
-				>PUSHW ZPGlobalBuf
+				>PUSHWI 5
+				>PUSHW L.SRC.ACC.SIZE
 				>PUSHW.G SYM.GlobalID
 				>LDA.G SYM.hGlobalList
 				>SYSCALL SListAddData
-				bra .3
+				bcs .9
 				
-.2				>PUSHW ZPGlobalBuf
-				>PUSHW.G SYM.GlobalID
-				>LDA.G SYM.hGlobalList
-				>SYSCALL SListSetData
 				
-.3				bcs .9
-				lda #0
-				sta (ZPGlobalBuf)
 				rts
 				
 .8				clc
 .9				rts
 *---------------------------------------
-SYM.GetName		jsr SRC.GetChar
-				bcs .9
-				
-				ldy #0
-
-.1				jsr SRC.IsLetterOrDigit
-				bcc .2
-				cmp #'.'
-				beq .2
-				cmp #'_'
-				bne .8
-				
-.2				sta (ZPNameBuf),y
-				iny
-				jsr SRC.GetNextChar
-				bcc .1
-				
-.8				lda #0
-				sta (ZPNameBuf),y
-				clc
-				rts
-	
-.9				lda #ERR.SYNTAX.ERROR
-				sec	
-				rts				
-*---------------------------------------
-SYM.PC2Global	ldx #4
-				
-				ldy #ASM.PC
+SYM.PC2Acc		ldy #ASM.PC+3
 				
 .1				lda (pData),y
-				pha
-				iny
-				dex
-				bne .1
-				
-				ldx #4
-				
-				ldy #SYMG.V+3
-				
-.2				pla
-				sta (ZPGlobalBuf),y
+				sta SRC.ACC,x
 				dey
-				dex
-				bne .2
-				
-				ldx #4
-				ldy #ASM.PC+3
-				
-.3				lda	(ZPGlobalBuf),y
-				bne .4
-				dex
-				dey
-				bne .3
-
-.4				txa
-
-				ldy #SYMG.F
-				sta (ZPGlobalBuf),y
-
-				txa						A=PC Size
-
-				rts
-*---------------------------------------
-SYM.Acc2Global	ldx #4
-				ldy #SYMG.F+4
-				
-.1				lda SRC.ACC.SIZE,x
-				sta (ZPGlobalBuf),y
-				dey
-				dex
 				bpl .1
-				
-				clc
+
+				lda #4
+				sta SRC.ACC.SIZE
 				rts
 *---------------------------------------
 SYM.Lookup2Acc	ldy #SYMG.F+4
@@ -346,8 +280,8 @@ SYM.Lookup2Acc	ldy #SYMG.F+4
 SYM.NewOrGetLocalA
 				tax						Save ID
 				
-				lda (ZPGlobalBuf)		not in a global label
-				bne .1
+				>LDA.G SYM.bNewGlobal	not in a global label
+				bmi .1
 				
 				lda #ERR.INV.LABEL				
 				clc
