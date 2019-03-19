@@ -1,27 +1,27 @@
 # A2osX (0.92) Multi-Tasking OS for Apple II
 
-This is the functional specification for A2osX, its system modules, internal and external commands and shell language.  Please refer to the other A2osX documentation such as the User Guide, Notes for Developers and Shell Programming Guide for more information.
+This is the functional specification for A2osX and its system modules, internal and external commands and shell language.  Please refer to the other A2osX documentation such as the User Guide, Notes for Developers and Shell Programming Guide for more information.
 
 ## SYS/KM* Supported Hardware At Kernel Level (ProDOS):
 
-| KM.Name      | Status  | Comment |
-| -------      | ------  | ------- |
-| KM.APPLETALK | Working | AppleTalk Support for ProDOS |
-| KM.NSC       | Working | No-Slot-Clock/DS1216E |
-| KM.RAMWORKS  | Working | AE-Ramworks I,II,III  |
-| KM.VSDRIVE   | Working | ADTPro Virtual Drive for SSC |
+| KM.Name      | Status  | Comment | K.Ver |
+| -------      | ------  | ------- | ------|
+| KM.APPLETALK | Working | AppleTalk Support for ProDOS | 0.92 |
+| KM.NSC       | Working | No-Slot-Clock/DS1216E | 0.92 |
+| KM.RAMWORKS  | Working | AE-Ramworks I,II,III  | 0.92 |
+| KM.VSDRIVE   | Working | ADTPro Virtual Drive for SSC | 0.92 |
 
 ## SBIN,Daemons/Commands:
 
 | Name    | Status      | Comment | K.Ver |
 | ----    | ------      | ------- | ------|
 | DHCPCLNT| Working     | rewritten to use new Socket API | 0.92 |
-| GETTY   | Working     | -E : Exit on remote close | 0.92 |
+| GETTY   | Working     | -E : Exit on remote close | 0.93 |
 | HTTPD   | In Progress |  | 0.9 |
-| INSDRV  | Working     |         | 0.92 |
-| KCONFIG | Working     | Kernel Configuration Utility | 0.92 |
-| LOGIN   | In Progress | no auth using /etc/passwd yet | 0.92 |
-| SHELL   | Working     | (See Internal Shell commands) | 0.92 |
+| INSDRV  | Working     |         | 0.93 |
+| KCONFIG | Working     | Kernel Configuration Utility | 0.93 |
+| LOGIN   | In Progress | no auth using /etc/passwd yet | 0.93 |
+| SHELL   | Working     | (See Internal Shell commands) | 0.93 |
 | TCPIPD  | Working     | ARP,IP,ICMP,UDP & TCP ok | 0.92 |
 | TELNETD | Working  |  | 0.92 |
 
@@ -110,46 +110,46 @@ note : '$VAR' does NOT expand Variable
 | Uther2.AI.DRV | In Progress | With ARP/IP Offloading | 0.92 |
 
 ## BIN,External Shell commands:
-| Name | Status | Comment | 
-| ---- | ------ | ------- | 
-| CAT | Working | -A : Show All non printable caracters <br> -N : Number all output lines <br> -S : Suppress repeated empty output lines |
-| CUT | Working | CUT \<opt\> "line" or CMD\|CUT \<opt\> <br> -H : This help screen <br> -F nn : Output field nn <br> -M nn : Output starting at nn <br> -N nn : Output Ending at nn <br> -S ch : Change default SPACE separator to 'ch' |
-| CHGRP | In Progress | -C : Continue On Error <br> -R : Recurse subdirectories |
-| CHMOD | In Progress | -C : Continue On Error <br> -R : Recurse subdirectories |
-| CHOWN | In Progress | -C : Continue On Error <br> -R : Recurse subdirectories |
-| CHTYP | Working | -C : Continue On Error <br> -R : Recurse subdirectories |
-| CP | Working | -C : Continue On Error <br> -Q : Quiet <br> -R : Recurse subdirectories <br> -Y : Dont't Prompt For Override |
-| EDIT | Working | still missing : find/replace | 
-| FORMAT | In Progress | FORMAT \<BLOCKDEV\> [VOLUME.NAME] <br> -L : Low-Level Format *not currently supported <br> -1..9 : Catalog Size (block count) |
-| GREP | Working | GREP \<opt\> PATTERN FILE or CMD\|GREP \<opt\> PATTERN <br> -H : This help screen <br> -I : Ignore Case <br> -N : Print line Number |
-| KILL | Working | KILL \<signal\> PID <br> -0 : No Signal <br> -1 : SIGQUIT |
-| LS | Working | -A : Print . & .. <br> -C : Single column listing <br> -F : Single column, includes full path <br> -L : long listing with size/date... <br> -R : Recurse subdirectories |
-| LSDEV | Working | Dump device Drivers | 
-| LSOF | Working | List Open Files | 
-| MD5 | Working | MD5 \[ -D : String \| file \] | 
-| MEM | Working | Old dump behavior is now MEMDUMP.  New MEM command displays MEMSTAT (Main, Aux & Kernel Memory) | 
-| MKDIR | Working | Make Directory| 
-| MORE | Working | MORE \<File\> or CMD\|MORE \<opt\> <br> -H : This help screen <br> -N : Number all output lines <br> -P : Page mode, no scroll <br> -S : Process ESC codes |
-| NSCUTIL | Working | NSCUTIL DD/MM/YY,hh:mm:ss <br> Tool for setting time in NSC/DL1216E |
-| MV | Working | -C : Continue On Error <br> -Q : Quiet <br> -R : Recurse subdirectories <br> -Y : Dont't Prompt For Override |
-| PS | Working | List Processes| 
-| RM | Working | RM \[File/Dir, *,? wildcards allowed\] <br> -C : Continue On Error <br> -Q : Quiet <br> -R : Recurse subdirectories |
+| Name | Status | Comment | K.Ver |
+| ---- | ------ | ------- | ----- |
+| CAT | Working | -A : Show All non printable caracters <br> -N : Number all output lines <br> -S : Suppress repeated empty output lines | 0.93 |
+| CUT | Working | CUT \<opt\> "line" or CMD\|CUT \<opt\> <br> -H : This help screen <br> -F nn : Output field nn <br> -M nn : Output starting at nn <br> -N nn : Output Ending at nn <br> -S ch : Change default SPACE separator to 'ch' | 0.93 |
+| CHGRP | In Progress | -C : Continue On Error <br> -R : Recurse subdirectories | - |
+| CHMOD | In Progress | -C : Continue On Error <br> -R : Recurse subdirectories | - |
+| CHOWN | In Progress | -C : Continue On Error <br> -R : Recurse subdirectories | - |
+| CHTYP | Working | -C : Continue On Error <br> -R : Recurse subdirectories | 0.92 |
+| CP | Working | -C : Continue On Error <br> -Q : Quiet <br> -R : Recurse subdirectories <br> -Y : Dont't Prompt For Override | 0.93 |
+| EDIT | Working | still missing : find/replace | 0.93 |
+| FORMAT | In Progress | FORMAT \<BLOCKDEV\> [VOLUME.NAME] <br> -L : Low-Level Format *not currently supported <br> -1..9 : Catalog Size (block count) | 0.92 |
+| GREP | Working | GREP \<opt\> PATTERN FILE or CMD\|GREP \<opt\> PATTERN <br> -H : This help screen <br> -I : Ignore Case <br> -N : Print line Number | 0.93 |
+| KILL | Working | KILL \<signal\> PID <br> -0 : No Signal <br> -1 : SIGQUIT | 0.93 |
+| LS | Working | -A : Print . & .. <br> -C : Single column listing <br> -F : Single column, includes full path <br> -L : long listing with size/date... <br> -R : Recurse subdirectories | 0.93 |
+| LSDEV | Working | Dump device Drivers | 0.93 | 
+| LSOF | Working | List Open Files |  0.93 |
+| MD5 | Working | MD5 \[ -D : String \| file \] | 0.93 | 
+| MEM | Working | Old dump behavior is now MEMDUMP.  New MEM command displays MEMSTAT (Main, Aux & Kernel Memory) |  0.93 |
+| MKDIR | Working | Make Directory|  0.93 |
+| MORE | Working | MORE \<File\> or CMD\|MORE \<opt\> <br> -H : This help screen <br> -N : Number all output lines <br> -P : Page mode, no scroll <br> -S : Process ESC codes | 0.93 |
+| NSCUTIL | Working | NSCUTIL DD/MM/YY,hh:mm:ss <br> Tool for setting time in NSC/DL1216E | 0.92 |
+| MV | Working | -C : Continue On Error <br> -Q : Quiet <br> -R : Recurse subdirectories <br> -Y : Dont't Prompt For Override | 0.93 |
+| PS | Working | List Processes|  0.93 |
+| RM | Working | RM \[File/Dir, *,? wildcards allowed\] <br> -C : Continue On Error <br> -Q : Quiet <br> -R : Recurse subdirectories | 0.93 |
 
 ## Network (TCPIP) tools:
-| Name | Status | Comment | 
-| ---- | ------ | ------- | 
-| ARP | Working | dump ARP cache, setup a static ARP entry | 
-| DNSINFO | Working | dump DNS cache, setup a static DNS entry | 
-| HTTPGET | In Progress | HTTPGET <ip\|host> [port] <br> -U Url <br> -F UrlFile |
-| IPCONFIG | Working | -D : Try to get IP address from DHCP <br> -E : Read ETC files <br> -S : Set/Reset TCPIP configuration (-E, then -D if required) |
-| NETSTAT | Working | Display socket status | 
-| PING | Working | PING <ip\|host> <br> -1..9 : Ping Count |
-| TELNET | Working | TELNET <ip\|host> [port] | 
+| Name | Status | Comment | K.Ver |
+| ---- | ------ | ------- | ----- |
+| ARP | Working | dump ARP cache, setup a static ARP entry | 0.92 | 
+| DNSINFO | Working | dump DNS cache, setup a static DNS entry |  0.92 |
+| HTTPGET | In Progress | HTTPGET <ip\|host> [port] <br> -U Url <br> -F UrlFile | 0.92 |
+| IPCONFIG | Working | -D : Try to get IP address from DHCP <br> -E : Read ETC files <br> -S : Set/Reset TCPIP configuration (-E, then -D if required) | 0.92 |
+| NETSTAT | Working | Display socket status |  0.92 |
+| PING | Working | PING <ip\|host> <br> -1..9 : Ping Count | 0.92 |
+| TELNET | Working | TELNET <ip\|host> [port] |  0.92 |
 
 ## DEV tools:
-| Name | Status | Comment | 
-| ---- | ------ | ------- | 
-| ASM | In Progress | S-C MASM based multi CPU assembler | 
-| MEMDUMP | Working | Tool to track memory leak| 
-| RPCDUMP | In Progress | Tool based on UDP socket API, renamed from RPCINFO <br> RPCDUMP <ip\|host> | |
+| Name | Status | Comment | K.Ver |
+| ---- | ------ | ------- | ----- |
+| ASM | In Progress | S-C MASM based multi CPU assembler | - |
+| MEMDUMP | Working | Tool to track memory leak|  0.93 |
+| RPCDUMP | In Progress | Tool based on UDP socket API, renamed from RPCINFO <br> RPCDUMP <ip\|host> | 0.92 |
 
