@@ -50,6 +50,8 @@ A lot of work is being done to expand and enhance the documentation for A2osX.  
 
 The repository all A2osX documentation can be found **[here](.Docs)**.  This directory includes the system generated specifications for all the A2osX APIs as well as all our other documentation. 
 
+Of special note please check out our brand new **[Users Guide](.Docs/User%20Guide.md)** and **[Developers Guide](.Docs/Developers%20Guide.md)**. 
+
 ### Technical Documentation
 
 There are two types of Technical Documentation available.  First there is the Automatically Generated Documentation that is created from the source code of A2osX.  These documents capture all the internal A2osX APIs and system calls available to the A2osX programmer.  Developers should scan through these documents before beginning any A2osX project.  In addition, please make sure you look at the programming template file that is the best start to any A2osX program; it can be found **[here](.Docs/.TEMPLATE.S.txt)**.

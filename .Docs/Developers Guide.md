@@ -1,14 +1,6 @@
-
-A2osX is already much more then a "primitive" command line operating system.  While A2osX runs on top of ProDos, leveraging its support for block devices such as floppy drives, hard drives, SmartPort drives, etc., it adds a preemptive multitasking kernel with a greatly enhanced shell that supports arguments, redirection, piping, and probably the biggest enhancement, a full scripting language.  In addition, at its core, the OS supports multiple virtual terminals (i.e. OA-1 OA-2 gets you different sessions) as well as concurrent external terminals via SSC (getty on SSC serial) or network (TELNETD).  A GUI interface is being built and will be part of a future release.
-
-A core element at the foundation of A2osX that enabling its multiuser  multitasking capabilities is that it is build on a reusable set of APIs and LIBs (written in Assembly) that all programs can and do use which make them very lean and fast.  For instance, there is one network API that any program can call which in turn handles the I/O to different LAN cards via drivers.  Key here is that multiple programs can be using the network at the same time such as the TELNETD server and the TELNET client.  A key benefit is that the code for doing each program is smaller because the network API is doing a lot of the work.  And with CORE APIs like printf and LIBs such as Network only loaded once, much like a DLL in Windows, significant memory is conserved providing the resources needed to support multitasking and multiple users.
-
-Its because of the Uthernet2 that I got hooked on A2osX and joined on to supported the project.  Not only does it have a telnet client, it has other net centric tools and more being added.  I will be honest, there is more that needs to be done, but it progressing rapidly and seems like a great foundation for building net apps on an Apple 2.
-Next post
-I agree with edward, that the constraint tends to be memory and not processor (we can wait that extra second). But 64K is a tight squeeze. A2osX does make use of 128k (requires it) of ram instead of just 64K and it still is pretty lean in that after ProDOS then A2osX loaded, you have 26K of main mem free.  The fact that Core APIs and Libs are shared helps a lot.  Having said that, don't expect that you are going to write an AppleWorks size App running under A2osX, that would probably be a strectch, though it does come with a VI or EDIT type editor
+# A2osX Developers Guide
 
 ASM is needed because at end of day its the most strict mem mgmt (the language that allows you to be stringy on mem use)  so of course the core of A2osX is in ASM.  however after we make out own ASM that makes the OS self making (we talked about this) we plan a CSH which is first step to Interactive C and then a BIn that will make C feed to ASM (the point of 23) so we will get there, but hey stupid, the CORE has to be ASM to be tight with mem
-
 
 # Notes for Developers
 
@@ -35,57 +27,6 @@ What we do in our current work flow, we edit the file with Notepad++, save local
 ASM program hosted in A2osX.
 Second part of plan is a AppleTalk over Ethernet Libray (LIBETALK) for A2osX that will allow the system to mount a remote file system on your Apple or Apple Emulator.  The plan is to have this file system be the same folder synced via SVN with GitHub containing the A2osX source code.  This would allow you to edit source code on either the Apple using A2osX EDIT or from your PC/MAC using a native text editor on those systems.  Not only will you be able to ASM any A2osX drivers, libraries or programs this way, we will create MAKE scripts that run on A2osZ that can create new builds automatically.
 
-## Developing for A2osX
-
-### The A2osX Shell (SH)
-
-One of the most significant parts of A2osX is its shell which can perform both interactive and scripted tasks.  With the interactive part of the shell you can perform many common and complex tasks using both built-in (native or internal to shell) and external (BINs or executables) commands.  Internal commands include CD (change directory), MD (make directory), DATE, TIME, etc.  External commands include CP (copy), RM (remove), CAT (display file contents), TELNET, etc.
-
-
-It should be noted, that it is possible to create and execute short scripts right on the interactive command line (these are run once and not saved like true scripts).  An example  
-
-The 32-bit int data type can hold integer values in the range of −2,147,483,648 to 2,147,483,647.  If you add to or subtract from INTs that would cause a RANGE error, you actually get a result that wraps around the range, so if you add 1 to 2,147,483,647 you will get −2,147,483,648.
-
-Strings can be up to 255 characters in length.  Note, like INTs, if you try to store more then 255 chars in a string, you get the same wraparound affect where the first 255 chars are tossed out the string is set to the remaining chars, so if you concatenate 3 strings of 100 chars the resulting string will be the last 45 chars of the 3rd original string. 
-
-
-### File System Layout of A2osX
-
-| Path | Use |
-| ---- | --- |
-| / | is the root directory|
-|/bin/ and /usr/bin/ |store user commands.|
-|/boot/| contains files used for system startup including the kernel.|
-|/dev/| contains device files|
-|/etc/| is where configuration files and directories are located.|
-|/home/| is the default location for users‟ home directories.|
-|/lib/ and /usr/lib/ |hold library files used by programs in /bin/ and /sbin/.|
-|/mnt/ |holds the mount points for file systems that were mounted after boot.|
-|/opt/ |is used primarily for installation and unintallation of third-party software. Holds optional files and programs.|
-|/root/ |is the home directory of the superuser "root"|
-|/sbin/ and /usr/sbin/ |store system commands.|
-|/tmp/ |is the system temporary directory. All users have read+write access to /tmp/.|
-|/usr/ |contains files related to users such as application files and related library files ("usr" is an acronym that stands for UNIX system resources).|
-|/var/ | holds files and directories that are constantly changing such as printer spools and log files.|
-
-## A2osX Boot Process
-
-On a Drive dedicated to A2osX, likely your boot process would be:
-Prodos
-nsc.sys if present and you have one of those
-a2osx.system
-new quit code (what is different?)
-    if no parameter loads KERNEL
-    if a param sent, load param
-    idea is passing a .SYSTEM file, then once .SYSTEM file is QUITting, the QC will reload KERNEL this could allow launching .SYSTEM files at $
-This then loads KMs then INIT
-GETTY, LOGIN, SHELL PROFILE
-
-
-### Maintenance mode
-
-
-
 ## Tools A2osX Developers Use
 
 ### S-C Macro Assembler
@@ -93,7 +34,6 @@ GETTY, LOGIN, SHELL PROFILE
 by the S-C Software Corporation
 
 You can find more information about this assembler here: http://www.txbobsc.com/scsc/scassembler/index.html
-
 
 ### Github
 
@@ -117,10 +57,7 @@ VSDrive, Localhostmode ADTPro and setting this up...
 make a bat file called adtlocal.bat and put in it
 @call "%~dp0adtpro.bat" localhost
 
-
 ### CiderPress 4.0.3
-
-
 
 ### PuTTY
 
@@ -132,7 +69,6 @@ Use Notepad++ which you can download from....
 
 #### S-C MASM color scheme for Notepad++
 ...drop _Tools/userDefineLang.xml in %APPDATA%\Notepad++
-
 
 THere is a userDefinedLang.xlm file in the .Tools dir that you will want to copy to Notepad... then when editing ASM files (.S) you can change your language to S-C MASM 65C02 and notepad++ will do the proper highlighting.
 
