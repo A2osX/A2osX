@@ -1,5 +1,10 @@
 # A2osX User Guide
 
+## What is A2osX?
+
+It is a new operating environment, layered on top of ProDOS, that brings a powerful new way of building and running programs on the venerable Apple // platform. A2osX is a pre-emptive multi-tasking and multi-user system that employs libraries and drivers to provide multi-application consistent access to system resources such as terminals, network, and files.
+Part of what makes A2osX different, is that all programs, utilities, drivers and libraries are made reentrant and relocatable so that they can be run concurrently and do not depend on a set memory location.  One of the clear benefits is that multiple users can run the same program and it is only loaded once, and more significantly, drivers and libraries for resources such as networking are only loaded once and can be used my multiple applications at the same time.
+
 A2osX is already much more then a "primitive" command line operating system.  While A2osX runs on top of ProDos, leveraging its support for block devices such as floppy drives, hard drives, SmartPort drives, etc.; it adds a preemptive multitasking kernel with a greatly enhanced shell that supports arguments, redirection, piping, and probably the biggest enhancement, a full scripting language.  In addition, at its core, the A2osX supports multiple virtual terminals (i.e. OA-1 OA-2 gets you different sessions) as well as concurrent external terminals via SSC (getty on SSC serial) or network (TELNETD).  A GUI interface is being built and will be part of a future release.
 
 A core element at the foundation of A2osX that enables its multiuser multitasking capabilities is its reusable set of APIs and Libraries (written in Assembly) that all programs can and do use that make them very lean and fast.  For instance, there is one network API that any program can call which in turn handles the I/O to different LAN cards via drivers.  A significant feature is that multiple programs can be using the network at the same time such as the TELNETD server, the HTTPD server and/or the TELNET client.  A key benefit is that the code for doing each program is smaller because the network API is doing a lot of the work.  And since CORE APIs like printf and libraries such as Network loaded only once, much like a DLL in Windows, significant memory is conserved providing the resources needed to support multitasking and multiple users.
@@ -18,11 +23,15 @@ One of the most significant parts of A2osX is its shell which can perform both i
 
 It should be noted, that it is possible to create and execute short scripts right on the interactive command line (these are run once and not saved like true scripts).  An example  
 
-The 32-bit int data type can hold integer values in the range of −2,147,483,648 to 2,147,483,647.  If you add to or subtract from INTs that would cause a RANGE error, you actually get a result that wraps around the range, so if you add 1 to 2,147,483,647 you will get −2,147,483,648.
-
-Strings can be up to 255 characters in length.  Note, like INTs, if you try to store more then 255 chars in a string, you get the same wraparound affect where the first 255 chars are tossed out the string is set to the remaining chars, so if you concatenate 3 strings of 100 chars the resulting string will be the last 45 chars of the 3rd original string. 
+An entire Shell Developers Guide is being written to help you with both using and writing scripts for the A2osX Shell.  It can be found **[Here](.Docs/Shell%20Developers%20Guide.md).**
 
 ### File System Layout of A2osX
+
+To use files and directories well, you need to understand the concept of a hierarchical file system.  This section introduces the A2osX file system and shows you how to work with files and directories using several A2osX commands.
+A2osX organizes information in files and directories.  A directory is a special file that can contain other files and directories.  Because a directory can contain other directories, this method of organizing diles gives rise to a hierarchical structure.  This organization of files is the file system.
+Folks who use and are accustomed to working with Linux or Unix will find familiarity with A2osX.  Many of the commands and much of the Shell interface follows the User Interface (UI) presented by Linux.  There is however one key difference, that makes A2osX adhere more to the ProDOS model and that is the concept of the ROOT directory or volume.
+You move around the file sytesm with CD and pwd will tell you were you are.  Your default prompt includes your current path.
+
 
 The following are the primary sub-directories used by A2osX.  While A2osX supports all standard ProDOS media/volumes and you can use its commands and utilities (like cp [copy] ls [catalog] rm [delete]) on these volumes, A2osX and its modules, commands, scripts, etc. must be installed under one directory that has these directories (at their related files) stored under it.  Below where you see a ./ (dot slash) in front of each path, think of that as the volume name or directory name where you have installed A2osX.  For example, on the media we supplied called BOOT, which has a volume name of /A2OSX.BOOT/, you will find directories named BIN and ETC.  The full path name for those dirs would be /A2OSX.BOOT/BIN/ and /A2OSX.BOOT/ETC/.  If you installed A2OSX on your own harddrive called /MYVOL1 in a directory called A2OSX, then your ./ would refer to /MYVOL1/A2OSX/ and your BIN would be /MYVOL1/A2OSX/BIN/.  See the installation section for more information on using A2osX with your own volumes.
 
@@ -41,7 +50,15 @@ The following are the primary sub-directories used by A2osX.  While A2osX suppor
 |./sys/| contains files used for system start-up including the kernel.|
 |./tmp/ |is the system temporary directory. All users have read+write access to /tmp/.|
 |./usr/ |contains files related to users such as application files and related library files |
-|./var/ | holds files and directories that are constantly changing such as printer spools and log files.|
+|./usr/share/| holds files and directories for optional packages such as MAN, MAKE, TEST and ADMIN |
+|./usr/share/admin|This directory contains the scripts used to Administer A2osX|
+|./usr/share/make|This directory contains the scripts used to build the various floppies and disk images that are distributed as part of A2osX |
+|./usr/share/test|This directory contains the scripts used to test A2osX after each new build |
+| ./usr/src/ | holds source code files for A2osX and other programs |
+|./var/ | holds files and directories that are constantly changing such as printer spools and log files or data for installed applications.|
+| ./var/log/ | holds log files for various programs and scripts |
+
+Please note that not all of the above directories are found on every disk or image for A2osX.  Several of them are optionally installed or omitted from systems during initial configuration and may be added or removed at a later time.
 
 ## A2osX Boot Process
 
@@ -56,6 +73,7 @@ First, let's walk through the most standard and likely boot process of A2osX usi
 - A2OSX.SYSTEM will then load and run all the KM.* files it finds in the ./SYS sub-directory.  These are Kernel Modules that configure ProDOS before the main Kernel of A2osX loads.  See the section on KMs for more information on what each module does.
 - A2OSX.SYSTEM then installs a new QUIT CODE routine
 - The new QUIT CODE routine loads and runs KERNEL found in ./SYS.
+- QUIT CODE loads Kernel Parameters stored in ./A2OSX.KCONFIG if the file exists.
 - KERNEL then executes the boot script stored in ./ETC/INIT
 - KERNEL starts GETTY Process (./SBIN/GETTY) for each configured virtual terminal
 - Each GETTY process starts a LOGIN process (./SBIN/LOGIN)
@@ -136,3 +154,190 @@ A2osX supports physical terminals (or a PC running a terminal emulator) via a Su
 ### Internet Terminals
 
 A2osX supports multiple internet connected terminals via a TELNETD server process.  The TELNETD process supports VT-100 terminals, so you should set your Telnet client (i.e. PuTTY) to use VT-100 emulation.  Of course you can use another Apple running A2osX and the TELNET client to connect to an Apple running A2osX and the TELNETD server.
+
+## Hardware
+
+### Hardware Requirements
+
+Minimum Hardware Requirements
+128K Enhanced (65C02) Apple //e
+Apple //c
+Apple //GS
+
+### Supported Hardware
+
+Any ProDOS Block Device (5.25 & 3.5 Floppy Drives, SmartPort Hard Drive and Ram Disks)
+NoSlot Clock or ThunderClock
+Super Serial Card
+Mouse Card
+Network Card (Uthernet I or II, LanCes)
+
+## Getting Started
+
+A2osX Distribution Media
+Several media image files are being made available.  
+BUILD
+BOOT
+MAKE
+AW
+INSTALL
+APPWIN
+
+ Several images are available including:
+  BUILD     a 32-megabyte bootable hardrive image containing all of A2osX.      
+  BOOT      a 140K bootable floppy image containing the minimum files needed to boot the A2osx Kernel and core functions.
+  INST100-  A series of 140K floppy images that can be used to install          
+  INST10x   A2osx onto your own ProDOS volume. Disk 100 is bootable and         
+                  automatically runs an appopriate instalation script.                
+  INST800-  A series of 800K floppy images that can be used to install          
+  INST80x   A2osx onto your own ProDOS volume. Disk 100 is bootable and         
+            automatically runs an appopriate instalation script. 
+
+
+### Using AppleWin
+
+Running from supplied media
+
+### Installing on Your Apple
+
+Check HW requirements.  Installing on your own media / Selecting your Media
+Check that you have enough free space if you are installing to your own ProDOS volume.  For the base A2osX boot you need under 200K of free space, but a complete install may take a megabyte or more.
+Configure
+Explore
+Find out more
+MAN
+Additional resources
+
+##Networking
+
+Hardware Drivers
+	MAC Address
+TCPIPD
+Fixed IP
+	TCPIP.CONF file
+	Internet Addresses
+DHCP
+HOSTS file
+HOSTNAME file
+Configuring Network at Boot Time
+	ETC/INIT
+Configuring Network on Demand
+	NET script
+Telnet Server
+Telnet Client
+PING
+ARP
+NETSTAT
+HTTPGET
+dhcpclnt
+Telnetd
+httpd
+
+
+##Utilities
+
+###Using Text Editors
+EDIT
+
+###Commands for navigating the file system
+CD
+CD ..
+PWD
+PATH
+PUSHD
+POPD
+LS
+LS -L or L
+###Commands for working with files
+MV
+CP
+RM
+###Commands for working with directories
+MD
+RD
+
+## License
+
+A2osX is made available under the GNU License 2.0.  Our Full License can he found **[Here](../License).**
+
+##Error Messages
+
+Shell Errors
+
+| Hex | Error Code | Error Message |
+| --- | --- | --- |
+|||User Interrupt|
+|||Command Syntax Error|
+|||Script Syntax Error|
+|||Expression Syntax Error|
+|||Stack Overflow|
+|||LOOP Without WHILE|
+|||NEXT Without FOR|
+|||FI/ELSE Without IF|
+|||Bad Expression|
+|||Bad File Type|
+|||Unknown Error|
+
+* ProDOS ERROR CODES : $00->$5F
+* Lib ERROR CODES : $80->$BF
+* Kernel ERROR CODES : $F0->$FF
+
+| Hex | Error Code | Error Message |
+| --- | --- | --- |
+| $FF |   0 | Out Of Memory Error|
+| $FE |   0 | Out Of Handle Error|
+| $FD |   0 | Invalid Handle|
+| $FC |   0 | Buffer Overflow|
+| $FB |   0 | Bad Path|
+| $FA |   0 | Bad Argument|
+| $F9 |   0 | No Such Process Error|
+| $F8 |   0 | Syntax Error|
+| $F7 |   0 | Env is Full|
+| $F6 |   0 | Invalid BIN format|
+| $F5 |   0 | File Too Big Error|
+| $F4 |   0 | Out Of Bound|
+| $F3 |   0 | Invalid Numerical|
+| $F2 |   0 | Invalid User|
+| $EF |   0 | Undefined Key|
+| $EE |   0 | Duplicate Key|
+| $ED |   0 | No Data|
+| $EC |   0 | Data Length Mismatch|
+
+
+ProDOS or MLI Errors
+
+| Hex | Error Code | Error Message |
+| --- | --- | --- |
+| $00 |   0 | No Error|
+| $01 |   1 | Bad Call Number|
+| $04 |   4 | Bad Parameter Count|
+| $06 |   6 | Communications Error|
+| $21 |  33 | Invalid Status Code|
+| $25 |  37 | Interrupt Table Full|
+| $27 |  39 | I/O Error|
+| $28 |  40 | No Device Connected|
+| $2B |  43 | Write Protected|
+| $2E |  46 | Disk Switched|
+| $2F |  47 | Device Offline|
+| $40 |  64 | Invalid Pathname|
+| $42 |  66 | Maximum Number of Files Open|
+| $43 |  67 | Invalid Reference Number|
+| $44 |  68 | Directory Not Found|
+| $45 |  69 | Volume Not Found|
+| $46 |  70 | File Not Found|
+| $47 |  71 | Duplicate File Name|
+| $48 |  72 | Volume Full|
+| $49 |  73 | Directory Full|
+| $4A |  74 | Incompatible File Format|
+| $4B |  75 | Unsupported Storage Type|
+| $4C |  76 | End of File, No More Data|
+| $4D |  77 | Beyond EOF|
+| $4E |  78 | File Access Error, File Locked|
+| $50 |  80 | File Already Open|
+| $51 |  81 | Directory Structure Damaged|
+| $53 |  83 | Invalid Parameter|
+| $55 |  85 | Too Many Volumes|
+| $56 |  86 | Bad Buffer Address|
+| $57 |  87 | Duplicate Volume|
+| $5A |  90 | File Structure Damaged|
+

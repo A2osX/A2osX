@@ -66,3 +66,6 @@ A draft of the first A2osX User Guide can be found on GitHub **[here](.Docs/User
 
 A draft of the first A2osX Notes for Developers can be found on GitHub **[here](.Docs/Notes%20for%20Developers.md)**.
 
+## License
+
+A2osX is made available under the GNU License 2.0.  Our Full License can he found **[Here](./License).**
