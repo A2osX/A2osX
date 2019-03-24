@@ -6,7 +6,7 @@ A2osX comes with a nice variety of system, file, network and data utilities or w
 
 ## System Commands
 
-You will usually not use these commands, they are more commonly found in A2osX system scripts such as ./ETC/INIT or they are launched by the A2osX Kernel itself.  All of these commands are found in ./SBIN/ letting you know they are special system commands.
+Typcically, you will not directly use the System group commands; they are more commonly found in A2osX system scripts such as ./ETC/INIT or they are launched by the A2osX Kernel itself.  All of these commands are found in ./SBIN/ letting you know they are special system commands.
 
 ### GETTY
 
@@ -14,11 +14,20 @@ You will usually not use these commands, they are more commonly found in A2osX s
 | --- | --- |
 | GETTY | -E : Exit upon disconnect |
 
+GETTY, short for "get tty", is a system process for A2osX that manages physical or virtual terminals (TTYs). When it detects a connection, it prompts for a username and then loads the system process LOGIN to authenticate the user.  Each GETTY process creates a pseudo file such as /DEV/TTY1 /DEV/TTY2 to allow A2osX pass input/output streams between processes and connected users.
+
+GETTY handles 3 types of connections:
+- for virtual terminals presented and controlled by your Apple Screen and Keyboard.  One GETTY process serves one virtual terminal.  You can configure the number of virtual terminals on your A2osX system using the KCONFIG utility.  Please see **[KCONFIG](###KCONFIG)***. 
+- for serial terminals (or emulated terminals i.e. a PC running a VT-100 emulator) connected to your Apple via a Super Serial Card.  One GETTY process serves one terminal.  See the User Guide for setup and configuration information on connecting Physical Terminals. 
+- for internet terminals connected to your Apple via via the internet using A2osX TCP networking suite.  This suite includes a TELNETD server process that listens for requests from the internet and when such a request is initiated, TELNETD will launch a GETTY process to support that user.  One GETTY process will launch for each TELNET user and will exit when then user disconnects (the TELNETD process calls GETTY with the -E option). 
+
 ### INSDRV
 
 | Command |
 | ---- |
 | INSDRV Driver |
+
+INSDRV, short for "install driver", is a system process that loads and initializes hardware drivers for A2osX.  Drivers are available for the Apple Mouse, Super Serial Card, and a range of Ethernet cards.  Please see the Hardware section of the User Guide for more complete information on the drivers available for A2osX and enabling them in your system.
 
 ### KCONFIG
 
@@ -26,7 +35,16 @@ You will usually not use these commands, they are more commonly found in A2osX s
 | ---- |
 | KCONFIG |
 
-Kernel Configuration Utility writes to ${ROOT}/A2OSX.KCONFIG.
+![](../.screen-shots/ScreenShot.KCONFIG.png)
+
+KCONFIG, short for "Kernel Configuration" Utility, is a system programs that allows the A2osX administrator to configure various settings of their A2osX system.  Any changes to your system configuration are stored in ${ROOT}/A2OSX.KCONFIG.  When A2osX boots and loads the KERNEL process, it looks for this file, and if not present it initialized the KERNEL with A2osX defaults.
+
+In KCONFIG you can set:
+- Machine Timing, either 60 (Default) or 50Hz.  If you change this RGXX will happen.
+- CHRoot to /RAMx, either Disabled (Default) or Enabled.  Enabling does RGXX.
+- Preemptive Mode, either Disabled (Default) or Enabled.  Enabling does RGXX.
+- TTYs, between 1 and 4, default is 2.  This is the number of Virtual Terminals configured on your system.  Please note, increasing and decreasing the number of virtual terminals can have a significant impact on the amount of memory used by the system, which in turns impacts the amount of free memory available to run your A2osX programs and scripts.
+- Slots 1-7, Enabled (Default) or Disabled.  If you disable a slot this RGXX will happen.
 
 ### LOGIN
 
