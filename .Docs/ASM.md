@@ -1,4 +1,4 @@
-# A2osX Macro Assembler (0.9.1)
+# A2osX Macro Assembler (0.9.3)
 
 ## Description
 
@@ -9,7 +9,7 @@ Multi-CPU macro assembler based on S-C MASM 3.0 dialect
 | Code | Description | Compatibility | Status | Syntax | Comment |
 |-|-|-|-|-|-|
 | .AC  | Ascii Compressed string| S-C           | NOT IMPL.   |             | As strings are supposed to be printed with A2osX API, Printf cannot handle 'AC' compressed strings |
-| .AS  | Ascii String | S-C,A2osX     | Working     |  `.AS dTEXTd` where d is any delimiter `.AS -"TEXT"`produce ascii code with b7=1             | |
+| .AS  | Ascii String | S-C,A2osX     | Working     |  `.AS dTEXTd`  where d is any delimiter  `.AS -"TEXT"`produce ascii code with b7=1             | |
 | .AT  | Ascii string Terminated | S-C,A2osX     | Working     | (same as above) | |
 | .AZ  | Ascii string Zero terminated (C String) | S-C,A2osX     | Working     | (same as above) | |
 | .BS  | Block Storage | S-C,A2osX     | Working     |             | |
