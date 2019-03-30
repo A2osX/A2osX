@@ -19,9 +19,9 @@ Typcically, you will not directly use the System group commands; they are more c
 GETTY, short for "get tty", is a system process for A2osX that manages physical or virtual terminals (TTYs). When it detects a connection, it prompts for a username and then loads the system process LOGIN to authenticate the user.  Each GETTY process creates a pseudo file such as /DEV/TTY1 /DEV/TTY2 to allow A2osX pass input/output streams between processes and connected users.
 
 GETTY handles 3 types of connections:
-- for virtual terminals presented and controlled by your Apple Screen and Keyboard.  One GETTY process serves one virtual terminal.  You can configure the number of virtual terminals on your A2osX system using the KCONFIG utility.  Please see **[KCONFIG](#kconfig)**. 
-- for serial terminals (or emulated terminals i.e. a PC running a VT-100 emulator) connected to your Apple via a Super Serial Card.  One GETTY process serves one terminal.  See the User Guide for setup and configuration information on connecting Physical Terminals. 
-- for internet terminals connected to your Apple via via the internet using A2osX TCP networking suite.  This suite includes a TELNETD server process that listens for requests from the internet and when such a request is initiated, TELNETD will launch a GETTY process to support that user.  One GETTY process will launch for each TELNET user and will exit when then user disconnects (the TELNETD process calls GETTY with the -E option). 
+- virtual terminals presented and controlled by your Apple Screen and Keyboard.  One GETTY process serves one virtual terminal.  You can configure the number of virtual terminals on your A2osX system using the KCONFIG utility.  Please see **[KCONFIG](#kconfig)**. 
+- serial terminals (or emulated terminals i.e. a PC running a VT-100 emulator) connected to your Apple via a Super Serial Card.  One GETTY process serves one terminal.  See the User Guide for setup and configuration information on connecting Physical Terminals. 
+- internet terminals connected to your Apple via via the internet using A2osX TCP networking suite.  This suite includes a TELNETD server process that listens for requests from the internet and when such a request is initiated, TELNETD will launch a GETTY process to support that user.  One GETTY process will launch for each TELNET user and will exit when then user disconnects (the TELNETD process calls GETTY with the -E option). 
 
 ### INITD
 
@@ -117,10 +117,10 @@ The CUT command is used to extract a sub part or portion of a string.  While one
 As an example, normally when you execute the **LS -L /** command you get output similar to:
 
 ----------
->/A2OSX.BUILD/ROOT/$ LS -L /
->/RAM3            S3D2 Blocks Used:8 Total:16000
->/A2OSX.BUILD     S7D1 Blocks Used: 3230 Total:65535
->/MAKE            S7D2 Blocks Used:48946 Total:65535
+>/A2OSX.BUILD/ROOT/$ LS -L /                               
+>/RAM3            S3D2 Blocks Used:8 Total:16000                               
+>/A2OSX.BUILD     S7D1 Blocks Used: 3230 Total:65535                               
+>/MAKE            S7D2 Blocks Used:48946 Total:65535                               
 ----------
 
 Now, if instead we execute the follow command at the shell prompt:
@@ -128,10 +128,10 @@ Now, if instead we execute the follow command at the shell prompt:
     /A2OSX/ROOT/$ CAT -N CATTEXT
 
 ----------
->/A2OSX.BUILD/ROOT/$ FOR F IN `LS -L /`;ECHO $F;NEXT 
->/RAM3            S3D2 Blocks Used:8 Total:16000 
->/A2OSX.BUILD     S7D1 Blocks Used: 3230 Total:65535 
->/MAKE            S7D2 Blocks Used:48946 Total:65535 
+>/A2OSX.BUILD/ROOT/$ FOR F IN `LS -L /`;ECHO $F;NEXT                                
+>/RAM3            S3D2 Blocks Used:8 Total:16000                                
+>/A2OSX.BUILD     S7D1 Blocks Used: 3230 Total:65535                                
+>/MAKE            S7D2 Blocks Used:48946 Total:65535                                
 ----------
 
 ----------
@@ -152,25 +152,25 @@ Now, if instead we execute the follow command at the shell prompt:
 Another use of CUT.  Given a Text File like ./ETC/PASSWORD with the following contents:
 
 ----------
->root:1cedeaefaffab15fd23d7a282c6610b1:0:0:A2osX Root:/root:/bin/sh
+>root:1cedeaefaffab15fd23d7a282c6610b1:0:0:A2osX Root:/root:/bin/sh                                
 >guest:084e0343a0486ff05530df6c705c8bb4:1000:1000:Guest Account:/home/guest:/bin/sh
 ----------
 
 Note the results of various CUT commands that use the -S option to denote : (colon) as the field separator.  This makes CUT a great tool for processing delimited text files.
 
 ----------
-> /A2OSX.BUILD/ROOT/$ FOR F IN `CAT ../ETC/PASSWD`;CUT -S : -F 1 ${F};NEXT
-> root
-> guest
-> /A2OSX.BUILD/ROOT/$ FOR F IN `CAT ../ETC/PASSWD`;CUT -S : -F 2 ${F};NEXT
-> 1cedeaefaffab15fd23d7a282c6610b1
-> 084e0343a0486ff05530df6c705c8bb4
-> /A2OSX.BUILD/ROOT/$ FOR F IN `CAT ../ETC/PASSWD`;CUT -S : -F 3 ${F};NEXT
-> 0
-> 1000
-> /A2OSX.BUILD/ROOT/$ FOR F IN `CAT ../ETC/PASSWD`;CUT -S : -F 5 ${F};NEXT
-> A2osX Root
-> Guest Account
+> /A2OSX.BUILD/ROOT/$ FOR F IN `CAT ../ETC/PASSWD`;CUT -S : -F 1 ${F};NEXT                               
+> root                               
+> guest                               
+> /A2OSX.BUILD/ROOT/$ FOR F IN `CAT ../ETC/PASSWD`;CUT -S : -F 2 ${F};NEXT                               
+> 1cedeaefaffab15fd23d7a282c6610b1                               
+> 084e0343a0486ff05530df6c705c8bb4                               
+> /A2OSX.BUILD/ROOT/$ FOR F IN `CAT ../ETC/PASSWD`;CUT -S : -F 3 ${F};NEXT                               
+> 0                               
+> 1000                               
+> /A2OSX.BUILD/ROOT/$ FOR F IN `CAT ../ETC/PASSWD`;CUT -S : -F 5 ${F};NEXT                               
+> A2osX Root                               
+> Guest Account                               
 ----------
 
 ### CHGRP
@@ -408,17 +408,23 @@ Display socket status
 | ----- |
 | DHCPCLNT |
 
+I am not sure if this command is even used any more.  RGXX??
+
 ### HTTPD
 
 | Command |
 | ----- |
 | HTTPD |
 
+HTTPD is a server process thats listens for incomming requests to server web pages from your A2osX system.  It listens for these requests on port 80.  This server process is in development and is in fact being used for test purposes only right now.  Further document and options will be made available in a future A2osX release.
+
 ### TCPIPD
 
 | Command |
 | ----- |
 | TCPIPD |
+
+This is the main network command.  RGXX needs to explain it to us all.
 
 ARP,IP,ICMP,UDP & TCP ok
 
@@ -428,6 +434,9 @@ ARP,IP,ICMP,UDP & TCP ok
 | ----- |
 | TELNETD -d [port] |
 
+TELNETD is a server process that listens for incoming requests to connect to your A2osX system.  By default it listens on Port 23.  You can change the Telnet Server port by starting the TELNETD process with the --d option and specifying an alternate port.  Typically this would be used to get around local firewall or port restrictions.  One example, is if you are running yoru server at home on a DSL or Cable connection your provider might block port 23.  In addition, if you are running in an environment with only one public IP address and you have another system at that site already running a Telnet server, you can use this option to move your Apple to alternate port.
+
+When TELNETD detects an incoming request it starts a GETTY process and creates a virtual internet terminal for the user and begins the LOGIN process same as the system would for a hardwired terminal.  Note TELNETD requires that you have a supported ethernet card and have configured your system for a network appropriately.
 
 ## Developer Tools
 

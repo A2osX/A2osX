@@ -106,7 +106,9 @@ The KM.NSC module gives you the same functionality as the NS.CLOCK.SYSTEM routin
 
 The KM.RAMWORKS is needed only on systems with greater then 128K of memory.  It turns any additional memory into a ram disk /RAM3.
 
-The KM.VSDRIVE module helps you connect to an ADTPRO server via a Super Serial Card (SSC).
+The KM.VSDRIVE module helps you connect to an ADTPRO server via a Super Serial Card (SSC).  This module will use the first Super Serial Card in your system set with Interrupts off.  It is also best if you set this SSC at a baud rate of 115200.  If you have more then one SSC system and you are using the others for terminals you should fully understand how to configure the cards, Kernel Modules, and the SSC drivers for optimal performance.
+
+PK Note: Fill in actual details of confirmed Apple //e and GS setup for VSDRIVE with and without terminals as well.
 
 The KM.APPLETALK module helps ProDOS talk to APPLETALK, though at the moment A2osX cannot use this facility until we complete the ATLOGIN/Mount programs.  On most of our media you will find this KM stored in a subdirectory of ./SYS which means it is not loaded at start up.
 
@@ -150,6 +152,8 @@ Note: if only 2 virtual terminals are configured then OA-3 and OA-4 will have no
 ### Physical Terminals
 
 A2osX supports physical terminals (or a PC running a terminal emulator) via a Super Serial Card and the A2osX SSC.DRV driver.  You will need to set the switches on your SSC and the parameters of your terminal emulator to match and of course you will need the appropriate null modem cable.  The terminal type supported is VT-100, so please set your emulator to VT-100 mode.  A2osX does not support modems connected to your SSC at this time.
+
+a2osx supports as many physical terminals as you have SSC cards and memory to load drivers for each card and support those users.  note that if you are running the KM.VSDRIVE module, it takes the first SSC card that has is not configured for interrupts (likely slot 1 or 2).  So if you INSDRV SSC.DRV with KM.VSDRIVE loaded, then it will use the next card.  You have to load a driver for each card you want to handle a terminal.  You also have to start the GETTY process for each terminal.  the Terminals will be named /DEV/COMx where x is the slot the card is in. 
 
 ### Internet Terminals
 
