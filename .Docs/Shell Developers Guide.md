@@ -58,7 +58,7 @@ where [ exp ] and [ condition ] allow to detail operators....
 | ----      | ------  | ------- |
 | \<value\> | Working | $VAR \| string \| "string with SPACE" \| 123 \| -456 |
 | \<expression\> | Working | \<value\> [\<op\> \<value\>] ... |
-| \<op\> | Working <br> --- <br> Planned | \+ signed int32 add <br> \- signed int32 sub <br> --- <br>  \* <br> div <br> mod |
+| \<op\> | Working | \+ signed int32 add <br> \- signed int32 sub <br>   \* <br> / <br> mod |
 | \<condition\> | Working |[ -D direxists ] <br> [ -E fileordirexists ] <br> [ -F fileexists ]<br> [ -N $VAR variable is not empty ] <br> [ -Z $VAR variable is empty ] <br> [ string1 = string2 ] <br> [ string1 != string2 ] <br> [ string1 .< string2 ] <br> [ string1 <= string2 ] <br> [ string1 .> string2 ] <br> [ string1 >= string2 ] <br> [ int32 -eq int32 ] <br> [ int32 -ne int32 ] <br> [ int32 -lt int32 ] <br> [ int32 -le int32 ] <br> [ int32 -gt int32 ] <br> [ int32 -ge int32 ] |
 | BREAK     | Working | Exit CASE of SWITCH |
 | CASE      | Working | CASE <expression> |
