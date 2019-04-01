@@ -61,6 +61,7 @@ where [ exp ] and [ condition ] allow to detail operators....
 | \<op\> | Working | \+ signed int32 add <br> \- signed int32 sub <br>   \* <br> / <br> mod |
 | \<condition\> | Working |[ -D direxists ] <br> [ -E fileordirexists ] <br> [ -F fileexists ]<br> [ -N $VAR variable is not empty ] <br> [ -Z $VAR variable is empty ] <br> [ string1 = string2 ] <br> [ string1 != string2 ] <br> [ string1 .< string2 ] <br> [ string1 <= string2 ] <br> [ string1 .> string2 ] <br> [ string1 >= string2 ] <br> [ int32 -eq int32 ] <br> [ int32 -ne int32 ] <br> [ int32 -lt int32 ] <br> [ int32 -le int32 ] <br> [ int32 -gt int32 ] <br> [ int32 -ge int32 ] |
 | BREAK     | Working | Exit CASE of SWITCH |
+| CALL      | Working | CALL function <arg> ... |
 | CASE      | Working | CASE <expression> |
 | CD        | Working | CD path or relative path |
 | DATE      | Working | |
@@ -80,7 +81,7 @@ where [ exp ] and [ condition ] allow to detail operators....
 | PUSHD     | Working | Save actual working directory <br> PUSHD \<dir\> do also a CD to \<dir\> |
 | PWD       | Working | Print Working Directory |
 | RD        | Working | Delete an empty directory |
-| READ      | Working | -S : no echo (password) <br> -P : "prompt message"   |
+| READ      | Working | -F : Undefine all functions <br> -S : no echo (password) <br> -P : "prompt message"   |
 | REN       | Working | Rename a file, directory or volume |
 | RETURN    | In Progress | Exit function with return code |
 | SET       | Working | -X : toggle debug mode <br> -C : toggle Control-C break mode |
