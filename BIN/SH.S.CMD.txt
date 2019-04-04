@@ -572,17 +572,24 @@ CMD..			lda (ZPArgVBufPtr)
 				beq .9
 				
 				>LDYA ZPArgVBufPtr
-				jmp CORE.FCALL			exec cmd file and continue
+				jsr IO.Load
+				bcs CMD.CALL.RTS
+				>LDYA ZPArgVBufPtr
+				jmp CMD.CALL			exec cmd file and continue
 
 .9				jmp CMD.Exec.CSYN
 *--------------------------------------
+CMD.CALL.UNDEF	lda #E.FUNDEF
+				sec
+CMD.CALL.RTS	rts
+*--------------------------------------
 CMD.CALL		>LDA.G hFuncList
-				beq .9
+				beq CMD.CALL.UNDEF
 
 				>PUSHW ZPArgVBufPtr
 				>LDA.G hFuncList
 				>SYSCALL SListLookup
-				bcs .9
+				bcs CMD.CALL.UNDEF
 				
 				>STYA M32.TMP			KeyID
 
@@ -592,47 +599,131 @@ CMD.CALL		>LDA.G hFuncList
 				>PUSHW M32.TMP			KeyID
 				>LDA.G hFuncList
 				>SYSCALL SListGetData
-				bcs .99
+				bcs CMD.CALL.RTS
 
 				>LDYA ZPArgVBufPtr		FUNC PARAM1 PARAM2...
-				jmp CORE.CALL			X = Func Code
-				
-.9				lda #E.FUNDEF
-				sec
-.99				rts
-*--------------------------------------
-CMD.RETURN		jsr CORE.RETURN
+
+CMD.CALL.YAX	stx M32.ACC				X=Code to Execute
+
+				jsr CORE.ArgV.Dup		Y,A = ArgV
 				bcs .9
 				
-				lda (ZPArgVBufPtr)
-				beq .8					no arg, exit 0
-
-				>LDYA ZPArgVBufPtr
-				>SYSCALL AToL
+				stx M32.ACC+1			X=ARGV
+				
+				lda #7
+				jsr CORE.StkCheck
 				bcs .9
-
-				>PULLL M32.ACC
+				
+				lda ZPInputBuf
+				jsr CORE.StkPush
+				
+				lda ZPInputBuf+1
+				jsr CORE.StkPush
+				
+				lda ZPInputBufPtr
+				jsr CORE.StkPush
+				
+				lda ZPInputBufPtr+1
+				jsr CORE.StkPush
+				
+				ldy #S.PS.hARGV
+				lda (pPS),y
+				jsr CORE.StkPush
+				
+				lda M32.ACC+1			new ARGV
+				ldy #S.PS.hARGV
+				sta (pPS),y
+				
 				lda M32.ACC
+				jsr CORE.StkPush
 				
-.8				clc
+				lda M32.ACC
+				>SYSCALL GetMemPtr
+				>STYA ZPInputBuf
+				>STYA ZPInputBufPtr
+
+				lda #$C0
+				jsr CORE.StkPush
+				
+				>INC.G bBatchMode
+				clc				
 .9				rts
 *--------------------------------------
 CMD.EXIT		lda (ZPArgVBufPtr)
-				beq .8					no arg, exit 0
+				beq CMD.EXIT.A			no arg, exit 0
 
 				>LDYA ZPArgVBufPtr
+				jsr EXP.GET
+				bcs CMD.EXIT.RTS
 				>SYSCALL AToL
-				bcs .9
+				bcs CMD.EXIT.RTS
 
-				>PULLL M32.ACC
-				lda M32.ACC
+				>PULLA
+				inc pStack
+				inc pStack
+				inc pStack
 				
-.8				pha
+CMD.EXIT.A		sta M32.ACC
+				>DEBUG
+.1				jsr CORE.StkPull
+				bcs	CMD.EXIT.RTS
+				
+				cmp #$C0				in CALL / . context ?
+				beq .8
+				
+				and #$3F
+				ldx #1
+				cmp #C.IF
+				beq .3
+				
+.2				ldx #3
+				cmp #C.WHILE
+				bne CMD.EXIT.99
+				
+.3				lda (pData)
+				
+.4				dec
+				dex
+				bne .4
+
+				sta (pData)
+				bra .1
+				
+.8				jsr CORE.StkPull
+				>SYSCALL freemem		Code buffer
+				
+				ldy #S.PS.hARGV
+				lda (pPS),y
+				>SYSCALL freemem		ArgV buffer
+				
+				jsr CORE.StkPull
+				ldy #S.PS.hARGV
+				sta (pPS),y
+				
+				jsr CORE.StkPull
+				sta ZPInputBufPtr+1
+
+				jsr CORE.StkPull
+				sta ZPInputBufPtr
+				
+				jsr CORE.StkPull
+				sta ZPInputBuf+1
+				
+				jsr CORE.StkPull
+				sta ZPInputBuf
+				
+				>DEC.G bBatchMode
+				
+				pha
 				lda #$FF
 				>STA.G bExit
 				pla
 				clc
-.9				rts
+CMD.EXIT.RTS	rts
+
+CMD.EXIT.99		lda #E.STACKERROR
+				sec
+				rts
 *--------------------------------------
 CMD.BREAK		jsr CORE.StkGetCtx		Get context in CORE.Test
 				bcs .9
@@ -659,6 +750,10 @@ CMD.BREAK		jsr CORE.StkGetCtx		Get context in CORE.Test
 *--------------------------------------
 CMD.SWITCH		jsr CORE.StkGetCtx
 
+				lda #2
+				jsr CORE.StkCheck
+				bcs .9
+				
 				jsr EXP.GET
 				bcs .9
 				>SYSCALL strdup
@@ -799,6 +894,14 @@ CMD.FOR			jsr CORE.StkGetCtx
 				jsr CORE.ArgV.Next
 				beq CMD.END.CSYN
 
+				lda #8
+				jsr CORE.StkCheck
+				bcs .9
+				
+				sec
+				jsr CORE.StkPushPtr		Push CmdPtr AFTER FOR
+
+				lda (ZPArgVBufPtr)
 				cmp #'('
 				beq FOR.FILE
 				
@@ -806,15 +909,9 @@ CMD.FOR			jsr CORE.StkGetCtx
 				bne FOR.LIST
 
 				jmp FOR.EXEC
+.9				rts				
 *--------------------------------------
-FOR.LIST		lda #8
-				jsr CORE.StkCheck
-				bcs .9
-				
-				sec
-				jsr CORE.StkPushPtr		Push CmdPtr AFTER FOR
-				
-				>LDYA ZPArgVBufPtr
+FOR.LIST		>LDYA ZPArgVBufPtr
 				>SYSCALL strdup
 				bcs .9
 				
@@ -851,14 +948,7 @@ FOR.LIST		lda #8
 				
 .9				rts
 *--------------------------------------
-FOR.FILE		lda #8
-				jsr CORE.StkCheck
-				bcs FOR.FILE.9
-				
-				sec
-				jsr CORE.StkPushPtr		Push CmdPtr AFTER FOR
-
-				jsr CORE.ArgV.NextChar	skip "("
+FOR.FILE		jsr CORE.ArgV.NextChar	skip "("
 
 				>PUSHWI 0				Aux type
 				>PUSHBI S.FI.T.TXT
@@ -897,14 +987,7 @@ FOR.FILE		lda #8
 				
 FOR.FILE.9		rts	
 *--------------------------------------
-FOR.EXEC		lda #8
-				jsr CORE.StkCheck
-				bcs FOR.FILE.9
-				
-				sec
-				jsr CORE.StkPushPtr		Push CmdPtr AFTER FOR
-
-				jsr CORE.ArgV.NextChar	skip "`"
+FOR.EXEC		jsr CORE.ArgV.NextChar	skip "`"
 
 				jsr IO.Pipe.Out
 				bcs .9
@@ -1222,6 +1305,7 @@ CMD.IF			jsr CORE.StkGetCtx
 *--------------------------------------
 CMD.LOOP		jsr CORE.StkPull
 				bcs .9
+				
 				tax
 				and #$3F
 				cmp #C.WHILE
@@ -1231,8 +1315,8 @@ CMD.LOOP		jsr CORE.StkPull
 				bmi .8
 								
 				lda (pData)
-				sec
-				sbc #2					Discard loop Ptr
+				dec
+				dec						Discard loop Ptr
 				sta (pData)
 
 				clc				

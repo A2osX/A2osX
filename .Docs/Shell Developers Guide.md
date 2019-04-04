@@ -64,12 +64,13 @@ where [ exp ] and [ condition ] allow to detail operators....
 | CALL      | Working | CALL function <arg> ... |
 | CASE      | Working | CASE <expression> |
 | CD        | Working | CD path or relative path |
+| ..        | Working | CD .. |
 | DATE      | Working | |
 | DEFAULT   | Working | Default CASE for SWITCH |
 | ECHO      | Working | \b,\e,\f,\n,\\\ and \\% supported <br> -N : Suppress \r\n |
 | ELSE      | Working | Optional branch for IF block |
 | END       | Working | End of SWITCH Statement |
-| EXIT      | Working | exit script or shell |
+| EXIT      | Working | exit function, script or shell |
 | FI        | Working | Terminator for IF block |
 | FUNC      | In Progress | FUNC fonction_name <br>   \<body\> <br>   END |
 | IF        | Working | [ \<condition\> ] |
@@ -81,10 +82,9 @@ where [ exp ] and [ condition ] allow to detail operators....
 | PUSHD     | Working | Save actual working directory <br> PUSHD \<dir\> do also a CD to \<dir\> |
 | PWD       | Working | Print Working Directory |
 | RD        | Working | Delete an empty directory |
-| READ      | Working | -F : Undefine all functions <br> -S : no echo (password) <br> -P : "prompt message"   |
+| READ      | Working | -S : no echo (password) <br> -P : "prompt message"   |
 | REN       | Working | Rename a file, directory or volume |
-| RETURN    | In Progress | Exit function with return code |
-| SET       | Working | -X : toggle debug mode <br> -C : toggle Control-C break mode |
+| SET       | Working | -X : toggle debug mode <br> -C : toggle Control-C break mode <br> -E : toggle error printing mode <br> -F : delete all declared functions |
 | SHIFT     | Working | Remove $1 from cmd line |
 | SLEEP     | Working | Wait \<count\> 10th sec |
 | SWITCH    | Working | SWITCH <expression> |
