@@ -122,3 +122,15 @@ note : '$VAR' does NOT expand Variable
 | 1>     | Working |  |
 | 2>>    | Working | StdErr redirection |
 | 2>     | Working |  |
+
+
+## Stuff to work on
+
+if [] && []   is AND
+if [] || []   is OR
+
+
+functions
+
+* DIV/MOD
+

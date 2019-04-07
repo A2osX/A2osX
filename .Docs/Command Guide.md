@@ -2,13 +2,13 @@
 
 This Guide provides information on all the A2osX commands and utilities.  This Guide helps you not only learn the purpose of each command but also what options a command supports and what arguments it either supports or requires.
 
-A2osX comes with a nice variety of system, file, network and data utilities or what we refer to as external commands.  This just means that each of the following commands or utilities is built as a separate BIN or executable file that runs under A2osX.  The source for all of these external commands is readily available, so you can make your own as your needs dictate.
+A2osX comes with a nice variety of system, file, network and data utilities or what we refer to as external commands.  This just means that each of the following commands or utilities is built as a separate BIN or executable file that runs under A2osX.  The source for all of these external commands is readily available, so you can make your own or modify these as your needs dictate.
 
->Note, that there are some **internal** commands that are build into the shell (the interactive prompt) such CD (change directory) or PWD (print working directory).  Those commands are discussed in-depth in the **[Shell Developers Guide](.Docs/Shell%20Developers%20Guide.md).**  
+>Note, that there are some **internal** commands that are build into the shell (the interactive prompt) such as CD (change directory) or PWD (print working directory).  Those commands are discussed in-depth in the **[Shell Developers Guide](.Docs/Shell%20Developers%20Guide.md).**  
 
 ## System Commands
 
-Typcically, you will not directly use the System group commands; they are more commonly found in A2osX system scripts such as ./ETC/INIT or they are launched by the A2osX Kernel itself.  All of these commands are found in ./SBIN/ letting you know they are special system commands.
+Typcically, you will not directly use the System group commands; they are more commonly found in A2osX system scripts such as ./ETC/INIT or they are launched by the A2osX Kernel itself.  All of these commands are found in **./SBIN/** letting you know they are special system commands.
 
 ### GETTY
 
@@ -16,12 +16,12 @@ Typcically, you will not directly use the System group commands; they are more c
 | --- | --- |
 | GETTY | -E : Exit upon disconnect |
 
-GETTY, short for "get tty", is a system process for A2osX that manages physical or virtual terminals (TTYs). When it detects a connection, it prompts for a username and then loads the system process LOGIN to authenticate the user.  Each GETTY process creates a pseudo file such as /DEV/TTY1 /DEV/TTY2 to allow A2osX pass input/output streams between processes and connected users.
+GETTY, short for "get tty", is a system process for A2osX that manages physical or virtual terminals (TTYs). When it detects a connection, it prompts for a username and then loads the system process LOGIN to authenticate the user.  Each GETTY process creates a pseudo file such as /DEV/TTY1 or /DEV/TTY2 to allow A2osX pass input/output streams between processes and connected users.
 
-GETTY handles 3 types of connections:
-- virtual terminals presented and controlled by your Apple Screen and Keyboard.  One GETTY process serves one virtual terminal.  You can configure the number of virtual terminals on your A2osX system using the KCONFIG utility.  Please see **[KCONFIG](#kconfig)**. 
-- serial terminals (or emulated terminals i.e. a PC running a VT-100 emulator) connected to your Apple via a Super Serial Card.  One GETTY process serves one terminal.  See the User Guide for setup and configuration information on connecting Physical Terminals. 
-- internet terminals connected to your Apple via via the internet using A2osX TCP networking suite.  This suite includes a TELNETD server process that listens for requests from the internet and when such a request is initiated, TELNETD will launch a GETTY process to support that user.  One GETTY process will launch for each TELNET user and will exit when then user disconnects (the TELNETD process calls GETTY with the -E option). 
+**GETTY handles 3 types of connections:
+- *virtual terminals* presented and controlled by your Apple Screen and Keyboard.  One GETTY process serves one virtual terminal.  You can configure the number of virtual terminals on your A2osX system using the KCONFIG utility.  Please see **[KCONFIG](#kconfig)**. 
+- *serial terminals* (or emulated terminals i.e. a PC running a VT-100 emulator) connected to your Apple via a Super Serial Card.  One GETTY process serves one terminal.  See the User Guide for setup and configuration information on connecting Physical Terminals. 
+- *internet terminals* connected to your Apple via via the internet using A2osX TCP networking suite.  This suite includes a TELNETD server process that listens for requests from the internet and when such a request is initiated, TELNETD will launch a GETTY process to support that user.  One GETTY process will launch for each TELNET user and will exit when then user disconnects (the TELNETD process calls GETTY with the -E option). 
 
 ### INITD
 
@@ -47,7 +47,7 @@ INSDRV, short for "install driver", is a system process that loads and initializ
 
 ![](../.screen-shots/ScreenShot.KCONFIG.png)
 
-KCONFIG, short for "Kernel Configuration" Utility, is a system programs that allows the A2osX administrator to configure various settings of their A2osX system.  Any changes to your system configuration are stored in ${ROOT}/A2OSX.KCONFIG.  When A2osX boots and loads the KERNEL process, it looks for this file, and if not present it initialized the KERNEL with A2osX defaults.
+KCONFIG, short for "Kernel Configuration" Utility, is a system program that allows the A2osX administrator to configure various settings of their A2osX system.  Any changes to your system configuration are stored in ${ROOT}/A2OSX.KCONFIG.  When A2osX boots and loads the KERNEL process, it looks for this file, and if not present it initializes the KERNEL with A2osX defaults.
 
 In KCONFIG you can set:
 - Machine Timing, either 60 (Default) or 50Hz.  If you change this RGXX will happen.
@@ -110,68 +110,59 @@ Note that the numbering of the lines didn't change, because that is their true n
 
 | Command | Options |
 | --- | --- |
-| CUT | CUT \<opt\> "line" or CMD\|CUT \<opt\> <br> -H : This help screen <br> -F nn : Output field nn <br> -M nn : Output starting at nn <br> -N nn : Output Ending at nn <br> -S ch : Change default SPACE separator to 'ch' |
+| CUT | CUT \<opt\> "line"   or   CMD\|CUT \<opt\> <br> -H : This help screen <br> -F nn : Output field nn <br> -M nn : Output starting at nn <br> -N nn : Output Ending at nn <br> -S ch : Change default SPACE separator to 'ch' |
 
 The CUT command is used to extract a sub part or portion of a string.  While one use of this command can be used to simply extract substrings much like Basic's MID, LEFT, or RIGHT might be used, it can also be used within the powerful FOR NEXT construct to process fields of columns from files or the output of processes.
 
 As an example, normally when you execute the **LS -L /** command you get output similar to:
 
-----------
->/A2OSX.BUILD/ROOT/$ LS -L /                               
->/RAM3            S3D2 Blocks Used:8 Total:16000                               
->/A2OSX.BUILD     S7D1 Blocks Used: 3230 Total:65535                               
->/MAKE            S7D2 Blocks Used:48946 Total:65535                               
-----------
+    /A2OSX.BUILD/ROOT/$ LS -L /                               
+    /RAM3            S3D2 Blocks Used:8 Total:16000                               
+    /A2OSX.BUILD     S7D1 Blocks Used: 3230 Total:65535                               
+    /MAKE            S7D2 Blocks Used:48946 Total:65535                               
 
 Now, if instead we execute the follow command at the shell prompt:
 
-    /A2OSX/ROOT/$ CAT -N CATTEXT
+    /A2OSX.BUILD/ROOT/$ FOR F IN `LS -L /`;ECHO $F;NEXT                                
+    /RAM3            S3D2 Blocks Used:8 Total:16000                                
+    /A2OSX.BUILD     S7D1 Blocks Used: 3230 Total:65535                                
+    /MAKE            S7D2 Blocks Used:48946 Total:65535                                
 
-----------
->/A2OSX.BUILD/ROOT/$ FOR F IN `LS -L /`;ECHO $F;NEXT                                
->/RAM3            S3D2 Blocks Used:8 Total:16000                                
->/A2OSX.BUILD     S7D1 Blocks Used: 3230 Total:65535                                
->/MAKE            S7D2 Blocks Used:48946 Total:65535                                
-----------
+It looks like the same results, but from now instead of LS simply outputting all of its results at once, each line is being passed to the FOR loop (as VAR $F) where we simply ECHO it.  Now imagine if instead we passed $F to CUT, we can display only specific columns of information as seen in these two examples:
 
-----------
->/A2OSX.BUILD/ROOT/$ FOR F IN `LS -L /`;CUT -M 00 -N 15 $F;NEXT                  
->/RAM3                                                                           
->/A2OSX.BUILD                                                                    
->/MAKE                                                                           
-----------
+    /A2OSX.BUILD/ROOT/$ FOR F IN `LS -L /`;CUT -M 00 -N 15 $F;NEXT                  
+    /RAM3                                                                           
+    /A2OSX.BUILD                                                                    
+    /MAKE                                                                           
 
-----------
->/A2OSX.BUILD/ROOT/$ FOR F IN `LS -L /`;CUT -M 17 -N 21 $F;NEXT                  
->S3D2                                                                            
->S7D1                                                                            
->S7D2                                                                            
-----------
+    /A2OSX.BUILD/ROOT/$ FOR F IN `LS -L /`;CUT -M 17 -N 21 $F;NEXT                  
+    S3D2                                                                            
+    S7D1                                                                            
+    S7D2                                                                            
 
 
 Another use of CUT.  Given a Text File like ./ETC/PASSWORD with the following contents:
 
-----------
->root:1cedeaefaffab15fd23d7a282c6610b1:0:0:A2osX Root:/root:/bin/sh                                
->guest:084e0343a0486ff05530df6c705c8bb4:1000:1000:Guest Account:/home/guest:/bin/sh
-----------
+    root:1cedeaefaffab15fd23d7a282c6610b1:0:0:A2osX Root:/root:/bin/sh                                
+    guest:084e0343a0486ff05530df6c705c8bb4:1000:1000:Guest Account:/home/guest:/bin/sh
 
-Note the results of various CUT commands that use the -S option to denote : (colon) as the field separator.  This makes CUT a great tool for processing delimited text files.
+Note here the results of various CUT commands that use the -S option to denote : (colon) as the field separator.  This makes CUT a great tool for processing delimited text files.
 
-----------
-> /A2OSX.BUILD/ROOT/$ FOR F IN `CAT ../ETC/PASSWD`;CUT -S : -F 1 ${F};NEXT                               
-> root                               
-> guest                               
-> /A2OSX.BUILD/ROOT/$ FOR F IN `CAT ../ETC/PASSWD`;CUT -S : -F 2 ${F};NEXT                               
-> 1cedeaefaffab15fd23d7a282c6610b1                               
-> 084e0343a0486ff05530df6c705c8bb4                               
-> /A2OSX.BUILD/ROOT/$ FOR F IN `CAT ../ETC/PASSWD`;CUT -S : -F 3 ${F};NEXT                               
-> 0                               
-> 1000                               
-> /A2OSX.BUILD/ROOT/$ FOR F IN `CAT ../ETC/PASSWD`;CUT -S : -F 5 ${F};NEXT                               
-> A2osX Root                               
-> Guest Account                               
-----------
+    /A2OSX.BUILD/ROOT/$ FOR F IN `CAT ../ETC/PASSWD`;CUT -S : -F 1 ${F};NEXT
+    root                               
+    guest                               
+
+    /A2OSX.BUILD/ROOT/$ FOR F IN `CAT ../ETC/PASSWD`;CUT -S : -F 2 ${F};NEXT
+    1cedeaefaffab15fd23d7a282c6610b1                               
+    084e0343a0486ff05530df6c705c8bb4                               
+
+    /A2OSX.BUILD/ROOT/$ FOR F IN `CAT ../ETC/PASSWD`;CUT -S : -F 3 ${F};NEXT
+    0                               
+    1000                               
+
+    /A2OSX.BUILD/ROOT/$ FOR F IN `CAT ../ETC/PASSWD`;CUT -S : -F 5 ${F};NEXT
+    A2osX Root                               
+    Guest Account                               
 
 ### CHGRP
 
@@ -208,9 +199,11 @@ This command is not currently implemented.
 
 | Command | Options |
 | --- | --- |
-| CP | Working | -C : Continue On Error <br> -Q : Quiet <br> -R : Recurse subdirectories <br> -Y : Dont't Prompt For Override | 0.93 |
+| CP | -C : Continue On Error <br> -Q : Quiet <br> -R : Recurse subdirectories <br> -Y : Dont't Prompt For Override | 0.93 |
 
 CP, which stands for Copy, is one of the most powerful commands in A2osX.  Not only can it copy files from one ProDOS volume to another, it can copy entire directories or even directory trees from volume to volume, or to another location on the same volume.  This recursive nature allows you to use a single command to copy the contents of an entire ProDOS volume with a single command.  CP also supports wild cards so that you can copy just those files matching a pattern.
+
+
 
 ### EDIT
 

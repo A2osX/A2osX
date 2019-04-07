@@ -214,6 +214,18 @@ Additional resources
 
 ##Networking
 
+
+install the drivers for the hardware (uther, lances, ssc, etc.)
+then NETWORKD lib lib  (and the libs are tcpip or etalk maybe) libs are protocalls here
+  in the LIB directory now are LIBTCPIP and LIBETALK
+NETWORKD will read ETC/NETWORK will load network programs
+  right now it contains IPCONFIG, you can also add to it HTTPD TELNETD etc, they are loaded in order and each needs to complete its full load before next one happens (assuring IPCONFIG happends before TELNETD tries to load)
+IPCONFIG will then look for ETC/TCPIP.CONF, if found uses those settings, if not does dhcp.  in addition ipconfig uses ETC/HOSTNAME and ETC/HOSTS for setting hostname and doing DNSloopups
+
+
+
+
+
 Hardware Drivers
 	MAC Address
 TCPIPD
