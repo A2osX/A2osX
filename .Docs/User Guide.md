@@ -278,6 +278,11 @@ A2osX is made available under the GNU License 2.0.  Our Full License can he foun
 
 ##Error Messages
 
+The Error section is out of date.  Refresh from INC/A2osX.I
+Error nums have been realigned and move around.
+
+
+
 Shell Errors
 
 | Hex | Error Code | Error Message |

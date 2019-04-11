@@ -1,19 +1,21 @@
 # A2osX (0.93) Multi-Tasking OS for Apple II  
 
-![](./.screen-shots/ScreenShot.LS.png)
+![](./.screen-shots/ScreenShot.Logo.png)
 
-If you would like to see more screenshots of A2osX click **[here](.Docs/Screen%20Shots.md)**.
+If you would like to see more screen shots of A2osX click **[here](.Docs/Screen%20Shots.md)**.
 
 ## Introduction...
 
-A2osX is an operating, programming and execution environment for the 128K Enhanced Apple //e and Apple //gs series of computers.  While layered atop of ProDOS, taking advantage of all ProDOS block devices and MLI calls; A2osX is much more than an application or command shell. Written in 65C02 assembly for speed of execution and efficient memory management; A2osX is a multitasking and yes multiuser development environment bringing many of today's server operating system features to our venerable vintage 8-bit systems. 
+A2osX is an operating, programming and execution environment for the 128K Enhanced Apple //e and Apple //gs series of computers.  While layered atop of ProDOS, taking advantage of all ProDOS block devices and MLI calls; A2osX is much more than an application or command shell. Written in 65C02 assembly for speed of execution and efficient memory management; A2osX is a multitasking and yes multi-user development environment bringing many of today's server operating system features to our venerable vintage 8-bit systems. 
 
-The foundation of A2osX enabling its multiuser multitasking capabilities is a reusable set of APIs and LIBs (written in Assembly) that all programs can and do use which make them very lean and fast.  For instance, there is one network API that any program can call which in turn handles the I/O to different brand LAN cards via a set of drivers.  Key here is that multiple programs can be using the network at the same time such as the TELNETD server and the TELNET client.  One of the key benefits is code for doing each program is smaller because the network API is doing a great deal of the work.  With CORE APIs like printf and LIBs such as Network only loaded once (much like a DLL in Windows) memory is conserved, providing more resources to support your A2osX programs.
+The foundation of A2osX enabling its multi-user multitasking capabilities is a reusable set of APIs and LIBs (written in Assembly) that all programs can and do use which make them very lean and fast.  For instance, there is one network API that any program can call which in turn handles the I/O to different brands of LAN cards via a set of drivers.  In addition, multiple programs can be using the network at the same time such as the TELNETD server and the TELNET client.  A key benefit is that code for each program is smaller because the network API is doing a great deal of the work.  With CORE APIs like printf and LIBs such as Network loaded only once (much like a DLL in Windows) memory is conserved, providing more resources to support your A2osX programs.
 
-A2osX is designed to work on any "stock" 128k Apple //e, with no additional hardware with a 65C02 or newer processor.
+## Requires :
 
-See the **[documentation](#documentation)** section below to find other resources available to you for learning how to install, use, develop and test A2osX.
- 
+A2osX is designed to work on any 128k Enhanced Apple //e or newer computer.  Specifically, A2osX relies on the enhanced instruction set found in the 65C02 processor (this includes the 65C816 found in the //GS).  A2osX will not run on an Apple ][ or ][+, an unenhanced //e or on systems without at least 128K of memory.  A2osX does not require any special hardware cards, but does support and its operation can be enhanced with the presence of a mass storage devices (any ProDOS block device), a network card, Super Serial Card and/or a Time Card.
+
+Consult the **[documentation](#documentation)** section below to find other resources available to you for learning how to install, use, develop and test A2osX.  The Hardware section of the User Guide contains more information on supported hardware.
+
 ## Latest News 2019-02-19
 
 Major updates have occurred to the kernel and many of the A2osX API's to support a greatly enhanced shell that boasts significant new scripting capabilities since 0.92.  Also added is the the ability to redirect input and output, including errors, and the ability to pipe (|) the output of one command or operation to another (i.e. **ls \* | more** ).  A2osX now provides for multiple virtual terminals as well as users/terminals via TCP (through TELNETD) and serial devices (through a SSC driver).
@@ -28,23 +30,7 @@ This is just a place holder and plug for our A2osx internet site.  Stay tuned he
 
 ## Disk images :
 
-You can use and/or install A2osX from the media found in our Media directory found **[here](.Floppies)**.  The current set of available media includes:
-
-| Image Name | Description !
-| --- | --- |
-| **A2OSX.BUILD.po** | 32MB disk image with S-C MASM 3.0, all binaries and all source for A2osX <br> This is primary development media for A2osX, especially pre-launch of Release, Stable and official Build Media.  See below.|
-| A2OSX.MAKE.po | 32MB disk image with S-C MASM 3.0, all binaries and all source for multiple BUILD versions of A2osX stored in directories on MAKE.  The image also includes the TEST, ADMIN, and EXAMPLE scripts being created to support A2osX. |
-| A2OSX.B800.po | An 800K 3.5" disk image containing the main BOOT and support files for running A2osX. |
-| A2OSX.BOOT.po | An 140K 5.25" disk image containing the main BOOT and support files for running A2osX. |
-| A2OSX.DEV.po | A 140K ProDOS disk image containing source code for A2osX.  Use is being discontinued. |
-| BLANK32MB.po | A formatted empty ProDOS 32MB HD disk image, suitable for use with emulators such as AppleWin |
-| BLANK800.po | A formatted empty ProDOS 3.5" 800K disk image, suitable for use with emulators such as AppleWin |
-| BLANK140.dsk | A formatted empty ProDOS 5.25" 140K disk image, suitable for use with emulators such as AppleWin |
-
-Please note, we plan to change the media set once 0.93 is officially released.  Currently, the BUILD media is the primary image used by the developers to hold the most current version of the A2osX binaries (and a copy of the source, although of course GitHub is the primary source repository). You can download the BUILD image and run in your favorite Apple II emulator or copy to CFFA, MicroTurbo or other Hard Disk emulator to boot, run, test and develop programs for A2osX.  Once 0.93 is released, we plan to update the media to include RELEASE, STABLE and BUILD editions of the media, like other projects you might find on GitHub; and each of these will include BOOT, INSTALL, SOURCE and EXTRA type media so that users and developers can BOOT or INSTALL A2osX to existing systems as they see fit.
-
-## Requires :
-Enhanced IIe (65c02 cpu) with 128k, //c, IIgs
+You can use and/or install A2osX from the media in our Media directory found **[here](.Floppies)**.  Provided media includes **Release**, **RC** (Release Candidate), **Stable** and **Bleed** (Cutting Edge) editions in 140K, 800K and 32MB images.  Please consult our **[Media Guide](.Docs/Media%20Guide.MD)** for more information.
 
 ## Documentation
 
