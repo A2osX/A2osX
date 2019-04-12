@@ -52,6 +52,35 @@ IFTTT Tweet using HTTPGET
 where [ exp ] and [ condition ] allow to detail operators....
 
 
+anywhere you can have [ exp ] you can have ![ exp ] which means NOT exp.
+
+
+    while ![ $total -eq 0 ]
+    loop
+    
+is the same thing as 
+
+    while [ $total -ne 0 ]
+    loop
+
+Just like
+
+    IF [ A -GT 5 ]
+      DO X
+    ELSE
+      DO Y
+    FI
+
+is the same as
+
+    IF ![ A -LE 5 ]
+      DO Y
+    ELSE
+      DO X
+    FI
+
+Notice that the DO X and DO Y logic is swapped between the two cases.
+
 ## Internal Shell commands:
 
 | Name      | Status  | Comment |
@@ -59,7 +88,7 @@ where [ exp ] and [ condition ] allow to detail operators....
 | \<value\> | Working | $VAR \| string \| "string with SPACE" \| 123 \| -456 |
 | \<expression\> | Working | \<value\> [\<op\> \<value\>] ... |
 | \<op\> | Working | \+ signed int32 add <br> \- signed int32 sub <br>   \* <br> / <br> mod |
-| \<condition\> | Working |[ -D direxists ] <br> [ -E fileordirexists ] <br> [ -F fileexists ]<br> [ -N $VAR variable is not empty ] <br> [ -Z $VAR variable is empty ] <br> [ string1 = string2 ] <br> [ string1 != string2 ] <br> [ string1 .< string2 ] <br> [ string1 <= string2 ] <br> [ string1 .> string2 ] <br> [ string1 >= string2 ] <br> [ int32 -eq int32 ] <br> [ int32 -ne int32 ] <br> [ int32 -lt int32 ] <br> [ int32 -le int32 ] <br> [ int32 -gt int32 ] <br> [ int32 -ge int32 ] |
+| \<condition\> | Working |[ -D direxists ] <br> [ -E fileordirexists ] <br> [ -F fileexists ]<br> [ -N $VAR variable is not empty ] <br> [ -Z $VAR variable is empty ] <br> [ string1 = string2 ] <br> [ string1 != string2 ] <br> [ string1 .< string2 ] <br> [ string1 <= string2 ] <br> [ string1 .> string2 ] <br> [ string1 >= string2 ] <br> [ int32 -eq int32 ] <br> [ int32 -ne int32 ] <br> [ int32 -lt int32 ] <br> [ int32 -le int32 ] <br> [ int32 -gt int32 ] <br> [ int32 -ge int32 ]|
 | BREAK     | Working | Exit CASE of SWITCH |
 | CALL      | Working | CALL function <arg> ... |
 | CASE      | Working | CASE <expression> |
@@ -73,7 +102,7 @@ where [ exp ] and [ condition ] allow to detail operators....
 | EXIT      | Working | exit function, script or shell |
 | FI        | Working | Terminator for IF block |
 | FUNC      | In Progress | FUNC fonction_name <br>   \<body\> <br>   END |
-| IF        | Working | [ \<condition\> ] |
+| IF        | Working | [ \<condition\> ] <br> ![ \<condition\> ]|
 | LOOP      | Working | Terminator for WHILE block |
 | MD        | Working | MD path or relative path <br> Create a directory |
 | NOHUP     | Working | Start a process with PPID=PS0 (Daemon) |
