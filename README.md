@@ -20,13 +20,13 @@ Consult the **[documentation](#documentation)** section below to find other reso
 
 Major updates have occurred to the kernel and many of the A2osX API's to support a greatly enhanced shell that boasts significant new scripting capabilities since 0.92.  Also added is the the ability to redirect input and output, including errors, and the ability to pipe (|) the output of one command or operation to another (i.e. **ls \* | more** ).  A2osX now provides for multiple virtual terminals as well as users/terminals via TCP (through TELNETD) and serial devices (through a SSC driver).
 
-As great as the changes to A2osX itself, we are also please to report that great strides have been made in terms of documentation.  While much of it is in draft form, there is a new **[Users Guide](.Docs/User%20Guide.md)**, **[Developers Guide](.Docs/Developers%20Guide.md)**, **[Shell Developers Guide](.Docs/Shell%20Developers%20Guide.md)**, **[Technical Spec](.Docs/Technical%20Spec.md)** and **[Command Guide](.Docs/Command%20Guide.md)**.  See the Documentation Section below for more details.
+As great as the changes to A2osX itself, we are also please to report that great strides have been made in terms of documentation.  While much of it is in draft form, there is a new **[Users Guide](.Docs/User%20Guide.md)**, **[Developers Guide](.Docs/Developers%20Guide.md)**, **[Shell Developers Guide](.Docs/Shell%20Developers%20Guide.md)**, **[Technical Spec](.Docs/Technical%20Spec.md)** and **[Command Guide](.Docs/Command%20Guide.md)**.  See the **[Documentation](#documentation)** Section below for more details.
 
 If you would like to read all the past news articles for A2osX, you can read the news article found **[here](.Docs/News.md)**.
 
 # **Visit us at [A2osX](http://www.a2osx.com)**
 
-This is just a place holder and plug for our A2osx internet site.  Stay tuned here for news about this site.
+This is just a place holder and plug for our A2osx internet site.  Stay tuned here for news about this site.  We have also created a Page to discuss A2osX on **[Facebook](https://www.facebook.com/A2osx-372512896625840/)**.  He also have a new **[Twitter](https://twitter.com/A2Osx)** handle that we have been using to test new A2osX features but will soon be using as a messaging channel, so please follow.
 
 ## Disk images :
 
@@ -34,7 +34,7 @@ You can use and/or install A2osX from the media in our Media directory found **[
 
 ## Documentation
 
-A lot of work is being done to expand and enhance the documentation for A2osX.  Some of this documentation is still in the rough draft stage, but is being provided to bring you as much information about A2osX as quickly as possible.  We happily welcome any help and contributions from others to this or any area of the A2osX project.
+A lot of work has been done to expand and enhance the documentation for A2osX.  Some of this documentation is still in the rough draft stage, provided to bring you as much information about A2osX as quickly as possible.  We happily welcome any help and contributions from others to this or any area of the A2osX project.
 
 The repository all A2osX documentation can be found **[here](.Docs)**.  This directory includes the system generated specifications for all the A2osX APIs as well as all our other documentation. 
 
@@ -44,16 +44,20 @@ Of special note please check out our brand new **[Users Guide](.Docs/User%20Guid
 
 There are two types of Technical Documentation available.  First there is the Automatically Generated Documentation that is created from the source code of A2osX.  These documents capture all the internal A2osX APIs and system calls available to the A2osX programmer.  Developers should scan through these documents before beginning any A2osX project.  In addition, please make sure you look at the programming template file that is the best start to any A2osX program; it can be found **[here](.Docs/.TEMPLATE.S.txt)**.
 
-In addition there is the developer generated Technical Specifications that document the internal and external A2osX commands, utilities and shell language.  The master technical spec file can be found **[here](.Docs/Technical%20Spec.md)**.
+In addition, there is the developer generated Technical Specifications that document the internal and external A2osX commands, utilities and shell language.  The master technical spec file can be found **[here](.Docs/Technical%20Spec.md)**.
 
 ### User Guide
 
 A draft of the first A2osX User Guide can be found on GitHub **[here](.Docs/User%20Guide.md)**.
 
-### Notes for Developers
+### Developers Guide
 
-A draft of the first A2osX Notes for Developers can be found on GitHub **[here](.Docs/Notes%20for%20Developers.md)**.
+A draft of the first A2osX Notes for Developers can be found on GitHub **[here](.Docs/Developers%20Guide.md)**.
 
 ## License
 
 A2osX is made available under the GNU License 2.0.  Our Full License can he found **[Here](./License).**
+
+## Copyright
+
+Copyright 2015 - 2019, Remy Gibert and the A2osX contributors.

@@ -464,3 +464,7 @@ RGXX you need to support more info on MEMDUMP and what the columns mean and how 
 Tool based on UDP socket API, renamed from RPCINFO <br> RPCDUMP <ip\|host>
 
 RGXX we need more info on this command.
+
+## Copyright
+
+Copyright 2015 - 2019, Remy Gibert and the A2osX contributors.
