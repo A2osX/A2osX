@@ -163,3 +163,7 @@ functions
 
 * DIV/MOD
 
+
+## Copyright
+
+Copyright 2015 - 2019, Remy Gibert and the A2osX contributors.

@@ -39,3 +39,7 @@ You can use and/or install A2osX from the media found in our Media directory fou
 
 
 Please note, we plan to change the media set once 0.93 is officially released.  Currently, the BUILD media is the primary image used by the developers to hold the most current version of the A2osX binaries (and a copy of the source, although of course GitHub is the primary source repository). You can download the BUILD image and run in your favorite Apple II emulator or copy to CFFA, MicroTurbo or other Hard Disk emulator to boot, run, test and develop programs for A2osX.  Once 0.93 is released, we plan to update the media to include RELEASE, STABLE and BUILD editions of the media, like other projects you might find on GitHub; and each of these will include BOOT, INSTALL, SOURCE and EXTRA type media so that users and developers can BOOT or INSTALL A2osX to existing systems as they see fit.
+
+## Copyright
+
+Copyright 2015 - 2019, Remy Gibert and the A2osX contributors.

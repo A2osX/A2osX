@@ -362,3 +362,7 @@ ProDOS or MLI Errors
 | $57 |  87 | Duplicate Volume|
 | $5A |  90 | File Structure Damaged|
 
+
+## Copyright
+
+Copyright 2015 - 2019, Remy Gibert and the A2osX contributors.

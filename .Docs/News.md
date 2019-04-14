@@ -181,3 +181,7 @@ Anyway, i'm convinced that a small team of developers could reach "version 1.0" 
 
 Well, let me know if you can bring "fresh blood" to this stuff... 
 
+
+## Copyright
+
+Copyright 2015 - 2019, Remy Gibert and the A2osX contributors.

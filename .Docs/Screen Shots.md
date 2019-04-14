@@ -29,3 +29,7 @@ DHGR Mixed-Mode Graphic primitives....
 
 ![](../.screen-shots/ScreenShot.GFX.png)
 
+
+## Copyright
+
+Copyright 2015 - 2019, Remy Gibert and the A2osX contributors.

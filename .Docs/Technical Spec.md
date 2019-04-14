@@ -153,3 +153,7 @@ note : '$VAR' does NOT expand Variable
 | MEMDUMP | Working | Tool to track memory leak|  0.93 |
 | RPCDUMP | In Progress | Tool based on UDP socket API, renamed from RPCINFO <br> RPCDUMP <ip\|host> | 0.92 |
 
+
+## Copyright
+
+Copyright 2015 - 2019, Remy Gibert and the A2osX contributors.
