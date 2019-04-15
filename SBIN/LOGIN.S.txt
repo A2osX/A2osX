@@ -7,11 +7,16 @@ NEW
 *--------------------------------------
 				.INB INC/MACROS.I
 				.INB INC/A2OSX.I
+				.INB INC/KERNEL.I
 				.INB INC/LIBCRYPT.I
 *--------------------------------------
 				.DUMMY
 				.OR ZPBIN
 ZS.START
+ZPUsrID			.BS 1
+ZPUsrPtr		.BS 2
+ZPSessionPtr	.BS 2
+ZPShellPtr		.BS 2
 ZPRetryCnt		.BS 1
 ZPbValidUser	.BS 1
 
@@ -45,17 +50,14 @@ CS.START		cld
 				.DA CS.RUN
 				.DA CS.DOEVENT
 				.DA	CS.QUIT
-L.MSG.NOPASSWD	.DA MSG.NOPASSWD				
+L.MSG.NOAUTH	.DA MSG.NOAUTH
 L.LIBCRYPT		.DA LIBCRYPT
 L.MSG.LOGIN		.DA MSG.LOGIN
 L.MSG.PASSWORD	.DA MSG.PASSWORD
 L.MSG.BAD		.DA MSG.BAD
 L.MSG.CRLF		.DA MSG.CRLF
 L.MSG.BS		.DA MSG.BS
-L.ENV.SHELL		.DA ENV.SHELL
-L.SHELL			.DA SHELL
-L.ENV.HOME		.DA ENV.HOME
-L.HOME			.DA HOME
+L.USR.ROOT		.DA USR.ROOT
 				.DA 0
 *--------------------------------------
 CS.INIT			clc
@@ -66,17 +68,8 @@ CS.RUN			>PUSHW pData			PW
 				>SYSCALL GetPWUID
 				bcc CS.RUN.AUTH
 				
-				>PUSHBI 0
-				>LDYA L.MSG.NOPASSWD
-				>SYSCALL printf
-				bcs CS.RUN.9
+				jmp CS.RUN.NOAUTH
 				
-				jsr CS.RUN.SETENV
-				bcs CS.RUN.9
-				
-				>PUSHBI S.PS.F.HOLD
-				>LDYA L.SHELL
-				>SYSCALL ExecL
 CS.RUN.9		rts
 *--------------------------------------
 CS.RUN.AUTH		>LDYA L.LIBCRYPT
@@ -140,16 +133,8 @@ CS.RUN.AUTH		>LDYA L.LIBCRYPT
 *				sec				
 .9				rts
 *--------------------------------------
-CS.RUN.LOGIN	jsr CS.RUN.SETENV
-				bcs .9
-				
-				>PUSHBI S.PS.F.HOLD
-				>LDYA L.SHELL
-				>SYSCALL ExecL
-.9				rts
-*--------------------------------------
 CS.RUN.CHECK	rol ZPbValidUser
-				bcs .9
+				bcs CS.RUN.CHECK.9
 
 				>PUSHW ZPGetlinePtr
 				>PUSHW ZPGetlinePtr
@@ -159,20 +144,96 @@ CS.RUN.CHECK	rol ZPbValidUser
 				>LDYA ZPGetlinePtr
 				>SYSCALL strcmp
 
+CS.RUN.CHECK.9	rts
+*--------------------------------------
+CS.RUN.NOAUTH	>PUSHBI 0
+				>LDYA L.MSG.NOAUTH
+				>SYSCALL printf
+				bcs CS.RUN.CHECK.9
+				
+				>LDYA L.USR.ROOT
+				
+CS.RUN.LOGIN	jsr CS.RUN.SETUSER
+				bcs .9
+				
+				>PUSHBI S.PS.F.HOLD
+				
+				lda ZPUsrPtr
+				clc
+				adc #S.USR.NAME
+				sta ZPUsrPtr
+				lda ZPUsrPtr+1
+				adc /S.USR.NAME
+				sta ZPUsrPtr+1
+				
+				ldx #3					Skip NAME,GECOS,DIR
+				
+.1				ldy #$ff
+
+.2				iny
+				lda (ZPUsrPtr),y
+				bne .2
+				tya
+				sec
+				adc ZPUsrPtr
+				sta ZPUsrPtr
+				bcc .3
+				inc ZPUsrPtr+1
+.3				dex
+				bne .1
+				
+				>LDYA ZPUsrPtr
+				>SYSCALL ExecL
+				bcs .9
+				
+				ldx ZPUsrID
+				lda S.Table.hPW-1,x
+				stz S.Table.hPW-1,x
+				stz S.Table.hFILE-1,x
+				>SYSCALL freemem
+				
 .9				rts
 *--------------------------------------
-CS.RUN.SETENV	>PUSHW L.HOME
-				>LDYA L.ENV.HOME
-				>SYSCALL setenv
+CS.RUN.SETUSER	>STYA ZPUsrPtr
+
+				ldx #1
+
+.1				lda S.Table.hPW-1,x
+				bne .7
+				
+				stx ZPUsrID
+				txa
+				
+				ldy #S.PS.hSID
+				sta (pPS),y
+				
+				>LDYAI USR.ROOT.Size
+				>SYSCALL getmem
 				bcs .9
+				>STYA ZPSessionPtr
 				
-				>PUSHW L.SHELL
-				>LDYA L.ENV.SHELL
-				>SYSCALL setenv
-				bcs .9
+				txa
+				ldx ZPUsrID
+				sta S.Table.hPW-1,x
 				
+				ldy #S.PS.hStdIn
+				lda (pPS),y
+				sta S.Table.hFILE-1,x
 				
+				ldy #USR.ROOT.Size-1
 				
+.2				lda (ZPUsrPtr),y
+				sta (ZPSessionPtr),y
+				dey
+				bpl .2
+				
+				clc
+				rts
+				
+.7				inx
+				cpx #K.USR.MAX+1
+				bne .1
+*				sec				
 .9				rts	
 *--------------------------------------
 CS.DOEVENT		
@@ -249,18 +310,24 @@ CS.END
 *--------------------------------------
 LIBCRYPT		.AZ "libcrypt"
 hLIBCRYPT		.BS 1
-MSG.NOPASSWD	.AS "\r\n\r\nA2osX-Login:No ETC/PASSWD file present, Logged as ROOT.\r\n"
+MSG.NOAUTH		.AS "\r\n\r\nA2osX-Login:No ETC/PASSWD file present, Logged as ROOT.\r\n"
 				.AS "Consider adding ROOT password with USERADD command.\r\n"
 MSG.CRLF		.AZ "\r\n"
 MSG.LOGIN		.AZ "\r\nlogin:"
 MSG.PASSWORD	.AZ "\r\npassword:"
 MSG.BAD			.AZ "Bad user or password\r\n"
 MSG.BS			.DA #C.BS,#C.SPACE,#C.BS,#0
-ENV.SHELL		.AZ "SHELL"
-ENV.HOME		.AZ "HOME"
-SHELL			.AZ "${ROOT}BIN/SH"
-HOME			.AZ "${ROOT}ROOT/"
 				.HS 00
+*--------------------------------------
+USR.ROOT		.DA #P.SYSADMIN
+				.DA #0					UID
+				.DA #0					GID
+				.BS 17					PASSWD
+				.AZ "ROOT"				NAME
+				.AZ "Root User"			GECOS
+				.AZ "${ROOT}ROOT/"		DIR
+				.AZ "${ROOT}BIN/SH"		SHELL
+USR.ROOT.Size	.EQ	*-USR.ROOT
 *--------------------------------------
 				.DUMMY
 				.OR 0
