@@ -1,6 +1,5 @@
 NEW
-PREFIX
-AUTO 4,1
+  AUTO 3,1
 				.LIST OFF
 				.OP	65C02
 				.OR	$2000
@@ -8,11 +7,19 @@ AUTO 4,1
 *--------------------------------------
 				.INB INC/MACROS.I
 				.INB INC/A2OSX.I
+				.INB INC/LIBCRYPT.I
 *--------------------------------------
 				.DUMMY
 				.OR ZPBIN
 ZS.START
-ZPPTR1			.BS 2
+ZPRetryCnt		.BS 1
+ZPbValidUser	.BS 1
+
+ZPhGetLine		.BS 1
+ZPGetLinePtr	.BS 2
+ZPbGetLineSecret	.BS 1
+ZPGetLineLen	.BS 1
+ZPGetLineMax	.BS 1
 ZS.END
 				.ED
 *--------------------------------------
@@ -28,7 +35,7 @@ CS.START		cld
 				.DA #0
 				.DA CS.END-CS.START		Code Size (without Constants)
 				.DA DS.END-DS.START		Data SegmentSize
-				.DA #16					Stack Size
+				.DA #64					Stack Size
 				.DA #ZS.END-ZS.START	Zero Page Size
 				.DA 0
 *--------------------------------------
@@ -42,8 +49,9 @@ L.MSG.NOPASSWD	.DA MSG.NOPASSWD
 L.LIBCRYPT		.DA LIBCRYPT
 L.MSG.LOGIN		.DA MSG.LOGIN
 L.MSG.PASSWORD	.DA MSG.PASSWORD
-L.MSG.ECHOCRLF	.DA MSG.ECHOCRLF
-L.MSG.ECHODEL	.DA MSG.ECHODEL
+L.MSG.BAD		.DA MSG.BAD
+L.MSG.CRLF		.DA MSG.CRLF
+L.MSG.BS		.DA MSG.BS
 L.ENV.SHELL		.DA ENV.SHELL
 L.SHELL			.DA SHELL
 L.ENV.HOME		.DA ENV.HOME
@@ -53,7 +61,7 @@ L.HOME			.DA HOME
 CS.INIT			clc
 				rts
 *--------------------------------------
-CS.RUN			>PUSHEA.G PW
+CS.RUN			>PUSHW pData			PW
 				lda #0
 				>SYSCALL GetPWUID
 				bcc CS.RUN.AUTH
@@ -66,7 +74,7 @@ CS.RUN			>PUSHEA.G PW
 				jsr CS.RUN.SETENV
 				bcs CS.RUN.9
 				
-				>PUSHBI S.PS.F.HOLD+S.PS.F.DUPENV
+				>PUSHBI S.PS.F.HOLD
 				>LDYA L.SHELL
 				>SYSCALL ExecL
 CS.RUN.9		rts
@@ -77,49 +85,80 @@ CS.RUN.AUTH		>LDYA L.LIBCRYPT
 				
 				sta hLIBCRYPT
 
-				>STZ.G INPUT.PrevCR
+				>LDYAI 256
+				>SYSCALL getmem
+				bcs CS.RUN.9
 
-				>PUSHBI 0
+				>STYA ZPGetLinePtr
+				stx ZPhGetLine
+				
+				lda #3
+				sta ZPRetryCnt
+
+.1				>PUSHBI 0
 				>LDYA L.MSG.LOGIN
 				>SYSCALL printf
 				bcs .9
 				
-				lda #0					Echo all caracters
-				jsr INPUT.RESET
-
-.1				>SYSCALL GetChar
+				lda #16
+				clc
+				jsr CS.RUN.GetLine
 				bcs .9
 				
-				jsr INPUT.CHARIN
-				jsr INPUT.LINEIN
-				bcc .1
+				>PUSHW pData
+				>LDYA ZPGetLinePtr
+				>SYSCALL GetPWName
+				ror ZPbValidUser
 				
 				>PUSHBI 0
 				>LDYA L.MSG.PASSWORD
 				>SYSCALL printf
 				bcs .9
 				
-				lda #'*'
-				jsr INPUT.RESET
-				
-.2				>SYSCALL GetChar
+				lda #128
+				sec
+				jsr CS.RUN.GetLine
 				bcs .9
 				
-				jsr INPUT.CHARIN
-				jsr INPUT.LINEIN
-				bcc .2
-				
 				>PUSHBI 0
-				>LDYA L.MSG.ECHOCRLF
+				>LDYA L.MSG.CRLF
 				>SYSCALL printf
 				bcs .9
 
-				jsr CS.RUN.SETENV
+				jsr CS.RUN.CHECK
+				bcc CS.RUN.LOGIN
+				
+				>PUSHBI 0
+				>LDYA L.MSG.BAD
+				>SYSCALL printf
 				bcs .9
 				
-				>PUSHBI S.PS.F.HOLD+S.PS.F.DUPENV
+				dec ZPRetryCnt
+				bne .1
+				
+				lda #E.IUSR
+*				sec				
+.9				rts
+*--------------------------------------
+CS.RUN.LOGIN	jsr CS.RUN.SETENV
+				bcs .9
+				
+				>PUSHBI S.PS.F.HOLD
 				>LDYA L.SHELL
 				>SYSCALL ExecL
+.9				rts
+*--------------------------------------
+CS.RUN.CHECK	rol ZPbValidUser
+				bcs .9
+
+				>PUSHW ZPGetlinePtr
+				>PUSHW ZPGetlinePtr
+				>LIBCALL hLIBCRYPT,LIBCRYPT.MD5
+				
+				>PUSHEA.G PW+S.PW.PASSWD
+				>LDYA ZPGetlinePtr
+				>SYSCALL strcmp
+
 .9				rts
 *--------------------------------------
 CS.RUN.SETENV	>PUSHW L.HOME
@@ -140,7 +179,12 @@ CS.DOEVENT
 				sec
 				rts		
 *--------------------------------------
-CS.QUIT			lda hLIBCRYPT
+CS.QUIT			lda ZPhGetLine
+				beq .1
+				
+				>SYSCALL freemem
+				
+.1				lda hLIBCRYPT
 				beq .8
 				
 				>SYSCALL UnloadLib
@@ -148,105 +192,70 @@ CS.QUIT			lda hLIBCRYPT
 .8				clc
 				rts
 *--------------------------------------
-*				PRIVATE
-*--------------------------------------
-INPUT.RESET		>STA.G INPUT.PassChar
-
-				>STZ.G INPUT.BUF
-				>STA.G INPUT.Status
-				rts
-*--------------------------------------
-INPUT.CHARIN	tax						save char...
-
-				>LDA.G INPUT.Status
-				bmi .9
+CS.RUN.GetLine	sta ZPGetLineMax
+				ror ZPbGetLineSecret
+				stz ZPGetLineLen
 				
-				lda #INPUT.BUF
-				clc
-				adc pData
-				sta ZPPTR1
-				lda pData+1
-				adc /INPUT.BUF
-				sta ZPPTR1+1
-				
-				cpx #$20				Control Char?
-				bcc .2
-				
-				cpx #C.DEL
-				beq INPUT.CHARIN.DEL
-				
-				lda (ZPPTR1)
-				
-				cmp	#INPUT.BUF.SIZE		Buffer full?
-				beq .9
-				
-				inc
-				sta (ZPPTR1)
-				tay
-				
-				txa
-				sta (ZPPTR1),y
-				
-				>LDA.G INPUT.PassChar
-				bne .1
-				
-				txa
-				
-.1				>SYSCALL PutChar
+.1				>SYSCALL getchar
 				bcs .9
 				
-				>STZ.G INPUT.PrevCR
-				rts
+				cmp #C.SPACE
+				bcc .2
 				
-.2				cpx #C.CR
-				bne .3
-
-				txa
-				>STA.G INPUT.PrevCR
-				
-				lda #$80
-				>STA.G INPUT.Status
-				rts
-				
-.3				cpx #C.LF
-				bne .4
-				
-				>LDA.G INPUT.PrevCR
+				ldy ZPGetLineLen
+				cpy ZPGetLineMax
 				beq .1
 				
-.4				>STZ.G INPUT.PrevCR
+				sta (ZPGetLinePtr),y
+				iny
+				sty ZPGetLineLen
 				
-.9				rts				
-*--------------------------------------
-INPUT.CHARIN.DEL
-				lda (ZPPTR1)
+				bit ZPbGetLineSecret
+				bmi .1
+				
+				>SYSCALL putchar
+				bra .1
+
+.2				cmp #3					Ctrl-C
+				beq .9
+
+				cmp #C.CR
 				beq .8
 				
-				dec
-				sta (ZPPTR1)
+				cmp #C.BS
+				bne .1
+				
+				ldy ZPGetLineLen
+				beq .1
+				dec ZPGetLineLen
+				
+				bit ZPbGetLineSecret
+				bmi .1
 				
 				>PUSHBI 0
-				>LDYA L.MSG.ECHODEL
+				>LDYA L.MSG.BS
 				>SYSCALL printf
+				bra .1
 				
-.8				clc
-				rts
-*--------------------------------------
-INPUT.LINEIN	ldy #INPUT.Status
-				lda (pData),y
-				asl						CS if a line is in the buffer
-				rts
+.8				ldy ZPGetLineLen
+				lda #0
+				sta (ZPGetLinePtr),y
+				
+				clc
+				
+.9				rts	
 *--------------------------------------
 CS.END
 *--------------------------------------
 LIBCRYPT		.AZ "libcrypt"
 hLIBCRYPT		.BS 1
 MSG.NOPASSWD	.AS "\r\n\r\nA2osX-Login:No ETC/PASSWD file present, Logged as ROOT.\r\n"
-				.AZ "Consider adding ROOT password with USERADD command.\r\n\r\n"
+				.AS "Consider adding ROOT password with USERADD command.\r\n"
+MSG.CRLF		.AZ "\r\n"
 MSG.LOGIN		.AZ "\r\nlogin:"
 MSG.PASSWORD	.AZ "\r\npassword:"
-MSG.ECHOCRLF	.AZ "\r\n"
-MSG.ECHODEL		.DA #C.BS,#C.SPACE,#C.BS,#0
+MSG.BAD			.AZ "Bad user or password\r\n"
+MSG.BS			.DA #C.BS,#C.SPACE,#C.BS,#0
 ENV.SHELL		.AZ "SHELL"
 ENV.HOME		.AZ "HOME"
 SHELL			.AZ "${ROOT}BIN/SH"
@@ -256,10 +265,6 @@ HOME			.AZ "${ROOT}ROOT/"
 				.DUMMY
 				.OR 0
 DS.START
-INPUT.BUF		.BS INPUT.BUF.SIZE+1
-INPUT.Status	.BS 1
-INPUT.PassChar	.BS 1
-INPUT.PrevCR	.BS 1
 PW				.BS S.PW
 DS.END
 				.ED
