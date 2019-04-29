@@ -1,0 +1,4343 @@
+NEW
+  AUTO 3,1
+object code = mli_2
+* xdos mli system call processor
+
+ofsX	.EQ	xdosobj-xdosorg		offset to xdos org
+
+xdosmli	.EQ	*-ofsX			xdos MLI in aux ram
+xdosobj	cld                            	no decimal.
+         pla				get processor status
+         sta   spare1                   save it temporarily
+         sty   mliy                     save x and y
+         stx   mlix                     
+         pla                            find out the address of the caller
+         sta   A3L
+         clc                            preserve the address of the call spec.
+         adc   #$04
+         sta   mliretn                  last MLI call return address
+         pla
+         sta   A3L+1
+         adc   #$00
+         sta   mliretn+1
+         lda   spare1
+         pha                            pull processor status
+         plp				to re-enable interrupts.
+         cld                            still no decimal
+         ldy   #$00
+         sty	p8error                  clear any previous errors.
+         iny                            find out if command is valid.
+	lda	(A3L),y                 get command #
+         lsr   a                        and hash it to a range of 0-$1F
+         lsr   a
+         lsr   a
+         lsr   a
+         clc
+         adc   (A3L),y
+         and   #$1F
+         tax
+         lda   (A3L),y			check result to see if valid command #
+         cmp   scnums,x
+         bne   scnerr
+         iny				index to call spec parm list.
+         lda   (A3L),y                  make A3L point to parameter count byte
+         pha                            in parameter block.
+         iny
+         lda   (A3L),y
+         sta   A3L+1
+         pla
+         sta   A3L
+         ldy   #$00			make sure parameter list has the
+         lda	pcntbl,x                 correct # of parameters.
+         beq   goclock                  clock has 0 parameters.
+         cmp   (A3L),y
+         bne   scperr			error if wrong count.
+         lda   scnums,x                 get call # again
+         cmp   #$65			is it quit?
+         beq   special                  if so, then call quit dispatcher
+         asl   a                        carry set if bfm or dev mgr
+         bpl   godevmgr
+         bcs   gobfmgr
+         lsr   a			shift back down for interrupt manager
+         and   #$03                     valid calls are 0 and 1
+         jsr   intmgr
+         bra   exitmli
+special	jmp   jspare			P8 system death vector
+goclock	jsr   clockv                   	go read clock.
+         bra   exitmli                  no errors possible
+godevmgr lsr   a			shift back down for device manager.
+         adc   #$01                     valid commands are 1 and 2.
+         sta   A4L                      save command #.
+         jsr   devmgr                   execute read or write request.
+         bra   exitmli
+gobfmgr	lsr   a				shift back down for block file manager.
+         and   #$1F			valid commands are 0-$13
+         tax
+         jsr   bfmgr
+exitmli	stz   bubit                    	clear backup bit
+         ldy   p8error                  P8 error code
+         cpy   #$01                     if > 0 then set carry
+	tya                            	and set z flag.
+         php                            disable interrupts until exit complete.
+         sei
+         lsr   mliact                   indicate MLI done.
+         plx                            save status register until return.
+         lda   mliretn+1                place last MLI call return address
+         pha                            on stack. return is done via 'rti'
+         lda   mliretn                  so the status register is restored
+         pha                            at the same time, so
+         phx                            place status back on stack
+         tya                            return error, if any.
+         ldx   mlix                     MLI X register savearea
+         ldy   mliy                     MLI Y register savearea
+         pha
+         lda   bnkbyt1                  restore language card status
+         jmp   HBFA0                    and return.
+nodevice .EQ	*-ofsX
+         lda   #$28			no device connected.
+         jsr   p8errv                   P8 error vector.
+scnerr	lda   #$01			no such command.
+         bne   H30B0
+scperr	lda   #$04			parameter count is invalid
+H30B0    jsr   gosyserr
+         bcs   exitmli			always taken
+
+* ProDOS Device Manager
+
+devmgr	.EQ	*-ofsX	
+         ldy   #$05
+	php				do not allow interrupts.
+         sei                            the call spec for devices must
+H30B9    lda   (A3L),y                  be passed to drivers in page zero:
+	sta	|A4L,y			sta $0042,y
+         dey
+         bne   H30B9
+         ldx   buf+1			buffer page
+         stx   usrbuf+1                 to user buffer
+         inx
+         inx
+         lda   buf			is buffer page aligned (nn00) ?
+         beq   H30CC                    branch if it is
+         inx                            else account for 3-page straddle
+H30CC    jsr   vldbuf1                  make sure user buffer is not
+         bcs   dvmgrerr			conflicting with protected ram.
+         jsr   dmgr			call internal entry for device dispatch
+         bcs   dvmgrerr			branch if error
+         plp
+         clc                            no error
+         rts
+dvmgrerr plp				restore interrupt status
+gosyserr .EQ	*-ofsX
+         jsr   p8errv                   P8 error vector
+dmgr	.EQ	*-ofsX			interrupts must always be off.
+         lda   unitnum			get device # and
+         and   #$F0                     strip misc lower nibble
+         sta   unitnum			then save it.
+         lsr   a                        use as index to device table
+         lsr   a
+         lsr   a
+         tax
+         lda   drivertbl1,x		fetch driver address
+         sta   goadr
+         lda   drivertbl1+1,x
+         sta   goadr+1
+gocmd	.EQ	*-ofsX
+         jmp   (goadr)			goto driver (or error if no driver)
+
+* ProDOS interrupt manager
+
+intmgr	.EQ	*-ofsX
+         sta   A4L			interrupt command
+         lsr   a                        allocate interrupt or deallocate?
+         bcs   dealcint                 branch if deallocate.
+         ldx   #$03			test for a free interrupt space in tbl.
+alcint	lda	inttbl-2,x              test high address for 0.
+         bne	H3118                   branch if spot occupied.
+         ldy	#$03                    get address of routine.
+         lda	(A3L),y                 must not be zero page.
+         beq   badint                   error if it is.
+         sta   inttbl-2,x		save high address
+         dey
+         lda   (A3L),y
+         sta   inttbl-3,x               and low address.
+         txa                            return interrupt # in range 1-4
+         lsr   a
+         dey
+         sta   (A3L),y                  pass back to user.
+         clc                            no errors.
+         rts
+H3118    inx
+         inx                            next lower priority spot
+         cpx   #$0B                     are all 4 already allocated?
+         bne	alcint                  branch if not.
+         lda	#$25                    interrupt table full
+	bne	H3124
+badint	lda   #$53                     	invalid parameter.
+H3124    jsr   p8errv                   P8 error vector.
+dealcint	ldy   #$01              zero out interrupt vector
+         lda	(A3L),y                 but make sure it is a valid #.
+         beq   badint                   error if < 1
+         cmp   #$05                     or > 4
+         bcs   badint
+         asl   a
+         tax
+         lda   #$00			now clear it
+         sta   inttbl-2,x
+         sta   inttbl-1,x
+         clc
+         rts
+irqrecev .EQ	*-ofsX
+         lda   accsav			get acc from where old ROM put it.
+         sta   p8areg
+         stx   p8xreg                   entry point on ram card interrupt
+         sty   p8yreg
+         tsx
+         stx   p8sreg
+         lda   irqflag			irq flag = 0 if old roms
+         bne   H315D                    and 1 if new roms.
+         pla                            restore return address and p-reg.
+         sta   p8preg                   
+         pla
+         sta   intadr                   interrupt return address
+         pla
+         sta   intadr+1
+H315D    txs
+         lda   mslot                    set up to re-enable $Cn00 rom
+         sta   irqdev+2
+         tsx				make sure stack has room for 16 bytes.
+         bmi   H3170                    branch if stack ok
+         ldy   #$0F                     otherwise, make room and save it.
+H3169	pla
+         sta   svstack,y
+         dey
+         bpl   H3169
+H3170    ldx   #$FA			save 6 bytes of page 0
+H3172    lda	$00,x
+         sta	svzerop-$FA,x
+         inx
+         bne	H3172
+
+* poll interrupt routines for a claimer
+
+	lda   inttbl+1                 	test for a valid routine.
+         beq   intr2                    branch if no routine.
+         jsr   goint1                   execute
+         bcc   irqdone
+intr2    lda   inttbl+3                 repeat 3 more times
+         beq   intr3
+         jsr   goint2
+         bcc   irqdone
+intr3    lda   inttbl+5
+         beq   intr4
+         jsr   goint3
+         bcc   irqdone
+intr4    lda   inttbl+7
+         beq   H31A2
+         jsr   goint4
+         bcc   irqdone
+H31A2    inc   irqcount			allow 255 unclaimed interrupts
+         bne   irqdone                  before system death.
+         lda   #$01                     bad irq so
+         jsr   sysdeath			kill the system.
+irqdone	ldx   #$FA
+H31AE    lda	svzerop-$FA,x           restore the zero page
+         sta	$00,x
+         inx
+         bne   H31AE
+         ldx   p8sreg                   test if stack needs restoring.
+         bmi   H31C6                    branch if not.
+         ldy   #$00
+H31BD    lda	svstack,y               restore stack
+         pha
+         iny
+         cpy   #$10
+         bne   H31BD
+H31C6    lda   irqflag			check for old roms.
+         bne   H31DD                    branch if new roms.
+         ldy   p8yreg                   restore registers.
+         ldx   p8xreg
+         lda   clrrom                   re-enable i/o card.
+irqdev	.EQ	*-ofsX
+         lda   $C100			Cn is self modifying.
+         lda   irqdev+2			restore device id.
+         sta   mslot                    slot being accessed.
+H31DD    jmp   irqexit                  do necessary bank switches and return.
+irqflag	.EQ	*-ofsX
+         dc    h'00'			0 = old roms. 1 = new roms.
+irqcount .EQ	*-ofsX
+         dc	h'00'                   # of unclaimed interrupts.
+svstack	.EQ	*-ofsX			temporary save area from stack
+	dc	h'0000000000000000'
+         dc    h'0000000000000000'
+svzerop	.EQ	*-ofsX			temporary save area for zero page
+         dc    h'000000000000'	
+goint1	.EQ	*-ofsX
+         jmp   (inttbl)                 interrupt routine 1
+goint2	.EQ	*-ofsX
+         jmp   (inttbl+2)               interrupt routine 2
+goint3	.EQ	*-ofsX
+         jmp   (inttbl+4)               interrupt routine 3
+goint4	.EQ	*-ofsX
+         jmp   (inttbl+6)               interrupt routine 4
+syserr1	.EQ	*-ofsX
+         sta   p8error                  P8 error code
+         plx
+         plx				pop 1 level of return
+         sec
+         rts
+sysdeath1 .EQ	*-ofsX
+         tax				death error code.
+         sta   clr80vid                 disable 80 col hardware.
+         lda   txtset                   switch in text.
+         lda   cortflag			is this a Cortland?
+         beq   H321A                    if not, don't use super hires switch.
+         stz   newvideo                 force off super hires.
+H321A    lda   txtpage1                 switch in text page 1.
+         ldy   #$13
+H321F    lda   #$20                     inverse space border
+         sta   vline11+10,y
+         sta   vline13+10,y
+         lda   deathmsg,y
+         sta   vline12+10,y		'RESTART SYSTEM-$0x'
+         dey
+         bpl   H321F
+         txa                            x = death error code
+         and   #$0F                     convert to ascii
+         ora   #$B0
+         cmp   #$BA
+         bcc   H323B			branch if not > 9.
+         adc   #$06                     inc to alpha a-f
+H323B    sta   vline12+28               death error code 1 to F
+H323E    bra   H323E			end of xdos mli
+
+* ProDOS Block File Manager
+
+bfmgr	.EQ	*-ofsX
+         lda   disptch,x		translate into command address.
+         asl   a                        bit 7 indicates pathname to process
+         sta   cmdtemp
+         and   #$3F                     bit 6  is refnum, 5 is time to process
+         tax
+         lda   cmdtable,x		move address to indirect jump
+         sta   goadr
+         lda   cmdtable+1,x             high byte
+         sta   goadr+1
+         lda   #$20                     init backup bit flag
+         sta   bkbitflg                 to say 'file modified'
+         bcc   nopath
+         jsr   setpath			process pathname before calling command
+         bcs   errorsys			branch if bad name.
+nopath	asl   cmdtemp                  	test for refnum processing
+         bcc   nopreref
+         jsr   findfcb			set pointers to fcb and vcb of file
+         bcs   errorsys
+nopreref asl   cmdtemp			check for necessity of time stamp
+         bcc   H3274
+         jsr   clockv                   date/time
+H3274    jsr   gocmd                    execute command
+         bcc   goodop
+errorsys jsr   p8errv                   P8 error vector
+goodop	rts
+setpath	.EQ	*-ofsX
+         ldy   #$01			index to pathname pointer
+         lda   (A3L),y                  low pointer address
+         sta   zpt
+         iny
+         lda   (A3L),y                  hi pointer address
+         sta   zpt+1
+synpath	.EQ	*-ofsX			entry used by rename for 2nd pathname.
+         ldx   #$00                     x = index to pathbuf
+         ldy   #$00                     y = index to input pathname.
+         stx   prfxflg			assume prefix is in use.
+         stx   pathbuf                  mark pathbuf = nothing processed.
+         lda   (zpt),y                  validate pathname length > 0 and < 65
+         beq   errsyn
+         cmp   #$41
+         bcs   errsyn
+         sta   pathcnt			this is used to compare for
+         inc   pathcnt                  end of pathname processing.
+         iny                            now check for full pathname...
+         lda   (zpt),y                  (full name if starts with '/')
+         ora   #$80
+         cmp   #$AF
+         bne   H32AD                    branch if prefix appended.
+         sta   prfxflg                  set prefix flag = prefix not used.
+         iny                            index to 1st character of pathname.
+H32AD    lda   #$FF                     set current position of pathbuf
+         sta   pathbuf,x                to indicate end of pathname.
+         sta   namcnt                   $FF = no chars processed in local name.
+         stx   namptr                   pointer to local name length byte.
+H32B8    cpy   pathcnt                  done with pathname processing?
+         bcs   endpath
+         lda   (zpt),y                  get character
+         and   #$7F
+         inx                            prepare for next char
+         iny
+         cmp   #$2F                     is it delimiter '/' ?
+         beq   endname                  yes
+         cmp   #$61                     lowercase?
+         bcc   H32CD                    no
+         and   #$5F                     shift to uppercase
+H32CD    sta   pathbuf,x                store char
+         inc   namcnt                   is it the 1st char of a local name?
+         bne   H32DA                    no
+         inc   namcnt                   increment to 1
+         bne   H32E6                    1st char must be alpha (always taken)
+H32DA    cmp   #$2E                     is it '.' ?
+         beq   H32B8                    ok, then do next char
+         cmp   #$30                     at least a '0' ?
+         bcc   errsyn                   error if not
+         cmp   #$3A			is it numeric?
+         bcc   H32B8			yes, get next char
+H32E6    cmp   #$41                     at least an 'a' ?
+         bcc   errsyn                   error if not
+         cmp   #$5B                     is it > 'z' ?
+         bcc   H32B8                    branch if valid alpha to get next char
+errsyn	sec                            	bad pathname
+         lda   #$40
+         rts
+endpath	lda   #$00                     	end pathname with a 0
+         bit   namcnt                   also make sure count is positive
+         bpl   H32FD
+         sta   namcnt
+         dex
+H32FD    inx
+         sta   pathbuf,x
+         beq   errsyn			error if '/' only.
+         stx   pathcnt                  save length of pathname
+         tax
+endname  lda   namcnt                   validate local name < 16
+         cmp   #$10
+         bcs   errsyn
+         phx                            save pointer
+         ldx   namptr                   get index to beginning of local name
+         sta   pathbuf,x                save local name's length
+         plx                            restore pointer
+         bne   H32AD                    branch if more names to process
+         clc                            probably no error, but
+         lda   prfxflg                  make sure all pathnames are prefixed
+         bne   H3323                    or begin with a '/'.
+         lda   newpfxptr                must be non-zero
+         beq   errsyn
+H3323    rts
+
+* set prefix command
+
+setprefx .EQ	*-ofsX
+         jsr   setpath                  call is made to detect if a null path.
+         bcc   H3333                    path ok.
+         ldy   pathbuf                  is it a null pathname?
+         bne   pfxerr                   error if not
+         jsr   stypfx			indicate null prefix
+         clc                            no error
+         rts
+H3333    jsr   findfile			go find specified prefix directory.
+         bcc   H333C                    if no error.
+         cmp   #$40                     bad pathname.
+         bne   pfxerr                   branch if error is not root directory.
+H333C    lda   d_stor                   make sure last local name is dir type
+         and   #$D0                     (either root or sub).
+         eor   #$D0                     directory?
+         bne   ptyperr                  wrong type
+         ldy   prfxflg                  new or appended prefix?
+         bne   H334D
+         lda   newpfxptr                append new prefix to old
+H334D    tay
+         sec                            find new beginning of prefix
+         sbc   pathcnt
+         cmp   #$C0                     too long?
+         bcc   errsyn                   then error
+         tax
+         jsr   stapfx
+         lda   d_dev                    save device #
+         sta   p_dev
+         lda   d_frst			and address of 1st block
+         sta   p_blok
+         lda   d_frst+1
+         sta   p_blok+1
+movprfx	lda   pathbuf,y
+         sta   pathbuf,x
+         iny
+         inx
+         bne   movprfx
+         clc				good prefix
+         rts
+ptyperr	lda   #$4B			filetype error (not a directory)
+pfxerr	sec
+         rts
+
+* get prefix command
+
+getprefx .EQ	*-ofsX			calc how big a buffer is needed.
+         clc                            get index to users pathname buffer
+         ldy   #$01
+         lda   (A3L),y
+         sta   usrbuf			user buffer ptr
+         iny
+         lda   (A3L),y
+         sta   usrbuf+1
+         stz   cbytes+1			set buffer length at 64 char max
+         lda   #$40
+         sta   cbytes
+         jsr   valdbuf			go validate prefix buffer address
+         bcs   pfxerr
+         ldy   #$00			y = indirect index to user buffer.
+         lda   newpfxptr                get address of beginning of prefix
+         tax
+         beq   nulprfx                  if null prefix.
+         eor   #$FF                     get total length of prefix
+         adc   #$02                     add 2 for leading and trailing slashes.
+nulprfx  sta   (usrbuf),y               store length in user's buffer.
+         beq   gotprfx                  branch if null prefix.
+sendprfx iny                            inc to next user buffer location.
+         lda   pathbuf,x                get next char of prefix.
+sndlimit sta   (usrbuf),y               give char to user.
+         and   #$F0                     check for length descriptor.
+         bne   H33B3                    branch if regular character
+         lda   #$2F                     otherwise, substitute a slash.
+         bne   sndlimit                 branch always
+H33B3    inx
+         bne   sendprfx                 branch if more to send.
+         iny
+         lda   #$2F                     end with '/'
+         sta   (usrbuf),y
+gotprfx  clc				no error
+         rts
+findfcb	.EQ	*-ofsX
+         ldy   #$01			index to ref#
+         lda   (A3L),y                  is it a valid file# ?
+         beq   badref			must not be 0.
+         cmp   #$09                     must be 1 to 8 only.
+         bcs   badref
+         pha
+         dec   a
+         lsr   a
+         ror   a
+         ror   a
+         ror   a			multiply by 32.
+         sta   fcbptr                   used as an index to fcb
+         tay
+         pla                            restore ref# in acc
+         cmp   fcbbuf,y
+         bne   errnoref
+fndfcbuf .EQ	*-ofsX			get page address of file buffer.
+         lda   fcbbuf+11,y
+         jsr   getbufadr		get file's address into bufaddrl,h
+         ldx   bufaddrh			(y=fcbptr preserved)
+         beq   fcbdead			fcb corrupted
+         stx   datptr+1			save ptr to data area of buffer
+         inx
+         inx                            index block always 2 pages after data
+         stx   zpt+1
+         lda   fcbbuf+1,y               also set up device #
+         sta   devnum
+         lda   bufaddrl
+         sta   datptr                   index and data buffers always on
+         sta   zpt			page boundaries.
+fndfvol	tax				search for associated vcb
+         lda   vcbbuf+16,x
+         cmp   fcbbuf+1,y		is this vcb the same device?
+         beq   tstvopen                 if it is, make sure volume is active.
+nxtfvol	txa                            	adjust index to next vcb.
+         clc
+         adc   #$20
+         bcc   fndfvol			loop until volume found.
+         lda   #$0A                     open file has no volume so
+         jsr   sysdeath			kill the system.
+fcbdead	lda   #$0B			fcb error so
+         jsr   sysdeath                 kill the system.
+tstvopen lda   vcbbuf,x			make sure this vcb is open.
+         beq   nxtfvol                  branch if it is not active.
+         stx   vcbptr                   save ptr to good vcb.
+         clc                            no error
+         rts
+errnoref lda   #$00			put a zero into this fcb to
+         sta   fcbbuf,y                 show free fcb.
+badref   lda   #$43                     requested refnum is
+         sec                            illegal (out of range)
+         rts
+
+* online command
+
+online	.EQ	*-ofsX                  move user spec'd buffer ptr to usrbuf.
+         jsr   mvdbufr			figure out how big buffer has to be.
+         stz   cbytes                   set this for valdbuf routine.
+         stz   cbytes+1
+         ldy   #$01
+         lda   (A3L),y                  if 0 then cbytes=$100 else $010 for one
+         and   #$F0                     device. mask out unused nibble.
+         sta   devnum                   last device used.
+         beq   H343C                    branch if all devices.
+         lda   #$10                     cbytes = $010
+         sta   cbytes
+         bne   H343F			always taken
+H343C    inc   cbytes+1                 cbytes = $100
+H343F    jsr   valdbuf                  go validate buffer range against
+         bcs   onlinerr                 allocated memory.
+         lda   #$00                     zero out user buffer space
+         ldy   cbytes
+H3449    dey
+         sta   (usrbuf),y
+         bne   H3449
+         sta   namptr                   used as pointer to user buffer.
+         lda   devnum                   get device # again.
+         bne   H3474                    branch if only 1 device to process.
+         jsr   mvdevnums		get list of currently recognized dev's.
+H3459    phx				save index to last item on list
+         lda   loklst,x
+         sta   devnum                   save desired device to look at.
+         jsr   online1			log this volume and return it's name.
+         lda   namptr                   inc pointer for next device
+         clc
+         adc   #$10
+         sta   namptr
+         plx				get index to device list.
+         dex                            next device.
+         bpl   H3459                    branch if there is another device.
+         lda   #$00                     no errors for multiple on-line
+         clc
+onlinerr rts
+online1	.EQ	*-ofsX
+H3474    jsr   fnddvcb			see if it has already been logged in.
+         bcs   olinerr1                 branch if vcb is full.
+         ldx   #$00			read in root (volume) directory
+         lda   #$02
+         jsr   rdblk                    read it into general purpose buffer.
+         ldx   vcbptr			index to the vcb entry.
+         bcc   volfound			branch if read was ok.
+         tay                            error value.
+         lda   vcbbuf+17,x              don't take the vcb offline if
+         bne   rtrnerr                  there are active files present.
+         sta   vcbbuf,x			now take the volume offline
+         sta   vcbbuf+16,x
+rtrnerr	tya                            	error value.
+         bcs   olinerr1                 branch if unable to read.
+volfound lda   vcbbuf,x                 has it been logged in before?
+         beq   H349E                    if not.
+         lda   vcbbuf+17,x              it has, are there active files?
+         bmi   H34AA                    branch if volume is currently busy.
+H349E    jsr   logvcb1                  go log it in.
+         bcs   olinerr1			branch if there is a problem.
+         lda   #$57                     anticipate a duplicate active volume
+         bit   duplflag                 exits.
+         bmi   olinerr1			branch if so.
+H34AA    ldx   vcbptr
+         jsr   cmpvcb			does vol read compare with logged vol?
+         lda   #$2E                     anticipate wrong volume mounted.
+         bcc   H34D0                    branch if ok.
+olinerr1 pha				save error code.
+         jsr   svdevn                   report what device has problem.
+         pla                            error code.
+         iny                            tell what error was encountered.
+         sta   (usrbuf),y
+         cmp   #$57			duplicate volume error?
+         bne   H34CE                    no.
+         iny                            report which other device has same name
+         ldx   vcbentry
+         lda   vcbbuf+16,x
+         sta   (usrbuf),y
+         stz   duplflag                 clear duplicate flag.
+         lda   #$57                     duplicate volume error code.
+H34CE    sec                            flag error
+         rts
+H34D0    lda   vcbbuf,x			get volume name count
+         sta   namcnt
+         ldy   namptr                   index to user's buffer.
+H34D9    lda   vcbbuf,x                 move name to user's buffer
+         sta   (usrbuf),y
+         inx
+         iny
+         dec   namcnt
+         bpl   H34D9
+svdevn	.EQ	*-ofsX
+         ldy   namptr			index to 1st byte of this entry.
+         lda   devnum                   upper nibble = device# and
+         ora   (usrbuf),y               lower nibble = name length.
+         sta   (usrbuf),y
+         clc                            no errors
+         rts				end of block file manager
+
+* create file
+
+create	.EQ	*-ofsX
+         jsr   lookfile			check for duplicate, get free entry
+         bcs   tstfnf                   error code may be 'file not found'
+         lda   #$47                     name already exists
+crerr1	sec
+         rts
+tstfnf	cmp   #$46                     'file not found' is ok
+         bne   crerr1                   otherwise exit with error.
+         ldy   #$07                     test for tree or directory file,
+         lda   (A3L),y                  no other kinds are legal.
+         cmp   #$04                     is it seed, sapling or tree?
+         bcc   tstdspc                  branch if it is
+         cmp   #$0D
+         bne   ctyperr                  report type error if not directory.
+tstdspc	lda   devnum                   	make sure destination device
+         jsr   twrprot1                 is not write protected.
+         bcs   H351D
+         lda   nofree			is there space in directory to
+         beq   xtndir                   add this file? branch if not
+         jmp   creat1                   otherwise, go create file.
+ctyperr	lda   #$4B			filetype error
+         sec
+H351D    rts
+xtndir	lda   own_blk			before extending directory,
+         ora   own_blk+1                make sure it's a subdirectory.
+         bne   H352A
+         lda   #$49                     otherwise, directory full error
+         sec
+         rts
+H352A    lda   bloknml			preserve disk address of current (last)
+         pha				directory link, before allocating an
+         lda   bloknml+1                extended block.
+         pha
+         jsr   alc1blk                  allocate a block for extending directory
+         plx
+         stx   bloknml+1                restore block addr of dir info in gbuf
+         plx
+         stx   bloknml
+         bcs   H351D			unable to allocate.
+         sta   gbuf+2                   save block address in y,a to
+         sty   gbuf+3                   current directory.
+         jsr   wrtgbuf			update directory block with new link.
+         bcs   H351D                    if error
+         ldx   #$01
+swpbloks lda   bloknml,x                prepare new directory block
+         sta   gbuf,x                   using current block as back link
+         lda   gbuf+2,x
+         sta   bloknml,x                and save new block as next to be written
+         dex
+         bpl   swpbloks
+         inx
+         txa				x and a = 0
+clrdir   sta   gbuf+2,x
+         sta   gbuf+$100,x
+         inx
+         bne   clrdir
+         jsr   wrtgbuf			write prepared directory extension.
+         bcs   H351D                    if error
+         lda   own_blk
+         ldx   own_blk+1
+         jsr   rdblk			read in parent directory block
+         ldx   own_ent                  and calc entry address.
+         lda   #>gbuf
+         sta   zpt+1
+         lda   #$04
+ocalc    clc
+         dex                            has entry address been calulated?
+         beq   H3584                    if yes.
+         adc   own_len                  next entry address
+         bcc   ocalc
+         inc   zpt+1                    entry must be in 2nd 256 bytes of block
+         bcs   ocalc			always taken.
+H3584    sta   zpt
+         ldy   #$13                     index to block count
+H3588    lda   (zpt),y
+         adc   dinctbl-$13,y            add 1 to block count and
+         sta   (zpt),y
+         iny
+         tya				$200 to the directory's eof.
+         eor   #$18                     done with usage/eof update?
+         bne   H3588                    branch if not.
+         jsr   wrtgbuf                  go update parent.
+         bcs   crerr2
+         jmp   create
+crerr2   rts                            return and report errors
+creat1	.EQ	*-ofsX
+         ldx   #$00                     zero out gbuf
+H35A0    stz   gbuf,x
+         stz   gbuf+$100,x              and data block of file.
+         inx
+         bne   H35A0
+         ldy   #$0B                     move user specified date/time
+cmvtime	lda   (A3L),y                  	to directory.
+         sta   d_filid,y
+         txa                            if all 4 bytes of date/time = 0
+         ora   (A3L),y                  then use built-in date/time.
+         tax
+         dey
+         cpy   #$07
+         bne   cmvtime
+         txa				does user want default time?
+         bne   cmvname                  if not.
+         ldx   #$03
+mvdftime lda   p8date,x                 move current default date/time
+         sta   d_credt,x
+         dex
+         bpl   mvdftime
+cmvname	lda   (A3L),y			y = index to file kind.
+         cmp   #$04
+         lda   #$10			assume tree type
+         bcc   csvfkind
+         lda   #$D0                     it's directory.
+csvfkind ldx   namptr                   index to local name of pathname.
+         ora   pathbuf,x                combine file kind with name length.
+         sta   d_stor                   sos calls this 'storage type'.
+         and   #$0F                     strip back to name length
+         tay                            and use as counter for move.
+         clc
+         adc   namptr                   calc end of name
+         tax
+crname	lda   pathbuf,x                	move local name as filename
+         sta   d_stor,y
+         dex
+         dey
+         bne   crname
+         ldy   #$03			index to 'access' parameter
+         lda   (A3L),y
+         sta   d_attr
+         iny				also move 'file identification'
+         lda   (A3L),y
+         sta   d_filid
+cmvauxid iny				move auxillary identification bytes
+         lda   (A3L),y
+         sta   d_auxid-5,y
+         cpy   #$06
+         bne   cmvauxid
+         lda   xdosver			save current xdos version #
+         sta   d_sosver
+         lda   compat                   and backward compatibility #
+         sta   d_comp
+         lda   #$01                     usage is always 1 block
+         sta   d_usage
+         lda   d_head			place back pointer to header block
+         sta   d_dhdr
+         lda   d_head+1
+         sta   d_dhdr+1
+         lda   d_stor			storage type.
+         and   #$E0                     is it a directory?
+         beq   cralcblk                 branch if seed file.
+         ldx   #$1E                     move header to data block
+cmvheadr lda   d_stor,x
+         sta   gbuf+4,x
+         dex
+         bpl   cmvheadr
+         eor   #$30
+         sta   gbuf+4			make it a directory header mark.
+         ldx   #$07                     overwrite password area and other
+cmvpass	lda   pass,x                  	header info.
+         sta   gbuf+20,x
+         lda   xdosver,x
+         sta   gbuf+32,x
+         dex
+         bpl   cmvpass
+         ldx   #$02			and include info about parent directory
+         stx   d_eof+1
+cmvparnt lda   d_entblk,x
+         sta   gbuf+39,x
+         dex
+         bpl   cmvparnt
+         lda   h_entln                  lastly, the length of parent's
+         sta   gbuf+42			directory entries.
+cralcblk jsr   alc1blk                  get address of file's data block
+         bcs   crerr3
+         sta   d_frst
+         sty   d_frst+1
+         sta   bloknml
+         sty   bloknml+1
+         jsr   wrtgbuf			go write data block of file
+         bcs   crerr3
+         inc   h_fcnt                   add 1 to total # of files in this dir
+         bne   credone
+         inc   h_fcnt+1
+credone	jsr   drevise			go revise directories with new file
+         bcs   crerr3
+         jmp   upbmap                   lastly, update volume bitmap
+entcalc	.EQ	*-ofsX
+         lda   #>gbuf			set high address of dir entry
+         sta   zpt+1                    index pointer.
+         lda   #$04                     calc address of entry based
+         ldx   d_entnum                 on the entry #.
+H3689    clc
+H368A    dex                            addr = gbuf + ((d_entnum-1) * h_entln)
+         beq   H3696                    branch with carry clear = no errors.
+         adc   h_entln
+         bcc   H368A
+         inc   zpt+1                    inc hi address.
+         bcs   H3689			always.
+H3696    sta   zpt                      newly calculated low address.
+crerr3   rts                            carry set if error.
+drevise	.EQ	*-ofsX
+         lda   p8date
+         beq   H36A9                    if no clock, then don't mod date/time.
+         ldx   #$03
+modtime	lda   p8date,x                 	move last modification date/time
+         sta   d_moddt,x                to entry being updated.
+         dex
+         bpl   modtime
+drevise1 .EQ	*-ofsX
+H36A9    lda   d_attr			mark entry as backupable
+         ora   bkbitflg                 (bit 5 = backup needed)
+         sta   d_attr
+         lda   d_dev                    get device # of directory
+         sta   devnum                   to be revised
+         lda   d_entblk                 and address of direcotry block.
+         ldx   d_entblk+1
+         jsr   rdblk                    read block into general purpose buffer
+         bcs   crerr3
+         jsr   entcalc                  fix up ptr to entry location within gbuf.
+         ldy   h_entln                  now move 'd.' info to directory.
+         dey
+H36CA    lda   d_stor,y
+         sta   (zpt),y
+         dey
+         bpl   H36CA
+         lda   d_head			is the entry block same as
+         cmp   bloknml                  the entry's header block?
+         bne   H36E0                    if no, go save entry block
+         lda   d_head+1                 then maybe, so test high addresses.
+         cmp   bloknml+1
+         beq   uphead                   branch if they are the same block.
+H36E0    jsr   wrtgbuf                  go write updated directory block.
+         bcs   crerr3
+         lda   d_head                   get address of header block and
+         ldx   d_head+1
+         jsr   rdblk                    go read in header block to modify.
+         bcs   crerr3
+uphead	ldy   #$01			update current # of files in this dir.
+H36F2    lda   h_fcnt,y
+         sta   gbuf+37,y                (current entry count)
+         dey
+         bpl   H36F2
+         lda   h_attr                   also update header's attributes.
+         sta   gbuf+34
+         jsr   wrtgbuf                  go write updated header
+         bcs   H375A
+ripple	lda   gbuf+4			test for 'root' directory because
+         and   #$F0                     if it is, then directory revision
+         eor   #$F0                     is complete (leaves carry clear).
+         beq   H3770                    branch if done.
+         lda   gbuf+41			get entry #
+         sta   d_entnum
+         lda   gbuf+42                  and the length of ertries in that dir
+         sta   h_entln
+         lda   gbuf+39                  get addr of parent entry's dir block
+         ldx   gbuf+40
+         jsr   rdblk                    read it
+         bcs   H375A
+         jsr   entcalc                  get indirect ptr to parent entry in gbuf
+         lda   p8date			don't touch mod
+         beq   H373B                    if no clock...
+         ldx   #$03                     update the modification date & time
+         ldy   #$24                     for this entry too
+H3732    lda   p8date,x
+         sta   (zpt),y
+         dey
+         dex
+         bpl   H3732
+H373B    jsr   wrtgbuf                  write updated entry back to disk.
+         bcs   H375A                    if error.
+         ldy   #$25                     compare current block # to this
+         lda   (zpt),y                  entry's header block.
+         iny
+         cmp   bloknml                  are low addresses the same?
+         sta   bloknml
+         bne   H3751                    branch if entry doesn't reside in same
+         lda   (zpt),y                  block as header.
+         cmp   bloknml+1                are high address the same?
+         beq   ripple                   they are the same, continue to root dir.
+H3751    lda   (zpt),y                  not same so read in this dir's header.
+         sta   bloknml+1
+         jsr   rdgbuf
+         bcc   ripple			continue if read was good
+H375A    rts
+tsterr   lda   #$52			not tree or dir, unrecognized type
+         sec
+         rts
+tstsos	.EQ	*-ofsX			test if xdos disk.
+         lda   gbuf                     pointer to previous dir block
+         ora   gbuf+1                   must be null
+         bne   tsterr
+         lda   gbuf+4                   test for header
+         and   #$E0
+         cmp   #$E0
+         bne   tsterr
+H3770    clc                            no error
+         rts
+findfile .EQ	*-ofsX
+         jsr   lookfile			see if file exists
+         bcs   nofind
+moventry .EQ	*-ofsX
+         ldy   h_entln
+H377A    lda   (zpt),y                  move entry into storage
+         sta   d_stor,y
+         dey
+         bpl   H377A
+         lda   #$00			no errors
+nofind   rts
+lookfile .EQ	*-ofsX
+         jsr   preproot			go find volume
+         bcs   fnderr
+         bne   L37C5			branch if more than root
+         lda   #>gbuf                   otherwise, report a bad path error
+         sta   zpt+1                    (but 1st create a phantom entry
+         lda   #$04                     for open)
+         sta   zpt
+         ldy   #$1F			move in id and date info
+phantm1  lda   (zpt),y
+         sta   d_stor,y
+         dey
+         cpy   #$17
+         bne   phantm1
+phantm2  lda   rootstuf-$10,y
+         sta   d_stor,y
+         dey
+         cpy   #$0F
+         bne   phantm2
+         lda   #$D0			fake directory file
+         sta   d_stor
+         lda   gbuf+2                   check forward link.
+         ora   gbuf+3                   if non-zero, assume full sized directory
+         bne   H37C2                    else assume it's the slot 3 /RAM volume
+         lda   #$02                     so reset eof and blocks_used fields
+         sta   d_eof+1
+         lda   #$01
+         sta   d_usage
+H37C2    lda   #$40			bad path (carry set)
+         rts
+lookfil0 .EQ	*-ofsX
+L37C5    stz   nofree			reset free entry indicator.
+         sec                            dir to be searched has header in this block.
+L37C9    stz   totent                   reset entry counter.
+         jsr   looknam			look for name pointed to by pnptr.
+         bcc   namfound			if name was found.
+         lda   entcntl                  have we looked at all of the
+         sbc   totent                   entries in this directory?
+         bcc   L37E2                    maybe, check hi count.
+         bne   L37EB                    no, read next directory block.
+         cmp   entcnth                  has the last entry been looked at?
+         beq   errfnf                   yes, give 'file not found' error
+         bne   L37EB			or branch always.
+L37E2    dec   entcnth                  should be at least one
+         bpl   L37EB                    so this should be branch always...
+errdir   lda   #$51                     directory error
+fnderr   sec
+         rts
+L37EB    sta   entcntl			keep a running count.
+         lda   #>gbuf                   reset indirect pointer
+         sta   zpt+1
+         lda   gbuf+2                   get link to next dir block
+         bne   L37FC                    (if there is one).
+         cmp   gbuf+3                   are both zero, i.e. no link? if so,
+         beq   errdir                   then not all entries were acct'd for.
+L37FC    ldx   gbuf+3                   acc has value for block# (low).
+         jsr   rdblk                    go read the next linked directory.
+         bcc   L37C9                    if no error.
+         rts                            return error in acc.
+errfnf   lda   nofree			was any free entry found?
+         bne   fnf0
+         lda   gbuf+2                   test link
+         bne   L3814
+         cmp   gbuf+3                   if both are 0 then give up.
+         beq   fnf0                     report 'not found'.
+L3814    sta   d_entblk
+         lda   gbuf+3
+         sta   d_entblk+1               assume 1st entry of next block
+         lda   #$01                     is free for use.
+         sta   d_entnum                 mark as valid (for create)
+         sta   nofree
+fnf0     jsr   nxtpnam1			'file not found' or 'path not found'?
+errpath1 sec                            if non-zero then 'path not found'
+         beq   fnf1
+         lda   #$44			path not found
+         rts
+fnf1     lda   #$46                     file not found
+         rts
+namfound jsr   nxtpname			adj index to next name in path.
+         beq   filfound                    branch if that was the last name.
+         ldy   #$00                     be sure this is a directory entry.
+         lda   (zpt),y                  high nibble will tell.
+         and   #$F0
+         cmp   #$D0                     is it a subdirectory?
+         bne   errpath1                 error if not.
+         ldy   #$11                     get address of 1st subdirectory block
+         lda   (zpt),y
+         sta   bloknml                  (no checking done for a valid block#)
+         iny
+         sta   d_head                   save as file's header block too
+         lda   (zpt),y
+         sta   bloknml+1
+         sta   d_head+1
+         jsr   rdgbuf                   read subdirectory into gbuf.
+         bcs   fnderr1                  if error.
+         lda   gbuf+37                  get the # of files contained in this
+         sta   entcntl                  directory.
+         lda   gbuf+38
+         sta   entcnth
+         lda   gbuf+20                  make sure password is disabled
+         ldx   #$00
+         sec
+         rol   a
+L3869    bcc   L386C
+         inx
+L386C    asl   a
+         bne   L3869
+         cpx   #$05			is password disabled?
+         beq   movhead
+         lda   #$4A                     directory is not compatible
+fnderr1  sec
+         rts
+movhead  jsr   movhed0			move directory info.
+         jmp   lookfil0                 do next local pathname.
+movhed0	.EQ	*-ofsX
+         ldx   #$0A			move this directory info
+L387F    lda   gbuf+28,x
+         sta   h_credt,x
+         dex
+         bpl   L387F
+         lda   gbuf+4			if this is root, then nothing to do
+         and   #$F0
+         eor   #$F0                     test header type.
+         beq   L389C                    branch if root
+         ldx   #$03                     otherwise, save owner info about
+L3893    lda   gbuf+39,x                this header.
+         sta   own_blk,x
+         dex
+         bpl   L3893
+L389C    rts
+entadr	.EQ	*-ofsX
+filfound lda   h_maxent			figure out which entry # this is
+         sec
+         sbc   cntent                   max entries - count entries + 1
+         adc   #$00                     = entry # (carry was set)
+         sta   d_entnum
+         lda   bloknml                  and indicate block # of this directory
+         sta   d_entblk
+         lda   bloknml+1
+         sta   d_entblk+1
+         clc
+         rts
+looknam	.EQ	*-ofsX			reset count of files per block
+         lda   h_maxent
+         sta   cntent
+         lda   #>gbuf
+         sta   zpt+1
+         lda   #$04
+L38C1    sta   zpt                      reset indirect pointer to gbuf
+         bcs   L38F8			branch if this block contains a header
+         ldy   #$00
+         lda   (zpt),y                  get length of name in directory.
+         bne   isname                   branch if there is a name.
+         lda   nofree			test if a free entry has been declared.
+         bne   L38F8                    yes, inc to next entry.
+         jsr   entadr                   set address for current entry.
+         inc   nofree			indicate a free spot has been found.
+         bne   L38F8                    always.
+isname   and   #$0F                     strip byte (is checked by 'filfound')
+         inc   totent			inc count of valid files found.
+         sta   namcnt                   save name length as counter.
+         ldx   namptr                   get index to current path.
+         cmp   pathbuf,x                are both names the same length?
+         bne   L38F8                    no, inc to next entry.
+cmpname  inx                            (first) next letter index
+         iny
+         lda   (zpt),y                  compare names letter by letter
+         cmp   pathbuf,x
+         bne   L38F8
+         dec   namcnt                   all letters compared?
+         bne   cmpname                  no, continue.
+         clc                            a match is found.
+noname   rts
+L38F8    dec   cntent			checked all entries in this block?
+         sec
+         beq   noname                   yes, no name match.
+         lda   h_entln                  add entry length to current pointer
+         clc
+         adc   zpt
+         bcc   L38C1                    branch if still in 1st page.
+         inc   zpt+1                    look on 2nd page.
+         clc                            carry should always be clear before
+         bcc   L38C1                    looking at next.
+preproot .EQ	*-ofsX
+         jsr   findvol			search vcb's and dev's for spec'd volume
+         bcs   novolume
+         lda   #$00			zero out directory temps
+         ldy   #$42
+L3914    sta   own_blk,y                and owner info
+         dey
+         bpl   L3914
+         lda   devnum                   setup device # for this directory
+         sta   d_dev
+         jsr   movhed0                  setup other header info from directory
+         ldy   #$01                     in gbuf and clean up misc info.
+         ldx   vcbptr
+         inx
+L3929    lda   vcbbuf+18,x              misc info includes
+         sta   h_tblk,y                 total # of blocks,
+         lda   vcbbuf+26,x              the address of the 1st bitmap,
+         sta   h_bmap,y
+         lda	|bloknml,y		directory's disk address,
+         sta   d_head,y
+         lda   h_fcnt,y                 and setting up a counter for the # of
+         sta   entcntl,y                files in this directory.
+         dex
+         dey
+         bpl   L3929
+nxtpname .EQ	*-ofsX
+         jsr   nxtpnam1			get new namptr in y and namlen in acc.
+         sty   namptr                   save new pathname pointer.
+         rts                            (status reg according to accumulator)
+nxtpnam1 .EQ	*-ofsX
+         ldy   namptr                   inc pathname pointer to next name
+         lda   pathbuf,y                in the path.
+         sec
+         adc   namptr                   if this addition results in zero,
+         tay                            then prefixed directory has been moved
+         bne   L395F                    to another device. branch if not.
+         lda   devnum                   revise devnum for prefixed directory
+         sta   p_dev
+L395F    lda   pathbuf,y                test for end of name.
+         clc                            no errors
+novolume rts
+findvol	 .EQ	*-ofsX
+         lda   #$00
+         ldy   preflag                  use prefix volume name to look up vcb.
+         bit   prfxflg                  is this a prefixed path?
+         bpl   L396F                    branch if it is
+         tay                            set ptr to volume name
+L396F    sty   vnptr                    and save.
+         sta   devnum                   zero out dev# until vcb located.
+L3975    pha                            acc now used as vcb lookup index.
+         tax                            index pointer to x.
+         lda   vcbbuf,x                 get vcb volume name length.
+         bne   L3987                    branch if claimed vcb to be tested.
+L397C    ldy   vnptr                    restore pointer to requested vol name.
+         pla                            now adj vcb index to next vcb entry.
+         clc
+         adc   #$20
+         bcc   L3975                    branch if more vcb's to check
+         bcs   L39D4                    otherwise go look for unlogged volumes.
+L3987    sta   namcnt                   save length of vol name to be compared.
+L398A    cmp   pathbuf,y                is it the same as requested vol name?
+         bne   L397C                    branch if not
+         inx
+         iny                            next character
+         lda   vcbbuf,x
+         dec   namcnt                   last character?
+         bpl   L398A                    if not.
+         plx                            restore pointer to matching vcb.
+         stx   vcbptr                   save it for future reference.
+         lda   vcbbuf+16,x              get it's device #
+         sta   devnum                   and save it.
+         stz   bloknml+1                assume prefix is not used and
+         lda   #$02                     that root directory is to be used.
+         sta   bloknml
+         lda   vnptr                    = 0 if no prefix.
+L39AC    tay                            if prefix then find ptr to prefixed
+         sta   namptr                   dir name. save path ptr.
+         beq   L39C2                    branch if no prefix.
+         sec
+         adc   pathbuf,y                inc to next dir in prefix path.
+         bcc   L39AC                    branch if another dir in prefix.
+         lda   p_blok                   volume verification will occur at
+         sta   bloknml                  subdirectory level.
+         lda   p_blok+1
+         sta   bloknml+1
+
+* verify volume name
+
+L39C2    jsr   rdgbuf			read in directory (or prefix dir)
+         bcs   L39CC                    if error then look on other devices.
+         jsr   cmppnam			compare dir name with path name.
+         bcc   L39F0                    if they match, stop looking.
+L39CC    ldx   vcbptr                   check if current (matched) vcb is active
+         lda   vcbbuf+17,x		i.e. does it have open files?
+         bmi   L39ED                    report not found if active.
+L39D4    lda   vnptr                    make path ptr same as volume ptr
+         sta   namptr
+         jsr   mvdevnums                copy all device #'s to be examined.
+         lda   devnum                   log current device 1st before searching
+         bne   L39F1                    others.
+L39E2    ldx   numdevs                  scan look list for devices we need
+L39E5    lda   loklst,x                 to search for the requested volume.
+         bne   L39F4                    branch if we've a device to look at.
+         dex
+         bpl   L39E5                    look at next one.
+L39ED    lda   #$45                     no mounted volume
+         sec                            error
+L39F0    rts
+L39F1    ldx   numdevs                  now remove the device from the list
+L39F4    cmp   loklst,x                 of prospective devices.
+         beq   L39FE                    branch if match.
+         dex                            look until found.
+         bpl   L39F4                    always taken (usually) unless
+         bmi   L39ED                    if dev was removed from devlst (/RAM).
+L39FE    sta   devnum                   preserve device to be checked next.
+         stz   loklst,x                 mark this one as tested.
+         jsr   fnddvcb                  find vcb that claims this dev (if any).
+         bcs   L3A29                    branch if vcb full.
+         ldx   vcbptr                   did fndvcb find it or return free vcb?
+         lda   vcbbuf,x
+         beq   L3A16			if free vcb.
+         lda   vcbbuf+17,x              is this volume active?
+         bmi   L39E2                    if so, no need to re-log.
+L3A16    lda   #$02                     go read root dir into gbuf
+         ldx   #$00
+         jsr   rdblk
+         bcs   L39E2                    ignore if unable to read.
+         jsr   logvcb			go log in volume name.
+         bcs   L39E2                    look at next if non-xdos disk mounted.
+         jsr   cmppnam                  is this the volume ?
+         bcs   L39E2                    if not
+L3A29    rts
+mvdevnums .EQ	*-ofsX
+         ldx   numdevs                  copy all dev #'s to be checked.
+L3A2D    lda   devlist,x                active device list.
+         and   #$F0                     strip device type info.
+         sta   loklst,x                 copy them to a temp workspace
+         dex
+         bpl   L3A2D
+         ldx   numdevs
+         rts
+fnddvcb	.EQ	*-ofsX			look for vcb with this device#
+         lda   #$00
+         ldy   #$FF
+L3A40    tax				new index to next vcb
+         lda   vcbbuf+16,x              check all devnums
+         cmp   devnum			is this the vcb?
+         bne   L3A4E                    if not
+         stx   vcbptr
+         clc                            indicates found
+         rts
+L3A4E    lda   vcbbuf,x			is this a free vcb?
+         bne   L3A57                    if not
+         iny
+         stx   vcbptr
+L3A57    txa
+         clc				inc index to next vcb
+         adc   #$20
+         bne   L3A40
+         tya                            any free vcb's available?
+         bpl   L3A79                    yes
+         lda   #$00                     look for an entry to kick out
+L3A62    tax
+         lda   vcbbuf+17,x              any open files?
+         bpl   L3A70                    no, kick this one out.
+         txa                            next vcb
+         clc
+         adc   #$20                     (vcb entry size)
+         bne   L3A62
+         beq   L3A7A                    all vcb entries have open files
+L3A70    stx   vcbptr                   save entry index.
+         stz   vcbbuf,x                 free this entry
+         stz   vcbbuf+16,x
+L3A79    clc                            no error.
+L3A7A    lda   #$55                     # vcb full error
+         rts
+cmppnam	.EQ	*-ofsX
+         ldx   #$00                     index to directory name.
+         ldy   namptr                   index to pathname.
+         lda   gbuf+4                   get dir name length and type.
+         cmp   #$E0			is it a directory?
+         bcc   L3A90                    if not.
+         and   #$0F                     isolate name length and
+         sta   namcnt                   save as a counter.
+         bne   L3A95                    branch if valid length.
+L3A90    sec                            indicate not found
+         rts
+L3A92    lda   gbuf+4,x                 next char
+L3A95    cmp   pathbuf,y
+         bne   L3A90                    if not the same.
+         inx                            check next char
+         iny
+         dec   namcnt
+         bpl   L3A92                    if more to compare.
+         clc                            match found
+         rts
+logvcb	.EQ	*-ofsX                   
+         ldx   vcbptr                   previously logged in volume?
+         lda   vcbbuf,x                 (acc = 0?)
+         beq   L3AB0                    no, go prepare vcb.
+         jsr   cmpvcb                   does vcb match vol read?
+         bcc   L3B05                    yes, do not disturb.
+logvcb1	.EQ	*-ofsX
+L3AB0    ldy   #$1F                     zero out vcb entry
+L3AB2    stz   vcbbuf,x
+         inx
+         dey
+         bpl   L3AB2
+         jsr   tstsos			make sure it's an xdos disk
+         bcs   L3B05			if not, return carry set.
+         jsr   tstdupvol		does a duplicate with open files
+         bcs   L3B04                    already exist? branch if yes.
+         lda   gbuf+4                   move volume name to vcb.
+         and   #$0F                     strip root marker
+         tay
+         pha
+         ora   vcbptr
+         tax
+L3ACE    lda   gbuf+4,y
+         sta   vcbbuf,x
+         dex
+         dey
+         bne   L3ACE
+         pla                            get length again
+         sta   vcbbuf,x                 and save.
+         lda   devnum                   last device used.
+         sta   vcbbuf+16,x              save device # and
+         lda   gbuf+41                  total # of blocks on this unit.
+         sta   vcbbuf+18,x
+         lda   gbuf+42
+         sta   vcbbuf+19,x
+         lda   bloknml                  save address of root directory.
+         sta   vcbbuf+22,x
+         lda   bloknml+1
+         sta   vcbbuf+23,x
+         lda   gbuf+39                  save address of the 1st bitmap.
+         sta   vcbbuf+26,x
+         lda   gbuf+40
+         sta   vcbbuf+27,x
+L3B04    clc                            indicate logged if possible
+L3B05    rts
+cmpvcb	.EQ	*-ofsX			compare volume name in vcb
+         lda   gbuf+4                   with name in directory.
+         and   #$0F
+         cmp   vcbbuf,x                 are they the same length?
+         stx   xvcbptr                  (see rev note #23)
+         bne   L3B1E                    if not the same.
+         tay
+         ora   xvcbptr
+         tax
+L3B18    lda   gbuf+4,y
+         cmp   vcbbuf,x
+L3B1E    sec                            anticipate different names.
+         bne   L3B26                    if not the same.
+         dex
+         dey
+         bne   L3B18
+         clc                            indicate match.
+L3B26    ldx   xvcbptr                  offset to start of vcb (rev note #23)
+         rts
+tstdupvol .EQ	*-ofsX			check for other logged in volumes
+         lda   #$00                     with the same name.
+L3B2C    tax
+         jsr   cmpvcb
+         bcs   L3B41                    if no match.
+         lda   vcbbuf+17,x              test for any open files.
+         bmi   L3B4B                    cannot look at this volume.
+         lda   #$00                     take duplicate offline if no open files
+         sta   vcbbuf,x
+         sta   vcbbuf+16,x
+         beq   L3B49                    ok to log in new volume.
+L3B41    txa                            index to next vcb
+         clc
+         and   #$E0                     strip odd stuff.
+         adc   #$20                     inc to next entry.
+         bcc   L3B2C                    branch if more to check
+L3B49    clc
+         rts
+L3B4B    sta   duplflag                 duplicate has been found.
+         stx   vcbentry                 save pointer to conflicting vcb.
+         sec                            error.
+         rts
+tstfrblk .EQ	*-ofsX			test if enough free blocks available
+         ldx   vcbptr                   for request.
+         lda   vcbbuf+21,x              check if proper count for this volume.
+         ora   vcbbuf+20,x
+         bne   L3BAD                    branch if count is non-zero.
+tkfrecnt .EQ	*-ofsX
+         jsr   cntbms			get # of bitmaps
+         sta   bmcnt                    and save.
+         stz   scrtch                   start count at 0
+         stz   scrtch+1
+         lda   #$FF                     mark 'first free' temp as unknown
+         sta   nofree
+         jsr   upbmap                   update volume bitmap.
+         bcs   L3BC1                    if error.
+         ldx   vcbptr                   get address of 1st bitmap
+         lda   vcbbuf+26,x
+         sta   bloknml
+         lda   vcbbuf+27,x
+         sta   bloknml+1
+L3B81    jsr   rdgbuf                   use general buffer for temp space to
+         bcs   L3BC1                    count free blocks (bits).
+         jsr   count
+         dec   bmcnt                    was that the last bitmap?
+         bmi   L3B96                    if so, go change fcb so not done again.
+         inc   bloknml
+         bne   L3B81
+         inc   bloknml+1
+         bra   L3B81
+L3B96    ldx   vcbptr                   mark which block had 1st free space
+         lda   nofree
+         bmi   L3BBE                    if no free space was found.
+         sta   vcbbuf+28,x              update the free count.
+         lda   scrtch+1                 
+         sta   vcbbuf+21,x              update volume control byte.
+         lda   scrtch
+         sta   vcbbuf+20,x
+L3BAD    lda   vcbbuf+20,x              compare total available free blocks
+         sec                            on this volume.
+         sbc   reql
+         lda   vcbbuf+21,x
+         sbc   reqh
+         bcc   L3BBE
+         clc
+         rts
+L3BBE    lda   #$48			disk full
+         sec
+L3BC1    rts
+count	.EQ	*-ofsX
+         ldy   #$00
+L3BC4    lda   gbuf,y			bit pattern.
+         beq   L3BCC                    don't count
+         jsr   cntfree
+L3BCC    lda   gbuf+$100,y		do both pages with same loop
+         beq   L3BD4
+         jsr   cntfree
+L3BD4    iny
+         bne   L3BC4                    loop until all 512 bytes counted.
+         bit   nofree                   has 1st block w/free space been found?
+         bpl   L3BEE                    if yes.
+         lda   scrtch                   test to see if any blocks were counted
+         ora   scrtch+1
+         beq   L3BEE                    branch if none counted.
+         jsr   cntbms                   get total # of maps.
+         sec                            subtract countdown from total bitmaps
+         sbc   bmcnt
+         sta   nofree
+L3BEE    rts
+cntfree	.EQ	*-ofsX
+L3BEF    asl   a                        count the # of bits in this byte
+         bcc   L3BFA
+         inc   scrtch
+         bne   L3BFA
+         inc   scrtch+1
+L3BFA    ora   #$00
+         bne   L3BEF			loop until all bits counted
+         rts
+cntbms	.EQ	*-ofsX
+         ldx   vcbptr
+         ldy   vcbbuf+19,x              return the # of bitmaps
+         lda   vcbbuf+18,x              possible with the total count
+         bne   L3C0B                    found in the vcb.
+         dey                            adj for bitmap block boundary
+L3C0B    tya
+         lsr   a                        divide by 16. the result is
+         lsr   a                        the # of bitmaps.
+         lsr   a
+         lsr   a
+         rts
+
+* deallocate a block's entry in bitmap
+* on entry, x,a = address of block
+
+dealloc	.EQ	*-ofsX
+         stx   bmcnt			high address of block.
+         pha                            save low address.
+         ldx   vcbptr                   check that bitmap block address is
+         lda   vcbbuf+19,x              valid given the total # of blocks
+         cmp   bmcnt                    on the volume.
+         pla
+         bcc   L3C8C                    branch if invalid
+         tax
+         and   #$07                     bit to be or'd in
+         tay
+         lda   whichbit,y               (shifting takes 7 bytes, but is slower)
+         sta   nofree                   save bit pattern.
+         txa                            low block address.
+         lsr   bmcnt
+         ror   a                        get pointer to byte in block that
+         lsr   bmcnt                    represents the block address.
+         ror   a
+         lsr   bmcnt
+         ror   a
+         sta   bmptr                    save pointer.
+         lsr   bmcnt                    transfer bit which is page of bitmap
+         rol   half
+         jsr   fndbmap			make sure device is correct one.
+         bcs   L3C8B                    error.
+         lda   bmacmap                  current map.
+         cmp   bmcnt                    is in-core bitmap the correct one ?
+         beq   L3C64                    branch if yes.
+         jsr   upbmap                   put current map away.
+         bcs   L3C8B                    error.
+         lda   bmcnt                    get map #
+         ldx   vcbptr
+         sta   vcbbuf+28,x              and make it current.
+         lda   bmadev
+         jsr   gtbmap			read it into buffer
+         bcs   L3C8B
+L3C64    ldy   bmptr                    index to byte
+         lsr   half
+         lda   nofree                   (get indiviual bit)
+         bcc   L3C77                    branch if on page 1 of bitmap
+         ora   bmbuf+$100,y
+         sta   bmbuf+$100,y
+         bcs   L3C7D                    always.
+bmbufhi	.EQ	*-ofsX			this address + 2 is used as an
+L3C77    ora   bmbuf,y                  absolute reference to bmbuf high byte.
+         sta   bmbuf,y
+L3C7D    lda   #$80                     mark bitmap as modified
+         tsb	bmastat
+         inc   deblock                  inc count of blocks deallocated
+         bne   L3C8A
+         inc   deblock+1
+L3C8A    clc
+L3C8B    rts
+L3C8C    lda   #$5A                     bitmap block # impossible.
+         sec                            bitmap disk address wrong
+         rts                            (maybe data masquerading as indx block)
+alc1blk	.EQ	*-ofsX
+         jsr   fndbmap			get address of bitmap.
+         bcs   L3CB8                    error.
+L3C95    ldy   #$00                     begin search at start of bitmap block.
+         sty   half                     which half (page) to search
+L3C9A    lda   bmbuf,y
+         bne   L3CB9                    free blocks indicated by 'on' bits
+         iny
+         bne   L3C9A                    check all in 1st page.
+         inc   half                     now search page 2.
+         inc   basval                   base value = base address / 2048.
+L3CA8    lda   bmbuf+$100,y             search 2nd half for free block
+         bne   L3CB9
+         iny
+         bne   L3CA8
+         inc   basval                   add 2048 offset for next page.
+         jsr   nxtbmap			get next bitmap (if exists) and
+         bcc   L3C95                    update vcb. branch if no error.
+L3CB8    rts                            return error.
+L3CB9    sty   bmptr                    save index pointer to valid bit group.
+         lda   basval                   prep for block address calculation
+         sta   scrtch+1
+         tya                            address of bit pattern.
+         asl   a                        multiply this and basval by 8
+         rol   scrtch+1
+         asl   a
+         rol   scrtch+1
+         asl   a
+         rol   scrtch+1
+         tax                            low address within 7 of actual address
+         sec
+         lda   half
+         beq   L3CDB			branch if allocating from 1st half.
+         lda   bmbuf+$100,y             get pattern from 2nd page.
+         bcs   L3CDE                    always.
+L3CDB    lda   bmbuf,y                  get bit pattern from 1st page.
+L3CDE    rol   a                        find left most 'on' bit
+         bcs   L3CE4                    if found.
+         inx                            adjust low address.
+         bne   L3CDE                    always.
+L3CE4    lsr   a                        restore pos'n of all but left most bit.
+         bcc   L3CE4                    loop until mark moves into carry.
+         stx   scrtch                   save low address.
+         ldx   half                     which half of bitmap ?
+         bne   L3CF4                    if page 2.
+         sta   bmbuf,y
+         beq   L3CF7                    always.
+L3CF4    sta   bmbuf+$100,y             update to show allocated block in use.
+L3CF7    lda   #$80                     indicate map is modified.
+         tsb   bmastat
+         ldy   vcbptr                   subtract 1 from total free vcb blocks
+         lda   vcbbuf+20,y              to account for newly allocated block.
+         sbc   #$01                     (carry is set)
+         sta   vcbbuf+20,y
+         bcs   L3D10                    if high free count doesn't need adj.
+         lda   vcbbuf+21,y              adjust high count
+         dec   a
+         sta   vcbbuf+21,y
+L3D10    clc                            no errors.
+         lda   scrtch                   return address in y,a of newly
+         ldy   scrtch+1                 allocated block.
+         rts
+nxtbmap	.EQ	*-ofsX			inc to next bitmap
+         ldy   vcbptr                   but 1st make sure there is another one.
+         lda   vcbbuf+19,y
+         lsr   a
+         lsr   a
+         lsr   a
+         lsr   a
+         cmp   vcbbuf+28,y              are there more maps ?
+         beq   L3D60                    if no more to look at.
+         lda   vcbbuf+28,y              add 1 to current map
+         inc   a
+         sta   vcbbuf+28,y
+         jsr   upbmap
+fndbmap	.EQ	*-ofsX
+         ldy   vcbptr
+         lda   vcbbuf+16,y              get device #.
+         cmp   bmadev                   does this map match this device ?
+         beq   L3D4A                    yes.
+         jsr   upbmap                   otherwise, save other volume's bitmap
+         bcs   L3D5F
+         ldy   vcbptr
+         lda   vcbbuf+16,y
+         sta   bmadev                   and read in fresh bitmap for this dev.
+L3D4A    ldy   bmastat                  is it already modified ?
+         bmi   L3D54                    yes, return pointer
+         jsr   gtbmap                   otherwise read in fresh bitmap.
+         bcs   L3D5F                    if error.
+L3D54    ldy   vcbptr                   get relative block # of bitmap.
+         lda   vcbbuf+28,y
+         asl   a                        2 pages per block
+         sta   basval
+         clc                            no errors.
+L3D5F    rts
+L3D60    lda   #$48                     request can't be filled
+         sec                            error
+         rts
+upbmap	.EQ	*-ofsX
+         clc                            
+         lda   bmastat                  is current map modified ?
+         bpl   L3D5F                    no.
+         jsr   wrtbmap                  update device.
+         bcs   L3D5F                    if error on writing.
+         lda   #$00
+         sta   bmastat			mark bitmap buffer as free
+         rts
+gtbmap	.EQ	*-ofsX                   read bitmap specified by dev and vcb.
+         sta   bmadev
+         ldy   vcbptr                   get lowest map # with free blocks in it
+         lda   vcbbuf+28,y
+         sta   bmacmap                  associate offset with bitmap ctrl block.
+         clc				add this # to the base address of
+         adc   vcbbuf+26,y              1st bitmap and save in bmadadr which
+         sta   bmadadr                  is address of bitmap to be used.
+         lda   vcbbuf+27,y
+         adc   #$00
+         sta   bmadadr+1
+         lda   #$01                     read device command
+L3D92    sta   A4L
+         lda   devnum                   save current dev #
+         pha
+         lda   bmadev                   get bitmap's dev #
+         sta   devnum
+         lda   bmadadr                  and disk address
+         sta   bloknml
+         lda   bmadadr+1
+         sta   bloknml+1
+         lda   bmbufhi+2		address of the buffer (low = 0)
+         jsr   dobitmap
+         tax				error code (if any).
+         pla                            restore current dev #
+         sta   devnum
+         bcc   L3DB6                    and return it if no error.
+         txa                            error code
+L3DB6    rts
+rdblk	.EQ	*-ofsX
+         sta   bloknml
+         stx   bloknml+1
+         jsr   rdgbuf
+         rts
+wrtbmap	.EQ	*-ofsX			write bitmap.
+         lda   #$02                     write command.
+         bne   L3D92                    always.
+wrtgbuf	.EQ	*-ofsX
+         lda   #$02			write command
+         bne   L3DC9                    always.
+rdgbuf	.EQ	*-ofsX
+         lda   #$01                     read command.
+L3DC9    sta   A4L                      pass to device handler.
+         lda   #>gbuf                   general buffer.
+dobitmap .EQ	*-ofsX
+         php                            no interrupts
+         sei
+         sta   buf+1			buffer high.
+         stz   buf                      buffer low (always on page boundary)
+         stz   p8error                  clear global error code.
+         lda   #$FF                     indicates reg call made to dev handler
+         sta   ioaccess
+         lda   devnum                   transfer dev # for dispatcher to
+         sta   unitnum			convert to unit #.
+         jsr   dmgr                     call the driver.
+         bcs   L3DE8                    if error.
+         plp                            restore interrupts.
+         clc
+         rts
+L3DE8    plp				file i/o error. restore interrupts.
+         sec
+         rts
+
+* get mark command
+
+getmark	.EQ	*-ofsX
+         ldx   fcbptr			index to open fcb.
+         ldy   #$02                     index to user's mark parmeter.
+L3DF0    lda   fcbbuf+18,x              transfer current position
+         sta   (A3L),y                  to user's parameter list
+         inx
+         iny
+         cpy   #$05                     transfer 3 bytes
+         bne   L3DF0
+         clc
+         rts
+L3DFD    lda   #$4D			invalid position
+         sec
+         rts
+
+* set mark command
+
+setmark	.EQ	*-ofsX
+         ldy   #$04			index to user's desired position.
+         ldx   fcbptr                   file's control block index.
+         inx                            inc by 2 for index to hi eof
+         inx
+         sec				indicate comparisons are necessary.
+L3E09    lda   (A3L),y			move it to 'tpos'
+         sta   tposll-2,y
+         bcc   L3E18                    branch if mark < eof
+         cmp   fcbbuf+21,x
+         bcc   L3E18                    branch if mark qualifies.
+         bne   L3DFD                    branch if mark > eof (invalid position)
+         dex
+L3E18    dey                            move/compare next lower byte of mark.
+         tya                            test for all bytes moved/tested.
+         eor   #$01                     preserves carry status.
+         bne   L3E09                    branch if more.
+rdposn	.EQ	*-ofsX
+         ldy   fcbptr			test to see if new position is
+         lda   fcbbuf+19,y              within the same (current) data block.
+         and   #$FE
+         sta   scrtch
+         lda   tposlh                   middle byte of new position
+         sec
+         sbc   scrtch
+         sta   scrtch
+         bcc   L3E44                    branch if < current position.
+         cmp   #$02                     must be within 512 bytes of beginning
+         bcs   L3E44                    of current position.
+         lda   tposhi                   make sure within the same 64k.
+         cmp   fcbbuf+20,y
+         bne   L3E44                    branch if not.
+         jmp	svmark                   if so, adj fcb, position ptr and return.
+L3E44    lda   fcbbuf+7,y		determine file type for positioning.
+         beq   L3E50                    0 = invalid file type.
+         cmp   #$04                     tree class file?
+         bcc   L3E59                    yes, go position.
+         jmp   dirmark                  no, test for dir type.
+L3E50    ldy   #$A4			clear illegal filetype entry in fcb
+         sta   fcbbuf,y
+         lda   #$43                     and report error
+         sec
+         rts
+L3E59    lda   fcbbuf+7,y		use storage type as # of index levels
+         sta   levels                   since 1=seed, 2=sapling, 3=tree.
+         lda   fcbbuf+8,y
+         and   #$40                     if previous data was modified then
+         beq   L3E6B                    disk must be updated.
+         jsr   wfcbdat
+         bcs   L3ED4	if error.
+L3E6B    ldy   fcbptr                   test to see if current index block
+         lda   fcbbuf+20,y              is usable by checking if new
+         and   #$FE                     position is within 128k of the
+         sta   scrtch                   beginning of current sapling level
+         lda   tposhi                   chunk.
+         sec
+         sbc   scrtch
+         bcc   L3E9D                    branch if a new index block is needed.
+         cmp   #$02                     is new position within 128k of old ?
+         bcs   L3E9D                    branch if not.
+         ldx   levels                   is it a seed file ?
+         dex
+         bne   datlevel                 no, use current indexes.
+L3E89    lda   tposlh                   is new position < 512 ?
+         lsr   a
+         ora   tposhi
+         bne   L3EEF                    no, mark both data and index block as
+         lda   fcbbuf+12,y              unallocated. 1st block is only block
+         sta   bloknml                  and it's data.
+         lda   fcbbuf+13,y              high block address.
+         jmp   rnewpos			go read in block and set statuses.
+L3E9D    lda   fcbbuf+8,y               check to see if previous index block
+         and   #$80                     was modified.
+         beq   L3EA9                    read in over it if current up to date.
+         jsr   wfcbidx			go update index on disk (fcb block addr)
+         bcs   L3ED4
+L3EA9    ldx   levels			be sure there is a top index
+         cpx   #$03                     before reading it...
+         beq   posindex                 branch if file is a tree.
+         lda   tposhi                   is new position within range of a
+         lsr   a                        sapling file (less than 128k) ?
+         php                            save results
+         lda   #$07                     (no level is allocated for new pos'n)
+         plp                            restore z-flag.
+         bne   L3F18                    go mark all as dummy.
+         jsr   clrstats			clr status bits 0,1,2 (index/data/alloc)
+         dex				check for seed
+         beq   L3E89                    if seed, check for position < 512.
+         jsr   rfcbfst			go get only index block.
+         bcs   L3ED4                    if error.
+         ldy   fcbptr                   save newly loaded index block's address.
+         lda   bloknml
+         sta   fcbbuf+14,y
+         lda   bloknml+1
+         sta   fcbbuf+15,y
+         bcc   datlevel			branch always
+L3ED4    rts
+posindex jsr   clrstats			clr all alloc requirements for previous
+         jsr   rfcbfst                  position. get highest level index block
+         bcs   L3ED4
+         lda   tposhi                   then test for a sap level index block
+         lsr   a
+         tay
+         lda   (zpt),y
+         inc   zpt+1
+         cmp   (zpt),y			(both high and low = 0 if no index exists)
+         bne   saplevel
+         tax                            are both bytes 0 ?
+         bne   saplevel
+         dec   zpt+1
+L3EEF    lda   #$03			show neither index or data block alloc'd
+         bra   L3F18
+saplevel sta   bloknml			read in next lower index block.
+         lda   (zpt),y                  (high address)
+         sta   bloknml+1
+         dec   zpt+1
+         jsr   rfcbidx			read in sapling level
+         bcs   L3ED4
+datlevel lda   tposhi			get block address of data block
+         lsr   a
+         lda   tposlh                   ( if there is one )
+         ror   a
+         tay
+         lda   (zpt),y                  data block address low
+         inc   zpt+1
+         cmp   (zpt),y
+         bne   L3F51
+         tax
+         bne   L3F51
+         lda   #$01			show data block as never been allocated
+         dec   zpt+1
+L3F18    ldy   fcbptr			set status to show what's missing
+         ora   fcbbuf+8,y
+         sta   fcbbuf+8,y
+         lsr   a                        discard bit that says data block
+         lsr   a                        unallocated because carry indicates if
+         jsr   zipdata                  index block is invalid and needs to be
+         bcc   L3F61                    zeroed. branch if it doesn't need zeroed
+         jsr   zeroindex		zero index block in user's i/o buffer
+         bra   L3F61
+zeroindex .EQ	*-ofsX                  
+         lda   #$00
+         tay
+L3F30    sta   (zpt),y                  zero out the index half of the user's
+         iny                            i/o buffer
+         bne   L3F30
+         inc   zpt+1
+L3F37    sta   (zpt),y
+         iny
+         bne   L3F37
+         dec   zpt+1			restore proper address
+         rts
+zipdata	.EQ	*-ofsX
+         lda   #$00
+         tay
+L3F42    sta   (datptr),y		zero out data area
+         iny
+         bne   L3F42
+         inc   datptr+1
+L3F49    sta   (datptr),y
+         iny
+         bne   L3F49
+         dec   datptr+1
+         rts
+L3F51    sta   bloknml			get data block of new position
+         lda   (zpt),y                  (high address)
+         dec   zpt+1
+rnewpos	.EQ	*-ofsX
+         sta   bloknml+1
+         jsr   rfcbdat
+         bcs   L3F86			if error.
+         jsr   clrstats                 show whole chain is allocated.
+svmark	.EQ	*-ofsX
+L3F61    ldy   fcbptr                   update position in fcb
+         iny
+         iny
+         ldx   #$02
+L3F68    lda   fcbbuf+18,y              save old mark in case calling routine
+         sta   oldmark,x                fails later.
+         lda   tposll,x
+         sta   fcbbuf+18,y
+         dey
+         dex                            move 3 byte position marker
+         bpl   L3F68
+         clc                            set up indirect address to buffer
+         lda   datptr                   page pointed to by the current
+         sta   sos                      position marker.
+         lda   tposlh
+         and   #$01
+         adc   datptr+1
+         sta   sos+1
+L3F86    rts				carry set if error
+clrstats .EQ	*-ofsX
+         ldy   fcbptr                   clear allocation states for data block
+         lda   fcbbuf+8,y               and both levels of indexes/
+         and   #$F8
+         sta   fcbbuf+8,y               indicates that either they exist now
+         rts				or unnecessary for current position.
+dirmark	.EQ	*-ofsX
+         cmp   #$0D			is it a directory ?
+         beq   L3F9C                    yes...
+         lda   #$4A                     no, so compatability problem.
+         jsr   p8errv                   should not have been opened !!!
+L3F9C    lda   scrtch                   recover results of previous subtraction.
+         lsr   a			use difference as counter for how many
+         sta   cntent                   blocks must be read to get to new pos'n.
+         lda   fcbbuf+19,y		test for positive direction
+         cmp   tposlh                   indicated by carry.
+         bcc   L3FB9                    if set, position forward. otherwise,
+L3FAB    ldy   #$00                     read directory file in reverse order.
+         jsr   dirpos1			read previous block.
+         bcs   L3FD6                    if error.
+         inc   cntent                   count up to 128.
+         bpl   L3FAB                    loop if more blocks to pass over.
+         bmi   L3F61                    always.
+L3FB9    ldy   #$02                     position is forward from current.
+         jsr   dirpos1                  read next directory block
+         bcs   L3FD6                    if error.
+         dec   cntent
+         bne   L3FB9                    loop if position not found in this block
+         beq   L3F61                    branch always.
+dirpos1	.EQ	*-ofsX
+         lda   (datptr),y               get link address of previous or next
+         sta   bloknml                  directory block.
+         cmp   #$01                     test for null byte into carry
+         iny                            but first be sure there is a link.
+         lda   (datptr),y               get the rest of the link.
+         bne   L3FD8                    branch if certain link exists.
+         bcs   L3FD8                    was the low part null as well ?
+         lda   #$4C                     something is wrong with directory file!
+L3FD6    sec				error.
+         rts
+L3FD8    sta   bloknml+1
+
+* read file's data block
+
+rfcbdat	.EQ	*-ofsX
+         lda   #$01			read command
+         sta   A4L
+         ldx   #datptr                  points at address  of data buffer.
+         jsr   fileio1			go do file input.
+         bcs   L3FF2                    error.
+         ldy   fcbptr
+         lda   bloknml
+         sta   fcbbuf+16,y              save block # just read in fcb.
+         lda   bloknml+1
+         sta   fcbbuf+17,y
+L3FF2    rts
+rfcbidx	.EQ	*-ofsX			prepare to read index block.
+         lda   #$01                     read command
+         sta   A4L
+         ldx   #$48                     address of current index buffer.
+         jsr   fileio1                  go read index block.
+         bcs   L400C                    error
+         ldy   fcbptr
+         lda   bloknml
+         sta   fcbbuf+14,y              save block address of this index in fcb
+         lda   bloknml+1
+         sta   fcbbuf+15,y
+         clc
+L400C    rts
+L400D    lda   #$02			write command
+	dc	h'2C'			skip next instruction
+rfcbfst	.EQ	*-ofsX
+         lda	#$01			read command.
+         pha                            save the command
+         lda   #$0C
+         ora   fcbptr                   add offset to fcbptr
+         tay
+         pla
+         ldx   #$48                     rd block into index portion of file buf
+dofileio .EQ	*-ofsX
+         sta   A4L                      command
+         lda   fcbbuf,y                 get disk block address from fcb.
+         sta   bloknml                  block 0 not legal
+         cmp   fcbbuf+1,y
+         bne   L4031
+         cmp   #$00                     are both bytes 0 ?
+         bne   L4031                    no, continue request
+         lda   #$0C                     otherwise, allocation error.
+         jsr   sysdeath			doesn't return...
+L4031    lda   fcbbuf+1,y		high address of disk block
+         sta   bloknml+1
+fileio1	.EQ	*-ofsX
+         php                            no interrupts
+         sei
+         lda   $00,x                    get memory address of buffer from
+         sta   buf                      page zero pointed to by x register
+         lda   $01,x
+         sta   buf+1			and pass address to device handler
+         ldy   fcbptr
+         lda   fcbbuf+1,y
+         sta   devnum                   along with device #.
+         lda   #$FF                     also, set to indicate reg call made to
+         sta   ioaccess                 device handler.
+         lda   devnum                   transfer device # for dispatcher
+         sta   unitnum			to convert to unit #.
+         stz   p8error                  clear global error code.
+         jsr   dmgr                     call the driver.
+         bcs   L405E                    if error.
+         plp                            restore interrupts
+         clc
+         rts
+L405E    plp                            restore interrupts
+         sec
+         rts
+wfcbfst	.EQ	*-ofsX
+         jsr   upbmap			update the bitmap
+         bra   L400D                    and write file's 1st block.
+wfcbdat	.EQ	*-ofsX
+         ldx   #datptr                  point at memory address with x and
+         lda   #$10                     disk address with y.
+         ora   fcbptr                   add offset to fcbptr
+         tay                            and put in y.
+         lda   #$02                     write data block.
+         jsr   dofileio
+         bcs   L4096                    if errors.
+         lda   #$BF                     mark data status as current.
+         bra   L408D
+wfcbidx	.EQ	*-ofsX
+         jsr   upbmap                   update bitmap.
+         ldx   #$48                     point to address of index buffer
+         lda   #$0E                     and block address of that index block.
+         ora   fcbptr
+         tay
+         lda   #$02
+         jsr   dofileio                 go write out index block.
+         bcs   L4096                    if errors.
+         lda   #$7F                     mark index status as current.
+L408D    ldy   fcbptr                   change status byte to reflect
+         and   fcbbuf+8,y               successful disk file update.
+         sta   fcbbuf+8,y               (carry is unaffected)
+L4096    rts
+
+openf	.EQ	*-ofsX
+         jsr   findfile			look up the file.
+         bcc   L40A0                    if ok.
+         cmp   #$40                     is this opening a root directory ?
+         bne   L40A7                    if not, then error.
+L40A0    jsr   tstopen			are any other files writing to this
+         bcc   L40AD                    same file ? branch if not.
+L40A5    lda   #$50                     file is busy, shared access not allowed.
+L40A7    sec
+         rts
+L40A9    lda   #$4B			file is wrong storage type.
+         sec
+         rts
+L40AD    ldy   fcbptr			get address of 1st free fcb found.
+         lda   fcbflg                   if this byte <> 0 then free fcb found
+         bne   L40B9                    and available for use.
+         lda   #$42                     fcb full error.
+         sec
+         rts
+L40B9    ldx   #$1F                     assign fcb,
+         lda   #$00                     but clean it first.
+L40BD    sta   fcbbuf,y
+         iny
+         dex
+         bpl   L40BD
+         lda   #$06                     start claiming it by moving in file info
+         tax				using x as source index
+         ora   fcbptr                   and y as destination (fcb).
+         tay
+L40CB    lda   d_dev-1,x                move ownership info.
+         sta   fcbbuf,y                 note: this code depends upon the defined
+         dey				order of both the fcb and directory
+         dex				entry buffer.
+         bne   L40CB
+         lda   d_stor                   get storage type and
+         lsr   a                        strip off file name length
+         lsr   a                        by dividing by 16.
+         lsr   a
+         lsr   a
+         tax                            save in x for later comparison
+         sta   fcbbuf+7,y               and in fcb for future access.
+         lda   d_attr                   get file's attributes and use it
+         and   #$03                     as a default access request.
+         cpx   #$0D                     if directory, don't allow write enable.
+         bne   L40EB
+         and   #$01                     read enabled bit
+L40EB    sta   fcbbuf+9,y
+         and   #$02                     check for write enabled request.
+         beq   L40F7                    branch for open as read-only
+         lda   totent                   otherwise, be sure no one else is
+         bne   L40A5                    reading the same file. branch if busy.
+L40F7    cpx   #$04                     is it a tree file type ?
+         bcc   L40FF                    yes.
+         cpx   #$0D                     is it a directory type ?
+         bne   L40A9                    if not, wrong storage type.
+L40FF    ldx   #$06                     move address of 1st block of file, end
+L4101    sta   bloknml+1                of file and current usage count.
+         lda   fcbptr
+         ora   ofcbtbl,x                this is done via a translation table
+         tay                            between directory info and fcb.
+         lda   d_frst,x
+         sta   fcbbuf,y
+         dex
+         bpl   L4101			last loop stores hi address of 1st block
+         sta   bloknml                  and this is the low one.
+         ldy   fcbptr
+         lda   cntent                   this was set up by 'tstopen'.
+         sta   fcbbuf,y                 claim fcb for this file.
+         jsr   alcbuffr			go allocate buffer in memory tables.
+         bcs   L4147                    if errors.
+         jsr   fndfcbuf                 rtn addr of bufs in data & index ptrs.
+         lda   flevel                   mark level at which
+         sta   fcbbuf+27,y              file was opened.
+         lda   fcbbuf+7,y               file must be positioned at beginning.
+         cmp   #$04                     is it a tree file ?
+         bcs   L415E                    no, assume a directory.
+         lda   #$FF                     fool the position routine into giving
+         sta   fcbbuf+20,y              a valid position with preloaded data,
+         ldy   #$02                     etc. set desired position to 0.
+         lda   #$00
+L413C    sta   tposll,y
+         dey
+         bpl   L413C
+         jsr   rdposn                   let tree position routine do the rest.
+         bcc   L4163                    if successful.
+L4147    pha                            save error code.
+         ldy   fcbptr                   free buffer space.
+         lda   fcbbuf+11,y
+         beq   L4156                    if no bufnum, ok because never alloc'd.
+         jsr   relbuffr                 go release buffer.
+         ldy   fcbptr                   since error was before file was
+L4156    lda   #$00                     successfully opened, then it is
+         sta   fcbbuf,y                 necessary to release fcb also.
+         pla                            error code.
+         sec
+         rts
+L415E    jsr   rfcbdat			read in 1st block of directory file.
+         bcs   L4147                    return error after freeing buffer & fcb.
+L4163    ldx   vcbptr			index to vcb.
+         inc   vcbbuf+30,x              add 1 to # of files currently open
+         lda   vcbbuf+17,x              and indicate that this volume has at
+         ora   #$80                     least 1 file active.
+         sta   vcbbuf+17,x
+         ldy   fcbptr                   index to fcb.
+         lda   fcbbuf,y                 return ref # to user.
+         ldy   #$05
+         sta   (A3L),y
+         clc                            open is successful
+         rts
+
+* test open
+* is there an open file?
+
+tstopen	.EQ	*-ofsX
+         lda   #$00
+         sta   cntent			returns the ref # of a free fcb.
+         sta   totent                   flag to indicate file already open.
+         sta   fcbflg                   flag indicates a free fcb is available.
+L4188    tay				index to next fcb.
+         ldx   fcbflg                   test for free fcb found.
+         bne   L4191                    if already found.
+         inc   cntent
+L4191    lda   fcbbuf,y                 is this fcb in use ?
+         bne   L41A3                    yes.
+         txa                            if not, should we claim it ?
+         bne   L41C1                    branch if free fcb already found.
+         sty   fcbptr                   save index to new free fcb.
+         lda   #$FF                     set fcb flag to indicate
+         sta   fcbflg                   free fcb found.
+         bne   L41C1                    branch always to test next fcb.
+L41A3    tya                            add offset to index to ownership info
+         ora   #$06
+         tay                            and put it back in y.
+         ldx   #$06                     index to directory entry owner info.
+L41A9    lda   fcbbuf,y			all bytes must match to say that it's
+         cmp   d_dev-1,x                the same file again.
+         bne   L41C1                    if not, then next fcb.
+         dey                            index to next lower bytes.
+         dex
+         bne   L41A9			loop to check all owner info.
+         inc   totent                   file is already open, now see
+         lda   fcbbuf+9,y               if it's already opened for write.
+         and   #$02                     if so report file busy (with carry set).
+         beq   L41C1			branch if this file is read access only.
+         sec
+         rts
+L41C1    tya				calc position of next fcb.
+         and   #$E0                     first strip any possible index offsets.
+         clc
+         adc   #$20                     inc to next fcb.
+         bne   L4188                    branch if more to compare.
+         clc                            report no conflicts.
+         rts
+
+* read command
+
+readf	.EQ	*-ofsX
+         jsr   mvdbufr			xfer buffer address and request count
+         jsr   mvcbytes			to a more accessable location, also
+         pha                            get fcb attributes and save on stack.
+         jsr   calcmrk                  calc mark after read, test if mark > eof
+         pla                            carry set means end mark > eof.
+         and   #$01                     test for read enabled.
+         bne   L41DE                    branch if ok to read.
+         lda   #$4E                     illegal access.
+         bne   L4202                    always.
+L41DE    bcc   L4205                    branch if result mark < eof. adjust
+         ldy   fcbptr                   request to read until just before eof.
+         lda   fcbbuf+21,y              result = (eof-1) - position
+         sbc   tposll
+         sta   cbytes
+         sta   rwreql
+         lda   fcbbuf+22,y
+         sbc   tposlh
+         sta   cbytes+1
+         sta   rwreqh
+         ora   cbytes                   if both bytes = 0 then eof error
+         bne   L4210
+         lda   #$4C			eof error
+L4202    jmp   errfix1
+L4205    lda   cbytes
+         ora   cbytes+1
+         bne   L4210			if read request definitely non-zero.
+L420D    jmp   rwdone                   do nothing.
+L4210    jsr   valdbuf                  validate user's data buffer range.
+         bcs   L4202                    branch if memory conflict.
+         jsr   gfcbstyp                 get storage type
+         cmp   #$04                     and find out if it's a tree or other.
+         bcc   L421F                    branch if a tree file
+         jmp   dread                    otherwise assume it's a directory.
+L421F    jsr   rdposn                   set up data pointer.
+         bcs   L4202                    errors.
+         jsr   preprw			test for newline, setup for partial
+         jsr   readpart			read. move current data buffer contents
+         bvs   L420D			to user area. branch if satisfied.
+         bcs   L421F                    indicates newline is set.
+         lda   rwreqh                   how many blocks are to be read ?
+         lsr   a                        if < 2 then use the slow way.
+         beq   L421F
+         sta   cmdtemp                  save bulk block count.
+         jsr	gfcbstat		make sure current data area doesn't
+         and   #$40                     need writing before resetting ptr to
+         bne   L421F                    read into user's area. branch if data
+         sta   ioaccess                 needs to be written to force 1st call
+         lda   usrbuf                   thru all dev handler checking. make
+         sta   datptr                   the data buffer the user's space.
+         lda   usrbuf+1
+         sta   datptr+1
+L4249    jsr   rdposn                   get next block directly into user space.
+         bcs   L42B7			if error.
+L424E    inc   datptr+1                 inc all ptrs by one block (512 bytes)
+         inc   datptr+1
+         dec   rwreqh
+         dec   rwreqh
+         inc   tposlh
+         inc   tposlh
+         bne   L4269			if pos'n doesn't get to a 64k boundary
+         inc   tposhi                   otherwise, must check for a 128k one.
+         lda   tposhi			carry set if 128k boundary reached.
+         eor   #$01
+         lsr   a
+L4269    dec   cmdtemp                  has all been read fast ?
+         bne   L427B                    branch if more to read.
+         jsr   fxdatptr			go fix up data pointer to xdos buffer.
+         lda   rwreql                   test for end of read.
+         ora   rwreqh                   are both 0 ?
+         beq   L42C3                    yes, done.
+         bne   L421F                    no, read last partial block
+L427B    bcs   L4249
+         lda   tposhi                   get index to next block address
+         lsr   a
+         lda   tposlh
+         ror   a
+         tay                            index to address = int(pos/512)
+         lda   (zpt),y                  get low address
+         sta   bloknml
+         inc   zpt+1
+         cmp   (zpt),y                  are hi and low address the same?
+         bne   L4299                    no, it's a real block address.
+         cmp   #$00                     are both bytes 0 ?
+         bne   L4299                    no, must be real data.
+         sta   ioaccess                 don't do repeat io just after sparse.
+         beq   L429C                    branch always (carry set).
+L4299    lda   (zpt),y                  get high address
+         clc
+L429C    dec   zpt+1
+         bcs   L4249                    if no block to read.
+         sta   bloknml+1
+         lda   ioaccess                 has 1st call gone to device yet ?
+         beq   L4249                    no, go thru normal route
+         clc
+         php                            interrupts can't occur during dmgr call
+         sei
+         lda   datptr+1                 reset hi buffer address for dev handler
+         sta   buf+1
+         jsr   dmgr
+         bcs   L42B6                    if error
+         plp
+         bcc   L424E                    no errors, branch always.
+L42B6    plp                            restore interrupts.
+L42B7    pha                            save error code.
+         jsr   fxdatptr                 go restore data pointers, etc.
+         pla
+errfix1	.EQ	*-ofsX
+         pha                            save error code
+         jsr   rwdone                   pass back # of bytes actually read
+         pla
+         sec                            error
+         rts
+rwdone	.EQ	*-ofsX
+L42C3    ldy   #$06                     return total # of bytes actually read
+         sec                            derived from cbytes-rwreq.
+         lda   cbytes
+         sbc   rwreql
+         sta   (A3L),y
+         iny
+         lda   cbytes+1
+         sbc   rwreqh
+         sta   (A3L),y
+         jmp   rdposn                   leave with valid position in fcb.
+preprw	.EQ	*-ofsX
+         ldy   fcbptr                   adj pointer to user's buffer to make
+         sec                            the transfer
+         lda   usrbuf
+         sbc   tposll
+         sta   usrbuf
+         bcs   L42E9                    if no adjustment to hi address needed
+         dec   usrbuf+1
+L42E9    lda   fcbbuf+31,y              test for new line enabled.
+         clc
+         beq   L42F9                    if new line not enabled.
+         sec                            carry indicates new line enabled
+         sta   nlmask
+         lda   fcbbuf+10,y              move newline character to more
+         sta   nlchar                   accesible spot.
+L42F9    ldy   tposll                   index to 1st data.
+         lda   datptr                   reset low order of position pointer to
+         sta   sos                      beginning of page.
+         ldx   rwreql                   get low order count of requested bytes.
+         rts                            return statuses.
+readpart .EQ	*-ofsX
+         txa				x = low count of bytes to move.
+         bne   L430F                    branch if request is not an even page.
+         lda   rwreqh                   a call of 0 bytes should never get here!
+         beq   L435D			branch if nothing to do.
+         dec   rwreqh
+L430F    dex
+L4310    lda   (sos),y                  move data to user's buffer
+         sta   (usrbuf),y
+         bcs   tstnewl                  test for newline 1st !
+L4316    txa                            note: x must be unchanged from tstnewl !
+         beq   L4332			go see if read request is satified...
+L4319    dex                            dec # of bytes left to move.
+         iny                            page crossed ?
+         bne   L4310                    no, move next byte.
+         lda   sos+1                    test for end of buffer, but first
+         inc   usrbuf+1                 adjust user buffer pointer
+         inc   tposlh                   and position
+         bne   L4329
+         inc   tposhi
+L4329    inc   sos+1                    and sos buffer high address.
+         eor   datptr+1                 (carry is undisturbed)
+         beq   L4310                    branch if more to read in buffer.
+         clv                            indicate not finished.
+         bvc   L4360                    always.
+L4332    lda   rwreqh
+         beq   L4350                    branch if request is satisfied.
+         iny                            done with this block of data ?
+         bne   L4340                    no, adjust high byte of request.
+         lda   sos+1                    maybe, check for end of block buffer.
+         eor   datptr+1                 (don't disturb carry).
+         bne   L4343                    if hi count can be dealt with next time
+L4340    dec   rwreqh
+L4343    dey                            restore proper value
+         bra   L4319
+tstnewl  lda   (sos),y                  get last byte transferred again.
+         and   nlmask                   only bits on in mask are significant.
+         eor   nlchar                   does it match newline character?
+         bne   L4316                    no, read next.
+L4350    iny                            adjust position.
+         bne   L435D
+         inc   usrbuf+1                 inc pointers
+         inc   tposlh
+         bne   L435D
+         inc   tposhi
+L435D    bit   setvflg			(sets v flag)
+L4360    sty   tposll			save low position
+         bvs   L4366
+         inx                            leave request as +1 for next call
+L4366    stx   rwreql                   and remainder of request count.
+         php                            save statuses
+         clc                            adjust user's low buffer address
+         tya
+         adc   usrbuf
+         sta   usrbuf
+         bcc   L4374
+         inc   usrbuf+1                 adjust hi address as needed.
+L4374    plp                            restore return statuses.
+setvflg	 .EQ	*-ofsX			this byte ($60) is used to set v flag.
+         rts
+fxdatptr .EQ	*-ofsX			put current user buffer
+         lda   datptr                   address back to normal
+         sta   usrbuf
+         lda   datptr+1
+         sta   usrbuf+1                 bank pair byte should be moved also.
+         ldy   fcbptr                   restore buffer address
+         jmp   fndfcbuf
+
+* read directory file
+
+dread	.EQ	*-ofsX
+L4384    jsr   rdposn
+         bcs   L43B8			pass back any errors.
+         jsr   preprw                   prepare for transfer.
+         jsr   readpart                 move data to user's buffer.
+         bvc   L4384                    repeat until request is satisfied.
+         jsr   rwdone                   update fcb as to new position.
+         bcc   L43B6                    branch if done with no errors.
+         cmp   #$4C                     was last read to end of file ?
+         sec                            anticipate some other error.
+         bne   L43B7                    branch if not eof error.
+         jsr   svmark
+         jsr   zipdata                  clear out data block.
+         ldy   #$00                     provide dummy back pointer for future
+         ldx   fcbptr                   re-position. x = hi byte of last block
+L43A6    lda   fcbbuf+16,x
+         sta   (datptr),y
+         lda   #$00			mark current block as impossible
+         sta   fcbbuf+16,x
+         inx
+         iny                            inc indexes to do both hi and low bytes
+         cpy   #$02
+         bne   L43A6
+L43B6    clc                            no error
+L43B7    rts
+L43B8    jmp   errfix1                  report how much xfer'd before error.
+mvcbytes .EQ	*-ofsX			move request count to a more
+         ldy   #$04                     accessable location
+         lda   (A3L),y
+         sta   cbytes
+         sta   rwreql
+         iny
+         lda   (A3L),y
+         sta   cbytes+1
+         sta   rwreqh
+         ldy   fcbptr                   return y = val(fcbptr),
+         lda   fcbbuf+9,y               a = attributes
+         clc                            and carry clear...
+         rts
+mvdbufr	.EQ	*-ofsX			move the pointer to user's buffer
+         ldy   #$02                     to the block file manager
+         lda   (A3L),y
+         sta   usrbuf                   z-page area
+         iny
+         lda   (A3L),y
+         sta   usrbuf+1
+gfcbstyp .EQ	*-ofsX
+         ldy   fcbptr                   return storage type
+         lda   fcbbuf+7,y
+         rts
+
+* this subroutine adds the requested byte count to mark and returns sum
+* in scrtch and also returns mark in tpos and oldmark.
+*
+* on exit:
+*          y,x,a is unknown
+*          carry set indicates scrtch > eof
+
+calcmrk	.EQ	*-ofsX
+         ldx   #$00                     
+         ldy   fcbptr
+         clc
+L43EE    lda   fcbbuf+18,y
+         sta   tposll,x
+         sta   oldmark,x
+         adc   cbytes,x
+         sta   scrtch,x
+         txa
+         eor   #$02			cbytes+2 always=0
+         beq   L4406
+         iny
+         inx
+         bne   L43EE			always.
+eoftest	.EQ	*-ofsX
+L4406    lda   scrtch,x			new mark in scrtch.
+         cmp   fcbbuf+21,y              is new position > eof ?
+         bcc   L4414                    no, proceed.
+         bne   L4414                    yes, adjust 'cbytes' request
+         dey
+         dex                            all tree bytes compared ?
+         bpl   L4406                    no, test next lowest
+L4414    rts
+werreof	.EQ	*-ofsX
+         jsr   plus2fcb			reset eof to pre-error position.
+L4418    lda   oldeof,x                 place oldeof back into fcb
+         sta   fcbbuf+21,y
+         lda   oldmark,x                also reset mark to last best
+         sta   fcbbuf+18,y              write position
+         sta   scrtch,x                 and copy mark to scrtch for test of
+         dey                            eof less than mark.
+         dex
+         bpl   L4418
+         jsr   plus2fcb                 get pointers to test eof < mark.
+         jsr   eoftest                  carry set means mark > eof !!
+
+* drop into wadjeof to adjust eof to mark if necessary
+
+wadjeof	.EQ	*-ofsX
+         jsr   plus2fcb			get y=fcbptr+2, x=2, a=y.
+L4434    lda   fcbbuf+21,y              copy eof to old eof
+         sta   oldeof,x
+         bcc   L4442                    and if carry set...
+         lda   scrtch,x                 then copy scrtch to fcb's eof.
+         sta   fcbbuf+21,y
+L4442    dey
+         dex                            copy all 3 bytes
+         bpl   L4434
+         rts
+plus2fcb .EQ	*-ofsX
+         lda   #$02                     on exit both a and y = fcbptr+2.
+         tax                            x = 2
+         ora   fcbptr
+         tay
+         rts
+
+* write command
+
+writef	.EQ	*-ofsX			first determine if requested
+         jsr   mvcbytes                 write is legal.
+         pha
+         jsr   calcmrk                  save a copy of eof to old eof, set/clr
+         jsr   wadjeof                  carry to determine if new mark > eof.
+         pla                            get attributes again.
+         and   #$02                     is write enabled ?
+         bne   L4462                    yes, continue...
+L445E    lda   #$4E                     illegal access error.
+         bne   L44A2
+L4462    jsr   tstwprot			otherwise, make sure device is not
+         bcs   L44A2                    write protected. if so, branch to abort.
+         lda   cbytes
+         ora   cbytes+1                 anything to write ?
+         bne   L4472                    branch if so,
+         jmp   rwdone                   else do nothing.
+L4472    jsr   mvdbufr			move the user's buffer ptr to bfm zero
+         cmp   #$04                     page area, also get storage type.
+         bcs   L445E                    if not tree, return an access error.
+L4479    jsr   rdposn                   
+         bcs   L44A2
+         jsr   gfcbstat
+         and   #$07
+         beq   L44E9
+         ldy   #$00			is enough disk space available for
+L4487    iny                            indexes and data block ?
+         lsr   a
+         bne   L4487
+         sty   reql
+         sta   reqh
+         jsr   tstfrblk
+         bcs   L44A2                    pass back any errors.
+         jsr   gfcbstat                 now get more specific.
+         and   #$04                     are we lacking a tree top ?
+         beq   L44AC                    no, test for lack of sapling level index
+         jsr   topdown                  go allocate tree top and adj file type.
+         bcc   L44B8                    continue with allocation of data block.
+L44A2    pha                            save error.
+         jsr   errfix1                  error return.
+         jsr   werreof                  adjust eof and mark to pre-error state.
+         pla                            restore error code.
+         sec
+         rts
+L44AC    jsr   gfcbstat                 get status byte again.
+         and   #$02                     do we need a sapling level index block ?
+         beq   L44B8			no, assume it's just a data block needed
+         jsr   sapdown			go alloc an indx blk and update tree top
+         bcs   L44A2			if error.
+L44B8    jsr   alcwblk			go allocate for data block.
+         bcs   L44A2
+         jsr   gfcbstat                 clear allocation required bits in status
+         ora   #$80			but first indicate index block is dirty.
+         and   #$F8
+         sta   fcbbuf+8,y
+         lda   tposhi			calculate position within index block.
+         lsr   a
+         lda   tposlh
+         ror   a
+         tay				now put block address into index block.
+         inc   zpt+1                    high byte first.
+         lda   scrtch+1
+         tax
+         sta   (zpt),y
+         dec   zpt+1                    restore pointer to lower page of index
+         lda   scrtch			block. get low block address.
+         sta   (zpt),y                  store low address.
+         ldy   fcbptr                   update fcb to indicate that this block
+         sta   fcbbuf+16,y              is allocated.
+         txa                            get high address again.
+         sta   fcbbuf+17,y
+L44E9    jsr   preprw
+         jsr   wrtpart
+         bvc   L4479
+         jmp   rwdone                   update fcb with new position
+wrtpart	.EQ	*-ofsX
+         txa
+         bne   L44FF			branch if request is not even pages
+         lda   rwreqh                   a call of 0 bytes should never get here!
+         beq   L4546			do nothing
+         dec   rwreqh
+L44FF    dex
+         lda   (usrbuf),y		move data from user's buffer
+         sta   (sos),y
+         txa
+         beq   L4525
+L4507    iny                            page crossed ?
+         bne   L44FF                    no, keep moving.
+         lda   sos+1                    test for end of buffer
+         inc   usrbuf+1                 but first adjust user buffer pointer
+         inc   tposlh                   and position
+         bne   L451C
+         inc   tposhi
+         bne   L451C
+         lda   #$4D                     out of range if > 32MB
+         bne   L44A2
+L451C    inc   sos+1                    adjust sos buffer high address
+         eor   datptr+1                 (carry is undisturbed)
+         beq   L44FF                    branch if more to write to buffer.
+         clv                            indicates not finished.
+         bvc   L4549                    always.
+L4525    lda   rwreqh
+         beq   L4539                    branch if request satisfied.
+         iny                            done with this block of data ?
+         bne   L4533                    if not.
+         lda   sos+1			this is necessary for proper
+         eor   datptr+1                 adjustment of request count
+         bne   L4536
+L4533    dec   rwreqh
+L4536    dey                            reset modified y
+         bra   L4507
+L4539    iny                            and position
+         bne   L4546
+         inc   usrbuf+1                 inc pointers
+         inc   tposlh
+         bne   L4546
+         inc   tposhi
+L4546    bit   setvflg                  set v flag
+L4549    sty   tposll                   save low position
+         stx   rwreql                   and remainder of request count.
+         php                            save statuses
+         jsr   gfcbstat
+         ora   #$50
+         sta   fcbbuf+8,y
+         clc                            adjust user's low buffer address
+         lda   tposll
+         adc   usrbuf
+         sta   usrbuf
+         bcc   L4564
+         inc   usrbuf+1                 adjust high address as needed.
+L4564    jsr   fcbused			set directory flush bit.
+         plp                            restore return statuses
+         rts
+topdown	.EQ	*-ofsX
+         jsr   swapdown			make current 1st block an entry in new
+         bcs   L45B1                    top. branch if errors.
+         jsr   gfcbstyp                 get storage type
+
+* has storage type been changed to 'tree' ? if not, assume it was originally
+* a seed and both levels need to be built. otherwise, only an index needs
+* to be allocated.
+
+         cmp   #$03			tree type
+         beq   L457A
+         jsr   swapdown			make previous swap a sap level index
+         bcs   L45B1                    block. branch if errors.
+L457A    jsr   alcwblk                  get another block address for the sap
+         bcs   L45B1                    level index. branch if errors.
+         lda   tposhi                   calculate position of new index block
+         lsr   a                        in the top of the tree.
+         tay
+         lda   scrtch                   get address of newly allocated index
+         tax                            block again.
+         sta   (zpt),y
+         inc   zpt+1
+         lda   scrtch+1
+         sta   (zpt),y			save hi address
+         dec   zpt+1
+         ldy   fcbptr                   make newly allocated block the current
+         sta   fcbbuf+15,y              index block.
+         txa
+         sta   fcbbuf+14,y
+         jsr   wfcbfst                  save new top of tree
+         bcs   L45B1
+         jmp   zeroindex                zero index block in user's i/o buffer.
+sapdown	.EQ	*-ofsX
+         jsr   gfcbstyp			find out if dealing with a tree.
+         cmp   #$01                     if seed then adj to file type is needed.
+         beq   L45B2			branch if seed
+         jsr   rfcbfst                  otherwise read in top of tree.
+         bcc   L457A                    if no error.
+L45B1    rts                            return errors.
+swapdown .EQ	*-ofsX			make current seed into a sapling.
+L45B2    jsr   alcwblk                  allocate a block before swap.
+         bcs   L45F6                    return errors.
+         ldy   fcbptr                   get previous first block
+         lda   fcbbuf+12,y              address into index block.
+         pha                            save temporarily while swapping in new
+         lda   scrtch                   top index. get new block address (low)
+         tax
+         sta   fcbbuf+12,y
+         lda   fcbbuf+13,y
+         pha
+         lda   scrtch+1                 and high address too
+         sta   fcbbuf+13,y
+         sta   fcbbuf+15,y              make new top also the current index in
+         txa                            memory. get low address again.
+         sta   fcbbuf+14,y
+         inc   zpt+1                    make previous the 1st entry in sub index
+         pla
+         sta   (zpt)
+         dec   zpt+1
+         pla
+         sta   (zpt)
+         jsr   wfcbfst                  save new file top.
+         bcs   L45F6                    if error.
+         jsr   gfcbstyp                 now adjust storage type by adding 1
+         adc   #$01                     (seed becomes sapling becomes tree)
+         sta   fcbbuf+7,y
+         lda   fcbbuf+8,y               mark storage type modified
+         ora   #$08
+         sta   fcbbuf+8,y
+         clc                            no error
+L45F6    rts
+alcwblk	.EQ	*-ofsX
+         jsr   alc1blk
+         bcs   L4616
+         jsr   gfcbstat			mark usage as modified
+         ora   #$10
+         sta   fcbbuf+8,y
+         lda   fcbbuf+24,y              inc current usage count by 1
+         clc
+         adc   #$01
+         sta   fcbbuf+24,y
+         lda   fcbbuf+25,y
+         adc   #$00
+         sta   fcbbuf+25,y
+L4615    clc				no error
+L4616    rts
+tstwprot .EQ	*-ofsX			check for 'never been modified'
+         jsr   gfcbstat                 condition
+         and   #$F0
+         bne   L4615                    ordinary rts if known write ok.
+         lda   fcbbuf+1,y               get file's dev #.
+         sta   devnum                   get current status of block device.
+twrprot1 .EQ	*-ofsX			make the device status call
+         sta   unitnum
+         lda   bloknml+1
+         pha
+         lda   bloknml                  save the current block values
+         pha
+         stz   A4L
+         stz   bloknml                  zero the block #
+         stz   bloknml+1
+         php
+         sei
+         jsr   dmgr
+         bcs   L463B                    branch if write protect error
+         lda   #$00                     otherwise, assume no errors.
+L463B    plp                            restore interrupt status
+         clc
+         tax                            save error.
+         beq   L4641                    branch if no error
+         sec                            else, set carry to show error.
+L4641    pla
+         sta   bloknml                  restore the block #
+         pla
+         sta   bloknml+1
+         txa
+         rts                            carry is indeterminate.
+
+* close command
+
+closef	.EQ	*-ofsX                   close all ?
+         ldy   #$01
+         lda   (A3L),y
+         bne   L4683                    no, just one of them.
+         sta   cferr                    clear global close error.
+         lda   #$00			start at the beginning.
+L4654    sta   fcbptr                   save current low byte of pointer.
+         tay                            get the level at which the file
+         lda   fcbbuf+27,y              was opened.
+         cmp   flevel                   if file's level is < global level
+         bcc   L4675                    then don't close.
+         lda   fcbbuf,y                 is this reference file open ?
+         beq   L4675                    no, try next.
+         jsr   flush2			clean it out...
+         bcs   L46B6                    return flush errors.
+         jsr   close2			update fcb & vcb
+         ldy   #$01
+         lda   (A3L),y
+         beq   L4675                    no error if close all.
+         bcs   L46B6                    close error.
+L4675    lda   fcbptr                   inc pointer to next fcb
+         clc
+         adc   #$20
+         bcc   L4654                    branch if within same page.
+         lda   cferr                    on final close report logged errors.
+         beq   L46B4                    branch if errors.
+         rts                            (carry already set).
+L4683    jsr   flush1			flush file 1st (including updating
+         bcs   L46B6                    bitmap). branch if errors.
+close2	.EQ	*-ofsX
+         ldy   fcbptr
+         lda   fcbbuf+11,y              release file buffer
+         jsr   relbuffr
+         bcs   L46B6
+         lda   #$00
+         ldy   fcbptr
+         sta   fcbbuf,y                 free fcb too
+         lda   fcbbuf+1,y
+         sta   devnum                   go look for associated vcb
+         jsr   fnddvcb
+         ldx   vcbptr                   get vcb pointer.
+         dec   vcbbuf+30,x              indicate one less file open.
+         bne   L46B4                    branch if that wasn't the last...
+         lda   vcbbuf+17,x
+         and   #$7F                     strip 'files open' bit
+         sta   vcbbuf+17,x
+L46B4    clc
+         rts
+L46B6    bcs   L46E6                    don't report close all error now.
+
+* flush command
+
+flushf	.EQ	*-ofsX
+         ldy   #$01			flush all ?
+         lda   (A3L),y
+         bne   L46E9			no, just one of them.
+         sta   cferr                    clear global flush error.
+         lda   #$00			start at the beginning.
+L46C3    sta   fcbptr                   save current low byte of pointer.
+         tay                            index to ref #.
+         lda   fcbbuf,y                 is this reference file open ?
+         beq   L46D1                    no, try next.
+         jsr   flush2                   clean it out...
+         bcs   L46E6                    return anty errors.
+L46D1    lda   fcbptr                   inc pointer to next fcb.
+         clc
+         adc   #$20
+         bcc   L46C3                    branch if within same page
+L46D9    clc
+         lda   cferr                    on last flush,
+         beq   L46E0                    branch if no logged errors.
+         sec                            report error now
+L46E0    rts
+flush2	.EQ	*-ofsX                   
+         jsr   fndfcbuf                 must set up vcb & buffer locations 1st.
+         bcc   L46F1                    branch if no error.
+L46E6    jmp   glberr			error so check for close or flush all.
+flush1	.EQ	*-ofsX                   for normal refnum flush,
+L46E9    stz   cferr                    clear global error.
+         jsr   findfcb                  setup pointer to fcb user references.
+         bcs   L46E6                    return any errors.
+L46F1    lda   fcbbuf+9,y               test to see if file is modified.
+         and   #$02                     is it write enabled ?
+         beq   L46D9                    branch if 'read only'
+         lda   fcbbuf+28,y              has eof been modified ?
+         bmi   L4704                    if yes.
+         jsr   gfcbstat                 has data been modified ?
+         and   #$70                     (was written to while it's been open?)
+         beq   L46D9                    if not.
+L4704    jsr   gfcbstat
+         and   #$40                     does current data buffer need to be
+         beq   L4710                    written ? branch if not.
+         jsr   wfcbdat                  if so, go write it.
+         bcs   L46E6                    if error.
+L4710    jsr   gfcbstat                 check to see if the index block (tree
+         and   #$80                     files only) needs to be written.
+         beq   L471C                    branch if not.
+         jsr   wfcbidx
+         bcs   L46E6                    return any errors.
+L471C    lda   #$06			prepare to update directory
+         tax
+         ora   fcbptr
+         tay
+L4723    lda   fcbbuf,y			note: this code depends on the defined
+         sta   d_dev-1,x                order of the file control block and the
+         dey                            temporary directory area in 'work space'
+         dex
+         bne   L4723
+         sta   devnum
+         lda   d_head			read the directory header for this file
+         ldx   d_head+1
+         jsr   rdblk                    into the general purpose buffer.
+         bcs   L46E6                    if error.
+         jsr   movhed0                  move header info.
+         lda   d_entblk                 get address of directory block that
+         ldy   d_entblk+1		contains the file entry.
+         cmp   d_head                   test to see if it's the same block the
+         bne   L474E                    header is in. branch if not.
+         cpy   d_head+1
+         beq   L4755                    branch if header block = entry block
+L474E    sta   bloknml
+         sty   bloknml+1
+         jsr   rdgbuf                   get block with file entry in general
+L4755    jsr   entcalc                  buffer. set up pointer to entry.
+         jsr   moventry                 move entry to temp entry buffer in
+         ldy   fcbptr                   'work space'. update 'blocks used' count
+         lda   fcbbuf+24,y
+         sta   d_usage
+         lda   fcbbuf+25,y
+         sta   d_usage+1
+         ldx   #$00                     and move in end of file mark whether
+L476C    lda   fcbbuf+21,y              needed or not.
+         sta   d_eof,x
+         inx
+         cpx   #$03                     move all 3 bytes
+         beq   L4780
+         lda   fcbbuf+12,y              also move in the address of the file's
+         sta   d_filid,x                first block since it might have changed
+         iny                            since the file first opened.
+         bne   L476C                    branch always.
+L4780    lda   fcbbuf+5,y               the last thing to update is storage
+         asl   a                        type (y=fcbptr+2). shift into high
+         asl   a                        nibble.
+         asl   a
+         asl   a
+         sta   scrtch
+         lda   d_stor			get old type byte (might be the same).
+         and   #$0F                     strip off old type,
+         ora   scrtch                   add in the new type
+         sta   d_stor                   and put it away.
+         jsr   drevise                  go update directory.
+         bcs   L47B4                    error.
+         ldy   fcbptr                   mark
+         lda   fcbbuf+28,y              fcb/directory
+         and   #$7F                     as
+         sta   fcbbuf+28,y              undirty.
+         lda   d_dev                    see if bitmap should be written.
+         cmp   bmadev                   is it in same as current file ?
+         bne   L47B2                    yes, put it on the disk if necessary.
+         jsr   upbmap                   go put it away.
+         bcs   L47B4                    flush error
+L47B2    clc
+         rts
+
+* report error only if not a close all or flush all
+
+glberr	.EQ	*-ofsX	
+L47B4    ldy   #$01
+         pha
+         lda   (A3L),y
+         bne   L47C1			not an 'all' so report now
+         clc
+         pla
+         sta   cferr                    save for later
+         rts
+L47C1    pla
+         rts
+gfcbstat .EQ	*-ofsX
+         ldy   fcbptr                   index to fcb.
+         lda   fcbbuf+8,y               return status byte.
+         rts
+L47CA    lda   #$4E                     access error
+         sec
+L47CD    rts
+
+seteof	.EQ	*-ofsX			can only move end of tree, sapling
+         jsr   gfcbstyp			or seed.
+         cmp   #$04                     tree type ?
+         bcs   L47CA                    if not then access error
+         asl   a
+         asl   a
+         asl   a
+         asl   a
+         sta   stortyp                  may be used later.
+         lda   fcbbuf+9,y
+         and   #$02                     is write enabled to set new eof ?
+         beq   L47CA                    no, access error.
+         jsr   tstwprot                 hardware write protected ?
+         bcs   L47CA                    yes, access error.
+         ldy   fcbptr                   save old eof so it can be seen
+         iny                            whether blocks need to be released
+         iny                            upon contraction.
+         ldx   #$02                     all 3 bytes of the eof
+L47EF    lda   fcbbuf+21,y
+         sta   oldeof,x
+         dey
+         dex
+         bpl   L47EF
+         ldy   #$04
+         ldx   #$02
+L47FD    lda   (A3L),y                  position mark to new eof
+         sta   tposll,x
+         dey
+         dex
+         bpl   L47FD
+         ldx   #$02                     point to 3rd byte.
+L4808    lda   oldeof,x                 see if eof moved backwards so blocks
+         cmp   tposll,x                 can be released.
+         bcc   L4815                    (branch if not)
+         bne   purge                    branch if blocks to be released
+         dex
+         bpl   L4808                    all 3 bytes
+eofset	.EQ	*-ofsX
+L4815    ldy   #$04
+         ldx   fcbptr			place new end of file into fcb
+         inx
+         inx
+L481C    lda   (A3L),y
+         sta   fcbbuf+21,x
+         dex
+         dey
+         cpy   #$02                     all 3 bytes moved ?
+         bcs   L481C                    no.
+         jmp   fcbused                  mark fcb as dirty.
+purge    jsr   flush1                   make sure file is current
+         bcs   L47CD
+         ldx   datptr+1                 pointer to index block
+         inx
+         inx
+         stx   zpt+1                    (zero page conflict with dir buf ptr)
+         ldx   datptr
+         stx   zpt
+         ldy   fcbptr                   check if eof < mark
+         iny
+         iny
+         ldx   #$02
+L4840    lda   fcbbuf+18,y
+         cmp   tposll,x                 compare until not equal or carry clear.
+         bcc   L485F                    branch if eof > mark.
+         bne   L484E                    branch if eof < mark.
+         dey
+         dex
+         bpl   L4840                    compare all 3 bytes
+L484E    ldy   fcbptr
+         ldx   #$00
+L4853    lda   tposll,x                 fake position, correct position will
+         sta   fcbbuf+18,y              be made below...
+         iny
+         inx
+         cpx   #$03                     move all 3 bytes
+         bne   L4853
+L485F    jsr   tkfrecnt                 force free block count before releasing
+         lda   tposll                   blocks. prepare for purge of excess...
+         sta   dseed                    all blocks and bytes beyond new eof
+         lda   tposlh                   must be zero'd
+         sta   dsap
+         and   #$01
+         sta   dseed+1
+         lda   tposhi
+         lsr   a
+         sta   dtree
+         ror   dsap                     pass position in terms of block & bytes.
+         lda   dseed			now adjust for boundaries of $200
+         ora   dseed+1
+         bne   L48A2                    branch if no adjustment necessary.
+         lda   dsap                     get correct block ositions for sap
+         sec                            and tree levels.
+         sbc   #$01
+         sta   dsap                     deallocate for last (phantom) block
+         lda   #$02                     and don't modify last data block.
+         bcs   L489F                    branch if tree level unaffected.
+         dec   dtree
+         bpl   L489F                    branch if new eof not zero
+         lda   #$00
+         sta   dtree                   otherwise, make a null seed out of it.
+         sta   dsap
+L489F    sta   dseed+1
+L48A2    ldy   fcbptr                   also must pass file's 1st block address.
+         lda   fcbbuf+12,y
+         sta   firstbl
+         lda   fcbbuf+13,y
+         sta   firstbh
+         stz   deblock			lastly, initialize # of blocks to
+         stz   deblock+1                be free'd.
+         jsr   detree			deallocate blocks from tree.
+         php                            save any error status until fcb
+         pha                            is cleaned up.
+         sec
+         ldy   fcbptr
+         ldx   #$00
+L48C2    lda   firstbl,x
+         sta   fcbbuf+12,y              move in possible new first file block
+         lda   fcbbuf+24,y              address. adjust usage count also
+         sbc   deblock,x
+         sta   fcbbuf+24,y
+         iny
+         inx
+         txa
+         and   #$01                     test for both bytes adjusted
+         bne   L48C2                    without disturbing carry.
+         lda   stortyp                  get possibly modified storage type
+         lsr   a
+         lsr   a
+         lsr   a
+         lsr   a
+         ldy   fcbptr                   and save it in fcb.
+         sta   fcbbuf+7,y
+         jsr   clrstats                 make it look as though position has
+         jsr   dvcbrev			nothing allocated, update total blocks
+         ldy   fcbptr                   in fcb and correct position.
+         iny
+         iny
+         ldx   #$02
+L48F2    lda   fcbbuf+18,y              tell 'rdposn' to go to correct
+         sta   tposll,x
+         eor   #$80                     position from incorrect place.
+         sta   fcbbuf+18,y
+         dey
+         dex
+         bpl   L48F2
+         jsr   rdposn                   go to correct position.
+         bcc   L490D                    if no error.
+         tax                            otherwise, report latest error.
+         pla
+         plp
+         txa                            restore latest error code to stack
+         sec
+         php
+         pha                            save new error.
+
+* mark file as in need of a flush and update fcb with new end of file,
+* then flush it.
+
+L490D    jsr   eofset			go mark and update
+         jsr   flush1			then go do the flush.
+         bcc   L491C                    branch if no error.
+         tax                            save latest error.
+         pla                            clean previous error off stack
+         plp
+         txa                            and restore latest error to stack.
+         sec                            show error condition.
+         php                            restore error status to stack
+         pha                            and the error code.
+L491C    pla                            report any errors that may have
+         plp                            appeared.
+         rts
+
+geteof	.EQ	*-ofsX
+         ldx   fcbptr			index to end of file mark
+         ldy   #$02                     and index to user's call parameters
+L4924    lda   fcbbuf+21,x
+         sta   (A3L),y
+         inx
+         iny
+         cpy   #$05
+         bne   L4924                    loop until all 3 bytes moved
+         clc                            no errors
+         rts
+
+newline	.EQ	*-ofsX
+         ldy   #$02			adjust newline status for open file.
+         lda   (A3L),y                  on or off ?
+         ldx   fcbptr                   it will be 0 if off.
+         sta   fcbbuf+31,x              set new line mask
+         iny
+         lda   (A3L),y                  and move in 'new-line' byte
+         sta   fcbbuf+10,x
+         clc                            no error possible
+         rts
+
+getinfo	.EQ	*-ofsX
+         jsr   findfile			look for file.
+         bcc   L4988                    no error.
+         cmp   #$40                     was it a root directory file ?
+         sec                            (in case of no match)
+         bne   L49A4                    if not, then error.
+         lda   #$F0
+         sta   d_stor                   for get info, report proper storage
+         stz   reql                     type. forca a count of free blocks.
+         stz   reqh
+         ldx   vcbptr
+         jsr   tkfrecnt                 get a fresh count of free blocks on
+         ldx   vcbptr                   this volume.
+         lda   vcbbuf+21,x              return total blocks and total in use.
+         sta   reqh                     1st transfer 'free' blocks to zpage
+         lda   vcbbuf+20,x              for later subtraction to determine
+         sta   reql                     the 'used' count.
+         lda   vcbbuf+19,x              transfer to 'd.' table as aux id
+         sta   d_auxid+1                (total block count is considered aux id
+         pha                             for the volume)
+         lda   vcbbuf+18,x
+         sta   d_auxid
+         sec                            subtract and report the number of
+         sbc   reql                     blocks 'in use'
+         sta   d_usage
+         pla
+         sbc   reqh
+         sta   d_usage+1
+L4988    lda   d_stor                   transfer bytes from internal order to
+         lsr   a                        call spec via 'inftabl' translation
+         lsr   a                        table but first change storage type to
+         lsr   a                        external (low nibble) format.
+         lsr   a
+         sta   d_stor
+         ldy   #$11                     index to last of user's spec table.
+L4994    lda   inftabl-3,y
+         and   #$7F                     strip bit used by setinfo
+         tax
+         lda   d_stor,x                 move directory info to call spec. table
+         sta   (A3L),y
+         dey
+         cpy   #$03
+         bcs   L4994                    if all info bytes moved, retn carry clr
+L49A4    rts
+
+setinfo	.EQ	*-ofsX
+         jsr   findfile			get the file to work on.
+         bcs   L49CF                    if error.
+         lda   bubit                    see if backup bit can be cleared
+         eor   #$20
+         and   d_attr
+         and   #$20
+         sta   bkbitflg                 or preserve current...
+         ldy   #$0D                     init pointer to user supplied list.
+L49B9    ldx   inftabl-3,y              get index to corresponding 'd.' table.
+         bmi   L49C3                    branch if parameter can't be set.
+         lda   (A3L),y
+         sta   d_stor,x
+L49C3    dey                            has user's request been satisfied ?
+         cpy   #$03
+         bcs   L49B9                    no, move next byte.
+         and   #$18			make sure no illegal access bits were
+         beq   L49D0                    set !! branch if legal access.
+         lda   #$4E                     otherwise, access error.
+         sec
+L49CF    rts
+L49D0    ldy   #$0B
+         lda   (A3L),y                  was clock null input ?
+         beq   L49D9                    if yes.
+         jmp   drevise1                 end by updating directory.
+L49D9    jmp   drevise                  update with clock also...
+
+rename	.EQ	*-ofsX
+         jsr   lookfile			look for source (original) file.
+         bcc   L4A1E                    if found.
+         cmp   #$40                     trying to rename a volume ?
+         bne   L49FD                    no, return error.
+         jsr   renpath			syntax new name.
+         bcs   L49FD                    rename error.
+         ldy   pathbuf                  find out if only rootname for new name
+         iny
+         lda   pathbuf,y                must be $FF if volume name only.
+         bne   L4A72                    if not single name
+         ldx   vcbptr                   check for open files before changing.
+         lda   vcbbuf+17,x
+         bpl   L49FF                    if volume not busy.
+         lda   #$50                     file busy error.
+L49FD    sec
+         rts
+L49FF    ldy   #$00                     get newname's length
+         lda   pathbuf,y
+         ora   #$F0                     (root file storage type)
+         jsr   mvrotnam			update root directory.
+         bcs   L4A74                    rename error.
+         ldy   #$00
+         ldx   vcbptr                   update vcb also.
+L4A10    lda   pathbuf,y                move new name to vcb.
+         beq   L4A1C
+         sta   vcbbuf,x
+         iny                            next character
+         inx
+         bne   L4A10                    always.
+L4A1C    clc                            no errors
+         rts
+L4A1E    jsr   getnamptr		set y = 1st char of path, x = 0.
+L4A21    lda   pathbuf,y                move original name to gbuf
+         sta   gbuf,x                   for later comparison to new name.
+         bmi   L4A2D                    if last character has been moved
+         iny                            otherwise, get the next one.
+         inx
+         bne   L4A21                    always.
+L4A2D    jsr   renpath                  get new name syntaxed.
+         bcs   L4A74                    rename error.
+         jsr   getnamptr                set y = path, x = 0.
+         lda   pathbuf,y                now compare new name with old name
+L4A38    cmp   gbuf,x                   to make sure they are in the same dir.
+         php                            save result of comparison.
+         and   #$F0                     was last char really a count ?
+         bne   L4A46                    if not.
+         sty   rnptr                    save pointer to next name, it might
+         stx   namptr                   be the last.
+L4A46    plp                            result of last comparison ?
+         bne   L4A52                    branch if different character or count.
+         inx                            bump pointers.
+         iny
+         lda   pathbuf,y                was it the last character ?
+         bne   L4A38                    if not.
+         clc                            no operation, names were the same.
+         rts
+L4A52    ldy   rnptr                    index to last name in the chain.
+         lda   pathbuf,y                get last name length.
+         sec
+         adc   rnptr
+         tay
+         lda   pathbuf,y                this byte should be $00 !
+         bne   L4A72                    if not, bad path error.
+         ldx   namptr                   index to last of original name
+         lda   gbuf,x
+         sec
+         adc   namptr
+         tax
+         lda   gbuf,x                   this byte should also be $00.
+         beq   L4A76                    if so, continue processing.
+L4A72    lda   #$40                     bad pathname error.
+L4A74    sec
+         rts
+L4A76    jsr   lookfile			test for duplicate file name.
+         bcs   L4A7F                    branch if file not found, which is ok !!
+         lda   #$47                     duplicate name error.
+         sec
+         rts
+L4A7F    cmp   #$46                     was it a valid file not found ?
+         bne   L4A74                    no, rename error.
+         jsr   setpath                  syntax pathname of file to be changed.
+         jsr   findfile                 get all the info on this file.
+         bcs   L4A74                    rename error.
+         jsr   tstopen                  is file in use ?
+         lda   #$50                     anticipate file busy error.
+         bcs   L4A74                    error if in use.
+         lda   d_attr                   test bit which allows rename.
+         and   #$40
+         bne   L4A9D                    branch if ok to rename
+         lda   #$4E                     otherwise, illegal access.
+L4A9B    sec
+         rts
+L4A9D    lda   d_stor                   find out which storage type.
+         and   #$F0                     strip off name length.
+         cmp   #$D0                     is it a directory ?
+         beq   L4AAE                    then ok.
+         cmp   #$40                     is it a seed, sapling or tree ?
+         bcc   L4AAE                    then ok.
+         lda   #$4A                     file incompatible error.
+         bne   L4A9B                    always.
+L4AAE    jsr   renpath                  since both names go into the directory,
+         bcs   L4A74                    syntax the new name to get the local
+         ldy   rnptr                    name address. y = index to local name
+         ldx   pathbuf,y                length. adj y to last char of new name.
+         tya
+         adc   pathbuf,y
+         tay
+L4ABE    lda   pathbuf,y                move local name to dir entry workspace.
+         sta   d_stor,x
+         dey
+         dex
+         bne   L4ABE
+         lda   d_stor                   preserve file storage type.
+         and   #$F0                     strip off old name length.
+         tax
+         ora   pathbuf,y                add in new name's length.
+         sta   d_stor
+         cpx   #$D0                     that file must be changed also.
+         bne   L4AF0                    branch if not directory type.
+         lda   d_frst                   read in 1st header block of subdir
+         ldx   d_frst+1
+         jsr   rdblk
+         bcs   L4A74                    errors.
+         ldy   rnptr                    change the header's name to match the
+         lda   pathbuf,y                owner's new name. get local name length.
+         ora   #$E0			assume it's a header.
+         jsr   mvrotnam
+         bcs   L4A74
+L4AF0    jmp   drevise1                 end by updating all path directories.
+mvrotnam .EQ	*-ofsX
+         ldx   #$00
+L4AF5    sta   gbuf+4,x
+         inx
+         iny
+         lda   pathbuf,y
+         bne   L4AF5
+         jmp   wrtgbuf                  write changed header block.
+renpath	.EQ	*-ofsX                   
+         ldy   #$03                     get address to new pathname
+         lda   (A3L),y
+         iny
+         sta   zpt
+         lda   (A3L),y                  set up for syntaxing routine (synpath)
+         sta   zpt+1
+         jmp   synpath			do syntax (returns y = local namelength)
+getnamptr .EQ	*-ofsX
+         ldy   #$00			return pointer to 1st name of path.
+         bit   prfxflg                  is this a prefixed name ?
+         bmi   L4B1A                    branch if not.
+         ldy   newpfxptr
+L4B1A    ldx   #$00
+         rts
+
+destroy	.EQ	*-ofsX
+         jsr   findfile			look for file to be destroyed.
+         bcs   L4B66                    if error.
+         jsr   tstopen                  is it open ?
+         lda   totent
+         bne   L4B64                    error if open.
+         stz   reql                     force proper free count in volume.
+         stz   reqh                     (no disk access occurs if already
+         jsr   tstfrblk                  proper)
+         bcc   L4B39			no errors.
+         cmp   #$48                     was error a full disk ?
+         bne   L4B66                    no, report error.
+L4B39    lda   d_attr                   make sure ok to destroy file.
+         and   #$80
+         bne   L4B45                    branch if ok to destroy.
+         lda   #$4E                     access error
+         jsr   p8errv                   (returns to caller)
+L4B45    lda   devnum                   last device used.
+         jsr   twrprot1                 test for write protected hardware
+         bcs   L4B66                    before going thru deallocation.
+         lda   d_frst                   'detree' needs first block address
+         sta   firstbl
+         lda   d_frst+1
+         sta   firstbh
+         lda   d_stor                   find out which storage type.
+         and   #$F0                     strip off name length.
+         cmp   #$40                     is it a seed, sapling or tree ?
+         bcc   L4B68                    branch if it is.
+         bra   L4BCF                    otherwise, test for directory destroy.
+L4B64    lda   #$50			file busy error.
+L4B66    sec                            can't be destroyed
+         rts
+L4B68    sta   stortyp                  destroy a tree file. save storage type.
+         ldx   #$05
+         lda   #$00                     set 'detree' input variables, must be
+L4B6F    sta   stortyp,x                in order: deblock, dtree, dsap, dseed.
+         dex
+         bne   L4B6F                    loop until all zero'd.
+         lda   #$02                     this avoids an extra file i/o and pre-
+         sta   dseed+1                  vents destruction of any deleted data.
+         inc   delflag                  don't allow detree to zero index blocks.
+         jsr   detree			make trees and saplings into seeds.
+         dec   delflag                  reset flag.
+         bcs   L4B93                    (de-evolution)
+L4B85    ldx   firstbh
+         lda   firstbl                  now deallocate seed.
+         jsr   dealloc
+         bcs   L4B93
+         jsr   upbmap
+L4B93    pha                            save possible error code.
+         lda   #$00                     update directory to free entry space.
+         sta   d_stor
+         cmp   h_fcnt                   file entry wrap ?
+         bne   L4BA1                    branch if no carry adjustment.
+         dec   h_fcnt+1                 take carry from hi byte of file entries.
+L4BA1    dec   h_fcnt			mark header with one less file.
+         jsr   dvcbrev                  go update block count in vcb (ignore
+         jsr   drevise                   error, if any) and update dir last.
+         tax                            save possible new error code,
+         pla                            restore possible old error code.
+         bcc   L4BAF                    branch if last call succeeded.
+         txa                            last call failed, use it's error code.
+L4BAF    cmp   #$01                     adjust carry accordingly
+         rts
+dvcbrev	.EQ	*-ofsX                   update block free count in vcb.
+         ldy   vcbptr                   point to vcb of correct device.
+         lda   deblock                  get # of blocks recently freed.
+         adc   vcbbuf+20,y
+         sta   vcbbuf+20,y              update current free block count.
+         lda   deblock+1
+         adc   vcbbuf+21,y
+         sta   vcbbuf+21,y
+         lda   #$00                     force re-scan from 1st bitmap
+         sta   vcbbuf+28,y
+         rts
+L4BCD    bcc   L4B85                    branch widened (always taken)
+L4BCF    cmp   #$D0                     is this a directory file ?
+         bne   L4C1B                    no, file incompatible.
+         jsr   fndbmap                  make sure a buffer available for bitmap
+         bcs   L4C1A                    if error.
+         lda   d_frst                   read 1st block of directory into gbuf
+         sta   bloknml
+         lda   d_frst+1
+         sta   bloknml+1
+         jsr   rdgbuf
+         bcs   L4C1A
+         lda   gbuf+37                  do any files exist in this directory ?
+         bne   L4BF1                    if so, access error.
+         lda   gbuf+38
+         beq   L4BF6
+L4BF1    lda   #$4E                     access error.
+         jsr   p8errv                   P8 error vector
+L4BF6    sta   gbuf+4                   make it an invalid subdirectory
+         jsr   wrtgbuf
+         bcs   L4C1A
+L4BFE    lda   gbuf+2                   get forward link.
+         cmp   #$01                     test for null block into carry.
+         ldx   gbuf+3                   get the rest of the block address.
+         bne   L4C0A                    branch if not null.
+         bcc   L4BCD                    was the low part null as well ?
+L4C0A    jsr   dealloc                  free this block.
+         bcs   L4C1A
+         lda   gbuf+2
+         ldx   gbuf+3
+         jsr   rdblk
+         bcc   L4BFE                    loop until all freed
+L4C1A    rts
+L4C1B    lda   #$4A                     file incompatible
+         jsr   p8errv			(returns to caller)
+fcbused	.EQ	*-ofsX			mark fcb as dirty so the directory
+         pha                            will be flushed on 'flush'.
+         tya                            save regs.
+         pha
+         ldy   fcbptr
+         lda   fcbbuf+28,y              fetch current fcb dirty byte.
+         ora   #$80                     mark fcb as dirty.
+         sta   fcbbuf+28,y              save it back
+         pla                            and restore regs.
+         tay
+         pla
+         rts
+
+* 'detree' deallocates blocks from tree files. it is assumed that the device has
+* been pre-selected and the 'gbuf' may be used.
+*
+* on entry:
+*    stortype = storage type in upper nibble, lower nibble is undisturbed.
+*    firstbl & firstbh = first block of file (index or data).
+*    deblock = 0
+*    dtree = ptr to 1st block with data to be deallocated at tree level.
+*    dsap = ptr to 1st block at sapling level.
+*    dseed = byte (0-511) position to be zeroed from (inclusive).
+*
+* on exit:
+*    stortype = modified result of storage type (if applicable).
+*    firstbl & h = modified if storage type changed.
+*    deblock = total number of blocks freed at all levels.
+*    dtree, dsap, deseed unchanged.
+*
+* to trim a tree to a seed file, both dtree and dsap must be zero.
+* to go from tree to sapling, dtree alone must be zero.
+
+detree	.EQ	*-ofsX
+         lda   stortyp			which kind of tree ?
+         cmp   #$20                     is it a 'seed' ?
+         bcc   L4C46                    if yes.
+         cmp   #$30                     a sapling ?
+         bcc   L4C51                    if yes.
+         cmp   #$40                     is it at least a 'tree' ?
+         bcc   L4C59                    branch if it is.
+         lda   #$0C                     block allocation error.
+         jsr   sysdeath			P8 system death vector
+
+* seedling file type - make sure first desireable block is the only
+* block available in a seedling file.
+
+L4C46    lda   dsap
+         ora   dtree
+         bne   L4CC2	
+         jmp   seedel0
+
+* sapling file type - make sure first desireable block is within the range of
+* blocks available in a sapling file
+
+L4C51    lda   dtree			can't have any blocks in this range
+         bne   L4CC2                    if so then done
+         jmp   sapdel0                  else go deallocate
+L4C59	lda   #$80
+         sta   topdest                  for tree top start at end, work backwards.
+L4C5E    jsr   drdfrst                  read specified first block into gbuf.
+         bcs   L4CC2                    return errors.
+         ldy   topdest                  get current pointer to top indexes.
+         cpy   dtree                    have enough sapling indexes been
+         beq   L4CC3                    deallocated? yes, now deallocate blocks
+         ldx   #$07			buffer up to 8 sapling index block
+L4C6D    lda   gbuf,y			addresses. fetch low block address
+         sta   dealbufl,x               and save it.
+         ora   gbuf+$100,y		is it a real block that is allocated?
+         beq   L4C81                    branch if phantom block.
+         lda   gbuf+$100,y              fetch high block address
+         sta   dealbufh,x               and save it.
+         dex                            decrement and test for dealc buf filled.
+         bmi   L4C93			branch if 8 addresses fetched.
+L4C81    dey                            look for end of deallocation limit.
+         cpy   dtree                    is this the last position on tree level?
+         bne   L4C6D                    if not.
+         iny
+         lda   #$00                     fill rest of dealc buffer with null addresses.
+L4C8A    sta   dealbufl,x
+         sta   dealbufh,x
+         dex
+         bpl   L4C8A
+L4C93    dey                            decrement to prepare for next time.
+         sty   topdest                  save index.
+         ldx   #$07
+L4C99    stx   dtmpx                    save index to dealc buf.
+         lda   dealbufl,x
+         sta   bloknml
+         ora   dealbufh,x               finished ?
+         beq   L4C5E                    branch if done with this level.
+         lda   dealbufh,x               complete address with high byte,
+         sta   bloknml+1
+         jsr   rdgbuf                   read sapling level into gbuf.
+         bcs   L4CC2                    return errors.
+         jsr   dealblk			go free all data indexes in this block
+         bcs   L4CC2
+         jsr   wrtgbuf                  write the flipped index block
+         bcs   L4CC2
+         ldx   dtmpx                    restore index to dealc buff.
+         dex                            are there more to free?
+         bpl   L4C99                    branch if so.
+         bmi   L4C5E                    branch always to get up to 8 more
+L4CC2    rts                            sapling block numbers.
+L4CC3    ldy   dtree                    deallocate all sapling blocks greater
+         iny                            than specified block.
+         jsr   dalblk1			(master index in gbuf)
+         bcs   L4CC2                    if errors.
+         jsr   wrtgbuf                  write updated master index back to disk.
+         bcs   L4CC2
+         ldy   dtree			figure out if tree can become sapling.
+         beq   L4CEB                    branch if it can.
+         lda   gbuf,y                   otherwise, continue with partial.
+         sta   bloknml                  deallocation of last sapling index.
+         ora   gbuf+$100,y              is there such a sapling index block ?
+         beq   L4CC2                    all done if not.
+         lda   gbuf+$100,y              read in sapling level to be modified.
+         sta   bloknml+1
+         jsr   rdgbuf                   read highest sapling index into gbuf.
+         bcc   L4CF5
+         rts
+L4CEB    jsr   shrink			shrink tree to sapling
+         bcs   L4CC2
+sapdel0	.EQ	*-ofsX
+         jsr   drdfrst                  read specified sapling level index
+         bcs   L4CC2                    into gbuf. branch if error.
+L4CF5    ldy   dsap                     pointer to last of desirable indexes.
+         iny                            inc to 1st undesirable.
+         beq   L4D05                    branch if all are desirable.
+         jsr   dalblk1                  deallocate all indexes above specified.
+         bcs   L4CC2
+         jsr   wrtgbuf                  write out the index block
+         bcs   L4CC2
+L4D05    ldy   dsap                     prepare to clean up last data block.
+         beq   L4D1F                    branch if possibility of making a seed.
+L4D0A    lda   gbuf,y                   fetch low order data block address.
+         sta   bloknml
+         ora   gbuf+$100,y              is it a real block ?
+         beq   L4CC2                    if not, then done.
+         lda   gbuf+$100,y
+         sta   bloknml+1
+         jsr   rdgbuf                   go read data block into gbuf.
+         bcc   L4D2E                    branch if good read
+         rts                            or return error.
+L4D1F    lda   dtree                    are both tree and sap levels zero ?
+         bne   L4D0A                    if not.
+         jsr   shrink                   reduce this sap to a seed.
+         bcs   L4D52                    if error.
+seedel0	.EQ	*-ofsX
+         jsr   drdfrst                  go read data block.
+         bcs   L4D52                    if error.
+L4D2E    ldy   dseed+1                  check high byte for no deletion.
+         beq   L4D39                    branch if all of 2nd page to be deleted.
+         dey				if dseed > $200 then all were done.
+         bne   L4D52                    branch if that is the case.
+         ldy   dseed                    clear only bytes >= dseed.
+L4D39    lda   #$00
+L4D3B    sta   gbuf+$100,y              zero out unwanted data
+         iny
+         bne   L4D3B
+         ldy   dseed+1                  is that all ?
+         bne   L4D4F                    yes.
+         ldy   dseed
+L4D49    sta   gbuf,y
+         iny
+         bne   L4D49
+L4D4F    jmp   wrtgbuf                  update data block to disk.
+L4D52    rts                            return error status.
+drdfrst	.EQ	*-ofsX			read specified 1st block into gbuf
+         lda   firstbl
+         ldx   firstbh
+         jmp   rdblk                    go read it
+
+* beware that dealloc may bring in a new bitmap block and may destroy
+* locations 46 and 47 which are used to point to the current index block.
+
+shrink	.EQ	*-ofsX
+         ldx   firstbh			first deallocate top index block
+         txa
+         pha
+         lda   firstbl
+         pha                            save block address of this index block.
+         jsr   dealloc                  free it from the bitmap
+         pla
+         sta   bloknml                  set master of sapling
+         pla				index block address.
+         sta   bloknml+1
+         bcs   L4D8D                    report errors.
+         lda   gbuf                     get # of new 1st block from old index.
+         sta   firstbl
+         lda   gbuf+$100
+         sta   firstbh
+         ldy   #$00
+         jsr   swapme			flip that one entry in old top index.
+         sec                            now change file type,
+         lda   stortyp                  from tree to sapling,
+         sbc   #$10                     or from sapling to seed.
+         sta   stortyp
+         jsr   wrtgbuf                  write the (deallocated) old top index.
+L4D8D    rts                            return error status.
+dealblk	.EQ	*-ofsX
+         ldy   #$00                     start at beginning.
+dalblk1	.EQ	*-ofsX
+         lda   bloknml                  save disk address of gbuf's data.
+         pha
+         lda   bloknml+1
+         pha
+L4D96    sty   saptr                    save current index.
+         lda   gbuf,y                   get low address of block to deallocate.
+         cmp   #$01                     test for null block into carry.
+         ldx   gbuf+$100,y              get remainder of block address.
+         bne   L4DA5                    branch if not null.
+         bcc   L4DB0                    was the low part null too ?
+L4DA5    jsr   dealloc                  free it up on volume bitmap.
+         bcs   L4DB4                    return any error.
+         ldy   saptr                    get index to sapling level index block.
+         jsr   swapme                   
+L4DB0    iny                            next block address.
+         bne   L4D96                    if more to deallocate or test.
+         clc                            no error.
+L4DB4    tax                            save error code, if any.
+         pla                            restore blocknm (16 bit)
+         sta   bloknml+1
+         pla
+         sta   bloknml
+         txa                            restore return code
+         rts
+swapme	.EQ	*-ofsX
+         lda   delflag                  swapping or zeroing ?
+         bne   L4DC5                    skip if swapping.
+         tax                            make x = 0.
+         beq   L4DCB                    zero the index (always taken).
+L4DC5    ldx   gbuf+$100,y              index high
+         lda   gbuf,y                   index low
+L4DCB    sta   gbuf+$100,y              save index high
+         txa
+         sta   gbuf,y                   save index low
+         rts				done.
+
+* MEMMGR memory manager
+*
+* allocate buffer in memory tables
+
+alcbuffr .EQ	*-ofsX
+         ldy   #$04			index to user specified buffer.
+alcbufr1 .EQ	*-ofsX                   
+         lda   (A3L),y                  this buffer must be on a page boundary.
+         tax                            save for validation.
+         cmp   #$08
+         bcc   L4E1E                    cannot be lower than video !
+         cmp   #$BC			nor greater than $BB00
+         bcs   L4E1E                    since it would wipe out globals...
+         sta   datptr+1
+         dey
+         lda   (A3L),y                  low address should be zero !
+         sta   datptr
+         bne   L4E1E                    error if not page boundary.
+         inx                            add 4 pages for 1k buffer.
+         inx
+         inx
+         inx
+L4DED    dex                            test for conflicts.
+         jsr   cmembit			test for free buffer space
+         and   memmap,y                 P8 memory bitmap
+         bne   L4E1E                    report memory conflict, if any.
+         cpx   datptr+1                 test all 4 pages.
+         bne   L4DED
+         inx                            add 4 pages again for allocation.
+         inx
+         inx
+         inx
+L4DFE    dex                            set proper bits to 1
+         jsr   cmembit
+         ora   memmap,y                 to mark it's allocation.
+         sta   memmap,y
+         cpx   datptr+1                 set all 4 pages
+         bne   L4DFE
+         ldy   fcbptr                   calculate buffer number
+         lda   fcbbuf,y
+         asl   a                        buffer number = (entnum) * 2.
+         sta   fcbbuf+11,y              save it in fcb.
+         tax                            use entnum * 2 as index to global
+         lda   datptr+1			buffer addr tables. get addr already
+         sta   buftbl-1,x               validated as good. store hi addr
+         clc                            (entnums start at 1, not 0)
+         rts
+L4E1E    lda   #$56                     buffer is in use or not legal
+         sec
+         rts
+getbufadr .EQ	*-ofsX
+         tax				index into global buffer table.
+         lda   buftbl-2,x
+         sta   bufaddrl
+         lda   buftbl-1,x
+         sta   bufaddrh
+         rts
+relbuffr .EQ	*-ofsX			preserve buffer address in 'bufaddr'
+         jsr   getbufadr
+         tay                            returns high buffer address in acc.
+         beq   L4E54                    branch if unallocated buffer space.
+         stz   buftbl-1,x               take address out of buffer list.
+         stz   buftbl-2,x               (x was set up by getbufadr)
+freebuf	.EQ	*-ofsX
+         ldx   bufaddrh                 get hi buffer address
+         inx                            add 4 pages to account for 1k space.
+         inx
+         inx
+         inx
+L4E43    dex                            drop to next lower page.
+         jsr   cmembit                  get bit and position to memtable of
+         eor   #$FF                     this page. invert mask.
+         and   memmap,y                 mark address as free space.
+         sta   memmap,y
+         cpx   bufaddrh                 all pages freed ?
+         bne   L4E43                    no.
+L4E54    clc                            no error.
+         rts
+
+* calculate memory allocation bit position.
+* on entry: x = high address of buffer, low address assumed zero.
+* on exit: acc = allocation bit mask, x = unchanged, y = pointer to memtabl byte
+
+cmembit	.EQ	*-ofsX
+         txa				page address
+         and   #$07                     which page in any 2k set ?
+         tay                            use as index to determine
+         lda   whichbit,y               bit position representation.
+         pha                            save bit position mask for now.
+         txa                            page address.
+         lsr   a
+         lsr   a                        determine 2k set
+         lsr   a
+         tay                            return it in y.
+         pla                            restore bit mask. return bit position
+         rts                            in a & y, pointer to memtabl in x.
+valdbuf	.EQ	*-ofsX
+         lda   usrbuf+1                 high address of user's buffer
+         cmp   #$02                     must be greater than page 2.
+         bcc   L4E1E                    report bad buffer
+         ldx   cbytes+1
+         lda   cbytes                   get cbytes-1 value.
+         sbc   #$01                     (carry is set)
+         bcs   L4E76
+         dex
+L4E76    clc
+         adc   usrbuf                   calculate end of request address.
+         txa                            do high address.
+         adc   usrbuf+1                 the final address
+         tax                            must be less than $BFnn (globals)
+         cpx   #$BF
+         bcs   L4E1E                    report bad buffer.
+         inx                            loop thru all affected pages.
+vldbuf1	.EQ	*-ofsX
+L4E82    dex                            check next lower page.
+         jsr   cmembit
+         and   memmap,y                 if 0 then no conflict.
+         bne   L4E1E                    branch if conflict.
+         cpx   usrbuf+1                 was that the last (lowest) page ?
+         bne   L4E82                    if not.
+         clc                            all pages ok.
+         rts
+
+getbuf	.EQ	*-ofsX			give user address of file buffer
+         ldy   #$02                     referenced by refnum.
+         lda   bufaddrl
+         sta   (A3L),y
+         iny
+         lda   bufaddrh
+         sta   (A3L),y
+         clc                            no errors possible
+         rts
+
+setbuf	.EQ	*-ofsX
+         ldy   #$03
+         jsr   alcbufr1			allocate new buffer address over old one
+         bcs   L4EC7			report any errors immediately
+         lda   bufaddrh
+         sta   usrbuf+1
+         lda   bufaddrl
+         sta   usrbuf
+         jsr   freebuf			free address space of old buffer
+         ldy   #$00
+         ldx   #$03
+L4EB8    lda   (usrbuf),y               move all 4 pages of the buffer to
+         sta   (datptr),y               new location.
+         iny
+         bne   L4EB8
+         inc   datptr+1
+         inc   usrbuf+1
+         dex
+         bpl   L4EB8
+         clc                            no errors
+L4EC7    rts
+
+
+* move 3 pages of dispatcher from 'displc2' to 'dispadr'
+* this move routine must be resident above $E000 at all times
+
+calldisp .EQ	*-ofsX
+         lda   altram			read/write RAM bank 2
+         lda   altram
+         lda   #>dispadr
+         sta   A2L+1
+         lda   #<dispadr
+         sta   A2L
+         lda   #>displc2
+         sta   A1L+1
+         stz   A1L
+         ldy   #$00
+         ldx   #$03			3 pages to move.
+L4EE0    dey                            move a page of code.
+         lda   (A1L),y
+         sta   (A2L),y
+         tya
+         bne   L4EE0
+         inc   A1L+1                    pointers to next page
+         inc   A2L+1
+         dex                            move all pages needed
+         bne   L4EE0
+         lda   ramin			read/write RAM bank 1
+         lda   ramin                    swap mli space back in
+         stz   mliact                   MLI active flag
+         stz   softev                   
+         lda   #>dispadr		point RESET to dispatch entry
+         sta   softev+1
+         eor   #$A5
+         sta   pwredup                  power up byte
+         jmp   dispadr
+
+* translate a prodos call into a smartport call
+* to access unseen smartport devices
+
+remap_sp .EQ	*-ofsX
+         ldx   #$03			assume 3 parameters.
+         lda   A4L                      command number
+         sta   cmdnum
+         bne   L4F1B			taken if not status call
+         ldy   #<spstatlist             set up memory for the status list buffer
+         sty   buf			fake up the prodos parameters
+         ldy   #>spstatlist
+         sty   buf+1
+         stz   bloknml			set statcode = 0 for simple status call
+L4F1B    cmp   #$03                     format command ?
+         bne   L4F21                    no.
+         ldx   #$01                     format has only 1 parameter.
+L4F21    stx   statparms		set # of parms.
+         lda   unitnum                  
+         lsr   a                        turn unit number into an index
+         lsr   a
+         lsr   a
+         lsr   a
+         tax
+         lda   spunit-1,x               get the smartport unit number and
+         sta   sp_unitnum		store into smartport parm list.
+         lda   spvectlo-1,x	
+         sta   sp_vector+1		copy smartport entry address
+         lda   spvecthi-1,x
+         sta   sp_vector+2
+         ldx   #$04			copy buffer pointer and block #
+L4F3F    lda   buf-1,x                  from prodos parameters
+         sta   sp_bufptr-1,x            to smartport parameter block
+         dex
+         bne   L4F3F
+sp_vector .EQ	*-ofsX                   smartport call
+         jsr   $0000			(entry address gets modified)
+cmdnum	.EQ	*-ofsX
+	dc	h'00'			command #
+         dc	i2'statparms'
+         bcs	L4F6E
+         ldx   cmdnum			status call ?
+         bne   L4F6E                    no...
+         ldx   spstatlist+1             else get the block count
+         ldy   spstatlist+2
+         lda	spstatlist		get the returned status.
+         bit   #$10                     is there a disk present ?
+         bne   L4F65                    yes, check for write protected.
+         lda   #$2F                     return offline error.
+         bra   L4F6D
+L4F65    and   #$44                     mask all but write allowed and write
+         eor   #$40                     protected bits. if allowed and not
+         beq   L4F6E                    protected, exit with carry clear
+         lda   #$2B                     else return write protected error.
+L4F6D    sec
+L4F6E    rts
+spvectlo .EQ	*-ofsX			storage for low byte of smartport
+         dc    h'0000000000000000'      entry.
+         dc    h'00000000000000'
+spvecthi .EQ	*-ofsX			storage for high byte of smartport
+         dc    h'0000000000000000'      entry.
+         dc    h'00000000000000'
+statparms .EQ	*-ofsX			# of parms (always 3 except format)
+	dc	h'03'
+sp_unitnum .EQ	*-ofsX
+         dc    h'00'                    unit number
+sp_bufptr .EQ	*-ofsX
+         dc	h'0000'			data buffer
+         dc	h'000000'		block number (3 bytes)
+
+* data tables
+
+scnums	.EQ	*-ofsX			table of valid mli command numbers.
+	dc	h'D3000000'
+         dc    h'40410000808182'
+         dc    h'65C0C1C2C3C4C5C6'
+         dc    h'C7C8C9CACBCCCDCE'
+         dc    h'CF00D0D1D2'
+pcntbl	.EQ	*-ofsX			parameter counts for the calls
+	dc	h'02FFFF'
+         dc    h'FF0201FFFF030300'
+         dc    h'04070102070A0201'
+         dc    h'0103030404010102'
+         dc    h'02FF020202'
+
+* command table
+
+cmdtable .EQ	*-ofsX
+	dc	i2'create'		create
+	dc	i2'destroy'		destroy
+         dc    i2'rename'               rename
+	dc	i2'setinfo'              setinfo
+	dc	i2'getinfo'              getinfo
+	dc	i2'online'               online
+         dc    i2'setprefx'             set prefix
+	dc	i2'getprefx'             get prefix
+	dc	i2'openf'                open
+	dc	i2'newline'              newline
+         dc    i2'readf'                read
+	dc	i2'writef'               write
+	dc	i2'closef'               close
+	dc	i2'flushf'               flush
+         dc    i2'setmark'		set mark
+	dc	i2'getmark'              get mark
+	dc	i2'seteof'               seteof
+	dc	i2'geteof'               geteof
+         dc    i2'setbuf'               setbuf
+	dc	i2'getbuf'               getbuf
+
+* corresponding command function bytes
+
+disptch	.EQ	*-ofsX
+	dc	h'A0A1A2A3'
+         dc    h'84050607'
+         dc	h'88494A4B'
+         dc    h'2C2D4E4F'
+         dc    h'50515253'
+
+dinctbl	.EQ	*-ofsX			table to increment
+	dc	h'0100000200'           directory usage/eof counts
+pass	.EQ	*-ofsX
+	dc	h'75'
+xdosver	.EQ	*-ofsX
+	dc    h'00'
+compat	.EQ	*-ofsX
+         dc	h'00'
+         dc	h'C3270D000000'
+rootstuf .EQ	*-ofsX
+         dc    h'0F02000400000800'
+whichbit .EQ	*-ofsX
+         dc    h'8040201008040201'
+ofcbtbl	.EQ	*-ofsX
+         dc    h'0C0D1819151617'
+inftabl	.EQ	*-ofsX
+         dc    h'1E101F2080939421'
+         dc    h'22232418191A1B'
+deathmsg .EQ	*-ofsX
+	dc	h'20'
+	msb	on
+         dc    c'RESTART SYSTEM-$01'
+	dc	h'20'
+
+*** work space ***
+
+* note: this area is accessed by code that depends on the order of these
+*       variables in the file control block and temporary directory.
+
+own_blk	.EQ	*-ofsX
+         dc    h'0000'
+own_ent	.EQ	*-ofsX
+	dc	h'00'
+own_len	.EQ	*-ofsX
+	dc	h'00'
+h_credt	.EQ	*-ofsX
+	dc	h'0000'			directory creation date
+	dc	h'0000'                  directory creation time
+         dc    h'00'                    version under which this dir created
+	dc	h'00'                    earliest version that it's compatible
+h_attr	.EQ	*-ofsX                   attributes (protect bit, etc.)
+	dc	h'00'
+h_entln	.EQ	*-ofsX                   length of each entry in this directory
+	dc	h'00'
+h_maxent .EQ	*-ofsX                   maximum number of entries per block
+	dc	h'00'
+h_fcnt	.EQ	*-ofsX                   current # of files in this directory
+	dc	h'0000'                  
+h_bmap	.EQ	*-ofsX                   address of first allocation bitmap
+         dc    h'0000'
+h_tblk	.EQ	*-ofsX                   total number of blocks on this unit
+	dc	h'0000'
+d_dev	.EQ	*-ofsX                   device number of this directory entry
+	dc	h'00'
+d_head	.EQ	*-ofsX                   address of <sub> directory header
+	dc	h'0000'                  
+d_entblk .EQ	*-ofsX			address of block which contains entry
+	dc	h'0000'
+d_entnum .EQ	*-ofsX                   entry number within block
+         dc    h'00'
+d_stor	.EQ	*-ofsX
+	dc	h'0000000000000000'      file name
+        dc	h'0000000000000000'
+d_filid	.EQ	*-ofsX                   user's identification byte
+         dc    h'00'
+d_frst	.EQ	*-ofsX                   first block of file
+	dc	h'0000'
+d_usage	.EQ	*-ofsX                   # of blocks allocated to this file
+	dc	h'0000'
+d_eof	.EQ	*-ofsX                   current end of file marker
+	dc	h'000000'
+d_credt	.EQ	*-ofsX
+         dc    h'0000'                  file creation date
+	dc	h'0000'			file creation time
+d_sosver .EQ	*-ofsX			sos version that created this file
+	dc	h'00'
+d_comp	.EQ	*-ofsX                   backward version compatibility
+	dc	h'00'
+d_attr	.EQ	*-ofsX                   attributes (protect, r/w, enable, etc.)
+	dc	h'00'
+d_auxid	.EQ	*-ofsX                   user auxilliary identification
+         dc    h'0000'
+d_moddt	.EQ	*-ofsX
+	dc	h'0000'                  file's last modification date
+	dc	h'0000'                  file's last modification time
+d_dhdr	.EQ	*-ofsX                   file directory header block address
+	dc	h'0000'
+scrtch	.EQ	*-ofsX			scratch area for
+         dc    h'00000000'              allocation address conversion.
+oldeof	.EQ	*-ofsX                   temp used in r/w
+	dc	h'000000'
+oldmark	.EQ	*-ofsX
+         dc    h'000000'
+xvcbptr	.EQ	*-ofsX                   used in 'cmpvcb' as a temp
+	dc	h'00'
+vcbptr	.EQ	*-ofsX
+	dc	h'00'
+fcbptr	.EQ	*-ofsX
+	dc	h'00'
+fcbflg	.EQ	*-ofsX
+	dc	h'00'
+reql	.EQ	*-ofsX
+	dc	h'00'                    
+reqh	.EQ	*-ofsX
+	dc	h'00'
+levels	.EQ	*-ofsX
+         dc    h'00'
+totent	.EQ	*-ofsX
+	dc	h'00'
+entcntl	.EQ	*-ofsX
+	dc	h'00'
+entcnth	.EQ	*-ofsX
+	dc	h'00'
+cntent	.EQ	*-ofsX
+	dc	h'00'
+nofree	.EQ	*-ofsX
+	dc	h'00'
+bmcnt	.EQ	*-ofsX
+	dc	h'00'                    
+saptr	.EQ	*-ofsX
+	dc	h'00'
+pathcnt	.EQ	*-ofsX
+         dc    h'00'
+p_dev	.EQ	*-ofsX
+	dc	h'00'
+p_blok	.EQ	*-ofsX
+	dc	h'0000'
+bmptr	.EQ	*-ofsX
+	dc	h'00'
+basval	.EQ	*-ofsX
+	dc	h'00'
+half	.EQ	*-ofsX
+	dc	h'00'
+
+* bitmap info tables
+
+bmastat	.EQ	*-ofsX
+	dc	h'00'
+bmadev	.EQ	*-ofsX
+         dc    h'00'
+bmadadr	.EQ	*-ofsX
+	dc	h'0000'
+bmacmap	.EQ	*-ofsX
+	dc	h'00'
+tposll	.EQ	*-ofsX
+	dc	h'00'
+tposlh	.EQ	*-ofsX
+	dc	h'00'
+tposhi	.EQ	*-ofsX
+	dc	h'00'
+rwreql	.EQ	*-ofsX
+	dc	h'00'
+rwreqh	.EQ	*-ofsX
+         dc    h'00'
+nlchar	.EQ	*-ofsX
+	dc	h'00'
+nlmask	.EQ	*-ofsX
+	dc	h'00'
+ioaccess .EQ	*-ofsX			has a call been made to
+	dc	h'00'                   disk device handler ?
+cmdtemp	.EQ	*-ofsX
+	dc	h'00'
+bkbitflg .EQ	*-ofsX			used to set or clear backup bit
+	dc	h'00'
+duplflag .EQ	*-ofsX
+	dc	h'00'
+vcbentry .EQ	*-ofsX
+	dc	h'00'
+
+* xdos temporary variables
+
+namcnt	.EQ	*-ofsX
+         dc    h'00'
+rnptr	.EQ	*-ofsX
+	dc	h'00'
+namptr	.EQ	*-ofsX
+	dc	h'00'
+vnptr	.EQ	*-ofsX
+	dc	h'00'
+prfxflg	.EQ	*-ofsX
+	dc	h'00'
+cferr	.EQ	*-ofsX
+	dc	h'00'
+
+* deallocation temporary variables
+
+firstbl	.EQ	*-ofsX
+	dc	h'00'
+firstbh	.EQ	*-ofsX
+	dc	h'00'
+stortyp	.EQ	*-ofsX
+         dc    h'00'
+deblock	.EQ	*-ofsX
+	dc	h'0000'
+dtree	.EQ	*-ofsX
+	dc	h'00'
+dsap	.EQ	*-ofsX
+	dc	h'00'
+dseed	.EQ	*-ofsX
+	dc	h'0000'
+topdest	.EQ	*-ofsX
+	dc	h'00'
+dtmpx	.EQ	*-ofsX
+	dc	h'00'
+loklst	.EQ	*-ofsX			look list of recognized device numbers
+dealbufl .EQ	*-ofsX
+	dc	h'0000000000000000'
+dealbufh .EQ	*-ofsX
+         dc    h'0000000000000000'
+cbytes	.EQ	*-ofsX
+         dc    h'0000'
+	dc	h'00'			cbytes+2 must = 0
+bufaddrl .EQ	*-ofsX
+	dc	h'00'                    
+bufaddrh .EQ	*-ofsX
+	dc	h'00'
+goadr	.EQ	*-ofsX
+	dc	h'0000'
+delflag	.EQ	*-ofsX			used by 'detree' to know if called
+         dc    h'00'                    from delete (destroy).
+
+* zero fill to page boundary - 3 ($FEFD). so that cortland flag stays
+* within page boundary.
+
+	dc	h'00000000000000'	
+        dc	h'0000000000'
+         	
+         dc	i2'calldisp'	
+cortflag .EQ	*-ofsX			cortland flag. 1 = Cortland system
+	dc	h'00'                    (must stay within page boundary)
+
+* end of obj mli_2
+*--------------------------------------
+MAN
+LOAD USR/SRC/PRODOS/PRODOS.S.XDOS
+SAVE USR/SRC/PRODOS/PRODOS.S
+ASM
+
+ 

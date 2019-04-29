@@ -1,0 +1,324 @@
+NEW
+  AUTO 3,1
+* object code = sel_0
+*
+* dispatcher 1 - this code org's and operates at 'dispadr' (=$1000) but
+* is resident in memory at 'displc2' (=$D100) in the alternate 4k bank
+* of the language card. the quit call vectors to a routine high in the
+* mli that moves dispatcher 1 down and jumps to it. the move routine
+* must remain somewhere between $E000-$F7FF. this routine must be less
+* than 3 pages in length.
+
+ofsS	.EQ	disp1obj-dispadr	offset to dispatcher org
+
+disp1obj lda   romin			read ROM
+         sta   clr80vid                 disable 80 col hardware
+         sta   clraltchar               normal LC, flashing UC
+         sta	store80off		disable 80 column store
+         jsr   setnorm                  set normal text mode
+         jsr   init                     init text screen
+         jsr   setvid                   reset output to screen
+         jsr   setkbd                   reset input to keyboard
+         ldx   #$17			clear the memory bitmap
+         lda   #$01                     but protect page $BF00.
+         sta   memmap,x                 P8 memory bitmap
+         dex
+         lda   #$00
+L5A22    sta   memmap,x
+         dex
+         bpl   L5A22
+         lda   #$CF                     protect zero page, stack and
+         sta   memmap                   $400-$7FF (text screen display)
+L5A2D    jsr   home                     clear screen
+         jsr   crout                    position top/left
+         ldx   #<dsp1msg0-dsp1msgs
+         jsr   prntmsg			'enter prefix...'
+         lda   #$03                     line 3
+         sta   cv
+         jsr   crout
+         jsr   MLI                  get prefix
+         dc    i1'$C7'
+         dc    i2'dsp1pfx'
+         ldx   PrefixBuf                     get prefix length
+         lda   #$00                     put 0 at end of prefix
+         sta   PrefixBuf+1,x
+         ldx   PrefixBuf                     get length.
+         beq   L5A5D                    if no prefix to display.
+L5A52    lda   PrefixBuf,x			display prefix directly to screen
+         ora   #$80                     normal text
+         sta   vline5-1,x               line 5
+         dex
+         bne   L5A52
+L5A5D    ldx   #$00
+         dec   cv
+         jsr   crout
+getkey	.EQ	*-ofsS
+         jsr   rdkey                    input char with cursor
+         cmp   #$8D			cr ?
+         beq   L5ABD                    yes, accept what is entered.
+         pha                            no, save the char.
+         jsr   clreol                   clear rest of line.
+         pla                            get char back
+         cmp   #$9B                     esc ?
+         beq   L5A2D                    yes, start over
+         cmp   #$98                     ctrl-x ?
+L5A76    beq   L5A2D                    then start over
+         cmp   #$89                     tab ?
+         beq   badkey
+         cmp   #$FF                     delete ?
+         beq   L5A84                    if yes
+         cmp   #$88                     backspace ?
+         bne   L5A91                    if not
+L5A84    cpx   #$00                     at column 0 ?
+         beq   L5A8B                    if so, do nothing
+         dec   ch                       else move left
+         dex                            dec char count
+L5A8B    jsr   clreol                   clear rest of line
+         jmp   getkey                   get another char
+L5A91    bcs   L5A99
+badkey	jsr   bell                     output bell for bad key
+         jmp   getkey                   and get another.
+L5A99    cmp   #$DB                     below 'Z' ?
+         bcc   L5A9F                    if yes
+         and   #$DF                     else shift to uppercase.
+L5A9F    cmp   #$AE                     below '.' ?
+         bcc   badkey
+         cmp   #$DB                     above 'Z' ?
+         bcs   badkey
+         cmp   #$BA                     below ':' ?
+         bcc   goodkey
+         cmp   #$C1			at or above 'A' ?
+         bcc   badkey
+goodkey  inx
+         cpx   #$27                     more than 39 chars ?
+         bcs   L5A76                    then too many, go restart.
+         sta   PrefixBuf,x                   save it
+         jsr   cout
+         jmp   getkey                   get another.
+L5ABD    cpx   #$00                     prefix length = 0 ?
+         beq   L5AD3                    if yes, don't set length.
+         stx   PrefixBuf                     set prefix length.
+         jsr   MLI			call mli to set prefix.
+         dc    i1'$C6'
+         dc    i2'dsp1pfx'
+         bcc   L5AD3                    if ok, go get filename.
+         jsr   bell			if not, ring bell
+         lda   #$00                     and try again for prefix.
+L5AD1    beq   L5A76
+L5AD3    jsr   home			clear screen for application name.
+         jsr   crout
+         ldx   #<disp1msg-dsp1msgs
+         jsr   prntmsg			'enter pathname...'
+retryrich .EQ	*-ofsS
+         lda   #$03                     line 3
+         sta   cv
+         jsr   crout
+         ldx   #$00
+loop1	.EQ	*-ofsS
+         jsr   rdkey                    input char with cursor.
+         cmp   #$9B                     esc ?
+         bne   L5AF4                    if not esc.
+         lda   ch			esc pressed in column 0 ?
+         bne   L5AD3                    if not, get pathname again.
+         beq   L5AD1                    if so, get prefix again.
+L5AF4    cmp   #$98                     ctrl-x ?
+L5AF6    beq   L5AD3                    then cancel and get pathname again.
+         cmp   #$89                     tab ?
+         beq   L5B09                    not good.
+         cmp   #$FF                     delete ?
+         beq   L5B04                    delete char.
+         cmp   #$88                     backspace ?
+         bne   L5B07
+L5B04    jmp   delchar			delete char.
+L5B07    bcs   L5B0F                    if > $88 then char may be acceptable.
+L5B09    jsr   bell                     output bell (ctl-G)
+         jmp   loop1			not good.
+L5B0F    cmp   #$8D                     cr ?
+         beq   L5B3C                    then done.
+         cmp   #$DB                     less than 'Z' ?
+         bcc   L5B19                    no.
+         and   #$DF                     make sure it's uppercase.
+L5B19    cmp   #$AE                     '.' ?
+         bcc   L5B09                    not good if less.
+         cmp   #$DB                     less than '[' ?
+         bcs   L5B09                    not good.
+         cmp   #$BA                     <= '9' ?
+         bcc   L5B29                    then ok.
+         cmp   #$C1                     greater than 'A' ?
+         bcc   L5B09                    if not, then no good.
+L5B29    pha                            it's good, save it.
+         jsr   clreol                   clear to end of line
+         pla
+         jsr   cout			print it
+         inx
+         cpx   #$27                     more than 39 chars ?
+         bcs   L5AF6                    too long, get pathname again.
+         sta   PrefixBuf,x                   store it.
+         jmp   loop1                    get another char
+L5B3C    lda   #$A0
+         jsr   cout                     after cr, blank out the cursor.
+         stx   PrefixBuf                     put length in front of the name.
+         jsr   MLI                  get file info for pathname in PrefixBuf
+         dc    i1'$C4'
+         dc    i2'dsp1info'
+         bcc   L5B4F                    if no errors.
+         jmp   dsp1error
+L5B4F    lda   dsp1type
+         cmp   #$FF                     is it a SYS file ?
+         beq   L5B5B                    yes.
+         lda   #$01                     not SYS file error.
+         jmp   dsp1error
+L5B5B    lda   #$00                     it's a system file
+         sta   dsp1cln
+         jsr   MLI                  close all open files
+         dc    i1'$CC'
+         dc    i2'dsp1cls'
+         bcc   L5B6B
+         jmp   dsp1error
+L5B6B    lda   dsp1acess		check for proper access.
+         and   #$01                     is read disabled ?
+         bne   L5B77                    no, access ok.
+         lda   #$27                     i/o error
+         jmp   dsp1error
+L5B77    jsr   MLI                  open the file
+         dc    i1'$C8'
+         dc    i2'dsp1open'
+         bcc   L5B82
+         jmp   dsp1error
+L5B82    lda   dsp1refn                 copy the reference number
+         sta   dsp1rdn
+         sta   dsp1eofn
+         jsr   MLI                  get eof
+         dc    i1'$D1'
+         dc    i2'dsp1eof'
+         bcs   L5BE2
+         lda   dsp1eofb+2               3rd of 3 bytes.
+         beq   L5B9C                    if 0 then ok
+         lda   #$27                     else i/o error because
+         bne   L5BE2                    file is too large.
+L5B9C    lda   dsp1eofb                 move eof to # of bytes to read.
+         sta   dsp1cnt
+         lda   dsp1eofb+1
+         sta   dsp1cnt+1
+         jsr   MLI                  read the file
+         dc    i1'$CA'
+         dc    i2'dsp1read'
+         php				save the status.
+         jsr   MLI                  close the file.
+         dc    i1'$CC'
+         dc    i2'dsp1cls'
+         bcc   L5BBB	
+L5BB7    plp                            get status (it is irrelevant now)
+         bne   L5BE2                    if close generated an error
+         plp                            here if close was ok.
+L5BBB    bcs   L5BB7                    error.
+         jmp   sysentry                 execute system file
+delchar	.EQ	*-ofsS
+         lda   ch			is cursor in column 0 ?
+         beq   L5BD3                    yes, ignore it.
+         dex
+         lda   #$A0                     blank out the cursor
+         jsr   cout
+         dec   ch
+         dec   ch                       point to last char entered
+         jsr   cout                     and blank it too.
+         dec   ch			point to that location.
+L5BD3    jmp   loop1                    get next char.
+prntmsg	.EQ	*-ofsS
+L5BD6    lda   dsp1msgs,x
+         beq   L5BE1
+         jsr   cout
+         inx
+         bne   L5BD6
+L5BE1    rts
+
+* dispatcher 1 error handler
+
+dsp1error .EQ	*-ofsS
+L5BE2    sta   errnum
+         lda   #$0C			display error message on line 13
+         sta   cv
+         jsr   crout
+         lda   errnum
+         cmp   #$01
+         bne   L5BF5
+         ldx   #<dsp1err1-dsp1msgs	not a type 'sys' file
+         bne   L5C0B                    handled separately.
+L5BF5    cmp   #$40			syntax error in pathname ?
+         beq   L5C09
+         cmp   #$44                     bad subdirectory path ?
+         beq   L5C09
+         cmp   #$45                     volume not found ?
+         beq   L5C09
+         cmp   #$46                     file not found ?
+         beq   L5C09
+         ldx   #<dsp1err2-dsp1msgs      if not the errors above then 'i/o error'
+         bne   L5C0B                   
+L5C09    ldx   #<dsp1err3-dsp1msgs      otherwise display 'file/path not found'
+L5C0B    jsr   prntmsg
+         jmp   retryrich                retry for application pathname
+	msb	on
+dsp1msgs .EQ	*-ofsS
+dsp1msg0 .EQ	*-ofsS
+         dc    c'ENTER PREFIX (PRESS "RETURN" TO ACCEPT)'
+         dc    h'00'
+disp1msg .EQ	*-ofsS
+         dc    c'ENTER PATHNAME OF NEXT APPLICATION'
+         dc    h'00'
+dsp1err1 .EQ	*-ofsS
+         dc    h'87'
+         dc    c'NOT A TYPE "SYS" FILE'
+         dc    h'00'
+dsp1err2 .EQ	*-ofsS
+         dc    h'87'
+         dc    c'I/O ERROR            '
+         dc    h'00'
+dsp1err3 .EQ	*-ofsS
+         dc    h'87'
+         dc    c'FILE/PATH NOT FOUND  '
+         dc    h'00'
+dsp1info .EQ	*-ofsS			get file info parms
+         dc    h'0A'                    10 parameters
+         dc	i2'PrefixBuf'                 pathname buffer
+dsp1acess .EQ	*-ofsS
+         dc	h'00'			access
+dsp1type .EQ	*-ofsS
+         dc	h'00'			file type
+         ds	13			the rest are unimportant
+dsp1open .EQ	*-ofsS                   open file parms
+	dc	h'03'			3 parameters for open
+         dc	i2'PrefixBuf'                 pathname buffer
+         dc	i2'fbuf'		fcb buffer
+dsp1refn .EQ	*-ofsS
+	dc	h'00'                    reference #
+dsp1cls	.EQ	*-ofsS			close file parms
+         dc    h'01'                    1 parameter for close
+dsp1cln	.EQ	*-ofsS
+         dc	h'00'			reference #
+dsp1read .EQ	*-ofsS
+	dc	h'04'			4 parameters for read
+dsp1rdn	.EQ	*-ofsS
+         dc	h'00'			reference #
+         dc	i2'sysentry'		.SYS load address
+dsp1cnt	.EQ	*-ofsS
+	dc	h'0000'			byte count
+         dc    h'0000'
+dsp1eof	.EQ	*-ofsS			get eof parms
+	dc	h'02'			2 parameters
+dsp1eofn .EQ	*-ofsS
+	dc	h'00'                    reference #
+dsp1eofb .EQ	*-ofsS
+	dc	h'000000'		3 byte eof
+dsp1pfx	.EQ	*-ofsS                   get/set prefix parms
+         dc    h'01'			1 parameter
+         dc	i2'PrefixBuf'                 prefix buffer
+
+disp1end .EQ	*
+	ds	$300-(disp1end-disp1obj)	fill to page boundary
+
+* end of obj sel_0
+*--------------------------------------
+MAN
+LOAD USR/SRC/PRODOS/PRODOS.S.SEL0
+SAVE USR/SRC/PRODOS/PRODOS.S
+ASM
