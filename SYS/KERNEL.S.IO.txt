@@ -271,7 +271,8 @@ IO.CLOSE.PIPE	ldy #S.FD.PIPE.S
 IO.CLOSE.FD		lda (pFD),y
 				beq .1
 				
-				jsr K.FreeStkObj
+*				jsr K.FreeStkObj
+				jsr K.Freemem
 				
 .1				lda IO.hFD
 				jmp K.FreeMem
@@ -419,7 +420,7 @@ IO.READ.SSOCK	ldy #S.FD.SSOCK.READ
 				lda	IO.hFD				
 
 .1				jsr $FFFF				SELF MODIFIED
-				bcs .9
+				bcs .9					I/O error
 				
 				phy
 				ply
@@ -428,7 +429,7 @@ IO.READ.SSOCK	ldy #S.FD.SSOCK.READ
 				tax
 				bne .9
 
-				dec pStack				CC, Y,A = 0
+				dec pStack				no data transfered, CC, Y,A = 0
 				dec pStack
 				dec pStack
 				dec pStack				keep buf/count on stack
@@ -449,31 +450,51 @@ IO.READ.PIPE	ldy #S.FD.PIPE.Used+1
 				lda (pFD),y
 				bpl .11
 
-				jmp IO.READ.PIPE.99		Remote PS closed the Pipe
+				jmp IO.READ.PIPE.EOF	Remote PS closed the Pipe
 
-.11				lda #0					BLOCKING I/O
-				sec						
-				rts
+.11				jmp IO.READ.PIPE.BLK
 				
 .10				>PULLW .3+1				get buf
 
 				>PULLA					get cnt lo
+				pha
+				ldy #S.FD.PIPE.Used
+				cmp (pFD),y
+				
+				>PULLA					get cnt hi
+				tax
+				iny
+				sbc (pFD),y
+				bcc .12
+
+				pla
+				dey
+				lda (pFD),y
+				pha
+				iny
+				lda (pFD),y
+				tax
+				
+.12				pla
+				sta .80+1
+				stx .81+1
 				eor #$ff
 				sta IO.Counter
 
-				>PULLA					get cnt hi
+				txa
 				eor #$ff
 				sta IO.Counter+1
 				
 				ldy #S.FD.PIPE.hMem
 				lda (pFD),y
 				jsr K.GetMemPtr
-				>STYA .2+1
 				
-				ldy #S.FD.PIPE.Head
-				lda (pFD),y
-				sta .4+1
-
+				sty .2+1
+				
+				ldy #S.FD.PIPE.Tail+1
+				adc (pFD),y
+				sta .2+2
+				
 				dey						S.FD.PIPE.Tail
 				lda (pFD),y
 				tay
@@ -487,55 +508,82 @@ IO.READ.PIPE	ldy #S.FD.PIPE.Used+1
 				
 .2				lda $ffff,y				SELF MODIFIED
 .3				sta $ffff,x				SELF MODIFIED
+
 				inx
-				beq .8					moved $100 bytes
+				bne .4
 				
-				iny
-.4				cpy #$ff				SELF MODIFIED
+				inc .3+2
+				
+.4				iny
 				bne .1
 				
-.5				clc
-				.HS B0					BCS
-	
-.8				sec
-				lda #0
-				rol
-				sta IO.Counter+1
-				stx IO.Counter
+				ldy #S.FD.PIPE.Tail+1
+				lda (pFD),y
+				inc
+				ldy #S.FD.PIPE.Size+1
+				cmp (pFD),y
+				beq .5
 				
-				tya
+				ldy #S.FD.PIPE.Tail+1
+				sta (pFD),y
+				inc .2+2
+				ldy #0
+				bra .1
+				
+.5				lda #0
+				ldy #S.FD.PIPE.Tail+1
+				sta (pFD),y
+				
+				ldy #S.FD.PIPE.hMem
+				lda (pFD),y
+				jsr K.GetMemPtr
+				sta .2+2
+				ldy #0
+				bra .1
+	
+.8				tya
 				ldy #S.FD.PIPE.Tail
 				sta (pFD),y
 				
-				txa
+				lda .80+1
 				ldy #S.FD.PIPE.Free
 				clc
 				adc (pFD),y
 				sta (pFD),y
+
 				iny
-				lda IO.Counter+1
+				
+				lda .81+1
 				adc (pFD),y
 				sta (pFD),y
 				
 				ldy #S.FD.PIPE.Used
 				sec 
 				lda (pFD),y
-				sbc IO.Counter
+				sbc .80+1
 				sta (pFD),y
+				
 				iny
+				
 				lda (pFD),y
-				sbc IO.Counter+1
+				sbc .81+1
 				sta (pFD),y				
 
-				ldy IO.Counter
-				lda IO.Counter+1		Y,A = bytes read
+.80				ldy #$ff				SELF MODIFIED
+.81				lda #$ff				Y,A = bytes read
 
 				clc
 				rts
 
-IO.READ.PIPE.99	lda #MLI.E.EOF
+IO.READ.PIPE.EOF
+				lda #MLI.E.EOF
 				sec
 				>RET 4					
+				
+IO.READ.PIPE.BLK
+				lda #0					BLOCKING I/O
+				sec
+				rts
 *--------------------------------------
 * (pStack)+2	count
 * (pStack)+0	buf
@@ -543,7 +591,7 @@ IO.READ.PIPE.99	lda #MLI.E.EOF
 IO.WRITE.PIPE	ldy #S.FD.PIPE.S
 				lda (pFD),y
 
-				bmi IO.READ.PIPE.99		Remote PS closed the Pipe
+				bmi IO.READ.PIPE.EOF	Remote PS closed the Pipe
 
 				sec
 				ldy #S.FD.PIPE.Free
@@ -556,7 +604,7 @@ IO.WRITE.PIPE	ldy #S.FD.PIPE.S
 				ldy #3
 				sbc (pStack),y
 				
-				bcc .9					not enough room in PIPE
+				bcc IO.READ.PIPE.BLK	not enough room in PIPE
 
 				ldy #S.FD.PIPE.Free+1
 				sta (pFD),y
@@ -567,6 +615,7 @@ IO.WRITE.PIPE	ldy #S.FD.PIPE.S
 				>PULLW .2+1				get buf
 				
 				>PULLA					get cnt lo
+				sta .80+1
 				pha 
 				eor #$ff
 				sta IO.Counter
@@ -577,6 +626,7 @@ IO.WRITE.PIPE	ldy #S.FD.PIPE.S
 				sta (pFD),y
 				
 				>PULLA					get cnt hi
+				sta .81+1
 				pha 
 				eor #$ff
 				sta IO.Counter+1
@@ -588,13 +638,18 @@ IO.WRITE.PIPE	ldy #S.FD.PIPE.S
 				ldy #S.FD.PIPE.hMem
 				lda (pFD),y
 				jsr K.GetMemPtr
-				>STYA .3+1
 				
-				ldy #S.FD.PIPE.Head
-				lda (pFD),y
-				tay
+				sty .3+1
 
+				ldy #S.FD.PIPE.Head+1
+				adc (pFD),y
+				sta .3+2
+				
 				ldx #0
+
+				dey
+				lda (pFD),y
+				tay						S.FD.PIPE.Head
 				
 .1				inc IO.Counter
 				bne .2
@@ -604,28 +659,45 @@ IO.WRITE.PIPE	ldy #S.FD.PIPE.S
 .2				lda $ffff,x				SELF MODIFIED
 .3				sta $ffff,y				SELF MODIFIED
 
-				iny
-				
 				inx
-				bne .1
-
-				sec						moved $100 bytes
-				.HS 90					BCC
-
-.8				clc
-				tya
-				ldy #S.FD.PIPE.Head
-				sta (pFD),y 
-
-				txa
-				tay
-				lda #0					Y,A = bytes written
-				rol
-*				clc				
-				rts
+				bne .4
 				
-.9				lda #0					BLOCKING I/O
-				sec
+				inc .2+2
+				
+.4				iny
+				bne .1
+				
+				ldy #S.FD.PIPE.Head+1
+				lda (pFD),y
+				inc
+				ldy #S.FD.PIPE.Size+1
+				cmp (pFD),y
+				beq .5
+				
+				ldy #S.FD.PIPE.Head+1
+				sta (pFD),y
+				inc .3+2
+				ldy #0
+				bra .1
+				
+.5				lda #0
+				ldy #S.FD.PIPE.Head+1
+				sta (pFD),y
+				
+				ldy #S.FD.PIPE.hMem
+				lda (pFD),y
+				jsr K.GetMemPtr
+				sta .3+2
+				ldy #0
+				bra .1
+				
+.8				tya
+				ldy #S.FD.PIPE.Head
+				sta (pFD),y
+
+.80				ldy #$ff				SELF MODIFIED
+.81				lda #$ff				SELF MODIFIED
+				clc						Y,A = bytes written		
 				rts
 */--------------------------------------
 * # IOCTL
@@ -667,28 +739,6 @@ K.IOCTL.GetPDrv	ldy #S.FD.DEV.DRVPTR
 				lda (pFD),y
 				sta pDRV+1
 				rts
-*--------------------------------------
-IO.MLIOPEN		>LDYAI 1024				get a ProDOS IOBUF
-				ldx #S.MEM.F.ALIGN+S.MEM.F.NOMOVE
-				jsr MEM.GetMem.YAX
-				bcs .9
-
-				>STYA K.MLI.PARAMS+3	Save Ptr to IOBUF for MLIOPEN call
-				txa
-				ldy #S.FD.REG.IOBUF
-				sta (pFD),y
-
-				>MLICALL MLIOPEN
-				bcs .9
-				
-				lda K.MLI.PARAMS+5		get ref_num
-				ldy #S.FD.REG.REF
-				sta (pFD),y
-
-				sta K.MLI.PARAMS+1		Next MLI Calls are REF_NUM based
-
-*				clc				
-.9				rts
 *--------------------------------------
 IO.EOF			lda (pFD)
 				tax
@@ -776,6 +826,28 @@ IO.EOF.PIPE		ldy #S.FD.PIPE.Used
 .8				lda #0
 				clc
 				rts			
+*--------------------------------------
+IO.MLIOPEN		>LDYAI 1024				get a ProDOS IOBUF
+				ldx #S.MEM.F.ALIGN+S.MEM.F.NOMOVE
+				jsr MEM.GetMem.YAX
+				bcs .9
+
+				>STYA K.MLI.PARAMS+3	Save Ptr to IOBUF for MLIOPEN call
+				txa
+				ldy #S.FD.REG.IOBUF
+				sta (pFD),y
+
+				>MLICALL MLIOPEN
+				bcs .9
+				
+				lda K.MLI.PARAMS+5		get ref_num
+				ldy #S.FD.REG.REF
+				sta (pFD),y
+
+				sta K.MLI.PARAMS+1		Next MLI Calls are REF_NUM based
+
+*				clc				
+.9				rts
 *--------------------------------------
 IO.DEVDIR		>PSTR "/DEV/"
 *--------------------------------------
