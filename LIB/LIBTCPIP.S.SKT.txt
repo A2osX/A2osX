@@ -1,6 +1,5 @@
 NEW
-PREFIX
-AUTO 4,1
+  AUTO 3,1
 				.LIST OFF
 */--------------------------------------
 * # Socket
@@ -33,7 +32,7 @@ SKT.Socket.DSOCK
 				stx FD.DSOCK+S.SOCKET.T		save type
 				sta FD.DSOCK+S.SOCKET.PROTO		ICMP,UDP,TCP
 				lda #0					Y = socket.size
-				>SYSCALL GetMem0
+				>SYSCALL2 GetMem0
 				bcs .9
 				>STYA ZPTmpPtr1
 
@@ -57,7 +56,7 @@ SKT.Socket.STREAM
 				stx FD.SSOCK+S.SOCKET.T		save type
 				sta FD.SSOCK+S.SOCKET.PROTO
 				lda #0					Y = socket.size
-				>SYSCALL GetMem0
+				>SYSCALL2 GetMem0
 				bcs .9
 				>STYA ZPTmpPtr1
 
@@ -84,7 +83,7 @@ SKT.Socket.FindFree
 				bne .1
 				
 				txa
-				>SYSCALL freemem
+				>SYSCALL2 freemem
 				lda #E.OOH
 				sec
 				rts
@@ -107,7 +106,7 @@ SKT.Socket.FindFree
 * CC: A = hSOCKET
 * CS: A = EC
 *\--------------------------------------
-SKT.bind		>SYSCALL GetMemPtr
+SKT.bind		>SYSCALL2 GetMemPtr
 				>STYA ZPPtrSKT
 				jsr SKT.PullLocAddr
 
@@ -127,7 +126,7 @@ SKT.bind		>SYSCALL GetMemPtr
 				beq .7
 
 				phx
-				>SYSCALL GetMemPtr
+				>SYSCALL2 GetMemPtr
 				>STYA ZPTmpPtr1
 				plx
 
@@ -168,7 +167,7 @@ SKT.bind		>SYSCALL GetMemPtr
 * CC: A = hSOCKET
 * CS: A = EC
 *\--------------------------------------
-SKT.connect		>SYSCALL GetMemPtr
+SKT.connect		>SYSCALL2 GetMemPtr
 				>STYA ZPPtrSKT
 
 				jsr SKT.PullRemAddr
@@ -207,7 +206,7 @@ SKT.connect.SEQPACKET
 * ## RETURN VALUE
 * CS: A = EC
 *\--------------------------------------
-SKT.listen		>SYSCALL GetMemPtr
+SKT.listen		>SYSCALL2 GetMemPtr
 				>STYA ZPPtrSKT
 
 				ldy #S.SOCKET.T
@@ -244,7 +243,7 @@ SKT.listen		>SYSCALL GetMemPtr
 * ## RETURN VALUE 
 * A = hSocket
 *\--------------------------------------
-SKT.Accept		>SYSCALL GetMemPtr
+SKT.Accept		>SYSCALL2 GetMemPtr
 				>STYA ZPPtrSKT
 
 				ldy #S.SOCKET.O
@@ -290,7 +289,7 @@ SKT.Accept		>SYSCALL GetMemPtr
 * ## RETURN VALUE
 *\--------------------------------------
 SKT.shutdown	pha
-				>SYSCALL GetMemPtr
+				>SYSCALL2 GetMemPtr
 				>STYA ZPPtrSKT
 
 				ldy #S.SOCKET.O
@@ -329,7 +328,7 @@ SKT.shutdown.SEQPACKET
 				txa
 				tay
 				lda (ZPPtrSKT),y
-				>SYSCALL FreeMem
+				>SYSCALL2 FreeMem
 				bra .1
 
 .3				pla					get hFD...
@@ -344,7 +343,7 @@ SKT.shutdown.SEQPACKET
 				bne .4
 
 .5				stz SKT.TABLE,x
-				>SYSCALL freemem
+				>SYSCALL2 freemem
 				clc
 				rts
 SKT.shutdown.STREAM
@@ -393,16 +392,128 @@ SKT.Read 		jsr SKT.PullhFDDataInPtrLen
 				bcs .99						I/O error
 
 				tay
-				bne .9						eof=true, exit with CC,Y,A = 0
-				
-				jmp SKT.GetDataFromSktIn
+				beq SKT.GetDataFromSktIn
 
-.9				lda #0
+.9				lda #0						eof=true, exit with CC,Y,A = 0
 				tay
-				rts
 				
-.99				ora #0
-				beq *
+.99				rts
+*--------------------------------------
+* In:
+*  Src : hInMem/INTAIL
+*  Dst : ZPDataOutPtr/ZPDataOutLen
+* Out:
+*  Y,A = bytes read
+*--------------------------------------
+SKT.GetDataFromSktIn
+				jsr SKT.GetTCB
+				
+				ldy #S.SOCKET.SQ.hInMem
+				lda (ZPPtrSKT),y
+				>SYSCALL2 GetMemPtr
+				>STYA ZPTmpPtr1			Make ZPTmpPtr1=buffer base
+
+				lda ZPTmpPtr1
+				clc
+				adc SKT.Cache+S.SOCKET.TCP.INTAIL
+				sta ZPTmpPtr2
+
+				lda ZPTmpPtr1+1
+				adc SKT.Cache+S.SOCKET.TCP.INTAIL+1
+				sta ZPTmpPtr2+1
+
+				lda ZPDataInLen
+				eor #$FF
+				tax
+
+				lda ZPDataInLen+1
+				eor #$FF
+				pha
+
+				stz ZPTmpPtr3			Reset byte counter
+				stz ZPTmpPtr3+1
+
+				ldy #0
+
+.1				inx						Check if room left in dest buffer
+				bne .2
+				pla
+				inc
+				beq .8
+
+				pha
+
+.2				lda SKT.Cache+S.SOCKET.TCP.INTAIL
+				eor SKT.Cache+S.SOCKET.TCP.INHEAD
+				bne .3
+				lda SKT.Cache+S.SOCKET.TCP.INTAIL+1
+				eor SKT.Cache+S.SOCKET.TCP.INHEAD+1
+				beq .7
+
+.3				lda (ZPTmpPtr2)
+				pha
+
+				inc SKT.Cache+S.SOCKET.TCP.INTAIL
+				bne .4
+
+				inc SKT.Cache+S.SOCKET.TCP.INTAIL+1
+				lda SKT.Cache+S.SOCKET.TCP.INTAIL+1
+				cmp /K.TCP.WSIZE
+				bne .4
+
+				stz SKT.Cache+S.SOCKET.TCP.INTAIL+1
+				lda ZPTmpPtr1
+				sta ZPTmpPtr2
+				lda ZPTmpPtr1+1
+				sta ZPTmpPtr2+1
+				bra .5
+
+.4				inc ZPTmpPtr2
+				bne .5
+				inc ZPTmpPtr2+1
+
+.5				pla						get back data....
+
+.6				sta (ZPDataInPtr),y
+				iny
+				bne .61
+				inc ZPDataInPtr+1
+
+.61				inc ZPTmpPtr3
+				bne .1
+				inc ZPTmpPtr3+1
+
+				bra .1
+
+.7				pla						discard byte counter HI
+
+.8				>ADC16 SKT.Cache+S.SOCKET.TCP.INFREE,ZPTmpPtr3
+				>SBC16 SKT.Cache+S.SOCKET.TCP.INUSED,ZPTmpPtr3
+
+				lda SKT.Cache+S.SOCKET.TCP.OUTACKNUM+3
+				clc 
+				adc ZPTmpPtr3
+				sta SKT.Cache+S.SOCKET.TCP.OUTACKNUM+3
+				lda SKT.Cache+S.SOCKET.TCP.OUTACKNUM+2
+				adc ZPTmpPtr3+1
+				sta SKT.Cache+S.SOCKET.TCP.OUTACKNUM+2
+
+				bcc .80
+				inc SKT.Cache+S.SOCKET.TCP.OUTACKNUM+1
+				bne .80
+				inc SKT.Cache+S.SOCKET.TCP.OUTACKNUM
+
+.80				jsr SKT.StoreTCB
+
+				ldy #S.SOCKET.TCP.O
+				lda (ZPPtrSKT),y
+				ora #S.TCP.OPTIONS.ACK
+				sta (ZPPtrSKT),y
+
+*				jsr TCP.OUT.I			SKT.GetTCB already called, Try to ACK read DATA
+
+				>LDYA ZPTmpPtr3
+				clc
 				rts
 */--------------------------------------
 * # Write (STREAM)
@@ -428,20 +539,84 @@ SKT.Write		jsr SKT.PullhFDDataInPtrLen
 				cpx ZPDataInLen
 				lda SKT.Cache+S.SOCKET.TCP.OUTFREE+1
 				sbc ZPDataInLen+1
-				bcc .9					Not enough room in Q
+				
+				bcs SKT.AddDataToSktOut
 
-				jsr SKT.AddDataToSktOut   will call SKT.GetTCB 
+				lda #0					Not enough room in Q,no data transfered
+				tay						exit with CC,Y,A = 0
+				clc
+.99				rts
+*--------------------------------------
+* Src : ZPDataInPtr/ZPDataInLen
+* Dst : hOutMem/OUTHEAD
+*--------------------------------------
+SKT.AddDataToSktOut
+				ldy #S.SOCKET.SQ.hOutMem
+				lda (ZPPtrSKT),y
+				>SYSCALL2 GetMemPtr
+				>STYA ZPTmpPtr1			Make ZPTmpPtr1=buffer base
 
-				jsr TCP.OUT.I			SKT.GetTCB called, try to push, ignore error....
+				lda ZPTmpPtr1
+				clc
+				adc SKT.Cache+S.SOCKET.TCP.OUTHEAD
+				sta ZPTmpPtr2
+
+				lda ZPTmpPtr1+1
+				adc SKT.Cache+S.SOCKET.TCP.OUTHEAD+1
+				sta ZPTmpPtr2+1			Make ZPTmpPtr2=base+Tail
+
+				lda ZPDataInLen
+				eor #$FF
+				tax
+
+				lda ZPDataInLen+1
+				eor #$FF
+				pha
+
+				ldy #0
+
+.1				inx
+				bne .2
+				pla
+				inc
+				beq .8
+
+				pha
+
+.2				lda (ZPDataInPtr),y
+				sta (ZPTmpPtr2)
+				iny
+				bne .3
+				inc ZPDataInPtr+1
+
+.3				inc ZPTmpPtr2
+				bne .4
+				inc ZPTmpPtr2+1
+
+.4				inc SKT.Cache+S.SOCKET.TCP.OUTHEAD
+				bne .1
+				inc SKT.Cache+S.SOCKET.TCP.OUTHEAD+1
+				lda SKT.Cache+S.SOCKET.TCP.OUTHEAD+1
+				cmp /K.TCP.WSIZE
+				bne .1
+				stz SKT.Cache+S.SOCKET.TCP.OUTHEAD+1
+
+				lda ZPTmpPtr1			Dst Ptr=Buffer Base
+				sta ZPTmpPtr2
+				lda ZPTmpPtr1+1
+				sta ZPTmpPtr2+1
+				bra .1
+
+.8				>SBC16 SKT.Cache+S.SOCKET.TCP.OUTFREE,ZPDataInLen
+				>ADC16 SKT.Cache+S.SOCKET.TCP.OUTUSED,ZPDataInLen
+				>ADC16 SKT.Cache+S.SOCKET.TCP.OUTTOSEND,ZPDataInLen
+				jsr SKT.StoreTCB
+
+*				jsr TCP.OUT.I			SKT.GetTCB called, try to push, ignore error....
 				
 				>LDYA ZPDataInLen
 				clc
 				rts
-
-.9				lda #0					no data transfered
-				tay
-				clc
-.99				rts
 */--------------------------------------
 * # Recv (RAW,DGRAM,SEQPACKET)
 * # RecvFrom (RAW,DGRAM,SEQPACKET)
@@ -464,7 +639,7 @@ SKT.RecvFrom	pha
 				.HS 90					BCC
 SKT.Recv		clc
 				php
-				>SYSCALL GetMemPtr
+				>SYSCALL2 GetMemPtr
 				>STYA ZPPtrSKT
 
 				ldy #S.SOCKET.T
@@ -497,7 +672,7 @@ SKT.Recv		clc
 				bcc .9					Exit with CC and A=hFrame
 
 				pha
-				>SYSCALL GetMemPtr
+				>SYSCALL2 GetMemPtr
 				>STYA ZPFrameInPtr
 
 				ldy #S.IP.SRC
@@ -615,7 +790,7 @@ SKT.Send.SEQPACKET
 * `>LIBCALL hLIBTCPIP,LIBTCPIP.GetSockOpt`
 * ## RETURN VALUE
 *\--------------------------------------
-SKT.getsockopt	>SYSCALL GetMemPtr
+SKT.getsockopt	>SYSCALL2 GetMemPtr
 				>STYA ZPPtrSKT
 				ldy #S.SOCKET.O
 				lda (ZPPtrSKT),y
@@ -628,16 +803,15 @@ SKT.getsockopt	>SYSCALL GetMemPtr
 * `int setsockopt(hFD fd, short int opts);`
 * ## ASM
 * **In:**
-* `>PUSHWI opts`
+* `>PUSHBI opts`
 * `lda fd`
 * `>LIBCALL hLIBTCPIP,LIBTCPIP.SetSockOpt`
 * ## RETURN VALUE
 *\--------------------------------------
-SKT.setsockopt	>SYSCALL GetMemPtr
+SKT.setsockopt	>SYSCALL2 GetMemPtr
 				>STYA ZPPtrSKT
 				>PULLA
 				ldy #S.SOCKET.O
-				ora (ZPPtrSKT),y
 				sta (ZPPtrSKT),y
 *				clc
 				rts
@@ -654,7 +828,7 @@ SKT.setsockopt	>SYSCALL GetMemPtr
 * CC : A = 0 if some data, A = $ff if EOF
 * CS : A = Socket Error
 *\--------------------------------------
-SKT.EOF			>SYSCALL GetMemPtr
+SKT.EOF			>SYSCALL2 GetMemPtr
 				>STYA ZPPtrSKT
 
 SKT.EOF.I		ldy #S.SOCKET.TCP.INUSED
@@ -715,7 +889,7 @@ SKT.GetTable	>LDYA L.SKT.Table
 				rts
 *--------------------------------------
 SKT.PullhFDDataInPtrLen
-				>SYSCALL GetMemPtr
+				>SYSCALL2 GetMemPtr
 				>STYA ZPPtrSKT
 				>PULLW ZPDataInPtr		!!!DataOut trashed when sending ACK in TCP.OUT	
 				>PULLW ZPDataInLen		!!!use DataInPtr/Len
@@ -763,7 +937,7 @@ SKT.FindMatchingLocRem
 				beq .8
 
 				phx
-				>SYSCALL GetMemPtr
+				>SYSCALL2 GetMemPtr
 				>STYA ZPPtrSKT
 				.DO IPDEBUG=1
 				jsr SKT.Dump
@@ -892,7 +1066,7 @@ SKT.AddDataToSktIn
 
 				ldy #S.SOCKET.SQ.hInMem
 				lda (ZPPtrSKT),y
-				>SYSCALL GetMemPtr
+				>SYSCALL2 GetMemPtr
 				>STYA ZPTmpPtr1			Make ZPTmpPtr1=buffer base
 
 				lda ZPTmpPtr1
@@ -969,190 +1143,6 @@ SKT.AddDataToSktIn
 .80				clc
 				rts
 *--------------------------------------
-* From SKT.Read
-* In:
-*  Src : hInMem/INTAIL
-*  Dst : ZPDataOutPtr/ZPDataOutLen
-* Out:
-*  Y,A = bytes read
-*--------------------------------------
-SKT.GetDataFromSktIn
-				jsr SKT.GetTCB
-				
-				ldy #S.SOCKET.SQ.hInMem
-				lda (ZPPtrSKT),y
-				>SYSCALL GetMemPtr
-				>STYA ZPTmpPtr1			Make ZPTmpPtr1=buffer base
-
-				lda ZPTmpPtr1
-				clc
-				adc SKT.Cache+S.SOCKET.TCP.INTAIL
-				sta ZPTmpPtr2
-
-				lda ZPTmpPtr1+1
-				adc SKT.Cache+S.SOCKET.TCP.INTAIL+1
-				sta ZPTmpPtr2+1
-
-				lda ZPDataInLen
-				eor #$FF
-				tax
-
-				lda ZPDataInLen+1
-				eor #$FF
-				pha
-
-				stz ZPTmpPtr3			Reset byte counter
-				stz ZPTmpPtr3+1
-
-				ldy #0
-
-.1				inx						Check if room left in dest buffer
-				bne .2
-				pla
-				inc
-				beq .8
-
-				pha
-
-.2				lda SKT.Cache+S.SOCKET.TCP.INTAIL
-				eor SKT.Cache+S.SOCKET.TCP.INHEAD
-				bne .3
-				lda SKT.Cache+S.SOCKET.TCP.INTAIL+1
-				eor SKT.Cache+S.SOCKET.TCP.INHEAD+1
-				beq .7
-
-.3				lda (ZPTmpPtr2)
-				pha
-
-				inc SKT.Cache+S.SOCKET.TCP.INTAIL
-				bne .4
-
-				inc SKT.Cache+S.SOCKET.TCP.INTAIL+1
-				lda SKT.Cache+S.SOCKET.TCP.INTAIL+1
-				cmp /K.TCP.WSIZE
-				bne .4
-
-				stz SKT.Cache+S.SOCKET.TCP.INTAIL+1
-				lda ZPTmpPtr1
-				sta ZPTmpPtr2
-				lda ZPTmpPtr1+1
-				sta ZPTmpPtr2+1
-				bra .5
-
-.4				inc ZPTmpPtr2
-				bne .5
-				inc ZPTmpPtr2+1
-
-.5				pla						get back data....
-
-.6				sta (ZPDataInPtr),y
-				iny
-				bne .61
-				inc ZPDataInPtr+1
-
-.61				inc ZPTmpPtr3
-				bne .1
-				inc ZPTmpPtr3+1
-
-				bra .1
-
-.7				pla						discard byte counter HI
-
-.8				>ADC16 SKT.Cache+S.SOCKET.TCP.INFREE,ZPTmpPtr3
-				>SBC16 SKT.Cache+S.SOCKET.TCP.INUSED,ZPTmpPtr3
-
-				lda SKT.Cache+S.SOCKET.TCP.OUTACKNUM+3
-				clc 
-				adc ZPTmpPtr3
-				sta SKT.Cache+S.SOCKET.TCP.OUTACKNUM+3
-				lda SKT.Cache+S.SOCKET.TCP.OUTACKNUM+2
-				adc ZPTmpPtr3+1
-				sta SKT.Cache+S.SOCKET.TCP.OUTACKNUM+2
-
-				bcc .80
-				inc SKT.Cache+S.SOCKET.TCP.OUTACKNUM+1
-				bne .80
-				inc SKT.Cache+S.SOCKET.TCP.OUTACKNUM
-
-.80				jsr SKT.StoreTCB
-
-				ldy #S.SOCKET.TCP.O
-				lda (ZPPtrSKT),y
-				ora #S.TCP.OPTIONS.ACK
-				sta (ZPPtrSKT),y
-
-				jsr TCP.OUT.I			SKT.GetTCB already called, Try to ACK read DATA
-
-				>LDYA ZPTmpPtr3
-				clc
-				rts
-*--------------------------------------
-* From SKT.Write.TCP
-* Src : ZPDataInPtr/ZPDataInLen
-* Dst : hOutMem/OUTHEAD
-*--------------------------------------
-SKT.AddDataToSktOut
-				ldy #S.SOCKET.SQ.hOutMem
-				lda (ZPPtrSKT),y
-				>SYSCALL GetMemPtr
-				>STYA ZPTmpPtr1			Make ZPTmpPtr1=buffer base
-
-				lda ZPTmpPtr1
-				clc
-				adc SKT.Cache+S.SOCKET.TCP.OUTHEAD
-				sta ZPTmpPtr2
-
-				lda ZPTmpPtr1+1
-				adc SKT.Cache+S.SOCKET.TCP.OUTHEAD+1
-				sta ZPTmpPtr2+1			Make ZPTmpPtr2=base+Tail
-
-				lda ZPDataInLen
-				eor #$FF
-				tax
-
-				lda ZPDataInLen+1
-				eor #$FF
-				pha
-
-				ldy #0
-
-.1				inx
-				bne .2
-				pla
-				inc
-				beq .8
-
-				pha
-
-.2				lda (ZPDataInPtr),y
-				sta (ZPTmpPtr2)
-				iny
-				bne .3
-				inc ZPDataInPtr+1
-
-.3				inc ZPTmpPtr2
-				bne .4
-				inc ZPTmpPtr2+1
-
-.4				inc SKT.Cache+S.SOCKET.TCP.OUTHEAD
-				bne .1
-				inc SKT.Cache+S.SOCKET.TCP.OUTHEAD+1
-				lda SKT.Cache+S.SOCKET.TCP.OUTHEAD+1
-				cmp /K.TCP.WSIZE
-				bne .1
-				stz SKT.Cache+S.SOCKET.TCP.OUTHEAD+1
-
-				lda ZPTmpPtr1			Dst Ptr=Buffer Base
-				sta ZPTmpPtr2
-				lda ZPTmpPtr1+1
-				sta ZPTmpPtr2+1
-				bra .1
-
-.8				>SBC16 SKT.Cache+S.SOCKET.TCP.OUTFREE,ZPDataInLen
-				>ADC16 SKT.Cache+S.SOCKET.TCP.OUTUSED,ZPDataInLen
-				>ADC16 SKT.Cache+S.SOCKET.TCP.OUTTOSEND,ZPDataInLen
-				jmp SKT.StoreTCB
-*--------------------------------------
 * From TCP.OUT
 * Src : hOutMem/OUTTAIL
 * Dst : ZPDataOutPtr/ZPDataOutLen
@@ -1161,7 +1151,7 @@ SKT.GetDataFromSktOut
 				ldy #S.SOCKET.SQ.hOutMem
 				lda (ZPPtrSKT),y
 
-				>SYSCALL GetMemPtr
+				>SYSCALL2 GetMemPtr
 				>STYA ZPTmpPtr1			Make ZPTmpPtr1=buffer base
 
 				lda ZPTmpPtr1
@@ -1282,7 +1272,7 @@ SKT.NewTCB		ldx #S.SOCKET.TCP.INTAIL
 				
 				>LDYAI K.TCP.WSIZE
 				>STYA SKT.Cache+S.SOCKET.TCP.INFREE
-				>SYSCALL getmem
+				>SYSCALL2 getmem
 				bcs .9
 				txa
 				ldy #S.SOCKET.SQ.hInMem
@@ -1290,7 +1280,7 @@ SKT.NewTCB		ldx #S.SOCKET.TCP.INTAIL
 
 				>LDYAI K.TCP.WSIZE
 				>STYA SKT.Cache+S.SOCKET.TCP.OUTFREE
-				>SYSCALL getmem
+				>SYSCALL2 getmem
 				bcs .9
 				txa
 				ldy #S.SOCKET.SQ.hOutMem
@@ -1305,6 +1295,14 @@ SKT.NewTCB		ldx #S.SOCKET.TCP.INTAIL
 *				clc				
 .9				rts
 *--------------------------------------
+SKT.GetTCB	 	ldy #S.SOCKET.TCP.INTAIL
+.1				lda (ZPPtrSKT),y
+				sta SKT.Cache,y
+				iny
+				cpy #S.SOCKET.TCP
+				bne .1
+				rts
+*--------------------------------------
 SKT.StoreTCB.S	ldy #S.SOCKET.TCP.S
 				sta (ZPPtrSKT),y
 
@@ -1315,14 +1313,6 @@ SKT.StoreTCB 	ldy #S.SOCKET.TCP.INTAIL
 				cpy #S.SOCKET.TCP
 				bne .1
 				clc
-				rts
-*--------------------------------------
-SKT.GetTCB	 	ldy #S.SOCKET.TCP.INTAIL
-.1				lda (ZPPtrSKT),y
-				sta SKT.Cache,y
-				iny
-				cpy #S.SOCKET.TCP
-				bne .1
 				rts
 *--------------------------------------
 SKT.SetFrameOutDstIP
@@ -1405,6 +1395,7 @@ SKT.CopyDataInToOut
 				pla
 				sta ZPDataInPtr+1
 				rts
+*--------------------------------------
 MAN
 SAVE USR/SRC/LIB/LIBTCPIP.S.SKT
 LOAD USR/SRC/LIB/LIBTCPIP.S
