@@ -162,8 +162,6 @@ Kernel.Init3C	>LDYAI MSG.Init3
 
 				jsr PwdMgrInit
 
-				jsr CacheMgrInit
-
 				lda KBD
 				bpl .7
 				sta KBDSTROBE
@@ -802,26 +800,28 @@ DevMgrInit		>LDYAI MSG.DEV
 				>SYSCALL puts
 				
 				lda DEVCNT
-				sta DevMgrInit.DEVCNT
+				sta .1+1
 				
-.1				ldx DevMgrInit.DEVCNT
+.1				ldx #$ff				SELF MODIFIED
 				lda DEVLST,x
 				
 				and #$F0
 				
 				asl
-				php								Save Drive 1/2 in C
-				ror								DSSS0000
+				php						Save Drive 1/2 in C
+				ror						DSSS0000
 				
 				lsr
 				lsr
 				lsr
 
-				tax								000DSSS0
-				lsr								0000DSSS
+				tax						000DSSS0
+				lsr						0000DSSS
 				and #$7
 				sta FD.BDEV+S.FD.DEV.BUSID
-
+				ora #$30
+				sta FD.BDEV.NAME+1		SnDy
+				
 				lda DEVPTRS,x
 				sta FD.BDEV+S.FD.DEV.BUSPTR
 				
@@ -829,36 +829,37 @@ DevMgrInit		>LDYAI MSG.DEV
 				sta FD.BDEV+S.FD.DEV.BUSPTR+1
 				
 				sta ZPPtr1+1			
-				stz ZPPtr1
+				stz ZPPtr1				Cn00
 				
 				plp
 				lda #0
 				adc #1					Make DevID 1 or 2
 				sta FD.BDEV+S.FD.DEV.DEVID
+				ora #$30
+				sta FD.BDEV.NAME+3		SxDn
 				
 				lda ZPPtr1+1
 
-				cmp #$D0				Disk II Driver is $D000
+				cmp #$FF				/RAM is always $FF00
 				bne .2
+
+				jsr DevMgrInit.RAM
+				bra .8					keep slot free
+				
+.2				cmp #$D0				Disk II Driver is $D000
+				bne .3
 				
 				jsr DevMgrInit.DII
 				lda #A2osX.S.DII
 				bra .7					Go mark slot as USED
-
-.2				cmp #$FF				/RAM is always $FF00
-				bne .3
-
-				jsr DevMgrInit.RAM
-				bra .8
 				
-.3				cmp #$C8
-				bcs .6					Some Prodos patched DRV
+.3				bcs .53					> $D0, Some BLK remapped DRV
 				
 				cmp #$C0
-				bcs .4
+				bcs .4					$C0 .. $CF, in slot ROM 
 				
-				jsr DevMgrInit.USR		Outside ROM space, User loaded BLK dev
-				bra .8
+				jsr DevMgrInit.USR		Outside ROM/LC space, User loaded BLK dev
+				bra .8					keep slot free
 				
 .4				ldx #SmartPort.SIG-SmartPort.OFS-1
 
@@ -897,27 +898,28 @@ DevMgrInit		>LDYAI MSG.DEV
 				lda #A2osX.S.SP
 				bra .7
 	
+.53				inc FD.BDEV+S.FD.DEV.DEVID		Remapped BLK devices....
+				inc FD.BDEV+S.FD.DEV.DEVID		Add 2 to DEVID (2 & 3)
+	
 .6				jsr DevMgrInit.BLK
 				lda #A2osX.S.BLK
 				
 .7				ldx FD.BDEV+S.FD.DEV.BUSID
 				sta A2osX.S,x
 				
-.8				dec DevMgrInit.DEVCNT
+.8				dec .1+1
 				bmi .80
 				jmp .1
 				
 .80				clc
 				rts
-DevMgrInit.DEVCNT
-				.BS 1
 *--------------------------------------
-DevMgrInit.DII	ldx #0
-				>LDYAI DRV.DiskII
+DevMgrInit.RAM	ldx #0
+				>LDYAI DRV.RamDrive
 				bra DevMgrInit.AddBDev
 *--------------------------------------
-DevMgrInit.RAM	ldx #2
-				>LDYAI DRV.RamDrive
+DevMgrInit.DII	ldx #2
+				>LDYAI DRV.DiskII
 				bra DevMgrInit.AddBDev
 *--------------------------------------
 DevMgrInit.USR	ldx #4
@@ -936,19 +938,7 @@ DevMgrInit.SP	ldy #$ff
 				lda (ZPPtr1),y
 				clc
 				adc #3					Compute smartport entry point
-				sta .1+1
 				sta FD.BDEV+S.FD.DEV.BUSPTR
-				lda ZPPtr1+1
-				sta .1+2
-				sta FD.BDEV+S.FD.DEV.BUSPTR+1
-
-				lda FD.BDEV+S.FD.DEV.DEVID
-				sta SP.IOCTL.STATUS+S.IOCTL.UNITNUM
-
-.1				jsr $ffff				Self Modified
-				.DA #0					Status
-				.DA SP.IOCTL.STATUS
-*				bcs DevMgrInit.AddBDev.RTS
 				
 				ldx #8
 				>LDYAI DRV.SmartPort
@@ -956,15 +946,6 @@ DevMgrInit.SP	ldy #$ff
 DevMgrInit.AddBDev
 				>STYA FD.BDEV+S.FD.DEV.DRVPTR
 				
-				lda FD.BDEV+S.FD.DEV.BUSID
-				ora #$30
-				sta FD.BDEV.NAME+1		SnDy
-				
-				lda FD.BDEV+S.FD.DEV.DEVID
-				and #3					Make sure 1 or 2
-				ora #$30
-				sta FD.BDEV.NAME+3		SxDn
-
 				>PUSHW MSG.BLKDEV.TBL,x
 				>PUSHWI FD.BDEV.NAME
 				>PUSHBI 4
@@ -1083,25 +1064,6 @@ PwdMgr.ROOT		.DA #S.SESSION.P.ROOT
 				.AZ "${ROOT}BIN/SH"		SHELL
 PwdMgr.ROOT.Size	.EQ	*-PwdMgr.ROOT
 *--------------------------------------
-CacheMgrInit	ldy #S.PS.hPREFIX
-				lda (pPs),y
-				jsr K.GetMemPtr
-				>STYA ZPPtr1
-				
-				lda A2osX.F.CHROOT
-				bpl .8
-				
-				
-				
-				
-.8				>PUSHWI $2E0			Get ROOT from QC
-				>PUSHWI $2C0			Get BOOT from QC
-				
-				>PUSHBI 4
-				>LDYAI MSG.BOOTROOT
-				>SYSCALL printf
-				rts
-*--------------------------------------
 * Modified CHARGET/CHARGOT for ROM CALL
 * CHRGET         .EQ $B1 - C8
 *--------------------------------------
@@ -1149,13 +1111,13 @@ SYSSCREEN.TOP	.AZ "A2osX 0.93 Console"
 MSG.Init3		.AZ "A2osX[Stage3]:Init *** Press Ctrl-R for ROOT Mode ***"
 MSG.DEV			.AZ "Device Manager..."
 MSG.BLKDEV		.AZ "  Adding Device: /DEV/%s, Type: %s\r\n"
-MSG.BLKDEV.TBL	.DA MSG.BLKDEV.DII
-				.DA MSG.BLKDEV.RAM
+MSG.BLKDEV.TBL	.DA MSG.BLKDEV.RAM
+				.DA MSG.BLKDEV.DII
 				.DA MSG.BLKDEV.USR
 				.DA MSG.BLKDEV.BLK
 				.DA MSG.BLKDEV.SP
-MSG.BLKDEV.DII	.AZ "Disk ]["
 MSG.BLKDEV.RAM	.AZ "/RAM Disk"
+MSG.BLKDEV.DII	.AZ "Disk ]["
 MSG.BLKDEV.USR	.AZ "User"
 MSG.BLKDEV.BLK	.AZ "Generic Block"
 MSG.BLKDEV.SP	.AZ "Smartport"
@@ -1250,13 +1212,6 @@ SmartPort.OFS	.HS 010305
 SmartPort.SIG	.HS 200003
 AWSmartPort.OFS	.HS 12131415161718191A1B
 AWSmartPort.SIG	.HS A9008DF2C0A9708DF3C0
-*--------------------------------------
-SP.IOCTL.STATUS	.DA #3
-				.BS 1					UNITNUM
-				.DA SP.IOCTL.STATUS.DIB
-				.DA #S.IOCTL.STATCODE.GETDIB
-SP.IOCTL.STATUS.DIB
-				.BS S.DIB
 *--------------------------------------
 MAN
 SAVE USR/SRC/SYS/KERNEL.S.INIT
