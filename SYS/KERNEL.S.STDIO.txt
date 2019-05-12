@@ -1,16 +1,10 @@
 NEW
-PREFIX
-AUTO 4,1
-*--------------------------------------
-*K.PrintF.PadL	.BS 1
-*K.PrintF.PadC	.BS 1
-*HEXBUF			.BS 4
-*BCDBUF			.BS 5					5, enough to handle 10 digits (32bits)
+  AUTO 3,1
 *--------------------------------------
 HEXBUF			.EQ FAC
 K.PrintF.PadL	.EQ FAC+4
 K.PrintF.PadC	.EQ FAC+5
-BCDBUF			.EQ ARG
+BCDBUF			.EQ ARG					5, enough to handle 10 digits (32bits)
 HEXBUF.Signed	.EQ ARG.SIGN
 */--------------------------------------
 * # putchar (BLOCKING)
@@ -29,14 +23,16 @@ K.PutChar		>PUSHA					character
 				ldy #S.PS.hStdOut
 				lda	(pPs),y
 				jsr K.FPutC
-				bcc .8
-				
-				tay
-				bne .8
-				
-				>RET 1
-				
-.8				rts
+				bcc K.PutChar.RTS
+
+				tay 					E.NODATA
+				bpl K.PutChar.RTS
+
+				inc						0 = BLOCKING
+
+K.PutChar.RET1	inc pStack
+
+K.PutChar.RTS	rts
 */--------------------------------------
 * # fputc (BLOCKING)
 * Print A (char) to hFILE
@@ -50,22 +46,26 @@ K.PutChar		>PUSHA					character
 * ## RETURN VALUE 
 * CC = success
 *\--------------------------------------
-* (pStack)+0	character
-*--------------------------------------
 K.FPutC			jsr PFT.CheckNodeA
-				bcs .8
-				
+				bcs K.PutChar.RET1
+
 				lda (pStack)			character
 				sta K.IOBuf
 
-				ldy #1					write 1 byte
-				jsr K.FPutC.Y
-				bcc .8
-				tay
-				bne .8
+				lda #0
+				>PUSHA
+				inc						write 1 byte
+				>PUSHA
+
+				>PUSHWI K.IOBuf			buf
+				jsr IO.Write.I
+				bcc K.PutChar.RET1		pop char...
+				tay						E.NODATA
+				bpl K.PutChar.RET1
+
+				inc						0 = BLOCKING
+				sec
 				rts
-				
-.8				>RET 1		
 */--------------------------------------
 * # puts (BLOCKING)
 * Write Str to StdOut, appends '\r\n'
@@ -78,36 +78,49 @@ K.FPutC			jsr PFT.CheckNodeA
 * ## RETURN VALUE 
 * CC = success
 *\--------------------------------------
-K.PutS			>PUSHYA
-				
+K.PutS			>STYA ZPPtr2
+
+				ldy #0
+
+.1				lda (ZPPtr2),y
+				beq .2
+				sta K.IOBuf,y
+				iny
+				bne .1
+
+.9				lda #E.BUF
+				sec
+				rts
+
+.2				lda #C.CR
+				sta K.IOBuf,y
+				iny
+				beq .9
+
+				lda #C.LF
+				sta K.IOBuf,y
+
+				iny
+				beq .9
+
+				lda #0
+				sta K.IOBuf,y
+
+				>PUSHWI K.IOBuf
+
 				ldy #S.PS.hStdOut
 				lda	(pPs),y
-				
 				jsr K.FPutS
-				bcs K.PutS.RTS
-
-				lda #C.CR
-				sta K.IOBuf
-				lda #C.LF
-				sta K.IOBuf+1
-				
-				ldy #2					write 2 bytes
-				
-K.FPutC.Y		lda #0
-				
-				>PUSHYA					count
-				>PUSHWI K.IOBuf			buf
-				jsr IO.Write.I
-				bcc K.PutS.RTS
+				bcc .99
 				tay
-				bne K.PutS.RTS
+				bpl .99
 				
-				>RET 4					pop buf,count but keep char
-
-K.PutS.RTS		rts
+				inc						0 = BLOCKING
+*				sec
+.99				rts
 */--------------------------------------
 * # fputs (BLOCKING)
-* Write Str to FILE
+* Write Str to hFILE
 * ## C
 * `int fputs (hFILE stream, const char * str );`
 * ## ASM
@@ -121,23 +134,42 @@ K.PutS.RTS		rts
 K.FPutS			jsr PFT.CheckNodeA		set IO.hFD
 				bcs .9
 
-				>PULLYA					Get String
-				>STYA ZPPtr2			Save Buffer
-				ldx #SYS.strlen			Get String len in Y,A
-				jsr K.SYSCALL.GoB
+				lda (pStack)
+				sta ZPPtr2				Get String
 				
-				>PUSHYA					push len
-				>PUSHW ZPPtr2			push buffer
+				ldy #1
+				lda (pStack),y
+				sta ZPPtr2+1
+				
+*				ldy #0
+				dey
+				ldx #0
+				
+.1				lda (ZPPtr2),y
+				beq .2
+				iny
+				bne .1
+				inx
+				bra .1
+				
+.2				txa
+				>PUSHA					push len HI
+
+				tya
+				>PUSHA					push len LO
+
+				>PUSHW ZPPtr2
+				
 				jsr IO.Write.I
 				bcc .8
 				tay
-				bne .8
+				bpl .9
 				
-				>RET 4
+				inc						0 = BLOCKING
 				
 .8				rts			
 				
-.9				>RET 2				
+.9				>RET 2					pop str	
 */--------------------------------------
 * # PrintF (BLOCKING)
 * # FPrintF (BLOCKING)
@@ -361,9 +393,11 @@ K.PrintF.1		stz PrintF.Cnt
 				jsr K.FWrite
 				bcc .81
 				tay
-				bne .99
+				bpl .99
 				
-				>RET 4
+				inc						0 = BLOCKING
+*				sec
+				rts
 				
 .80				lda #0					Writing to buffer, append \0
 				ldy PrintF.Cnt
@@ -812,7 +846,7 @@ K.FGetS			jsr PFT.CheckNodeA
 				bcs .9
 
 				lda (pFD)
-				bne K.FGetS.Special
+				bra K.FGetS.Special
 				
 *				clc
 				lda (pStack)
@@ -906,17 +940,17 @@ K.FGetS.Special	lda (pStack)
 			
 .3				jsr K.GetC.I
 				bcc .2					another char...
-				
+
 .4				tay						
-				bne .9					I/O error
-				
+				bpl .9					I/O error
+
 				lda ZPPtr2
 				sta (pStack)			s
-				
+
 				lda ZPPtr2+1
 				ldy #1
 				sta (pStack),y			s
-				
+
 				lda ZPPtr1
 				eor #$ff
 *				sec
@@ -929,11 +963,11 @@ K.FGetS.Special	lda (pStack)
 				adc #0
 				iny
 				sta (pStack),y			!(n+2)
-				
-				lda #0					BLOCKING I/O
+
+				lda #0					BLOCKING
 				sec
 				rts
-				
+
 .8				lda #0
 				sta (ZPPtr2)			terminate string
 				clc
@@ -967,17 +1001,18 @@ K.GetChar		ldy #S.PS.hStdIn
 *\--------------------------------------
 K.GetC			jsr PFT.CheckNodeA
 				bcs K.GetC.RTS
-				
+
 K.GetC.I		>PUSHWI 1
 				>PUSHWI K.IOBuf
-				
+
 				jsr IO.READ.I
 				bcc .8
 				tay
-				bne K.GetC.RTS			I/O error
-				
-				>RET 4					BLOCKING I/O
-				
+				bpl K.GetC.RTS			I/O error
+
+				inc						0 = BLOCKING
+				rts
+
 .8				lda K.IOBuf
 
 K.GetC.RTS		rts				
@@ -1008,7 +1043,7 @@ K.GetC.RTS		rts
 * A = Number of arguments filled.
 *\--------------------------------------
 K.SScanF		jsr MEM.SPtr2PPtr1		ptr2=String to Scan,Ptr1=format
-				
+
 				stz .5+1				reset LStack Ptr
 				stz .80+1				rest Arg processed
 
@@ -1017,18 +1052,18 @@ K.SScanF		jsr MEM.SPtr2PPtr1		ptr2=String to Scan,Ptr1=format
 
 				cmp #'%' 				Escape ?
 				beq .2
-				
+
 				cmp #' '				Space ?
 				beq .12
-				
+
 				cmp (ZPPtr2)			Same char in string?
 				bne .9
-				
+
 				inc ZPPtr2
 				bne .1
 				inc ZPPtr2+1
 				bra .1
-				
+
 .12				inc ZPPtr2				Space....
 				bne .14
 				inc ZPPtr2+1
@@ -1036,28 +1071,28 @@ K.SScanF		jsr MEM.SPtr2PPtr1		ptr2=String to Scan,Ptr1=format
 .14				cmp (ZPPtr2)			another one ?
 				beq .12
 				bne .1
-				
+
 .2				jsr MEM.GetCharPtr1		Get specifier after %
 				beq .9					unexpected End of format after "%" ?
 
 				ldx #K.SScanFJMP-K.SScanFTBL-2
-				
+
 .3				cmp K.SScanFTBL,x
 				beq .4
 				dex
 				dex
 				bpl .3
-				
+
 .9				jsr .8
 				lda #MLI.E.EOF
 				sec
 				rts
-				
+
 .4				jsr .5
 				bcs .9					out of Ptr on stack
-				
+
 				bra .1
-				
+
 .8				lda pStack
 				sec						ByteCnt byte
 				adc (pStack)			... ByteCnt
@@ -1069,12 +1104,12 @@ K.SScanF		jsr MEM.SPtr2PPtr1		ptr2=String to Scan,Ptr1=format
 .5				lda #$FF				SELF MODIFIED LStack Ptr
 				cmp (pStack)
 				beq .99					CS
-				
+
 				tay
 				iny
 				lda (pStack),y
 				sta ZPPtr3
-				
+
 				iny
 				lda (pStack),y
 				sta ZPPtr3+1			get VAR Ptr
@@ -1110,11 +1145,11 @@ K.SScanF.H		lda K.SScanFTBL+1,x		Get VAR size
 				pha
 
 				jsr STDLIB.GetHex
-				
+
 K.SScanF.GetVAL	jsr K.SScanF.Fwd		Y=char count parsed
-				
+
 .1				ply						get back VAL size 
-				
+
 .2				lda STDLIB.32-1,y
 				dey
 				sta (ZPPtr3),y
@@ -1134,7 +1169,7 @@ K.SScanF.S		ldy #$ff
 				bne .1
 .2				lda #0					add \0 to param ptr
 				sta (ZPPtr3),y
-				
+
 K.SScanF.Fwd	tya						Y=char count parsed
 				clc
 				adc ZPPtr2
@@ -1185,7 +1220,7 @@ K.FOpen			jsr PFT.CheckPathYA
 
 				jsr STDIO.NewHFile
 				bcc K.FClose.RTS
-				
+
 				jmp IO.Open.ERR
 
 K.FOpen.RET4	>RET 4
@@ -1202,18 +1237,18 @@ K.FOpen.RET4	>RET 4
 *\--------------------------------------
 K.FClose		jsr PFT.CheckNodeA
 				bcs K.FClose.RTS
-				
+
 				sta .1+1				store hFile
-				
+
 				jsr IO.Close.I
 				bcs K.FClose.RTS
-				
+
 .1				ldx #$ff				SELF MODIFIED				
 				stz OF.Table.hFD-1,x
 
 				lda OF.Table.hPath-1,x
 				beq K.FClose.RTS		special files have no path 
-				
+
 				stz OF.Table.hPath-1,x
 				jmp K.FreeMem			discard filename
 
@@ -1234,8 +1269,16 @@ K.FClose.RTS	rts
 *\--------------------------------------
 K.FRead			jsr PFT.CheckNodeA
 				bcs K.FOpen.RET4
-				
-				jmp IO.Read.I
+
+				jsr IO.Read.I
+				bcc .9
+
+				tay
+				bpl .9
+
+				inc						0 = BLOCKING
+
+.9				rts				
 */--------------------------------------
 * # FWrite (BLOCKING)
 * Write bytes to file
@@ -1252,8 +1295,16 @@ K.FRead			jsr PFT.CheckNodeA
 *\--------------------------------------
 K.FWrite		jsr PFT.CheckNodeA
 				bcs K.FOpen.RET4
-				
-				jmp IO.Write.I
+
+				jsr IO.Write.I
+				bcc .9
+
+				tay
+				bpl .9
+
+				inc						0 = BLOCKING
+
+.9				rts
 */--------------------------------------
 * # FFlush
 * ## C
@@ -1265,8 +1316,15 @@ K.FWrite		jsr PFT.CheckNodeA
 *\--------------------------------------
 K.FFlush		jsr PFT.CheckNodeA
 				bcs .9
+
+				lda (pFD)
+				bne STDIO.IOERR
 				>MLICALL MLIFLUSH
 .9				rts
+*--------------------------------------
+STDIO.IOERR		lda #MLI.E.IO
+				sec
+				rts
 */-------------------------------------
 * # FSeek
 * Set the file-position indicator for hFILE
@@ -1281,18 +1339,18 @@ K.FFlush		jsr PFT.CheckNodeA
 *\-------------------------------------
 K.FSeek			jsr PFT.CheckNodeA
 				bcc .11
-	
-				>RET 6
-				
+
+				>RET 5
+
 .11				>PULLA					whence
 				tax
 				>PULLW ZPPtr1			offset LW
 				>PULLW ZPPtr2			offset HW
 				cpx #SEEK.END+1
 				bcs .98
-				
+
 				jmp (.1,x)
-				
+
 .1				.DA .10
 				.DA .20
 				.DA .30			
@@ -1313,9 +1371,9 @@ K.FSeek			jsr PFT.CheckNodeA
 
 .8				ldy #0
 				ldx #3					3 bytes, 24 bits!!!
-				
+
 				clc
-				
+
 .81				lda K.MLI.PARAMS+2,y
 				adc ZPPtr1,y
 				sta K.MLI.PARAMS+2,y
@@ -1323,7 +1381,7 @@ K.FSeek			jsr PFT.CheckNodeA
 				iny
 				dex
 				bne .81
-				
+
 				bcs .99					Offset out of range!			
 
 .82				>MLICALL MLISETMARK
@@ -1357,9 +1415,9 @@ K.FSeek			jsr PFT.CheckNodeA
 *\--------------------------------------
 K.FEOF			jsr PFT.CheckNodeA
 				bcs .9
-				
+
 				jmp IO.EOF
-	
+
 .9				rts
 */--------------------------------------
 * # FTell
@@ -1377,17 +1435,17 @@ K.FTell			jsr PFT.CheckNodeA
 				bcs .9
 				>MLICALL MLIGETMARK
 				bcs .9
-				
+
 				lda #0
 				>PUSHA
-				
+
 				ldy #2
-				
+
 .1				lda K.MLI.PARAMS+2,y
 				>PUSHA
 				dey
 				bpl .1
-				
+
 .9				rts
 */--------------------------------------
 * # Remove
@@ -1402,7 +1460,7 @@ K.FTell			jsr PFT.CheckNodeA
 *\--------------------------------------
 K.Remove		jsr PFT.CheckPathYA
 				bcs .9
-				
+
 				>MLICALL MLIDESTROY
 .9				rts
 */--------------------------------------
@@ -1421,16 +1479,16 @@ K.Rename		jsr PFT.CheckPathYA
 				bcs .9
 
 				>PULLW .1+1
-				
+
 				ldy #0
-				
+
 .1				lda $ffff,y				Self Modified
 				beq .8
 				iny
 				sta K.Buf256,y
 				cpy #MLI.MAXPATH
 				bne .1
-				
+
 .8				sty K.Buf256
 				>LDYAI K.Buf256
 				>STYA K.MLI.PARAMS+3
@@ -1449,30 +1507,30 @@ STDIO.NewHFile	sta .4+1				Store hFD
 				
 .1				lda OF.Table.hFD-1,x
 				beq .2
-				
+
 				inx
 				cpx #K.OF.MAX+1
 				bne .1
-				
+
 				lda #E.OOH
 *				sec				
 				rts
-				
+
 .2				stx .3+1				Store hFILE
-				
+
 				lda (pFD)
 				cmp #S.FD.T.CDEV
 				beq .20
-				
+
 				cmp #S.FD.T.BDEV
 				bne .21
-				
+
 .20				lda #0					No hPath for DEV
 				bra .3
-				
+
 .21				>LDYAI K.buf256
 				ldx #SYS.strdup
-				jsr K.SYSCALL.GoB
+				jsr K.SYSCALL2.BANK
 				bcs .9
 
 				txa
@@ -1483,13 +1541,9 @@ STDIO.NewHFile	sta .4+1				Store hFD
 				sta OF.Table.hFD-1,x
 				
 				txa						hFILE
-				
+
 				clc
 .9				rts
-*--------------------------------------
-STDIO.IOERR		lda #MLI.E.IO
-				sec
-				rts
 *--------------------------------------
 MAN
 SAVE USR/SRC/SYS/KERNEL.S.STDIO
