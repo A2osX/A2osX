@@ -285,6 +285,20 @@ A = hFIFO
 
 ## RETURN VALUE  
 
+# ChTyp  
+Change The type of a ProDOS File  
+
+## C  
+`int chtyp(const char *filepath, const char filetype);`  
+
+## ASM  
+**In:**  
+`>PUSHBI filetype`  
+`>LDYA filepath`  
+`>SYSCALL chtyp`  
+
+## RETURN VALUE  
+
 # LoadTxtFile  
 Load TXT a file in memory (with ending 0)  
 
@@ -321,25 +335,6 @@ Load a file in memory
  Y,A = File Length  
  X = hMem of Loaded File  
 
-# ChTyp  
-Change The type of a ProDOS File  
-
-## C  
-`int chtyp(const char *filepath, const char filetype);`  
-
-## ASM  
-**In:**  
-`>PUSHBI filetype`  
-`>LDYA filepath`  
-`>SYSCALL chtyp`  
-
-## RETURN VALUE  
-
-# ChMod  
-**In:**  
- PUSHW = UID  
- PUSHW = PATH  
-
 # ChOwn  
 **In:**  
  PUSHW = mod  
@@ -375,7 +370,7 @@ REG File created on ProDOS : T=TXT,X=$0000
 `lda fd`  
 `>SYSCALL close`  
 
-# read (BLOCKING)  
+# read  
 
 ## C  
 `int read(hFD fd, void *buf, int count);`  
@@ -391,7 +386,7 @@ REG File created on ProDOS : T=TXT,X=$0000
 CC: Y,A = bytes read  
 CS: A = EC  
 
-# write (BLOCKING)  
+# write  
 
 ## C  
 `int write(hFD fd, const void *buf, int count);`  
@@ -788,9 +783,10 @@ A = hFILE
 # pipe  
 
 ## C  
-`hFD pipe();`  
+`hFD pipe(int size);`  
 
 ## ASM  
+`>LDYA size`  
 `>SYSCALL pipe`  
 
 ## RETURN VALUE  
@@ -841,7 +837,7 @@ Write Str to StdOut, appends '\r\n'
 CC = success  
 
 # fputs (BLOCKING)  
-Write Str to FILE  
+Write Str to hFILE  
 
 ## C  
 `int fputs (hFILE stream, const char * str );`  
@@ -906,8 +902,6 @@ Specifiers :
 + %i : pull 1 byte to Print signed DEC -128..127  
 + %I : pull 2 bytes to Print signed DEC -32768..32767  
 + %L : pull 4 bytes signed DEC -2147483648..2147483647  
-+ %n : pull 1 byte to Print low Nibble HEX  
-+ %N : pull 1 byte to Print high Nibble HEX  
 + %s : pull 2 bytes ptr to C-Style String  
 + %S : pull 2 bytes ptr to P-Style String  
 + \b : Print 'BS' (08)  
@@ -1121,8 +1115,8 @@ Test the end-of-file indicator for hFILE
 
 ## RETURN VALUE  
  CC :   
- A=0 EOF  
- A =0 NOT EOF  
+ A = $ff EOF  
+ A = 0 NOT EOF  
  CS :  
 
 # FTell  

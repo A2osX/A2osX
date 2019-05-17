@@ -217,8 +217,6 @@ K.FPutS			jsr PFT.CheckNodeA		set IO.hFD
 * + %i : pull 1 byte to Print signed DEC -128..127
 * + %I : pull 2 bytes to Print signed DEC -32768..32767
 * + %L : pull 4 bytes signed DEC -2147483648..2147483647
-* + %n : pull 1 byte to Print low Nibble HEX
-* + %N : pull 1 byte to Print high Nibble HEX
 * + %s : pull 2 bytes ptr to C-Style String
 * + %S : pull 2 bytes ptr to P-Style String
 * + \b : Print 'BS' (08)
@@ -245,7 +243,22 @@ PrintF.Cnt		.BS 2
 PrintF.hFILE	.BS 1
 *				.ED
 *--------------------------------------
-K.SPrintF		>STYA pIOBuf			str
+K.PrintF.GetFormat
+				lda (pStack)
+				sta ZPPtr1
+				ldy #1
+				lda (pStack),y
+				sta ZPPtr1+1
+				
+				lda pStack
+				inc
+				inc
+				sta pLocal
+				
+				rts
+*--------------------------------------
+K.SPrintF		stz PrintF.hFILE
+				>STYA pIOBuf			str
 				jsr K.PrintF.GetFormat
 				bra K.PrintF.1
 				
@@ -379,12 +392,12 @@ K.PrintF.1		stz PrintF.Cnt
 				adc (pLocal)			... ByteCnt
 				sta pStack				CC
 				pla
+				beq *
 				sec
 				rts
 *--------------------------------------				
-.8				lda pIOBuf+1
-				eor /K.IOBuf
-				bne .80					Writing to buffer, append \0
+.8				lda PrintF.hFILE
+				beq .80					Writing to buffer, append \0
 				
 				>PUSHW PrintF.Cnt		Writing to File/dev...
 				>PUSHWI K.IOBuf
@@ -392,15 +405,13 @@ K.PrintF.1		stz PrintF.Cnt
 				lda PrintF.hFILE
 				jsr K.FWrite
 				bcc .81
+
 				tay
-				bpl .99
+				bne .99
+
+				>RET 4					0=BLOCKING
 				
-				inc						0 = BLOCKING
-*				sec
-				rts
-				
-.80				lda #0					Writing to buffer, append \0
-				ldy PrintF.Cnt
+.80				ldy PrintF.Cnt			A=0, Writing to buffer, append \0
 				sta (pIOBuf),y
 
 .81				lda pLocal
@@ -409,20 +420,6 @@ K.PrintF.1		stz PrintF.Cnt
 				sta pStack				CC
 				>LDYA PrintF.Cnt
 				clc
-				rts
-*--------------------------------------
-K.PrintF.GetFormat
-				lda (pStack)
-				sta ZPPtr1
-				ldy #1
-				lda (pStack),y
-				sta ZPPtr1+1
-				
-				lda pStack
-				inc
-				inc
-				sta pLocal
-				
 				rts
 *--------------------------------------
 K.PrintF.CheckTBL1
@@ -444,10 +441,9 @@ PrintF.ESC		jmp (.1,x)
 				.DA PrintF.E,PrintF.F
 				.DA PrintF.H,PrintF.HH
 				.DA PrintF.I,PrintF.II,PrintF.L
-				.DA PrintF.N,PrintF.NN
 				.DA PrintF.S,PrintF.SS
 *--------------------------------------
-PrintFTBL1		.AS	"bBdDuefhHiILnNsS"
+PrintFTBL1		.AS	"bBdDuefhHiILsS"
 PrintFTBL1.Cnt	.EQ *-PrintFTBL1
 PrintFTBL2		.AS	"befnrtv\%"
 PrintFTBL2.Cnt	.EQ *-PrintFTBL2
@@ -469,15 +465,17 @@ PrintF.B		jsr PrintF.GetByte
 PrintF.B.1		ldx #8
 				
 .1				asl
-				pha
-				lda #'0'
-				adc #0					add Carry
+				tay
+				lda #'0'/2
+				ror
 				jsr PrintF.COut
-				pla
-				bcs PrintF.BB.RTS
+				bcs .9
+				
+				tya
 				dex
 				bne .1
-				rts
+				
+.9				rts
 *--------------------------------------
 PrintF.I		sec						signed short
 				.HS 90					BCC
@@ -591,6 +589,7 @@ PrintF.Hex2Dec	ror HEXBUF.Signed
 
 				lda #'-'
 				jsr PrintF.COut
+				bcs .99
 				
 .9				lda K.PrintF.PadL		any Len format ?
 				beq .4					no
@@ -685,7 +684,8 @@ PrintF.F		clc
 				beq .8
 				
 				jsr PrintF.COut
-
+				bcs .99
+				
 				iny
 				bne .2
 				
@@ -693,39 +693,7 @@ PrintF.F		clc
 				rts
 				
 .9				sec
-PrintF.H.9		rts
-*--------------------------------------
-PrintF.HH		jsr PrintF.GetByte
-				bcs PrintF.H.9
-				pha
-				jsr PrintF.H
-				pla
-				bra PrintF.H.1
-*--------------------------------------
-PrintF.H		jsr PrintF.GetByte
-				bcs PrintF.H.9
-PrintF.H.1		pha
-				jsr PrintF.NN.1
-				pla
-				bra PrintF.N.1
-*--------------------------------------
-PrintF.N		jsr PrintF.GetByte
-				bcs PrintF.H.9
-PrintF.N.1		and #$0F
-				bra PrintF.NN.2
-
-PrintF.NN		jsr PrintF.GetByte
-				bcs PrintF.H.9
-PrintF.NN.1		lsr
-				lsr
-				lsr
-				lsr
-				
-PrintF.NN.2		ora #$30
-				cmp #$3A
-				bcc .1
-				adc #6
-.1				jmp PrintF.COut
+.99				rts
 *--------------------------------------
 PrintF.S		ldy #$ff				CSTR
 				.HS 2C					bit abs
@@ -782,9 +750,55 @@ PrintF.SS		ldy #$00				PSTR
 .8				clc
 .9				rts
 *--------------------------------------
+PrintF.HH		jsr PrintF.GetByte
+				bcs PrintF.COut.RTS
+				tax						LO byte
+				jsr PrintF.H
+				bcs PrintF.COut.RTS
+				txa
+				bra PrintF.H.1
+*--------------------------------------
+PrintF.H		jsr PrintF.GetByte
+				bcs PrintF.COut.RTS
+PrintF.H.1		tay
+				lsr
+				lsr
+				lsr
+				lsr
+				jsr PrintF.COutHex
+				bcs PrintF.COut.RTS
+				tya
+				and #$0F
+*--------------------------------------
+PrintF.COutHex	ora #$30
+				cmp #$3A
+				bcc PrintF.COut
+				adc #6
+*--------------------------------------
+PrintF.COut		phy
+				ldy PrintF.Cnt
+				sta (pIOBuf),y
+				ply
+				
+				inc PrintF.Cnt
+				bne .8
+				
+				lda PrintF.hFILE
+				bne .9
+
+				inc pIOBuf+1
+				inc PrintF.Cnt+1
+				
+.8				clc
+				rts
+				
+.9				lda #E.BUF
+				sec
+PrintF.COut.RTS	rts		
+*--------------------------------------
 PrintF.GetByte	lda #$FF				SELF MODIFIED LStack Ptr
 				cmp (pLocal)
-				beq .9					CS
+				beq PrintF.GetByte.9	CS
 
 				phy
 
@@ -797,30 +811,8 @@ PrintF.GetByte	lda #$FF				SELF MODIFIED LStack Ptr
 				
 *				clc
 
-.9				rts
-*--------------------------------------
-PrintF.COut		phy
-				
-				ldy PrintF.Cnt
-				sta (pIOBuf),y
-				inc PrintF.Cnt
-				bne .8
-				
-				lda pIOBuf+1
-				eor /K.IOBuf
-				beq .9
-
-				inc pIOBuf+1
-				inc PrintF.Cnt+1
-				
-.8				ply
-				clc
+PrintF.GetByte.9
 				rts
-				
-.9				ply
-				lda #E.BUF
-				sec
-				rts		
 */--------------------------------------
 * # fgets (BLOCKING)
 * read bytes from stream into the array
@@ -843,64 +835,9 @@ PrintF.COut		phy
 * (pStack)+0	s
 *--------------------------------------
 K.FGetS			jsr PFT.CheckNodeA
-				bcs .9
+				bcs PrintF.GetByte.9
 
-				lda (pFD)
-				bra K.FGetS.Special
-				
-*				clc
 				lda (pStack)
-				sbc #0
-				sta ZPPtr2				s-1
-				
-				ldy #1
-
-				lda (pStack),y
-				sbc #0
-				sta ZPPtr2+1			s-1
-
-				iny
-				
-				clc				
-				lda (pStack),y			n-1
-				sbc #0
-				sta (pStack),y
-				
-				iny
-				
-				lda (pStack),y			n-1
-				sbc #0
-				sta (pStack),y
-				
-				jsr IO.READ.REG
-				bcs .9
-
-				pha
-				tya
-*				clc				
-				adc ZPPtr2
-				sta ZPPtr2
-
-				pla
-				adc ZPPtr2+1
-				sta ZPPtr2+1
-				
-				lda (ZPPtr2)
-				cmp #C.CR
-				beq .8
-
-				inc ZPPtr2
-				bne .8
-
-				inc ZPPtr2+1
-				
-.8				lda #0
-				sta (ZPPtr2)			terminate string
-				clc
-				
-.9				rts				
-*--------------------------------------				
-K.FGetS.Special	lda (pStack)
 				sta ZPPtr2				s
 				
 				ldy #1
@@ -922,13 +859,17 @@ K.FGetS.Special	lda (pStack)
 				eor #$ff
 				sta	ZPPtr1+1			!(n-2)
 				
-				jsr K.GetC.I
-				bcs .4
+				>PUSHWI 1
+				>PUSHWI K.IOBuf
+				jsr IO.READ.I
+				bcs .7
 				
-.1				cmp #C.LF				Discard any leading LF
+				lda K.IOBuf
+				cmp #C.LF				Discard any leading LF
 				beq .3
 				
-.2				cmp #C.CR
+.2				lda K.IOBuf
+				cmp #C.CR
 				beq .8
 				
 				jsr MEM.PutCharPtr2
@@ -938,7 +879,9 @@ K.FGetS.Special	lda (pStack)
 				inc ZPPtr1+1
 				beq .8					Buffer full
 			
-.3				jsr K.GetC.I
+.3				>PUSHWI 1
+				>PUSHWI K.IOBuf
+				jsr IO.READ.I
 				bcc .2					another char...
 
 .4				tay						
@@ -967,6 +910,11 @@ K.FGetS.Special	lda (pStack)
 				lda #0					BLOCKING
 				sec
 				rts
+				
+.7				tay
+				bpl .9
+				inc						FF
+				rts						BLOCKING
 
 .8				lda #0
 				sta (ZPPtr2)			terminate string
@@ -1002,9 +950,8 @@ K.GetChar		ldy #S.PS.hStdIn
 K.GetC			jsr PFT.CheckNodeA
 				bcs K.GetC.RTS
 
-K.GetC.I		>PUSHWI 1
+				>PUSHWI 1
 				>PUSHWI K.IOBuf
-
 				jsr IO.READ.I
 				bcc .8
 				tay

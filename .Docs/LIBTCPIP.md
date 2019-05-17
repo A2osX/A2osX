@@ -241,11 +241,26 @@ Set Socket Options
 
 ## ASM  
 **In:**  
-`>PUSHWI opts`  
+`>PUSHBI opts`  
 `lda fd`  
 `>LIBCALL hLIBTCPIP,LIBTCPIP.SetSockOpt`  
 
 ## RETURN VALUE  
+
+# EOF  
+End Of File  
+
+## C  
+`int eof(hFD fd);`  
+
+## ASM  
+**In:**  
+`lda fd`  
+`>LIBCALL hLIBTCPIP,LIBTCPIP.EOF`  
+
+## RETURN VALUE  
+CC : A = 0 if some data, A = $ff if EOF  
+CS : A = Socket Error  
 
 # GetTable  
 Get socket table  
