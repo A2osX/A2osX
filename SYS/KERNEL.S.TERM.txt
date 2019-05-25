@@ -19,8 +19,10 @@ ZPTmpBool		.BS 1
 ZPTmpChar		.BS 1
 *--------------------------------------
 bActive			.BS 1
+CsiHeader		.BS 1
 bCsiInNum		.BS 1
 CsiParamCnt		.BS 1
+
 CsiParams		.BS 4
 				.ED
 *--------------------------------------
@@ -213,22 +215,38 @@ DRV.TERM.READ	jsr DRV.TERM.GetIOCTLBufCntDCB
 
 				and #$7F
 
-				ldx KeyRemapped
+				ldx #KeyRemapped.cnt-1
+				
 .2				cmp KeyRemapped,x
 				beq .3
 				dex 
-				bne .2
-				jsr Char.Out.Put		no remap....send char....
+				bpl .2
+				
+				cmp #C.CR
+				bne .21
+
+				jsr Char.Out.Put
+				ldy #S.DCB.TTY.bCRLF
+				lda (ZPDCBPtr),y
+				bpl .7
+				
+				lda #C.LF
+				
+.21				jsr Char.Out.Put		no remap....send char....
 				bra .7					and flush
 				
-.3				lda KeyRemappedIdx,x
-				tax
+.3				lda KeyRemapped.Tbl,x
+				pha
 				
-.4				lda KeyRemappedTbl,x
-				beq .7					end of remap....flush
+				lda #C.ESC
 				jsr Char.Out.Put
-				inx
-				bra .4
+				
+				lda #'['
+				jsr Char.Out.Put
+				
+				pla
+				jsr Char.Out.Put
+				bra .7
 	
 .6				ldy #S.DCB.TTY.OUTTAIL
 				lda (ZPDCBPtr),y
@@ -274,7 +292,7 @@ DRV.TERM.WRITE	jsr DRV.TERM.GetIOCTLBufCntDCB
 .1				inc ZPCount
 				bne .2
 				inc ZPCount+1
-				beq FS.8
+				beq .8
 				
 .2				ldy #S.DCB.TTY.MODE
 				lda (ZPDCBPtr),y
@@ -295,6 +313,9 @@ DRV.TERM.WRITE	jsr DRV.TERM.GetIOCTLBufCntDCB
 				.DA DRV.TERM.IAC
 				.DA DRV.TERM.G0
 				.DA DRV.TERM.G1
+				
+.8				clc
+				rts
 *--------------------------------------
 DRV.TERM.COUT	lda (ZPBufPtr)
 
@@ -324,8 +345,8 @@ DRV.TERM.COUT	lda (ZPBufPtr)
 				jmp (.4,x)
 
 .4				.DA ENQ
-				.DA BS
-				.DA LF
+				.DA DRV.TERM.COUT.BS
+				.DA DRV.TERM.COUT.LF
 				.DA	DRV.TERM.COUT.FF
 				.DA DRV.TERM.COUT.CR
 				.DA DRV.TERM.COUT.SO
@@ -343,18 +364,43 @@ DRV.TERM.COUT.FS
 
 				ldy #S.DCB.TTY.bLINEWRAP
 				lda (ZPDCBPtr),y
-				bpl FS.8
+				bpl DRV.TERM.COUT.FS.8
 				
 				ldy #S.DCB.TTY.CH
 				lda #0
 				sta (ZPDCBPtr),y
 				
-				jmp LF
+				jmp DRV.TERM.COUT.LF.1
 				
 .1				inc
 				sta (ZPDCBPtr),y
 				
-FS.8			clc
+DRV.TERM.COUT.FS.8
+				clc
+				rts
+*--------------------------------------
+DRV.TERM.COUT.BS
+ 				ldy #S.DCB.TTY.CH
+				lda (ZPDCBPtr),y
+				beq .1
+
+				dec
+				sta (ZPDCBPtr),y
+				clc
+				rts
+
+.1				ldy #S.DCB.TTY.CV
+				lda (ZPDCBPtr),y
+				beq .2
+
+				dec
+				sta (ZPDCBPtr),y
+
+				lda #79
+				dey
+				sta (ZPDCBPtr),y
+
+.2				clc
 				rts
 *--------------------------------------
 DRV.TERM.COUT.DEL
@@ -367,7 +413,7 @@ DRV.TERM.COUT.DEL
 
 .1				iny						S.DCB.TTY.CV
 				lda (ZPDCBPtr),y
-				beq FS.8
+				beq DRV.TERM.COUT.FS.8
 				
 				dec
 				sta (ZPDCBPtr),y
@@ -470,11 +516,20 @@ DRV.TERM.CSI	ldy #S.DCB.TTY.INBUFFER
 				rts
 
 DRV.TERM.CSI.Exec
+				stz CsiHeader
 				stz CsiParamCnt
 				stz bCsiInNum
 				
-				ldy #S.DCB.TTY.INBUFFER			EscSeq Ptr
+				ldy #S.DCB.TTY.INBUFFER+1		EscSeq Ptr
+				lda (ZPDCBPtr),y
+				dey
 				
+				cmp #'?'
+				bne .10
+
+				sta CsiHeader
+				iny
+			
 .10				stz ZPTmpWord
 				stz ZPTmpWord+1
 
@@ -554,8 +609,8 @@ DRV.TERM.CSI.Exec
 				tax
 				jmp (.8,x)
 
-.8				.DA Csi.LWEnable		h
-				.DA Csi.LWDisable		l
+.8				.DA Csi.SetMode			h
+				.DA Csi.ResetMode		l
 				.DA Csi.DispAttr		m
 				.DA Csi.Query			n
 				.DA Csi.Scroll			r
@@ -563,24 +618,46 @@ DRV.TERM.CSI.Exec
 				.DA Csi.EraseLine		K
 				.DA	Csi.Home			H
 *--------------------------------------
-Csi.LWEnable	sec
+Csi.SetMode		sec
 				.HS 90					BCC 
 *--------------------------------------
-Csi.LWDisable	clc
+Csi.ResetMode	clc
+
 				ldx CsiParamCnt
-				beq .8
-				dex
-				bne .8
-
-				lda CsiParams
-				eor #7
-				bne .8
-
-				ror
-				ldy #S.DCB.TTY.bLINEWRAP
-				sta (ZPDCBPtr),y
+				beq .99
 				
-.8				clc
+				dex
+				bne .99
+
+				ldx CsiHeader
+				lda CsiParams
+				
+				php
+
+				cmp #20					bCRLF
+				bne .1
+				txa
+				bne .98
+
+				ldy #S.DCB.TTY.bCRLF
+				bra .8
+				
+.1				cmp #7
+				bne .98
+
+				cpx #'?'
+				bne .98
+				
+				ldy #S.DCB.TTY.bLINEWRAP
+				
+.8				plp
+				ror
+				sta (ZPDCBPtr),y
+				clc
+				rts
+
+.98				plp				
+.99				clc
 				rts
 *--------------------------------------
 Csi.DispAttr	ldx CsiParamCnt
@@ -917,30 +994,15 @@ ENQ				ldx #0
 .8				clc
 				rts
 *--------------------------------------
-BS 				ldy #S.DCB.TTY.CH
+DRV.TERM.COUT.LF
+				ldy #S.DCB.TTY.bCRLF
 				lda (ZPDCBPtr),y
-				beq .1
-
-				dec
-				sta (ZPDCBPtr),y
-				clc
-				rts
-
-.1				ldy #S.DCB.TTY.CV
-				lda (ZPDCBPtr),y
-				beq .2
-
-				dec
-				sta (ZPDCBPtr),y
-
-				lda #79
-				dey
-				sta (ZPDCBPtr),y
-
-.2				clc
-				rts
-*--------------------------------------
-LF				ldy #S.DCB.TTY.CV
+				bpl DRV.TERM.COUT.LF.1
+				
+				jsr DRV.TERM.COUT.CR
+				
+DRV.TERM.COUT.LF.1
+				ldy #S.DCB.TTY.CV
 				lda (ZPDCBPtr),y
 				ldy #S.DCB.TTY.SCROLLBOT
 				cmp (ZPDCBPtr),y
@@ -1279,66 +1341,6 @@ DRV.TERM.Title.OFF
 				lda #$0
 				sta (ZPDCBPtr),y
 				jmp DRV.TERM.LINE0CPY
-*--------------------------------------
-RESET.VALUES	.DA #0					S.DCB.TTY.MODE
-				.DA #0					S.DCB.TTY.CH
-				.DA #0					S.DCB.TTY.CV
-				.DA #0					S.DCB.TTY.SCROLLTOP
-				.DA #23					S.DCB.TTY.SCROLLBOT
-				.DA #0					S.DCB.TTY.bCURON
-				.DA #$80				S.DCB.TTY.bNORMAL
-				.DA #$80				S.DCB.TTY.bLINEWRAP
-				.DA #0					S.DCB.TTY.bTITLE
-				.DA #0					S.DCB.TTY.bG0G1
-				.DA #0					S.DCB.TTY.bG0ALT
-				.DA #$80				S.DCB.TTY.bG1ALT
-				.DA #S.DCB.TTY.OUTBUFFER	S.DCB.TTY.OUTTAIL
-				.DA #S.DCB.TTY.OUTBUFFER	S.DCB.TTY.OUTHEAD
-				.DA #S.DCB.TTY.INBUFFER	S.DCB.TTY.INBUFFER			
-*--------------------------------------
-CtrlChars		.DA #C.ENQ,#C.BS,#C.LF,#C.FF,#C.CR,#C.SO,#C.SI,#C.FS,#C.ESC
-CtrlChars.Cnt	.EQ *-CtrlChars
-*--------------------------------------
-EscCodes		.AZ "MDc[()"
-EscCodes.Cnt	.EQ *-EscCodes
-EscModes		.DA #0,#0,#0,#S.DCB.TTY.MODE.CSI,#S.DCB.TTY.MODE.G0,#S.DCB.TTY.MODE.G1
-CsiCodes		.AS "hlmnrJKH"
-CsiCodes.Cnt	.EQ *-CsiCodes
-*--------------------------------------
-KeyRemapped		.HS 05080A0B0D15		L,D,U,CR,R
-KeyRemappedIdx	.HS 050004080C0F
-KeyRemappedTbl	.EQ *
-KeyRemappedLEFT	.HS 1B5B4400			esc[D
-KeyRemappedDOWN	.HS 1B5B4200			esc[B
-KeyRemappedUP	.HS 1B5B4100			esc[A
-KeyRemappedCR	.HS 0D0A00				crlf
-KeyRemappedRGHT	.HS 1B5B4300			esc[C
-*--------------------------------------
-WILLDO			.DA #TELOPT.BINARY,#TELOPT.SGA
-WILLDO.CNT		.EQ *-WILLDO
-WILLDONT		.DA #TELOPT.TSPEED,#TELOPT.LINEMODE,#TELOPT.STATUS
-WILLDONT.CNT	.EQ *-WILLDONT
-DOWILL			.DA #TELOPT.BINARY,#TELOPT.SGA,#TELOPT.TTYPE,#TELOPT.NAWS
-DOWILL.CNT		.EQ *-DOWILL
-DOWONT			.DA #TELOPT.ECHO,#TELOPT.NEWENVIRON,#TELOPT.XDISPLOC,#TELOPT.TSPEED,#TELOPT.LFLOW
-DOWONT.CNT		.EQ *-DOWONT
-SB.IS.TTYPE		.DA #IAC,#SB,#TELOPT.TTYPE,#SB.IS
-ENQ.String		.AS "xterm"
-ENQ.String.Len	.EQ *-ENQ.String
-				.DA #IAC,#SE
-SB.IS.TTYPE.LEN	.EQ *-SB.IS.TTYPE
-SB.IS.NAWS		.DA #IAC,#SB,#TELOPT.NAWS,#SB.IS
-				.DA 80
-				.DA 24
-				.DA #IAC,#SE
-SB.IS.NAWS.LEN	.EQ *-SB.IS.NAWS
-*--------------------------------------
-DRV.TERM.DIB	.DA #S.DIB.S.WRITE+S.DIB.S.READ
-				.DA #0,#0,#0
-				>PSTR "A2osX VT100 TERM"
-				.DA #S.DIB.T.CHAR
-				.DA #0
-				.DA K.VER
 *--------------------------------------
 MAN
 SAVE USR/SRC/SYS/KERNEL.S.TERM
