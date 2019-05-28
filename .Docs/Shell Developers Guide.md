@@ -4,7 +4,7 @@ One of the most significant parts of A2osX is its shell which can perform both i
 
 It should be noted, that it is possible to create and execute short scripts right on the interactive command line (these are run once and not saved like true scripts).  An example  
 
-### The A2osX Shell (SH)
+## The A2osX Shell (SH)
 
 ### Variables
 
@@ -17,13 +17,33 @@ Strings can be up to 255 characters in length.  Note, like INTs, if you try to s
 
 
 The Shell
-Enteracting with the Shell.
+Interacting with the Shell.
 Special Keys
+
+| Key | Usage |
+| -- | -- |
+| BACKSPACE | Deletes character under the cursor.  Note this key does not exist on Apple keyboards, but may on terminals connected via an SSC or through a Telnet Session |
+| DELETE | Deletes character to left of cursor and moves cursor/rest of line to the left |
+| Control-C | Erases entire command line |
+| Control-D | Exits SHell and if the top most SHell logs you out of your session |
+| Control-Z | Deletes character under the cursor |
+| Up Arrow | Displays previous command from history.  Multiple Up Arrows scrolls progressively through history |
+| Down Arrow | Displays next command from history.  Multiple Down Arrows scrolls progressively through history |
+| Left Arrow | Moves cursor to the left to edit current command |
+| Right Arrow | Moves cursor to the right to edit current command |
+| Open Apple-0 | Switches you to the console display |
+| Open Apple-1 to 4 | Switches you to Virtual Terminals 1 through 4 if so configured |
+
 Internal Commands
+
 External Commands
+
 Variables
+
 Special Variables
+
 Scripts
+
 Redirection
 
 ## Advanced Display Techniques
@@ -48,6 +68,9 @@ Plus Colors
 ###Examples
 
 IFTTT Tweet using HTTPGET
+
+Also look at Microsoft Flow and Integromat and Automate.io
+
 
 where [ exp ] and [ condition ] allow to detail operators....
 
