@@ -748,6 +748,22 @@ CC : success
 CS : error  
 A = EC  
 
+# MKFIFO  
+return a pathname to a new FIFO  
+
+## C  
+`int mkfifo( char *pathname, int mode );`  
+
+## ASM  
+**In:**   
+`>PUSHW mode`  
+`>LDYA pathname`  
+`>SYSCALL mkfifo`  
+
+## RETURN VALUE  
+CC = OK, CS = ERROR  
+A = hFD  
+
 # MkNod  
 Create a special or ordinary file.  
 (CDEV, BDEV, DSOCKS, SSOCK, PIPE)  
@@ -761,20 +777,6 @@ Create a special or ordinary file.
 `>PUSHW mode`  
 `>LDYA pathname`  
 `>SYSCALL mknod`  
-
-## RETURN VALUE  
-CC = OK, CS = ERROR  
-A = hFILE  
-
-# MKFIFO  
-return a hFILE to a new FIFO  
-
-## C  
-`hFILE mkfifo();`  
-
-## ASM  
-**In:**   
-`>SYSCALL mkfifo`  
 
 ## RETURN VALUE  
 CC = OK, CS = ERROR  
