@@ -159,6 +159,8 @@ a2osx supports as many physical terminals as you have SSC cards and memory to lo
 
 A2osX supports multiple internet connected terminals via a TELNETD server process.  The TELNETD process supports VT-100 terminals, so you should set your Telnet client (i.e. PuTTY) to use VT-100 emulation.  Of course you can use another Apple running A2osX and the TELNET client to connect to an Apple running A2osX and the TELNETD server.
 
+Please note, if you are using Telnet Client Software such as PuTTY for Windows and see random garbled characters (odd graphics symbols), you may need to change your **Remote Character Set** to something other than **UTF-8**, such as **ISO-8859-1:1998 (Latin-1, West Europe)**.
+
 ## Hardware
 
 ### Hardware Requirements

@@ -6,8 +6,7 @@ Major updates have occured to the kernel and many of the APIs to support an enha
 
 ## Latest News 2018-11-10
 
-My loneliness has been cured, new resources have signed onto the project.  I welcome Patrick Kloepfer
-who is helping with product management, recruitment, testing and feedback. 
+My loneliness has been cured, new resources have signed onto the project.  I welcome Patrick Kloepfer who is helping with product management, recruitment, testing and feedback. 
 
 ## News 2018-09-06
 
