@@ -16,7 +16,9 @@ NEW
 ZS.START
 ZPUsrID			.BS 1
 
-ZPShellPtr		.BS 2
+ZPhBuf			.BS 1
+ZPBufPtr		.BS 2
+
 ZPRetryCnt		.BS 1
 ZPbValidUser	.BS 1
 
@@ -26,6 +28,9 @@ ZPbGetLineSecret	.BS 1
 ZPbEsc			.BS 1
 ZPGetLineLen	.BS 1
 ZPGetLineMax	.BS 1
+
+ZPhPW			.BS 1
+ZPPWPtr			.BS 2
 
 ZPhSID			.BS 1
 
@@ -70,7 +75,7 @@ L.SHELL			.DA SHELL
 CS.INIT			clc
 CS.INIT.RTS		rts
 *--------------------------------------
-CS.RUN			>LDYAI 256
+CS.RUN			>LDYAI 32
 				>SYSCALL getmem
 				bcs CS.INIT.RTS
 
@@ -80,8 +85,15 @@ CS.RUN			>LDYAI 256
 				>LDYA L.ETCISSUE
 				jsr CS.RUN.DUMPFILE
 
-				>PUSHW pData			PW
-				lda #0
+				>LDYAI S.PW
+				>SYSCALL getmem
+				bcs CS.INIT.RTS
+
+				>STYA ZPPWPtr
+				stx ZPhPW
+
+				>PUSHWI 0				Dry Run, no output
+*				lda #0					ROOT user
 				>SYSCALL GetPWUID
 				bcc CS.RUN.AUTH
 				
@@ -106,7 +118,7 @@ CS.RUN.AUTH		>LDYA L.LIBCRYPT
 				jsr CS.RUN.GetLine
 				bcs .9
 				
-				>PUSHW pData
+				>PUSHW ZPPWPtr
 				>LDYA ZPGetLinePtr
 				>SYSCALL GetPWName
 				ror ZPbValidUser
@@ -116,7 +128,7 @@ CS.RUN.AUTH		>LDYA L.LIBCRYPT
 				>SYSCALL printf
 				bcs .9
 				
-				lda #128
+				lda #32
 				sec
 				jsr CS.RUN.GetLine
 				bcs .9
@@ -135,10 +147,12 @@ CS.RUN.AUTH		>LDYA L.LIBCRYPT
 				bcs .9
 				
 				dec ZPRetryCnt
-				bne .1
+				beq .99
 				
-				lda #E.IUSR
-*				sec				
+				jmp .1
+				
+.99				lda #E.IUSR
+				sec				
 .9				rts
 *--------------------------------------
 CS.RUN.CHECKPWD	rol ZPbValidUser
@@ -148,7 +162,14 @@ CS.RUN.CHECKPWD	rol ZPbValidUser
 				>PUSHW ZPGetlinePtr
 				>LIBCALL hLIBCRYPT,LIBCRYPT.MD5
 				
-				>PUSHEA.G PW+S.PW.PASSWD
+				lda ZPPWPtr
+				clc
+				adc #S.PW.PASSWD
+				tay
+				lda ZPPWPtr+1
+				adc /S.PW.PASSWD
+				>PUSHYA
+				
 				>LDYA ZPGetlinePtr
 				>SYSCALL strcmp
 
@@ -196,6 +217,8 @@ CS.RUN.EXEC		ldx #1
 				>LDYA L.ETCMOTD
 				jsr CS.RUN.DumpFile
 				
+				jsr CS.CLEANUP
+
 				>PUSHBI S.PS.F.HOLD
 				>LDYA L.SHELL
 				>SYSCALL ExecL
@@ -208,7 +231,7 @@ CS.RUN.EXEC		ldx #1
 				stz S.Table.hSession-1,x
 				stz S.Table.hFILE-1,x
 				>SYSCALL freemem
-				
+				sec
 .9				rts
 *--------------------------------------
 CS.RUN.SetRootSession
@@ -236,37 +259,25 @@ CS.RUN.SetUserSession
 				
 				ldy #S.PW.NAME-1
 				
-.1				inx
-				iny
-				lda (pData),y
-				bne .1					NAME len
+				jsr CS.RUN.AddStrLen	NAME len
 				
 				inx
 				
 				ldy #S.PW.GECOS-1
 				
-.2				inx
-				iny
-				lda (pData),y
-				bne .2					GECOS len
+				jsr CS.RUN.AddStrLen	GECOS len
 				
 				inx
 				
 				ldy #S.PW.DIR-1
 				
-.3				inx
-				iny
-				lda (pData),y
-				bne .3					DIR len
+				jsr CS.RUN.AddStrLen	DIR len
 				
 				inx
 
 				ldy #S.PW.SHELL-1
 				
-.4				inx
-				iny
-				lda (pData),y
-				bne .4					SHELL len
+				jsr CS.RUN.AddStrLen	SHELL len
 
 				txa
 				tay
@@ -282,14 +293,14 @@ CS.RUN.SetUserSession
 *				clc
 
 				ldy #S.PW.GID
-				lda (pData),y
+				lda (ZPPWPtr),y
 				tax
 				bne .5
 				
 				sec
 				
 .5				ldy #S.PW.UID
-				lda (pData),y
+				lda (ZPPWPtr),y
 				bne .6
 				
 				sec
@@ -297,7 +308,7 @@ CS.RUN.SetUserSession
 .6				lda #0
 				ror
 				jsr CS.RUN.AddByte			PRIV
-				lda (pData),y
+				lda (ZPPWPtr),y
 				jsr CS.RUN.AddByte			UID
 				txa
 				jsr CS.RUN.AddByte			GID
@@ -320,7 +331,14 @@ CS.RUN.SetUserSession
 				clc
 .9				rts
 *--------------------------------------
-CS.RUN.AddStr	lda (pData),y
+CS.RUN.AddStrLen
+.1				inx
+				iny
+				lda (ZPPWPtr),y
+				bne .1
+				rts
+*--------------------------------------
+CS.RUN.AddStr	lda (ZPPWPtr),y
 				jsr CS.RUN.AddByte
 				iny
 				tax
@@ -414,68 +432,62 @@ CS.RUN.DumpFile	pha
 				
 				stx ZPhFile		
 				
-.1				>PUSHWI	256
-				>PUSHW ZPGetLinePtr
-				lda ZPhFile
+				>LDYAI 256
+				>SYSCALL getmem
+				bcs .99
 
-				>SYSCALL fgets
-				bcs .8
+				>STYA ZPBufPtr
+				stx ZPhBuf
 				
-				>LDYA ZPGetLinePtr
+.1				>PUSHWI	256
+				>PUSHW ZPBufPtr
+				lda ZPhFile
+				>SYSCALL fgets
+				bcs .7
+				
+				>LDYA ZPBufPtr
 				>SYSCALL ExpandStr
 				bcc .2
 
-				php
+.99				php
 				pha
 				jsr .8
 				pla
 				plp
-				rts
+.9				rts
 				
 .2				phx
-				>STYA ZPStrPtr
-	
-				ldy #$ff
-
-.3				iny
-				lda (ZPStrPtr),y
-				bne .3
-				
-				lda #C.CR
-				sta (ZPStrPtr),y
-				iny
-				lda #C.LF
-				sta (ZPStrPtr),y
-				iny
-				lda #0
-				sta (ZPStrPtr),y
-				
-				>PUSHBI 0
-				>LDYA ZPStrPtr
-				>SYSCALL printf
+				>SYSCALL puts
 				
 				pla
 				>SYSCALL freemem
 				bra .1
-	
+				
+.7 				lda ZPhBuf
+				>SYSCALL freemem
 .8				lda ZPhFile
 				>SYSCALL fclose
 				
-.9				rts				
+				rts				
 *--------------------------------------
 CS.DOEVENT		
 				sec
 				rts		
 *--------------------------------------
-CS.QUIT			lda ZPhGetLine
-				beq .1
-				
-				>SYSCALL freemem
-				
-.1				lda hLIBCRYPT
-				beq .8
+CS.QUIT			lda hLIBCRYPT
+				beq CS.CLEANUP
 				
 				>SYSCALL UnloadLib
+				
+CS.CLEANUP		lda ZPhGetLine
+				beq .1
+				stz ZPhGetLine
+				>SYSCALL freemem
+				
+.1				lda ZPhPW
+				beq .8
+				stz ZPhPW
+				>SYSCALL freemem
 				
 .8				clc
 				rts
@@ -507,7 +519,6 @@ SESSION.ROOT.Size	.EQ	*-SESSION.ROOT
 				.DUMMY
 				.OR 0
 DS.START
-PW				.BS S.PW
 DS.END
 				.ED
 *--------------------------------------
