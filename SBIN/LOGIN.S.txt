@@ -21,6 +21,7 @@ ZPBufPtr		.BS 2
 
 ZPRetryCnt		.BS 1
 ZPbValidUser	.BS 1
+ZPUID			.BS 1
 
 ZPhGetLine		.BS 1
 ZPGetLinePtr	.BS 2
@@ -75,7 +76,7 @@ L.SHELL			.DA SHELL
 CS.INIT			clc
 CS.INIT.RTS		rts
 *--------------------------------------
-CS.RUN			>LDYAI 32
+CS.RUN			>LDYAI 33				Enough for HASH
 				>SYSCALL getmem
 				bcs CS.INIT.RTS
 
@@ -85,19 +86,21 @@ CS.RUN			>LDYAI 32
 				>LDYA L.ETCISSUE
 				jsr CS.RUN.DUMPFILE
 
-				>LDYAI S.PW
-				>SYSCALL getmem
-				bcs CS.INIT.RTS
-
-				>STYA ZPPWPtr
-				stx ZPhPW
-
 				>PUSHWI 0				Dry Run, no output
 *				lda #0					ROOT user
 				>SYSCALL GetPWUID
-				bcc CS.RUN.AUTH
+				bcc CS.RUN.AUTH			
+*--------------------------------------
+CS.RUN.NOAUTH	>PUSHBI 0
+				>LDYA L.MSG.NOAUTH
+				>SYSCALL printf
+				bcs .9
 				
-				jmp CS.RUN.NOAUTH
+				jsr CS.RUN.SetRootSession
+				bcs .9
+				
+				jmp CS.RUN.EXEC
+.9				rts				
 *--------------------------------------
 CS.RUN.AUTH		>LDYA L.LIBCRYPT
 				>SYSCALL LoadLib
@@ -118,10 +121,11 @@ CS.RUN.AUTH		>LDYA L.LIBCRYPT
 				jsr CS.RUN.GetLine
 				bcs .9
 				
-				>PUSHW ZPPWPtr
+				>PUSHWI 0			Dry Run
 				>LDYA ZPGetLinePtr
 				>SYSCALL GetPWName
 				ror ZPbValidUser
+				sta ZPUID
 				
 				>PUSHBI 0
 				>LDYA L.MSG.PASSWORD
@@ -139,9 +143,14 @@ CS.RUN.AUTH		>LDYA L.LIBCRYPT
 				bcs .9
 
 				jsr CS.RUN.CHECKPWD
-				bcc CS.RUN.LOGIN
+				bcs .8
 				
-				>PUSHBI 0
+				jsr CS.RUN.SetUserSession
+				bcs .9
+
+				jmp CS.RUN.EXEC
+				
+.8				>PUSHBI 0
 				>LDYA L.MSG.BAD
 				>SYSCALL printf
 				bcs .9
@@ -153,85 +162,6 @@ CS.RUN.AUTH		>LDYA L.LIBCRYPT
 				
 .99				lda #E.IUSR
 				sec				
-.9				rts
-*--------------------------------------
-CS.RUN.CHECKPWD	rol ZPbValidUser
-				bcs CS.RUN.CHECK.9
-
-				>PUSHW ZPGetlinePtr
-				>PUSHW ZPGetlinePtr
-				>LIBCALL hLIBCRYPT,LIBCRYPT.MD5
-				
-				lda ZPPWPtr
-				clc
-				adc #S.PW.PASSWD
-				tay
-				lda ZPPWPtr+1
-				adc /S.PW.PASSWD
-				>PUSHYA
-				
-				>LDYA ZPGetlinePtr
-				>SYSCALL strcmp
-
-CS.RUN.CHECK.9	rts
-*--------------------------------------
-CS.RUN.LOGIN	jsr CS.RUN.SetUserSession
-				
-				bcc CS.RUN.EXEC
-CS.RUN.LOGIN.9	rts
-*--------------------------------------
-CS.RUN.NOAUTH	>PUSHBI 0
-				>LDYA L.MSG.NOAUTH
-				>SYSCALL printf
-				bcs CS.RUN.CHECK.9
-				
-				jsr CS.RUN.SetRootSession
-				bcs CS.RUN.LOGIN.9
-
-CS.RUN.EXEC		ldx #1
-
-.1				lda S.Table.hSession-1,x
-				beq .2
-				inx
-				cpx #K.USR.MAX+1
-				bne .1
-				
-				lda #E.OOH
-*				sec				
-				rts	
-				
-.2				stx ZPUsrID
-				txa
-				
-				ldy #S.PS.hSID
-				sta (pPS),y
-				
-				lda ZPhSID
-				ldx ZPUsrID
-				sta S.Table.hSession-1,x
-				
-				ldy #S.PS.hStdIn
-				lda (pPS),y
-				sta S.Table.hFILE-1,x				
-
-				>LDYA L.ETCMOTD
-				jsr CS.RUN.DumpFile
-				
-				jsr CS.CLEANUP
-
-				>PUSHBI S.PS.F.HOLD
-				>LDYA L.SHELL
-				>SYSCALL ExecL
-				bcs .9
-				
-				>SLEEP
-				
-				ldx ZPUsrID
-				lda S.Table.hSession-1,x
-				stz S.Table.hSession-1,x
-				stz S.Table.hFILE-1,x
-				>SYSCALL freemem
-				sec
 .9				rts
 *--------------------------------------
 CS.RUN.SetRootSession
@@ -329,6 +259,84 @@ CS.RUN.SetUserSession
 				jsr CS.RUN.AddByte
 
 				clc
+.9				rts
+*--------------------------------------
+CS.RUN.CHECKPWD	rol ZPbValidUser
+				bcs CS.RUN.CHECK.9
+
+				>LDYAI S.PW
+				>SYSCALL getmem
+				bcs CS.RUN.CHECK.9
+
+				>STYA ZPPWPtr
+				stx ZPhPW
+				
+				>PUSHYA
+				lda ZPUID
+				>SYSCALL GetPWUID
+				bcs CS.RUN.CHECK.9
+
+				>PUSHW ZPGetlinePtr
+				>PUSHW ZPGetlinePtr
+				>LIBCALL hLIBCRYPT,LIBCRYPT.MD5
+				
+				lda ZPPWPtr
+				clc
+				adc #S.PW.PASSWD
+				tay
+				lda ZPPWPtr+1
+				adc /S.PW.PASSWD
+				>PUSHYA
+				
+				>LDYA ZPGetlinePtr
+				>SYSCALL strcmp
+
+CS.RUN.CHECK.9	rts
+*--------------------------------------
+CS.RUN.EXEC		ldx #1
+
+.1				lda S.Table.hSession-1,x
+				beq .2
+				inx
+				cpx #K.USR.MAX+1
+				bne .1
+				
+				lda #E.OOH
+*				sec				
+				rts	
+				
+.2				stx ZPUsrID
+				txa
+				
+				ldy #S.PS.hSID
+				sta (pPS),y
+				
+				lda ZPhSID
+				ldx ZPUsrID
+				sta S.Table.hSession-1,x
+				
+				ldy #S.PS.hStdIn
+				lda (pPS),y
+				sta S.Table.hFILE-1,x				
+
+				>LDYA L.ETCMOTD
+				jsr CS.RUN.DumpFile
+				
+				jsr CS.CLEANUP
+
+				>PUSHBI S.PS.F.HOLD
+				>LDYA L.SHELL
+				>SYSCALL ExecL
+				bcs .9
+				
+				>SLEEP
+				
+				ldx ZPUsrID
+				lda S.Table.hSession-1,x
+				stz S.Table.hSession-1,x
+				stz S.Table.hFILE-1,x
+				>SYSCALL freemem
+				sec
 .9				rts
 *--------------------------------------
 CS.RUN.AddStrLen
