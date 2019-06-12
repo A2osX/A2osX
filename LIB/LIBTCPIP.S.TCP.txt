@@ -104,7 +104,7 @@ TCP.IN.JMP.SYNSENT
 				jmp SKT.StoreTCB.S
 				
 .9				lda #S.TCP.OPTIONS.RST
-				jsr TCP.OUT.SendOptA
+				jsr TCP.OUT.SendOptA	Send RST
 				
 				ldx SKT.Index
 				lda SKT.TABLE,x
@@ -193,7 +193,7 @@ TCP.IN.JMP.ESTBLSH
 				sbc TmpDWord+2
 				sta SKT.Cache+S.SOCKET.TCP.OUTUSED+1
 
-.3				jsr SKT.StoreTCB		and update SKT
+				jsr SKT.StoreTCB
 
 .4				jsr TCP.IN.SetDataInPtrAndLen
 				
@@ -227,12 +227,9 @@ TCP.IN.JMP.ESTBLSH
 				bne .6
 				inc SKT.Cache+S.SOCKET.TCP.INSEQNUM
 
-.6				jsr TCP.SetSocketTCPO.ACK	
-
-*				lda #S.TCP.OPTIONS.ACK
-*				jsr TCP.OUT.SendOptA	Try to ACK read DATA
-
-				jsr SKT.StoreTCB		success, update socket
+.6				jsr SKT.StoreTCB		update socket
+				
+				jsr TCP.SetSocketTCPO.ACK	...and ack data
 				
 .7				ldy #S.TCP.OPTIONS
 				lda (ZPFrameInPtr),y
@@ -245,7 +242,7 @@ TCP.IN.JMP.ESTBLSH
 				
 				jsr TCP.IN.ACKTheFIN
 				lda #S.TCP.OPTIONS.FIN+S.TCP.OPTIONS.ACK
-				jmp TCP.OUT.SendOptA	FIN received, Send FIN.ACK		
+				jmp TCP.SetSocketTCPO	FIN received, Send FIN.ACK		
 				
 .8				clc
 .9				rts
@@ -340,10 +337,10 @@ TCP.IN.ACKTheSYN
 .3				lda (ZPFrameInPtr),y	Set OUTACK=SEQ+1 for new socket...
 				adc #0
 				sta SKT.Cache+S.SOCKET.TCP.INSEQNUM,x
-*				sta SKT.Cache+S.SOCKET.TCP.OUTACKNUM,x
 				dey
 				dex
 				bpl .3
+
 				rts
 *--------------------------------------
 TCP.IN.ACKTheFIN
@@ -355,13 +352,6 @@ TCP.IN.ACKTheFIN
 				bne .8
 				dex
 				bpl .1
-
-*.2				ldx #3
-
-*.3				inc SKT.Cache+S.SOCKET.TCP.OUTACKNUM,x
-*				bne .8
-*				dex
-*				bpl .3
 
 .8				rts
 *--------------------------------------
@@ -441,6 +431,7 @@ TCP.SENDCLOSE	ldx #0
 				cmp #S.SOCKET.TCP.S.ESTBLSH
 				bne .8
 				
+				jsr SKT.GetTCB
 				jsr TCP.OUT
 				
 				bra .8
@@ -466,17 +457,7 @@ TCP.SENDCLOSE	ldx #0
 
 .9				rts
 *--------------------------------------
-TCP.SetSocketTCPO.ACK
-				lda #S.TCP.OPTIONS.ACK
-TCP.SetSocketTCPO
-				ldy #S.SOCKET.TCP.O
-				ora (ZPPtrSKT),y
-				sta (ZPPtrSKT),y
-				rts
-*--------------------------------------
-TCP.OUT			jsr SKT.GetTCB 
-
-TCP.OUT.I		lda SKT.Cache+S.SOCKET.TCP.OUTTOSEND+1
+TCP.OUT			lda SKT.Cache+S.SOCKET.TCP.OUTTOSEND+1
 				ldy SKT.Cache+S.SOCKET.TCP.OUTTOSEND
 				
 				bne .1
@@ -505,9 +486,14 @@ TCP.OUT.I		lda SKT.Cache+S.SOCKET.TCP.OUTTOSEND+1
 
 				jsr SKT.GetDataFromSktOut
 								
-				lda #S.TCP.OPTIONS.ACK+S.TCP.OPTIONS.PSH
+				ldy #S.TCP.WINDOW
+				lda SKT.Cache+S.SOCKET.TCP.INFREE+1
+				sta (ZPFrameOutPtr),y
+				iny
+				lda SKT.Cache+S.SOCKET.TCP.INFREE
+				sta (ZPFrameOutPtr),y
 				
-*				jsr TCP.SetSocketTCPO
+				lda #S.TCP.OPTIONS.ACK+S.TCP.OPTIONS.PSH
 				
 				jsr TCP.OUT.Send
 				
@@ -533,7 +519,19 @@ TCP.OUT.SendOptA
 
 				>LDYAI 0
 				jsr TCP.NewFrame
-				bcs TCP.OUT.Send.RTS
+				bcs TCP.OUT.Send.9
+
+				ldy #S.SOCKET.TCP.INFREE+1
+				lda (ZPPtrSKT),y
+				tax
+				dey
+				lda (ZPPtrSKT),y
+				
+				ldy #S.TCP.WINDOW
+				sta (ZPFrameOutPtr),y
+				iny
+				txa
+				sta (ZPFrameOutPtr),y
 
 				ldy #S.SOCKET.TCP.O
 				lda (ZPPtrSKT),y
@@ -561,23 +559,23 @@ TCP.OUT.Send	ldy #S.TCP.OPTIONS
 				dey
 				dex
 				bpl .3
-				
-				ldy #S.TCP.WINDOW
-				lda SKT.Cache+S.SOCKET.TCP.INFREE+1
-				sta (ZPFrameOutPtr),y
-				iny
-				lda SKT.Cache+S.SOCKET.TCP.INFREE
-				sta (ZPFrameOutPtr),y
 
 				jsr FRM.SendIP
-				bcs TCP.OUT.Send.RTS
+				bcs TCP.OUT.Send.9
 				
 				ldy #S.SOCKET.TCP.O
 				lda #0
 				sta (ZPPtrSKT),y
 
 *				clc
-TCP.OUT.Send.RTS
+TCP.OUT.Send.9	rts
+*--------------------------------------
+TCP.SetSocketTCPO.ACK
+				lda #S.TCP.OPTIONS.ACK
+TCP.SetSocketTCPO
+				ldy #S.SOCKET.TCP.O
+				ora (ZPPtrSKT),y
+				sta (ZPPtrSKT),y
 				rts
 *--------------------------------------
 TCP.NewFrame	ldx #S.IP.PROTOCOL.TCP
@@ -590,13 +588,6 @@ TCP.NewFrame	ldx #S.IP.PROTOCOL.TCP
 				
 				ldy #S.TCP.DATAOFFSET
 				lda #$50				Header size = 5 DWORDS
-				sta (ZPFrameOutPtr),y
-				
-				ldy #S.TCP.WINDOW
-				lda SKT.Cache+S.SOCKET.TCP.INFREE+1
-				sta (ZPFrameOutPtr),y
-				iny
-				lda SKT.Cache+S.SOCKET.TCP.INFREE
 				sta (ZPFrameOutPtr),y
 				
 				clc
