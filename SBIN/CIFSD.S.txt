@@ -7,6 +7,11 @@ NEW
 *--------------------------------------
 				.INB INC/MACROS.I
 				.INB INC/A2OSX.I
+				.INB INC/ETH.I
+				.INB INC/LIBTCPIP.I	
+				.INB INC/NET.SMB.I				
+*--------------------------------------
+TIMEOUT.MAX		.EQ 100					10 sec.
 *--------------------------------------
 * Zero Page Segment, up to 32 bytes
 *--------------------------------------
@@ -14,6 +19,7 @@ NEW
 				.OR ZPBIN
 ZS.START
 ZPIPCfgPtr		.BS 2
+TimeOut			.BS 1
 ZS.END
 				.ED
 *--------------------------------------
@@ -23,7 +29,7 @@ CS.START		cld
 				jmp (.1,x)
 				.DA #$61				6502,Level 1 (65c02)
 				.DA #1					BIN Layout Version 1
-				.DA #0					S.PS.F.EVENT
+				.DA #S.PS.F.EVENT
 				.DA #0
 				.DA CS.END-CS.START		Code Size (without Constants)
 				.DA DS.END-DS.START		Data SegmentSize
@@ -37,7 +43,9 @@ CS.START		cld
 				.DA CS.RUN
 				.DA CS.DOEVENT		
 				.DA	CS.QUIT
-L.MSG.USAGE		.DA MSG.USAGE	
+L.LIBTCPIP		.DA LIBTCPIP
+L.MSG.USAGE		.DA MSG.USAGE
+L.MSG.UNKNOWN	.DA MSG.UNKNOWN
 				.DA 0
 *--------------------------------------
 * Called once at process creation
@@ -53,17 +61,39 @@ CS.INIT			>LDYA L.LIBTCPIP
 				>STYA ZPIPCfgPtr
 				
 				lda (ZPIPCfgPtr)		Configured ?
-				bmi .8
+				bmi .1
 				
-				
-				
-				
-	
 				lda #E.SYN
 				sec
 				rts
 				
-.8				clc
+.1				lda #AF.INET
+				>STA.G SA.LOCAL
+				>STA.G SA.REMOTE
+				
+				ldy #S.IPCFG.IP+3
+				
+.2				lda (ZPIPCfgPtr),y
+				pha
+				dey
+				cpy #S.IPCFG.IP-1
+				bne .2
+				
+				ldy #SA.REMOTE+S.SOCKADDR.PORT
+				
+.3				pla
+				sta (pData),y
+				iny
+				cpy #SA.REMOTE+S.SOCKADDR.PORT+4
+				bne .3
+				
+				lda #TCP.PORT.CIFS
+				>STA.G SA.REMOTE+S.SOCKADDR.PORT
+				iny
+				lda /TCP.PORT.CIFS
+				sta (pData),y
+
+				clc
 .99				rts
 *--------------------------------------
 * Called until exit with CS
@@ -87,16 +117,68 @@ CS.RUN.CheckArgs
 				lda (pPs),y
 				cmp #3
 				bcc .9
+
+				lda #TIMEOUT.MAX
+				sta TimeOut
 				
+.1				>PUSHEA.G SA.REMOTE+S.SOCKADDR.ADDR
+				lda #1
+				>SYSCALL ArgV
+				>PUSHYA
+				>LIBCALL hLIBTCPIP,LIBTCPIP.HST.GETBYNAME
+				bcc .2
 				
+				>SLEEP
+				lda TimeOut
+				bne .1
 				
+				lda #1
+				>SYSCALL ArgV
+				>PUSHYA
+				>PUSHBI 2
+				>LDYA L.MSG.UNKNOWN
+				>SYSCALL printf
+				sec
+				rts
+				
+.2				
+
+
+				clc
+				rts
+
 .9				sec
 				rts
+*--------------------------------------
+CS.RUN.Connect	>PUSHBI 0				no protocol
+				lda #S.SOCKET.T.STREAM
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Socket
+				bcs .9
+
+				>STA.G hSocket
+
+				>PUSHW.G SA.LOCAL
+				>LDA.G hSocket
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Bind
+				bcs .9
+				
+				>PUSHW.G SA.REMOTE
+				>LDA.G hSocket
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Connect
+.9				rts
 *--------------------------------------
 * Called if option S.PS.F.EVENT enabled in Header
 * Timer Event : every 10th seconds
 *--------------------------------------
-CS.DOEVENT		sec
+CS.DOEVENT		lda (pEvent)
+				bpl .9					is it a TIMER event?
+				
+				lda TimeOut
+				beq .9
+				
+				dec TimeOut
+				
+.9				sec						do not discard TIMER event
 				rts
 *--------------------------------------
 * Called once, when RUN exited with CS
@@ -113,22 +195,26 @@ CS.END
 *--------------------------------------
 * Initialized DATA
 *--------------------------------------
-MSG.USAGE		.AZ "Usage : CIFSD <ip|host> sharename mountpoint"
+LIBTCPIP		.AZ "libtcpip"
 hLIBTCPIP		.BS 1
+MSG.USAGE		.AZ "Usage : CIFSD <ip|host> sharename mountpoint"
+MSG.UNKNOWN		.AZ "%s: Unknown host\r\n"
 *--------------------------------------
 * Per Process DATA segement (0 filled before INIT)
 *--------------------------------------
 				.DUMMY
 				.OR 0
 DS.START
-SA.LOCAL		.DA #AF.INET			S.SOCKADDR.AF
+SA.LOCAL		.BS 1					S.SOCKADDR.AF
 				.BS 1
 				.BS 4					S.SOCKADDR.ADDR
 				.BS 2					S.SOCKADDR.PORT
-SA.REMOTE		.DA #AF.INET			S.SOCKADDR.AF
+SA.REMOTE		.BS 1					S.SOCKADDR.AF
 				.BS 1
 				.BS 4					S.SOCKADDR.ADDR
-				.DA 445
+				.BS 2					S.SOCKADDR.PORT
+				
+hSocket			.BS 1				
 DS.END
 				.ED
 *--------------------------------------
