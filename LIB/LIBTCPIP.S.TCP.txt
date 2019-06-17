@@ -125,7 +125,7 @@ TCP.IN.JMP.SYNRCVD
 
 .1				lda	SKT.Cache+S.SOCKET.TCP.OUTNEXTSEQ,x 	Check if ACK=OUTNEXTSEQ+1
 				adc #0
-				sta SKT.Cache+S.SOCKET.TCP.OUTSEQNUM,x 		setup SEQNUM
+				sta SKT.Cache+S.SOCKET.TCP.OUTSENTSEQ,x 		setup SEQNUM
 				sta	SKT.Cache+S.SOCKET.TCP.OUTNEXTSEQ,x		...and update NEXTSEQ
 				eor (ZPFrameInPtr),y
 				bne .8
@@ -140,13 +140,16 @@ TCP.IN.JMP.SYNRCVD
 .9				rts
 *--------------------------------------
 TCP.IN.JMP.ESTBLSH
+				.DO IPDEBUG=1
+				jsr DEBUG.IPID
+				.FIN
 				jsr SKT.GetTCB
 
 				ldy #S.TCP.OPTIONS
 				lda (ZPFrameInPtr),y
 				and #S.TCP.OPTIONS.ACK	Remote side ACKed data ?
 				beq .4
-				
+* Ack sent data 
 				ldy #S.TCP.ACKNUM+3		Get new ACK number from FrameIn...
 				ldx #3					Substract old ACK from socket
 
@@ -154,10 +157,10 @@ TCP.IN.JMP.ESTBLSH
 
 .1				lda (ZPFrameInPtr),y
 				pha
-				sbc SKT.Cache+S.SOCKET.TCP.OUTSEQNUM,x
+				sbc SKT.Cache+S.SOCKET.TCP.OUTSENTSEQ,x
 				sta TmpDWord,x
 				pla						....and Set SEQ = new SEQ
-				sta SKT.Cache+S.SOCKET.TCP.OUTSEQNUM,x
+				sta SKT.Cache+S.SOCKET.TCP.OUTSENTSEQ,x
 				dey
 				dex
 				bpl .1
@@ -168,7 +171,9 @@ TCP.IN.JMP.ESTBLSH
 				tay
 				beq .4
 
-.2				clc
+.2				pha
+
+				clc
 				adc SKT.Cache+S.SOCKET.TCP.OUTTAIL
 				sta SKT.Cache+S.SOCKET.TCP.OUTTAIL
 
@@ -177,12 +182,14 @@ TCP.IN.JMP.ESTBLSH
 				and /K.TCP.WSIZE-1
 				sta SKT.Cache+S.SOCKET.TCP.OUTTAIL+1
 				
-				lda SKT.Cache+S.SOCKET.TCP.OUTFREE
+				pla
+				
 				clc
-				adc TmpDWord+3
+				adc SKT.Cache+S.SOCKET.TCP.OUTFREE
 				sta SKT.Cache+S.SOCKET.TCP.OUTFREE
-				lda SKT.Cache+S.SOCKET.TCP.OUTFREE+1
-				adc TmpDWord+2
+				
+				txa
+				adc SKT.Cache+S.SOCKET.TCP.OUTFREE+1
 				sta SKT.Cache+S.SOCKET.TCP.OUTFREE+1
 
 				lda SKT.Cache+S.SOCKET.TCP.OUTUSED
@@ -193,8 +200,8 @@ TCP.IN.JMP.ESTBLSH
 				sbc TmpDWord+2
 				sta SKT.Cache+S.SOCKET.TCP.OUTUSED+1
 
-				jsr SKT.StoreTCB
-
+*				jsr SKT.StoreTCB
+* Store incoming data
 .4				jsr TCP.IN.SetDataInPtrAndLen
 				
 				lda ZPDataInLen			Incoming Data in this frame ?
@@ -206,13 +213,14 @@ TCP.IN.JMP.ESTBLSH
 
 .5				lda (ZPFrameInPtr),y
 				eor SKT.Cache+S.SOCKET.TCP.INSEQNUM,x
-				bne .7
+				bne .9					Missed a frame.....
+
 				dey
 				dex
 				bpl .5
 
 				jsr SKT.AddDataToSktIn	yes, queue data if there is room for....
-				bcs .7
+				bcs .9					Should never appends....
 
 				lda SKT.Cache+S.SOCKET.TCP.INSEQNUM+3
 *				clc
@@ -242,10 +250,25 @@ TCP.IN.JMP.ESTBLSH
 				
 				jsr TCP.IN.ACKTheFIN
 				lda #S.TCP.OPTIONS.FIN+S.TCP.OPTIONS.ACK
-				jmp TCP.SetSocketTCPO	FIN received, Send FIN.ACK		
+				jsr TCP.SetSocketTCPO	FIN received, Send FIN.ACK		
 				
-.8				clc
-.9				rts
+.8				jsr TCP.OUT				Send ACK as soon as possible
+
+.9				clc
+				rts
+*--------------------------------------
+				.DO IPDEBUG=1
+DEBUG.IPID		ldy #S.IP.IDENTIFICATION
+				lda (ZPFrameInPtr),y
+				>PUSHA
+				iny
+				lda (ZPFrameInPtr),y
+				>PUSHA
+				>PUSHBI 2
+				>LDYA L.IPID
+				>SYSCALL printf
+				rts
+				.FIN
 *--------------------------------------
 TCP.IN.JMP.CLWAIT
 				clc						Wait for SKT.shutdown
@@ -438,13 +461,15 @@ TCP.SENDCLOSE	ldx #0
 				
 .4				ldy #S.SOCKET.SQ.hInMem
 				lda (ZPPtrSKT),y
+				beq .5
 				>SYSCALL2 freemem
 				
-				ldy #S.SOCKET.SQ.hOutMem
+.5				ldy #S.SOCKET.SQ.hOutMem
 				lda (ZPPtrSKT),y
+				beq .6
 				>SYSCALL2 freemem
 				
-				plx
+.6				plx
 				phx
 				lda SKT.TABLE,x
 				stz SKT.TABLE,x
