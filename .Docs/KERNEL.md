@@ -615,6 +615,14 @@ A=hSList
  none.  
  (X,Y unmodified)  
 
+# GetStkObjPtr  
+
+## ASM  
+`lda hStkObj`  
+`>SYSCALL GetStkObjPtr`  
+
+## RETURN VALUE  
+
 # LoadStkObj  
 Load a file in AUX memory (Stock Objects)  
  PUSHW = AUXTYPE (Handled by....  
@@ -626,15 +634,12 @@ Load a file in AUX memory (Stock Objects)
  Y,A = File Length  
  X = hMem of Loaded Object in AUX mem  
 
-# GetStkObjData  
-
-## ASM  
-`PUSHW DataLen`  
-`PUSHW DataPtr`  
-`lda hStkObj`  
-`>SYSCALL GetStkObjData`  
+# GetMemStat  
+**In:**  
+ Y,A = Ptr to 24 bytes buffer  
 
 ## RETURN VALUE  
+ Buffer filled with memory stats  
 
 # ExecL  
 
@@ -709,13 +714,6 @@ A = Child PSID
 `>SYSCALL putpw`  
 
 ## RETURN VALUE  
-
-# GetMemStat  
-**In:**  
- Y,A = Ptr to 24 bytes buffer  
-
-## RETURN VALUE  
- Buffer filled with memory stats  
 
 # Stat  
 Return information about a file  
