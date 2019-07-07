@@ -3,15 +3,9 @@ NEW
 				.LIST OFF	
 *--------------------------------------
 TCP.IN			jsr FRM.GetTargetSKT.TCPUDP
-
 				jsr SKT.FindMatchingLocRem
 				bcs TCP.IN.JMP.CLOSED	no socket, go discard
 
-				ldy #S.SOCKET.PROTO
-				lda (ZPPtrSKT),y
-				cmp #S.IP.PROTOCOL.TCP
-				bne TCP.IN.JMP.CLOSED	wrong protocol, go discard
-			
 				ldy #S.TCP.OPTIONS
 				lda (ZPFrameInPtr),y
 				and #S.TCP.OPTIONS.RST	RST ? go Kill this socket...
@@ -26,6 +20,7 @@ TCP.IN			jsr FRM.GetTargetSKT.TCPUDP
 TCP.IN.RST		lda SKT.TABLE,x
 				jsr SKT.shutdown
 *--------------------------------------
+TCP.IN.JMP.OPENED
 TCP.IN.JMP.CLOSED
 				lda hFrameIn
 				stz hFrameIn
@@ -200,7 +195,7 @@ TCP.IN.JMP.ESTBLSH
 				sbc TmpDWord+2
 				sta SKT.Cache+S.SOCKET.TCP.OUTUSED+1
 
-*				jsr SKT.StoreTCB
+				jsr SKT.StoreTCB
 * Store incoming data
 .4				jsr TCP.IN.SetDataInPtrAndLen
 				
@@ -215,15 +210,16 @@ TCP.IN.JMP.ESTBLSH
 				eor SKT.Cache+S.SOCKET.TCP.INSEQNUM,x
 				bne .9					Missed a frame.....
 
-				dey
+.51				dey
 				dex
 				bpl .5
 
 				jsr SKT.AddDataToSktIn	yes, queue data if there is room for....
-				bcs .9					Should never appends....
+				bcs *					Should never appends....
+
+*				clc
 
 				lda SKT.Cache+S.SOCKET.TCP.INSEQNUM+3
-*				clc
 				adc ZPDataInLen
 				sta SKT.Cache+S.SOCKET.TCP.INSEQNUM+3
 
@@ -237,8 +233,11 @@ TCP.IN.JMP.ESTBLSH
 
 .6				jsr SKT.StoreTCB		update socket
 				
-				jsr TCP.SetSocketTCPO.ACK	...and ack data
-				
+*				jsr TCP.SetSocketTCPO.ACK	...and ack data
+				lda #S.TCP.OPTIONS.ACK
+				jsr TCP.OUT.SendOptA
+*				bcs *
+
 .7				ldy #S.TCP.OPTIONS
 				lda (ZPFrameInPtr),y
 				and #S.TCP.OPTIONS.FIN
@@ -251,12 +250,14 @@ TCP.IN.JMP.ESTBLSH
 				jsr TCP.IN.ACKTheFIN
 				lda #S.TCP.OPTIONS.FIN+S.TCP.OPTIONS.ACK
 				jsr TCP.SetSocketTCPO	FIN received, Send FIN.ACK		
-				
-.8				jsr TCP.OUT				Send ACK as soon as possible
-
+*				jsr TCP.OUT.SendOptA				
+.8				
+*				jsr TCP.OUT				Send ACK as soon as possible
+				clc
+				rts
 .9				
-*				clc
-*				rts
+				sec
+				rts
 *--------------------------------------
 TCP.IN.JMP.CLWAIT
 				clc						Wait for SKT.shutdown
@@ -285,7 +286,7 @@ TCP.IN.JMP.FINWT1
 
 				lda #S.TCP.OPTIONS.FIN+S.TCP.OPTIONS.ACK
 				jsr TCP.OUT.SendOptA	Send FIN.ACK		
-				bcs .9
+				bcs TCP.IN.JMP.TIMEWT.RTS
 
 				lda #S.SOCKET.TCP.S.FINWT2
 				jmp SKT.StoreTCB.S
@@ -293,34 +294,26 @@ TCP.IN.JMP.FINWT1
 .1				jsr TCP.IN.ACKTheFIN	FIN/ACK
 
 				lda #S.TCP.OPTIONS.FIN+S.TCP.OPTIONS.ACK
-				jsr TCP.OUT.SendOptA	Send FIN.ACK		
-				bcs .9
-
-				lda #S.SOCKET.TCP.S.TIMEWT
-				jmp SKT.StoreTCB.S
-				
-*				clc
-.9				rts
+				bra TCP.IN.JMP.FINWT.ACK	Send FIN.ACK		
 *--------------------------------------
 TCP.IN.JMP.FINWT2
 				ldy #S.TCP.OPTIONS		only accept ACK packet
 				lda (ZPFrameInPtr),y
 
 				bit #S.TCP.OPTIONS.ACK
-				beq .8
+				beq TCP.IN.JMP.TIMEWT
 				
 				jsr SKT.GetTCB
 				jsr TCP.IN.ACKTheFIN
 
 				lda #S.TCP.OPTIONS.ACK
+
+TCP.IN.JMP.FINWT.ACK
 				jsr TCP.OUT.SendOptA	FIN received, Send ACK		
-				bcs .9
+				bcs TCP.IN.JMP.TIMEWT.RTS
 			
 				lda #S.SOCKET.TCP.S.TIMEWT
 				jmp SKT.StoreTCB.S
-				
-.8				clc
-.9				rts
 *--------------------------------------
 TCP.IN.JMP.CLOSING
 				ldy #S.TCP.OPTIONS		only accept ACK packet
@@ -338,6 +331,7 @@ TCP.IN.JMP.CLOSING
 *--------------------------------------
 TCP.IN.JMP.TIMEWT
 				clc						Wait for TCP.Close
+TCP.IN.JMP.TIMEWT.RTS
 				rts
 *--------------------------------------
 TCP.IN.ACKTheSYN
@@ -441,11 +435,27 @@ TCP.SENDCLOSE	ldx #0
 				beq .4
 				
 				cmp #S.SOCKET.TCP.S.ESTBLSH
-				bne .8
+				bne .2
 				
 				jsr SKT.GetTCB
 				jsr TCP.OUT
 				
+				bra .8
+				
+.2				cmp #S.SOCKET.TCP.S.OPENED
+				bne .8
+				
+				jsr SKT.GetTCB
+				lda #S.TCP.OPTIONS.SYN
+				jsr TCP.OUT.SendOptA	Send SYN
+				bcs .8					failed ARP lookup....
+
+				lda #S.SOCKET.TCP.S.SYNSENT
+				jsr SKT.StoreTCB.S
+				bra .8
+
+				lda #S.TCP.OPTIONS.SYN
+				jsr TCP.OUT.SendOptA	Send SYN
 				bra .8
 				
 .4				ldy #S.SOCKET.SQ.hInMem
@@ -583,6 +593,7 @@ TCP.OUT.Send	ldy #S.TCP.OPTIONS
 				dex
 				bpl .3
 
+				sec						DONT Queue if fail
 				jsr FRM.SendIP
 				bcs TCP.OUT.Send.9
 				

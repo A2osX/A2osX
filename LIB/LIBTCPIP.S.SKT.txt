@@ -184,17 +184,18 @@ SKT.connect.SEQPACKET
 				jsr SKT.NewTCB
 				bcs SKT.listen.RTS
 
+				lda #S.SOCKET.TCP.S.OPENED
+				jsr SKT.StoreTCB.S
+				
 				lda #S.TCP.OPTIONS.SYN
 				jsr TCP.OUT.SendOptA	Send SYN
-*				bcs .9					could be queued for ARP....
+				bcs .8					failed ARP lookup....
 
 				lda #S.SOCKET.TCP.S.SYNSENT
 				jmp SKT.StoreTCB.S
-
-*.9				lda #ERR.SKT.BAD
-*				sec
-*				clc
-*.99			rts
+				
+.8				clc
+				rts
 */--------------------------------------
 * # Listen
 * Listen for connections on a socket
@@ -366,15 +367,14 @@ SKT.shutdown.STREAM
 				lda #S.SOCKET.TCP.S.FINWT1
 				jmp SKT.StoreTCB.S
 				
-.1				bcs .8					Already Closing			
-*				cmp #S.SOCKET.TCP.S.TIMEWT
-*				beq .8
+.1				cmp #S.SOCKET.TCP.S.CLWAIT
+				beq .3
 				
-				lda #S.TCP.OPTIONS.RST
+.2				lda #S.TCP.OPTIONS.RST
 				jsr TCP.OUT.SendOptA	Send RST
 				bcs .9
 
-				lda #S.SOCKET.TCP.S.TIMEWT
+.3				lda #S.SOCKET.TCP.S.TIMEWT
 				jmp SKT.StoreTCB.S
 
 .8				clc				
@@ -926,8 +926,10 @@ SKT.Send		clc
 				jsr SKT.PullhFDDataInPtrLen
 				plp
 				bcc .1
+				
 				jsr SKT.PullRemAddr
-				jsr SKT.SetRemAddr
+*				jsr SKT.SetRemAddr
+				
 .1				ldy #S.SOCKET.T
 				lda (ZPPtrSKT),y
 				tax
@@ -938,17 +940,18 @@ SKT.Send.RAW	ldy #S.SOCKET.PROTO
 				tax
 				>LDYA ZPDataInLen
 				jsr FRM.NewIP
-				bcs SKT.Send.9
-				bra SKT.Send.DGRAM.8
+				bcc SKT.Send.8
+				
+				rts
 *--------------------------------------
 SKT.Send.DGRAM	ldx #S.IP.PROTOCOL.UDP
-				>LDYA ZPDataInLen
 				jsr FRM.NewIP
 				bcs SKT.Send.9
 				jsr SKT.SetFrameOutTCPUDPPorts
-SKT.Send.DGRAM.8
-				jsr SKT.SetFrameOutDstIP
+
+SKT.Send.8		jsr SKT.SetFrameOutDstIP
 				jsr SKT.CopyDataInToOut
+				clc						Queue if fail
 				jmp FRM.SendIP
 *--------------------------------------
 SKT.Send.STREAM	lda #ERR.SKT.BAD
@@ -956,7 +959,13 @@ SKT.Send.STREAM	lda #ERR.SKT.BAD
 SKT.Send.9		rts
 *--------------------------------------
 SKT.Send.SEQPACKET
-				bra *
+				>LDYA ZPDataInLen
+				jsr TCP.NewFrame
+				bcs SKT.Send.9
+
+				jsr SKT.CopyDataInToOut
+				sec						DONT Queue if fail
+				jmp FRM.SendIP
 */--------------------------------------
 * # GetSockOpt
 * Set Socket Options
@@ -1041,15 +1050,18 @@ SKT.CheckStream	ldy #S.SOCKET.T
 				cmp #S.SOCKET.TCP.S.ESTBLSH
 				bcc .8
 				cmp #S.SOCKET.TCP.S.CLWAIT
-				bcs .91
+				bne .91
+				
 .8				lda #0
+				clc
 				rts						CC=ESTBLSH...or less
 
 .91				lda #MLI.E.IO
 				sec
 				rts
 
-.99				lda #ERR.SKT.BAD
+.99				
+SKT.BAD			lda #ERR.SKT.BAD
 				sec
 				rts
 */--------------------------------------
@@ -1105,10 +1117,14 @@ SKT.SetRemAddr	ldy #S.SOCKET.REM.PORT+1
 				bcs .1
 				rts
 *--------------------------------------
+*  SKT.REM.ADDR = Incoming Frame SRC 
+*  SKT.LOC.ADDR = Incoming Frame DST 
+*--------------------------------------
 SKT.FindMatchingLocRem
 				.DO IPDEBUG=1
 				jsr FRM.Dump
 				.FIN
+
 				ldx #0
 
 .1				lda SKT.TABLE,x
@@ -1127,6 +1143,13 @@ SKT.FindMatchingLocRem
 				cmp #AF.INET
 				bne .8
 
+				ldy #S.SOCKET.PROTO
+				lda (ZPPtrSKT),y
+
+				ldy #S.IP.PROTOCOL				
+				cmp (ZPFrameInPtr),y
+				bne .8
+				
 				ldy #S.SOCKET.LOC.ADDR
 
 .2				lda (ZPPtrSKT),y
@@ -1155,27 +1178,26 @@ SKT.FindMatchingLocRem
 
 .6				lda SKT.REM.ADDR+S.SOCKADDR.ADDR
 
-				cmp #$ff				FF.FF.FF.FF, Broadcast ?
+				cmp #$ff				incoming frame is FF.FF.FF.FF, Broadcast ?
 				bne .41
+
 *				ldy #S.SOCKET.O
 				lda (ZPPtrSKT),y
 				and #S.SOCKET.O.BROADCAST
-				beq .9					this socket does not accept broadcast
+				bne .43
+*				sec				
+				rts					this socket does not accept broadcast
 
-				bra .43
-				
 .41				ldy #S.SOCKET.REM.ADDR
 
-.5				lda (ZPPtrSKT),y
-
-				cmp #$ff				accept 255.255.255.255 ?
-				bne .42
+				lda (ZPPtrSKT),y
+				bne .44
 				
-.43				ldy #S.SOCKET.REM.PORT	Boradcast, check port only
+.43				ldy #S.SOCKET.REM.PORT	Frame is Broadcast, or listening is 0.0.0.0 check port only
 		
 .42				lda (ZPPtrSKT),y
 
-				cmp SKT.REM.ADDR+S.SOCKADDR.ADDR-S.SOCKET.REM.ADDR,y
+.44				cmp SKT.REM.ADDR+S.SOCKADDR.ADDR-S.SOCKET.REM.ADDR,y
 				bne .8					wrong remote host, exit....
 				iny
 				cpy #S.SOCKET.REM.PORT+2
@@ -1221,7 +1243,7 @@ SKT.AddToQueueA pha
 *				sec
 				rts
 *--------------------------------------
-SKT.NewTCB		ldx #S.SOCKET.TCP.INTAIL
+SKT.NewTCB		ldx #S.SOCKET.TCP.INSEQNUM
 				
 .1				stz SKT.Cache,x
 				inx
@@ -1262,7 +1284,7 @@ SKT.NewTCB		ldx #S.SOCKET.TCP.INTAIL
 *				clc				
 .9				rts
 *--------------------------------------
-SKT.GetTCB	 	ldy #S.SOCKET.TCP.INTAIL
+SKT.GetTCB	 	ldy #S.SOCKET.TCP.INSEQNUM
 .1				lda (ZPPtrSKT),y
 				sta SKT.Cache,y
 				iny
@@ -1273,7 +1295,7 @@ SKT.GetTCB	 	ldy #S.SOCKET.TCP.INTAIL
 SKT.StoreTCB.S	ldy #S.SOCKET.TCP.S
 				sta (ZPPtrSKT),y
 
-SKT.StoreTCB 	ldy #S.SOCKET.TCP.INTAIL
+SKT.StoreTCB 	ldy #S.SOCKET.TCP.INSEQNUM
 .1				lda SKT.Cache,y
 				sta (ZPPtrSKT),y
 				iny
@@ -1284,22 +1306,34 @@ SKT.StoreTCB 	ldy #S.SOCKET.TCP.INTAIL
 *--------------------------------------
 SKT.SetFrameOutDstIP
 				ldy #S.SOCKET.REM.ADDR
-				ldx #4
+				ldx #3
 
 .1				lda (ZPPtrSKT),y
+				beq .3
 				pha
 				iny
 				dex
-				bne .1
+				bpl .1
 
 				ldy #S.IP.DST+3
-				ldx #4
+				ldx #3
 
 .2				pla
 				sta (ZPFrameOutPtr),y
 				dey
 				dex
-				bne .2
+				bpl .2
+
+				rts
+				
+.3				ldy #S.IP.DST+3
+
+.4				lda SKT.REM.ADDR+S.SOCKADDR.ADDR,x
+				sta (ZPFrameOutPtr),y
+				dey
+				dex
+				bpl .4
+
 				rts
 *--------------------------------------
 SKT.SetFrameOutTCPUDPPorts
@@ -1316,10 +1350,17 @@ SKT.SetFrameOutTCPUDPPorts
 
 				ldy #S.SOCKET.REM.PORT
 				lda (ZPPtrSKT),y
+				beq .1
+				
 				tax
 				iny
 				lda (ZPPtrSKT),y
- 				ldy #S.TCPUDP.DSTPORT
+				bra .2
+				
+.1				lda SKT.REM.ADDR+S.SOCKADDR.PORT+1
+				ldx SKT.REM.ADDR+S.SOCKADDR.PORT
+	
+.2 				ldy #S.TCPUDP.DSTPORT
 				sta (ZPFrameOutPtr),y
 				iny
 				txa

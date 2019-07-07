@@ -148,7 +148,11 @@ FRM.NewIP		stx	.8+1
 				
 .9				rts
 *--------------------------------------
-FRM.SendIP		ldx #3					Copy SRC.IP even if IP offload
+*				clc						Queue if fail
+*				sec						DONT Queue if fail
+*--------------------------------------
+FRM.SendIP		php
+				ldx #3					Copy SRC.IP even if IP offload
 				ldy #S.IP.SRC+3			for proper UDP/TCP CRC calculation
 				
 .1				lda IPCFG+S.IPCFG.IP,x
@@ -229,7 +233,7 @@ FRM.SendIP		ldx #3					Copy SRC.IP even if IP offload
 				sbc /S.IP
 				
 				dey
-				sta (ZPFrameOutPtr),y				
+				sta (ZPFrameOutPtr),y
 				
 				jsr IP.ComputeUDPChecksum
 				bra .5
@@ -249,11 +253,16 @@ FRM.SendIP		ldx #3					Copy SRC.IP even if IP offload
 				bcs FRM.Queue
 				
 				jsr	FRM.Discard
+
+				plp
 				clc
 				rts
 *--------------------------------------
-FRM.Queue		ldy hFrameOut			no hFrame, cannot queue for retry
-				beq .9
+FRM.Queue		plp
+				bcs .9					DONT queue
+				
+				ldy hFrameOut			no hFrame, cannot queue for retry
+				beq FRM.Discard.9
 
 				ldx FRM.QUEUE.Head
 				inx
@@ -263,7 +272,7 @@ FRM.Queue		ldy hFrameOut			no hFrame, cannot queue for retry
 				ldx #0
 				
 .1				cpx FRM.QUEUE.Tail
-				beq FRM.Discard
+				beq FRM.Discard			CS
 				
 				ldy FRM.QUEUE.Head
 				stx FRM.QUEUE.Head
@@ -278,52 +287,51 @@ FRM.Queue		ldy hFrameOut			no hFrame, cannot queue for retry
 				lda ZPFrameOutLen+1
 				sta FRM.QUEUE.LenH,y
 				
-.9				sec
-				rts
+				clc
+.9				rts
 *--------------------------------------
 FRM.Discard		lda hFrameOut
-				beq .9
+				beq FRM.Discard.9
 				>SYSCALL2 FreeMem
 				stz hFrameOut
-.9				sec
+				
+FRM.Discard.9	sec
 				rts
 *--------------------------------------
 FRM.Retry		ldx FRM.QUEUE.Tail
 
-.10				cpx FRM.QUEUE.Head
+.1				cpx FRM.QUEUE.Head
 				beq .8					Queue is empty, exit...
-				
-				lda FRM.QUEUE.hMem,x
-				>SYSCALL2 GetMemPtr
-				>STYA ZPFrameOutPtr
-				
-				ldx FRM.QUEUE.Tail
 				
 				lda FRM.QUEUE.LenL,x
 				sta ZPFrameOutLen
 				lda FRM.QUEUE.LenH,x
 				sta ZPFrameOutLen+1
 
+				lda FRM.QUEUE.hMem,x
+				>SYSCALL2 GetMemPtr
+				>STYA ZPFrameOutPtr
+				
+				ldx FRM.QUEUE.Tail
+				
 				lda FRM.QUEUE.State,x
 				cmp #ERR.ARP.PENDING
-				bne .1
+				bne .2
 
 				jsr IP.SetDestMAC		Err is ARP or higher, retry getting MAC
-				bcs .2					still error getting dest MAC
+				bcs .3					still error getting dest MAC
 				
-.1				jsr FRM.Send			try sending again to DRV
-				bcc .3
-	
-.2				ldx FRM.QUEUE.Tail		save error...
-				sta FRM.QUEUE.State,x	
+.2				jsr FRM.Send			try sending again to DRV
+				bcc .4
+
+.3				ldx FRM.QUEUE.Tail
+				sta FRM.QUEUE.State,x	save error...
 				dec FRM.QUEUE.Retry,x	
 				bne .8					exit....until next run!
 	
-.3				ldx FRM.QUEUE.Tail		Success,or max retry, discard entry
-				lda FRM.QUEUE.hMem,x
-				>SYSCALL2 FreeMem
+.4				ldx FRM.QUEUE.Tail
+				lda FRM.QUEUE.hMem,x	Success,or max retry, discard entry
 				
-				ldx FRM.QUEUE.Tail
 				inx
 				cpx #K.FRMQUEUE.SIZE
 				bne .5
@@ -331,8 +339,10 @@ FRM.Retry		ldx FRM.QUEUE.Tail
 				ldx #0
 				
 .5				stx FRM.QUEUE.Tail
-				bra .10
+				>SYSCALL2 FreeMem
 				
+				bra FRM.Retry
+
 .8				rts
 *--------------------------------------
 FRM.Send		ldx #3
