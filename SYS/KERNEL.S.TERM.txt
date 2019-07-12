@@ -20,9 +20,7 @@ ZPTmpChar		.BS 1
 *--------------------------------------
 bActive			.BS 1
 CsiHeader		.BS 1
-bCsiInNum		.BS 1
 CsiParamCnt		.BS 1
-
 CsiParams		.BS 4
 				.ED
 *--------------------------------------
@@ -509,7 +507,7 @@ DRV.TERM.CSI	ldy #S.DCB.TTY.INBUFFER
 				cpy #S.DCB.TTY.INBUFFER.MAX-1	buffer full?
 				bne .8
 				
-				jmp RESET.MODE
+				jsr RESET.MODE
 				
 .8				clc
 				rts
@@ -517,93 +515,58 @@ DRV.TERM.CSI	ldy #S.DCB.TTY.INBUFFER
 DRV.TERM.CSI.Exec
 				stz CsiHeader
 				stz CsiParamCnt
-				stz bCsiInNum
 				
-				ldy #S.DCB.TTY.INBUFFER+1		EscSeq Ptr
-				lda (ZPDCBPtr),y
-				dey
+				lda #S.DCB.TTY.INBUFFER+1		EscSeq Ptr
+				clc
+				adc ZPDCBPtr
+				sta ZPPtr2
+				lda /S.DCB.TTY.INBUFFER+1
+				adc ZPDCBPtr+1
+				sta ZPPtr2+1
 				
+				lda (ZPPtr2)
 				cmp #'?'
-				bne .10
+				bne .2
 
 				sta CsiHeader
-				iny
+				
+.1				jsr MEM.NextCharPtr2
 			
-.10				stz ZPTmpWord
-				stz ZPTmpWord+1
+.2				jsr MATH.Dec2ACC32
+				bcs .5
 
-.1				iny
-				lda (ZPDCBPtr),y
+				jsr MEM.AddYToPtr2
 				
-				cmp #'0'
-				bcc .2
-				cmp #'9'+1
-				bcs .2
-
-				dec bCsiInNum
-				
-				and #$0F
-				pha
-				
-				lda ZPTmpWord
-				ldx ZPTmpWord+1
-				
-				asl ZPTmpWord	    param=param*10
-				rol ZPTmpWord+1
-				asl ZPTmpWord
-				rol ZPTmpWord+1
-				
-				clc
-				adc ZPTmpWord
-				sta ZPTmpWord
-				txa
-				adc ZPTmpWord+1
-				sta ZPTmpWord+1
-				asl ZPTmpWord
-				rol ZPTmpWord+1
-
-				pla
-				clc
-				adc ZPTmpWord
-				sta ZPTmpWord
-				bcc .1
-				inc ZPTmpWord+1
-				bra .1
-
-.2				bit bCsiInNum
-				bpl .3
-
-				stz bCsiInNum
 				lda #255
-				ldx ZPTmpWord+1
-				bne .21
+				ldx ACC32+1
+				bne .3
 
-				lda ZPTmpWord
-.21				ldx CsiParamCnt
+				lda ACC32
+
+.3				ldx CsiParamCnt
 				sta CsiParams,x
 				inc CsiParamCnt
 
-.3				lda (ZPDCBPtr),y
+				lda (ZPPtr2)
 				cmp #';'
-				beq .10
+				beq .1
 
-				pha
+.5				jsr RESET.MODE
 				
-				jsr RESET.MODE
-				
-				pla
+				lda (ZPPtr2)
 				
 				ldx #CsiCodes.Cnt-1
 
-.4				cmp CsiCodes,x
-				beq .5
+.6				cmp CsiCodes,x
+				beq .7
+				
 				dex
-				bne .4
+				bne .6
 				
 				clc
 				rts
 
-.5				txa
+.7				txa
 				asl
 				tax
 				jmp (.8,x)
@@ -962,15 +925,14 @@ COUT.IAC.EXIT
 RESET.MODE		lda #0
 				ldy #S.DCB.TTY.MODE
 				sta (ZPDCBPtr),y
-				clc
 				rts
 *--------------------------------------
-RESET			ldy #1
+RESET			ldy #S.DCB.TTY.MODE
 				
-.1				iny
-				lda RESET.VALUES-2,y		
+.1				lda RESET.VALUES-S.DCB.TTY.MODE,y		
 				sta (ZPDCBPtr),y
-				cpy #S.DCB.TTY.INBUFFER
+				iny
+				cpy #S.DCB.TTY.INBUFFER+1
 				bne .1
 				
 				jmp DRV.TERM.CLRSCR
@@ -1297,6 +1259,61 @@ DRV.TERM.Title.OFF
 				lda #$0
 				sta (ZPDCBPtr),y
 				jmp DRV.TERM.LINE0CPY
+*--------------------------------------
+DRV.TERM.SETUP.L1X
+				ldy #S.FD.DEV.BUFPTR
+				lda (pFD),y
+				clc
+				adc BUF.BASEL,x
+				sta ZPBufBaseL1
+				
+				iny
+				lda (pFD),y
+				adc BUF.BASEH,x
+				sta ZPBufBaseL1+1
+				
+				bit bActive
+				bpl DRV.TERM.SETUP.L1X.8
+
+DRV.TERM.SETUP.L1X.SCR
+				lda SCR.BASEL,x
+				sta ZPScrBaseL1
+				lda SCR.BASEH,x
+				sta ZPScrBaseL1+1
+DRV.TERM.SETUP.L1X.8
+				rts
+*--------------------------------------
+CtrlChars		.DA #C.ENQ,#C.BS,#C.LF,#C.FF,#C.CR,#C.SO,#C.SI,#C.FS,#C.ESC
+CtrlChars.Cnt	.EQ *-CtrlChars
+*--------------------------------------
+EscCodes		.AZ "MDc[()"
+EscCodes.Cnt	.EQ *-EscCodes
+EscModes		.DA #0,#0,#0,#S.DCB.TTY.MODE.CSI,#S.DCB.TTY.MODE.G0,#S.DCB.TTY.MODE.G1
+CsiCodes		.AS "hlmnrJKH"
+CsiCodes.Cnt	.EQ *-CsiCodes
+*--------------------------------------
+KeyRemapped		.HS 080A0B15			Left,Down,Up,Right
+KeyRemapped.Cnt	.EQ *-KeyRemapped
+KeyRemapped.Tbl	.HS 44424143			esc[D,esc[B,esc[A,esc[C
+*--------------------------------------
+WILLDO			.DA #TELOPT.BINARY,#TELOPT.SGA
+WILLDO.CNT		.EQ *-WILLDO
+WILLDONT		.DA #TELOPT.TSPEED,#TELOPT.LINEMODE,#TELOPT.STATUS
+WILLDONT.CNT	.EQ *-WILLDONT
+DOWILL			.DA #TELOPT.BINARY,#TELOPT.SGA,#TELOPT.TTYPE,#TELOPT.NAWS
+DOWILL.CNT		.EQ *-DOWILL
+DOWONT			.DA #TELOPT.ECHO,#TELOPT.NEWENVIRON,#TELOPT.XDISPLOC,#TELOPT.TSPEED,#TELOPT.LFLOW
+DOWONT.CNT		.EQ *-DOWONT
+SB.IS.TTYPE		.DA #IAC,#SB,#TELOPT.TTYPE,#SB.IS
+ENQ.String		.AS "xterm"
+ENQ.String.Len	.EQ *-ENQ.String
+				.DA #IAC,#SE
+SB.IS.TTYPE.LEN	.EQ *-SB.IS.TTYPE
+SB.IS.NAWS		.DA #IAC,#SB,#TELOPT.NAWS,#SB.IS
+				.DA 80
+				.DA 24
+				.DA #IAC,#SE
+SB.IS.NAWS.LEN	.EQ *-SB.IS.NAWS
 *--------------------------------------
 MAN
 SAVE USR/SRC/SYS/KERNEL.S.TERM
