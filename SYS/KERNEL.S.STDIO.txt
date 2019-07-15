@@ -291,70 +291,59 @@ K.PrintF.1		stz PrintF.Cnt
 				stz K.PrintF.PadL
 				stz K.PrintF.PadC
 				
-				ldy #0
-				
-.2				lda (ZPPtr2),y
-				beq .7					end of line... print % and exit
-				iny
-				
-				jsr K.PrintF.CheckTBL1	do we have a %x command?
-				bcc .6					yes, jmp to it!
+				lda (ZPPtr2)
+				beq .7					end of format... print % and exit
+
+				jsr IsDigit
+				bcs .6					no digit....go check specifier
 				
 				cmp #'0'				...a 0...mmm... padding char?
 				bne .4
 				
-				ldx K.PrintF.PadL		K.PrintF.PadL is not nul, so this 0 is second digit
-				bne .5
+				sta K.PrintF.PadC
 				
-*				lda #'0'
-				sta K.PrintF.PadC		no, this is the first 0, so make it K.PrintF.PadC
-				bra .2
-
-.4				jsr IsDigit
-				bcs .7					no TBL1, no digit....abort		
+				jsr MEM.NextCharPtr2	skip 0 ...
 				
-.5				and #$0F				we have a digit
-				ldx K.PrintF.PadL
-				bne .51					second digit...
-				
-				sta K.PrintF.PadL		first digit, store.
-				lda #' '
-				sta K.PrintF.PadC		and set pad char as SPACE
-				bra .2
-				
-.51				pha						save it...
-				lda K.PrintF.PadL		starts K.PrintF.PadL * 10
-				asl 
-				asl 					A=times 4
-				adc K.PrintF.PadL				CC by ASL, A=times 5			
-				asl						times 10
-				sta K.PrintF.PadL
-
-				pla						get back digit
-				adc K.PrintF.PadL
-				sta K.PrintF.PadL
-				
-				lda (ZPPtr2),y			we have 2 digits, must get a letter, now
+				lda (ZPPtr2)
 				beq .7
-				iny
-				jsr K.PrintF.CheckTBL1
-				bcs .7					abort and print %
+				
+				jsr IsDigit
+				bcs .6					%0x ??????
 
-.6				jsr MEM.AddYToPtr2		skip all processed chars
+.4				jsr MATH.Dec2ACC32
+				bcs .99
+				
+				lda ACC32
+				sta K.PrintF.PadL
+				lda K.PrintF.PadC
+				bne .6
+				
+				lda #C.SPACE
+				sta K.PrintF.PadC
 
-				txa
+				jsr MEM.AddYToPtr2		skip all processed chars
+
+				lda (ZPPtr2)
+				beq .7
+
+.6				jsr K.PrintF.CheckTBL1	do we have a %x command?
+				bcs .20
+
+				jsr MEM.NextCharPtr2
+				
+				txa						yes, jmp to it!
 				asl
 				tax
 				jsr PrintF.ESC
 				bcc .1
-				bcs .99
+				bra .99
 				
 .7				lda #'%'
 				bra .20
 *--------------------------------------	
 .10				cmp #'\'
 				bne .20
-				
+
 				jsr MEM.GetCharPtr2
 				beq .99
 				
@@ -380,7 +369,7 @@ K.PrintF.1		stz PrintF.Cnt
 
 .20				jsr	PrintF.COut
 				bcs	.99
-				jmp .1
+.11				jmp .1
 *--------------------------------------				
 .99				pha
 				lda pLocal
@@ -415,7 +404,7 @@ K.PrintF.1		stz PrintF.Cnt
 				adc (pLocal)			... ByteCnt
 				sta pStack				CC
 				>LDYA PrintF.Cnt
-				clc
+*				clc
 				rts
 *--------------------------------------
 K.PrintF.CheckTBL1
@@ -448,30 +437,33 @@ PrintFTBL2.OUT	.HS 08.1B.0C.0A.0D.09.0B		\b\e\f\n\r\t\v
 				.DA #'%'				\%
 *--------------------------------------
 PrintF.BB		jsr PrintF.GetByte
-				bcs PrintF.BB.RTS
+				bcs PrintF.B.RTS
 				pha
 				jsr PrintF.B
-				pla
-				bcc PrintF.B.1
-PrintF.BB.RTS	rts
+				plx
+				bcs PrintF.B.RTS
+				txa
+				bra PrintF.B.1
 *--------------------------------------
 PrintF.B		jsr PrintF.GetByte
-				bcs PrintF.BB.RTS
+				bcs PrintF.B.RTS
 				
-PrintF.B.1		ldx #8
+PrintF.B.1		ldy #8
 
 .1				asl
-				tay
+				pha
 				lda #'0'/2
 				rol
 				jsr PrintF.COut
 				bcs .9
 				
-				tya
-				dex
+				pla
+				dey
 				bne .1
 				
-.9				rts
+.9				ply
+PrintF.B.RTS
+				rts
 *--------------------------------------
 PrintF.I		sec						signed short
 				.HS 90					BCC
@@ -480,14 +472,10 @@ PrintF.D		clc						unsigned short (BYTE)
 				ror ACC32.Sign
 				
 				jsr PrintF.GetByte
-				bcs PrintF.BB.RTS
-				sta ACC32
-				
-				stz ACC32+1
+				bcs PrintF.B.RTS
+				jsr MATH.A2ACC32
 
-				ldx #0					one byte
-				
-				bra PrintF.DD.1
+				bra PrintF.NUM
 				
 PrintF.II		sec						signed int
 				.HS 90					BCC
@@ -496,17 +484,13 @@ PrintF.DD		clc						unsigned int (WORD)
 				ror ACC32.Sign
 
 				jsr PrintF.GetByte
-				bcs PrintF.BB.RTS
-				sta ACC32
+				bcs PrintF.B.RTS
+				jsr MATH.A2ACC32
 
 				jsr PrintF.GetByte
-				bcs PrintF.BB.RTS
+				bcs PrintF.B.RTS
 				sta ACC32+1
 
-				ldx #1					two bytes
-								
-PrintF.DD.1		stz ACC32+2
-				stz ACC32+3
 				bra PrintF.NUM
 
 PrintF.L		sec						signed long
@@ -515,14 +499,13 @@ PrintF.U		clc						unsigned long (DWORD)
 
 				ror ACC32.Sign
 
-				ldx #$ff
+				ldx #0
 				
 .1				jsr PrintF.GetByte
-				bcs PrintF.BB.RTS
-				inx
+				bcs PrintF.B.RTS
 				sta ACC32,x
-
-				cpx #3
+				inx
+				cpx #4
 				bne .1
 				
 PrintF.NUM		ldx K.PrintF.PadL
@@ -733,9 +716,7 @@ K.FGetS			jsr PFT.CheckNodeA
 				sta ZPPtr1+1
 				bmi .3					already something in buffer
 			
-.1				>PUSHWI 1
-				>PUSHWI K.IOBuf
-				jsr IO.READ.I
+.1				jsr STDIO.Read.1
 				bcc .2
 				
 				cmp #MLI.E.EOF
@@ -769,9 +750,7 @@ K.FGetS			jsr PFT.CheckNodeA
 				inc ZPPtr1+1
 				beq .8					Buffer full
 			
-.4				>PUSHWI 1
-				>PUSHWI K.IOBuf
-				jsr IO.READ.I
+.4				jsr STDIO.Read.1
 				bcs .5
 
 				lda K.IOBuf
@@ -840,9 +819,7 @@ K.GetChar		ldy #S.PS.hStdIn
 K.GetC			jsr PFT.CheckNodeA
 				bcs K.GetC.RTS
 
-				>PUSHWI 1
-				>PUSHWI K.IOBuf
-				jsr IO.READ.I
+				jsr STDIO.Read.1
 				bcc .8
 				tay
 				bpl K.GetC.RTS			I/O error
@@ -852,7 +829,14 @@ K.GetC			jsr PFT.CheckNodeA
 
 .8				lda K.IOBuf
 
-K.GetC.RTS		rts				
+K.GetC.RTS		rts
+*--------------------------------------
+STDIO.Read.1	lda #0
+				>PUSHA
+				inc						read 1 byte
+				>PUSHA
+				>PUSHWI K.IOBuf
+				jmp IO.READ.I
 */--------------------------------------
 * # SScanF
 * Read formatted data from string
