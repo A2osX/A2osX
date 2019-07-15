@@ -279,10 +279,11 @@ K.PrintF.0		>LDYAI K.IOBuf
 K.PrintF.1		stz PrintF.Cnt
 				stz PrintF.Cnt+1
 
-				stz PrintF.GetByte+1
+				stz PrintF.LocalGetByte+1
 	
 .1				jsr MEM.GetCharPtr2
 				bne .22
+
 				jmp .8					end of format..
 
 .22				cmp #'%'
@@ -306,7 +307,7 @@ K.PrintF.1		stz PrintF.Cnt
 				
 				lda (ZPPtr2)
 				beq .7
-				
+
 				jsr IsDigit
 				bcs .6					%0x ??????
 
@@ -316,12 +317,12 @@ K.PrintF.1		stz PrintF.Cnt
 				lda ACC32
 				sta K.PrintF.PadL
 				lda K.PrintF.PadC
-				bne .6
+				bne .5
 				
 				lda #C.SPACE
 				sta K.PrintF.PadC
 
-				jsr MEM.AddYToPtr2		skip all processed chars
+.5				jsr MEM.AddYToPtr2		skip all processed chars
 
 				lda (ZPPtr2)
 				beq .7
@@ -334,8 +335,9 @@ K.PrintF.1		stz PrintF.Cnt
 				txa						yes, jmp to it!
 				asl
 				tax
+				
 				jsr PrintF.ESC
-				bcc .1
+.11				bcc .1
 				bra .99
 				
 .7				lda #'%'
@@ -354,7 +356,7 @@ K.PrintF.1		stz PrintF.Cnt
 				dex
 				bpl	.12
 
-				cmp #'x'
+				cmp #'x'				\xHH
 				bne .1
 
 				jsr MATH.Hex2ACC32
@@ -368,18 +370,9 @@ K.PrintF.1		stz PrintF.Cnt
 .19				lda	PrintFTBL2.OUT,x
 
 .20				jsr	PrintF.COut
-				bcs	.99
-.11				jmp .1
+				bcc .11
 *--------------------------------------				
-.99				pha
-				lda pLocal
-				sec						ByteCnt byte
-				adc (pLocal)			... ByteCnt
-				sta pStack				CC
-				pla
-
-				sec
-				rts
+.99				bra PrintF.LocalCleanUp
 *--------------------------------------				
 .8				ldx PrintF.hFILE
 				beq .80					Writing to buffer, append \0
@@ -399,12 +392,45 @@ K.PrintF.1		stz PrintF.Cnt
 .80				ldy PrintF.Cnt			A=0, Writing to buffer, append \0
 				sta (pIOBuf),y
 
-.81				lda pLocal
+.81				>LDYA PrintF.Cnt
+*				clc
+*--------------------------------------
+PrintF.LocalCleanUp
+				php
+				pha
+				lda pLocal
 				sec						ByteCnt byte
 				adc (pLocal)			... ByteCnt
 				sta pStack				CC
-				>LDYA PrintF.Cnt
+				pla
+				plp
+PrintF.LocalCleanUp.RTS				
+				rts
+*--------------------------------------
+PrintF.LocalGetPtr
+				jsr PrintF.LocalGetByte
+				bcs PrintF.LocalCleanUp.RTS
+				tax
+*--------------------------------------
+PrintF.LocalGetByte	
+				lda #$FF				SELF MODIFIED LStack Ptr
+				cmp (pLocal)
+				beq .9					CS
+
+				phy
+
+				tay
+				iny
+				lda (pLocal),y
+				sty PrintF.LocalGetByte+1
+
+				ply
+				
 *				clc
+				rts
+
+.9				lda #E.STACK
+*				sec
 				rts
 *--------------------------------------
 K.PrintF.CheckTBL1
@@ -414,6 +440,7 @@ K.PrintF.CheckTBL1
 				beq .8
 				dex
 				bpl	.1
+
 				sec						no valid letter...
 				rts
 				
@@ -436,7 +463,7 @@ PrintFTBL2.OUT	.HS 08.1B.0C.0A.0D.09.0B		\b\e\f\n\r\t\v
 				.DA #'\'				\\
 				.DA #'%'				\%
 *--------------------------------------
-PrintF.BB		jsr PrintF.GetByte
+PrintF.BB		jsr PrintF.LocalGetByte
 				bcs PrintF.B.RTS
 				pha
 				jsr PrintF.B
@@ -445,7 +472,7 @@ PrintF.BB		jsr PrintF.GetByte
 				txa
 				bra PrintF.B.1
 *--------------------------------------
-PrintF.B		jsr PrintF.GetByte
+PrintF.B		jsr PrintF.LocalGetByte
 				bcs PrintF.B.RTS
 				
 PrintF.B.1		ldy #8
@@ -469,46 +496,41 @@ PrintF.I		sec						signed short
 				.HS 90					BCC
 PrintF.D		clc						unsigned short (BYTE)
 
-				ror ACC32.Sign
-				
-				jsr PrintF.GetByte
-				bcs PrintF.B.RTS
-				jsr MATH.A2ACC32
-
+				ldy #1
 				bra PrintF.NUM
 				
 PrintF.II		sec						signed int
 				.HS 90					BCC
 PrintF.DD		clc						unsigned int (WORD)
 
-				ror ACC32.Sign
-
-				jsr PrintF.GetByte
-				bcs PrintF.B.RTS
-				jsr MATH.A2ACC32
-
-				jsr PrintF.GetByte
-				bcs PrintF.B.RTS
-				sta ACC32+1
-
+				ldy #2
 				bra PrintF.NUM
 
 PrintF.L		sec						signed long
 				.HS 90					BCC
 PrintF.U		clc						unsigned long (DWORD)
 
-				ror ACC32.Sign
+				ldy #4
 
+PrintF.NUM		ror ACC32.Sign
+				
 				ldx #0
 				
-.1				jsr PrintF.GetByte
+.1				jsr PrintF.LocalGetByte
 				bcs PrintF.B.RTS
 				sta ACC32,x
 				inx
-				cpx #4
+				dey
 				bne .1
-				
-PrintF.NUM		ldx K.PrintF.PadL
+
+.2				cpx #4
+				beq .3
+	
+				stz ACC32,x
+				inx
+				bra .2
+
+.3				ldx K.PrintF.PadL
 				ldy K.PrintF.PadC
 				rol ACC32.Sign
 				jsr MATH.ACC322STR10
@@ -521,7 +543,7 @@ PrintF.E		sec						Force "E+12"
 				.HS 90					BCC
 PrintF.F		clc
 
-				lda PrintF.GetByte+1	get current stack Ptr
+				lda PrintF.LocalGetByte+1	get current stack Ptr
 				tay
 				clc						at least 5 bytes remaining ?
 				adc #5
@@ -540,10 +562,10 @@ PrintF.F		clc
 				ldx #FPU.SETFAC
 				jsr GP.ROMCALL
 				
-				lda PrintF.GetByte+1
+				lda PrintF.LocalGetByte+1
 				clc
 				adc #5
-				sta PrintF.GetByte+1
+				sta PrintF.LocalGetByte+1
 
 				ldy #A2osX.NumStrBuf+1	In order not to trash A2osX.SaveSM,A2osX.SaveSX
 				ldx #FPU.FOUT
@@ -569,12 +591,9 @@ PrintF.S		ldy #$ff				CSTR
 				.HS 2C					bit abs
 PrintF.SS		ldy #$00				PSTR
 
-				jsr PrintF.GetByte
+				jsr PrintF.LocalGetPtr
 				bcs .9
-				sta ZPPtr1
-				
-				jsr PrintF.GetByte
-				bcs .9
+				stx ZPPtr1
 				sta ZPPtr1+1
 			
 				lda (ZPPtr1)			if CSTR:last char=0, if PSTR:len=0
@@ -621,7 +640,7 @@ PrintF.SS		ldy #$00				PSTR
 *				clc
 .9				rts
 *--------------------------------------
-PrintF.HH		jsr PrintF.GetByte
+PrintF.HH		jsr PrintF.LocalGetByte
 				bcs PrintF.COut.RTS
 				pha						LO byte
 				jsr PrintF.H
@@ -630,7 +649,7 @@ PrintF.HH		jsr PrintF.GetByte
 				txa
 				bra PrintF.H.1
 *--------------------------------------
-PrintF.H		jsr PrintF.GetByte
+PrintF.H		jsr PrintF.LocalGetByte
 				bcs PrintF.COut.RTS
 				
 PrintF.H.1		jsr MATH.AToHexAX
@@ -658,24 +677,6 @@ PrintF.COut		phy
 .9				lda #E.BUF
 				sec
 PrintF.COut.RTS	rts		
-*--------------------------------------
-PrintF.GetByte	lda #$FF				SELF MODIFIED LStack Ptr
-				cmp (pLocal)
-				beq PrintF.GetByte.9	CS
-
-				phy
-
-				tay
-				iny
-				lda (pLocal),y
-				sty PrintF.GetByte+1
-
-				ply
-				
-*				clc
-
-PrintF.GetByte.9
-				rts
 */--------------------------------------
 * # fgets (BLOCKING)
 * read bytes from stream into the array
@@ -698,7 +699,7 @@ PrintF.GetByte.9
 * (pStack)+0	s
 *--------------------------------------
 K.FGetS			jsr PFT.CheckNodeA
-				bcs PrintF.GetByte.9
+				bcs PrintF.COut.RTS
 
 				lda (pStack)
 				sta ZPPtr2				s LO
@@ -865,8 +866,11 @@ STDIO.Read.1	lda #0
 *\--------------------------------------
 K.SScanF		jsr MEM.SPtr2PPtr1		ptr2=String to Scan,Ptr1=format
 
-				stz .5+1				reset LStack Ptr
-				stz .80+1				rest Arg processed
+				lda pStack
+				sta pLocal
+
+				stz .8+1				rest Arg processed
+				stz PrintF.LocalGetByte+1
 
 .1				jsr MEM.GetCharPtr1		End Of format?
 				beq .8
@@ -900,40 +904,26 @@ K.SScanF		jsr MEM.SPtr2PPtr1		ptr2=String to Scan,Ptr1=format
 				dex
 				bpl .3
 
-.9				jsr .8
-				lda #MLI.E.EOF
+.9				lda #MLI.E.EOF
 				sec
-				rts
+				jmp PrintF.LocalCleanUp
 
-.4				jsr .5
+.4				jsr PrintF.LocalGetPtr
+				bcs .9
+				stx ZPPtr3
+				sta ZPPtr3+1
+				
+				jsr .5
 				bcs .9					out of Ptr on stack
 
+				inc .8+1				parsed one more arg!
 				bra .1
 
-.8				lda pStack
-				sec						ByteCnt byte
-				adc (pStack)			... ByteCnt
-				sta pStack				CC
-
-.80				lda #$ff				SELF MODIFIED Arg processed
-.99				rts
+.8				lda #$ff				SELF MODIFIED Arg processed
+				clc
+				jmp PrintF.LocalCleanUp
 *--------------------------------------
-.5				lda #$FF				SELF MODIFIED LStack Ptr
-				cmp (pStack)
-				beq .99					CS
-
-				tay
-				iny
-				lda (pStack),y
-				sta ZPPtr3
-
-				iny
-				lda (pStack),y
-				sta ZPPtr3+1			get VAR Ptr
-				sty .5+1
-
-				inc .80+1				parsed one more arg!
-				jmp (K.SScanFJMP,x)
+.5				jmp (K.SScanFJMP,x)
 *--------------------------------------
 K.SScanFTBL		.DA #'i,#1,#'d,#1,#'I,#2,#'D,#2,#'l,#4,#'u,#4,#'h,#1,#'H,#2,#'s,#2
 K.SScanFJMP		.DA K.SScanF.I
