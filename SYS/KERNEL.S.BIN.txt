@@ -3,9 +3,7 @@ NEW
 *--------------------------------------
 				.DUMMY
 				.OR FAC					15 Bytes
-BIN.CmdLine		.BS 2
 BIN.hMem		.BS 1
-BIN.Move.Len	.BS 2
 BIN.R.CS.Start	.BS 2
 BIN.R.CS.End	.BS 2
 BIN.R.End		.BS 2
@@ -14,28 +12,24 @@ BIN.R.Offset	.BS 2
 *--------------------------------------
 * LoadLib
 *  in :
-*   Y,A = PTR To "LibName.o" C-String
+*   Y,A = PTR To "LibName" C-String
 * out :
 *   A = hMem To loaded LIB
 *--------------------------------------
 K.LoadLib		jsr ENV.Search.LIB
 				bcs .9
-				>LDYAI K.Buf256
-
 				jsr BIN.Load			Y,A = "/PATH/BIN"
 				bcs .9
 				
 				>STYA .1+1
-				stx .8+1
 
 				txa						Pass hLib to LibLoad
 				ldx #LIBMGR.LOAD
 .1				jsr $ffff				SELF MODIFIED, Call LIB.LOAD function
 				
-				ldx .8+1
 				bcs BIN.Load.Cleanup
 
-.8				lda #$ff				SELF MODIFIED, hLib
+				lda BIN.hMem
 *				clc
 .9				rts
 *--------------------------------------
@@ -71,12 +65,10 @@ K.LoadDrv		>STYA .2+1				Save "BIN\0ARGS\0\0"
 
 				jsr ENV.Search.DRV
 				bcs .9
-				>LDYAI K.Buf256
 				jsr BIN.Load			Y,A = "/PATH/BIN"
 				bcs .9
 				
 				>STYA .3+1
-				stx .8+1
 
 				ldx #$ff
 			
@@ -93,18 +85,17 @@ K.LoadDrv		>STYA .2+1				Save "BIN\0ARGS\0\0"
 				
 .3				jsr $ffff				SELF MODIFIED, call Dev.Detect
 				
-.8				ldx #$ff				SELF MODIFIED, hMem
 				jsr BIN.Load.Cleanup
 				bcs .9
 				
 				lda #0					Make sure RC = 0 if success
-				clc
+*				clc
 .9				rts
 				
 BIN.Load.Cleanup
 				php
 				pha
-				txa
+				lda BIN.hMem
 				jsr K.FreeMem
 				pla
 				plp
@@ -118,9 +109,7 @@ BIN.Load.Cleanup.RTS
 *   Y,A = MEMPTR	
 *   X = hMem of Code Segment
 *--------------------------------------
-BIN.Load		>STYA BIN.CmdLine
-
-				ldx #0
+BIN.Load		ldx #0
 				
 .1				cpx Mem.LastSlot
 				beq BIN.Load.1
@@ -142,21 +131,19 @@ BIN.Load		>STYA BIN.CmdLine
 
 				ldy #0
 				
-.2				lda (BIN.CmdLine),y
+.2				lda K.Buf256,y
 .3				cmp $ffff,y				SELF MODIFIED
 				bne .1
 				iny
 				ora #0
 				bne .2
 				
+				stx BIN.hMem			save hMem
 				txa
 				jsr MEM.GetMemByID
-				
 				jsr Mem.IncRefCnt
-
 				clc
-				jmp MEM.GetMEMPTR
-*				 X=hMem, Y,A=Ptr
+				jmp MEM.GetMEMPTR		Y,A=Ptr
 *--------------------------------------				
 * STAT Already called by Filesearch in FindDRV, FindLIB
 * STAT Already called by PS.Load (TXT,BIN,SYS)
@@ -167,18 +154,16 @@ BIN.Load.1		>LDYA K.S.STAT+S.STAT.P.AUXTYPE
 				>PUSHYA					Push AUXTYPE
 				>PUSHBI S.FI.T.BIN
 				>PUSHBI	O.RDONLY
-				>LDYA BIN.CmdLine
+				>LDYAI K.Buf256
 
 				ldx #SYS.LoadFile
 				jsr K.SYSCALL2.BANK 		BANK1!!! 
 				bcs BIN.Load.Cleanup.RTS	Error Loading file
-
 				stx BIN.hMem			save hMem
-				
+
 				pha						YA=CODE+DATA size
 				tya
-*				clc						CC from bcs .99				
-
+*				clc
 				adc BIN.R.CS.Start		Get AUXTYPE for actual Base Address
 				sta BIN.R.End			compute Range End=AUXTYPE+FILELEN
 				pla
@@ -187,30 +172,20 @@ BIN.Load.1		>LDYA K.S.STAT+S.STAT.P.AUXTYPE
 
 				txa
 				jsr K.GetMemPtr
-				>STYA ZPPtr1			set ZPPtr1 -> Code start
+				>STYA ZPPtr1			set ZPPtr1 -> New Code start
 
-				pha						YA = actual load address
-				tya
-				sec
-				sbc BIN.R.CS.Start
-				sta BIN.R.Offset		Offset=ZPPtr1-AUXTYPE
-				pla
-				sbc BIN.R.CS.Start+1
-				sta BIN.R.Offset+1
+				jsr BIN.ComputeOffsetYA	YA = actual load address
 				
 				ldy #H.BIN.CS.SIZE		get Code Len
 				lda (ZPPtr1),y
-				clc
-				adc BIN.R.CS.Start
-				sta BIN.R.CS.End		ZPPtr1 + CodeLen
+				pha
 				iny
 				lda (ZPPtr1),y
-				adc BIN.R.CS.Start+1
-				sta BIN.R.CS.End+1
-				
+				ply
+				jsr BIN.ComputeCSEndYA
 				jsr BIN.RelExe
 				
-				>LDYA BIN.CmdLine		get back bin path
+				>LDYAI K.Buf256			get back bin path
 				ldx #SYS.strdup			make a copy of this string
 				jsr K.SYSCALL2.BANK
 				bcs .98
@@ -226,64 +201,52 @@ BIN.Load.1		>LDYA K.S.STAT+S.STAT.P.AUXTYPE
 				ldy #S.MEM.BIN
 				sta (ZPMemMgrSPtr),y
 							
-				ldx BIN.hMem			return hMEM to Caller...
 				clc
 				jmp MEM.GetMEMPTR		...and Y,A=PTR to CS
 				
-.98				ldx BIN.hMem
-				jmp BIN.Load.Cleanup	Discard Loaded Code, exits CS
+.98				jmp BIN.Load.Cleanup	Discard Loaded Code, exits CS
 */--------------------------------------
 * # InsDrv
 * ## C
-* `void * insdrv (void * src, void * crvcsstart, void * drvcsend, void * drvend);`
+* `void * insdrv (void * src, void * crvcsstart, void * drvcssize, void * drvend);`
 * ## ASM
 * **In:**
 * `>PUSHW DRV.END`
-* `>PUSHW DRV.CS.END`
+* `>PUSHW DRV.CS.SIZE`
 * `>PUSHW DRV.CS.START`
 * `>LDYA L.SRC`
 * `>SYSCALL insdrv`
 * ## RETURN VALUE
 * Y,A = Ptr to installed driver
 *\--------------------------------------
-K.InsDrv		>STYA ZPPtr2			SRC PTR
+K.InsDrv		>STYA ZPPtr3			SRC PTR for move
 
 				>PULLW BIN.R.CS.Start
-				>PULLW BIN.R.CS.End
+				>PULLYA					CS Len
+				jsr BIN.ComputeCSEndYA
 				>PULLW BIN.R.End
-
-				lda	BIN.R.End			Compute DRVLen=End-start
-				sec
-				sbc BIN.R.CS.Start
-				sta BIN.Move.Len
-				tay
 				
-				lda BIN.R.End+1
-				sbc BIN.R.CS.Start+1
-				sta BIN.Move.Len+1
-
-				jsr MEM.GetKrnlBuf		Y,A = LEN
+				jsr MEM.GetKrnlBuf		Y,A = CODE + DATA
 				bcs .9					No More Room to load Driver
+
 				>STYA ZPPtr1			Y,A = DST Buf for RelDrv...
-				>STYA ZPPtr3			...for move...
+				>STYA ZPPtr4			...for move...
 				sty .7+1				...and for exit
 				sta .8+1
 				
-				lda ZPPtr1
+				jsr BIN.ComputeOffsetYA
+
+				lda BIN.R.End
 				sec
 				sbc BIN.R.CS.Start
-				sta BIN.R.Offset
-				
-				lda ZPPtr1+1
-				sbc BIN.R.CS.Start+1
-				sta BIN.R.Offset+1
-
-				lda BIN.Move.Len+1
-				eor #$ff
-				pha
-				lda BIN.Move.Len
+				tay
 				eor #$ff
 				tax
+				
+				lda BIN.R.End+1
+				sbc BIN.R.CS.Start+1
+				eor #$ff
+				pha
 				
 				ldy #0
 				
@@ -296,13 +259,13 @@ K.InsDrv		>STYA ZPPtr2			SRC PTR
 				
 				pha
 				
-.2				lda (ZPPtr2),y
-				sta (ZPPtr3),y
+.2				lda (ZPPtr3),y
+				sta (ZPPtr4),y
 				iny
 				bne .1
 				
-				inc ZPPtr2+1
 				inc ZPPtr3+1
+				inc ZPPtr4+1
 				bra .1
 				
 .3				jsr BIN.RelDrv			Relocate at Ptr1
@@ -345,16 +308,15 @@ BIN.RelDrv		ldy #H.BIN.DRV.REL.TABLE
 *										+ 1 to skip last 00 from beq .2
 *										ZPPtr1=Current Code PTR
 
-.3				lda BIN.R.CS.End		compute new CS.END to stop relocating
+				lda BIN.R.End
 				clc
 				adc BIN.R.Offset
+				sta .6+1
+				lda BIN.R.End+1
+				adc BIN.R.Offset+1
 				sta .7+1
 
-				lda BIN.R.CS.End+1
-				adc BIN.R.Offset+1
-				sta .8+1
-				
-				lda (ZPPtr1)			get OPCODE
+.3				lda (ZPPtr1)			get OPCODE
 				lsr						/2
 				tax
 				lda BIN.65816,x			get OPCODE definition
@@ -366,7 +328,7 @@ BIN.RelDrv		ldy #H.BIN.DRV.REL.TABLE
 .4				and #$0f				
 				
 				bit #$8					abs addressing? 
-				beq .6					no....
+				beq .5					no....
 				
 				and #7					save Opcode length...
 				pha
@@ -374,21 +336,42 @@ BIN.RelDrv		ldy #H.BIN.DRV.REL.TABLE
 				ldy #1
 				jsr BIN.RelocateAtPtr1Y
 				
-.5				pla						get back Opcode length...
+				pla						get back Opcode length...
 
-.6				clc						A = OPCODE length
-				adc ZPPtr1
-				sta ZPPtr1
-				bcc .7
-				inc ZPPtr1+1
+.5				tay						A = OPCODE length
+				jsr MEM.AddYToPtr1
+		
+.6				cmp #$ff				SELF MODIFIED, A = ZPPtr1
+				bne .3
+
+				lda ZPPtr1+1
+.7				cmp #$ff				SELF MODIFIED
+				bne .3					next opcode....
+
 				clc						Make sure exit with CC
 				
-.7				eor #$ff				SELF MODIFIED	A = ZPPtr1
-				bne .3
-				lda ZPPtr1+1
-.8				eor #$ff				SELF MODIFIED
-				bne .3					next opcode....
-				
+				rts
+*--------------------------------------	YA = CS Size
+BIN.ComputeCSEndYA
+				pha
+				tya
+				clc
+				adc BIN.R.CS.Start
+				sta BIN.R.CS.End		ZPPtr1 + CodeLen
+				pla
+				adc BIN.R.CS.Start+1
+				sta BIN.R.CS.End+1
+				rts
+*-------------------------------------- YA = Target Address
+BIN.ComputeOffSetYA
+				pha
+				tya
+				sec
+				sbc BIN.R.CS.Start
+				sta BIN.R.Offset
+				pla
+				sbc BIN.R.CS.Start+1
+				sta BIN.R.Offset+1
 				rts
 *--------------------------------------
 BIN.RelocateAtPtr1Y
