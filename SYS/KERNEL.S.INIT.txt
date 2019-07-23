@@ -567,6 +567,169 @@ DetectZ80		ldx #Z80Code.Size
 				clc
 .9				rts
 *--------------------------------------
+DevMgrInit		>LDYAI MSG.DEV
+				>SYSCALL2 puts
+				
+				lda DEVCNT
+				sta .1+1
+				
+.1				ldx #$ff				SELF MODIFIED
+				lda DEVLST,x
+				
+				and #$F0
+				
+				asl
+				php						Save Drive 1/2 in C
+				ror						DSSS0000
+				
+				lsr
+				lsr
+				lsr
+
+				tax						000DSSS0
+				lsr						0000DSSS
+				and #$7
+				sta FD.BDEV+S.FD.DEV.BUSID
+				ora #$30
+				sta FD.BDEV.NAME+1		SnDy
+				
+				lda DEVPTRS,x
+				sta FD.BDEV+S.FD.DEV.BUSPTR
+				
+				lda DEVPTRS+1,x
+				sta FD.BDEV+S.FD.DEV.BUSPTR+1
+				
+				sta ZPPtr1+1			
+				stz ZPPtr1				Cn00
+				
+				plp
+				lda #0
+				adc #1					Make DevID 1 or 2
+				sta FD.BDEV+S.FD.DEV.DEVID
+				ora #$30
+				sta FD.BDEV.NAME+3		SxDn
+				
+				lda ZPPtr1+1
+
+				cmp #$FF				/RAM is always $FF00
+				bne .2
+
+				jsr DevMgrInit.RAM
+				bra .8					keep slot free
+				
+.2				cmp #$D0				Disk II Driver is $D000
+				bne .3
+				
+				jsr DevMgrInit.DII
+				lda #A2osX.S.DII
+				bra .7					Go mark slot as USED
+				
+.3				bcs .53					> $D0, Some BLK remapped DRV
+				
+				cmp #$C0
+				bcs .4					$C0 .. $CF, in slot ROM 
+				
+				jsr DevMgrInit.USR		Outside ROM/LC space, User loaded BLK dev
+				bra .8					keep slot free
+				
+.4				ldx #SmartPort.SIG-SmartPort.OFS-1
+
+.5				ldy SmartPort.OFS,x			Check if there is a smartport firmware
+				lda (ZPPtr1),y
+				cmp SmartPort.SIG,x
+				bne .8						not a Disk Controller...
+				dex
+				bpl .5
+				
+				ldy #7
+				lda (ZPPtr1),y
+				beq .51						$Cn07=00 : SmartPort
+				
+				ldx #AWSmartPort.SIG-AWSmartPort.OFS-1
+				
+.50				ldy AWSmartPort.OFS,x		Check if there is AWsmartport firmware
+				lda (ZPPtr1),y
+				cmp AWSmartPort.SIG,x
+				bne .6						not on AW
+				dex
+				bpl .50
+
+.51				lda ZPPtr1+1				get $Cn
+				and #$f						get $0n
+				cmp FD.BDEV+S.FD.DEV.BUSID 	same as SSS ?
+				beq .52
+				
+				inc FD.BDEV+S.FD.DEV.DEVID		Remapped SP devices....
+				inc FD.BDEV+S.FD.DEV.DEVID		Add 2 to DEVID (2 & 3)
+				
+				jsr DevMgrInit.SP
+				bra .8							Phantom slot...
+				
+.52				jsr DevMgrInit.SP
+				lda #A2osX.S.SP
+				bra .7
+	
+.53				inc FD.BDEV+S.FD.DEV.DEVID		Remapped BLK devices....
+				inc FD.BDEV+S.FD.DEV.DEVID		Add 2 to DEVID (2 & 3)
+	
+.6				jsr DevMgrInit.BLK
+				lda #A2osX.S.BLK
+				
+.7				ldx FD.BDEV+S.FD.DEV.BUSID
+				sta A2osX.S,x
+				
+.8				dec .1+1
+				bmi .80
+				jmp .1
+				
+.80				clc
+				rts
+*--------------------------------------
+DevMgrInit.RAM	ldx #0
+				>LDYAI DRV.RamDrive
+				bra DevMgrInit.AddBDev
+*--------------------------------------
+DevMgrInit.DII	ldx #2
+				>LDYAI DRV.DiskII
+				bra DevMgrInit.AddBDev
+*--------------------------------------
+DevMgrInit.USR	ldx #4
+				>LDYAI DRV.BlkDevice
+				bra DevMgrInit.AddBDev			
+*--------------------------------------
+DevMgrInit.BLK	ldy #$ff
+				lda (ZPPtr1),y
+				sta FD.BDEV+S.FD.DEV.BUSPTR
+				
+				ldx #6
+				>LDYAI DRV.BlkDevice
+				bra DevMgrInit.AddBDev
+*--------------------------------------
+DevMgrInit.SP	ldy #$ff
+				lda (ZPPtr1),y
+				clc
+				adc #3					Compute smartport entry point
+				sta FD.BDEV+S.FD.DEV.BUSPTR
+				
+				ldx #8
+				>LDYAI DRV.SmartPort
+*--------------------------------------
+DevMgrInit.AddBDev
+				>STYA FD.BDEV+S.FD.DEV.DRVPTR
+				
+				>PUSHW MSG.BLKDEV.TBL,x
+				>PUSHWI FD.BDEV.NAME
+				>PUSHBI 4
+				>LDYAI MSG.BLKDEV
+				>SYSCALL2 printf
+				
+				>PUSHWI FD.BDEV.NAME
+				>LDYAI FD.BDEV 
+				>SYSCALL2 MKDev
+
+DevMgrInit.AddBDev.RTS				
+				rts
+*--------------------------------------
 * Setup AuxLC $FFFE->Kernel IRQ Handler
 * if irq not handled, jmp (S.IrqMgrOldFFFE)
 *--------------------------------------
@@ -794,169 +957,6 @@ IrqMgrInit.HZ2Tick
 .1				stx CORE.TickPerSec
 				stx CORE.TickSec
 
-				rts
-*--------------------------------------
-DevMgrInit		>LDYAI MSG.DEV
-				>SYSCALL2 puts
-				
-				lda DEVCNT
-				sta .1+1
-				
-.1				ldx #$ff				SELF MODIFIED
-				lda DEVLST,x
-				
-				and #$F0
-				
-				asl
-				php						Save Drive 1/2 in C
-				ror						DSSS0000
-				
-				lsr
-				lsr
-				lsr
-
-				tax						000DSSS0
-				lsr						0000DSSS
-				and #$7
-				sta FD.BDEV+S.FD.DEV.BUSID
-				ora #$30
-				sta FD.BDEV.NAME+1		SnDy
-				
-				lda DEVPTRS,x
-				sta FD.BDEV+S.FD.DEV.BUSPTR
-				
-				lda DEVPTRS+1,x
-				sta FD.BDEV+S.FD.DEV.BUSPTR+1
-				
-				sta ZPPtr1+1			
-				stz ZPPtr1				Cn00
-				
-				plp
-				lda #0
-				adc #1					Make DevID 1 or 2
-				sta FD.BDEV+S.FD.DEV.DEVID
-				ora #$30
-				sta FD.BDEV.NAME+3		SxDn
-				
-				lda ZPPtr1+1
-
-				cmp #$FF				/RAM is always $FF00
-				bne .2
-
-				jsr DevMgrInit.RAM
-				bra .8					keep slot free
-				
-.2				cmp #$D0				Disk II Driver is $D000
-				bne .3
-				
-				jsr DevMgrInit.DII
-				lda #A2osX.S.DII
-				bra .7					Go mark slot as USED
-				
-.3				bcs .53					> $D0, Some BLK remapped DRV
-				
-				cmp #$C0
-				bcs .4					$C0 .. $CF, in slot ROM 
-				
-				jsr DevMgrInit.USR		Outside ROM/LC space, User loaded BLK dev
-				bra .8					keep slot free
-				
-.4				ldx #SmartPort.SIG-SmartPort.OFS-1
-
-.5				ldy SmartPort.OFS,x			Check if there is a smartport firmware
-				lda (ZPPtr1),y
-				cmp SmartPort.SIG,x
-				bne .8						not a Disk Controller...
-				dex
-				bpl .5
-				
-				ldy #7
-				lda (ZPPtr1),y
-				beq .51						$Cn07=00 : SmartPort
-				
-				ldx #AWSmartPort.SIG-AWSmartPort.OFS-1
-				
-.50				ldy AWSmartPort.OFS,x		Check if there is AWsmartport firmware
-				lda (ZPPtr1),y
-				cmp AWSmartPort.SIG,x
-				bne .6						not on AW
-				dex
-				bpl .50
-
-.51				lda ZPPtr1+1				get $Cn
-				and #$f						get $0n
-				cmp FD.BDEV+S.FD.DEV.BUSID 	same as SSS ?
-				beq .52
-				
-				inc FD.BDEV+S.FD.DEV.DEVID		Remapped SP devices....
-				inc FD.BDEV+S.FD.DEV.DEVID		Add 2 to DEVID (2 & 3)
-				
-				jsr DevMgrInit.SP
-				bra .8							Phantom slot...
-				
-.52				jsr DevMgrInit.SP
-				lda #A2osX.S.SP
-				bra .7
-	
-.53				inc FD.BDEV+S.FD.DEV.DEVID		Remapped BLK devices....
-				inc FD.BDEV+S.FD.DEV.DEVID		Add 2 to DEVID (2 & 3)
-	
-.6				jsr DevMgrInit.BLK
-				lda #A2osX.S.BLK
-				
-.7				ldx FD.BDEV+S.FD.DEV.BUSID
-				sta A2osX.S,x
-				
-.8				dec .1+1
-				bmi .80
-				jmp .1
-				
-.80				clc
-				rts
-*--------------------------------------
-DevMgrInit.RAM	ldx #0
-				>LDYAI DRV.RamDrive
-				bra DevMgrInit.AddBDev
-*--------------------------------------
-DevMgrInit.DII	ldx #2
-				>LDYAI DRV.DiskII
-				bra DevMgrInit.AddBDev
-*--------------------------------------
-DevMgrInit.USR	ldx #4
-				>LDYAI DRV.BlkDevice
-				bra DevMgrInit.AddBDev			
-*--------------------------------------
-DevMgrInit.BLK	ldy #$ff
-				lda (ZPPtr1),y
-				sta FD.BDEV+S.FD.DEV.BUSPTR
-				
-				ldx #6
-				>LDYAI DRV.BlkDevice
-				bra DevMgrInit.AddBDev
-*--------------------------------------
-DevMgrInit.SP	ldy #$ff
-				lda (ZPPtr1),y
-				clc
-				adc #3					Compute smartport entry point
-				sta FD.BDEV+S.FD.DEV.BUSPTR
-				
-				ldx #8
-				>LDYAI DRV.SmartPort
-*--------------------------------------
-DevMgrInit.AddBDev
-				>STYA FD.BDEV+S.FD.DEV.DRVPTR
-				
-				>PUSHW MSG.BLKDEV.TBL,x
-				>PUSHWI FD.BDEV.NAME
-				>PUSHBI 4
-				>LDYAI MSG.BLKDEV
-				>SYSCALL2 printf
-				
-				>PUSHWI FD.BDEV.NAME
-				>LDYAI FD.BDEV 
-				>SYSCALL2 MKDev
-
-DevMgrInit.AddBDev.RTS				
 				rts
 *--------------------------------------
 EvtMgrInit		>LDYAI MSG.EVT
