@@ -40,12 +40,12 @@ none
 # InsDrv  
 
 ## C  
-`void * insdrv (void * src, void * crvcsstart, void * drvcsend, void * drvend);`  
+`void * insdrv (void * src, void * crvcsstart, void * drvcssize, void * drvend);`  
 
 ## ASM  
 **In:**  
 `>PUSHW DRV.END`  
-`>PUSHW DRV.CS.END`  
+`>PUSHW DRV.CS.SIZE`  
 `>PUSHW DRV.CS.START`  
 `>LDYA L.SRC`  
 `>SYSCALL insdrv`  
@@ -216,75 +216,6 @@ Remove an environment variable
 
 ## RETURN VALUE  
 
-# NewFIFO  
-
-## C  
-`int getpwuid(short int uid, S.PW* passwd );`  
-
-## ASM  
-`>PUSHW passwd`  
-`>LDYA size`  
-`>SYSCALL getpwuid`  
-
-## RETURN VALUE  
-A = hFIFO  
-
-# GetPWName  
-
-## C  
-`int getpwname(const char* name, S.PW* passwd );`  
-
-## ASM  
-`>PUSHW passwd`  
-`>LDYA name`  
-`>SYSCALL getpwname`  
-
-## RETURN VALUE  
-
-# PutPW  
-
-## C  
-`int putpw( S.PW* passwd );`  
-
-## ASM  
-`>LDYA passwd`  
-`>SYSCALL putpw`  
-
-## RETURN VALUE  
-
-# PutPW  
-
-## C  
-`int putpw( S.PW* passwd );`  
-
-## ASM  
-`>LDYA passwd`  
-`>SYSCALL putpw`  
-
-## RETURN VALUE  
-
-# PutPW  
-
-## C  
-`int putpw( S.PW* passwd );`  
-
-## ASM  
-`>LDYA passwd`  
-`>SYSCALL putpw`  
-
-## RETURN VALUE  
-
-# PutPW  
-
-## C  
-`int putpw( S.PW* passwd );`  
-
-## ASM  
-`>LDYA passwd`  
-`>SYSCALL putpw`  
-
-## RETURN VALUE  
-
 # ChTyp  
 Change The type of a ProDOS File  
 
@@ -344,6 +275,69 @@ Load a file in memory
 **In:**  
  PUSHW = GID  
  PUSHW = PATH  
+
+# FAdd,FSub,FMult,FDiv,FPwr  
+Return X+Y, X-Y, X*Y, X/Y, X^Y  
+
+## ASM  
+**In:**  
+`>PUSHF X (float)`  
+`>PUSHF Y (float)`  
+`>FPU fadd`  
+`>FPU fsub`  
+`>FPU fmult`  
+`>FPU fdiv`  
+`>FPU fpwr`  
+
+## RETURN VALUE  
+ On stack (float)  
+
+# Log,Sqr,Exp,Cos,Sin,Tan,ATan  
+Return Log(x), Sqr(x), E^X, Cos(x), Sin(X), Tan(x), ATan(x)  
+
+## C  
+`float log ( float x);`  
+`float sqr ( float x);`  
+`float exp ( float x);`  
+`float cos ( float x);`  
+`float sin ( float x);`  
+`float tan ( float x);`  
+`float atan ( float x);`  
+
+## ASM  
+**In:**  
+`>PUSHF x (Float)`  
+`>FPU log`  
+
+## RETURN VALUE  
+ On stack (Float)  
+
+# float  
+Return 'floated' long  
+
+## C  
+`float f = (float)12345678;  
+
+## ASM  
+**In:**  
+ `>PUSHL X` (long)  
+
+## RETURN VALUE  
+ On stack (float)  
+
+# lrintf  
+Return float rounded into a long  
+
+## C  
+`long int lrintf (float x);`  
+
+## ASM  
+**In:**  
+`>PUSHF x`  
+`>SYSCALL lrintf`  
+
+## RETURN VALUE  
+ On stack (long)  
 
 # open  
 
@@ -415,69 +409,6 @@ CS: A = EC
 
 ## RETURN VALUE  
  Y,A = ...  
-
-# FAdd,FSub,FMult,FDiv,FPwr  
-Return X+Y, X-Y, X*Y, X/Y, X^Y  
-
-## ASM  
-**In:**  
-`>PUSHF X (float)`  
-`>PUSHF Y (float)`  
-`>SYSCALL fadd`  
-`>SYSCALL fsub`  
-`>SYSCALL fmult`  
-`>SYSCALL fdiv`  
-`>SYSCALL fpwr`  
-
-## RETURN VALUE  
- On stack (float)  
-
-# Log,Sqr,Exp,Cos,Sin,Tan,ATan  
-Return Log(x), Sqr(x), E^X, Cos(x), Sin(X), Tan(x), ATan(x)  
-
-## C  
-`float log ( float x);`  
-`float sqr ( float x);`  
-`float exp ( float x);`  
-`float cos ( float x);`  
-`float sin ( float x);`  
-`float tan ( float x);`  
-`float atan ( float x);`  
-
-## ASM  
-**In:**  
-`>PUSHF x (Float)`  
-`>SYSCALL log`  
-
-## RETURN VALUE  
- On stack (Float)  
-
-# float  
-Return 'floated' long  
-
-## C  
-`float f = (float)12345678;  
-
-## ASM  
-**In:**  
- `>PUSHL X` (long)  
-
-## RETURN VALUE  
- On stack (float)  
-
-# lrintf  
-Return float rounded into a long  
-
-## C  
-`long int lrintf (float x);`  
-
-## ASM  
-**In:**  
-`>PUSHF x`  
-`>SYSCALL lrintf`  
-
-## RETURN VALUE  
- On stack (long)  
 
 # GetMem0  
  Y,A = Size Requested  
@@ -608,21 +539,6 @@ A=hSList
  CS :  
   A = EC  
 
-# FreeStkObj  
- A = hMem To Free (AUX Memory)  
-
-## RETURN VALUE  
- none.  
- (X,Y unmodified)  
-
-# GetStkObjPtr  
-
-## ASM  
-`lda hStkObj`  
-`>SYSCALL GetStkObjPtr`  
-
-## RETURN VALUE  
-
 # LoadStkObj  
 Load a file in AUX memory (Stock Objects)  
  PUSHW = AUXTYPE (Handled by....  
@@ -634,12 +550,20 @@ Load a file in AUX memory (Stock Objects)
  Y,A = File Length  
  X = hMem of Loaded Object in AUX mem  
 
-# GetMemStat  
-**In:**  
- Y,A = Ptr to 24 bytes buffer  
+# GetStkObjPtr  
+
+## ASM  
+`lda hStkObj`  
+`>SYSCALL GetStkObjPtr`  
 
 ## RETURN VALUE  
- Buffer filled with memory stats  
+
+# FreeStkObj  
+ A = hMem To Free (AUX Memory)  
+
+## RETURN VALUE  
+ none.  
+ (X,Y unmodified)  
 
 # ExecL  
 
@@ -667,7 +591,7 @@ A = Child PSID
 ## RETURN VALUE  
 A = Child PSID  
 
-# ExecL  
+# Kill  
 
 ## C  
 `int kill(short int pid, short int sig);`  
@@ -714,6 +638,13 @@ A = Child PSID
 `>SYSCALL putpw`  
 
 ## RETURN VALUE  
+
+# GetMemStat  
+**In:**  
+ Y,A = Ptr to 24 bytes buffer  
+
+## RETURN VALUE  
+ Buffer filled with memory stats  
 
 # Stat  
 Return information about a file  
@@ -891,7 +822,6 @@ CC : success, Y,A = bytes sent
 CS : error, A = code from Output  
 Specifiers :  
 + %b : pull 1 byte to Print BIN   
-+ %B : pull 2 bytes to Print BIN  
 + %d : pull 1 byte unsigned DEC 0..255  
 + %D : pull 2 bytes unsigned DEC 0..65535  
 + %u : pull 4 bytes long unsigned DEC 0..4294967295  
