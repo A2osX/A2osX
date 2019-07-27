@@ -1,0 +1,331 @@
+NEW
+  AUTO 3,1
+*--------------------------------------
+IO.PIPE.SRCBUF	.EQ ZPDRV
+IO.PIPE.DSTBUF	.EQ ZPDRV+2
+IO.PIPE.CNT		.EQ ZPDRV+4
+IO.PIPE.BASEH	.EQ ZPDRV+6
+IO.PIPE.BUFH	.EQ ZPDRV+7
+IO.PIPE.SIZEH	.EQ ZPDRV+8
+*--------------------------------------
+IO.OPEN.PIPE	ldy #S.FD.PIPE.S
+				lda (pFD),y
+				inc
+				sta (pFD),y
+				
+				lda IO.hFD
+				clc
+				rts				
+*--------------------------------------
+IO.CLOSE.PIPE	ldy #S.FD.PIPE.S
+
+				lda (pFD),y
+				bmi .1					remote PS closed its end
+				
+				lda #$80
+				sta (pFD),y
+				clc
+				rts
+
+.1				jsr IO.CLOSE.NOD
+
+				ldy #S.FD.PIPE.hMem
+				
+				lda (pFD),y
+				beq .2
+				
+				.DO AUXPIPE=1
+				ldx #SYS.FreeStkObj
+				jsr K.SYSCALL2.AUX
+				.ELSE
+				jsr K.FreeMem
+				.FIN
+				
+.2				lda IO.hFD
+				jmp K.FreeMem
+*--------------------------------------
+* (pStack)+2	count
+* (pStack)+0	buf
+*--------------------------------------
+IO.WRITE.PIPE	ldy #S.FD.PIPE.S
+				lda (pFD),y
+
+				bpl .10
+				jmp IO.READ.PIPE.EOF	Remote PS closed the Pipe
+
+.10				ldy #S.FD.PIPE.Free
+				lda (pFD),y
+				ldy #2
+				cmp (pStack),y
+
+				ldy #S.FD.PIPE.Free+1
+				lda (pFD),y
+				ldy #3
+				sbc (pStack),y
+				bcc IO.READ.PIPE.NODATA	not enough room in PIPE
+
+				>PULLW IO.PIPE.SRCBUF
+
+				ldy #S.FD.PIPE.Head+1
+				jsr IO.PIPE.GET.BUF
+				
+				>STYA IO.PIPE.DSTBUF
+				
+				>PULLA					get cnt lo
+				sta IO.PIPE.CNT
+				eor #$ff
+				tax
+
+				>PULLA					get cnt hi
+				sta IO.PIPE.CNT+1
+				eor #$ff
+				pha 
+				
+				ldy #S.FD.PIPE.Head
+				lda (pFD),y
+				tay
+
+				.DO AUXPIPE=1
+				sta SETWRITEAUX
+				.FIN
+				
+.1				inx
+				bne .2
+
+				pla
+				inc
+				beq .8
+				
+				pha
+				
+.2				lda (IO.PIPE.SRCBUF)
+				sta (IO.PIPE.DSTBUF),y
+
+				inc IO.PIPE.SRCBUF
+				bne .4
+				
+				inc IO.PIPE.SRCBUF+1
+				
+.4				iny
+				bne .1
+				
+				lda IO.PIPE.BUFH
+				inc
+				cmp IO.PIPE.SIZEH
+				beq .6
+				
+				sta IO.PIPE.BUFH
+				inc IO.PIPE.DSTBUF+1
+				bra .1
+				
+.6				stz IO.PIPE.BUFH
+				
+				lda IO.PIPE.BASEH		Pipe Buffer Base
+				sta IO.PIPE.DSTBUF+1
+				bra .1
+				
+.8				.DO AUXPIPE=1
+				sta CLRWRITEAUX
+				.FIN
+				
+				tya
+				ldy #S.FD.PIPE.Head
+				sta (pFD),y
+				iny
+				lda IO.PIPE.BUFH
+				sta (pFD),y
+				
+				ldy #S.FD.PIPE.Free
+				jsr IO.PIPE.SUB.CNT
+			
+				iny						#S.FD.PIPE.Used
+
+				jsr IO.PIPE.ADD.CNT
+				jmp IO.READ.PIPE.EXIT
+
+IO.READ.PIPE.EOF
+				lda #MLI.E.EOF
+				.HS 2C					BIT ABS
+IO.READ.PIPE.NODATA
+				lda #E.NODATA
+				sec
+				>RET 4
+*--------------------------------------
+IO.READ.PIPE	ldy #S.FD.PIPE.Used+1
+				
+				lda (pFD),y				Data ?
+				dey
+				ora (pFD),y
+				bne .10					yes...
+				
+				ldy #S.FD.PIPE.S
+				lda (pFD),y
+				bmi IO.READ.PIPE.EOF	Remote PS closed the Pipe
+				bpl IO.READ.PIPE.NODATA
+				
+.10				>PULLW IO.PIPE.DSTBUF	get dest buf
+
+				ldy #S.FD.PIPE.Tail+1
+				jsr IO.PIPE.GET.BUF
+
+				>STYA IO.PIPE.SRCBUF
+
+				>PULLA					get cnt lo
+				tax
+				ldy #S.FD.PIPE.Used
+				cmp (pFD),y
+				
+				>PULLA					get cnt hi
+				pha
+				iny						#S.FD.PIPE.Used+1
+				sbc (pFD),y
+				pla
+				bcc .12					cnt < Used
+
+				dey
+				lda (pFD),y
+				tax
+				iny
+				lda (pFD),y				X,A = Used
+				
+.12				stx IO.PIPE.CNT
+				sta IO.PIPE.CNT+1
+
+				eor #$ff
+				pha
+				
+				txa
+				eor #$ff
+				tax
+				
+				ldy #S.FD.PIPE.Tail
+				lda (pFD),y
+				tay
+				
+				.DO AUXPIPE=1
+				sta SETREADAUX
+				.FIN
+
+.1				inx
+				bne .2
+				
+				pla
+				inc
+				beq .8
+				
+				pha
+				
+.2				lda (IO.PIPE.SRCBUF),y
+				sta (IO.PIPE.DSTBUF)
+
+				inc IO.PIPE.DSTBUF
+				bne .4
+				
+				inc IO.PIPE.DSTBUF+1
+				
+.4				iny
+				bne .1
+				
+				lda IO.PIPE.BUFH
+				inc
+				cmp IO.PIPE.SIZEH
+				beq .6
+				
+				sta IO.PIPE.BUFH
+				inc IO.PIPE.SRCBUF+1
+				bra .1
+				
+.6				stz IO.PIPE.BUFH
+				
+				lda IO.PIPE.BASEH
+				sta IO.PIPE.SRCBUF+1	Restore Pipe Buf base
+				bra .1
+	
+.8				.DO AUXPIPE=1
+				sta CLRREADAUX
+				.FIN
+
+				tya
+				ldy #S.FD.PIPE.Tail
+				sta (pFD),y
+				iny
+				lda IO.PIPE.BUFH
+				sta (pFD),y
+				
+				ldy #S.FD.PIPE.Free
+				jsr IO.PIPE.ADD.CNT
+			
+				iny						#S.FD.PIPE.Used
+
+				jsr IO.PIPE.SUB.CNT
+IO.READ.PIPE.EXIT				
+				>LDYA IO.PIPE.CNT		Y,A = bytes written
+				clc
+				rts
+*--------------------------------------
+IO.PIPE.GET.BUF	lda (pFD),y
+				sta IO.PIPE.BUFH
+
+				ldy #S.FD.PIPE.Size+1
+				lda (pFD),y
+				sta IO.PIPE.SIZEH
+
+				ldy #S.FD.PIPE.hMem
+				lda (pFD),y
+
+				.DO AUXPIPE=1
+				ldx #SYS.GetStkObjPtr
+				jsr K.SYSCALL2.AUX
+				.ELSE
+				jsr K.GetMemPtr			get src buf
+				.FIN
+				
+				sta IO.PIPE.BASEH		Pipe Buffer Base
+				
+*				clc
+				adc IO.PIPE.BUFH
+				rts
+*--------------------------------------
+IO.PIPE.ADD.CNT	clc
+				lda (pFD),y
+				adc IO.PIPE.CNT
+				sta (pFD),y
+				
+				iny
+
+				lda (pFD),y
+				adc IO.PIPE.CNT+1
+				sta (pFD),y
+				rts
+*--------------------------------------
+IO.PIPE.SUB.CNT	sec 
+				lda (pFD),y
+				sbc IO.PIPE.CNT
+				sta (pFD),y
+				
+				iny
+				
+				lda (pFD),y
+				sbc IO.PIPE.CNT+1
+				sta (pFD),y
+				rts
+*--------------------------------------
+IO.EOF.PIPE		clc
+				ldy #S.FD.PIPE.Used
+				lda (pFD),y
+				iny
+				ora (pFD),y
+				beq .8
+				
+				lda #0
+*				clc
+				rts
+
+.8				lda #$ff
+*				clc
+				rts			
+*--------------------------------------
+MAN
+SAVE USR/SRC/SYS/KERNEL.S.PIPE
+LOAD USR/SRC/SYS/KERNEL.S
+ASM
