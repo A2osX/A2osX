@@ -169,25 +169,33 @@ GP.AtkCall		dec IRQ.InKernel
 .1				.DA *
 				jsr GO.A2osX
 				
-				inc IRQ.InKernel
+GP.AtkCall.INC	inc IRQ.InKernel
 				rts
-*--------------------------------------
+*/--------------------------------------
+* # Add32,Sub32,Mul32,IMul32,Div32,IDiv32,Mod32,IMod32,Cmp32,ICmp32
+* Return X+Y, X-Y, X*Y, X/Y, X mod Y....
+* ## ASM
+* **In:**
+* `>PUSHF X (long)`
+* `>PUSHF Y (long)`
+* `>FPU add32`
+* `...`
+* ## RETURN VALUE
+*  On stack (long)
+*\--------------------------------------
 GP.FpuCall		dec IRQ.InKernel
 				jsr .1
-				inc IRQ.InKernel
-
-				clc
-				rts
+				bra GP.AtkCall.INC
 				
-.1				cpx #FPU.IMOD32+1
-				bcc GP.RomCall.JmpX		INT32
+.1				cpx #FPU.FADD
+				bcc GP.RomCall.JmpX		INT32, direct JMP
 				
 				phx
 				jsr GP.SetFAC			Get float from stack
 								
 				plx
 				cpx #FPU.PWR+1
-				bcs .2
+				bcs GP.RomCallGetFacOnStack
 */--------------------------------------
 * # FAdd,FSub,FMult,FDiv,FPwr
 * Return X+Y, X-Y, X*Y, X/Y, X^Y
@@ -229,9 +237,9 @@ GP.FpuCall		dec IRQ.InKernel
 * ## RETURN VALUE
 *  On stack (Float)
 *\--------------------------------------
-.2				jsr GP.ROMCALL
+GP.RomCallGetFacOnStack
+				jsr GP.ROMCALL
 			
-GP.GETFAC.ON.STACK
 				lda pStack
 				ldy pStack+1
 				
@@ -255,6 +263,68 @@ GP.RomCall		phx
 				
 				rts
 *--------------------------------------
+GP.SetARG		ldx #FPU.SETARG
+				.HS 2C					BIT ABS
+GP.SetFAC		ldx #FPU.SETFAC
+				
+				>LDYA pStack
+				bra GP.RomCall
+*/--------------------------------------
+* # float
+* Return 'floated' long
+* ## C
+* `float f = (float)l;
+* ## ASM
+* **In:**
+* `>PUSHL l` (long)
+* `>FPU float`
+* ## RETURN VALUE
+*  On stack (float)
+*\--------------------------------------
+GP.Float		ldy #3
+
+.1				lda (pStack),y
+				sta FAC+1,y				Reverse Order
+				dey
+				bpl .1
+				
+				dec pStack				keep 5 bytes on stack
+				
+				stz	FAC.SIGN
+				lda #$80+32
+				sta FAC					Positive + Exp=32
+				
+				ldx #FPU.LTOF
+
+				bra GP.RomCallGetFacOnStack
+*/--------------------------------------
+* # lrintf
+* Return float rounded into a long
+* ## C
+* `long int lrintf (float x);`
+* ## ASM
+* **In:**
+* `>PUSHF x`
+* `>FPU lrintf`
+* ## RETURN VALUE
+*  On stack (long)
+*\--------------------------------------
+GP.lrintf		jsr GP.SetFAC
+				
+				inc pStack				keep 4 bytes on stack
+				
+				ldx #FPU.QINT
+				jsr GP.ROMCALL	
+
+				ldy #3
+				
+.1				lda FAC+1,y
+				sta (pStack),y
+				dey
+				bpl .1
+
+				rts
+*--------------------------------------
 GP.RomCall.JmpX	jmp (.1,x)
 				
 .1				.DA GP.ADD32
@@ -265,6 +335,8 @@ GP.RomCall.JmpX	jmp (.1,x)
 				.DA GP.IDIV32
 				.DA GP.UMOD32
 				.DA GP.IMOD32
+				.DA GP.UCMP32
+				.DA GP.ICMP32
 				
 * http://www.txbobsc.com/scsc/scdocumentor/E7A0.html
 
@@ -281,25 +353,18 @@ GP.RomCall.JmpX	jmp (.1,x)
 				.DA $EFF1				SIN
 				.DA $F03A				TAN
 				.DA $F09E				ATN
-
+*--------------------------------------
 				.DA $E9E3				LOAD.ARG.FROM.YA
 				.DA $EAF9				LOAD.FAC.FROM.YA
 				
 				.DA $EB27				SETFOR		(GETFAC)
-				.DA $EBB2				FCOMP
+				.DA $EBB2				FCOMP 		(Y,A with FAC)
 
 				.DA $E82E				NORMALIZE.FAC.2 (L->F)
 				.DA $EBF2				QINT		(F->L)
 
 				.DA $EC4A				FIN			AToF
 				.DA $ED36				FOUT.1		PrintF
-*--------------------------------------
-GP.SetARG		ldx #FPU.SETARG
-				.HS 2C					BIT ABS
-GP.SetFAC		ldx #FPU.SETFAC
-				
-				>LDYA pStack
-				bra GP.ROMCALL
 *--------------------------------------
 GP.ADD32		clc
 				.HS B0					BCS
@@ -313,25 +378,45 @@ GP.SUB32		sec
 				ldx #3
 				
 				plp
-				bcs .2
+				bcs .1
+				lda #$79				ADC Absolute,Y
+				.HS 2C					BIT ABS
+.1				lda #$F9				SBC Absolute,Y
 				
-.1				lda (pStack),y
-				adc ACC32,y
-				sta (pStack),y
-				iny
-				dex
-				bpl .1
-				
-				rts
+				sta .3
 				
 .2				lda (pStack),y
-				sbc ACC32,y
+.3				adc ACC32,y				SELF MODIFIED
 				sta (pStack),y
 				iny
 				dex
 				bpl .2
 				
 GP.SUB32.RTS	rts
+*--------------------------------------
+* Returns:
+*  ff X < Y
+*   0 X = Y
+*   1 X > Y
+*--------------------------------------
+GP.UCMP32
+GP.ICMP32		jsr GP.SUB32
+				
+				jsr GP.PopACC32			A = ACC32+3 (sign)
+				
+				tay
+				bmi .2
+
+.1				ora ACC32+2
+				ora ACC32+1
+				ora ACC32
+				beq .8
+				
+				lda #1
+				rts
+
+.2				lda #$ff
+.8				rts			
 *--------------------------------------
 GP.UMUL32		clc
 				.HS B0					BCS
@@ -412,21 +497,17 @@ GP.PutNotARG32	lda #ARG32
 				
 				rts
 *--------------------------------------
-GP.PopACC32		ldy #$ff
+GP.PopACC32		ldy #0
 
-.1				iny
-				lda (pStack),y
+.1				lda (pStack)
+				inc pStack
 				sta ACC32,y
-				cpy #3
+				iny
+				cpy #4
 				bne .1
 				
 				sta ACC32.Sign
 				
-				tya
-*				sec						Add 3+CS=4
-				adc pStack
-				sta pStack
-
 				rts
 *--------------------------------------
 GP.GetARG32		ldy #0
@@ -439,7 +520,7 @@ GP.GetARG32		ldy #0
 
 				sta ARG32.Sign
 
-				rts
+GP.GetARG32.RTS	rts
 *--------------------------------------
 GP.MULDIVMOD.COMMON
 				php
@@ -448,69 +529,12 @@ GP.MULDIVMOD.COMMON
 				jsr GP.GetARG32
 				
 				plp
-				bcc .1
+				bcc GP.GetARG32.RTS
 				
 				jsr MATH.ACC32ABS
-				jsr MATH.ARG32ABS
-
-.1				rts
-*/--------------------------------------
-* # float
-* Return 'floated' long
-* ## C
-* `float f = (float)12345678;
-* ## ASM
-* **In:**
-*  `>PUSHL X` (long)
-* ## RETURN VALUE
-*  On stack (float)
-*\--------------------------------------
-K.Float			ldy #3
-
-.1				lda (pStack),y
-				sta FAC,y			Reverse Order
-				dey
-				bpl .1
-				
-				dec pStack				keep 5 bytes on stack
-				
-				stz	FAC.SIGN
-				lda #$80+32
-				sta FAC					Positive + Exp=32
-				
-				ldx #FPU.LTOF
-
-GP.RomCallPushFAC
-				jsr GP.ROMCALL
-				jmp GP.GETFAC.ON.STACK
-*/--------------------------------------
-* # lrintf
-* Return float rounded into a long
-* ## C
-* `long int lrintf (float x);`
-* ## ASM
-* **In:**
-* `>PUSHF x`
-* `>SYSCALL lrintf`
-* ## RETURN VALUE
-*  On stack (long)
-*\--------------------------------------
-K.lrintf		jsr GP.SetFAC
-				
-				inc pStack				keep 4 bytes on stack
-				
-				ldx #FPU.QINT
-				jsr GP.ROMCALL	
-
-				ldy #3
-				
-.1				lda FAC+1,y
-				sta (pStack),y
-				dey
-				bpl .1
-
-				clc
-				rts				
+				jmp MATH.ARG32ABS
+*--------------------------------------
+* MLI : From Kernel Aux LC to Main LC
 *--------------------------------------
 GP.MLICall		stx .1
 				sta K.MLI.PARAMS
@@ -620,11 +644,6 @@ CORE.Tick10t	.BS 1
 CORE.CPUStatCnt	.DA #100
 CORE.LastPSID	.DA #0
 *--------------------------------------
-DevMgr.Stat		.DA DevMgr.FreeMem
-DevMgr.Free		.DA DevMgr.FreeMem
-				.DA DevMgr.HiMem
-DevMgr.DevIdx	.DA #1
-*--------------------------------------
 IRQ.InKernel	.BS 1
 IRQ.InLib		.BS 1
 IRQ.SkipA2osX	.BS 1
@@ -634,8 +653,6 @@ IRQ.VBL.n0		.BS 1
 IRQ.VBL.0n		.BS 1
 IRQ.Mode		.BS 1
 IRQ.Tick		.BS 1
-*--------------------------------------
-IRQ.Vectors		.BS K.IRQDEV.MAX*2
 *--------------------------------------
 *GO.Reset		jsr GO.A2osX
 *				jmp CORE.Run
