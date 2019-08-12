@@ -124,7 +124,7 @@ Notice that the DO X and DO Y logic is swapped between the two cases.
 | END       | Working | End of SWITCH Statement |
 | EXIT      | Working | exit function, script or shell |
 | FI        | Working | Terminator for IF block |
-| FUNC      | In Progress | FUNC fonction_name <br>   \<body\> <br>   END |
+| FUNCTION  | Working | FUNCTION fonction_name { <br> \<body\> <br> } |
 | IF        | Working | [ \<condition\> ] <br> ![ \<condition\> ]|
 | LOOP      | Working | Terminator for WHILE block |
 | MD        | Working | MD path or relative path <br> Create a directory |

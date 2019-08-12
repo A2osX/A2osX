@@ -2,9 +2,20 @@ NEW
   AUTO 3,1
 				.LIST OFF	
 *--------------------------------------
-CMD.NOHUP		>LDA.G CORE.PSFlags
-				ora #S.PS.F.NOHUP
-				sta (pData),y
+CMD..			lda (ZPArgVBufPtr)
+				beq .9
+				
+				>LDYA ZPArgVBufPtr
+				jsr IO.Load
+				bcs .99
+				>LDYA ZPArgVBufPtr
+				jmp CORE.Load.YAX			exec cmd file and continue
+
+.9				jmp CMD.Exec.CSYN
+.99				rts
+*--------------------------------------
+CMD.NOHUP		lda #S.PS.F.NOHUP
+				tsb CORE.PSFlags
 				
 				>LDYA ZPArgVBuf
 				jmp CORE.ExecExtCmd
@@ -51,7 +62,7 @@ CMD.POPD		>LDA.G PUSHD.STACK
 				
 				tay
 				lda (pData),y
-				jsr CMD.SetPrefixA
+				jsr CMD.SetCWDA
 				
 				>DEC.G PUSHD.STACK
 				clc
@@ -91,7 +102,7 @@ CMD.CD.YA		>SYSCALL realpath
 				bne .12
 
 				txa
-				jmp CMD.SetPrefixA		we have '/'
+				jmp CMD.SetCWDA			we have '/'
 
 .12				>PUSHEA.G StatBuf
 				>LDYA ZPPtr1
@@ -119,7 +130,7 @@ CMD.CD.YA		>SYSCALL realpath
 				bne .14
 
 				lda ZPTmpW
-				jmp CMD.SetPrefixA	already ends with a /
+				jmp CMD.SetCWDA			already ends with a /
 
 .14				iny
 				iny
@@ -142,7 +153,7 @@ CMD.CD.YA		>SYSCALL realpath
 				>SYSCALL freemem
 				pla
 *--------------------------------------
-CMD.SetPrefixA	pha
+CMD.SetCWDA		pha
 				ldy #S.PS.hCWD
 				lda (pPs),y
 				>SYSCALL FreeMem
@@ -538,16 +549,12 @@ CMD.RD			lda (ZPArgVBufPtr)
 				
 .9				jmp CMD.Exec.CSYN
 *--------------------------------------
-CMD.FUNC		lda (ZPArgVBufPtr)
+CMD.FUNCTION	lda (ZPArgVBufPtr)
 				beq .9
 				
 				jsr CORE.StkGetCtx
-				bcc .9					NO context allowed
+				bcc .9					No context allowed
 
-				lda #3					Check stack for 3 bytes
-				jsr CORE.StkCheck
-				bcs .99
-				
 				>LDA.G hFuncList
 				bne .1
 				
@@ -557,32 +564,77 @@ CMD.FUNC		lda (ZPArgVBufPtr)
 				
 .1				>PUSHW ZPArgVBufPtr
 				>LDA.G hFuncList
+
 				>SYSCALL SListNewKey
 				bcs .99
 
-				jsr CORE.StkPushYA
+				>STYA ZPTmpW			Save KeyID
 
-				lda #$C0+C.FUNC
-				jsr CORE.StkPush
+				jsr CORE.ArgV.Next		nothing after function name
+				beq .10
 				
-				lda #$ff
-				>STA.G bFuncMode
+				cmp #'{'
+				bne .9
 
-*				clc
-.99				rts
+				ldy #1
+				lda (ZPArgVBufPtr),y
+				beq .11
 				
 .9				jmp CMD.Exec.CSYN
-*--------------------------------------
-CMD..			lda (ZPArgVBufPtr)
-				beq .9
-				
-				>LDYA ZPArgVBufPtr
-				jsr IO.Load
-				bcs CMD.CALL.RTS
-				>LDYA ZPArgVBufPtr
-				jmp CORE.Load.YAX			exec cmd file and continue
 
-.9				jmp CMD.Exec.CSYN
+.99				rts			
+*--------------------------------------				
+.10				jsr CORE.GetCharNB
+				bcs .9
+				cmp #'{'
+				bne .9
+				
+				jsr CORE.GetNextCharNB
+				bcs .9
+				
+.11				stz M32.ACC				'{' counter
+
+				>LDYA ZPInputBufPtr
+				>STYA ZPPtr1
+				
+				ldy #0
+				ldx #0
+				
+				lda (ZPInputBufPtr)
+				beq .6
+				
+.12				cmp #'{'
+				bne .13
+				
+				inc M32.ACC
+				bra .14
+				
+.13				cmp #'}'
+				bne .14
+				
+				dec M32.ACC
+				bmi .7
+				
+.14				iny
+				bne .15
+				inx
+
+.15				jsr CORE.GetNextChar
+				bne .12
+				
+.6				lda M32.ACC
+				bpl .9
+				
+.7				jsr CORE.GetNextChar	skip ending '}'
+
+				txa
+
+				>PUSHYA					DataLen
+				>PUSHW ZPPtr1			DataPtr
+				>PUSHW ZPTmpW			KeyID
+				>LDA.G hFuncList
+				>SYSCALL SListAddData
+				rts
 *--------------------------------------
 CMD.CALL.UNDEF	lda #E.FUNDEF
 				sec
@@ -615,40 +667,34 @@ CMD.EXIT		lda (ZPArgVBufPtr)
 				>LDYA ZPArgVBufPtr
 				jsr EXP.GET
 				bcs .9
+
 				>SYSCALL AToL
-				bcs .9
+				bcs .99
 
 				>PULLA
+
 				inc pStack
 				inc pStack
 				inc pStack
 
-.1				jsr CMD.EXIT.A
+.1				sta M32.ACC
+				
+.2				jsr CORE.StkPull
 				bcs .9
 
-				lda (pData)
-				bne .8
-				
-				lda #$ff
-				>STA.G bExitOnEOF
-
-.8				lda M32.ACC
-				clc
-.9				rts
-				
-CMD.EXIT.A		sta M32.ACC
-
-.1				jsr CORE.StkPull
-				bcs	CMD.EXIT.RTS
-				
 				cmp #$C0				in CALL / . context ?
-				beq .8
+				beq CMD.EXIT.CALL
 				
 				jsr CMD.EXIT.POP
-				bcc .1
+				bcc .2
+
+.9				rts
+
+.99				lda #E.ESYN
+*				sec
 				rts
-				
-.8				jsr CORE.StkPull
+*--------------------------------------
+CMD.EXIT.CALL	jsr CORE.StkPull
 				>SYSCALL freemem		Code buffer
 				
 				ldy #S.PS.hARGV
@@ -672,31 +718,39 @@ CMD.EXIT.A		sta M32.ACC
 				sta ZPInputBuf
 
 				lda M32.ACC
-				clc
+				
+CMD.EXIT.CLCRTS	clc
 CMD.EXIT.RTS	rts
 *--------------------------------------
 CMD.EXIT.POP	and #$3F
 				cmp #C.IF
-				beq CMD.EXIT.POP0
-				
-				cmp #C.CASE				CASE : nothing
-				beq CMD.EXIT.POP0
-				
+				beq CMD.EXIT.CLCRTS		IF : Nothing
+
 				ldx #2
-				cmp #C.WHILE			WHILE : one Ptr
+				cmp #C.WHILE			WHILE : One Ptr = 2 bytes
 				beq CMD.EXIT.POPX
-				
+
 				cmp #C.SWITCH			SWITCH : hValue
-				bne .9
+				beq .2
 				
-				jsr CORE.StkPull
+				ldx #1
+				
+				cmp #C.CASE				CASE : C.CASE + hValue
+				beq .1
+
+				cmp #C.DEFAULT			DEFAULT : C.DEFAULT + hValue
+				bne .9
+
+.1				jsr CMD.EXIT.POPX
+
+.2				jsr CORE.StkPull
 				>SYSCALL freemem
 				rts
 				
 .9				lda #E.STACKERROR
 				sec
 				rts
-
+*--------------------------------------
 CMD.EXIT.POPX	lda (pData)
 				
 .1				dec
@@ -705,7 +759,7 @@ CMD.EXIT.POPX	lda (pData)
 
 				sta (pData)
 
-CMD.EXIT.POP0	clc
+				clc
 				rts		
 *--------------------------------------
 CMD.BREAK		jsr CORE.StkGetCtx		Get context in CORE.TestResult
@@ -819,11 +873,8 @@ CMD.DEFAULT		jsr CORE.StkGetCtx		Get context in CORE.TestResult
 *--------------------------------------
 CMD.END			jsr CORE.StkGetCtx		Get context in CORE.TestResult
 				bcs CMD.END.CSYN
-				
-				and #$3F
-				cmp #C.FUNC
-				beq CMD.END.FUNC
 
+				and #$3F
 				cmp #C.SWITCH
 				beq .3
 				
@@ -833,17 +884,13 @@ CMD.END			jsr CORE.StkGetCtx		Get context in CORE.TestResult
 				cmp #C.DEFAULT
 				bne CMD.END.CSYN
 				
-.2				jsr CORE.StkPull		remove C.CASE,C.DEFAULT
+.2				jsr CORE.StkPull		remove C.CASE or C.DEFAULT
 				
 .3				jsr CORE.StkPull		remove C.SWITCH
 				jsr CORE.StkPull		get hVALUE
 				>SYSCALL freemem			
 				rts
 							
-CMD.END.FUNC	jsr CORE.StkPull		remove C.FUNC
-				jsr CORE.StkPull		remove KeyID
-				jmp CORE.StkPull		remove KeyID
-				
 CMD.END.CSYN	jmp CMD.Exec.CSYN
 *--------------------------------------
 CMD.FOR			jsr CORE.StkGetCtx
