@@ -21,20 +21,18 @@ CORE.FUNCRESET	>LDA.G hFuncList
 				>SYSCALL SListFree
 				>STZ.G hFuncList
 	
-.8
-CORE.FUNCRESET.RTS
-				rts	
+.8				rts	
 *--------------------------------------
-CORE.Load.YAX	stx M32.ACC				X=Code to Execute
+CORE.Load.YAX	stx M32.ACC				X = Code to Execute
 
 				jsr CORE.ArgV.Dup		Y,A = ArgV
-				bcs CORE.FUNCRESET.RTS
-				sta M32.ACC+2			A=ARGC
-				stx M32.ACC+1			X=ARGV
+				bcs .9
+				sta M32.ACC+2			A = ARGC
+				stx M32.ACC+1			X = hARGV
 
 				lda #8
 				jsr CORE.StkCheck
-				bcs CORE.FUNCRESET.RTS
+				bcs .9
 				
 				>LDYA ZPInputBuf
 				jsr CORE.StkPushYA
@@ -48,7 +46,7 @@ CORE.Load.YAX	stx M32.ACC				X=Code to Execute
 
 				ldy #S.PS.hARGV
 				lda (pPS),y
-				jsr CORE.StkPush		old ARGV
+				jsr CORE.StkPush		old hARGV
 
 				ldy #S.PS.ARGC
 				lda M32.ACC+2			new ARGC
@@ -56,18 +54,18 @@ CORE.Load.YAX	stx M32.ACC				X=Code to Execute
 				
 				iny 					#S.PS.hARGV
 				lda M32.ACC+1
-				sta (pPS),y				new ARGV
+				sta (pPS),y				new hARGV
 				
 				lda M32.ACC				new code
 				jsr CORE.StkPush
 				
-				lda M32.ACC
+*				lda M32.ACC
 				>SYSCALL GetMemPtr
 				>STYA ZPInputBuf
 				>STYA ZPInputBufPtr
 
-				lda #$C0
-				jmp CORE.StkPush
+*				clc
+.9				rts
 *--------------------------------------
 * http://heirloom.sourceforge.net/sh/sh.1.html
 *--------------------------------------
@@ -94,13 +92,16 @@ CORE.Load.YAX	stx M32.ACC				X=Code to Execute
 * set hStdOut = Std
 *--------------------------------------
 CORE.Run.EOF	jsr CORE.StkPull
-				bcs .9
+				bcs *
 				
-				cmp #$C0				in CALL / . context ?
+				cmp #$C0+C..			check CALL . CL context
+				beq .1
+				cmp #$C0+C.CALL
+				beq .1
+				cmp #$C0+C.CLEXEC
 				bne .9
 				
-				jsr CMD.EXIT.CALL
-				bcs .9
+.1				jsr CMD.EXIT.FILE
 
 				jsr IO.Reset
 				
@@ -108,7 +109,7 @@ CORE.Run.EOF	jsr CORE.StkPull
 				sec
 				rts						Ending 0, CS,A=0
 				
-.9				lda #E.UNEXP
+.9				lda #E.UNEXPEOF
 				sec
 				rts				
 *--------------------------------------
@@ -305,12 +306,14 @@ CORE.SkipLine	jsr CORE.GetNextCharNB
 * search ZPInputBufPtr/ZPArgVBufPtr in Y,A table
 *--------------------------------------
 CORE.LookupInputBuf
-				>STYA ZPPtr1
-				>LDYA ZPInputBufPtr
-				bra CORE.Lookup
-CORE.LookupArgVBuf				
-				>STYA ZPPtr1
+				sec
+				.HS 90					BCC
+CORE.LookupArgVBuf
+				clc
+				>STYA ZPPtr1			Keywords table
 				>LDYA ZPArgVBufPtr
+				bcc CORE.Lookup
+				>LDYA ZPInputBufPtr
 				
 CORE.Lookup		>STYA ZPPtr2
 
@@ -318,46 +321,58 @@ CORE.Lookup		>STYA ZPPtr2
 				
 .1				ldy #$ff
 				
-.2				iny
-				lda (ZPPtr2),y
-				beq .3					Src Keyword end
-			
-				jsr CORE.IsSpaceOrEndCmd
-				bcc .3					Src Keyword end
+.2				jsr .7					get next valid char in src text
+				bcs .3
 				
-				lda (ZPPtr1),y
-				beq .4					Table Keyword end
-				lda (ZPPtr2),y
+.20				jsr ToUpperCase
+				
+				eor (ZPPtr1),y			match table char ?
+				asl						compare only 7 bits
+				bne .4					no match...get next table keyword
 
-				jsr ToUpperCase
-				
-				cmp (ZPPtr1),y			
-				beq .2
+				bcc .2					not last char in this keyword
 
-				bra .4
-				
-.3				lda (ZPPtr1),y
-				bne .4
-				
-				tya						Keyword Len
-				dey
+				jsr .7					next char in text...
+				bcc .4					valid....failed
+
+.8				tya						Keyword Len
+
 				clc			
-.8				rts
-				
-.4				jsr IncPtr1
+				rts
 
-				lda (ZPPtr1)
-				bne .4
+.3				dey
+				lda (ZPPtr1),y			was last char in this keyword ?
+				bmi .8
+				
+				iny
+				
+.41				jsr IncPtr1				skip chars to next keyword
+
+.4				lda (ZPPtr1)
+				bpl .41
 				
 				jsr IncPtr1
 								
 .6				inx
 				
-				lda (ZPPtr1)			Array Ending 0, must be an external Cmd....
+				lda (ZPPtr1)			Array Ending 0, lookup failed
 				bne .1
 				
 				lda #E.SYN
 				sec
+				rts
+				
+.7				iny
+				lda (ZPPtr2),y			Get Src text char...
+				beq .9					end of text
+			
+				jsr CORE.IsSpaceOrEndCmd
+				bcc .9					end of valid chars
+				
+				clc
+				rts
+				
+.9				sec
 				rts
 *--------------------------------------
 * ArgV
@@ -388,7 +403,7 @@ CORE.ArgV.Dup	>STYA ZPPtr1
 				
 				>STYA ZPPtr2
 
-				lda #$ff			Arg count-1 (skip $0)
+				lda #$ff				Arg count-1 (skip $0)
 				pha
 				
 .5				pla
@@ -666,16 +681,22 @@ CORE.StkGetCtx	jsr CORE.StkGet
 				tax
 				bcs .1					no context...
 
-				cmp #$C0				in a call...
+				cmp #$C0+C..			in a call...
 				beq .1					CS
 
+				cmp #$C0+C.CALL
+				beq .1					CS
+				
+				cmp #$C0+C.CLEXEC
+				beq .1					CS
+				
 				and #$80				get current..
 				lsr						becomes parent
-				bra .2
+				bra .8
 				
 .1				lda #$40				...set Parent = true
 
-.2				sta CORE.TestResult
+.8				sta CORE.TestResult
 
 				txa
 				rts

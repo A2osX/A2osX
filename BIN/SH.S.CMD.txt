@@ -7,12 +7,16 @@ CMD..			lda (ZPArgVBufPtr)
 				
 				>LDYA ZPArgVBufPtr
 				jsr IO.Load
-				bcs .99
-				>LDYA ZPArgVBufPtr
-				jmp CORE.Load.YAX			exec cmd file and continue
+				bcs CMD.SHIFTA.RTS
 
-.9				jmp CMD.Exec.CSYN
-.99				rts
+				>LDYA ZPArgVBufPtr
+				jsr CORE.Load.YAX		Exec . file
+				bcs CMD.SHIFTA.RTS
+
+				lda #$C0+C..
+				jmp CORE.StkPush
+
+.9				jmp CMD.E.CSYN
 *--------------------------------------
 CMD.NOHUP		lda #S.PS.F.NOHUP
 				tsb CORE.PSFlags
@@ -33,7 +37,7 @@ CMD.SHIFTA		>SYSCALL ArgV
 				sta (pPS),y
 				
 .8				clc
-				rts
+CMD.SHIFTA.RTS	rts
 *--------------------------------------
 CMD.PUSHD		>LDA.G PUSHD.STACK
 				cmp #PUSHD.STACK+PUSHD.STACK.MAX
@@ -69,7 +73,7 @@ CMD.POPD		>LDA.G PUSHD.STACK
 CMD.POPD.RTS				
 				rts
 				
-CMD.POPD.CSYN	jmp CMD.Exec.CSYN
+CMD.POPD.CSYN	jmp CMD.E.CSYN
 *--------------------------------------
 CMD.PWD			ldy #S.PS.hCWD
 				lda (pPs),y
@@ -285,7 +289,7 @@ CMD.SET.1
 .8				clc
 .9				rts
 				
-.99				jmp CMD.Exec.CSYN
+.99				jmp CMD.E.CSYN
 				
 CMD.SET.UNSET	>LDYA ZPVarNamePtr
 				>SYSCALL UnsetEnv
@@ -319,16 +323,16 @@ CMD.SET.EXEC	jsr CORE.ArgV.NextChar	skip "`"
 				jsr IO.Pipe.In
 				bcs .9
 				
-				lda #$ff
-				>STA.G bREAD.S			secret
-				>STA.G bReadMode
+				lda #255
+				>STA.G READ.N
+				>STA.G bREAD.S
+
+				jmp CMD.READ.VAR
 				
-				>SLEEP
-				clc
 .9				rts
 *--------------------------------------
 CMD.DATE		sec
-				.HS 90					bcc
+				.HS 90					BCC
 CMD.TIME		clc
 				php
 				>LEA.G TimeBuf
@@ -444,10 +448,16 @@ CMD.GETKEY		lda (ZPArgVBufPtr)
 								
 				>LDYA ZPArgVBufPtr
 				>SYSCALL SetEnv
-.9				rts
+.9				
+CMD.GETKEY.RTS	rts
 *--------------------------------------
 CMD.READ		lda (ZPArgVBufPtr)
-				beq .9 
+				beq .9
+				
+				stz ZPVarNamePtr+1
+				>STZ.G bREAD.S
+				dec
+				>STA.G READ.N
 
 .1				jsr CMD.IsSwitch
 				bcs .4
@@ -457,10 +467,10 @@ CMD.READ		lda (ZPArgVBufPtr)
 				lda #$ff
 				>STA.G bREAD.S
 				
-				bra .7
+				bra .5
 				
-.2				cmp #'P'			
-				bne .9
+.2				cmp #'P'
+				bne .3
 				
 				jsr CORE.ArgV.Next
 				beq .9
@@ -468,39 +478,73 @@ CMD.READ		lda (ZPArgVBufPtr)
 				>PUSHBI 0
 				>LDYA ZPArgVBufPtr
 				>SYSCALL printf
-				bcs .99
-				bra .7
+				bcs CMD.GETKEY.RTS
+				bra .5
+
+.9				jmp CMD.E.CSYN
+				
+.3				cmp #'N'
+				bne .9
+						
+				jsr CORE.ArgV.Next
+				beq .9
+				
+				>LDYA ZPArgVBufPtr
+				>SYSCALL AToL
+				bcs CMD.GETKEY.RTS
+
+				>PULLA
+				>STA.G READ.N
+
+				inc pStack
+				inc pStack
+				inc pStack
+				
+				bra .5
 				
 .4				>LDYA ZPArgVBufPtr
 				>STYA ZPVarNamePtr
 
-				>LDA.G bReadMode
-				bne .9
-				lda #$ff
-				>STA.G bReadMode
-				
-.7				jsr CORE.ArgV.Next
+.5				jsr CORE.ArgV.Next
 				bne .1
 				
-				>LDA.G bReadMode
+				lda ZPVarNamePtr+1
 				beq .9
-				clc
-.99				rts
 				
-.9				jmp CMD.Exec.CSYN
+CMD.READ.VAR	jsr CL.Reset
+				
+.1				>SYSCALL GetChar
+				bcs .9
+
+				jsr CL.CHARIN
+
+				>LDA.G CL.bReady
+				bpl .1
+
+				lda (ZPCLBuf)
+				bne .2
+				
+				>LDYA ZPVarNamePtr
+				>SYSCALL UnSetEnv
+				rts
+				
+.2				>PUSHW ZPCLBuf
+
+				>LDYA ZPVarNamePtr
+				>SYSCALL SetEnv
+
+.9				rts
 *--------------------------------------
 CMD.SLEEP		lda (ZPArgVBufPtr)
-				beq .9
+				beq CMD.REN.CSYN
 
 				>LDYA ZPArgVBufPtr
 				>SYSCALL AToL
-				bcs .9
+				bcs CMD.REN.CSYN
 
 				>PULLL.G Sleep
 				clc
 				rts
-				
-.9				jmp CMD.Exec.CSYN
 *--------------------------------------
 CMD.PAUSE		lda #$FF
 				>STA.G bPause
@@ -508,13 +552,11 @@ CMD.PAUSE		lda #$FF
 				rts
 *--------------------------------------
 CMD.MD			lda (ZPArgVBufPtr)
-				beq .9
+				beq CMD.REN.CSYN
 
 				>LDYA ZPArgVBufPtr
 				>SYSCALL MKDir
 				rts
-				
-.9				jmp CMD.Exec.CSYN
 *--------------------------------------
 CMD.REN			lda (ZPArgVBufPtr)
 				beq .9
@@ -529,10 +571,11 @@ CMD.REN			lda (ZPArgVBufPtr)
 				rts
 				
 .90				>PULLYA				
-.9				jmp CMD.Exec.CSYN
+.9				
+CMD.REN.CSYN	jmp CMD.E.CSYN
 *--------------------------------------
 CMD.RD			lda (ZPArgVBufPtr)
-				beq .9
+				beq CMD.REN.CSYN
 				
 				>PUSHEA.G StatBuf
 				>LDYA ZPArgVBufPtr
@@ -541,13 +584,11 @@ CMD.RD			lda (ZPArgVBufPtr)
 				
 				>LDA.G StatBuf+S.STAT.P.TYPE
 				cmp #S.FI.T.DIR
-				bne .9
+				bne CMD.REN.CSYN
 				
 				>LDYA ZPArgVBufPtr
 				>SYSCALL Remove
 .99				rts
-				
-.9				jmp CMD.Exec.CSYN
 *--------------------------------------
 CMD.FUNCTION	lda (ZPArgVBufPtr)
 				beq .9
@@ -580,7 +621,7 @@ CMD.FUNCTION	lda (ZPArgVBufPtr)
 				lda (ZPArgVBufPtr),y
 				beq .11
 				
-.9				jmp CMD.Exec.CSYN
+.9				jmp CMD.E.CSYN
 
 .99				rts			
 *--------------------------------------				
@@ -659,7 +700,11 @@ CMD.CALL		>LDA.G hFuncList
 				bcs CMD.CALL.RTS
 
 				>LDYA ZPArgVBufPtr		FUNC PARAM1 PARAM2...
-				jmp CORE.Load.YAX
+				jsr CORE.Load.YAX		Exec FUNC
+				bcs CMD.CALL.RTS
+				
+				lda #$C0+C.CALL
+				jmp CORE.StkPush
 *--------------------------------------
 CMD.EXIT		lda (ZPArgVBufPtr)
 				beq .1					no arg, exit 0
@@ -678,12 +723,18 @@ CMD.EXIT		lda (ZPArgVBufPtr)
 				inc pStack
 
 .1				sta M32.ACC
-				
-.2				jsr CORE.StkPull
+	
+.2				jsr CORE.StkPull		Pull everything until CALL . CL...
 				bcs .9
 
-				cmp #$C0				in CALL / . context ?
-				beq CMD.EXIT.CALL
+				cmp #$C0+C..			in CALL . CL context ?
+				beq CMD.EXIT.FILE
+				
+				cmp #$C0+C.CALL
+				beq CMD.EXIT.FILE
+				
+				cmp #$C0+C.CLEXEC
+				beq CMD.EXIT.SH
 				
 				jsr CMD.EXIT.POP
 				bcc .2
@@ -694,7 +745,14 @@ CMD.EXIT		lda (ZPArgVBufPtr)
 *				sec
 				rts
 *--------------------------------------
-CMD.EXIT.CALL	jsr CORE.StkPull
+CMD.EXIT.SH		jsr CMD.EXIT.FILE
+
+				lda #$ff
+				>STA.G bExitOnEOF
+				clc
+				rts
+*--------------------------------------
+CMD.EXIT.FILE	jsr CORE.StkPull
 				>SYSCALL freemem		Code buffer
 				
 				ldy #S.PS.hARGV
@@ -776,11 +834,12 @@ CMD.BREAK		jsr CORE.StkGetCtx		Get context in CORE.TestResult
 				jsr CORE.StkPull		remove C.CASE
 				jsr CORE.StkGet
 				and #$7F
+
 				sta (pDATA),y
 .8				clc
 				rts
 
-.9				jmp CMD.Exec.CSYN
+.9				jmp CMD.E.CSYN
 *--------------------------------------
 * stack-1		hVALUE
 * stack			SWITCH TOKEN
@@ -793,6 +852,7 @@ CMD.SWITCH		jsr CORE.StkGetCtx
 				
 				jsr EXP.GET
 				bcs .9
+				
 				>SYSCALL strdup
 				bcs .9
 
@@ -850,17 +910,20 @@ CMD.CASE		jsr CORE.StkGetCtx		Get context in CORE.TestResult
 				ora #C.CASE
 				jmp CORE.StkPush
 				
-.9				jmp CMD.Exec.CSYN
+.9				
+CMD.E.CSYN		lda #E.CSYN
+				sec
+				rts
 *--------------------------------------
 CMD.DEFAULT		jsr CORE.StkGetCtx		Get context in CORE.TestResult
-				bcs .9
+				bcs CMD.E.CSYN
 
 				and #$3F
 				cmp #C.SWITCH
 				beq .1
 				
 				cmp #C.CASE
-				bne .9
+				bne CMD.E.CSYN
 				
 				jsr CORE.StkPull		remove C.CASE
 
@@ -868,11 +931,9 @@ CMD.DEFAULT		jsr CORE.StkGetCtx		Get context in CORE.TestResult
 				and #$C0
 				ora #C.DEFAULT
 				jmp CORE.StkPush
-				
-.9				jmp CMD.Exec.CSYN
 *--------------------------------------
 CMD.END			jsr CORE.StkGetCtx		Get context in CORE.TestResult
-				bcs CMD.END.CSYN
+				bcs CMD.E.CSYN
 
 				and #$3F
 				cmp #C.SWITCH
@@ -882,7 +943,7 @@ CMD.END			jsr CORE.StkGetCtx		Get context in CORE.TestResult
 				beq .2
 				
 				cmp #C.DEFAULT
-				bne CMD.END.CSYN
+				bne CMD.E.CSYN
 				
 .2				jsr CORE.StkPull		remove C.CASE or C.DEFAULT
 				
@@ -890,27 +951,25 @@ CMD.END			jsr CORE.StkGetCtx		Get context in CORE.TestResult
 				jsr CORE.StkPull		get hVALUE
 				>SYSCALL freemem			
 				rts
-							
-CMD.END.CSYN	jmp CMD.Exec.CSYN
 *--------------------------------------
 CMD.FOR			jsr CORE.StkGetCtx
 
 				lda (ZPArgVBufPtr)
-				beq CMD.END.CSYN
+				beq CMD.E.CSYN
 
 				>LDYA ZPArgVBufPtr
 				>STYA ZPVarNamePtr
 
 				jsr CORE.ArgV.Next
-				beq CMD.END.CSYN
+				beq CMD.E.CSYN
 				
 				>PUSHW ZPArgVBufPtr
 				>LDYA L.IN
 				>SYSCALL StrCaseCmp
-				bcs CMD.END.CSYN
+				bcs CMD.E.CSYN
 
 				jsr CORE.ArgV.Next
-				beq CMD.END.CSYN
+				beq CMD.E.CSYN
 
 				lda #8					Make sure 8 bytes free on stack
 				jsr CORE.StkCheck

@@ -134,7 +134,7 @@ Notice that the DO X and DO Y logic is swapped between the two cases.
 | PUSHD     | Working | Save actual working directory <br> PUSHD \<dir\> do also a CD to \<dir\> |
 | PWD       | Working | Print Working Directory |
 | RD        | Working | Delete an empty directory |
-| READ      | Working | -S : no echo (password) <br> -P : "prompt message"   |
+| READ      | Working | -S : no echo (password) <br> -P : "prompt message" <br> -N maxchar  |
 | REN       | Working | Rename a file, directory or volume |
 | SET       | Working | -X : toggle debug mode <br> -C : toggle Control-C break mode <br> -E : toggle error printing mode <br> -F : delete all declared functions |
 | SHIFT     | Working | Remove $1 from cmd line |

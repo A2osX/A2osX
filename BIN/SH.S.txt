@@ -1,5 +1,5 @@
 NEW
-  AUTO 4,1
+  AUTO 3,1
 				.LIST OFF
 				.OP	65C02
 				.OR	$2000
@@ -48,6 +48,8 @@ C.ELSE			.EQ 31
 C.FI			.EQ 32
 C.END			.EQ 33
 *--------------------------------------
+C.CLEXEC		.EQ 63
+*--------------------------------------
 E.CSYN			.EQ $C0
 E.ESYN			.EQ $C1
 E.STACKERROR	.EQ $C2
@@ -57,7 +59,7 @@ E.NOFOR			.EQ $C5
 E.NOIF			.EQ $C6
 E.BADFTYPE		.EQ $C7
 E.FUNDEF		.EQ $C8
-E.UNEXP			.EQ $C9
+E.UNEXPEOF		.EQ $C9
 *--------------------------------------
 				.INB INC/MACROS.I
 				.INB INC/A2OSX.I
@@ -125,6 +127,7 @@ L.MSG.PID		.DA MSG.PID
 L.FMT.DATE		.DA FMT.DATE
 L.FMT.TIME		.DA FMT.TIME
 L.FMT.GETKEY	.DA FMT.GETKEY
+L.FMT.Long		.DA FMT.Long
 J.ESC			.DA CL.BS			left arrow
 				.DA HIS.GetNext			
 				.DA HIS.GetPrev
@@ -187,10 +190,9 @@ J.EXP.OP.UNARY	.DA EXP.OP.UNARY.D
 L.EXP.OP.BINARY	.DA EXP.OP.BINARY
 L.EXP.OP.MATH	.DA EXP.OP.MATH
 L.EXP.OP.LOGIC	.DA EXP.OP.LOGIC
-L.HOME			.DA HOME
 L.HOME.PROFILE	.DA HOME.PROFILE
+L.HOME			.DA HOME
 L.PS1			.DA PS1
-L.M32.Printf	.DA M32.Printf
 L.ERR.Codes		.DA ERR.Codes
 L.ERR.Messages	.DA ERR.Messages
 				.DA 0
@@ -222,7 +224,12 @@ CS.RUN			jsr CL.Init
 				lda (pPS),y
 				>SYSCALL GetMemPtr
 				plx
-				jsr CORE.Load.YAX
+				jsr CORE.Load.YAX		Exec Batch file
+				bcs CS.INIT.RTS
+				
+				lda #$C0+C..
+				jsr CORE.StkPush
+				
 				bra CS.RUN.LOOP
 *--------------------------------------
 .1				jsr CMD.CD.HOME
@@ -235,26 +242,22 @@ CS.RUN			jsr CL.Init
 				>SYSCALL printf
 				bcs CS.INIT.RTS
 
-				>PUSHEA.G StatBuf
-				>LDYA L.HOME.PROFILE
-				>SYSCALL STAT
-				bcs CS.RUN.LOOP			no profile...
-
 				>LDYA L.HOME.PROFILE
 				jsr IO.Load
-				bcs CS.RUN.LOOP
+				bcs CS.RUN.LOOP			No profile...
+
 				>LDYA L.HOME.PROFILE
-				jsr CORE.Load.YAX		exec profile and continue
+				jsr CORE.Load.YAX		Exec profile and continue
 				
-*				bcs CS.RUN.LOOP
+				bcs CS.RUN.LOOP
+				
+				lda #$C0+C..
+				jsr CORE.StkPush				
 *--------------------------------------
 CS.RUN.LOOP		>SLEEP
 
 .1				jsr CheckSleep
-				beq .3
-
-				>LDA.G bSET.C
-				bne CS.RUN.LOOP
+				beq .2
 
 				ldy #S.PS.hStdIn
 				lda (pPS),y
@@ -268,67 +271,69 @@ CS.RUN.LOOP		>SLEEP
 				bcs .9					I/O err
 				
 				cmp #3					Ctrl-C
-				bne CS.RUN.LOOP
+				bne .11
 				
 				lda (pData)				batch mode ?
 				beq CS.RUN.LOOP
 				
 				>LDA.G bSET.C
 				beq .8
+				
 				bra CS.RUN.LOOP
+				
+.11				cmp #19					test Ctrl-s
+				bne CS.RUN.LOOP
 
-.3				>LDA.G bPause
-				bpl .6
-				
-.4				>SYSCALL GetChar
-				bcs	.9					I/O err
-				
-.5				cmp #3					Ctrl-C
-				bne .60
-				
-				lda (pData)				batch mode ?
-				beq .61
-				
-				>LDA.G bSET.C
-				beq .8
-				bra .61
-				
-.60				tax
-				
-				>LDA.G bPause
-				asl
-				bpl .61					not from PAUSE command
-				
-				cpx #C.CR
-				bne .4
-				
-.61				>STZ.G bPause
-				bra .62
-
-.6				>LDA.G bReadMode		read mode ?
-				bne .7
-				
-.62				lda (pData)				batch mode ?
-				beq CS.RUN.INTERACTIVE
-				
-				jmp CS.RUN.BATCH
-.7				jmp CS.RUN.READ
-
+				lda #$80
+				>STA.G bPause
+				bra CS.RUN.LOOP				
+*--------------------------------------
 .8				lda #3					User Interrupt
 				sec
 .9				rts
 *--------------------------------------
-CS.RUN.INTERACTIVE
-				>LDA.G bExitOnEOF
-				beq .10
-
-				jmp CS.RUN.LOOP.EXIT
+.2				>LDA.G bPause
+				bpl .6
 				
-.10				jsr IO.Reset
+.3				>SYSCALL GetChar
+				bcs	.9					I/O err
+				
+				cmp #3					Ctrl-C
+				bne .4
+				
+				lda (pData)				batch mode ?
+				beq .5
+				
+				>LDA.G bSET.C
+				beq .8
+				bra .5
+				
+.4				tax
+				
+				>LDA.G bPause
+				asl						$ff ?
+				bpl .5					not from PAUSE command
+				
+				cpx #C.CR
+				bne .3
+				
+.5				>STZ.G bPause
+*--------------------------------------
+.6				lda (pData)				batch mode ?
+				
+				bne CS.RUN.BATCH
+*--------------------------------------
+CS.RUN.INTERACTIVE
+				jsr IO.Reset
 				jsr CL.Reset
+
 				jsr CL.PrintPrompt
 				bcs .9
-
+				
+				>STZ.G bREAD.S
+				dec
+				>STA.G READ.N
+				
 .1				>SYSCALL GetChar
 				bcs .9						I/O error 
 				
@@ -361,7 +366,11 @@ CS.RUN.INTERACTIVE
 				>SYSCALL GetMemPtr		Y,A =ARGV
 				
 				plx
-				jsr CORE.Load.YAX		X = Copy of CL
+				jsr CORE.Load.YAX		Exec CL
+				bcs .9
+				
+				lda #$C0+C.CLEXEC
+				jsr CORE.StkPush
 
 .6				jsr CORE.Run
 				
@@ -369,68 +378,7 @@ CS.RUN.INTERACTIVE
 
 .9				rts			
 *--------------------------------------
-CS.RUN.READ		jsr CL.RESET
-				
-.1				>SYSCALL GetChar
-				bcs CS.RUN.READ.9
-
-				jsr CL.CHARIN
-
-				>LDA.G CL.bReady
-				bpl .1
-
-				lda (ZPCLBuf)
-				bne .2
-				
-				>LDYA ZPVarNamePtr
-				>SYSCALL UnSetEnv
-				bra .7
-				
-.2				>PUSHW ZPCLBuf
-
-				>LDYA ZPVarNamePtr
-				>SYSCALL SetEnv
-				
-.7				php
-				pha
-
-				>STZ.G bReadMode
-				>STA.G bREAD.S
-				
-				pla
-				plp
-				
-.8				jmp CS.RUN.LOOP.END
-CS.RUN.READ.9	rts
-*--------------------------------------
-CS.RUN.BATCH	>LDA.G bSET.C
-				bne .2
-
-				ldy #S.PS.hStdIn
-				lda (pPS),y
-				>SYSCALL feof
-				bcs .2					unsupported
-				
-				tay
-				bne .2
-				
-				>SYSCALL GetChar
-				bcs CS.RUN.READ.9
-				
-				cmp #3					test Ctrl-c
-				bne .1
-
-				bra CS.RUN.LOOP.END		CS
-
-.1				cmp #19					test Ctrl-s
-				bne .2
-
-				lda #$80
-				>STA.G bPause
-				clc
-				jmp CS.RUN.LOOP.END
-
-.2				>LDA.G bSET.X
+CS.RUN.BATCH	>LDA.G bSET.X
 				beq .5
 
 				ldy #$ff
@@ -452,27 +400,25 @@ CS.RUN.BATCH	>LDA.G bSET.C
 				bcs CS.RUN.LOOP.RTS
 
 .5				jsr CORE.Run
-				bcc CS.RUN.LOOP.END
-
-				tay							0 = EOF
-				bne CS.RUN.LOOP.END
-
-				lda #0
-				sec
 				
 CS.RUN.LOOP.END	ldy #S.PS.RC
 				sta (pPs),y
 				
 				bcc CS.RUN.LOOP.80
 				tay
-				beq CS.RUN.LOOP.80
+				beq CS.RUN.LOOP.80		0 = EOF
 
 				>LDA.G bSET.E
 				bmi CS.RUN.LOOP.80
+
+				jsr CORE.StkGet
+				cmp #$C0+C.CLEXEC
+				beq .1
+				
 				jsr IO.PrintBatchErrMsg
 				bcs CS.RUN.LOOP.RTS
 				
-				ldy #S.PS.RC
+.1				ldy #S.PS.RC
 				lda (pPs),y
 				
 				jsr IO.PrintErrMsg
@@ -518,6 +464,7 @@ CS.DOEVENT		lda (pEvent)
 CS.QUIT			jsr HIS.Quit
 				jsr CL.Quit
 				jsr CORE.Quit
+
 				clc
 				rts
 *--------------------------------------
@@ -621,12 +568,12 @@ MSG.PID			.AZ "PID=%d\r\n"
 FMT.DATE		.AZ "%A (%w), %B %d %Y"
 FMT.TIME		.AZ "%H:%M:%S (%I:%M:%S%p)"
 FMT.GETKEY		.AZ "%d"
-M32.Printf		.AZ "%L"
+FMT.Long		.AZ "%L"
 *--------------------------------------
-HOME			.AZ "${HOME}"
 HOME.PROFILE	.AZ "${HOME}PROFILE"
-PS1				.AZ "${PS1}"
 				.HS 00					To Make It ArgV
+PS1				.AZ "${PS1}"
+HOME			.AZ "${HOME}"
 *--------------------------------------
 EscChars		.AS 'DBAC'
 EscChars.Cnt	.EQ *-EscChars
@@ -634,76 +581,82 @@ EscChars.Remap	.DA #C.BS,#C.VT,#C.LF,#C.FS
 *--------------------------------------
 IN				.AZ "IN"
 *--------------------------------------
-CMD				.AZ ".."
-				.AZ "."
-				.AZ "CD"
-				.AZ "NOHUP"
-				.AZ "DATE"
-				.AZ "ECHO"
-				.AZ "EXIT"
-				.AZ "GETKEY"
-				.AZ "MD"
-				.AZ "PAUSE"
-				.AZ "PWD"
-				.AZ "RD"
-				.AZ "READ"
-				.AZ "REN"
-				.AZ "SET"
-				.AZ "SLEEP"
-				.AZ "SHIFT"
-				.AZ "TIME"
-				.AZ "PUSHD"
-				.AZ "POPD"
-				.AZ "FUNCTION"
-				.AZ "CALL"
-				.AZ "BREAK"
-				.AZ "SWITCH"
-				.AZ "CASE"
-				.AZ "DEFAULT"
-				.AZ "FOR"
-				.AZ "WHILE"
-				.AZ "IF"
-				.AZ "NEXT"
-				.AZ "LOOP"
-				.AZ "ELSE"
-				.AZ "FI"
-				.AZ "END"
+CMD				.AT ".."
+				.AT "."
+				.AT "CD"
+				.AT "NOHUP"
+				.AT "DATE"
+				.AT "ECHO"
+				.AT "EXIT"
+				.AT "GETKEY"
+				.AT "MD"
+				.AT "PAUSE"
+				.AT "PWD"
+				.AT "RD"
+				.AT "READ"
+				.AT "REN"
+				.AT "SET"
+				.AT "SLEEP"
+				.AT "SHIFT"
+				.AT "TIME"
+				.AT "PUSHD"
+				.AT "POPD"
+				.AT "FUNCTION"
+				.AT "CALL"
+				.AT "BREAK"
+				.AT "SWITCH"
+				.AT "CASE"
+				.AT "DEFAULT"
+				.AT "FOR"
+				.AT "WHILE"
+				.AT "IF"
+				.AT "NEXT"
+				.AT "LOOP"
+				.AT "ELSE"
+				.AT "FI"
+				.AT "END"
+				.HS 00
+CORE.IO			.AT "&"
+				.AT "<"
+				.AT ">>"
+				.AT ">"
+				.AT "1>>"
+				.AT "1>"
+				.AT "2>>"
+				.AT "2>"
+				.HS 00
+EXP.BEGIN		.AT "!["
+				.AT "["
+				.HS 00
+EXP.OP.UNARY	.AT "-D"
+				.AT "-E"
+				.AT "-F"
+				.AT "-N"
+				.AT "-Z"
+				.HS 00
+EXP.OP.BINARY	.AT "="
+				.AT "!="
+				.AT ".<"
+				.AT "<="
+				.AT ".>"
+				.AT ">="
+				.AT "-EQ"
+				.AT "-NE"
+				.AT "-LT"
+				.AT "-LE"
+				.AT "-GT"
+				.AT "-GE"
+				.HS 00
+EXP.OP.MATH		.AT "+"
+				.AT "-"
+				.AT "*"
+				.AT "/"
+				.AT "MOD"
+				.HS 00
+EXP.OP.LOGIC	.AT "AND"
+				.AT "OR"
 				.HS 00
 *--------------------------------------
-* https://www.tldp.org/LDP/abs/html/io-redirection.html
-*--------------------------------------
-CORE.IO			.AZ "&"
-				.AZ "<"
-				.AZ ">>"
-				.AZ ">"
-				.AZ "1>>"
-				.AZ "1>"
-				.AZ "2>>"
-				.AZ "2>"
-				.HS 00
-*--------------------------------------
-EXP.BEGIN		.AZ "!["
-				.AZ "["
-				.HS 00
-EXP.OP.UNARY	.AZ "-D"
-				.AZ "-E"
-				.AZ "-F"
-				.AZ "-N"
-				.AZ "-Z"
-				.HS 00
-EXP.OP.BINARY	.AZ "="
-				.AZ "!="
-				.AZ ".<"
-				.AZ "<="
-				.AZ ".>"
-				.AZ ">="
-				.AZ "-EQ"
-				.AZ "-NE"
-				.AZ "-LT"
-				.AZ "-LE"
-				.AZ "-GT"
-				.AZ "-GE"
-				.HS 00
 EXP.OP.BINARY.BITS
 				.DA #%010
 				.DA #%101
@@ -718,16 +671,8 @@ EXP.OP.BINARY.BITS
 				.DA #%110
 				.DA #%001
 				.DA #%011
-EXP.OP.MATH		.AZ "+"
-				.AZ "-"
-				.AZ "*"
-				.AZ "/"
-				.AZ "MOD"
-				.HS 00
+
 EXP.OP.MATH.FPU	.DA #FPU.ADD32,#FPU.SUB32,#FPU.IMUL32,#FPU.IDIV32,#FPU.IMOD32
-EXP.OP.LOGIC	.AZ "AND"
-				.AZ "OR"
-				.HS 00
 *--------------------------------------
 				.INB USR/SRC/SHARED/X.ERRORS.S
 *--------------------------------------
@@ -739,7 +684,6 @@ PUSHD.STACK		.BS PUSHD.STACK.MAX+1
 
 hFuncList		.BS 1
 
-bReadMode		.BS 1
 bExitOnEOF		.BS 1
 
 bEscMode		.BS 1
@@ -750,6 +694,7 @@ bSET.E			.BS 1
 bSET.X			.BS 1
 
 bREAD.S			.BS 1
+READ.N			.BS 1
 
 Sleep			.BS 4
 StatBuf			.BS S.STAT
