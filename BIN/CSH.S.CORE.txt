@@ -86,7 +86,7 @@ CSH.Run			jsr CSH.GetCharNB
 				
 				jmp (J.CSH.KW,x)
 
-.4				jsr CSH.GetVarValue
+.4				jsr CSH.GetVar
 				bcs .5
 
 				jsr CSH.GetCharNB
@@ -100,7 +100,7 @@ CSH.Run			jsr CSH.GetCharNB
 				jsr CSH.ExpEval
 				bcs .9
 				
-				jsr CSH.StoreACCToVar
+				jsr CSH.SetVarValue
 				bcs .9
 				
 				jsr CSH.GetChar
@@ -153,8 +153,8 @@ CSH.IF			jsr CSH.GetCharNB
 				cmp #'{'
 				bne .9
 				
-				jsr CSH.IsACC0
-				bcc .6					eval returned ACC=0, skip {{....}}
+				jsr CSH.IsValue0
+				bcc .6					Value=0, skip {{....}}
 				
 				jsr CSH.GetNextCharNB	Skip '{'
 				bcs .99
@@ -322,7 +322,7 @@ CSH.TYPE		stx ZPVarType
 				
 				bcs .99
 				
-				jsr CSH.StoreACCToVar	Update value to this var
+				jsr CSH.SetVarValue		Update value to this var
 				
 				jsr CSH.GetChar
 				bcs .9
@@ -451,9 +451,7 @@ CSH.ExpEval		ldx ZPPtr2
 				phx
 				
 				sta ZPPtr2				save Type
-				
-				jsr CSH.ZeroACC
-			
+							
 .10				lda #$ff
 				sta ZPPtr2+1			Reset BOP1
 
@@ -463,9 +461,10 @@ CSH.ExpEval		ldx ZPPtr2
 .20				jsr CSH.IsLetter		Fnc or Var ?
 				bcs .2
 
-				jsr CSH.GetVarValue
+				jsr CSH.GetVar
 				bcs .1
 				
+				jsr CSH.GetVarValue		Get value on stack
 				bra .11				
 				
 .1				jsr CSH.FnEval			X = function index
@@ -475,7 +474,7 @@ CSH.ExpEval		ldx ZPPtr2
 .2				jsr CSH.IsDigit10		number ?
 				bcs .3
 				
-				jsr CSH.GetNumInACC
+				jsr CSH.GetNumOnStack
 				bcs .9
 				
 .11				jsr CSH.GetCharNB
@@ -500,7 +499,8 @@ CSH.ExpEval		ldx ZPPtr2
 				
 				stx ZPPtr2+1
 
-				jsr CSH.ACC2ARG
+				jsr CSH.PushValueOnStack
+				
 				jsr CSH.GetCharNB
 				bcc .20					go check for an ARG		
 				bra .9
@@ -576,10 +576,10 @@ CSH.AddContCharP
 				phy
 				
 				lda #CSH.Q.CONST+CSH.Q.POINTER+CSH.T.CHAR
-				>STA.G CSH.ACCT
+				sta ZPVarType
 
 				>LDYA ZPCSHConst
-				>STYA.G CSH.ACC
+				>STYA ZPVarData
 
 				pla
 				sec
@@ -691,7 +691,8 @@ CSH.ZPPtr1AddAp1
 				inc ZPPtr1+1
 .1				rts
 *--------------------------------------
-CSH.GetNumInACC	>LDA.G CSH.ACCT
+CSH.GetNumOnStack
+				lda ZPVarType
 				cmp #CSH.T.FLOAT
 				bcc .1
 
@@ -699,9 +700,6 @@ CSH.GetNumInACC	>LDA.G CSH.ACCT
 				>LDYA ZPFileBufPtr
 
 				>SYSCALL StrToF
-*				bcs .9
-				>PULLF.G CSH.ACC
-				clc
 				rts
 				
 .1				>PUSHBI 10
@@ -710,36 +708,8 @@ CSH.GetNumInACC	>LDA.G CSH.ACCT
 				>LDYA ZPFileBufPtr
 				
 				>SYSCALL StrToL
-				bcs .9
-				>PULLL.G CSH.ACC
-				clc
+
 .9				rts	
-*--------------------------------------
-CSH.ZeroACC		lda #0
-				ldx #5
-				ldy #CSH.ACC
-				
-.1				sta (pData),y
-				iny
-				dex
-				bne .1
-				
-				rts
-*--------------------------------------
-CSH.ACC2ARG		>LEA.G CSH.ACCT
-				>STYA ZPPtr1
-
-				>LEA.G CSH.ARGT
-				>STYA ZPPtr2
-				
-				ldy #5
-				
-.1				lda (ZPPtr1),y
-				sta (ZPPtr2),y
-				dey
-				bpl .1
-
-				rts
 *--------------------------------------
 * Input : ZPFileBufPtr, A = Var Type, Value on Stack
 * Output : Y,A = ZPVarID
@@ -787,11 +757,7 @@ CSH.AddVar		sta ZPVarType
 				
 .9				rts
 *--------------------------------------
-* Input : ZPFileBufPtr, A = Var Type
-* Output : Value on Stack
-*--------------------------------------
-CSH.GetVarValue
-				sta ZPVarType
+CSH.GetVar		sta ZPVarType
 
 				>PUSHW ZPFileBufPtr
 				>LDA.G CSH.hSymbols
@@ -808,33 +774,65 @@ CSH.GetVarValue
 				
 				inc ZPFileBufPtr+1
 				
-.1
+.1				ldx ZPVarType
+				cpx ZPVarData
+				bne .99
 				
+				clc
+				rts
+
+.99				lda #CSH.E.TMISMATCH
+				sec
+.9				
+CSH.GetVar.RTS	rts
+*--------------------------------------
+* Input : ZPFileBufPtr, A = Var Type
+* Output : Value on Stack
+*--------------------------------------
+CSH.GetVarValue	sta ZPVarType
+
+.1				>PUSHWI 0
+				>PUSHWI 6
+				>PUSHWI ZPVarData
+				>PUSHWI ZPVarID
+				>LDA.G CSH.hSymbols
+				>SYSCALL SListGetData
+				bcs CSH.GetVar.RTS
+				
+CSH.PushValueOnStack
+				ldx ZPVarType
+				cpx ZPVarData
+				bne .99
+				
+				ldy CSH.TSIZE,x
+				
+.2				lda ZPVarData,y
+				>PUSHA
+				dey
+				bne .2
+				
+				clc
+				rts
+				
+				
+.99				lda #CSH.E.TMISMATCH
+				sec
 .9				rts
 *--------------------------------------
-CSH.StoreACCToVar
-				>LDA.G CSH.ACCT
-				cmp (ZPCSHValue)
+CSH.SetVarValue	cmp ZPVarType
 				bne .9
 				
 				tax
-				lda CSH.TSIZE,x
-				tax						Byte count to transfer
+				ldy CSH.TSIZE,x			Byte count to transfer
 				
-				>LEA.G CSH.ACC
-				>STYA ZPPtr1
+				ldx #1
 
-				ldy #1					do not trash TYPE byte
-				
-.1				lda (ZPPtr1)
-				inc ZPPtr1
-				bne .2
-				inc ZPPtr1+1
-				
-.2				sta (ZPCSHValue),y
-				iny
-				dex
+.1				>PULLA
+				sta ZPVarData,x
+				inx
+				dey
 				bne .1
+
 				clc
 				rts
 				
@@ -842,11 +840,13 @@ CSH.StoreACCToVar
 				sec
 				rts
 *--------------------------------------
-CSH.IsACC0		>LDA.G CSH.ACCT
-				cmp #CSH.T.FLOAT
+CSH.IsValue0	ldx ZPVarType
+				cpx #CSH.T.FLOAT
 				bne .1					char,int,long
 				
-				>LDA.G CSH.ACC
+				ldy CSH.TSIZE,x
+				
+				lda ZPVarData,y
 				bne .9
 				
 .8				clc
@@ -857,9 +857,9 @@ CSH.IsACC0		>LDA.G CSH.ACCT
 				tax
 				
 				lda #0
-				ldy #CSH.ACC
+				ldy #1
 
-.2				ora (pData),y
+.2				ora ZPVarData,y
 				iny
 				dex
 				bne .2
@@ -878,7 +878,7 @@ CSH.BOPS.ADD
 				rts
 
 
-CSH.BOPS.SUB	>LDA.G CSH.ACCT
+CSH.BOPS.SUB	lda ZPVarType
 				cmp #CSH.T.FLOAT
 				beq .8
 				
@@ -888,18 +888,15 @@ CSH.BOPS.SUB	>LDA.G CSH.ACCT
 				clc
 				rts
 
-.8				>PUSHF.G CSH.ACC
-				>PUSHF.G CSH.ARG
-				>FPU FSUB
+.8				>FPU FSUB
 				bcs .9
 				
-				>PULLF.G CSH.ACC
 .9				rts
 CSH.BOPS.MUL
 				clc
 				rts
 				
-CSH.BOPS.DIV	>LDA.G CSH.ACCT
+CSH.BOPS.DIV	lda ZPVarType
 				cmp #CSH.T.FLOAT
 				beq .8
 				
@@ -909,10 +906,9 @@ CSH.BOPS.DIV	>LDA.G CSH.ACCT
 				clc
 				rts
 
-.8				>PUSHF.G CSH.ACC
-				>PUSHF.G CSH.ARG
+.8				
 				>FPU FDIV
-				>PULLF.G CSH.ACC
+				
 				clc
 				rts
 CSH.BOPS.MOD
@@ -1094,28 +1090,24 @@ CSH.IsDigit10	cmp #'0'
 *--------------------------------------
 * EXEC
 *--------------------------------------
-EXEC.printf		>LDYA.G CSH.ACC
+EXEC.printf		>PULLYA
 				>SYSCALL printf
 				bcs .9
-				
-				>STYA.G CSH.ACC
+
 .9				rts				
 *--------------------------------------
-EXEC.puts		>LDYA.G CSH.ACC
+EXEC.puts		>PULLYA
 				>SYSCALL puts
 				bcs .9
 				
-				>STYA.G CSH.ACC
 .9				rts				
 *--------------------------------------
 EXEC.cos		>FPU COS
 
-				>PULLF.G CSH.ACC
 				rts
 *--------------------------------------
 EXEC.getchar	>SYSCALL getchar
 
-				>STA.G CSH.ACC
 				rts
 *--------------------------------------
 MAN
