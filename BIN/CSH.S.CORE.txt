@@ -50,7 +50,7 @@ CSH.Quit.RTS	rts
 CSH.Run			jsr CSH.GetCharNB
 				bcs CSH.Quit.RTS
 								
-				cmp #'}'				End of block ?
+CSH.Run.1		cmp #'}'				End of block ?
 				bne .1
 
 				jsr CSH.CheckStack		must be something on stack....
@@ -63,7 +63,7 @@ CSH.Run			jsr CSH.GetCharNB
 .1				cmp #C.CR
 				bne .2
 				
-				jmp CSH.GetNextCharNB	Skip CR and exit
+				jmp CSH.GetNextChar		Skip CR and exit
 				
 .2				pha
 				jsr CSH.SavePtr			Save Ptr, in case of while,for....
@@ -84,7 +84,10 @@ CSH.Run			jsr CSH.GetCharNB
 				txa	
 				>STA.G CSH.CmdSave
 				
-				jmp (J.CSH.KW,x)
+				jsr CSH.KW.JMP
+				bcs .9
+				
+				bra .7
 
 .4				jsr CSH.GetVar
 				bcs .5
@@ -94,7 +97,7 @@ CSH.Run			jsr CSH.GetCharNB
 				cmp #'='
 				bne .99
 				
-				jsr CSH.GetNextCharNB	Skip =
+				jsr CSH.GetNextChar		Skip =
 				bcs .99
 				
 				jsr CSH.ExpEval
@@ -107,13 +110,19 @@ CSH.Run			jsr CSH.GetCharNB
 				cmp #';'
 				bne .99
 				
-				jmp CSH.GetNextCharNB	Skip ;
+				bra .7
 				
 .5				lda #0					no return value type check required
 				jsr CSH.FnEval			X = function index
 				bcs .9
 
-				jmp CSH.GetNextCharNB	Skip ;
+.7				jsr CSH.GetNextCharNB	Skip ;
+				bcs .9
+				
+				cmp #C.CR
+				bne CSH.Run.1
+				
+				jmp CSH.GetNextChar		Skip CR
 				
 .99				lda #CSH.E.SYNTAX
 				sec
@@ -126,11 +135,12 @@ CSH.Run			jsr CSH.GetCharNB
 				cmp #C.CR
 				bne .80
 				
-				clc
-				rts
+				jmp CSH.GetNextChar		Skip CR
 *--------------------------------------
 * Built in Keywords
 *--------------------------------------
+CSH.KW.JMP		jmp (J.CSH.KW,x)
+
 CSH.WHILE
 CSH.IF			jsr CSH.GetCharNB
 				bcs .9
@@ -314,7 +324,7 @@ CSH.TYPE		stx ZPVarType
 				cmp #'='
 				bne .9
 				
-				jsr CSH.GetNextCharNB
+				jsr CSH.GetNextCharNB	Skip =
 				bcs .9
 				
 				lda ZPVarType
@@ -329,8 +339,7 @@ CSH.TYPE		stx ZPVarType
 				cmp #';'
 				bne .9
 				
-.8				jsr CSH.GetNextCharNB	Skip ;
-				clc
+.8				clc
 				rts
 
 .90				lda #CSH.E.DUP
@@ -418,10 +427,17 @@ CSH.FnEval		ldx ZPPtr1
 				cmp #')'
 				bne .90
 
-				jsr CSH.GetNextCharNB	Skip )
+				jsr CSH.GetNextChar		Skip )
 
-				jsr .9
-				
+				plx					restore X = function index
+
+				pla
+				sta ZPPtr2
+				pla
+				sta ZPPtr1+1
+				pla
+				sta ZPPtr1
+
 				jmp (J.CSH.EXEC,x)
 
 .90				lda #CSH.E.SYNTAX
@@ -445,7 +461,11 @@ CSH.FnEval		ldx ZPPtr1
 *   CS, A = EC
 *   CC, A, Y,A or x bytes on Stack
 *--------------------------------------
-CSH.ExpEval		ldx ZPPtr2
+CSH.ExpEval		ldx ZPPtr1
+				phx
+				ldx ZPPtr1+1
+				phx
+				ldx ZPPtr2
 				phx
 				ldx ZPPtr2+1			One local : BOP1
 				phx
@@ -456,14 +476,15 @@ CSH.ExpEval		ldx ZPPtr2
 				sta ZPPtr2+1			Reset BOP1
 
 				jsr CSH.GetCharNB
-				bcs .9
+				bcs .33
 				
 .20				jsr CSH.IsLetter		Fnc or Var ?
 				bcs .2
 
+				lda ZPPtr2				var type
 				jsr CSH.GetVar
 				bcs .1
-				
+	
 				jsr CSH.GetVarValue		Get value on stack
 				bra .11				
 				
@@ -475,10 +496,10 @@ CSH.ExpEval		ldx ZPPtr2
 				bcs .3
 				
 				jsr CSH.GetNumOnStack
-				bcs .9
+				bcs .99
 				
 .11				jsr CSH.GetCharNB
-				bcs .9
+				bcs .90
 				
 				cmp #','
 				beq .8
@@ -488,11 +509,11 @@ CSH.ExpEval		ldx ZPPtr2
 				beq .8
 				
 				jsr CSH.IsOPChar
-				bcs .9
+.33				bcs .90
 
 				>LDYA L.CSH.BOPS
 				jsr CSH.LookupOP
-				bcs .9
+				bcs .90
 				
 				lda ZPPtr2+1			previous OP...
 				bpl .5					go check precedence
@@ -503,27 +524,15 @@ CSH.ExpEval		ldx ZPPtr2
 				
 				jsr CSH.GetCharNB
 				bcc .20					go check for an ARG		
-				bra .9
+				bra .90
 				
 .3				cmp #'"'				String literal
-				bne .9
+				bne .90
 				
-				
-
 				jsr CSH.AddContCharP
 				bcs	.99
 
 				jmp .11
-
-				
-.9				plx
-				stx ZPPtr2+1
-				plx
-				stx ZPPtr2
-				
-				lda #CSH.E.SYNTAX
-				sec
-.99				rts	
 				
 .5				cpx ZPPtr2+1
 				bcs .6					
@@ -537,23 +546,34 @@ CSH.ExpEval		ldx ZPPtr2
 * Old OP has precedence, compute ACC=ARG <BOP> ACC					
 .6				lda ZPPtr2+1
 				jsr CSH.Compute
-				bcs .9
+				bcs .99
 				
 				jsr CSH.GetCharNB
-				bcs .9		
+				bcs .90	
 				jmp .10
 				
 .8				lda ZPPtr2+1
 				bmi .80
 				
-				jmp CSH.Compute
+				jsr CSH.Compute
+				bcc .80
+				bcs .99
 				
-.80				plx
+.90				lda #CSH.E.SYNTAX
+				
+.99				sec
+				.HS 90					BCC
+.80				clc
+
+				plx
 				stx ZPPtr2+1
 				plx
 				stx ZPPtr2
+				plx
+				stx ZPPtr1+1
+				plx
+				stx ZPPtr1
 				
-				clc
 				rts
 *--------------------------------------
 CSH.AddContCharP
@@ -570,18 +590,12 @@ CSH.AddContCharP
 				iny 
 				bra .1
 				
-.2				lda #0				
+.2				lda #0
 				sta (ZPCSHConst),y
 				
-				phy
-				
-				lda #CSH.Q.CONST+CSH.Q.POINTER+CSH.T.CHAR
-				sta ZPVarType
+				>PUSHW ZPCSHConst		Push PTR on stack
 
-				>LDYA ZPCSHConst
-				>STYA ZPVarData
-
-				pla
+				tya
 				sec
 				adc ZPCSHConst
 				sta ZPCSHConst
@@ -589,7 +603,7 @@ CSH.AddContCharP
 				
 				inc ZPCSHConst+1
 				
-.3				jsr CSH.GetNextCharNB	Skip "
+.3				jsr CSH.GetNextChar		Skip "
 
 				clc
 				rts
@@ -698,8 +712,8 @@ CSH.GetNumOnStack
 
 				>PUSHWI ZPFileBufPtr
 				>LDYA ZPFileBufPtr
-
 				>SYSCALL StrToF
+				clc
 				rts
 				
 .1				>PUSHBI 10
@@ -758,7 +772,7 @@ CSH.AddVar		sta ZPVarType
 .9				rts
 *--------------------------------------
 CSH.GetVar		sta ZPVarType
-
+			>DEBUG
 				>PUSHW ZPFileBufPtr
 				>LDA.G CSH.hSymbols
 				>SYSCALL SListLookup
@@ -1021,8 +1035,6 @@ CSH.GetNextCharNB.RTS
 				rts
 *--------------------------------------
 CSH.CheckCharNB	cmp #C.SPACE
-				beq .9
-				cmp #C.CR
 				beq .9
 				cmp #C.LF
 				beq .9
