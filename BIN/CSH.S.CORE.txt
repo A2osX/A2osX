@@ -50,8 +50,22 @@ CSH.Quit.RTS	rts
 CSH.Run			jsr CSH.GetCharNB
 				bcs CSH.Quit.RTS
 								
-CSH.Run.1		cmp #'}'				End of block ?
+CSH.Run.1		cmp #'#'
+				bne .3					comments ...
+				
+.1				jsr CSH.GetNextChar
+				bcs .2
+				
+				cmp #C.CR
 				bne .1
+				
+.2				jmp CSH.GetNextChar		Skip CR and exit
+				
+.3				cmp #C.CR
+				beq .2
+
+				cmp #'}'				End of block ?
+				bne .4
 
 				jsr CSH.CheckStack		must be something on stack....
 				bcs .9
@@ -60,26 +74,21 @@ CSH.Run.1		cmp #'}'				End of block ?
 				tax
 				jmp (J.CSH.KW.END,x) 
 				
-.1				cmp #C.CR
-				bne .2
-				
-				jmp CSH.GetNextChar		Skip CR and exit
-				
-.2				pha
+.4				pha
 				jsr CSH.SavePtr			Save Ptr, in case of while,for....
 				pla
 				jsr CSH.IsLetter
-				bcc .3
+				bcc .5
 				
-				cmp #'#'
-				beq .80					comments ...
+
+
+
+				bra .99					error, todo : PREOPS ++ --.....
 				
-				bra .9					error, todo : PREOPS ++ --.....
-				
-.3				>LDYA L.CSH.KW
+.5				>LDYA L.CSH.KW
 				jsr CSH.LookupID
 
-				bcs .4					not an internal CSH keyword....
+				bcs .6					not an internal CSH keyword....
 				
 				txa	
 				>STA.G CSH.CmdSave
@@ -87,10 +96,10 @@ CSH.Run.1		cmp #'}'				End of block ?
 				jsr CSH.KW.JMP
 				bcs .9
 				
-				bra .7
+				bra .8
 
-.4				jsr CSH.GetVar
-				bcs .5
+.6				jsr CSH.GetVar
+				bcs .7
 
 				jsr CSH.GetCharNB
 				bcs .9
@@ -110,13 +119,13 @@ CSH.Run.1		cmp #'}'				End of block ?
 				cmp #';'
 				bne .99
 				
-				bra .7
+				bra .8
 				
-.5				lda #0					no return value type check required
+.7				lda #0					no return value type check required
 				jsr CSH.FnEval			X = function index
 				bcs .9
 
-.7				jsr CSH.GetNextCharNB	Skip ;
+.8				jsr CSH.GetNextCharNB	Skip ;
 				bcs .9
 				
 				cmp #C.CR
@@ -127,15 +136,6 @@ CSH.Run.1		cmp #'}'				End of block ?
 .99				lda #CSH.E.SYNTAX
 				sec
 .9				rts
-
-				
-				
-.80				jsr CSH.GetNextChar
-				bcs .9
-				cmp #C.CR
-				bne .80
-				
-				jmp CSH.GetNextChar		Skip CR
 *--------------------------------------
 * Built in Keywords
 *--------------------------------------
@@ -329,10 +329,11 @@ CSH.TYPE		stx ZPVarType
 				
 				lda ZPVarType
 				jsr CSH.ExpEval
-				
 				bcs .99
 				
+				lda ZPVarType
 				jsr CSH.SetVarValue		Update value to this var
+				bcs .99
 				
 				jsr CSH.GetChar
 				bcs .9
@@ -404,6 +405,7 @@ CSH.FnEval		ldx ZPPtr1
 				inc ZPPtr1+1
 				
 .4				jsr CSH.ExpEval
+
 				bcs .9
 
 				lda (ZPPtr1)			no more arg in fn definition
@@ -413,21 +415,31 @@ CSH.FnEval		ldx ZPPtr1
 				bcs .9
 				
 				cmp #','
-				bne .90
+				bne .6
 
 				jsr CSH.GetNextCharNB	Skip ,
 				
 				lda (ZPPtr1)
 				bne .3					Another ARG....
 
-				bra .9
+				bra .9					extra args....error
+				
+.6				cmp #')'
+				bne .90
+				
+				lda (ZPPtr1)
+				eor #CSH.T.VARIADIC
+				beq .8
+
+				bra .90					missing arg
 
 .7				jsr CSH.GetCharNB
 				bcs .90
+				
 				cmp #')'
 				bne .90
 
-				jsr CSH.GetNextChar		Skip )
+.8				jsr CSH.GetNextCharNB	Skip )
 
 				plx					restore X = function index
 
@@ -446,13 +458,15 @@ CSH.FnEval		ldx ZPPtr1
 .91				lda #CSH.E.TMISMATCH
 				sec
 
-.9				plx
+.9				plx						Discard function index
+
+				plx
 				stx ZPPtr2
 				plx
 				stx ZPPtr1+1
 				plx
 				stx ZPPtr1
-				plx
+
 .99				rts
 *--------------------------------------
 * Input: 
@@ -465,12 +479,12 @@ CSH.ExpEval		ldx ZPPtr1
 				phx
 				ldx ZPPtr1+1
 				phx
-				ldx ZPPtr2
+				ldx ZPPtr2				local : VarType
 				phx
-				ldx ZPPtr2+1			One local : BOP1
+				ldx ZPPtr2+1			local : BOP1
 				phx
-				
-				sta ZPPtr2				save Type
+
+				sta ZPPtr2
 							
 .10				lda #$ff
 				sta ZPPtr2+1			Reset BOP1
@@ -481,14 +495,16 @@ CSH.ExpEval		ldx ZPPtr1
 .20				jsr CSH.IsLetter		Fnc or Var ?
 				bcs .2
 
-				lda ZPPtr2				var type
 				jsr CSH.GetVar
 				bcs .1
 	
+				ldx ZPPtr2				var type
 				jsr CSH.GetVarValue		Get value on stack
+				bcs .99
 				bra .11				
 				
-.1				jsr CSH.FnEval			X = function index
+.1				lda ZPPtr2				var type
+				jsr CSH.FnEval			X = function index
 				bcs .99
 				bra .11
 				
@@ -747,8 +763,8 @@ CSH.AddVar		sta ZPVarType
 .1				ldy #2
 
 				lda ZPVarType
-				>PUSHA					Push Var Type On stack...
-				
+				sta ZPVarData
+
 				and #CSH.Q.PPPOINTER
 				bne .2					Pointer, always 2 bytes
 
@@ -761,19 +777,17 @@ CSH.AddVar		sta ZPVarType
 				lda #0
 				
 				>PUSHYA					DataLen
-				>PUSHW pStack
+				>PUSHW ZPVarData
 				>PUSHW ZPVarID
 				>LDA.G CSH.hSymbols
 				>SYSCALL SListAddData
 				bcs .9
 				
-				>LDYA ZPVarType
+				>LDYA ZPVarID
 				
 .9				rts
 *--------------------------------------
-CSH.GetVar		sta ZPVarType
-			>DEBUG
-				>PUSHW ZPFileBufPtr
+CSH.GetVar		>PUSHW ZPFileBufPtr
 				>LDA.G CSH.hSymbols
 				>SYSCALL SListLookup
 				bcs .9
@@ -787,37 +801,32 @@ CSH.GetVar		sta ZPVarType
 				bcc .1
 				
 				inc ZPFileBufPtr+1
-				
-.1				ldx ZPVarType
-				cpx ZPVarData
-				bne .99
-				
 				clc
-				rts
-
-.99				lda #CSH.E.TMISMATCH
-				sec
+.1				
 .9				
 CSH.GetVar.RTS	rts
 *--------------------------------------
-* Input : ZPFileBufPtr, A = Var Type
-* Output : Value on Stack
+* Input : ZPFileBufPtr, X = Var Type (or 0)
+* Output : Value on Stack, X = Var Type
 *--------------------------------------
-CSH.GetVarValue	sta ZPVarType
+CSH.GetVarValue	stx ZPVarType
 
 .1				>PUSHWI 0
 				>PUSHWI 6
 				>PUSHWI ZPVarData
-				>PUSHWI ZPVarID
+				>PUSHW ZPVarID
 				>LDA.G CSH.hSymbols
 				>SYSCALL SListGetData
 				bcs CSH.GetVar.RTS
-				
+
 CSH.PushValueOnStack
 				ldx ZPVarType
+				beq .1
+				
 				cpx ZPVarData
 				bne .99
 				
+.1				ldx ZPVarData			
 				ldy CSH.TSIZE,x
 				
 .2				lda ZPVarData,y
@@ -827,14 +836,15 @@ CSH.PushValueOnStack
 				
 				clc
 				rts
-				
-				
+
 .99				lda #CSH.E.TMISMATCH
 				sec
 .9				rts
 *--------------------------------------
 CSH.SetVarValue	cmp ZPVarType
 				bne .9
+	
+				sta ZPVarData
 				
 				tax
 				ldy CSH.TSIZE,x			Byte count to transfer
@@ -847,7 +857,15 @@ CSH.SetVarValue	cmp ZPVarType
 				dey
 				bne .1
 
-				clc
+				>PUSHBI 0
+				ldx ZPVarType
+				lda CSH.TSIZE,x
+				inc						+1 including TYPE
+				>PUSHA 
+				>PUSHWI ZPVarData
+				>PUSHW ZPVarID
+				>LDA.G CSH.hSymbols
+				>SYSCALL SListSetData
 				rts
 				
 .9				lda #CSH.E.TMISMATCH
