@@ -90,9 +90,6 @@ CSH.Run.1		cmp #'#'
 
 				bcs .6					not an internal CSH keyword....
 				
-				txa	
-				>STA.G CSH.CmdSave
-				
 				jsr CSH.KW.JMP
 				bcs .9
 				
@@ -109,9 +106,11 @@ CSH.Run.1		cmp #'#'
 				jsr CSH.GetNextChar		Skip =
 				bcs .99
 				
+				lda #0					Any Type
 				jsr CSH.ExpEval
 				bcs .9
 				
+				txa 					X = Exp Type
 				jsr CSH.SetVarValue
 				bcs .9
 				
@@ -122,7 +121,7 @@ CSH.Run.1		cmp #'#'
 				bra .8
 				
 .7				lda #0					no return value type check required
-				jsr CSH.FnEval			X = function index
+				jsr CSH.fCall			X = function index
 				bcs .9
 
 .8				jsr CSH.GetNextCharNB	Skip ;
@@ -139,7 +138,9 @@ CSH.Run.1		cmp #'#'
 *--------------------------------------
 * Built in Keywords
 *--------------------------------------
-CSH.KW.JMP		jmp (J.CSH.KW,x)
+CSH.KW.JMP		txa	
+				>STA.G CSH.CmdSave			
+				jmp (J.CSH.KW,x)
 
 CSH.WHILE
 CSH.IF			jsr CSH.GetCharNB
@@ -150,6 +151,7 @@ CSH.IF			jsr CSH.GetCharNB
 				jsr CSH.GetNextCharNB
 				bcs .9
 
+				lda #0					Any var type
 				jsr CSH.ExpEval
 				bcs .99
 				
@@ -163,14 +165,12 @@ CSH.IF			jsr CSH.GetCharNB
 				cmp #'{'
 				bne .9
 				
-				jsr CSH.IsValue0
+				jsr CSH.IsValue0		X = var type from ExpEval
 				bcc .6					Value=0, skip {{....}}
-				
+
 				jsr CSH.GetNextCharNB	Skip '{'
 				bcs .99
 				
-				>LDA.G CSH.CmdSave		get back Token ("IF" or "WHILE")
-				tax
 				jsr CSH.Keyword.start 
 				bcs .99
 				
@@ -182,13 +182,13 @@ CSH.IF			jsr CSH.GetCharNB
 				
 .6				ldx #1					expecting 1 '}' for now....
 
-.7				jsr CSH.GetNextChar
+.7				jsr CSH.GetNextCharNB
 				bcs .9
 				cmp #'{'
 				bne .71
 				inx
 				bra .7
-				
+
 .71				cmp #'}'
 				bne .7
 				txa
@@ -196,7 +196,7 @@ CSH.IF			jsr CSH.GetCharNB
 				dex
 				bne .7
 				
-				jsr CSH.GetNextChar
+				jsr CSH.GetNextCharNB	skip '}'
 				
 				clc
 				rts
@@ -204,8 +204,10 @@ CSH.IF			jsr CSH.GetCharNB
 .9				lda #CSH.E.SYNTAX
 				sec
 .99				rts
-
+*--------------------------------------
 CSH.Keyword.Start
+				>LDA.G CSH.CmdSave		get back Token ("IF" or "WHILE")
+				tax
 				jmp (J.CSH.KW.START,x)
 *--------------------------------------
 CSH.IF.START	jmp CSH.Push			Push "IF" Token
@@ -331,7 +333,7 @@ CSH.TYPE		stx ZPVarType
 				jsr CSH.ExpEval
 				bcs .99
 				
-				lda ZPVarType
+				txa
 				jsr CSH.SetVarValue		Update value to this var
 				bcs .99
 				
@@ -357,19 +359,22 @@ CSH.TYPE		stx ZPVarType
 *   CS, A = EC
 *   CC, A, Y,A or x bytes on Stack
 *--------------------------------------
-CSH.FnEval		ldx ZPPtr1
+CSH.fCall		ldx ZPPtr1
 				phx
 				ldx ZPPtr1+1
 				phx
-				ldx ZPPtr2
+				ldx ZPPtr2				local : type
+				phx
+				ldx ZPPtr2+1			local : variadic size
 				phx
 				
 				sta ZPPtr2				save Type
+				stz ZPPtr2+1			Reset VARIADIC byte count
 				
 				>LDYA L.CSH.FN
 				jsr CSH.LookupFn
 				phx						X = function index
-				bcs .90
+				bcs .10
 
 				>STYA ZPPtr1			f() definition, starting at returned type
 
@@ -380,7 +385,7 @@ CSH.FnEval		ldx ZPPtr1
 				bne .90
 
 				jsr CSH.GetNextCharNB	skip '('
-				bcs .90
+.10				bcs .90
 
 				lda ZPPtr2				Expected type in 0, ignore
 				beq .1
@@ -404,15 +409,21 @@ CSH.FnEval		ldx ZPPtr1
 				bne .4
 				inc ZPPtr1+1
 				
-.4				jsr CSH.ExpEval
-
-				bcs .9
+.4				jsr CSH.ExpEval			A=0 if VARIADIC
+				bcs .9					X = Var Type
 
 				lda (ZPPtr1)			no more arg in fn definition
-				beq .7 
+				beq .7
+				eor #CSH.T.VARIADIC
+				bne .5
+				
+*				clc
+				lda CSH.SIZEOF,x
+				adc ZPPtr2+1
+				sta ZPPtr2+1			Add to byte count
 				
 .5				jsr CSH.GetCharNB
-				bcs .9
+				bcs .90
 				
 				cmp #','
 				bne .6
@@ -422,17 +433,19 @@ CSH.FnEval		ldx ZPPtr1
 				lda (ZPPtr1)
 				bne .3					Another ARG....
 
-				bra .9					extra args....error
+				bra .90					extra args....error
 				
 .6				cmp #')'
 				bne .90
 				
 				lda (ZPPtr1)
 				eor #CSH.T.VARIADIC
-				beq .8
+				bne .90					missing arg
 
-				bra .90					missing arg
-
+				>PUSHB ZPPtr2+1			push VARIADIC byte count
+				
+				bra .8
+				
 .7				jsr CSH.GetCharNB
 				bcs .90
 				
@@ -443,6 +456,8 @@ CSH.FnEval		ldx ZPPtr1
 
 				plx					restore X = function index
 
+				pla
+				sta ZPPtr2+1
 				pla
 				sta ZPPtr2
 				pla
@@ -461,6 +476,8 @@ CSH.FnEval		ldx ZPPtr1
 .9				plx						Discard function index
 
 				plx
+				stx ZPPtr2+1
+				plx
 				stx ZPPtr2
 				plx
 				stx ZPPtr1+1
@@ -473,7 +490,7 @@ CSH.FnEval		ldx ZPPtr1
 *   ZPFileBufPtr, A = Expected type
 * Output:
 *   CS, A = EC
-*   CC, A, Y,A or x bytes on Stack
+*   CC, X = Var Type, Value on Stack
 *--------------------------------------
 CSH.ExpEval		ldx ZPPtr1
 				phx
@@ -504,7 +521,7 @@ CSH.ExpEval		ldx ZPPtr1
 				bra .11				
 				
 .1				lda ZPPtr2				var type
-				jsr CSH.FnEval			X = function index
+				jsr CSH.fCall			X = function index
 				bcs .99
 				bra .11
 				
@@ -581,14 +598,15 @@ CSH.ExpEval		ldx ZPPtr1
 				.HS 90					BCC
 .80				clc
 
-				plx
-				stx ZPPtr2+1
-				plx
-				stx ZPPtr2
-				plx
-				stx ZPPtr1+1
-				plx
-				stx ZPPtr1
+				ldx ZPPtr2				X = Var Type
+				pla
+				sta ZPPtr2+1
+				pla
+				sta ZPPtr2
+				pla
+				sta ZPPtr1+1
+				pla
+				sta ZPPtr1
 				
 				rts
 *--------------------------------------
@@ -771,7 +789,7 @@ CSH.AddVar		sta ZPVarType
 				lda ZPVarType
 				and #$1f
 				tax
-				ldy	CSH.TSIZE,x
+				ldy	CSH.SIZEOF,x
 
 .2				iny						+1 for Type
 				lda #0
@@ -826,8 +844,8 @@ CSH.PushValueOnStack
 				cpx ZPVarData
 				bne .99
 				
-.1				ldx ZPVarData			
-				ldy CSH.TSIZE,x
+.1				ldx ZPVarData
+				ldy CSH.SIZEOF,x
 				
 .2				lda ZPVarData,y
 				>PUSHA
@@ -847,7 +865,7 @@ CSH.SetVarValue	cmp ZPVarType
 				sta ZPVarData
 				
 				tax
-				ldy CSH.TSIZE,x			Byte count to transfer
+				ldy CSH.SIZEOF,x		Byte count to transfer
 				
 				ldx #1
 
@@ -859,7 +877,7 @@ CSH.SetVarValue	cmp ZPVarType
 
 				>PUSHBI 0
 				ldx ZPVarType
-				lda CSH.TSIZE,x
+				lda CSH.SIZEOF,x
 				inc						+1 including TYPE
 				>PUSHA 
 				>PUSHWI ZPVarData
@@ -872,11 +890,13 @@ CSH.SetVarValue	cmp ZPVarType
 				sec
 				rts
 *--------------------------------------
-CSH.IsValue0	ldx ZPVarType
-				cpx #CSH.T.FLOAT
-				bne .1					char,int,long
+* Input : Value on Stack, X = Var Type
+* Output : CC = true, CS = false
+*--------------------------------------
+CSH.IsValue0	cpx #CSH.T.FLOAT
+				bcc .1					char,int,long
 				
-				ldy CSH.TSIZE,x
+				ldy CSH.SIZEOF,x
 				
 				lda ZPVarData,y
 				bne .9
@@ -885,7 +905,7 @@ CSH.IsValue0	ldx ZPVarType
 				rts
 				
 .1				tax
-				lda CSH.TSIZE,x
+				lda CSH.SIZEOF,x
 				tax
 				
 				lda #0
@@ -1122,22 +1142,16 @@ CSH.IsDigit10	cmp #'0'
 *--------------------------------------
 EXEC.printf		>PULLYA
 				>SYSCALL printf
-				bcs .9
-
-.9				rts				
+				rts				
 *--------------------------------------
 EXEC.puts		>PULLYA
 				>SYSCALL puts
-				bcs .9
-				
-.9				rts				
+				rts				
 *--------------------------------------
 EXEC.cos		>FPU COS
-
 				rts
 *--------------------------------------
 EXEC.getchar	>SYSCALL getchar
-
 				rts
 *--------------------------------------
 MAN
