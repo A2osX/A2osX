@@ -121,7 +121,7 @@ CSH.Run.1		cmp #'#'
 				bra .8
 				
 .7				lda #0					no return value type check required
-				jsr CSH.fCall			X = function index
+				jsr CSH.fCall
 				bcs .9
 
 .8				jsr CSH.GetNextCharNB	Skip ;
@@ -357,7 +357,7 @@ CSH.TYPE		stx ZPVarType
 *   ZPFileBufPtr, A = Expected type
 * Output:
 *   CS, A = EC
-*   CC, A, Y,A or x bytes on Stack
+*   CC, Result on Stack, X = Type
 *--------------------------------------
 CSH.fCall		ldx ZPPtr1
 				phx
@@ -379,50 +379,55 @@ CSH.fCall		ldx ZPPtr1
 				>STYA ZPPtr1			f() definition, starting at returned type
 
 				jsr CSH.GetCharNB
-				bcs .90
+				bcs .10
 
 				cmp #'('
 				bne .90
-
+				
 				jsr CSH.GetNextCharNB	skip '('
 .10				bcs .90
 
-				lda ZPPtr2				Expected type in 0, ignore
-				beq .1
+				lda ZPPtr2
+				bne .11
 				
-				cmp (ZPPtr1)			Get Return value Type
+				lda (ZPPtr1)
+				sta ZPPtr2
+				bra .1					expected type is 0, no check
+				
+.11				cmp (ZPPtr1)			Get Return value Type
 				bne .91
 				
 .1				inc ZPPtr1				advance to arg list type
 				bne .2
 				inc ZPPtr1+1
 
-.2				lda (ZPPtr1)			get type of next arg
+.2				lda (ZPPtr1)			get type of first arg
 				beq .7					end of list, go check ending ')'
-
+*--------------------------------------
 .3				eor #CSH.T.VARIADIC		if VARIADIC, don't advance to next arg and assume type = 0
 				beq .4
 				
-				lda (ZPPtr1)			get type again...
-				
-				inc ZPPtr1
-				bne .4
-				inc ZPPtr1+1
+				eor #CSH.T.VARIADIC		restore type...
 				
 .4				jsr CSH.ExpEval			A=0 if VARIADIC
 				bcs .9					X = Var Type
 
-				lda (ZPPtr1)			no more arg in fn definition
-				beq .7
+				lda (ZPPtr1)			get current arg type
 				eor #CSH.T.VARIADIC
 				bne .5
 				
+				jsr CSH.SIZEOF			X = Var Type
 *				clc
-				lda CSH.SIZEOF,x
+
 				adc ZPPtr2+1
 				sta ZPPtr2+1			Add to byte count
+				bra .51
 				
-.5				jsr CSH.GetCharNB
+.5				inc ZPPtr1
+				bne .51
+				inc ZPPtr1+1
+				
+.51				jsr CSH.GetCharNB
 				bcs .90
 				
 				cmp #','
@@ -439,6 +444,8 @@ CSH.fCall		ldx ZPPtr1
 				bne .90
 				
 				lda (ZPPtr1)
+				beq .8					no more arg after ')', exit
+				
 				eor #CSH.T.VARIADIC
 				bne .90					missing arg
 
@@ -514,15 +521,18 @@ CSH.ExpEval		ldx ZPPtr1
 
 				jsr CSH.GetVar
 				bcs .1
-	
-				ldx ZPPtr2				var type
+
+				ldx ZPPtr2				var type (could be 0=any)
 				jsr CSH.GetVarValue		Get value on stack
 				bcs .99
+
+				stx ZPPtr2				store real var type
 				bra .11				
 				
 .1				lda ZPPtr2				var type
 				jsr CSH.fCall			X = function index
 				bcs .99
+				stx ZPPtr2				store real var type
 				bra .11
 				
 .2				jsr CSH.IsDigit10		number ?
@@ -789,13 +799,13 @@ CSH.AddVar		sta ZPVarType
 				lda ZPVarType
 				and #$1f
 				tax
-				ldy	CSH.SIZEOF,x
+				ldy	CSH.TYPESIZE,x
 
 .2				iny						+1 for Type
 				lda #0
 				
 				>PUSHYA					DataLen
-				>PUSHW ZPVarData
+				>PUSHWI ZPVarData
 				>PUSHW ZPVarID
 				>LDA.G CSH.hSymbols
 				>SYSCALL SListAddData
@@ -845,14 +855,14 @@ CSH.PushValueOnStack
 				bne .99
 				
 .1				ldx ZPVarData
-				ldy CSH.SIZEOF,x
+				ldy CSH.TYPESIZE,x
 				
 .2				lda ZPVarData,y
 				>PUSHA
 				dey
 				bne .2
 				
-				clc
+				clc						X = Var Type
 				rts
 
 .99				lda #CSH.E.TMISMATCH
@@ -861,11 +871,10 @@ CSH.PushValueOnStack
 *--------------------------------------
 CSH.SetVarValue	cmp ZPVarType
 				bne .9
-	
+
 				sta ZPVarData
-				
 				tax
-				ldy CSH.SIZEOF,x		Byte count to transfer
+				ldy CSH.TYPESIZE,x		Byte count to transfer
 				
 				ldx #1
 
@@ -877,7 +886,7 @@ CSH.SetVarValue	cmp ZPVarType
 
 				>PUSHBI 0
 				ldx ZPVarType
-				lda CSH.SIZEOF,x
+				lda CSH.TYPESIZE,x
 				inc						+1 including TYPE
 				>PUSHA 
 				>PUSHWI ZPVarData
@@ -896,7 +905,7 @@ CSH.SetVarValue	cmp ZPVarType
 CSH.IsValue0	cpx #CSH.T.FLOAT
 				bcc .1					char,int,long
 				
-				ldy CSH.SIZEOF,x
+				ldy CSH.TYPESIZE,x
 				
 				lda ZPVarData,y
 				bne .9
@@ -905,7 +914,7 @@ CSH.IsValue0	cpx #CSH.T.FLOAT
 				rts
 				
 .1				tax
-				lda CSH.SIZEOF,x
+				lda CSH.TYPESIZE,x
 				tax
 				
 				lda #0
@@ -1138,14 +1147,30 @@ CSH.IsDigit10	cmp #'0'
 .9				sec
 				rts
 *--------------------------------------
+CSH.SIZEOF		txa
+				and #CSH.Q.PPPOINTER
+				bne .2
+				
+				txa
+				and #$f
+				tay
+				lda CSH.TYPESIZE,y
+				rts
+				
+.2				lda #2
+				rts
+*--------------------------------------
 * EXEC
 *--------------------------------------
-EXEC.printf		>SYSCALL printf2
+CSH.EXEC		jmp (J.CSH.EXEC,x)
+*--------------------------------------
+EXEC.printf		>DEBUG
+				>SYSCALL printf2
 				rts				
 *--------------------------------------
 EXEC.puts		>PULLYA
 				>SYSCALL puts
-				rts				
+				rts
 *--------------------------------------
 EXEC.cos		>FPU COS
 				rts
