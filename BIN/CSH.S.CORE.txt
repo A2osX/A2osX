@@ -98,6 +98,8 @@ CSH.Run.1		cmp #'#'
 .6				jsr CSH.GetVar
 				bcs .7
 
+				>STYA ZPVarID
+				
 				jsr CSH.GetCharNB
 				bcs .9
 				cmp #'='
@@ -110,7 +112,7 @@ CSH.Run.1		cmp #'#'
 				jsr CSH.ExpEval
 				bcs .9
 				
-				txa 					X = Exp Type
+				>LDYA ZPVarID			X = Exp Type
 				jsr CSH.SetVarValue
 				bcs .9
 				
@@ -128,9 +130,11 @@ CSH.Run.1		cmp #'#'
 				bcs .9
 				
 				cmp #C.CR
-				bne CSH.Run.1
+				beq .80
 				
-				jmp CSH.GetNextChar		Skip CR
+				jmp CSH.Run.1
+				
+.80				jmp CSH.GetNextChar		Skip CR
 				
 .99				lda #CSH.E.SYNTAX
 				sec
@@ -312,18 +316,27 @@ CSH.TYPE		stx ZPVarType
 				jsr CSH.IsLetter
 				bcs .9
 
-				txa						VAR TYPE
-				jsr CSH.AddVar			add with undefined value...
+				jsr CSH.AddVar			add with no value...
 				bcs .99					OOM or DUP
-				
+
 				>STYA ZPVarID
 				
 				jsr CSH.GetCharNB
 				bcs .9
 				cmp #';'
-				beq .8					end of declaration, no value...
+				bne .2
+
+				ldx ZPVarType
+				jsr CSH.SIZEOF
 				
-				cmp #'='
+.1				dec pStack
+				dec
+				bne .1
+				
+				ldx ZPVarType
+				bra .7
+				
+.2				cmp #'='
 				bne .9
 				
 				jsr CSH.GetNextCharNB	Skip =
@@ -333,8 +346,8 @@ CSH.TYPE		stx ZPVarType
 				jsr CSH.ExpEval
 				bcs .99
 				
-				txa
-				jsr CSH.SetVarValue		Update value to this var
+.7				>LDYA ZPVarID
+				jsr CSH.AddVarValue		X= Type, Add value to this var
 				bcs .99
 				
 				jsr CSH.GetChar
@@ -519,11 +532,11 @@ CSH.ExpEval		ldx ZPPtr1
 .20				jsr CSH.IsLetter		Fnc or Var ?
 				bcs .2
 
-				jsr CSH.GetVar
+				jsr CSH.GetVar 
 				bcs .1
 
 				ldx ZPPtr2				var type (could be 0=any)
-				jsr CSH.GetVarValue		Get value on stack
+				jsr CSH.GetVarValue		Y,A = VarID, Get value on stack
 				bcs .99
 
 				stx ZPPtr2				store real var type
@@ -563,8 +576,6 @@ CSH.ExpEval		ldx ZPPtr1
 				
 				stx ZPPtr2+1
 
-				jsr CSH.PushValueOnStack
-				
 				jsr CSH.GetCharNB
 				bcc .20					go check for an ARG		
 				bra .90
@@ -587,7 +598,7 @@ CSH.ExpEval		ldx ZPPtr1
 				jmp .10
 				
 * Old OP has precedence, compute ACC=ARG <BOP> ACC					
-.6				lda ZPPtr2+1
+.6				ldx ZPPtr2+1
 				jsr CSH.Compute
 				bcs .99
 				
@@ -595,7 +606,7 @@ CSH.ExpEval		ldx ZPPtr1
 				bcs .90	
 				jmp .10
 				
-.8				lda ZPPtr2+1
+.8				ldx ZPPtr2+1
 				bmi .80
 				
 				jsr CSH.Compute
@@ -609,14 +620,14 @@ CSH.ExpEval		ldx ZPPtr1
 .80				clc
 
 				ldx ZPPtr2				X = Var Type
-				pla
-				sta ZPPtr2+1
-				pla
-				sta ZPPtr2
-				pla
-				sta ZPPtr1+1
-				pla
-				sta ZPPtr1
+				ply
+				sty ZPPtr2+1
+				ply
+				sty ZPPtr2
+				ply
+				sty ZPPtr1+1
+				ply
+				sty ZPPtr1
 				
 				rts
 *--------------------------------------
@@ -801,14 +812,12 @@ CSH.GetNumOnStack
 * Input : ZPFileBufPtr, A = Var Type, Value on Stack
 * Output : Y,A = ZPVarID
 *--------------------------------------
-CSH.AddVar		sta ZPVarType
-
-				>PUSHW ZPFileBufPtr
+CSH.AddVar		>PUSHW ZPFileBufPtr
 				>LDA.G CSH.hSymbols
 				>SYSCALL SListNewKey
 				bcs .9
 				
-				>STYA ZPVarID
+				pha
 				txa
 *				clc
 				adc ZPFileBufPtr
@@ -816,40 +825,62 @@ CSH.AddVar		sta ZPVarType
 				bcc .1
 				
 				inc ZPFileBufPtr+1
+				clc
 				
-.1				ldy #2
-
-				lda ZPVarType
-				sta ZPVarData
-
-				and #CSH.Q.PPPOINTER
-				bne .2					Pointer, always 2 bytes
-
-				lda ZPVarType
-				and #$1f
-				tax
-				ldy	CSH.TYPESIZE,x
-
-.2				iny						+1 for Type
-				lda #0
-				
-				>PUSHYA					DataLen
-				>PUSHWI ZPVarData
-				>PUSHW ZPVarID
-				>LDA.G CSH.hSymbols
-				>SYSCALL SListAddData
-				bcs .9
-				
-				>LDYA ZPVarID
+.1				pla
 				
 .9				rts
+*--------------------------------------
+* Y,A = VarID, X=Type
+*--------------------------------------
+CSH.AddVarValue	sec
+				.HS 90					BCC
+*--------------------------------------
+* Y,A = VarID, X=Type
+*--------------------------------------
+CSH.SetVarValue	clc
+				php
+				
+				pha
+				phy
+				stx ZPVarData			X = type
+
+				jsr CSH.SIZEOF
+				pha						Size....
+				tax
+
+				ldy #1
+				
+.1				>PULLA
+				sta ZPVarData,y
+				iny
+				dex
+				bne .1
+				
+				>PUSHBI 0				Datalen HI
+				pla
+				inc
+				>PUSHA					Datalen LO
+				>PUSHWI ZPVarData		DataPtr
+				ply
+				pla
+				>PUSHYA					Y,A = VarID
+				>LDA.G CSH.hSymbols
+				plp
+				bcc .2
+	
+				>SYSCALL SListAddData
+				rts
+				
+.2				>SYSCALL SListSetData
+				rts				
 *--------------------------------------
 CSH.GetVar		>PUSHW ZPFileBufPtr
 				>LDA.G CSH.hSymbols
 				>SYSCALL SListLookup
 				bcs .9
 
-				>STYA ZPVarID
+				pha
 
 				txa
 *				clc
@@ -859,24 +890,26 @@ CSH.GetVar		>PUSHW ZPFileBufPtr
 				
 				inc ZPFileBufPtr+1
 				clc
-.1				
-.9				
-CSH.GetVar.RTS	rts
+				
+.1				pla						Y,A = VarID
+.9				rts
 *--------------------------------------
-* Input : ZPFileBufPtr, X = Var Type (or 0)
+* Input : Y,A = VarID, X = Var Type (or 0)
 * Output : Value on Stack, X = Var Type
 *--------------------------------------
 CSH.GetVarValue	stx ZPVarType
 
-.1				>PUSHWI 0
-				>PUSHWI 6
+				pha
+				>PUSHWI 0				From Start
+				>PUSHWI 6				6 bytes
 				>PUSHWI ZPVarData
-				>PUSHW ZPVarID
+				pla
+				>PUSHYA					KeyID
+				
 				>LDA.G CSH.hSymbols
 				>SYSCALL SListGetData
-				bcs CSH.GetVar.RTS
+				bcs .9
 
-CSH.PushValueOnStack
 				ldx ZPVarType
 				beq .1
 				
@@ -884,7 +917,10 @@ CSH.PushValueOnStack
 				bne .99
 				
 .1				ldx ZPVarData
-				ldy CSH.TYPESIZE,x
+				beq *
+
+				jsr CSH.SIZEOF
+				tay
 				
 .2				lda ZPVarData,y
 				>PUSHA
@@ -897,36 +933,6 @@ CSH.PushValueOnStack
 .99				lda #CSH.E.TMISMATCH
 				sec
 .9				rts
-*--------------------------------------
-CSH.SetVarValue	cmp ZPVarType
-				bne .9
-
-				sta ZPVarData
-				tax
-				ldy CSH.TYPESIZE,x		Byte count to transfer
-				
-				ldx #1
-
-.1				>PULLA
-				sta ZPVarData,x
-				inx
-				dey
-				bne .1
-
-				>PUSHBI 0
-				ldx ZPVarType
-				lda CSH.TYPESIZE,x
-				inc						+1 including TYPE
-				>PUSHA 
-				>PUSHWI ZPVarData
-				>PUSHW ZPVarID
-				>LDA.G CSH.hSymbols
-				>SYSCALL SListSetData
-				rts
-				
-.9				lda #CSH.E.TMISMATCH
-				sec
-				rts
 *--------------------------------------
 * Input : Value on Stack, X = Var Type
 * Output : CC = true, CS = false
@@ -960,11 +966,17 @@ CSH.IsValue0	cpx #CSH.T.FLOAT
 .9				sec
 				rts
 *--------------------------------------
-CSH.Compute		tax
-				jmp (J.CSH.BOPS,x)
+CSH.Compute		jmp (J.CSH.BOPS,x)
 *--------------------------------------
-CSH.BOPS.ADD	
+CSH.BOPS.ADD	lda ZPVarType
+				cmp #CSH.T.FLOAT
+				beq .8
+				
+
 				clc
+				rts
+
+.8				>FPU FADD
 				rts
 
 
@@ -972,18 +984,22 @@ CSH.BOPS.SUB	lda ZPVarType
 				cmp #CSH.T.FLOAT
 				beq .8
 				
-
-				
 				
 				clc
 				rts
 
 .8				>FPU FSUB
-				bcs .9
+				rts
 				
-.9				rts
-CSH.BOPS.MUL
+CSH.BOPS.MUL	lda ZPVarType
+				cmp #CSH.T.FLOAT
+				beq .8
+				
+				
 				clc
+				rts
+
+.8				>FPU FMULT
 				rts
 				
 CSH.BOPS.DIV	lda ZPVarType
@@ -991,15 +1007,10 @@ CSH.BOPS.DIV	lda ZPVarType
 				beq .8
 				
 
-				
-				
 				clc
 				rts
 
-.8				
-				>FPU FDIV
-				
-				clc
+.8				>FPU FDIV
 				rts
 CSH.BOPS.MOD
 CSH.BOPS.SHL
@@ -1176,14 +1187,18 @@ CSH.IsDigit10	cmp #'0'
 .9				sec
 				rts
 *--------------------------------------
+* in : X = type, out : X = type, A = size
+*--------------------------------------
 CSH.SIZEOF		txa
 				and #CSH.Q.PPPOINTER
 				bne .2
 				
 				txa
 				and #$f
-				tay
-				lda CSH.TYPESIZE,y
+				phx
+				tax
+				lda CSH.TYPESIZE,x
+				plx
 				rts
 				
 .2				lda #2
@@ -1205,7 +1220,7 @@ EXEC.cos		>FPU COS
 *--------------------------------------
 EXEC.getchar	>SYSCALL getchar
 				>PUSHA
-			>DEBUG	
+			>DEBUG
 				rts
 *--------------------------------------
 MAN
