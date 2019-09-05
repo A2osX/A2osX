@@ -70,7 +70,11 @@ CSH.Run.1		cmp #'#'
 				jsr CSH.CheckStack		must be something on stack....
 				bcs .9
 				
-				jsr CSH.Pop				was expected, get stacked Cmd...
+				jsr CSH.GetNextCharNB	Skip '}'
+				
+				jsr CSH.Pop				was expected....
+				
+				jsr CSH.Pop				get stacked Cmd...
 				tax
 				jmp (J.CSH.KW.END,x) 
 				
@@ -141,9 +145,9 @@ CSH.Run.1		cmp #'#'
 * Built in Keywords
 *--------------------------------------
 CSH.KW.JMP		txa	
-				>STA.G CSH.CmdSave			
+				>STA.G CSH.CmdSave
 				jmp (J.CSH.KW,x)
-
+*--------------------------------------
 CSH.WHILE
 CSH.IF			jsr CSH.GetCharNB
 				bcs .9
@@ -169,11 +173,22 @@ CSH.IF			jsr CSH.GetCharNB
 				
 				jsr CSH.GetNextCharNB	Skip '{'
 				bcs .99
-				
+	
 				jsr CSH.IsValue0		X = var type from ExpEval
 				bcc .6					Value=0, skip {{....}}
 
+				>LDA.G CSH.CmdSave
+				beq .1					IF
 
+				pha
+				>LDA.G CSH.BufPtrSave+1	WHILE : push loop address...
+				jsr CSH.Push
+				>LDA.G CSH.BufPtrSave
+				jsr CSH.Push		
+				pla
+				
+.1				jsr CSH.Push
+				bcs .99
 				
 				lda #'}'				Tell '}' is expected at the end of block
 				jsr CSH.Push
@@ -181,29 +196,31 @@ CSH.IF			jsr CSH.GetCharNB
 	
 				rts
 				
-.6				jmp CSH.SkipBlock
+.6				jsr CSH.SkipBlock
+
+				bcc .99
+				
 				
 .9				lda #CSH.E.SYNTAX
 				sec
 .99				rts
 *--------------------------------------
-CSH.Keyword.Start
-				>LDA.G CSH.CmdSave		get back Token ("IF" or "WHILE")
-				tax
-				jmp (J.CSH.KW.START,x)
+*CSH.Keyword.Start
+*				>LDA.G CSH.CmdSave		get back Token ("IF" or "WHILE")
+*				tax
+*				jmp (J.CSH.KW.START,x)
 *--------------------------------------
-CSH.IF.START	jmp CSH.Push			Push "IF" Token
+*CSH.IF.START	jmp CSH.Push			Push "IF" Token
 *--------------------------------------
-CSH.WHILE.START pha
-				>LDA.G CSH.BufPtrSave+1	WHILE : push loop address...
-				jsr CSH.Push
-				>LDA.G CSH.BufPtrSave
-				jsr CSH.Push		
-				pla
-				jmp CSH.Push			Push "WHILE" Token
+*CSH.WHILE.START pha
+*				>LDA.G CSH.BufPtrSave+1	WHILE : push loop address...
+*				jsr CSH.Push
+*				>LDA.G CSH.BufPtrSave
+*				jsr CSH.Push		
+*				pla
+*				jmp CSH.Push			Push "WHILE" Token
 *--------------------------------------
-CSH.IF.END		jsr CSH.GetNextChar		just skip ending '}'
-				clc
+CSH.IF.END		clc
 				rts
 *--------------------------------------
 CSH.WHILE.END	jsr CSH.Pop
@@ -580,7 +597,7 @@ CSH.ExpEval		ldx ZPPtr1
 * Old OP has precedence, compute ACC=ARG <BOP> ACC					
 .6				lda ZPPtr2				Var Type
 				ldx ZPPtr2+1			BOP
-				jsr CSH.Compute
+				jsr CSH.BOPExec
 				bcs .99
 				
 				jsr CSH.GetCharNB
@@ -591,7 +608,7 @@ CSH.ExpEval		ldx ZPPtr1
 				bmi .80
 				
 				lda ZPPtr2				Var Type
-				jsr CSH.Compute
+				jsr CSH.BOPExec
 				bcc .80
 				bcs .99
 				
@@ -913,17 +930,18 @@ CSH.GetVarValueOnStack
 				bne .2
 				
 				clc						X = Var Type
-				rts
-
-.99				lda #CSH.E.TMISMATCH
-				sec
 .9				rts
+
+.99
+*--------------------------------------
+CSH.TMISSMATCH	lda #CSH.E.TMISMATCH
+				sec
+				rts
 *--------------------------------------
 * Input : Value on Stack, X = Var Type
 * Output : CC = true, CS = false
 *--------------------------------------
-CSH.IsValue0	>DEBUG
-				cpx #CSH.T.FLOAT
+CSH.IsValue0	cpx #CSH.T.FLOAT
 				bcc .1					char,int,long
 				
 				ldy CSH.TYPESIZE,x
@@ -950,31 +968,85 @@ CSH.IsValue0	>DEBUG
 .9				sec
 				rts
 *--------------------------------------
-CSH.Compute		jmp (J.CSH.BOPS,x)
+* A = Type, X = OP
 *--------------------------------------
-CSH.BOPS.ADD	cmp #CSH.T.FLOAT
-				beq .8
-				
+CSH.BOPExec		jmp (J.CSH.BOPS,x)
+*--------------------------------------
+CSH.BOPS.ADD	asl
+				tax
+				jmp (J.CSH.BOPS.ADDt,x)
 
-				clc
-				rts
-
-.8				>FPU FADD
-				clc
-				rts
-
-
-CSH.BOPS.SUB	cmp #CSH.T.FLOAT
-				beq .8
-				
-				
-				clc
-				rts
-
-.8				>FPU FSUB
+CSH.BOPS.ADDi8
+CSH.BOPS.ADDu8	clc
+				>PULLA
+				adc (pStack)
+				sta (pStack)
 				clc
 				rts
 				
+
+CSH.BOPS.ADDi16 
+CSH.BOPS.ADDu16 clc
+				ldy #1
+				>PULLA
+				adc (pStack),y
+				sta (pStack),y
+				>PULLA
+				adc (pStack),y
+				sta (pStack),y
+				clc
+				rts
+				
+CSH.BOPS.ADDi32
+CSH.BOPS.ADDu32 >FPU ADD32
+				clc
+				rts
+
+CSH.BOPS.ADDf	>FPU FADD
+				clc
+				rts
+*--------------------------------------
+CSH.BOPS.SUB	asl
+				tax
+				jmp (J.CSH.BOPS.SUBt,x)
+
+CSH.BOPS.SUBi8
+CSH.BOPS.SUBu8	sec
+				ldy #1
+				lda (pStack),y
+				sbc (pStack)
+				sta (pStack),y
+				inc pStack
+				clc
+				rts
+				
+
+CSH.BOPS.SUBi16 
+CSH.BOPS.SUBu16 sec
+				ldy #2
+				lda (pStack),y
+				sbc (pStack)
+				sta (pStack),y
+				
+				iny
+				lda (pStack),y
+				ldy #1
+				sbc (pStack),y
+				inc pStack
+				inc pStack
+				sta (pStack),y
+				clc
+				rts
+				
+CSH.BOPS.SUBi32
+CSH.BOPS.SUBu32 >FPU SUB32
+				clc
+				rts
+
+CSH.BOPS.SUBf	>FPU FSUB
+				clc
+				rts	
+*--------------------------------------
 CSH.BOPS.MUL	cmp #CSH.T.FLOAT
 				beq .8
 				
@@ -986,6 +1058,7 @@ CSH.BOPS.MUL	cmp #CSH.T.FLOAT
 				clc
 				rts
 				
+*--------------------------------------
 CSH.BOPS.DIV	cmp #CSH.T.FLOAT
 				beq .8
 				
@@ -996,6 +1069,7 @@ CSH.BOPS.DIV	cmp #CSH.T.FLOAT
 .8				>FPU FDIV
 				clc
 				rts
+*--------------------------------------
 CSH.BOPS.MOD
 CSH.BOPS.SHL
 CSH.BOPS.SHR
@@ -1089,21 +1163,42 @@ CSH.GetIDLen	ldy #0
 .8				tya
 				rts
 *--------------------------------------
-CSH.SkipBlock	ldx #1					expecting 1 '}' for now....
+CSH.SkipStatement
+
+				clc
+				rts
+*--------------------------------------
+CSH.SkipBlock	ldy #0					not in "", TOTO:skip comments
+
+				ldx #1					starting with 1 '{' for now....
 
 .1				jsr CSH.GetNextCharNB
 				bcs .9
+				
 				cmp #'{'
 				bne .2
+				
+				tya
+				bmi .1
+				
 				inx
 				bra .1
 
 .2				cmp #'}'
-				bne .1
-				txa
-				beq .9
+				bne .3
+
+				tya
+				bmi .1
+				
 				dex
 				bne .1
+				
+.3				cmp #'"'
+				bne .1
+				tya
+				eor #$ff
+				tay
+				bra .1
 				
 				jmp CSH.GetNextCharNB	skip '}'
 				
