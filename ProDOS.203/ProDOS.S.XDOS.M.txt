@@ -1,0 +1,546 @@
+NEW
+  AUTO 3,1
+* MEMMGR memory manager
+*
+* allocate buffer in memory tables
+
+alcbuffr .EQ	*-ofsX
+				ldy #$04			index to user specified buffer.
+alcbufr1 .EQ	*-ofsX			 
+				lda (A3L),y			this buffer must be on a page boundary.
+				tax		 save for validation.
+				cmp #$08
+				bcc L4E1E			  cannot be lower than video !
+				cmp #$BC			nor greater than $BB00
+				bcs L4E1E			  since it would wipe out globals...
+				sta datptr+1
+				dey
+				lda (A3L),y			low address should be zero !
+				sta datptr
+				bne L4E1E			  error if not page boundary.
+				inx		 add 4 pages for 1k buffer.
+				inx
+				inx
+				inx
+L4DED  dex		 test for conflicts.
+				jsr cmembit			test for free buffer space
+				and memmap,y					P8 memory bitmap
+				bne L4E1E			  report memory conflict, if any.
+				cpx datptr+1					test all 4 pages.
+				bne L4DED
+				inx		 add 4 pages again for allocation.
+				inx
+				inx
+				inx
+L4DFE  dex		 set proper bits to 1
+				jsr cmembit
+				ora memmap,y					to mark it's allocation.
+				sta memmap,y
+				cpx datptr+1					set all 4 pages
+				bne L4DFE
+				ldy fcbptr			 calculate buffer number
+				lda fcbbuf,y
+				asl			  buffer number = (entnum) * 2.
+				sta fcbbuf+11,y				   save it in fcb.
+				tax		 use entnum * 2 as index to global
+				lda datptr+1			buffer addr tables. get addr already
+				sta buftbl-1,x				  validated as good. store hi addr
+				clc		 (entnums start at 1, not 0)
+				rts
+L4E1E  lda #$56			 buffer is in use or not legal
+				sec
+				rts
+getbufadr .EQ	*-ofsX
+				tax				index into global buffer table.
+				lda buftbl-2,x
+				sta bufaddrl
+				lda buftbl-1,x
+				sta bufaddrh
+				rts
+relbuffr .EQ	*-ofsX			preserve buffer address in 'bufaddr'
+				jsr getbufadr
+				tay		 returns high buffer address in acc.
+				beq L4E54			  branch if unallocated buffer space.
+				stz buftbl-1,x				  take address out of buffer list.
+				stz buftbl-2,x				  (x was set up by getbufadr)
+freebuf	.EQ	*-ofsX
+				ldx bufaddrh					get hi buffer address
+				inx		 add 4 pages to account for 1k space.
+				inx
+				inx
+				inx
+L4E43  dex		 drop to next lower page.
+				jsr cmembit			get bit and position to memtable of
+				eor #$FF			 this page. invert mask.
+				and memmap,y					mark address as free space.
+				sta memmap,y
+				cpx bufaddrh					all pages freed ?
+				bne L4E43			  no.
+L4E54  clc		 no error.
+				rts
+
+* calculate memory allocation bit position.
+* on entry: x = high address of buffer, low address assumed zero.
+* on exit: acc = allocation bit mask, x = unchanged, y = pointer to memtabl byte
+
+cmembit	.EQ	*-ofsX
+				txa				page address
+				and #$07			 which page in any 2k set ?
+				tay		 use as index to determine
+				lda whichbit,y				  bit position representation.
+				pha		 save bit position mask for now.
+				txa		 page address.
+				lsr a
+				lsr a			  determine 2k set
+				lsr a
+				tay		 return it in y.
+				pla		 restore bit mask. return bit position
+				rts		 in a & y, pointer to memtabl in x.
+valdbuf	.EQ	*-ofsX
+				lda usrbuf+1					high address of user's buffer
+				cmp #$02			 must be greater than page 2.
+				bcc L4E1E			  report bad buffer
+				ldx cbytes+1
+				lda cbytes			 get cbytes-1 value.
+				sbc #$01			 (carry is set)
+				bcs L4E76
+				dex
+L4E76  clc
+				adc usrbuf			 calculate end of request address.
+				txa		 do high address.
+				adc usrbuf+1					the final address
+				tax		 must be less than $BFnn (globals)
+				cpx #$BF
+				bcs L4E1E			  report bad buffer.
+				inx		 loop thru all affected pages.
+vldbuf1	.EQ	*-ofsX
+L4E82  dex		 check next lower page.
+				jsr cmembit
+				and memmap,y					if 0 then no conflict.
+				bne L4E1E			  branch if conflict.
+				cpx usrbuf+1					was that the last (lowest) page ?
+				bne L4E82			  if not.
+				clc		 all pages ok.
+				rts
+
+getbuf	.EQ	*-ofsX			give user address of file buffer
+				ldy #$02			 referenced by refnum.
+				lda bufaddrl
+				sta (A3L),y
+				iny
+				lda bufaddrh
+				sta (A3L),y
+				clc		 no errors possible
+				rts
+
+setbuf	.EQ	*-ofsX
+				ldy #$03
+				jsr alcbufr1			allocate new buffer address over old one
+				bcs L4EC7			report any errors immediately
+				lda bufaddrh
+				sta usrbuf+1
+				lda bufaddrl
+				sta usrbuf
+				jsr freebuf			free address space of old buffer
+				ldy #$00
+				ldx #$03
+L4EB8  lda (usrbuf),y				  move all 4 pages of the buffer to
+				sta (datptr),y				  new location.
+				iny
+				bne L4EB8
+				inc datptr+1
+				inc usrbuf+1
+				dex
+				bpl L4EB8
+				clc		 no errors
+L4EC7  rts
+
+
+* move 3 pages of dispatcher from 'displc2' to 'dispadr'
+* this move routine must be resident above $E000 at all times
+
+calldisp .EQ	*-ofsX
+				lda altram			read/write RAM bank 2
+				lda altram
+				lda #>dispadr
+				sta A2L+1
+				lda #<dispadr
+				sta A2L
+				lda #>displc2
+				sta A1L+1
+				stz A1L
+				ldy #$00
+				ldx #$03			3 pages to move.
+L4EE0  dey		 move a page of code.
+				lda (A1L),y
+				sta (A2L),y
+				tya
+				bne L4EE0
+				inc1L+1			  pointers to next page
+				inc2L+1
+				dex		 move all pages needed
+				bne L4EE0
+				lda ramin			read/write RAM bank 1
+				lda ramin			  swap mli space back in
+				stz mliact			 MLI active flag
+				stz softev			 
+				lda #>dispadr		point RESET to dispatch entry
+				sta softev+1
+				eor #$A5
+				sta pwredup			power up byte
+				jmp dispadr
+
+* translate a prodos call into a smartport call
+* to access unseen smartport devices
+
+remap_sp .EQ	*-ofsX
+				ldx #$03			assume 3 parameters.
+				lda A4L			  command number
+				sta cmdnum
+				bne L4F1B			taken if not status call
+				ldy #<spstatlist				  set up memory for the status list buffer
+				sty buf			fake up the prodos parameters
+				ldy #>spstatlist
+				sty buf+1
+				stz bloknml			set statcode = 0 for simple status call
+L4F1B  cmp #$03			 format command ?
+				bne L4F21			  no.
+				ldx #$01			 format has only 1 parameter.
+L4F21  stx statparms		set # of parms.
+				lda unitnum			
+				lsr a			  turn unit number into an index
+				lsr a
+				lsr a
+				lsr a
+				tax
+				lda spunit-1,x				  get the smartport unit number and
+				sta sp_unitnum		store into smartport parm list.
+				lda spvectlo-1,x	
+				sta sp_vector+1		copy smartport entry address
+				lda spvecthi-1,x
+				sta sp_vector+2
+				ldx #$04			copy buffer pointer and block #
+L4F3F  lda buf-1,x			from prodos parameters
+				sta sp_bufptr-1,x				 to smartport parameter block
+				dex
+				bne L4F3F
+sp_vector .EQ	*-ofsX			 smartport call
+				jsr $0000			(entry address gets modified)
+cmdnum	.EQ	*-ofsX
+	.HS 00			command #
+				.DA statparms'
+				bcs	L4F6E
+				ldx cmdnum			status call ?
+				bne L4F6E			  no...
+				ldx spstatlist+1				  else get the block count
+				ldy spstatlist+2
+				lda	spstatlist		get the returned status.
+				bit #$10			 is there a disk present ?
+				bne L4F65			  yes, check for write protected.
+				lda #$2F			 return offline error.
+				bra L4F6D
+L4F65  and #$44			 mask all but write allowed and write
+				eor #$40			 protected bits. if allowed and not
+				beq L4F6E			  protected, exit with carry clear
+				lda #$2B			 else return write protected error.
+L4F6D  sec
+L4F6E  rts
+spvectlo .EQ	*-ofsX			storage for low byte of smartport
+				   .DA #0000000000000000'  entry.
+				   .DA #00000000000000'
+spvecthi .EQ	*-ofsX			storage for high byte of smartport
+				   .DA #0000000000000000'  entry.
+				   .DA #00000000000000'
+statparms .EQ	*-ofsX			# of parms (always 3 except format)
+	dc	h'03'
+sp_unitnum .EQ	*-ofsX
+				   .HS 00			  unit number
+sp_bufptr .EQ	*-ofsX
+	.HS 0000			data buffer
+				dc	h'000000'		block number (3 bytes)
+
+* data tables
+
+scnums	.EQ	*-ofsX			table of valid mli command numbers.
+	dc	h'D3000000'
+				   .DA #40410000808182'
+				   .DA #65C0C1C2C3C4C5C6'
+				   .DA #C7C8C9CACBCCCDCE'
+				   .DA #CF00D0D1D2'
+pcntbl	.EQ	*-ofsX			parameter counts for the calls
+	dc	h'02FFFF'
+				   .DA #FF0201FFFF030300'
+				   .DA #04070102070A0201'
+				   .DA #0103030404010102'
+				   .DA #02FF020202'
+
+* command table
+
+cmdtable .EQ	*-ofsX
+	.DA create'		create
+	.DA destroy'		destroy
+				   .DA rename'				  rename
+	.DA setinfo'				   setinfo
+	.DA getinfo'				   getinfo
+	.DA online'				  online
+				   .DA setprefx'				  set prefix
+	.DA getprefx'				  get prefix
+	.DA openf'				   open
+	.DA newline'				   newline
+				   .DA readf'				   read
+	.DA writef'				  write
+	.DA closef'				  close
+	.DA flushf'				  flush
+				   .DA setmark'		set mark
+	.DA getmark'				   get mark
+	.DA seteof'				  seteof
+	.DA geteof'				  geteof
+				   .DA setbuf'				  setbuf
+	.DA getbuf'				  getbuf
+
+* corresponding command function bytes
+
+disptch	.EQ	*-ofsX
+	dc	h'A0A1A2A3'
+				   .DA #84050607'
+				dc	h'88494A4B'
+				   .DA #2C2D4E4F'
+				   .DA #50515253'
+
+dinctbl	.EQ	*-ofsX			table to increment
+	dc	h'0100000200'				  directory usage/eof counts
+pass	.EQ	*-ofsX
+	dc	h'75'
+xdosver	.EQ	*-ofsX
+	dc  h'00'
+compat	.EQ	*-ofsX
+				.HS 00
+				dc	h'C3270D000000'
+rootstuf .EQ	*-ofsX
+				   .DA #0F02000400000800'
+whichbit .EQ	*-ofsX
+				   .DA #8040201008040201'
+ofcbtbl	.EQ	*-ofsX
+				   .DA #0C0D1819151617'
+inftabl	.EQ	*-ofsX
+				   .DA #1E101F2080939421'
+				   .DA #22232418191A1B'
+deathmsg .EQ	*-ofsX
+	dc	h'20'
+	msb	on
+				dc  c'RESTART SYSTEM-$01'
+	dc	h'20'
+
+*** work space ***
+
+* note: this area is accessed by code that depends on the order of these
+*   variables in the file control block and temporary directory.
+
+own_blk	.EQ	*-ofsX
+				   .HS 0000
+own_ent	.EQ	*-ofsX
+	.HS 00
+own_len	.EQ	*-ofsX
+	.HS 00
+h_credt	.EQ	*-ofsX
+	.HS 0000			directory creation date
+	.HS 0000			directory creation time
+				   .HS 00			  version under which this dir created
+	.HS 00			  earliest version that it's compatible
+h_attr	.EQ	*-ofsX			 attributes (protect bit, etc.)
+	.HS 00
+h_entln	.EQ	*-ofsX			 length of each entry in this directory
+	.HS 00
+h_maxent .EQ	*-ofsX			 maximum number of entries per block
+	.HS 00
+h_fcnt	.EQ	*-ofsX			 current # of files in this directory
+	.HS 0000			
+h_bmap	.EQ	*-ofsX			 address of first allocation bitmap
+				   .HS 0000
+h_tblk	.EQ	*-ofsX			 total number of blocks on this unit
+	.HS 0000
+d_dev	.EQ	*-ofsX			 device number of this directory entry
+	.HS 00
+d_head	.EQ	*-ofsX			 address of <sub> directory header
+	.HS 0000			
+d_entblk .EQ	*-ofsX			address of block which contains entry
+	.HS 0000
+d_entnum .EQ	*-ofsX			 entry number within block
+				   .HS 00
+d_stor	.EQ	*-ofsX
+	dc	h'0000000000000000'  file name
+	dc	h'0000000000000000'
+d_filid	.EQ	*-ofsX			 user's identification byte
+				   .HS 00
+d_frst	.EQ	*-ofsX			 first block of file
+	.HS 0000
+d_usage	.EQ	*-ofsX			 # of blocks allocated to this file
+	.HS 0000
+d_eof	.EQ	*-ofsX			 current end of file marker
+	dc	h'000000'
+d_credt	.EQ	*-ofsX
+				   .HS 0000			file creation date
+	.HS 0000			file creation time
+d_sosver .EQ	*-ofsX			sos version that created this file
+	.HS 00
+d_comp	.EQ	*-ofsX			 backward version compatibility
+	.HS 00
+d_attr	.EQ	*-ofsX			 attributes (protect, r/w, enable, etc.)
+	.HS 00
+d_auxid	.EQ	*-ofsX			 user auxilliary identification
+				   .HS 0000
+d_moddt	.EQ	*-ofsX
+	.HS 0000			file's last modification date
+	.HS 0000			file's last modification time
+d_dhdr	.EQ	*-ofsX			 file directory header block address
+	.HS 0000
+scrtch	.EQ	*-ofsX			scratch area for
+				   .DA #00000000'				   allocation address conversion.
+oldeof	.EQ	*-ofsX			 temp used in r/w
+	dc	h'000000'
+oldmark	.EQ	*-ofsX
+				   .DA #000000'
+xvcbptr	.EQ	*-ofsX			 used in 'cmpvcb' as a temp
+	.HS 00
+vcbptr	.EQ	*-ofsX
+	.HS 00
+fcbptr	.EQ	*-ofsX
+	.HS 00
+fcbflg	.EQ	*-ofsX
+	.HS 00
+reql	.EQ	*-ofsX
+	.HS 00			  
+reqh	.EQ	*-ofsX
+	.HS 00
+levels	.EQ	*-ofsX
+				   .HS 00
+totent	.EQ	*-ofsX
+	.HS 00
+entcntl	.EQ	*-ofsX
+	.HS 00
+entcnth	.EQ	*-ofsX
+	.HS 00
+cntent	.EQ	*-ofsX
+	.HS 00
+nofree	.EQ	*-ofsX
+	.HS 00
+bmcnt	.EQ	*-ofsX
+	.HS 00			  
+saptr	.EQ	*-ofsX
+	.HS 00
+pathcnt	.EQ	*-ofsX
+				   .HS 00
+p_dev	.EQ	*-ofsX
+	.HS 00
+p_blok	.EQ	*-ofsX
+	.HS 0000
+bmptr	.EQ	*-ofsX
+	.HS 00
+basval	.EQ	*-ofsX
+	.HS 00
+half	.EQ	*-ofsX
+	.HS 00
+
+* bitmap info tables
+
+bmastat	.EQ	*-ofsX
+	.HS 00
+bmadev	.EQ	*-ofsX
+				   .HS 00
+bmadadr	.EQ	*-ofsX
+	.HS 0000
+bmacmap	.EQ	*-ofsX
+	.HS 00
+tposll	.EQ	*-ofsX
+	.HS 00
+tposlh	.EQ	*-ofsX
+	.HS 00
+tposhi	.EQ	*-ofsX
+	.HS 00
+rwreql	.EQ	*-ofsX
+	.HS 00
+rwreqh	.EQ	*-ofsX
+				   .HS 00
+nlchar	.EQ	*-ofsX
+	.HS 00
+nlmask	.EQ	*-ofsX
+	.HS 00
+ioaccess .EQ	*-ofsX			has a call been made to
+	.HS 00			 disk device handler ?
+cmdtemp	.EQ	*-ofsX
+	.HS 00
+bkbitflg .EQ	*-ofsX			used to set or clear backup bit
+	.HS 00
+duplflag .EQ	*-ofsX
+	.HS 00
+vcbentry .EQ	*-ofsX
+	.HS 00
+
+* xdos temporary variables
+
+namcnt	.EQ	*-ofsX
+				   .HS 00
+rnptr	.EQ	*-ofsX
+	.HS 00
+namptr	.EQ	*-ofsX
+	.HS 00
+vnptr	.EQ	*-ofsX
+	.HS 00
+prfxflg	.EQ	*-ofsX
+	.HS 00
+cferr	.EQ	*-ofsX
+	.HS 00
+
+* deallocation temporary variables
+
+firstbl	.EQ	*-ofsX
+	.HS 00
+firstbh	.EQ	*-ofsX
+	.HS 00
+stortyp	.EQ	*-ofsX
+				   .HS 00
+deblock	.EQ	*-ofsX
+	.HS 0000
+dtree	.EQ	*-ofsX
+	.HS 00
+dsap	.EQ	*-ofsX
+	.HS 00
+dseed	.EQ	*-ofsX
+	.HS 0000
+topdest	.EQ	*-ofsX
+	.HS 00
+dtmpx	.EQ	*-ofsX
+	.HS 00
+loklst	.EQ	*-ofsX			look list of recognized device numbers
+dealbufl .EQ	*-ofsX
+				.HS 0000000000000000
+dealbufh .EQ	*-ofsX
+				   .HS 0000000000000000
+cbytes	.EQ	*-ofsX
+				   .HS 0000
+	.HS 00			cbytes+2 must = 0
+bufaddrl .EQ	*-ofsX
+	.HS 00			  
+bufaddrh .EQ	*-ofsX
+	.HS 00
+goadr	.EQ	*-ofsX
+	.HS 0000
+delflag	.EQ	*-ofsX			used by 'detree' to know if called
+				   .HS 00			  from delete (destroy).
+
+* zero fill to page boundary - 3 ($FEFD). so that cortland flag stays
+* within page boundary.
+
+				.HS 00000000000000
+				.HS 0000000000
+					
+				.DA calldisp
+cortflag .EQ	*-ofsX			cortland flag. 1 = Cortland system
+	.HS 00			  (must stay within page boundary)
+
+* end of obj mli_2
+*--------------------------------------
+MAN
+SAVE USR/SRC/PRODOS.203/PRODOS.S.XDOS.M
+LOAD USR/SRC/PRODOS.203/PRODOS.S
+ASM
