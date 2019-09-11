@@ -1,0 +1,355 @@
+NEW
+  AUTO 3,1
+
+destroy	.EQ	*-ofsX
+				jsr findfile			look for file to be destroyed.
+				bcs L4B66			  if error.
+				jsr tstopen			is it open ?
+				lda totent
+				bne L4B64			  error if open.
+				stz reql			 force proper free count in volume.
+				stz reqh			 (no disk access occurs if already
+				jsr tstfrblk			proper)
+				bcc L4B39			no errors.
+				cmp #$48			 was error a full disk ?
+				bne L4B66			  no, report error.
+L4B39  lda d_attr			 make sure ok to destroy file.
+				and #$80
+				bne L4B45			  branch if ok to destroy.
+				lda #$4E			 access error
+				jsr p8errv			 (returns to caller)
+L4B45  lda devnum			 last device used.
+				jsr twrprot1					test for write protected hardware
+				bcs L4B66			  before going thru deallocation.
+				lda d_frst			 'detree' needs first block address
+				sta firstbl
+				lda d_frst+1
+				sta firstbh
+				lda d_stor			 find out which storage type.
+				and #$F0			 strip off name length.
+				cmp #$40			 is it a seed, sapling or tree ?
+				bcc L4B68			  branch if it is.
+				bra L4BCF			  otherwise, test for directory destroy.
+L4B64  lda #$50			file busy error.
+L4B66  sec		 can't be destroyed
+				rts
+L4B68  sta stortyp			destroy a tree file. save storage type.
+				ldx #$05
+				lda #$00			 set 'detree' input variables, must be
+L4B6F  sta stortyp,x				   in order: deblock, dtree, dsap, dseed.
+				dex
+				bne L4B6F			  loop until all zero'd.
+				lda #$02			 this avoids an extra file i/o and pre-
+				sta dseed+1			vents destruction of any deleted data.
+				inc delflag			don't allow detree to zero index blocks.
+				jsr detree			make trees and saplings into seeds.
+				dec delflag			reset flag.
+				bcs L4B93			  (de-evolution)
+L4B85  ldx firstbh
+				lda firstbl			now deallocate seed.
+				jsr dealloc
+				bcs L4B93
+				jsr upbmap
+L4B93  pha		 save possible error code.
+				lda #$00			 update directory to free entry space.
+				sta d_stor
+				cmp h_fcnt			 file entry wrap ?
+				bne L4BA1			  branch if no carry adjustment.
+				dec h_fcnt+1					take carry from hi byte of file entries.
+L4BA1  dec h_fcnt			mark header with one less file.
+				jsr dvcbrev			go update block count in vcb (ignore
+				jsr drevise			 error, if any) and update dir last.
+				tax		 save possible new error code,
+				pla		 restore possible old error code.
+				bcc L4BAF			  branch if last call succeeded.
+				txa		 last call failed, use it's error code.
+L4BAF  cmp #$01			 adjust carry accordingly
+				rts
+dvcbrev	.EQ	*-ofsX			 update block free count in vcb.
+				ldy vcbptr			 point to vcb of correct device.
+				lda deblock			get # of blocks recently freed.
+				adc vcbbuf+20,y
+				sta vcbbuf+20,y				   update current free block count.
+				lda deblock+1
+				adc vcbbuf+21,y
+				sta vcbbuf+21,y
+				lda #$00			 force re-scan from 1st bitmap
+				sta vcbbuf+28,y
+				rts
+L4BCD  bcc L4B85			  branch widened (always taken)
+L4BCF  cmp #$D0			 is this a directory file ?
+				bne L4C1B			  no, file incompatible.
+				jsr fndbmap			make sure a buffer available for bitmap
+				bcs L4C1A			  if error.
+				lda d_frst			 read 1st block of directory into gbuf
+				sta bloknml
+				lda d_frst+1
+				sta bloknml+1
+				jsr rdgbuf
+				bcs L4C1A
+				lda gbuf+37			do any files exist in this directory ?
+				bne L4BF1			  if so, access error.
+				lda gbuf+38
+				beq L4BF6
+L4BF1  lda #$4E			 access error.
+				jsr p8errv			 P8 error vector
+L4BF6  sta gbuf+4			 make it an invalid subdirectory
+				jsr wrtgbuf
+				bcs L4C1A
+L4BFE  lda gbuf+2			 get forward link.
+				cmp #$01			 test for null block into carry.
+				ldx gbuf+3			 get the rest of the block address.
+				bne L4C0A			  branch if not null.
+				bcc L4BCD			  was the low part null as well ?
+L4C0A  jsr dealloc			free this block.
+				bcs L4C1A
+				lda gbuf+2
+				ldx gbuf+3
+				jsr rdblk
+				bcc L4BFE			  loop until all freed
+L4C1A  rts
+L4C1B  lda #$4A			 file incompatible
+				jsr p8errv			(returns to caller)
+fcbused	.EQ	*-ofsX			mark fcb as dirty so the directory
+				pha		 will be flushed on 'flush'.
+				tya		 save regs.
+				pha
+				ldy fcbptr
+				lda fcbbuf+28,y				   fetch current fcb dirty byte.
+				ora #$80			 mark fcb as dirty.
+				sta fcbbuf+28,y				   save it back
+				pla		 and restore regs.
+				tay
+				pla
+				rts
+
+* 'detree' deallocates blocks from tree files. it is assumed that the device has
+* been pre-selected and the 'gbuf' may be used.
+*
+* on entry:
+*  stortype = storage type in upper nibble, lower nibble is undisturbed.
+*  firstbl & firstbh = first block of file (index or data).
+*  deblock = 0
+*  dtree = ptr to 1st block with data to be deallocated at tree level.
+*  dsap = ptr to 1st block at sapling level.
+*  dseed = byte (0-511) position to be zeroed from (inclusive).
+*
+* on exit:
+*  stortype = modified result of storage type (if applicable).
+*  firstbl & h = modified if storage type changed.
+*  deblock = total number of blocks freed at all levels.
+*  dtree, dsap, deseed unchanged.
+*
+* to trim a tree to a seed file, both dtree and dsap must be zero.
+* to go from tree to sapling, dtree alone must be zero.
+
+detree	.EQ	*-ofsX
+				lda stortyp			which kind of tree ?
+				cmp #$20			 is it a 'seed' ?
+				bcc L4C46			  if yes.
+				cmp #$30			 a sapling ?
+				bcc L4C51			  if yes.
+				cmp #$40			 is it at least a 'tree' ?
+				bcc L4C59			  branch if it is.
+				lda #$0C			 block allocation error.
+				jsr sysdeath			P8 system death vector
+
+* seedling file type - make sure first desireable block is the only
+* block available in a seedling file.
+
+L4C46  lda dsap
+				ora dtree
+				bne L4CC2	
+				jmp seedel0
+
+* sapling file type - make sure first desireable block is within the range of
+* blocks available in a sapling file
+
+L4C51  lda dtree			can't have any blocks in this range
+				bne L4CC2			  if so then done
+				jmp sapdel0			else go deallocate
+L4C59	lda #$80
+				sta topdest			for tree top start at end, work backwards.
+L4C5E  jsr drdfrst			read specified first block into gbuf.
+				bcs L4CC2			  return errors.
+				ldy topdest			get current pointer to top indexes.
+				cpy dtree			  have enough sapling indexes been
+				beq L4CC3			  deallocated? yes, now deallocate blocks
+				ldx #$07			buffer up to 8 sapling index block
+L4C6D  lda gbuf,y			addresses. fetch low block address
+				sta dealbufl,x				  and save it.
+				ora gbuf+$100,y		is it a real block that is allocated?
+				beq L4C81			  branch if phantom block.
+				lda gbuf+$100,y				   fetch high block address
+				sta dealbufh,x				  and save it.
+				dex		 decrement and test for dealc buf filled.
+				bmi L4C93			branch if 8 addresses fetched.
+L4C81  dey		 look for end of deallocation limit.
+				cpy dtree			  is this the last position on tree level?
+				bne L4C6D			  if not.
+				iny
+				lda #$00			 fill rest of dealc buffer with null addresses.
+L4C8A  sta dealbufl,x
+				sta dealbufh,x
+				dex
+				bpl L4C8A
+L4C93  dey		 decrement to prepare for next time.
+				sty topdest			save index.
+				ldx #$07
+L4C99  stx dtmpx			  save index to dealc buf.
+				lda dealbufl,x
+				sta bloknml
+				ora dealbufh,x				  finished ?
+				beq L4C5E			  branch if done with this level.
+				lda dealbufh,x				  complete address with high byte,
+				sta bloknml+1
+				jsr rdgbuf			 read sapling level into gbuf.
+				bcs L4CC2			  return errors.
+				jsr dealblk			go free all data indexes in this block
+				bcs L4CC2
+				jsr wrtgbuf			write the flipped index block
+				bcs L4CC2
+				ldx dtmpx			  restore index to dealc buff.
+				dex		 are there more to free?
+				bpl L4C99			  branch if so.
+				bmi L4C5E			  branch always to get up to 8 more
+L4CC2  rts		 sapling block numbers.
+L4CC3  ldy dtree			  deallocate all sapling blocks greater
+				iny		 than specified block.
+				jsr dalblk1			(master index in gbuf)
+				bcs L4CC2			  if errors.
+				jsr wrtgbuf			write updated master index back to disk.
+				bcs L4CC2
+				ldy dtree			figure out if tree can become sapling.
+				beq L4CEB			  branch if it can.
+				lda gbuf,y			 otherwise, continue with partial.
+				sta bloknml			deallocation of last sapling index.
+				ora gbuf+$100,y				   is there such a sapling index block ?
+				beq L4CC2			  all done if not.
+				lda gbuf+$100,y				   read in sapling level to be modified.
+				sta bloknml+1
+				jsr rdgbuf			 read highest sapling index into gbuf.
+				bcc L4CF5
+				rts
+L4CEB  jsr shrink			shrink tree to sapling
+				bcs L4CC2
+sapdel0	.EQ	*-ofsX
+				jsr drdfrst			read specified sapling level index
+				bcs L4CC2			  into gbuf. branch if error.
+L4CF5  ldy dsap			 pointer to last of desirable indexes.
+				iny		 inc to 1st undesirable.
+				beq L4D05			  branch if all are desirable.
+				jsr dalblk1			deallocate all indexes above specified.
+				bcs L4CC2
+				jsr wrtgbuf			write out the index block
+				bcs L4CC2
+L4D05  ldy dsap			 prepare to clean up last data block.
+				beq L4D1F			  branch if possibility of making a seed.
+L4D0A  lda gbuf,y			 fetch low order data block address.
+				sta bloknml
+				ora gbuf+$100,y				   is it a real block ?
+				beq L4CC2			  if not, then done.
+				lda gbuf+$100,y
+				sta bloknml+1
+				jsr rdgbuf			 go read data block into gbuf.
+				bcc L4D2E			  branch if good read
+				rts		 or return error.
+L4D1F  lda dtree			  are both tree and sap levels zero ?
+				bne L4D0A			  if not.
+				jsr shrink			 reduce this sap to a seed.
+				bcs L4D52			  if error.
+seedel0	.EQ	*-ofsX
+				jsr drdfrst			go read data block.
+				bcs L4D52			  if error.
+L4D2E  ldy dseed+1			check high byte for no deletion.
+				beq L4D39			  branch if all of 2nd page to be deleted.
+				dey				if dseed > $200 then all were done.
+				bne L4D52			  branch if that is the case.
+				ldy dseed			  clear only bytes >= dseed.
+L4D39  lda #$00
+L4D3B  sta gbuf+$100,y				   zero out unwanted data
+				iny
+				bne L4D3B
+				ldy dseed+1			is that all ?
+				bne L4D4F			  yes.
+				ldy dseed
+L4D49  sta gbuf,y
+				iny
+				bne L4D49
+L4D4F  jmp wrtgbuf			update data block to disk.
+L4D52  rts		 return error status.
+drdfrst	.EQ	*-ofsX			read specified 1st block into gbuf
+				lda firstbl
+				ldx firstbh
+				jmp rdblk			  go read it
+
+* beware that dealloc may bring in a new bitmap block and may destroy
+* locations 46 and 47 which are used to point to the current index block.
+
+shrink	.EQ	*-ofsX
+				ldx firstbh			first deallocate top index block
+				txa
+				pha
+				lda firstbl
+				pha		 save block address of this index block.
+				jsr dealloc			free it from the bitmap
+				pla
+				sta bloknml			set master of sapling
+				pla				index block address.
+				sta bloknml+1
+				bcs L4D8D			  report errors.
+				lda gbuf			 get # of new 1st block from old index.
+				sta firstbl
+				lda gbuf+$100
+				sta firstbh
+				ldy #$00
+				jsr swapme			flip that one entry in old top index.
+				sec		 now change file type,
+				lda stortyp			from tree to sapling,
+				sbc #$10			 or from sapling to seed.
+				sta stortyp
+				jsr wrtgbuf			write the (deallocated) old top index.
+L4D8D  rts		 return error status.
+dealblk	.EQ	*-ofsX
+				ldy #$00			 start at beginning.
+dalblk1	.EQ	*-ofsX
+				lda bloknml			save disk address of gbuf's data.
+				pha
+				lda bloknml+1
+				pha
+L4D96  sty saptr			  save current index.
+				lda gbuf,y			 get low address of block to deallocate.
+				cmp #$01			 test for null block into carry.
+				ldx gbuf+$100,y				   get remainder of block address.
+				bne L4DA5			  branch if not null.
+				bcc L4DB0			  was the low part null too ?
+L4DA5  jsr dealloc			free it up on volume bitmap.
+				bcs L4DB4			  return any error.
+				ldy saptr			  get index to sapling level index block.
+				jsr swapme			 
+L4DB0  iny		 next block address.
+				bne L4D96			  if more to deallocate or test.
+				clc		 no error.
+L4DB4  tax		 save error code, if any.
+				pla		 restore blocknm (16 bit)
+				sta bloknml+1
+				pla
+				sta bloknml
+				txa		 restore return code
+				rts
+swapme	.EQ	*-ofsX
+				lda delflag			swapping or zeroing ?
+				bne L4DC5			  skip if swapping.
+				tax		 make x = 0.
+				beq L4DCB			  zero the index (always taken).
+L4DC5  ldx gbuf+$100,y				   index high
+				lda gbuf,y			 index low
+L4DCB  sta gbuf+$100,y				   save index high
+				txa
+				sta gbuf,y			 save index low
+				rts				done.
+
+MAN
+SAVE USR/SRC/PRODOS.203/PRODOS.S.XDOS.F
+LOAD USR/SRC/PRODOS.203/PRODOS.S
+ASM

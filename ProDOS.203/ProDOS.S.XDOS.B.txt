@@ -1,0 +1,869 @@
+NEW
+  AUTO 3,1
+
+* create file
+
+create			.EQ	*-ofsX
+				jsr lookfile			check for duplicate, get free entry
+				bcs tstfnf				error code may be 'file not found'
+				lda #$47				name already exists
+crerr1			sec
+				rts
+tstfnf			cmp #$46				'file not found' is ok
+				bne crerr1				otherwise exit with error.
+				ldy #$07				test for tree or directory file,
+				lda (A3L),y				no other kinds are legal.
+				cmp #$04				is it seed, sapling or tree?
+				bcc tstdspc				branch if it is
+				cmp #$0D
+				bne ctyperr				report type error if not directory.
+tstdspc			lda devnum				make sure destination device
+				jsr twrprot1			is not write protected.
+				bcs H351D
+				lda nofree				is there space in directory to
+				beq xtndir				add this file? branch if not
+				jmp creat1				otherwise, go create file.
+ctyperr			lda #$4B				filetype error
+				sec
+H351D  			rts
+xtndir			lda own_blk				before extending directory,
+				ora own_blk+1			make sure it's a subdirectory.
+				bne H352A
+				lda #$49				otherwise, directory full error
+				sec
+				rts
+H352A  			lda bloknml				preserve disk address of current (last)
+				pha	directory link, before allocating an
+				lda bloknml+1			extended block.
+				pha
+				jsr alc1blk				allocate a block for extending directory
+				plx
+				stx bloknml+1			restore block addr of dir info in gbuf
+				plx
+				stx bloknml
+				bcs H351D				unable to allocate.
+				sta gbuf+2				save block address in y,a to
+				sty gbuf+3				current directory.
+				jsr wrtgbuf				update directory block with new link.
+				bcs H351D				if error
+				ldx #$01
+swpbloks 		lda bloknml,x			prepare new directory block
+				sta gbuf,x				using current block as back link
+				lda gbuf+2,x
+				sta bloknml,x			and save new block as next to be written
+				dex
+				bpl swpbloks
+				inx
+				txa	x and a = 0
+clrdir 			sta gbuf+2,x
+				sta gbuf+$100,x
+				inx
+				bne clrdir
+				jsr wrtgbuf				write prepared directory extension.
+				bcs H351D				if error
+				lda own_blk
+				ldx own_blk+1
+				jsr rdblk				read in parent directory block
+				ldx own_ent				and calc entry address.
+				lda /gbuf
+				sta zpt+1
+				lda #$04
+ocalc  			clc
+				dex	has entry address been calulated?
+				beq H3584				if yes.
+				adc own_len				next entry address
+				bcc ocalc
+				inc zpt+1				entry must be in 2nd 256 bytes of block
+				bcs ocalc				always taken.
+H3584  			sta zpt
+				ldy #$13				index to block count
+H3588  			lda (zpt),y
+				adc dinctbl-$13,y		add 1 to block count and
+				sta (zpt),y
+				iny
+				tya	$200 to the directory's eof.
+				eor #$18				done with usage/eof update?
+				bne H3588				branch if not.
+				jsr wrtgbuf				go update parent.
+				bcs crerr2
+				jmp create
+crerr2 			rts	return and report errors
+creat1			.EQ	*-ofsX
+				ldx #$00				zero out gbuf
+H35A0  			stz gbuf,x
+				stz gbuf+$100,x			and data block of file.
+				inx
+				bne H35A0
+				ldy #$0B				move user specified date/time
+cmvtime			lda (A3L),y				to directory.
+				sta d_filid,y
+				txa		 if all 4 bytes of date/time = 0
+				ora (A3L),y			then use built-in date/time.
+				tax
+				dey
+				cpy #$07
+				bne cmvtime
+				txa				does user want default time?
+				bne cmvname			if not.
+				ldx #$03
+mvdftime lda p8date,x					move current default date/time
+				sta d_credt,x
+				dex
+				bpl mvdftime
+cmvname	lda (A3L),y			y = index to file kind.
+				cmp #$04
+				lda #$10			assume tree type
+				bcc csvfkind
+				lda #$D0			 it's directory.
+csvfkind ldx namptr			 index to local name of pathname.
+				ora pathbuf,x				   combine file kind with name length.
+				sta d_stor			 sos calls this 'storage type'.
+				and #$0F			 strip back to name length
+				tay		 and use as counter for move.
+				clc
+				adc namptr			 calc end of name
+				tax
+crname	lda pathbuf,x				   	move local name as filename
+				sta d_stor,y
+				dex
+				dey
+				bne crname
+				ldy #$03			index to 'access' parameter
+				lda (A3L),y
+				sta d_attr
+				iny				also move 'file identification'
+				lda (A3L),y
+				sta d_filid
+cmvauxid iny				move auxillary identification bytes
+				lda (A3L),y
+				sta d_auxid-5,y
+				cpy #$06
+				bne cmvauxid
+				lda xdosver			save current xdos version #
+				sta d_sosver
+				lda compat			 and backward compatibility #
+				sta d_comp
+				lda #$01			 usage is always 1 block
+				sta d_usage
+				lda d_head			place back pointer to header block
+				sta d_dhdr
+				lda d_head+1
+				sta d_dhdr+1
+				lda d_stor			storage type.
+				and #$E0			 is it a directory?
+				beq cralcblk					branch if seed file.
+				ldx #$1E			 move header to data block
+cmvheadr lda d_stor,x
+				sta gbuf+4,x
+				dex
+				bpl cmvheadr
+				eor #$30
+				sta gbuf+4			make it a directory header mark.
+				ldx #$07			 overwrite password area and other
+cmvpass	lda pass,x				header info.
+				sta gbuf+20,x
+				lda xdosver,x
+				sta gbuf+32,x
+				dex
+				bpl cmvpass
+				ldx #$02			and include info about parent directory
+				stx d_eof+1
+cmvparnt lda d_entblk,x
+				sta gbuf+39,x
+				dex
+				bpl cmvparnt
+				lda h_entln			lastly, the length of parent's
+				sta gbuf+42			directory entries.
+cralcblk jsr alc1blk			get address of file's data block
+				bcs crerr3
+				sta d_frst
+				sty d_frst+1
+				sta bloknml
+				sty bloknml+1
+				jsr wrtgbuf			go write data block of file
+				bcs crerr3
+				inc h_fcnt			 add 1 to total # of files in this dir
+				bne credone
+				inc h_fcnt+1
+credone	jsr drevise			go revise directories with new file
+				bcs crerr3
+				jmp upbmap			 lastly, update volume bitmap
+entcalc	.EQ	*-ofsX
+				lda /gbuf			set high address of dir entry
+				sta zpt+1			  index pointer.
+				lda #$04			 calc address of entry based
+				ldx d_entnum					on the entry #.
+H3689  clc
+H368A  dex		 addr = gbuf + ((d_entnum-1) * h_entln)
+				beq H3696			  branch with carry clear = no errors.
+				adc h_entln
+				bcc H368A
+				inc zpt+1			  inc hi address.
+				bcs H3689			always.
+H3696  sta zpt			  newly calculated low address.
+crerr3 rts		 carry set if error.
+drevise	.EQ	*-ofsX
+				lda p8date
+				beq H36A9			  if no clock, then don't mod date/time.
+				ldx #$03
+modtime	lda p8date,x	move last modification date/time
+				sta d_moddt,x				   to entry being updated.
+				dex
+				bpl modtime
+drevise1 .EQ	*-ofsX
+H36A9  lda d_attr			mark entry as backupable
+				ora bkbitflg					(bit 5 = backup needed)
+				sta d_attr
+				lda d_dev			  get device # of directory
+				sta devnum			 to be revised
+				lda d_entblk					and address of direcotry block.
+				ldx d_entblk+1
+				jsr rdblk			  read block into general purpose buffer
+				bcs crerr3
+				jsr entcalc			fix up ptr to entry location within gbuf.
+				ldy h_entln			now move 'd.' info to directory.
+				dey
+H36CA  lda d_stor,y
+				sta (zpt),y
+				dey
+				bpl H36CA
+				lda d_head			is the entry block same as
+				cmp bloknml			the entry's header block?
+				bne H36E0			  if no, go save entry block
+				lda d_head+1					then maybe, so test high addresses.
+				cmp bloknml+1
+				beq uphead			 branch if they are the same block.
+H36E0  jsr wrtgbuf			go write updated directory block.
+				bcs crerr3
+				lda d_head			 get address of header block and
+				ldx d_head+1
+				jsr rdblk			  go read in header block to modify.
+				bcs crerr3
+uphead	ldy #$01			update current # of files in this dir.
+H36F2  lda h_fcnt,y
+				sta gbuf+37,y				   (current entry count)
+				dey
+				bpl H36F2
+				lda h_attr			 also update header's attributes.
+				sta gbuf+34
+				jsr wrtgbuf			go write updated header
+				bcs H375A
+ripple	lda gbuf+4			test for 'root' directory because
+				and #$F0			 if it is, then directory revision
+				eor #$F0			 is complete (leaves carry clear).
+				beq H3770			  branch if done.
+				lda gbuf+41			get entry #
+				sta d_entnum
+				lda gbuf+42			and the length of ertries in that dir
+				sta h_entln
+				lda gbuf+39			get addr of parent entry's dir block
+				ldx gbuf+40
+				jsr rdblk			  read it
+				bcs H375A
+				jsr entcalc			get indirect ptr to parent entry in gbuf
+				lda p8date			don't touch mod
+				beq H373B			  if no clock...
+				ldx #$03			 update the modification date & time
+				ldy #$24			 for this entry too
+H3732  lda p8date,x
+				sta (zpt),y
+				dey
+				dex
+				bpl H3732
+H373B  jsr wrtgbuf			write updated entry back to disk.
+				bcs H375A			  if error.
+				ldy #$25			 compare current block # to this
+				lda (zpt),y			entry's header block.
+				iny
+				cmp bloknml			are low addresses the same?
+				sta bloknml
+				bne H3751			  branch if entry doesn't reside in same
+				lda (zpt),y			block as header.
+				cmp bloknml+1				   are high address the same?
+				beq ripple			 they are the same, continue to root dir.
+H3751  lda (zpt),y			not same so read in this dir's header.
+				sta bloknml+1
+				jsr rdgbuf
+				bcc ripple			continue if read was good
+H375A  rts
+tsterr lda #$52			not tree or dir, unrecognized type
+				sec
+				rts
+tstsos	.EQ	*-ofsX			test if xdos disk.
+				lda gbuf			 pointer to previous dir block
+				ora gbuf+1			 must be null
+				bne tsterr
+				lda gbuf+4			 test for header
+				and #$E0
+				cmp #$E0
+				bne tsterr
+H3770  clc		 no error
+				rts
+findfile .EQ	*-ofsX
+				jsr lookfile			see if file exists
+				bcs nofind
+moventry .EQ	*-ofsX
+				ldy h_entln
+H377A  lda (zpt),y			move entry into storage
+				sta d_stor,y
+				dey
+				bpl H377A
+				lda #$00			no errors
+nofind rts
+lookfile .EQ	*-ofsX
+				jsr preproot			go find volume
+				bcs fnderr
+				bne L37C5			branch if more than root
+				lda /gbuf			 otherwise, report a bad path error
+				sta zpt+1			  (but 1st create a phantom entry
+				lda #$04			 for open)
+				sta zpt
+				ldy #$1F			move in id and date info
+phantm1  lda (zpt),y
+				sta d_stor,y
+				dey
+				cpy #$17
+				bne phantm1
+phantm2  lda rootstuf-$10,y
+				sta d_stor,y
+				dey
+				cpy #$0F
+				bne phantm2
+				lda #$D0			fake directory file
+				sta d_stor
+				lda gbuf+2			 check forward link.
+				ora gbuf+3			 if non-zero, assume full sized directory
+				bne H37C2			  else assume it's the slot 3 /RAM volume
+				lda #$02			 so reset eof and blocks_used fields
+				sta d_eof+1
+				lda #$01
+				sta d_usage
+H37C2  lda #$40			bad path (carry set)
+				rts
+lookfil0 .EQ	*-ofsX
+L37C5  stz nofree			reset free entry indicator.
+				sec		 dir to be searched has header in this block.
+L37C9  stz totent			 reset entry counter.
+				jsr looknam			look for name pointed to by pnptr.
+				bcc namfound			if name was found.
+				lda entcntl			have we looked at all of the
+				sbc totent			 entries in this directory?
+				bcc L37E2			  maybe, check hi count.
+				bne L37EB			  no, read next directory block.
+				cmp entcnth			has the last entry been looked at?
+				beq errfnf			 yes, give 'file not found' error
+				bne L37EB			or branch always.
+L37E2  dec entcnth			should be at least one
+				bpl L37EB			  so this should be branch always...
+errdir lda #$51			 directory error
+fnderr sec
+				rts
+L37EB  sta entcntl			keep a running count.
+				lda /gbuf			 reset indirect pointer
+				sta zpt+1
+				lda gbuf+2			 get link to next dir block
+				bne L37FC			  (if there is one).
+				cmp gbuf+3			 are both zero, i.e. no link? if so,
+				beq errdir			 then not all entries were acct'd for.
+L37FC  ldx gbuf+3			 acc has value for block# (low).
+				jsr rdblk			  go read the next linked directory.
+				bcc L37C9			  if no error.
+				rts		 return error in acc.
+errfnf lda nofree			was any free entry found?
+				bne fnf0
+				lda gbuf+2			 test link
+				bne L3814
+				cmp gbuf+3			 if both are 0 then give up.
+				beq fnf0			 report 'not found'.
+L3814  sta d_entblk
+				lda gbuf+3
+				sta d_entblk+1				  assume 1st entry of next block
+				lda #$01			 is free for use.
+				sta d_entnum					mark as valid (for create)
+				sta nofree
+fnf0   jsr nxtpnam1			'file not found' or 'path not found'?
+errpath1 sec		 if non-zero then 'path not found'
+				beq fnf1
+				lda #$44			path not found
+				rts
+fnf1   lda #$46			 file not found
+				rts
+namfound jsr nxtpname			adj index to next name in path.
+				beq filfound			  branch if that was the last name.
+				ldy #$00			 be sure this is a directory entry.
+				lda (zpt),y			high nibble will tell.
+				and #$F0
+				cmp #$D0			 is it a subdirectory?
+				bne errpath1					error if not.
+				ldy #$11			 get address of 1st subdirectory block
+				lda (zpt),y
+				sta bloknml			(no checking done for a valid block#)
+				iny
+				sta d_head			 save as file's header block too
+				lda (zpt),y
+				sta bloknml+1
+				sta d_head+1
+				jsr rdgbuf			 read subdirectory into gbuf.
+				bcs fnderr1			if error.
+				lda gbuf+37			get the # of files contained in this
+				sta entcntl			directory.
+				lda gbuf+38
+				sta entcnth
+				lda gbuf+20			make sure password is disabled
+				ldx #$00
+				sec
+				rol
+L3869  bcc L386C
+				inx
+L386C  asl
+				bne L3869
+				cpx #$05			is password disabled?
+				beq movhead
+				lda #$4A			 directory is not compatible
+fnderr1  sec
+				rts
+movhead  jsr movhed0			move directory info.
+				jmp lookfil0					do next local pathname.
+movhed0	.EQ	*-ofsX
+				ldx #$0A			move this directory info
+L387F  lda gbuf+28,x
+				sta h_credt,x
+				dex
+				bpl L387F
+				lda gbuf+4			if this is root, then nothing to do
+				and #$F0
+				eor #$F0			 test header type.
+				beq L389C			  branch if root
+				ldx #$03			 otherwise, save owner info about
+L3893  lda gbuf+39,x				   this header.
+				sta own_blk,x
+				dex
+				bpl L3893
+L389C  rts
+entadr	.EQ	*-ofsX
+filfound lda h_maxent			figure out which entry # this is
+				sec
+				sbc cntent			 max entries - count entries + 1
+				adc #$00			 = entry # (carry was set)
+				sta d_entnum
+				lda bloknml			and indicate block # of this directory
+				sta d_entblk
+				lda bloknml+1
+				sta d_entblk+1
+				clc
+				rts
+looknam	.EQ	*-ofsX			reset count of files per block
+				lda h_maxent
+				sta cntent
+				lda /gbuf
+				sta zpt+1
+				lda #$04
+L38C1  sta zpt			  reset indirect pointer to gbuf
+				bcs L38F8			branch if this block contains a header
+				ldy #$00
+				lda (zpt),y			get length of name in directory.
+				bne isname			 branch if there is a name.
+				lda nofree			test if a free entry has been declared.
+				bne L38F8			  yes, inc to next entry.
+				jsr entadr			 set address for current entry.
+				inc nofree			indicate a free spot has been found.
+				bne L38F8			  always.
+isname and #$0F			 strip byte (is checked by 'filfound')
+				inc totent			inc count of valid files found.
+				sta namcnt			 save name length as counter.
+				ldx namptr			 get index to current path.
+				cmp pathbuf,x				   are both names the same length?
+				bne L38F8			  no, inc to next entry.
+cmpname  inx		 (first) next letter index
+				iny
+				lda (zpt),y			compare names letter by letter
+				cmp pathbuf,x
+				bne L38F8
+				dec namcnt			 all letters compared?
+				bne cmpname			no, continue.
+				clc		 a match is found.
+noname rts
+L38F8  dec cntent			checked all entries in this block?
+				sec
+				beq noname			 yes, no name match.
+				lda h_entln			add entry length to current pointer
+				clc
+				adc zpt
+				bcc L38C1			  branch if still in 1st page.
+				inc zpt+1			  look on 2nd page.
+				clc		 carry should always be clear before
+				bcc L38C1			  looking at next.
+preproot .EQ	*-ofsX
+				jsr findvol			search vcb's and dev's for spec'd volume
+				bcs novolume
+				lda #$00			zero out directory temps
+				ldy #$42
+L3914  sta own_blk,y				   and owner info
+				dey
+				bpl L3914
+				lda devnum			 setup device # for this directory
+				sta d_dev
+				jsr movhed0			setup other header info from directory
+				ldy #$01			 in gbuf and clean up misc info.
+				ldx vcbptr
+				inx
+L3929  lda vcbbuf+18,x				   misc info includes
+				sta h_tblk,y					total # of blocks,
+				lda vcbbuf+26,x				   the address of the 1st bitmap,
+				sta h_bmap,y
+				lda	bloknml,y		directory's disk address,
+				sta d_head,y
+				lda h_fcnt,y					and setting up a counter for the # of
+				sta entcntl,y				   files in this directory.
+				dex
+				dey
+				bpl L3929
+nxtpname .EQ	*-ofsX
+				jsr nxtpnam1			get new namptr in y and namlen in acc.
+				sty namptr			 save new pathname pointer.
+				rts		 (status reg according to accumulator)
+nxtpnam1 .EQ	*-ofsX
+				ldy namptr			 inc pathname pointer to next name
+				lda pathbuf,y				   in the path.
+				sec
+				adc namptr			 if this addition results in zero,
+				tay		 then prefixed directory has been moved
+				bne L395F			  to another device. branch if not.
+				lda devnum			 revise devnum for prefixed directory
+				sta p_dev
+L395F  lda pathbuf,y				   test for end of name.
+				clc		 no errors
+novolume rts
+findvol	 .EQ	*-ofsX
+				lda #$00
+				ldy preflag			use prefix volume name to look up vcb.
+				bit prfxflg			is this a prefixed path?
+				bpl L396F			  branch if it is
+				tay		 set ptr to volume name
+L396F  			sty vnptr			  and save.
+				sta devnum			 zero out dev# until vcb located.
+L3975 			 pha		 acc now used as vcb lookup index.
+				tax		 index pointer to x.
+				lda vcbbuf,x					get vcb volume name length.
+				bne L3987			  branch if claimed vcb to be tested.
+L397C 			ldy vnptr			  restore pointer to requested vol name.
+				pla		 now adj vcb index to next vcb entry.
+				clc
+				adc #$20
+				bcc L3975			  branch if more vcb's to check
+				bcs L39D4			  otherwise go look for unlogged volumes.
+L3987  			sta namcnt			 save length of vol name to be compared.
+L398A  			cmp pathbuf,y				   is it the same as requested vol name?
+				bne L397C			  branch if not
+				inx
+				iny		 next character
+				lda vcbbuf,x
+				dec namcnt			 last character?
+				bpl L398A			  if not.
+				plx		 restore pointer to matching vcb.
+				stx vcbptr			 save it for future reference.
+				lda vcbbuf+16,x				   get it's device #
+				sta devnum			 and save it.
+				stz bloknml+1				   assume prefix is not used and
+				lda #$02			 that root directory is to be used.
+				sta bloknml
+				lda vnptr			  = 0 if no prefix.
+L39AC  			tay		 if prefix then find ptr to prefixed
+				sta namptr			 dir name. save path ptr.
+				beq L39C2			  branch if no prefix.
+				sec
+				adc pathbuf,y				   inc to next dir in prefix path.
+				bcc L39AC			  branch if another dir in prefix.
+				lda p_blok			 volume verification will occur at
+				sta bloknml			subdirectory level.
+				lda p_blok+1
+				sta bloknml+1
+
+* verify volume name
+
+L39C2  			jsr rdgbuf			read in directory (or prefix dir)
+				bcs L39CC			  if error then look on other devices.
+				jsr cmppnam			compare dir name with path name.
+				bcc L39F0			  if they match, stop looking.
+L39CC  			ldx vcbptr			 check if current (matched) vcb is active
+				lda vcbbuf+17,x		i.e. does it have open files?
+				bmi L39ED			  report not found if active.
+L39D4  			lda vnptr			  make path ptr same as volume ptr
+				sta namptr
+				jsr mvdevnums				   copy all device #'s to be examined.
+				lda devnum			 log current device 1st before searching
+				bne L39F1			  others.
+L39E2  ldx numdevs			scan look list for devices we need
+L39E5  lda loklst,x					to search for the requested volume.
+				bne L39F4			  branch if we've a device to look at.
+				dex
+				bpl L39E5			  look at next one.
+L39ED  lda #$45			 no mounted volume
+				sec		 error
+L39F0  rts
+L39F1  ldx numdevs			now remove the device from the list
+L39F4  cmp loklst,x					of prospective devices.
+				beq L39FE			  branch if match.
+				dex		 look until found.
+				bpl L39F4			  always taken (usually) unless
+				bmi L39ED			  if dev was removed from devlst (/RAM).
+L39FE  sta devnum			 preserve device to be checked next.
+				stz loklst,x					mark this one as tested.
+				jsr fnddvcb			find vcb that claims this dev (if any).
+				bcs L3A29			  branch if vcb full.
+				ldx vcbptr			 did fndvcb find it or return free vcb?
+				lda vcbbuf,x
+				beq L3A16			if free vcb.
+				lda vcbbuf+17,x				   is this volume active?
+				bmi L39E2			  if so, no need to re-log.
+L3A16  lda #$02			 go read root dir into gbuf
+				ldx #$00
+				jsr rdblk
+				bcs L39E2			  ignore if unable to read.
+				jsr logvcb			go log in volume name.
+				bcs L39E2			  look at next if non-xdos disk mounted.
+				jsr cmppnam			is this the volume ?
+				bcs L39E2			  if not
+L3A29  rts
+mvdevnums .EQ	*-ofsX
+				ldx numdevs			copy all dev #'s to be checked.
+L3A2D  lda devlist,x				   active device list.
+				and #$F0			 strip device type info.
+				sta loklst,x					copy them to a temp workspace
+				dex
+				bpl L3A2D
+				ldx numdevs
+				rts
+fnddvcb	.EQ	*-ofsX			look for vcb with this device#
+				lda #$00
+				ldy #$FF
+L3A40  tax				new index to next vcb
+				lda vcbbuf+16,x				   check all devnums
+				cmp devnum			is this the vcb?
+				bne L3A4E			  if not
+				stx vcbptr
+				clc		 indicates found
+				rts
+L3A4E  lda vcbbuf,x			is this a free vcb?
+				bne L3A57			  if not
+				iny
+				stx vcbptr
+L3A57  txa
+				clc				inc index to next vcb
+				adc #$20
+				bne L3A40
+				tya		 any free vcb's available?
+				bpl L3A79			  yes
+				lda #$00			 look for an entry to kick out
+L3A62  tax
+				lda vcbbuf+17,x				   any open files?
+				bpl L3A70			  no, kick this one out.
+				txa		 next vcb
+				clc
+				adc #$20			 (vcb entry size)
+				bne L3A62
+				beq L3A7A			  all vcb entries have open files
+L3A70  stx vcbptr			 save entry index.
+				stz vcbbuf,x					free this entry
+				stz vcbbuf+16,x
+L3A79  clc		 no error.
+L3A7A  lda #$55			 # vcb full error
+				rts
+cmppnam	.EQ	*-ofsX
+				ldx #$00			 index to directory name.
+				ldy namptr			 index to pathname.
+				lda gbuf+4			 get dir name length and type.
+				cmp #$E0			is it a directory?
+				bcc L3A90			  if not.
+				and #$0F			 isolate name length and
+				sta namcnt			 save as a counter.
+				bne L3A95			  branch if valid length.
+L3A90  sec		 indicate not found
+				rts
+L3A92  lda gbuf+4,x					next char
+L3A95  cmp pathbuf,y
+				bne L3A90			  if not the same.
+				inx		 check next char
+				iny
+				dec namcnt
+				bpl L3A92			  if more to compare.
+				clc		 match found
+				rts
+logvcb	.EQ	*-ofsX			 
+				ldx vcbptr			 previously logged in volume?
+				lda vcbbuf,x					(acc = 0?)
+				beq L3AB0			  no, go prepare vcb.
+				jsr cmpvcb			 does vcb match vol read?
+				bcc L3B05			  yes, do not disturb.
+logvcb1	.EQ	*-ofsX
+L3AB0  ldy #$1F			 zero out vcb entry
+L3AB2  stz vcbbuf,x
+				inx
+				dey
+				bpl L3AB2
+				jsr tstsos			make sure it's an xdos disk
+				bcs L3B05			if not, return carry set.
+				jsr tstdupvol		does a duplicate with open files
+				bcs L3B04			  already exist? branch if yes.
+				lda gbuf+4			 move volume name to vcb.
+				and #$0F			 strip root marker
+				tay
+				pha
+				ora vcbptr
+				tax
+L3ACE  lda gbuf+4,y
+				sta vcbbuf,x
+				dex
+				dey
+				bne L3ACE
+				pla		 get length again
+				sta vcbbuf,x					and save.
+				lda devnum			 last device used.
+				sta vcbbuf+16,x				   save device # and
+				lda gbuf+41			total # of blocks on this unit.
+				sta vcbbuf+18,x
+				lda gbuf+42
+				sta vcbbuf+19,x
+				lda bloknml			save address of root directory.
+				sta vcbbuf+22,x
+				lda bloknml+1
+				sta vcbbuf+23,x
+				lda gbuf+39			save address of the 1st bitmap.
+				sta vcbbuf+26,x
+				lda gbuf+40
+				sta vcbbuf+27,x
+L3B04  clc		 indicate logged if possible
+L3B05  rts
+cmpvcb	.EQ	*-ofsX			compare volume name in vcb
+				lda gbuf+4			 with name in directory.
+				and #$0F
+				cmp vcbbuf,x					are they the same length?
+				stx xvcbptr			(see rev note #23)
+				bne L3B1E			  if not the same.
+				tay
+				ora xvcbptr
+				tax
+L3B18  lda gbuf+4,y
+				cmp vcbbuf,x
+L3B1E  sec		 anticipate different names.
+				bne L3B26			  if not the same.
+				dex
+				dey
+				bne L3B18
+				clc		 indicate match.
+L3B26  ldx xvcbptr			offset to start of vcb (rev note #23)
+				rts
+tstdupvol .EQ	*-ofsX			check for other logged in volumes
+				lda #$00			 with the same name.
+L3B2C  tax
+				jsr cmpvcb
+				bcs L3B41			  if no match.
+				lda vcbbuf+17,x				   test for any open files.
+				bmi L3B4B			  cannot look at this volume.
+				lda #$00			 take duplicate offline if no open files
+				sta vcbbuf,x
+				sta vcbbuf+16,x
+				beq L3B49			  ok to log in new volume.
+L3B41  txa		 index to next vcb
+				clc
+				and #$E0			 strip odd stuff.
+				adc #$20			 inc to next entry.
+				bcc L3B2C			  branch if more to check
+L3B49  clc
+				rts
+L3B4B  sta duplflag					duplicate has been found.
+				stx vcbentry					save pointer to conflicting vcb.
+				sec		 error.
+				rts
+tstfrblk .EQ	*-ofsX			test if enough free blocks available
+				ldx vcbptr			 for request.
+				lda vcbbuf+21,x				   check if proper count for this volume.
+				ora vcbbuf+20,x
+				bne L3BAD			  branch if count is non-zero.
+tkfrecnt .EQ	*-ofsX
+				jsr cntbms			get # of bitmaps
+				sta bmcnt			  and save.
+				stz scrtch			 start count at 0
+				stz scrtch+1
+				lda #$FF			 mark 'first free' temp as unknown
+				sta nofree
+				jsr upbmap			 update volume bitmap.
+				bcs L3BC1			  if error.
+				ldx vcbptr			 get address of 1st bitmap
+				lda vcbbuf+26,x
+				sta bloknml
+				lda vcbbuf+27,x
+				sta bloknml+1
+L3B81  jsr rdgbuf			 use general buffer for temp space to
+				bcs L3BC1			  count free blocks (bits).
+				jsr count
+				dec bmcnt			  was that the last bitmap?
+				bmi L3B96			  if so, go change fcb so not done again.
+				inc bloknml
+				bne L3B81
+				inc bloknml+1
+				bra L3B81
+L3B96  ldx vcbptr			 mark which block had 1st free space
+				lda nofree
+				bmi L3BBE			  if no free space was found.
+				sta vcbbuf+28,x				   update the free count.
+				lda scrtch+1					
+				sta vcbbuf+21,x				   update volume control byte.
+				lda scrtch
+				sta vcbbuf+20,x
+L3BAD  lda vcbbuf+20,x				   compare total available free blocks
+				sec		 on this volume.
+				sbc reql
+				lda vcbbuf+21,x
+				sbc reqh
+				bcc L3BBE
+				clc
+				rts
+L3BBE  lda #$48			disk full
+				sec
+L3BC1  rts
+count	.EQ	*-ofsX
+				ldy #$00
+L3BC4  lda gbuf,y			bit pattern.
+				beq L3BCC			  don't count
+				jsr cntfree
+L3BCC  lda gbuf+$100,y		do both pages with same loop
+				beq L3BD4
+				jsr cntfree
+L3BD4  iny
+				bne L3BC4			  loop until all 512 bytes counted.
+				bit nofree			 has 1st block w/free space been found?
+				bpl L3BEE			  if yes.
+				lda scrtch			 test to see if any blocks were counted
+				ora scrtch+1
+				beq L3BEE			  branch if none counted.
+				jsr cntbms			 get total # of maps.
+				sec		 subtract countdown from total bitmaps
+				sbc bmcnt
+				sta nofree
+L3BEE  rts
+cntfree	.EQ	*-ofsX
+L3BEF  asl			  count the # of bits in this byte
+				bcc L3BFA
+				inc scrtch
+				bne L3BFA
+				inc scrtch+1
+L3BFA  ora #$00
+				bne L3BEF			loop until all bits counted
+				rts
+cntbms	.EQ	*-ofsX
+				ldx vcbptr
+				ldy vcbbuf+19,x				   return the # of bitmaps
+				lda vcbbuf+18,x				   possible with the total count
+				bne L3C0B			  found in the vcb.
+				dey		 adj for bitmap block boundary
+L3C0B  tya
+				lsr			  divide by 16. the result is
+				lsr			  the # of bitmaps.
+				lsr
+				lsr
+				rts
+MAN
+SAVE USR/SRC/PRODOS.203/PRODOS.S.XDOS.B
+LOAD USR/SRC/PRODOS.203/PRODOS.S
+ASM
