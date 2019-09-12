@@ -1,0 +1,311 @@
+NEW
+  AUTO 3,1
+				.LIST OFF
+				.OP	65C02
+				.OR	$2000
+				.TF BIN/CMP
+*--------------------------------------
+				.INB INC/MACROS.I
+				.INB INC/A2OSX.I
+				.INB INC/MLI.I
+				.INB INC/MLI.E.I
+*--------------------------------------
+				.DUMMY
+				.OR ZPBIN
+ZS.START
+ArgIndex		.BS 1
+ZPPTR1			.BS 2
+
+bPause			.BS 1
+bAll			.BS 1
+bVerbose		.BS 1
+bDiff			.BS 1
+
+hFile1			.BS 1
+hBuf1			.BS 1
+ZPBufPtr1		.BS 2
+bSkip1			.BS 1
+hFile2			.BS 1
+hBuf2			.BS 1
+ZPBufPtr2		.BS 2
+bSkip2			.BS 1
+
+Offset			.BS 2
+
+BufCnt			.BS 2
+ZS.END			.ED	
+*--------------------------------------
+*			File Header (16 Bytes)
+*--------------------------------------
+CS.START		cld
+				jmp (.1,x)
+				.DA #$61				6502,Level 1 (65c02)
+				.DA #1					BIN Layout Version 1
+				.DA #S.PS.F.EVENT		S.PS.F
+				.DA #0
+				.DA CS.END-CS.START		CS
+				.DA DS.END-DS.START		DS
+				.DA #64					SS
+				.DA #ZS.END-ZS.START	Zero Page Size
+				.DA 0
+*--------------------------------------
+* Relocation Table
+*--------------------------------------				
+.1				.DA CS.INIT
+				.DA CS.RUN
+				.DA CS.DOEVENT		
+				.DA	CS.QUIT
+L.MSG.USAGE		.DA MSG.USAGE
+L.MSG.DIFF		.DA MSG.DIFF
+				.DA 0
+*--------------------------------------
+CS.INIT			clc
+				rts
+*--------------------------------------
+CS.RUN			
+.1				inc ArgIndex
+				lda ArgIndex
+				>SYSCALL ArgV
+				bcs .7
+				
+				>STYA ZPPtr1
+
+				lda (ZPPtr1)
+				cmp #'-'
+				bne .2
+				
+				jsr CS.RUN.CheckOpt
+				bcc .1
+								
+.99				>PUSHBI 0
+				>LDYA L.MSG.USAGE
+				>SYSCALL printf
+				lda #E.SYN
+				sec
+.9				rts
+				
+.2				lda hFile1
+				bne .3
+				
+				jsr CS.RUN.OPEN
+				bcs .9
+				sta hFile1
+				
+				>LDYAI 256
+				>SYSCALL GetMem
+				bcs .9
+				
+				>STYA ZPBufPtr1
+				stx hBuf1
+				bra .1
+				
+.3				lda hFile2
+				bne .4
+				
+				jsr CS.RUN.OPEN
+				bcs .9
+				sta hFile2
+				
+				>LDYAI 256
+				>SYSCALL GetMem
+				bcs .9
+				
+				>STYA ZPBufPtr2
+				stx hBuf2
+				bra .1
+
+.4				lda #$ff
+
+				bit bSkip1
+				bmi .5
+				
+				sta bSkip1
+				jsr CS.RUN.SEEK
+				bcs .9
+				bra .1
+				
+.5				bit bSkip2
+				bmi .99
+				
+				sta bSkip2
+				jsr CS.RUN.SEEK
+				bcs .9
+				jmp .1
+				
+.7				lda hFile2
+				beq .99
+				lda hFile1
+				beq .99
+*--------------------------------------
+CS.RUN.LOOP		ldy #S.PS.hStdIn
+				lda (pPS),y
+				>SYSCALL feof
+				bcs .9					IO error
+				
+				tay
+				bne .1					no char
+
+				>SYSCALL GetChar
+				bcs .9					IO error
+				
+				cmp #$03				Ctrl-C
+				beq .9					Abort....
+				
+				cmp #$13				Ctrl-S
+				bne .1
+
+				lda bPause
+				eor	#$ff
+				sta bPause
+				bne CS.RUN.LOOP
+				
+.1				lda bPause
+				bne CS.RUN.LOOP			Pause...
+
+				jsr CS.RUN.READ1
+				bcc .2
+				cmp #MLI.E.EOF
+				bne .9
+				bra .99
+				
+.2				>STYA BufCnt
+				jsr CS.RUN.READ2
+				
+				bcc .20
+				cmp #MLI.E.EOF
+				bne .9
+				bra .99
+				
+.20				cpy BufCnt
+				pha
+				sbc BufCnt+1
+				pla
+				bcc .3
+				>STYA BufCnt
+				
+.3				ldy #0
+
+.4				lda (ZPBufPtr1),y
+				cmp (ZPBufPtr2),y
+				beq .8
+				
+				lda #1
+				sta bDiff
+				
+				bit bVerbose
+				bpl .5
+				
+				jsr CS.RUN.Print
+				bcs .9
+				
+.5				bit bAll
+				bpl .99
+				
+.8				iny
+				cpy BufCnt
+				bne .4
+				inc Offset
+				bne CS.RUN.LOOP
+				inc Offset+1
+				bra CS.RUN.LOOP
+				
+.99				lda bDiff
+.9				sec
+				rts
+*--------------------------------------
+CS.RUN.OPEN		>PUSHWZ				Aux type
+				>PUSHBI 0			Type
+				>PUSHBI	O.RDONLY
+				
+				>LDYA ZPPtr1
+				>SYSCALL FOpen
+				rts
+*--------------------------------------
+CS.RUN.SEEK		clc
+				rts
+*--------------------------------------
+CS.RUN.READ1	>PUSHWI 256
+				>PUSHW ZPBufPtr1
+				lda hFile1
+				>SYSCALL FRead
+				rts
+*--------------------------------------
+CS.RUN.READ2	>PUSHWI 256
+				>PUSHW ZPBufPtr2
+				lda hFile2
+				>SYSCALL FRead
+				rts
+*--------------------------------------
+CS.RUN.Print	phy
+				>PUSHB (ZPBufPtr2),y
+				>PUSHB (ZPBufPtr1),y
+				tya
+				>PUSHA
+				>PUSHW Offset
+				>PUSHBI 5
+				
+				>LDYA L.MSG.DIFF
+				>SYSCALL printf
+				ply
+				rts
+*--------------------------------------
+CS.QUIT			lda hFile2
+				beq .1
+				>SYSCALL FClose
+				
+.1				lda hFile1
+				beq .2
+				>SYSCALL FClose
+
+.2				lda hBuf2
+				beq .3
+				>SYSCALL FreeMem
+
+.3				lda hBuf1
+				beq .8
+				>SYSCALL FreeMem
+				
+.8				clc
+				rts
+*--------------------------------------
+CS.DOEVENT		sec
+				rts
+*--------------------------------------
+CS.RUN.CheckOpt	ldy #1 
+				lda (ZPPtr1),y
+
+				ldx #OptionVars-OptionList-1
+
+.2				cmp OptionList,x
+				beq .3
+				dex
+				bpl .2
+
+				sec
+				rts
+				
+.3				ldy OptionVars,x
+				lda #$ff
+				sta 0,y
+				clc
+				rts
+*--------------------------------------
+CS.END
+*--------------------------------------
+OptionList		.AS "AaVv"
+OptionVars		.DA #bAll,#bAll,#bVerbose,#bVerbose
+*--------------------------------------
+MSG.USAGE		.AS "Usage : CMP File1 File2 [SKIP1 [SKIP1]]\r\n"
+				.AS "   -A : Shows All differences\r\n"
+				.AZ "   -V : Verbose Mode\r\n"
+MSG.DIFF		.AZ "%H%h:%h %h\r\n"
+*--------------------------------------
+				.DUMMY
+				.OR 0
+DS.START
+DS.END
+				.ED
+*--------------------------------------
+MAN
+SAVE USR/SRC/BIN/CMP.S
+ASM
