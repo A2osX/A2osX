@@ -513,7 +513,7 @@ CMD.READ		lda (ZPArgVBufPtr)
 CMD.READ.VAR	jsr CL.Reset
 				
 .1				>SYSCALL GetChar
-				bcs .9
+				bcs CMD.READ.VAR.9
 
 				jsr CL.CHARIN
 
@@ -521,18 +521,19 @@ CMD.READ.VAR	jsr CL.Reset
 				bpl .1
 
 				lda (ZPCLBuf)
-				bne .2
-				
+				bne CMD.READ.VAR.SET
+
+CMD.READ.VAR.UNSET				
 				>LDYA ZPVarNamePtr
 				>SYSCALL UnSetEnv
 				rts
 				
-.2				>PUSHW ZPCLBuf
-
+CMD.READ.VAR.SET
+				>PUSHW ZPCLBuf
 				>LDYA ZPVarNamePtr
 				>SYSCALL SetEnv
 
-.9				rts
+CMD.READ.VAR.9	rts
 *--------------------------------------
 CMD.SLEEP		lda (ZPArgVBufPtr)
 				beq CMD.REN.CSYN
@@ -993,12 +994,8 @@ CMD.FOR.LIST	>LDYA ZPArgVBufPtr
 				
 				jsr CORE.StkPushYAX		Push listPtr,hList
 				
-				>LDYA ZPVarNamePtr
-				>SYSCALL strdup
+				jsr CORE.PushVarName	Push hVARNAME
 				bcs FOR.FILE.9
-
-				txa
-				jsr CORE.StkPush		Push hVARNAME
 				
 				lda #C.FOR.LIST
 				jsr CORE.StkPush
@@ -1006,37 +1003,16 @@ CMD.FOR.LIST	>LDYA ZPArgVBufPtr
 				lda #C.FOR
 				jsr CORE.StkPush
 
-				jsr CMD.NEXT.LIST.1
-				bcs FOR.FILE.9
-				
-				jmp CMD.FOR.LOOP
+				jsr CMD.NEXT.LIST.TOKEN
+				bcc CMD.FOR.LOOP
+				rts
 *--------------------------------------
 CMD.FOR.FILE	jsr CORE.ArgV.NextChar	skip "("
 
 				>LDYA ZPArgVBufPtr
 				ldx	#O.RDONLY+O.TEXT
 				jsr IO.FOpenYAX
-				bcs FOR.FILE.9
-				
-				jsr CORE.StkPush		push hFILE		
-				
-				>LDYA ZPVarNamePtr
-				>SYSCALL strdup
-				bcs FOR.FILE.9
-
-				txa
-				jsr CORE.StkPush		Push hVARNAME
-
-				lda #C.FOR.FILE
-				jsr CORE.StkPush
-				
-				lda #C.FOR
-				jsr CORE.StkPush
-
-				jsr CMD.NEXT.LINE
-				bcs FOR.FILE.9
-				
-				bra CMD.FOR.LOOP
+				bcc CMD.FOR.PUSH
 				
 FOR.FILE.9		rts	
 *--------------------------------------
@@ -1050,19 +1026,23 @@ CMD.FOR.EXEC	jsr CORE.ArgV.NextChar	skip "`"
 				>SYSCALL execl
 				bcs FOR.FILE.9
 				
-				jsr IO.Pipe.In
-				bcs FOR.FILE.9
-
-				jsr CORE.StkPush		push hPIPE
+				>LDA.G IO.hOut
+				ldy #S.PS.hStdOut
+				sta (pPS),y
 				
-				>LDYA ZPVarNamePtr
-				>SYSCALL strdup
+				>STZ.G IO.hOut
+				
+				>LEA.G IO.FIFO
+				ldx #O.RDONLY+O.TEXT
+				jsr IO.FOpenYAX				
 				bcs FOR.FILE.9
 
-				txa
-				jsr CORE.StkPush		Push hVARNAME
+CMD.FOR.PUSH	jsr CORE.StkPush		push hPIPE
+				
+				jsr CORE.PushVarName	Push hVARNAME
+				bcs FOR.FILE.9
 
-				lda #C.FOR.EXEC
+				lda #C.FOR.FILEEXEC
 				jsr CORE.StkPush
 				
 				lda #C.FOR
@@ -1070,7 +1050,7 @@ CMD.FOR.EXEC	jsr CORE.ArgV.NextChar	skip "`"
 
 				jsr CMD.NEXT.LINE
 				bcs FOR.FILE.9
-				
+	
 CMD.FOR.LOOP	ora CORE.TestResult
 				ora #C.FOR				Push FOR
 				pha
@@ -1078,7 +1058,8 @@ CMD.FOR.LOOP	ora CORE.TestResult
 				tay
 				pla
 				sta (pData),y
-				
+
+*				clc				
 				rts
 *--------------------------------------
 CMD.NEXT		jsr CORE.StkGet			Y = StkPtr
@@ -1090,9 +1071,10 @@ CMD.NEXT		jsr CORE.StkGet			Y = StkPtr
 				
 				dey
 				lda (pData),y
-				tax
 				iny
-				jmp (J.NEXT,x)
+				tax
+				beq CMD.NEXT.LIST
+				jmp CMD.NEXT.FILEEXEC
 				
 .9				lda #E.NOFOR
 				sec
@@ -1109,7 +1091,7 @@ CMD.NEXT.LIST	lda (pData),y			Y = StkPtr
 				
 				bpl .1
 				
-				jsr CMD.NEXT.LIST.1
+				jsr CMD.NEXT.LIST.TOKEN
 				bcs .9
 				bpl .1
 				
@@ -1143,10 +1125,11 @@ CMD.NEXT.LIST	lda (pData),y			Y = StkPtr
 				pla
 				>SYSCALL freemem
 				
-				clc
+*				clc
 .9				rts
 *--------------------------------------
-CMD.NEXT.LIST.1	lda (pData)
+CMD.NEXT.LIST.TOKEN
+				lda (pData)
 				dec						skip FOR
 				dec						skip SUB TOKEN
 
@@ -1194,9 +1177,7 @@ CMD.NEXT.LIST.1	lda (pData)
 				tya
 				beq .8
 				
-				>PUSHW ZPCLBuf
-				>LDYA ZPVarNamePtr
-				>SYSCALL SetEnv
+				jsr CMD.READ.VAR.SET
 				bcs .9
 
 				lda (pData)
@@ -1212,8 +1193,7 @@ CMD.NEXT.LIST.1	lda (pData)
 				clc
 				rts
 				
-.8				>LDYA ZPVarNamePtr
-				>SYSCALL UnSetEnv
+.8				jsr CMD.READ.VAR.UNSET
 				bcs .9
 				
 				lda #0
@@ -1221,22 +1201,15 @@ CMD.NEXT.LIST.1	lda (pData)
 .9				rts
 *--------------------------------------
 * stack-4		CmdPtr
-* stack-3		hFILE
+* stack-3		hFILE/hPIPE
 * stack-2       hVARNAME
 * stack-1		FOR SUB TOKEN		
 * stack			FOR TOKEN
 *--------------------------------------
-CMD.NEXT.FILE
-*--------------------------------------
-* stack-4		CmdPtr
-* stack-3		hPIPE
-* stack-2       hVARNAME
-* stack-1		FOR SUB TOKEN		
-* stack			FOR TOKEN
-*--------------------------------------
-CMD.NEXT.EXEC	lda (pData),y			Y = StkPtr
+CMD.NEXT.FILEEXEC
+				lda (pData),y			Y = StkPtr
 				bpl .1
-				
+
 				jsr CMD.NEXT.LINE
 				bcs .9
 				bpl .1					end of file/pipe
@@ -1291,17 +1264,14 @@ CMD.NEXT.LINE	lda (pData)
 				>SYSCALL fgets
 				bcs .8
 				
-				>PUSHW ZPCLBuf
-				>LDYA ZPVarNamePtr
-				>SYSCALL SetEnv
+				jsr CMD.READ.VAR.SET
 				bcs .9
 
 				lda #$80
 *				clc
 				rts
 				
-.8				>LDYA ZPVarNamePtr
-				>SYSCALL UnSetEnv
+.8				jsr CMD.READ.VAR.UNSET
 				bcs .9
 				
 				lda #0
