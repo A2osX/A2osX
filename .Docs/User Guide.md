@@ -9,7 +9,7 @@ A2osX is already much more then a "primitive" command line operating system.  Wh
 
 A core element at the foundation of A2osX that enables its multiuser multitasking capabilities is its reusable set of APIs and Libraries (written in Assembly) that all programs can and do use that make them very lean and fast.  For instance, there is one network API that any program can call which in turn handles the I/O to different LAN cards via drivers.  A significant feature is that multiple programs can be using the network at the same time such as the TELNETD server, the HTTPD server and/or the TELNET client.  A key benefit is that the code for doing each program is smaller because the network API is doing a lot of the work.  And since CORE APIs like printf and libraries such as Network loaded only once, much like a DLL in Windows, significant memory is conserved providing the resources needed to support multitasking and multiple users.
 
-The core of A2osX is written entirely in 65C02 Assemnbly and built using the S-C Macro Assembler.  Assembly was chosen because at end of day it provides for the most strict and stringent memory management as well as the fastest performance of any language on the Apple II.  Work is underway to provide ASM running under A2osX (see Current and Future Development Process sections below).  There is also an entire shell scripting language (see below) and in the future we plan a CSH (C-Shell) which is the first step to an Interactive C interpreter and then a Compilter that will make C feed to built-in assembler.  Yes, that is a lot on our development plan, but the only way to make it feasible is by building the core using assembly to provide enough memory and processing sources to enable such features.
+The core of A2osX is written entirely in 65C02 Assembly and built using the S-C Macro Assembler.  Assembly was chosen because at end of day it provides for the most strict and stringent memory management as well as the fastest performance of any language on the Apple II.  Work is underway to provide ASM running under A2osX (see Current and Future Development Process sections below).  There is also an entire shell scripting language (see below) and in the future we plan a CSH (C-Shell) which is the first step to an Interactive C interpreter and then a Compilter that will make C feed to built-in assembler.  Yes, that is a lot on our development plan, but the only way to make it feasible is by building the core using assembly to provide enough memory and processing sources to enable such features.
 
 ## Developing for A2osX
 
@@ -21,19 +21,27 @@ The Developers Guide is all about developing the core of A2osX, its drivers, uti
 
 One of the most significant parts of A2osX is its shell which can perform both interactive and scripted tasks.  With the interactive part of the shell you can perform many common and complex tasks using both built-in (native or internal to shell) and external (BINs or executables) commands.  Internal commands include CD (change directory), MD (make directory), DATE, TIME, etc.  External commands include CP (copy), RM (remove), CAT (display file contents), TELNET, etc.
 
-It should be noted, that it is possible to create and execute short scripts right on the interactive command line (these are run once and not saved like true scripts).  An example  
+It should be noted, that it is possible to create and execute short scripts right on the interactive command line (these are run once and not saved like true scripts).  An example
+
+```
+FOR FILE IN `LS -C CT*`; CAT ${FILE}; NEXT
+```
+
+In this example, the system will generate a list of files found in the current directory that match the CT* wildcard and perform the CAT operation on each.  The semicolons act as a line separator allowing you to type in multiple commands, or short scripts, to execute as an inline script.
 
 An entire Shell Developers Guide is being written to help you with both using and writing scripts for the A2osX Shell.  It can be found **[Here](.Docs/Shell%20Developers%20Guide.md).**
 
 ### File System Layout of A2osX
 
-To use files and directories well, you need to understand the concept of a hierarchical file system.  This section introduces the A2osX file system and shows you how to work with files and directories using several A2osX commands.
-A2osX organizes information in files and directories.  A directory is a special file that can contain other files and directories.  Because a directory can contain other directories, this method of organizing diles gives rise to a hierarchical structure.  This organization of files is the file system.
-Folks who use and are accustomed to working with Linux or Unix will find familiarity with A2osX.  Many of the commands and much of the Shell interface follows the User Interface (UI) presented by Linux.  There is however one key difference, that makes A2osX adhere more to the ProDOS model and that is the concept of the ROOT directory or volume.
+To get the most out of the use of files and directories you need to understand the concept of a hierarchical file system.  This section introduces the A2osX file system and shows you how to work with files and directories using several A2osX commands.
+
+A2osX organizes information in files and directories.  A directory is a special file that can contain other files and directories.  Because a directory can contain other directories, this method of organizing files gives rise to a hierarchical structure.  This organization of files is the file system.
+
+Folks who use and are accustomed to working with Linux or Unix will find familiarity with A2osX.  Many of the commands and much of the Shell interface follows the User Interface (UI) presented by Linux.  There is however, one key difference, that makes A2osX adhere more to the ProDOS model which is the support for multiple distinct volumes.  In Linux there is only one root represented by / (typically the boot volume) with all other drives appearing as sub directories of this volume.  A2osX instead continues to present each volume separately by their name as does ProDOS.  A2osX does present a BOOT/SYSTEM directory (where A2OSX.SYSTEM was loaded from) and uses this for finding critical system directories and files such as BIN and ETC.
+
 You move around the file sytesm with CD and pwd will tell you were you are.  Your default prompt includes your current path.
 
-
-The following are the primary sub-directories used by A2osX.  While A2osX supports all standard ProDOS media/volumes and you can use its commands and utilities (like cp [copy] ls [catalog] rm [delete]) on these volumes, A2osX and its modules, commands, scripts, etc. must be installed under one directory that has these directories (at their related files) stored under it.  Below where you see a ./ (dot slash) in front of each path, think of that as the volume name or directory name where you have installed A2osX.  For example, on the media we supplied called BOOT, which has a volume name of /A2OSX.BOOT/, you will find directories named BIN and ETC.  The full path name for those dirs would be /A2OSX.BOOT/BIN/ and /A2OSX.BOOT/ETC/.  If you installed A2OSX on your own harddrive called /MYVOL1 in a directory called A2OSX, then your ./ would refer to /MYVOL1/A2OSX/ and your BIN would be /MYVOL1/A2OSX/BIN/.  See the installation section for more information on using A2osX with your own volumes.
+The following are the primary sub-directories used by A2osX.  While A2osX supports all standard ProDOS media/volumes and you can use its commands and utilities (like cp [copy] ls [catalog] rm [delete]) on these volumes, A2osX and its modules, commands, scripts, etc. must be installed under one directory that has these directories (and their related files) stored under it.  Below where you see a ./ (dot slash) in front of each path, think of that as the volume name or directory name where you have installed A2osX.  For example, on the media we supplied called BOOT, which has a volume name of /A2OSX.BOOT/, you will find directories named BIN and ETC.  The full path name for those dirs would be /A2OSX.BOOT/BIN/ and /A2OSX.BOOT/ETC/.  If you installed A2OSX on your own hard drive called /MYVOL1 in a directory called A2OSX, then your ./ would refer to /MYVOL1/A2OSX/ and your BIN would be /MYVOL1/A2OSX/BIN/.  See the installation section for more information on using A2osX with your own volumes.
 
 | Path | Use |
 | ---- | --- |
@@ -180,29 +188,11 @@ Network Card (Uthernet I or II, LanCes)
 
 ## Getting Started
 
-A2osX Distribution Media
-Several media image files are being made available.  
-BUILD
-BOOT
-MAKE
-AW
-INSTALL
-APPWIN
-
- Several images are available including:
-  BUILD     a 32-megabyte bootable hardrive image containing all of A2osX.      
-  BOOT      a 140K bootable floppy image containing the minimum files needed to boot the A2osx Kernel and core functions.
-  INST100-  A series of 140K floppy images that can be used to install          
-  INST10x   A2osx onto your own ProDOS volume. Disk 100 is bootable and         
-                  automatically runs an appopriate instalation script.                
-  INST800-  A series of 800K floppy images that can be used to install          
-  INST80x   A2osx onto your own ProDOS volume. Disk 100 is bootable and         
-            automatically runs an appopriate instalation script. 
-
+To get started with A2osX, the very first thing you need to do is download a disk image from GitHub.  Images are available in multiple versions from cutting edge developer seeds to release candidates as well as in multiple sizes suitable for placing on Disk II drives, 3.5 drives or hard drives of for use with emulators.  Please consult the **[A2osX Media Guide](.Docs/Media%20Guide.md).** for detailed information on the available images. 
 
 ### Using AppleWin
 
-Running from supplied media
+Download one of the available 32MB images from GitHub.  Open AppleWin and then click on the  configuration icon.  When the configuration screen appears, select the Disk tab.  Next, make sure the **Enable Hard disk controller in slot 7** box is checked and set the **HDD 1** to the image you downloaded.  Click OK to save your changes and finally boot the emulated Apple by clicking on the colored Apple icon.  Suggestion: on the configuration screen, for Video Mode, select Color (RGB Monitor).  You may also want to setup AppleWin for Ethernet as A2osX has many features that make use of the emulated Uthernet I card supplied by AppleWin (consult AppleWin documentation for more information on enabling this feature). 
 
 ### Installing on Your Apple
 
@@ -214,8 +204,7 @@ Find out more
 MAN
 Additional resources
 
-##Networking
-
+## Networking
 
 install the drivers for the hardware (uther, lances, ssc, etc.)
 then NETWORKD lib lib  (and the libs are tcpip or etalk maybe) libs are protocalls here
@@ -223,10 +212,6 @@ then NETWORKD lib lib  (and the libs are tcpip or etalk maybe) libs are protocal
 NETWORKD will read ETC/NETWORK will load network programs
   right now it contains IPCONFIG, you can also add to it HTTPD TELNETD etc, they are loaded in order and each needs to complete its full load before next one happens (assuring IPCONFIG happends before TELNETD tries to load)
 IPCONFIG will then look for ETC/TCPIP.CONF, if found uses those settings, if not does dhcp.  in addition ipconfig uses ETC/HOSTNAME and ETC/HOSTS for setting hostname and doing DNSloopups
-
-
-
-
 
 Hardware Drivers
 	MAC Address
@@ -252,12 +237,12 @@ Telnetd
 httpd
 
 
-##Utilities
+## Utilities
 
-###Using Text Editors
+### Using Text Editors
 EDIT
 
-###Commands for navigating the file system
+### Commands for navigating the file system
 CD
 CD ..
 PWD
@@ -266,68 +251,27 @@ PUSHD
 POPD
 LS
 LS -L or L
-###Commands for working with files
+
+### Commands for working with files
+
 MV
 CP
 RM
-###Commands for working with directories
+
+### Commands for working with directories
+
 MD
 RD
 
-## License
+## Error Messages
 
-A2osX is made available under the GNU License 2.0.  Our Full License can he found **[Here](../License).**
+* ProDOS Error Codes : $00->$5F
+* Kernel Error Codes : $60->$7F
+* Lib Error Codes : $80->$BF
+* Shell Error Codes : $C0->$CF
+* Application Error Codes : $ D0->$FF 
 
-##Error Messages
-
-The Error section is out of date.  Refresh from INC/A2osX.I
-Error nums have been realigned and move around.
-
-
-
-Shell Errors
-
-| Hex | Error Code | Error Message |
-| --- | --- | --- |
-|||User Interrupt|
-|||Command Syntax Error|
-|||Script Syntax Error|
-|||Expression Syntax Error|
-|||Stack Overflow|
-|||LOOP Without WHILE|
-|||NEXT Without FOR|
-|||FI/ELSE Without IF|
-|||Bad Expression|
-|||Bad File Type|
-|||Unknown Error|
-
-* ProDOS ERROR CODES : $00->$5F
-* Lib ERROR CODES : $80->$BF
-* Kernel ERROR CODES : $F0->$FF
-
-| Hex | Error Code | Error Message |
-| --- | --- | --- |
-| $FF |   0 | Out Of Memory Error|
-| $FE |   0 | Out Of Handle Error|
-| $FD |   0 | Invalid Handle|
-| $FC |   0 | Buffer Overflow|
-| $FB |   0 | Bad Path|
-| $FA |   0 | Bad Argument|
-| $F9 |   0 | No Such Process Error|
-| $F8 |   0 | Syntax Error|
-| $F7 |   0 | Env is Full|
-| $F6 |   0 | Invalid BIN format|
-| $F5 |   0 | File Too Big Error|
-| $F4 |   0 | Out Of Bound|
-| $F3 |   0 | Invalid Numerical|
-| $F2 |   0 | Invalid User|
-| $EF |   0 | Undefined Key|
-| $EE |   0 | Duplicate Key|
-| $ED |   0 | No Data|
-| $EC |   0 | Data Length Mismatch|
-
-
-ProDOS or MLI Errors
+### ProDOS or MLI Errors
 
 | Hex | Error Code | Error Message |
 | --- | --- | --- |
@@ -363,6 +307,48 @@ ProDOS or MLI Errors
 | $56 |  86 | Bad Buffer Address|
 | $57 |  87 | Duplicate Volume|
 | $5A |  90 | File Structure Damaged|
+
+### Kernel Errors
+
+| Hex | Error Code | Error Message |
+| --- | --- | --- |
+| $7F |   0 | Out Of Memory Error|
+| $7E |   0 | Out Of Handle Error|
+| $7D |   0 | Invalid Handle|
+| $7C |   0 | Buffer Overflow|
+| $7B |   0 | Bad Path|
+| $7A |   0 | Bad Argument|
+| $79 |   0 | No Such Process Error|
+| $78 |   0 | Syntax Error|
+| $77 |   0 | Environment is Full|
+| $76 |   0 | Invalid BIN format|
+| $75 |   0 | File Too Big Error|
+| $74 |   0 | Out Of Bound|
+| $73 |   0 | Invalid Numerical|
+| $72 |   0 | Stack Error|
+| $6F |   0 | Undefined Key|
+| $6E |   0 | Duplicate Key|
+| $6D |   0 | No Data|
+| $6C |   0 | Data Length Mismatch|
+| $68 |   0 | Invalid PWD database |
+| $67 |   0 | Invalid User |
+
+### Shell Errors
+
+| Hex | Error Code | Error Message |
+| --- | --- | --- |
+| $BF | 0 |User Interrupt|
+| $C0 | 0 |Command Syntax Error|
+| $-- | 0 |Script Syntax Error|
+| $C1 | 0 |Expression Syntax Error|
+| $C2 | 0 |Stack Error|
+| $C3 | 0 |Stack Overflow|
+| $C4 | 0 |LOOP Without WHILE|
+| $C5 | 0 |NEXT Without FOR|
+| $C6 | 0 |FI/ELSE Without IF|
+| $C7 | 0 |Bad File Type|
+| $C8 | 0 |Undefined Function|
+| $C9 | 0 |Unexpected EOF|
 
 ## License
 A2osX is licensed under the GNU General Pulic License.
