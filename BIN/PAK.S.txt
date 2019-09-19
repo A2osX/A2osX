@@ -7,8 +7,22 @@ NEW
 *--------------------------------------
 				.INB INC/MACROS.I
 				.INB INC/A2OSX.I
+				.INB INC/KERNEL.I
 				.INB INC/MLI.I
 				.INB INC/MLI.E.I
+*--------------------------------------
+CHNK.T			.EQ 0
+CHNK.T.DATA			.EQ 0
+CHNK.T.DIR			.EQ 1
+CHNK.T.FILE			.EQ 2
+*
+CHNK.TYPE		.EQ 1
+CHNK.AUXTYPE	.EQ 2
+CHNK.FNLEN		.EQ 4
+*
+CHNK.COMPALG	.EQ 1
+CHNK.ULEN		.EQ 2
+CHNK.CLEN		.EQ 4
 *--------------------------------------
 X.ENTER.SUBDIR	.EQ 0
 X.COPY.TO.DEST	.EQ 0
@@ -21,7 +35,14 @@ ZPPtr1			.BS 2
 ZPPtr2			.BS 2
 ZPFileName		.BS 2
 ZPFileStat		.BS 2
+
 ZPFullPath		.BS 2
+ZPRelPath		.BS 2
+
+bAppend			.BS 1
+bRecurse		.BS 1
+bPause			.BS 1
+
 ZS.END			.ED
 *--------------------------------------
 *			File Header (16 Bytes)
@@ -48,6 +69,7 @@ L.MSG.DIR		.DA MSG.DIR
 L.MSG.FILE		.DA MSG.FILE
 L.MSG.OK		.DA MSG.OK
 L.MSG.ERR		.DA MSG.ERR
+L.ARC.Header	.DA ARC.Header
 				.DA 0
 *--------------------------------------
 CS.INIT			clc
@@ -62,15 +84,8 @@ CS.RUN			>INC.G ArgIndex
 				cmp #'-'
 				bne .4
 				
-				ldy #1 
-				lda (ZPPtr1),y
-
-				ldx OptionList
-				
-.2				cmp OptionList,x
-				beq .3
-				dex
-				bne .2
+				jsr CS.RUN.CheckOpt
+				bcc CS.RUN
 				
 .9				>PUSHBI 0
 				>LDYA L.MSG.USAGE
@@ -78,11 +93,6 @@ CS.RUN			>INC.G ArgIndex
 				lda #E.SYN
 				sec
 .99				rts
-				
-.3				ldy OptionVars-1,x
-				lda #$80
-				sta (pData),y
-				bra CS.RUN
 *--------------------------------------
 .4				>LDA.G ArcName
 				bne .5
@@ -111,6 +121,33 @@ CS.RUN			>INC.G ArgIndex
 				>STYA ZPFullPath
 				txa
 				>STA.G hSrcFullPath
+				
+				>LDA.G hSrcBasePath
+				>SYSCALL GetMemPtr
+				>STYA ZPPtr1
+				
+				ldy #$ff
+				
+.80				iny
+				lda (ZPPtr1),y
+				bne .80
+				
+				tya
+				clc
+				adc ZPFullPath
+				sta ZPRelPath
+				lda ZPFullPath+1
+				adc #0
+				sta ZPRelPath+1
+				
+				jsr CS.RUN.OpenArc
+				bcs .99
+				
+				>LDYAI 4096
+				>SYSCALL getmem
+				bcs .99
+				txa
+				>STA.G hMem
 *--------------------------------------
 CS.RUN.LOOP		ldy #S.PS.hStdIn
 				lda (pPS),y
@@ -129,13 +166,14 @@ CS.RUN.LOOP		ldy #S.PS.hStdIn
 				cmp #$13				Ctrl-S
 				bne .1
 
-				>LDA.G bPause
+				lda bPause
 				eor	#$ff
-				sta (pData),y
+				sta bPause
 				bne CS.RUN.LOOP
 				
-.1				>LDA.G bPause
+.1				lda bPause
 				bne CS.RUN.LOOP			Pause...
+
 				jsr GetEntry
 				bcs .9
 				
@@ -176,7 +214,7 @@ CS.RUN.DEV		lda #E.BADPATH
 				sec				
 				rts
 *--------------------------------------
-CS.RUN.DIR		>LDA.G bRecurse
+CS.RUN.DIR		lda bRecurse
 				bpl .8
 				
 				lda (ZPFileName)
@@ -185,39 +223,60 @@ CS.RUN.DIR		>LDA.G bRecurse
 				
 				jsr CS.RUN.GetFilePath
 				
-				>PUSHW ZPFullPath
+				>PUSHW ZPRelPath
 				
 				>PUSHBI 2
 				>LDYA L.MSG.DIR
 				>SYSCALL printf
 				bcs .9
 				
-				jsr CS.RUN.CheckErr
+				lda #CHNK.T.DIR
+				jsr CS.RUN.WriteHeader
+				bcs .9
 				
 				>LDYA ZPFileName
-				jmp EnterSubDirYA
+				jsr EnterSubDirYA
 				
+.9				jmp CS.RUN.CheckErr
+								
 .8				clc
-.9				rts
+				rts
 *--------------------------------------
 CS.RUN.FILE		jsr FilterMatch
 				bcs .8					no match, skip....
 				
+				>PUSHW ZPFullPath
+				
+				>LDA.G hArcFile
+				tay
+				lda OF.Table.hPath-1,x
+				>SYSCALL getmemptr
+				>SYSCALL strcmp
+				bcc .8
+
 				jsr CS.RUN.GetFilePath
 				
-				>PUSHW ZPFullPath
+				>PUSHW ZPRelPath
 				
 				>PUSHBI 2
 				>LDYA L.MSG.FILE
 				>SYSCALL printf
 				bcs .9
 				
+				lda #CHNK.T.FILE
+				jsr CS.RUN.WriteHeader
+				bcs .9
+
+				jsr CS.RUN.OpenFile
+				bcs .9
 				
-				
-				jsr CS.RUN.CheckErr
+				>LDA.G hFile
+				>SYSCALL fclose
+
+.9				jsr CS.RUN.CheckErr
 				
 .8				clc
-.9				rts
+				rts
 *--------------------------------------
 CS.RUN.CheckErr	bcs .1
 				>LDYA L.MSG.OK
@@ -230,11 +289,9 @@ CS.RUN.CheckErr	bcs .1
 				>LDYA L.MSG.ERR
 				
 				>SYSCALL printf
-				
-				>LDA.G bContinue
-				eor #$80
-				asl
+
 				pla
+				sec
 				rts
 *--------------------------------------
 CS.RUN.GetFilePath
@@ -251,6 +308,72 @@ CS.RUN.GetFilePath
 				>SYSCALL StrCat
 				rts
 *--------------------------------------
+CS.RUN.OpenArc	>PUSHWZ					Aux type
+				>PUSHBI $CF				PAK
+				>PUSHBI	O.CREATE+O.WRONLY
+				>LDA.G ArcName
+				>SYSCALL Argv
+
+				>SYSCALL FOpen
+				bcs .9
+				
+				>STA.G hArcFile
+				
+				>PUSHW L.ARC.Header
+				>LDA.G hArcFile
+				>SYSCALL fputs
+.9				rts
+*--------------------------------------
+CS.RUN.WriteHeader
+				>PUSHA
+				jsr .8
+				bcs .9
+				
+				ldy #S.STAT.P.TYPE
+				jsr .6
+				bcs .9
+				
+				ldy #S.STAT.P.AUXTYPE
+				jsr .6
+				bcs .9
+
+				ldy #S.STAT.P.AUXTYPE+1
+				jsr .6
+				bcs .9
+
+				ldy #$ff
+				
+.1				iny
+				lda (ZPRelPath),y
+				bne .1
+				
+				tya
+				jsr .7
+				bcs .9
+				
+				>PUSHW ZPRelPath
+				>LDA.G hArcFile
+				>SYSCALL fputs				
+				rts
+				
+.6				lda (ZPFileStat),y
+.7				>PUSHA		
+.8				>LDA.G hArcFile
+				>SYSCALL fputc
+.9				rts
+*--------------------------------------
+CS.RUN.OpenFile	>PUSHWZ					Aux type
+				>PUSHBI 0				Type
+				>PUSHBI	O.RDONLY
+				>LDYA ZPFullPath
+
+				>SYSCALL FOpen
+				bcs .9
+				
+				>STA.G hFile
+
+.9				rts
+*--------------------------------------
 CS.DOEVENT		sec
 				rts
 *--------------------------------------
@@ -262,48 +385,68 @@ CS.QUIT			jsr LeaveSubDir
 				>SYSCALL FreeMem
 				
 .1				>LDA.G hSrcFullPath
-				beq .8
+				beq .2
 				>SYSCALL FreeMem
 				
+.2				>LDA.G hArcFile
+				beq .3
+				
+				>SYSCALL fclose
+				
+.3				>LDA.G hMem
+				beq .8
+				>SYSCALL FreeMem
+								
+				
 .8				clc
+				rts
+*--------------------------------------
+CS.RUN.CheckOpt	ldy #1 
+				lda (ZPPtr1),y
+
+				ldx #OptionVars-OptionList-1
+
+.2				cmp OptionList,x
+				beq .3
+				dex
+				bpl .2
+
+				sec
+				rts
+				
+.3				ldy OptionVars,x
+				lda #$ff
+				sta 0,y
+				clc
 				rts
 *--------------------------------------
 				.INB USR/SRC/BIN/X.FILEENUM.S
 *--------------------------------------
 CS.END
 *--------------------------------------
-OptionList		>PSTR "CRcr"
-OptionVars		.DA #bContinue,#bRecurse,#bContinue,#bRecurse
+OptionList		.AS "AaRr"
+OptionVars		.DA #bAppend,#bAppend,#bRecurse,#bRecurse
 *--------------------------------------
 MSG.USAGE		.AS "Usage : PAK Archive [File *,? wildcards allowed]\r\n"
-				.AS "   -C : Continue on error\r\n"
+				.AS "   -A : Append to archive\r\n"
 				.AZ "   -R : Recurse subdirectories\r\n"
 MSG.OK			.AZ "[OK]"
 MSG.ERR			.AZ "[%h]\r\n"
 MSG.DIR			.AZ "Reading Dir:%s..."
 MSG.FILE		.AZ "Adding File:%s..."
+ARC.Header		.AZ "PAK"
 *--------------------------------------
 				.DUMMY
 				.OR 0
 DS.START
 ArgIndex		.BS 1
-bContinue		.BS 1
-bRecurse		.BS 1
-
 ArcName			.BS 1
-
-bPause			.BS 1
-
-hFullPath		.BS 1
 hSrcFullPath	.BS 1
-STAT			.BS S.STAT
-Index			.BS 1
-hDIRs			.BS X.MAX.RECURSE
-hDIRENTs		.BS X.MAX.RECURSE
-oDIRENTs		.BS X.MAX.RECURSE*2
-hSrcBasePath	.BS 1
-hFilter			.BS 1
+hArcFile		.BS 1
+hFile			.BS 1
+hMem			.BS 1
 
+				.INB USR/SRC/BIN/X.FILEENUM.G
 DS.END
 				.ED
 *--------------------------------------
