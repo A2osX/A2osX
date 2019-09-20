@@ -21,7 +21,22 @@ ZPPtr1			.BS 2
 ZPPtr2			.BS 2
 ZPFileName		.BS 2
 ZPFileStat		.BS 2
+
 ZPFullPath		.BS 2
+ZPRelPath		.BS 2
+
+ZPLineBuf		.BS 2
+
+bPause			.BS 1
+
+bContinue		.BS 1
+bRecurse		.BS 1
+bChar			.BS 1
+bLine			.BS 1
+bWord			.BS 1
+bInWord			.BS 1
+bTotal			.BS 1
+
 ZS.END			.ED
 *--------------------------------------
 *			File Header (16 Bytes)
@@ -44,10 +59,9 @@ CS.START		cld
 				.DA CS.DOEVENT		
 				.DA	CS.QUIT
 L.MSG.USAGE		.DA MSG.USAGE
-L.MSG.DIR		.DA MSG.DIR
 L.MSG.FILE		.DA MSG.FILE
-L.MSG.OK		.DA MSG.OK
 L.MSG.ERR		.DA MSG.ERR
+L.MSG.TOTAL		.DA MSG.TOTAL
 				.DA 0
 *--------------------------------------
 CS.INIT			clc
@@ -62,15 +76,8 @@ CS.RUN			>INC.G ArgIndex
 				cmp #'-'
 				bne .4
 				
-				ldy #1 
-				lda (ZPPtr1),y
-
-				ldx OptionList
-				
-.2				cmp OptionList,x
-				beq .3
-				dex
-				bne .2
+				jsr CS.RUN.CheckOpt
+				bcc CS.RUN
 				
 .9				>PUSHBI 0
 				>LDYA L.MSG.USAGE
@@ -78,11 +85,6 @@ CS.RUN			>INC.G ArgIndex
 				lda #E.SYN
 				sec
 .99				rts
-				
-.3				ldy OptionVars-1,x
-				lda #$80
-				sta (pData),y
-				bra CS.RUN
 *--------------------------------------
 .4				>LDA.G hSrcBasePath
 				bne .9
@@ -101,6 +103,31 @@ CS.RUN			>INC.G ArgIndex
 				>STYA ZPFullPath
 				txa
 				>STA.G hSrcFullPath
+
+				>LDA.G hSrcBasePath
+				>SYSCALL GetMemPtr
+				>STYA ZPPtr1
+				
+				ldy #$ff
+				
+.80				iny
+				lda (ZPPtr1),y
+				bne .80
+				
+				tya
+				clc
+				adc ZPFullPath
+				sta ZPRelPath
+				lda ZPFullPath+1
+				adc #0
+				sta ZPRelPath+1
+
+				>LDYAI 256
+				>SYSCALL getmem
+				bcs .99
+				>STYA ZPLineBuf
+				txa
+				>STA.G hMem				
 *--------------------------------------
 CS.RUN.LOOP		ldy #S.PS.hStdIn
 				lda (pPS),y
@@ -119,20 +146,20 @@ CS.RUN.LOOP		ldy #S.PS.hStdIn
 				cmp #$13				Ctrl-S
 				bne .10
 
-				>LDA.G bPause
+				lda bPause
 				eor	#$ff
-				sta (pData),y
+				sta bPause
 				bne CS.RUN.LOOP
 				
-.10				>LDA.G bPause
+.10				lda bPause
 				bne CS.RUN.LOOP			Pause...
-				
+	
 				jsr GetEntry
 				bcs .9
 				
 				ldy #S.STAT.P.DRIVE
 				lda (ZPFileStat),y		ProDOS Device ?
-				bne .5
+				beq .5
 				
 				jsr CS.RUN.DEV
 				bcc CS.RUN.LOOP
@@ -144,12 +171,12 @@ CS.RUN.LOOP		ldy #S.PS.hStdIn
 				bne .6
 
 				jsr CS.RUN.DIR
-				bcc CS.RUN.LOOP
-				rts				
+				bcs .99
+				bra .8			
 				
 .6				jsr CS.RUN.FILE
-				bcc CS.RUN.LOOP
-				rts
+				bcs .99
+				bra .8
 
 .9				jsr LeaveSubDir
 				bcs .90
@@ -159,22 +186,26 @@ CS.RUN.LOOP		ldy #S.PS.hStdIn
 .8				jsr GetNextEntry
 				jmp CS.RUN.LOOP
 				
-.90				lda #0
+.90				jsr CS.RUN.PrintTstat
+				
+				lda #0
 				sec
 .99				rts
 *--------------------------------------
-CS.RUN.DIR		jsr CS.RUN.GetFilePath
+CS.RUN.DIR		lda bRecurse
+				bpl .8
 				
-				>PUSHW ZPFullPath
+				lda (ZPFileName)
+				cmp #'.'
+				beq .8
+								
+				>LDYA ZPFileName
+				jsr EnterSubDirYA
 				
-				>PUSHBI 2
-				>LDYA L.MSG.DIR
-				>SYSCALL printf
-				bcs .9
-				
-.8				jsr GetNextEntry
-				clc
-.9				rts
+				jmp CS.RUN.CheckErr
+								
+.8				clc
+				rts
 *--------------------------------------
 CS.RUN.DEV
 .8				jsr GetNextEntry
@@ -183,50 +214,85 @@ CS.RUN.DEV
 *--------------------------------------
 CS.RUN.FILE		jsr FilterMatch
 				bcs .8					no match, skip....
-				
+
 				jsr CS.RUN.GetFilePath
 				
-				>PUSHW ZPFullPath
-				
-				>PUSHBI 2
-				>LDYA L.MSG.FILE
-				>SYSCALL printf
+				jsr CS.RUN.OpenFile
 				bcs .9
+
+.1				>PUSHWI 256
+				>PUSHW ZPLineBuf
+				>LDA.G hFile
+				>SYSCALL fgets
+				bcs .6
 				
-				jsr CS.RUN.CheckErr
+				jsr CS.RUN.IncFLine
 				
-				>LDA.G bRecurse
-				bpl .8
+				ldy #$ff
+				stz bInWord
 				
-				lda (ZPFileName)
-				cmp #'.'
-				beq .8
+.2				iny
+				lda (ZPLineBuf),y
+				beq .1
+
+				cmp #C.SPACE
+				beq .3
 				
-				>LDYA ZPFileName
-				jsr EnterSubDirYA
+				cmp #C.TAB
+				bne .4
+				
+.3				lda bInWord
+				beq .5 
+
+				jsr CS.RUN.IncFWord
+				stz bInWord
+				bra .5
+				
+.4				inc bInWord				
+.5				jsr CS.RUN.IncFChar
+				bra .2
+				
+.6				cmp #MLI.E.EOF
+				bne .7 
+				
+				jsr CS.RUN.CloseFile
+
+				jsr CS.RUN.PrintFstat
+				bcs .99
+				
+				jsr CS.RUN.AddFstat2Tstat
+				lda bTotal
+				bmi .8
+				beq .61
+				
+				lda #$fe
+				
+.61				inc
+				sta bTotal
+				
+.8				clc
 				rts
-				
-.8				jsr GetNextEntry
-				clc
-.9				rts
+
+.7				pha
+				jsr CS.RUN.CloseFile
+				pla
+				sec
+.9				jmp CS.RUN.CheckErr
+.99				rts
 *--------------------------------------
-CS.RUN.CheckErr	bcs .1
-				>LDYA L.MSG.OK
-				>SYSCALL puts
-				rts
-				
-.1				pha
+CS.RUN.CheckErr	bcc .9
+				pha
 				>PUSHA
 				>PUSHBI 1
 				>LDYA L.MSG.ERR
 				
 				>SYSCALL printf
 				
-				>LDA.G bContinue
+				lda bContinue
 				eor #$80
 				asl
 				pla
-				rts
+.9				rts
 *--------------------------------------
 CS.RUN.GetFilePath
 				>LDA.G hSrcBasePath
@@ -242,6 +308,97 @@ CS.RUN.GetFilePath
 				>SYSCALL StrCat
 				rts
 *--------------------------------------
+CS.RUN.OpenFile	ldx #12
+				ldy #fCharCount
+				lda #0
+				
+.1				sta (pData),y
+				iny
+				dex
+				bne .1
+				
+				>PUSHWZ					Aux type
+				>PUSHBI 0				Type
+				>PUSHBI	O.RDONLY+O.TEXT
+				>LDYA ZPFullPath
+
+				>SYSCALL FOpen
+				bcs .9
+				
+				>STA.G hFile
+
+.9				rts
+*--------------------------------------
+CS.RUN.CloseFile
+				>LDA.G hFile
+				>SYSCALL fclose
+				bcs .9
+				
+				>STZ.G hFile
+.9				rts
+*--------------------------------------
+CS.RUN.IncFChar	phy
+				ldy #fCharCount
+				bra CS.RUN.IncF
+
+CS.RUN.IncFLine	phy
+				ldy #fLineCount
+				bra CS.RUN.IncF
+
+CS.RUN.IncFWord	phy
+				ldy #fWordCount
+				ldx #4
+				
+CS.RUN.IncF		lda (pData),y
+				inc
+				sta (pData),y
+				bne .8
+				iny
+				dex
+				bne CS.RUN.IncF
+				
+.8				ply
+				rts				
+*--------------------------------------
+CS.RUN.AddFstat2Tstat
+				>PUSHL.G fWordCount
+				>PUSHL.G tWordCount
+				>FPU ADD32
+				>PULLL.G tWordCount
+				
+				>PUSHL.G fLineCount
+				>PUSHL.G tLineCount
+				>FPU ADD32
+				>PULLL.G tLineCount
+
+				>PUSHL.G fCharCount
+				>PUSHL.G tCharCount
+				>FPU ADD32
+				>PULLL.G tCharCount
+				rts
+*--------------------------------------
+CS.RUN.PrintFstat
+				>PUSHW ZPRelPath
+				>PUSHL.G fWordCount
+				>PUSHL.G fLineCount
+				>PUSHL.G fCharCount
+				>PUSHBI 14
+				>LDYA L.MSG.FILE
+				>SYSCALL printf
+				rts
+*--------------------------------------
+CS.RUN.PrintTstat
+				lda bTotal
+				
+				bpl .8
+				>PUSHL.G tWordCount
+				>PUSHL.G tLineCount
+				>PUSHL.G tCharCount
+				>PUSHBI 12
+				>LDYA L.MSG.TOTAL
+				>SYSCALL printf
+.8				rts
+*--------------------------------------
 CS.DOEVENT		sec
 				rts
 *--------------------------------------
@@ -253,40 +410,57 @@ CS.QUIT			jsr LeaveSubDir
 				>SYSCALL FreeMem
 				
 .1				>LDA.G hSrcFullPath
+				beq .2
+				>SYSCALL FreeMem
+				
+.2				>LDA.G hMem
 				beq .8
 				>SYSCALL FreeMem
 				
 .8				clc
 				rts
 *--------------------------------------
+CS.RUN.CheckOpt	ldy #1 
+				lda (ZPPtr1),y
+
+				ldx #OptionVars-OptionList-1
+
+.2				cmp OptionList,x
+				beq .3
+				dex
+				bpl .2
+
+				sec
+				rts
+				
+.3				ldy OptionVars,x
+				lda #$ff
+				sta 0,y
+				clc
+				rts
+*--------------------------------------
 				.INB USR/SRC/BIN/X.FILEENUM.S
 *--------------------------------------
 CS.END
 *--------------------------------------
-OptionList		>PSTR "CRMLWcrmlw"
+OptionList		.AS "CRMLWcrmlw"
 OptionVars		.DA #bContinue,#bRecurse,#bChar,#bLine,#bWord
 				.DA #bContinue,#bRecurse,#bChar,#bLine,#bWord
 *--------------------------------------
-MSG.USAGE		.AS "Usage : PAK Archive [File *,? wildcards allowed]\r\n"
+MSG.USAGE		.AS "Usage : WC File(s) (*,? wildcards allowed)\r\n"
 				.AS "   -C : Continue on error\r\n"
 				.AS "   -R : Recurse subdirectories\r\n"
 				.AS "   -M : Print the CHAR counts\r\n"
 				.AS "   -L : Print the LINE counts\r\n"
 				.AZ "   -W : Print the WORD counts\r\n"
-MSG.OK			.AZ "[OK]"
 MSG.ERR			.AZ "[%h]\r\n"
-MSG.DIR			.AZ "Adding Dir :%S..."
-MSG.FILE		.AZ "Adding File:%S..."
+MSG.FILE		.AZ "%10L %10L %10L %s\r\n"
+MSG.TOTAL		.AZ "%10L %10L %10L\r\n"
 *--------------------------------------
 				.DUMMY
 				.OR 0
 DS.START
 ArgIndex		.BS 1
-bContinue		.BS 1
-bRecurse		.BS 1
-bChar			.BS 1
-bLine			.BS 1
-bWord			.BS 1
 
 bPrintTotal		.BS 1
 
@@ -298,17 +472,11 @@ tCharCount		.BS 4
 tLineCount		.BS 4
 tWordCount		.BS 4
 
-bPause			.BS 1
-
-hFullPath		.BS 1
 hSrcFullPath	.BS 1
-STAT			.BS S.STAT
-Index			.BS 1
-hDIRs			.BS X.MAX.RECURSE
-hDIRENTs		.BS X.MAX.RECURSE
-oDIRENTs		.BS X.MAX.RECURSE*2
-hSrcBasePath	.BS 1
-hFilter			.BS 1
+hFile			.BS 1
+hMem			.BS 1
+
+				.INB USR/SRC/BIN/X.FILEENUM.G
 
 DS.END
 				.ED
