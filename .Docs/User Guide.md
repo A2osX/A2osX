@@ -337,9 +337,8 @@ RD
 
 | Hex | Error Code | Error Message |
 | --- | --- | --- |
-| $BF | 0 |User Interrupt|
+| $03 | 0 |User Interrupt|
 | $C0 | 0 |Command Syntax Error|
-| $-- | 0 |Script Syntax Error|
 | $C1 | 0 |Expression Syntax Error|
 | $C2 | 0 |Stack Error|
 | $C3 | 0 |Stack Overflow|
