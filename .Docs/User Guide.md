@@ -11,7 +11,7 @@ A core element at the foundation of A2osX that enables its multiuser multitaskin
 
 The core of A2osX is written entirely in 65C02 Assembly and built using the S-C Macro Assembler.  Assembly was chosen because at end of day it provides for the most strict and stringent memory management as well as the fastest performance of any language on the Apple II.  Work is underway to provide ASM running under A2osX (see Current and Future Development Process sections below).  There is also an entire shell scripting language (see below) and in the future we plan a CSH (C-Shell) which is the first step to an Interactive C interpreter and then a Compilter that will make C feed to built-in assembler.  Yes, that is a lot on our development plan, but the only way to make it feasible is by building the core using assembly to provide enough memory and processing sources to enable such features.
 
-## Developing for A2osX
+### Developing for A2osX
 
 There has been a significant uptick in interest in A2osX and its development.  That's great!  Along with that has come a lot of questions and requests for documentation.  Besides this new user guide, which we hope will answer many of your questions, we have also written an extensive  **[Developers Guide](.Docs/Developers%20Guide.md).**  That guide explains our current development process (GitHub to delivery media) as well as our future plans.
 
@@ -129,6 +129,10 @@ A2osX supports a special maintenance mode that you can invoke while A2osX is loa
 3. does not load the root users PROFILE, in case you have made some change to this file that is causing ROOT login issues. 
 
 In maintenance mode, you still have access to all A2osX utilities and scripts, so you can run programs such as EDIT to make changes to any needed text file reconfigure the system before booting normally.
+
+### A2osX Preemptive Mode
+
+A2osX is a multiuser multitasking operating system.  As with any such operating system running on a single core single CPU system such as an Apple II with the 6502, A2osX switches between all of the running processes automatically ensuring that each gets serviced in a reasonable time. It is the A2osX Kernel that performs this task in 1 of 2 manners: Cooperative or Preemptive mode.  In Cooperative mode, the default, switching between processes occurs whenever an application makes a "blocking" API call such as a file services request or cooperatively relinquishes control (see the A2osX Developers Guide).  In Preemptive Mode, set by option in KCONFIG utility (see A2osX Command Guide), the kernel switches between "sleeping" processes automatically at 1/10th-second intervals.  In order to use Preemptive Mode, your system must have supported hardware that generates an interrupt used by A2osX such as an Apple II Mouse or Uthernet interface.
 
 ## Devices
 
