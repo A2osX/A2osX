@@ -3,22 +3,34 @@ NEW
 				.LIST OFF
 				.OP	65C02
 				.OR	$2000
-				.TF ROOT/UNPAK
+				.TF BIN/UNPAK
 *--------------------------------------
 				.INB INC/MACROS.I
 				.INB INC/A2OSX.I
+				.INB INC/MLI.E.I
 				.INB INC/LIBPAK.I
 *--------------------------------------
-ZPPakHdrPtr		.EQ ZPBIN
-ZPPakDataPtr	.EQ ZPBIN+2
-ZPPakSrcPtr		.EQ ZPBIN+4
-
+CHNK.SIZE		.EQ 4096
 *--------------------------------------
-UNPAK.Mask		.EQ ZPBIN+8
-UNPAK.LastByte	.EQ ZPBIN+9
-UNPAK.Cnt		.EQ ZPBIN+10
-UNPAK.Ofs		.EQ ZPBIN+12
-UNPAK.BLOfs		.EQ ZPBIN+14
+				.DUMMY
+				.OR ZPBIN
+ZS.START
+ZPPtr1			.BS 2
+ZPInBufPtr		.BS 2
+ZPULen			.BS 2
+
+ZPPakHdrPtr		.BS 2
+ZPPakDataPtr	.BS 2
+ZPPakSrcPtr		.BS 2
+ZPFullPathPtr	.BS 2
+ZPRelPathPtr	.BS 2
+
+UNPAK.Mask		.BS 2
+UNPAK.LastByte	.BS 2
+UNPAK.Cnt		.BS 2
+UNPAK.Ofs		.BS 2
+UNPAK.BLOfs		.BS 2
+ZS.END			.ED
 *--------------------------------------
 *			File Header (16 Bytes)
 *--------------------------------------
@@ -30,7 +42,7 @@ CS.START		cld
 				.DA CS.END-CS.START		CS
 				.DA DS.END-DS.START		DS
 				.DA #64					SS
-				.DA #16					ZP
+				.DA #ZS.END-ZS.START	Zero Page Size
 				.DA 0
 *--------------------------------------
 * Relocation Table
@@ -39,47 +51,304 @@ CS.START		cld
 				.DA CS.RUN
 				.DA CS.DOEVENT		
 				.DA	CS.QUIT
-L.MSG.USAGE		.DA MSG.USAGE				
+L.MSG.USAGE		.DA MSG.USAGE
+L.MSG.DIR		.DA MSG.DIR
+L.MSG.FILE		.DA MSG.FILE
+L.MSG.OK		.DA MSG.OK
+L.MSG.ERR		.DA MSG.ERR
+L.MSG.E.IARC	.DA MSG.E.IARC
+L.MSG.E.OFS		.DA MSG.E.OFS
 L.MSG.DEBUG		.DA MSG.DEBUG
-L.MSG.UnpakErr	.DA MSG.UnpakErr
-L.MSG.DEBUG.S3	.DA MSG.DEBUG.S3
 				.DA 0
 *--------------------------------------
 CS.INIT			clc
 				rts
 *--------------------------------------
-CS.RUN			ldy	#S.PS.ARGC
-				lda (pPs),y
-				bne CS.RUN.Pak
+CS.RUN			>LDYAI CHNK.SIZE
+				>SYSCALL getmem
+				bcs .9
+				>STYA ZPInBufPtr
+				txa
+				>STA.G hInBuf
 
-				>PUSHBI 0
+				lda #1
+				>SYSCALL Argv
+				bcs .9
+				
+				jsr CS.RUN.OpenArc
+				bcs .9
+				
+				>LDYAI 256
+				>SYSCALL getmem
+				bcs .9
+				>STYA ZPFullPathPtr
+				txa
+				>STA.G hFullPath
+				
+				lda #2
+				>SYSCALL Argv
+				bcc .1
+				
+				ldy #S.PS.hCWD
+				lda (pPS),y
+				>SYSCALL getmemptr
+
+.1				jsr CS.RUN.SetupPath
+
+				>LDYAI CHNK.SIZE
+				>SYSCALL getmem
+				bcs .9
+				txa
+				>STA.G hOutBuf
+
+				jsr CS.RUN.LOOP
+				bcs .9
+
+				lda #0
+				sec
+.9				rts
+
+.99				>PUSHBI 0
 				>LDYA L.MSG.USAGE
 				>SYSCALL printf
 				lda #E.SYN
 				sec
 				rts
 *--------------------------------------
-.8				sec
-.9				rts
+CS.RUN.SetupPath
+				>STYA ZPPtr1
+
+				ldy #$ff
+	
+.2				iny
+				lda (ZPPtr1),y
+				sta (ZPFullPathPtr),y
+				bne .2
 				
-.1				>PUSHW.G PAK.Stat+S.PAKSTAT.STORE
-				>PUSHW.G PAK.Stat+S.PAKSTAT.S4
-				>PUSHW.G PAK.Stat+S.PAKSTAT.S3
-				>PUSHW.G PAK.Stat+S.PAKSTAT.REP
-				>PUSHW.G PAK.Stat+S.PAKSTAT.BL
-				>PUSHW.G PAK.Stat+S.PAKSTAT.PASS2
-				>PUSHW.G PAK.Stat+S.PAKSTAT.PASS1
-				>PUSHW.G PAK.FileSize
-				>PUSHBI 16
-				>LDYA L.MSG.DEBUG
+				dey
+				lda #'/'
+				cmp (ZPFullPathPtr),y
+				beq .3
+				
+				iny
+				sta (ZPFullPathPtr),y
+				
+.3				tya
+				sec
+				adc ZPFullPathPtr
+				sta ZPRelPathPtr
+				lda #0
+				adc ZPFullPathPtr+1
+				sta ZPRelPathPtr+1
+				
+				rts
+*--------------------------------------
+CS.RUN.LOOP		jsr CS.RUN.GetByte
+				bcs .9
+
+.10				cmp #CHNK.T.DIR
+				bne .1
+
+				jsr CS.RUN.GetFileName
+				bcs .9
+				
+				ldx #0
+				jsr CS.RUN.PrintFN
+
+				jsr CS.RUN.CheckDir
+				bcs .99
+				
+				>LDYA L.MSG.OK
+				>SYSCALL puts
+				
+				bra CS.RUN.LOOP
+				clc
+.99				rts
+				
+.9				jmp CS.RUN.E.IARC
+				
+.1				cmp #CHNK.T.FILE
+				bne .9
+
+				jsr CS.RUN.GetFileType
+				bcs .9
+
+				jsr CS.RUN.GetFileName
+				bcs .9
+
+				ldx #2
+				jsr CS.RUN.PrintFN
+				
+				jsr CS.RUN.OpenFile
+				bcs .9
+*--------------------------------------
+				jsr CS.RUN.GetByte		DATA
+				bcs .8					eof 
+				
+.2				cmp #CHNK.T.DATA
+				bne .3					Could be a 0 byte file
+				
+.20				jsr CS.RUN.GetByte		ALG
+				bcs .9
+				cmp #0					STORE
+				bne .9
+
+				jsr CS.RUN.GetByte		ULEN LO
+				bcs .9
+				sta ZPULen
+
+				jsr CS.RUN.GetByte		ULEN HI
+				bcs .9
+				sta ZPULen+1
+				
+				jsr CS.RUN.ReadData
+				bcs .9
+				
+				jsr CS.RUN.WriteFile
+				bcs .9
+				
+				jsr CS.RUN.GetByte
+				bcs .8
+				
+				cmp #CHNK.T.DATA
+				beq .20
+				
+.3				pha
+				jsr .8
+				pla
+				
+				jmp .10
+
+.8				>LDA.G hFile
+				>SYSCALL fclose
+				>LDYA L.MSG.OK
+				>SYSCALL puts
+				rts
+*--------------------------------------
+CS.RUN.PrintFN	>PUSHW ZPFullPathPtr
+				>PUSHBI 2
+				>LDYA L.MSG.DIR,x
 				>SYSCALL printf
+				rts
+*--------------------------------------
+CS.RUN.OpenArc	pha
+				>PUSHWZ					Aux type
+				>PUSHBI $CF				PAK
+				>PUSHBI	O.RDONLY
+				pla
+				>SYSCALL FOpen
+				bcs .9
+				>STA.G hArcFile
+				
+				pha
+				>PUSHWI 3
+				>PUSHW ZPInBufPtr
+				pla
+				>SYSCALL fread
+				bcs .9
+				
+				cpy #3
+				bne .99
+				
+				dey
+				
+.1				lda MSG.PAK,y
+				cmp (ZPInBufPtr),y
+				bne .99
+				dey
+				bpl .1
+				
+				clc
+.9				rts
+
+.99
+CS.RUN.E.IARC	>LDYA L.MSG.E.IARC
+				>SYSCALL puts
+				lda #E.SYN
+				sec
+				rts
+*--------------------------------------
+CS.RUN.GetFileType
+				>PUSHWI 3
+				>PUSHEA.G FileType
+				>LDA.G hArcFile
+				>SYSCALL fread
+				rts
+*--------------------------------------
+CS.RUN.GetFileName
+				jsr CS.RUN.GetByte
+				bcs .9
+				
+				tay
+				lda #0
+
+				>PUSHYA
+				>PUSHW ZPRelPathPtr
+				>LDA.G hArcFile
+				>SYSCALL fread
+				bcs .9
+
+				lda #0
+				sta (ZPRelPathPtr),y
+
+*				clc				
+				
+.9				rts				
+*--------------------------------------
+CS.RUN.ReadData >PUSHW ZPULen
+				>PUSHW ZPInBufPtr
+				>LDA.G hArcFile
+				>SYSCALL fread
+				rts
+*--------------------------------------
+CS.RUN.GetByte	>LDA.G hArcFile
+				>SYSCALL getc
+				rts
+*--------------------------------------
+CS.RUN.CheckDir	>PUSHEA.G STAT
+				>LDYA ZPFullPathPtr
+				>SYSCALL stat
+				bcc .1
+
+				>LDYA ZPFullPathPtr
+				>SYSCALL mkdir 
+
+				rts
+				
+.1				ldy #STAT+S.STAT.P.TYPE
+				lda (pData),y
+				cmp #$F
+				bne .99
+				clc
+				rts
+				
+.99				lda #MLI.E.INVPATH
+				sec
+.9				rts
+*--------------------------------------
+CS.RUN.OpenFile	>PUSHW.G FileAuxType
+				>PUSHB.G FileType
+				>PUSHBI	O.CREATE+O.WRONLY+O.TRUNC
+				>LDYA ZPFullPathPtr
+				>SYSCALL FOpen
+				bcs .9
+				>STA.G hFile
+.9				rts
+*--------------------------------------
+CS.RUN.WriteFile
+				>PUSHW ZPULen
+				>PUSHW ZPInBufPtr
+				>LDA.G hFile
+				>SYSCALL fwrite
+				rts
 *--------------------------------------
 * Y,A = Ptr to Shunk Header:
 * +0 : Flags
 *      10000000 : LZ8 encoded, 1 byte (ESC) follow 
 *	   01000000 : BS
 *--------------------------------------
-CS.RUN.Unpak	lda ZPPakHdrPtr
+CS.RUN.UnpakChnk
+				lda ZPPakHdrPtr
 				clc
 				adc #S.PAKSTAT
 				sta ZPPakDataPtr
@@ -100,10 +369,7 @@ CS.RUN.Unpak	lda ZPPakHdrPtr
 				lda #$80
 				sta UNPAK.Mask
 				
-				>LDA.G PAK.hFileBuf
-				>SYSCALL GetMemPtr
-				>STYA ZPPakSrcPtr
-				
+			
 				stz	UNPAK.Ofs
 				stz	UNPAK.Ofs+1
 				
@@ -126,11 +392,11 @@ CS.RUN.Unpak	lda ZPPakHdrPtr
 				ldx #3
 				jsr CS.RUN.UnpakGetXBitInA
 				clc
-				adc #S.PAKHDR.SHORT3
+*				adc #S.PAKHDR.SHORT3
 				tay
 				lda (ZPPakHdrPtr),y
 				sta UNPAK.LastByte
-				jsr DEBUG.S3
+
 				jsr CS.RUN.UnpakCmpA
 				bcs .9
 				bra .1
@@ -142,7 +408,7 @@ CS.RUN.Unpak	lda ZPPakHdrPtr
 				ldx #4
 				jsr CS.RUN.UnpakGetXBitInA
 				clc
-				adc #S.PAKHDR.SHORT4
+*				adc #S.PAKHDR.SHORT4
 				tay
 				lda (ZPPakHdrPtr),y
 				sta UNPAK.LastByte
@@ -205,7 +471,7 @@ CS.RUN.Unpak	lda ZPPakHdrPtr
 				
 .9				>PUSHW UNPAK.Ofs
 				>PUSHBI 2
-				>LDYA L.MSG.UnpakErr
+				>LDYA L.MSG.ERR
 				>SYSCALL printf
 				
 				lda #0
@@ -266,44 +532,46 @@ CS.RUN.UnpakCmpA
 .9				sec
 				rts
 *--------------------------------------
-DEBUG.S3		pha
-				phx
-				phy
-				>PUSHA
-				>PUSHBI 1
-				>LDYA L.MSG.DEBUG.S3
-				>SYSCALL printf
-				ply
-				plx
-				pla
-				rts
-				lda #0
-				sec
-				rts
-*--------------------------------------
 CS.DOEVENT		sec
 				rts
 *--------------------------------------
-CS.QUIT			>LDA.G PAK.hFileName
+CS.QUIT			>LDA.G hFile
 				beq .1
 				
-				>SYSCALL FreeMem
+				>SYSCALL fclose
 				
-.1				>LDA.G PAK.hFileBuf
+.1				>LDA.G hFullPath
 				beq .2
 				
 				>SYSCALL FreeMem
 				
-.2				>LDA.G PAK.hOutBuf
-				beq .8
+.2				>LDA.G hOutBuf
+				beq .3
 				
 				>SYSCALL FreeMem
 				
+.3				>LDA.G hInBuf
+				beq .4
+				
+				>SYSCALL FreeMem
+				
+.4				>LDA.G hArcFile
+				beq .8
+				
+				>SYSCALL fclose
+			
 .8				clc
 				rts
 *--------------------------------------
 CS.END
-MSG.USAGE		.AS "Usage : UNPAK Archive [DstDir]\r\n"
+MSG.USAGE		.AZ "Usage : UNPAK Archive [DstDir]\r\n"
+MSG.DIR			.AZ "Creating Dir:%s..."
+MSG.FILE		.AZ "Extracting File:%s..."
+MSG.OK			.AZ "[OK]"
+MSG.ERR			.AZ "[%h]\r\n"
+MSG.E.IARC		.AZ "Invalid/corrupt archive"
+MSG.E.OFS		.AZ "UnPak Error at Offset : %L\r\n"
+MSG.PAK			.AS "PAK"
 *--------------------------------------
 MSG.DEBUG		.AS "Src Length : %D\r\n"
 				.AS "Pass #1    : %D\r\n"	
@@ -313,20 +581,21 @@ MSG.DEBUG		.AS "Src Length : %D\r\n"
 				.AS "S3 Count   : %D\r\n"
 				.AS "S4 Count   : %D\r\n"
 				.AZ "STO Count  : %D\r\n"
-MSG.UnpakErr	.AZ "UnPak Error at Offset : %H\r\n" 				
-MSG.DEBUG.S3	.AZ "S3:%h\r\n"
 *--------------------------------------
 				.DUMMY
 				.OR 0
 DS.START
-PAK.hFileName	.BS 1
-PAK.FileSize	.BS 2
-PAK.hFileBuf	.BS 1
-PAK.hOutBuf		.BS 1
-PAK.Stat		.BS S.PAKSTAT
+hArcFile		.BS 1
+hFullPath		.BS 1
+hInBuf			.BS 1
+hOutBuf			.BS 1
+hFile			.BS 1
+FileType		.BS 1
+FileAuxType		.BS 2
+STAT			.BS S.STAT
 DS.END
 				.ED
 *--------------------------------------
 MAN
-SAVE BIN/UNPAK.S
+SAVE USR/SRC/BIN/UNPAK.S
 ASM

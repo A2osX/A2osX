@@ -132,7 +132,7 @@ In maintenance mode, you still have access to all A2osX utilities and scripts, s
 
 ### A2osX Preemptive Mode
 
-A2osX is a multiuser multitasking operating system.  As with any such operating system running on a single core single CPU system such as an Apple II with the 6502, A2osX switches between all of the running processes automatically ensuring that each gets serviced in a reasonable time. It is the A2osX Kernel that performs this task in 1 of 2 manners: Cooperative or Preemptive mode.  In Cooperative mode, the default, switching between processes occurs whenever an application makes a "blocking" API call such as a file services request or cooperatively relinquishes control (see the A2osX Developers Guide).  In Preemptive Mode, set by option in KCONFIG utility (see A2osX Command Guide), the kernel switches between "sleeping" processes automatically at 1/10th-second intervals.  In order to use Preemptive Mode, your system must have supported hardware that generates an interrupt used by A2osX such as an Apple II Mouse or Uthernet interface.
+A2osX is a multiuser multitasking operating system.  As with any such operating system running on a single core single CPU system such as an Apple II with the 6502, A2osX switches between all of the running processes automatically ensuring that each gets serviced in a reasonable time. It is the A2osX Kernel that performs this task in 1 of 2 manners: Cooperative or Preemptive mode.  In Cooperative mode, the default, switching between processes occurs whenever an application makes a "blocking" API call such as waiting for a key pressed, a network frame... or cooperatively relinquishes control (explicitly calling >SLEEP, see the A2osX Developers Guide).  In Preemptive Mode, set by option in KCONFIG utility (see A2osX Command Guide), the kernel switches between "sleeping" processes automatically at 1/10th-second intervals.  In order to use Preemptive Mode, your system must have supported hardware that generates an interrupt used by A2osX such as an Apple II Mouse or ThunderClock interface.
 
 ## Devices
 
@@ -188,7 +188,7 @@ Any ProDOS Block Device (5.25 & 3.5 Floppy Drives, SmartPort Hard Drive and Ram 
 NoSlot Clock or ThunderClock
 Super Serial Card
 Mouse Card
-Network Card (Uthernet I or II, LanCes)
+Network Card (Uthernet I or II, LanCEgs)
 
 ## Getting Started
 
