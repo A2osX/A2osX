@@ -132,7 +132,7 @@ In maintenance mode, you still have access to all A2osX utilities and scripts, s
 
 ### A2osX Preemptive Mode
 
-A2osX is a multiuser multitasking operating system.  As with any such operating system running on a single core single CPU system such as an Apple II with the 6502, A2osX switches between all of the running processes automatically ensuring that each gets serviced in a reasonable time. It is the A2osX Kernel that performs this task in 1 of 2 manners: Cooperative or Preemptive mode.  In Cooperative mode, the default, switching between processes occurs whenever an application makes a "blocking" API call such as waiting for a key pressed, a network frame... or cooperatively relinquishes control (explicitly calling >SLEEP, see the A2osX Developers Guide).  In Preemptive Mode, set by option in KCONFIG utility (see A2osX Command Guide), the kernel switches between "sleeping" processes automatically at 1/10th-second intervals.  In order to use Preemptive Mode, your system must have supported hardware that generates an interrupt used by A2osX such as an Apple II Mouse or ThunderClock interface.
+A2osX is a multiuser multitasking operating system.  As with any such operating system running on a single core single CPU system such as an Apple II with the 6502, A2osX switches between all of the running processes automatically ensuring that each gets serviced in a reasonable time. It is the A2osX Kernel that performs this task in 1 of 2 manners: Cooperative or Preemptive mode.  In Cooperative mode, the default, switching between processes occurs whenever an application makes a "blocking" API call (i.e. waiting for a key press or a network frame) or cooperatively relinquishes control (by explicitly calling >SLEEP, see the A2osX Developers Guide).  In Preemptive Mode, set by option in the KCONFIG utility (see A2osX Command Guide), the kernel switches between "sleeping" processes automatically at 1/10th-second intervals.  In order to use Preemptive Mode, your system must have supported hardware that generates an interrupt used by A2osX such as an Apple II Mouse or ThunderClock interface.
 
 ## Devices
 
@@ -269,20 +269,29 @@ RD
 
 ## Error Messages
 
-* ProDOS Error Codes : $00->$5F
+* No Error : $00
+* User Script Error Codes : $01->$1F
+	* Note this range may be used by multiple different scripts.
+* ProDOS Error Codes : $20->$5F
 * Kernel Error Codes : $60->$7F
 * Lib Error Codes : $80->$BF
-* Shell Error Codes : $C0->$CF
-* Application Error Codes : $ D0->$FF 
+* Shell Error Codes : $C0->$DF
+* BIN/External Command Error Codes : $ E0->$F8
+	* Note this range may be reused by multiple BINs.
+* Reserved for internal Kernel Use : $FA->$FF 
 
-### ProDOS or MLI Errors
+### No Error : $00
+
+This is the normal or expected returned when the last command or script statement executed properly.
+
+### User Script Error Codes : $01->$1F
+
+This range of Error Codes may be used by Users/Developers in scripts.  Consult the Shell Developers Guide for more information.
+
+### ProDOS or MLI Errors : $20->$5F
 
 | Hex | Error Code | Error Message |
 | --- | --- | --- |
-| $00 |   0 | No Error|
-| $01 |   1 | Bad Call Number|
-| $04 |   4 | Bad Parameter Count|
-| $06 |   6 | Communications Error|
 | $21 |  33 | Invalid Status Code|
 | $25 |  37 | Interrupt Table Full|
 | $27 |  39 | I/O Error|
@@ -312,7 +321,7 @@ RD
 | $57 |  87 | Duplicate Volume|
 | $5A |  90 | File Structure Damaged|
 
-### Kernel Errors
+### Kernel Errors : $ 60->$7F
 
 | Hex | Error Code | Error Message |
 | --- | --- | --- |
@@ -337,7 +346,12 @@ RD
 | $68 |   0 | Invalid PWD database |
 | $67 |   0 | Invalid User |
 
-### Shell Errors
+### Kernel Error Codes : $60->$7F
+
+| Hex | Error Code | Error Message |
+| --- | --- | --- |
+
+### Shell Errors : $ C0->$D8
 
 | Hex | Error Code | Error Message |
 | --- | --- | --- |
@@ -352,6 +366,15 @@ RD
 | $C7 | 0 |Bad File Type|
 | $C8 | 0 |Undefined Function|
 | $C9 | 0 |Unexpected EOF|
+
+### BIN/External Command Error Codes : $ E0->$F8
+
+This range of error codes is used by all A2osX and User/Developer create BINs or application programs to denote some completion result, usually not fatal.  For example, the CMP command (./BIN/CMP) compares two files to see if they are equal. CMP will return 0 ($00) if the files compare equal and there is no other error; CMP will return 70 ($46) if one of the files is not found (a ProDOS error); and CMP will return 224 ($D0) if the files do not match, a not fatal error as the BIN did run, do its job, just the result was an "Application" mismatch error.
+
+This range may be reused by multiple BINs so scripts checking these results should be aware of the BIN called and the valid return results for that BIN.
+
+### Reserved for internal Kernel Use : $FA->$FF 
+
 
 ## License
 A2osX is licensed under the GNU General Pulic License.

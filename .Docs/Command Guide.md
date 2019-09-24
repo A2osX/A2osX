@@ -98,7 +98,7 @@ TELNETD is a server process that listens for incoming requests to connect to you
 
 When TELNETD detects an incoming request it starts a GETTY process and creates a virtual internet terminal for the user and begins the LOGIN process same as the system would for a hardwired terminal.  Note TELNETD requires that you have a supported ethernet card and have configured your system for a network appropriately.
 
-## BIN,External Shell commands:
+## BIN/External Shell commands:
 
 The BIN or "External" shell commands are the tools used by most users to display and manipulate data stored on their A2osX system.  Typcical commands allow you to display directory contents (LS), display file contents (CAT), copy files (CP), delete files (RM), etc.  These commands are found in **./BIN/** letting you know they are normal user commands.
 
@@ -186,7 +186,7 @@ This utility allows you to change the type of a file to a standard files types s
 | --- | --- |
 | CMP File1 File2 [SKIP1 [SKIP2]]| -A : Shows All differences <br> -V : Verbose Mode |
 
-CMP  will compare two files to determine if they are byte for byte equal.  If the files are equal CMP exits normally with an exit code of 0.  If the files have one or more bytes that are different, CMP will exit with an application error code of 223 (hex E0).  By using the Verbose option you can see the offset and values of the first different byte.  With the Verbose and All options you can see the list of all offsets and values that are different.  The SKIP options allow you specify a number of bytes to skip in the file(s) before starting the comparison.  CMP A B 100 200 would skip to the 100th byte of A and the 200th byte of B before starting the byte by byte comparison.  Note then that B would need to be 100 bytes larger then A for the comparison to ever end without error.
+CMP  will compare two files to determine if they are byte for byte equal.  If the files are equal CMP exits normally with an exit code of 0.  If the files have one or more bytes that are different, CMP will exit with an application error code of 223 (Hex $DF).  By using the Verbose option you can see the offset and values of the first different byte.  With the Verbose and All options you can see the list of all offsets and values that are different.  The SKIP options allow you specify a number of bytes to skip in the file(s) before starting the comparison.  CMP A B 100 200 would skip to the 100th byte of A and the 200th byte of B before starting the byte by byte comparison.  Note then that B would need to be 100 bytes larger then A for the comparison to ever end without error.
 
 ### CP
 
