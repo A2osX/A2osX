@@ -3,7 +3,7 @@ NEW
 				.LIST OFF	
 				.OP	65C02
 				.OR	$2000
-				.TF LIB/LIBPAK.O
+				.TF LIB/LIBPAK
 *--------------------------------------
 				.INB INC/MACROS.I
 				.INB INC/A2OSX.I
@@ -33,7 +33,6 @@ CS.START		cld
 .1				.DA LIB.LOAD
 				.DA LIB.UNLOAD
 				.DA Pak
-				.DA Unpak
 				.DA 0
 *--------------------------------------
 LIB.LOAD
@@ -43,32 +42,15 @@ LIB.UNLOAD		clc
 * # Pak
 * **In:**
 * ##ASM 
-* PUSHW = Src PTR 
-* PUSHW = Src Length 
-* PUSHW = Dst PTR Output Buffer
-* PUSHW = Dst PTR S.PAKSTAT
+* PUSHW = S.PAKSTAT Ptr
+* PUSHW = Output Buffer Ptr
+* PUSHW = Input Buffer Len
+* PUSHW = Input Buffer Ptr 
 *\--------------------------------------
-* PASS #1 : BL+REP dryrun with raw BYTE store (no bit prefix) -> Dst
-* if BL stat=0, disable BL in PASS #2
-*   BuildShortTable with DST
-* PASS #2 : BL with store real prefixed S3,S4,REP & STORE -> Dst
-*--------------------------------------
-Pak				>PULLW ZPStatPtr
-
-				>PULLA
-				sta ZPHdrPtr
-				clc
-				adc #S.PAKHDR
-				sta ZPDstPtr
-				
-				>PULLA
-				sta ZPHdrPtr+1
-				adc /S.PAKHDR
-				sta ZPDstPtr+1
-				
-				>PULLW Pak.Hdr+S.PAKHDR.LEN
-
-				>PULLW Pak.SrcPtr
+Pak				>PULLW Pak.SrcPtr
+				>PULLW Pak.SrcLen
+				>PULLW ZPDstPtr
+				>PULLW ZPStatPtr
 
 * Reset Byte counters
 
@@ -81,10 +63,10 @@ Pak				>PULLW ZPStatPtr
 				
 * PASS #1 : REP & BL, no store, update byte counters
 
-				jsr Pak.InitPass
-
 				stz Pak.bPass2
 								
+				jsr Pak.InitPass
+
 				jsr Pak.Run
 				bcs .9
 				
@@ -92,22 +74,20 @@ Pak				>PULLW ZPStatPtr
 				
 * PASS #2 : REP & BL, store with S3,S4
 
-				jsr Pak.InitPass
-
 				dec Pak.bPass2
 				
-				lda #$80
-				sta Pak.Mask			Initialize properly for
-				stz Pak.Byte			first "PutBit" Call
+				jsr Pak.InitPass
+
+				jsr Pak.Out.Init		Initialize properly for first "PutBit" Call
 
 				stz Pak.StoreCnt
 				
 				jsr Pak.Run
 				bcs .9
 				
-				ldy #S.PAKHDR-1
+				ldy #S.PAKSHNK-1
 				
-.2				lda Pak.Hdr,y
+.2				lda Pak.Shnk,y
 				sta (ZPHdrPtr),y
 				dey
 				bpl .2
@@ -130,11 +110,11 @@ Pak.InitPass	>LDYA Pak.SrcPtr
 				>STYA ZPSrcPtr
 				>STYA Pak.WPtr
 				
-				lda Pak.Hdr+S.PAKHDR.LEN
+				lda Pak.SrcLen
 				eor #$ff
 				sta Pak.SrcCnt
 				
-				lda Pak.Hdr+S.PAKHDR.LEN+1
+				lda Pak.SrcLen+1
 				eor #$ff
 				sta Pak.SrcCnt+1
 
@@ -328,7 +308,7 @@ Pak.BuildShortTable
 				sbc Pak.CntH,x
 				bcs .8					not better or equal...
 				
-				stx Pak.Byte			save new score index...
+				stx Pak.In.Byte			save new score index...
 				
 				lda Pak.CntL,x
 				sta Pak.Cnt				...and value
@@ -338,8 +318,8 @@ Pak.BuildShortTable
 .8				inx
 				bne .7
 				
-				lda Pak.Byte
-				sta Pak.Hdr+S.PAKHDR.SHORT3,y
+				lda Pak.In.Byte
+				sta Pak.Shnk+S.PAKSHNK.SHORT3,y
 				tax
 				stz Pak.CntL,x			Discard this entry
 				stz Pak.CntH,x
@@ -411,14 +391,14 @@ Pak.PutA.1		bit Pak.bPass2
 				
 .10				ldy #7
 
-.1				cmp Pak.Hdr+S.PAKHDR.SHORT3,y
+.1				cmp Pak.Shnk+S.PAKSHNK.SHORT3,y
 				beq .3
 				dey
 				bpl .1
 				
 				ldy #15
 
-.2				cmp Pak.Hdr+S.PAKHDR.SHORT4,y
+.2				cmp Pak.Shnk+S.PAKSHNK.SHORT4,y
 				beq .4
 				dey
 				bpl .2
@@ -452,21 +432,15 @@ Pak.PutA.1		bit Pak.bPass2
 				clc
 				rts
 				
-.8				jsr Pak.UpdateStats				
-*--------------------------------------
-Pak.PutYBits	asl
-				jsr Pak.PutBit
-				bcs .9
-				dey
-				bne Pak.PutYBits
-.9				rts
+.8				jsr Pak.UpdateStats
+				jmp Pak.Out.PutYBits
 *--------------------------------------
 Pak.Flush		ldx Pak.StoreCnt 
 				beq .8
 				
 				lda #PAK.B.STOREn
 				ldy #4
-				jsr Pak.PutYBits
+				jsr Pak.Out.PutYBits
 				bcs .9
 				
 				ldx #0
@@ -474,7 +448,7 @@ Pak.Flush		ldx Pak.StoreCnt
 .1				lda Pak.StoreBuf,x
 				sta Pak.LastByte		update last byte for REP
 				ldy #8
-				jsr Pak.PutYBits
+				jsr Pak.Out.PutYBits
 				bcs .9
 				
 				inc Pak.Stat+S.PAKSTAT.STORE
@@ -494,128 +468,14 @@ Pak.UpdateStats	inc Pak.Stat,x
 				bne .8
 				inc Pak.Stat+1,x
 .8				rts
-*/--------------------------------------
-* #UnPak
-* ##ASM
-* **In:** 
-* PUSHW = Src PTR Compressed Buffer
-* PUSHW = Dst PTR
-*\--------------------------------------
-UnZPSrcPtr		.EQ ZPLIB
-UnZPDstPtr		.EQ ZPLIB+2
-UnPak.ShrtTbl	.EQ ZPLIB+4
-UnPak.Cnt		.EQ ZPLIB+6
 *--------------------------------------
-UnPak			>PULLA					Get Dst PTR LO
-				sec
-				sbc #1					
-				sta	UnZPDstPtr
-				>PULLA					Get Dst PTR HI
-				sbc #0
-				sta	UnZPDstPtr+1		setup Dst PTR-1 
-				
-				>PULLW UnZPSrcPtr
-				
-				jsr UnPak.GetByte		Get !LEN for counting up to $0000
-				sta UnPak.Cnt
-				
-				jsr UnPak.GetByte
-				sta UnPak.Cnt+1
-				
-				>LDYA UnZPSrcPtr		Get PTR to Short Table.....
-				>STYA UnPak.ShrtTbl		and save it for SHORTx
-				
-				lda #8
-				sta UnPak.GetBit+1		Initialize properly for first "GetBit" Call
-				
-.1				inc	UnPak.Cnt
-				bne .2
-				inc UnPak.Cnt+1
-				beq .99
-				
-.2				jsr UnPak.GetBit
-				bcs .4					CMD....
-*---- STORE
-				jsr UnPak.GetBit
-				ldx #1
-				bcc	.3					if CC one byte
-				jsr UnPak.Get4Bits		CC
-				adc #2					range is 2->17
-				tax
-				
-.3				jsr UnPak.Get8Bits
-				jsr UnPak.PutByte
-				dex
-				bne .3
-				bra .1
-.99				rts				
-*---- CMD
-.4				jsr UnPak.GetBit
-				bcs .6					BACKLINK or REP...
-*---- CMD : SHORT		
-				lda #0
-				ldy #4
-								
-				jsr UnPak.GetBit		if CS short3
-				rol						make offset 00000001
-				asl						....00000010
-				beq .5
-				
-				dey						if short3, only 3 bits
-				
-.5				jsr UnPak.GetBit
-				rol
-				dey
-				bne .5	
-				
-				tay						if s3, offset is 00010xxx
-				lda (UnPak.ShrtTbl),y	if s4, offset is 0000xxxx
-				jsr UnPak.PutByte
-				bra .1
-*---- CMD : BACKLINK or REP
-.6				jsr UnPak.GetBit
-				bcs .8					if CS -> REP	
-*---- CMD : BACKLINK
-				jsr UnPak.Get8Bits		get Offset LO, (CC)
-				eor #$ff				!offset LO
-				adc UnZPDstPtr		equiv. SUB offset
-				sta .7+1				PTR to Backlink LO
-				lda UnZPDstPtr+1
-				bcs .61					if ADC sets C, no need to dec HI
-				dec
-.61				jsr UnPak.GetBit		get Offset HI in C
-				bcc .62
-				dec
-.62				sta .7+2				PTR to Backlink HI
-				
-				jsr UnPak.Get4Bits		CC
-				adc #3					Backlink are ate least 3 bytes...
-				tax
-				ldy #0
-				
-.7				lda $ffff,y				Self Modified code : PTR to Backlink			
-				jsr UnPak.PutByte
-				iny
-				dex
-				bne .7
-				beq .1
-*---- CMD : REP				
-.8				jsr UnPak.GetBit
-				ldx #1
-				bcc .9					REP 1
-				
-				jsr UnPak.Get4Bits		REP xxxx, CC
-				adc #2					range is 2->17
-				tax
-				
-.9				lda (UnZPDstPtr)		Get Last Byte
-				jsr UnPak.PutByte
-				dex
-				bne .9
-				jmp .1
+*				.INB USR/SRC/LIB/LIBPAK.S.IN
+				.INB USR/SRC/LIB/LIBPAK.S.OUT
 *--------------------------------------
 CS.END
 Pak.SrcPtr		.BS 2
+Pak.SrcLen		.BS 2
+
 Pak.SrcCnt		.BS 2
 Pak.DstCnt		.BS 2
 
@@ -642,14 +502,13 @@ Pak.In.Mask		.BS 1
 
 Pak.Out.Byte	.BS 1
 Pak.Out.Mask	.BS 1
-
 *--------------------------------------
 Pak.CntL		.BS 256
 Pak.CntH		.BS 256
-Pak.Hdr			.BS S.PAKHDR
+Pak.Shnk		.BS S.PAKSHNK
 Pak.Stat		.BS S.PAKSTAT
 *--------------------------------------
-UnPak.BitMask	.HS 8040201008040201
+Pak.In.BitMask	.HS 8040201008040201
 MAN
 SAVE USR/SRC/LIB/LIBPAK.S
 ASM
