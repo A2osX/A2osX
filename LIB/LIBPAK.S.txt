@@ -12,7 +12,7 @@ NEW
 ZPSrcPtr		.EQ ZPLIB
 ZPSrcWPtr		.EQ ZPLIB+2
 ZPCnt			.EQ ZPLIB+4
-ZPHdrPtr		.EQ ZPLIB+14
+
 ZPDstPtr		.EQ ZPLIB+16
 ZPStatPtr		.EQ ZPLIB+18
 *--------------------------------------
@@ -61,7 +61,7 @@ Pak				>PULLW Pak.SrcPtr
 				inx
 				bne .1
 				
-* PASS #1 : REP & BL, no store, update byte counters
+* PASS #1 : no store, update byte counters
 
 				stz Pak.bPass2
 								
@@ -70,9 +70,9 @@ Pak				>PULLW Pak.SrcPtr
 				jsr Pak.Run
 				bcs .9
 				
-				jsr Pak.BuildShortTable
+				jsr Pak.BuildTOPTable
 				
-* PASS #2 : REP & BL, store with S3,S4
+* PASS #2 : store with TOP bytes
 
 				dec Pak.bPass2
 				
@@ -80,7 +80,7 @@ Pak				>PULLW Pak.SrcPtr
 
 				jsr Pak.Out.Init		Initialize properly for first "PutBit" Call
 
-				stz Pak.StoreCnt
+				stz Pak.StringLen
 				
 				jsr Pak.Run
 				bcs .9
@@ -88,7 +88,7 @@ Pak				>PULLW Pak.SrcPtr
 				ldy #S.PAKSHNK-1
 				
 .2				lda Pak.Shnk,y
-				sta (ZPHdrPtr),y
+				
 				dey
 				bpl .2
 				
@@ -118,10 +118,15 @@ Pak.InitPass	>LDYA Pak.SrcPtr
 				eor #$ff
 				sta Pak.SrcCnt+1
 
-				lda #$ff				RepChar invalid
-				sta Pak.RepCnt
+				stz Pak.RepCnt
+				stz Pak.LastByte
 				
-				ldx #S.PAKSTAT.PASS2
+				ldx #S.PAKSTAT.PASS1
+				bit Pak.bPass2
+				bpl .1
+				
+				inx
+				inx
 				
 .1				stz Pak.Stat,x			Reset Stats
 				inx
@@ -294,19 +299,28 @@ Pak.ScanBL		stx Pak.WStrLen
 .9				sec
 				rts
 *--------------------------------------
-Pak.BuildShortTable
+Pak.BuildTOPTable
 				ldy #0
 
-.6				stz Pak.Cnt				Init best score to 0
+.1				stz Pak.Cnt				Init best score to 0
 				stz Pak.Cnt+1
+				
+				sec
+				ror Pak.bStop
 				
 				ldx #0
 				
-.7				lda Pak.Cnt
+.2				lda Pak.Cnt
+				ora Pak.Cnt+1
+				beq .3
+
+				stz Pak.bStop
+
+				lda Pak.Cnt
 				cmp Pak.CntL,x			is it better at X
 				lda Pak.Cnt+1
 				sbc Pak.CntH,x
-				bcs .8					not better or equal...
+				bcs .3					not better or equal...
 				
 				stx Pak.In.Byte			save new score index...
 				
@@ -315,18 +329,23 @@ Pak.BuildShortTable
 				lda Pak.CntH,x
 				sta Pak.Cnt+1
 				
-.8				inx
-				bne .7
+.3				inx
+				bne .2
+				
+				bit Pak.bStop
+				bmi .8
 				
 				lda Pak.In.Byte
-				sta Pak.Shnk+S.PAKSHNK.SHORT3,y
+				sta Pak.Shnk+S.PAKSHNK.TOPBYTES,y
 				tax
 				stz Pak.CntL,x			Discard this entry
 				stz Pak.CntH,x
 				iny
 				cpy #24
-				bne .6
-
+				bne .1
+				
+.8				sty Pak.TopCnt
+				
 				rts
 *--------------------------------------
 Pak.PutA		bit Pak.RepCnt
@@ -347,7 +366,7 @@ Pak.PutA		bit Pak.RepCnt
 				jsr  Pak.PutA.1
 				bcs .9
 
-				ldx #S.PAKSTAT.REP
+				ldx #S.PAKSTAT.REPN
 				jsr Pak.UpdateStats
 				stz Pak.RepCnt
 				
@@ -367,7 +386,7 @@ Pak.PutA		bit Pak.RepCnt
 				lda #1
 				sta Pak.RepCnt
 				
-				ldx #S.PAKSTAT.REP
+				ldx #S.PAKSTAT.REPN
 				jsr Pak.UpdateStats
 				
 .8				clc
@@ -389,53 +408,37 @@ Pak.PutA.1		bit Pak.bPass2
 				
 * Pak.PutA.1  PASS #2
 				
-.10				ldy #7
+.10				ldy #S.PAKSHNK.TOPCNT
 
-.1				cmp Pak.Shnk+S.PAKSHNK.SHORT3,y
+.1				cmp Pak.Shnk+S.PAKSHNK.TOPBYTES-1,y
 				beq .3
 				dey
 				bpl .1
-				
-				ldy #15
 
-.2				cmp Pak.Shnk+S.PAKSHNK.SHORT4,y
-				beq .4
-				dey
-				bpl .2
-				
-				bra .7
+				ldx #S.PAKSTAT.BYTE8
+				jsr Pak.UpdateStats
 
-.3				tya
-				asl
-				asl
-				asl
-				asl
-				ora #PAK.B.SHORT3
-				ldy #4
-				ldx #S.PAKSTAT.S3
-				bra .8
-				
-.4				tya
-				asl
-				asl
-				ora #PAK.B.SHORT4
-				ldy #6
-				ldx #S.PAKSTAT.S4
-				bra .8
-				
-.7				ldx Pak.StoreCnt
-				sta Pak.StoreBuf,x
-				inx
-				cpx #STOREMAX
-				beq Pak.Flush
-				stx Pak.StoreCnt
 				clc
-				rts
+				jmp Pak.Out.PutCA
 				
-.8				jsr Pak.UpdateStats
+.3				tya						Range 0-23
+				lsr
+				lsr
+				lsr
+				tax
+				tya
+				and #7
+				ora TOP.Bits,x
+				ldy TOP.BitCnt,x
+				pha
+				lda TOP.Stat,x
+				tax
+				pla
+
+				jsr Pak.UpdateStats
 				jmp Pak.Out.PutYBits
 *--------------------------------------
-Pak.Flush		ldx Pak.StoreCnt 
+Pak.Flush		ldx Pak.StringLen 
 				beq .8
 				
 				lda #PAK.B.STOREn
@@ -445,18 +448,18 @@ Pak.Flush		ldx Pak.StoreCnt
 				
 				ldx #0
 				
-.1				lda Pak.StoreBuf,x
+.1				lda Pak.StringBuf,x
 				sta Pak.LastByte		update last byte for REP
 				ldy #8
 				jsr Pak.Out.PutYBits
 				bcs .9
 				
-				inc Pak.Stat+S.PAKSTAT.STORE
+				inc Pak.Stat+S.PAKSTAT.BYTE8
 				bne .2
-				inc Pak.Stat+S.PAKSTAT.STORE+1
+				inc Pak.Stat+S.PAKSTAT.BYTE8+1
 				
 .2				inx
-				dec Pak.StoreCnt
+				dec Pak.StringLen
 				bne .1
 
 				stz Pak.RepCnt			Don't forget to set last byte valid
@@ -473,6 +476,11 @@ Pak.UpdateStats	inc Pak.Stat,x
 				.INB USR/SRC/LIB/LIBPAK.S.OUT
 *--------------------------------------
 CS.END
+*--------------------------------------
+TOP.Bits		.DA #%10000,#%110000,#%1110000
+TOP.BitCnt		.DA #5,#6,#7
+TOP.Stat		.DA #S.PAKSTAT.TOP8,S.PAKSTAT.TOP16,S.PAKSTAT.TOP24
+*--------------------------------------
 Pak.SrcPtr		.BS 2
 Pak.SrcLen		.BS 2
 
@@ -482,11 +490,12 @@ Pak.DstCnt		.BS 2
 Pak.RepCnt		.BS 1
 Pak.LastByte	.BS 1
 
-Pak.StoreCnt	.BS 1
-Pak.StoreBuf	.BS STOREMAX
+Pak.StringLen	.BS 1
+Pak.StringBuf	.BS STRINGMAX
 
-
+Pak.TopCnt		.BS 1
 Pak.Cnt			.BS 2
+Pak.bStop		.BS 1
 
 Pak.bPass2		.BS 1
 Pak.MaxReadAhead	.BS 1
