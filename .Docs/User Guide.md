@@ -2,14 +2,14 @@
 
 ## What is A2osX?
 
-It is a new operating environment, layered on top of ProDOS, that brings a powerful new way of building and running programs on the venerable Apple // platform. A2osX is a pre-emptive multi-tasking and multi-user system that employs libraries and drivers to provide multi-application consistent access to system resources such as terminals, network, and files.
-Part of what makes A2osX different, is that all programs, utilities, drivers and libraries are made reentrant and relocatable so that they can be run concurrently and do not depend on a set memory location.  One of the clear benefits is that multiple users can run the same program and it is only loaded once, and more significantly, drivers and libraries for resources such as networking are only loaded once and can be used my multiple applications at the same time.
+It is a new operating environment, layered on top of ProDOS, that brings a powerful new way of building and running programs on the venerable Apple // platform. A2osX is a pre-emptive multitasking and multi-user system that employs libraries and drivers to provide multiple applications consistent access to system resources such as terminals, network, and files.
+Part of what makes A2osX different, is that all programs, utilities, drivers and libraries are made re-entrant and relocatable so that they can be run concurrently and do not depend on a set memory location.  One of the clear benefits is that multiple users can run the same program and it is only loaded once, and more significantly, drivers and libraries for resources such as networking are only loaded once and can be used my multiple applications at the same time.
 
 A2osX is already much more then a "primitive" command line operating system.  While A2osX runs on top of ProDos, leveraging its support for block devices such as floppy drives, hard drives, SmartPort drives, etc.; it adds a preemptive multitasking kernel with a greatly enhanced shell that supports arguments, redirection, piping, and probably the biggest enhancement, a full scripting language.  In addition, at its core, the A2osX supports multiple virtual terminals (i.e. OA-1 OA-2 gets you different sessions) as well as concurrent external terminals via SSC (getty on SSC serial) or network (TELNETD).  A GUI interface is being built and will be part of a future release.
 
-A core element at the foundation of A2osX that enables its multiuser multitasking capabilities is its reusable set of APIs and Libraries (written in Assembly) that all programs can and do use that make them very lean and fast.  For instance, there is one network API that any program can call which in turn handles the I/O to different LAN cards via drivers.  A significant feature is that multiple programs can be using the network at the same time such as the TELNETD server, the HTTPD server and/or the TELNET client.  A key benefit is that the code for doing each program is smaller because the network API is doing a lot of the work.  And since CORE APIs like printf and libraries such as Network loaded only once, much like a DLL in Windows, significant memory is conserved providing the resources needed to support multitasking and multiple users.
+A core element at the foundation of A2osX that enables its multi-user multitasking capabilities is its reusable set of APIs and Libraries (written in Assembly) that all programs can and do use that make them very lean and fast.  For instance, there is one network API that any program can call which in turn handles the I/O to different LAN cards via drivers.  A significant feature is that multiple programs can be using the network at the same time such as the TELNETD server, the HTTPD server and/or the TELNET client.  A key benefit is that the code for doing each program is smaller because the network API is doing a lot of the work.  And since CORE APIs like printf and libraries such as Network loaded only once, much like a DLL in Windows, significant memory is conserved providing the resources needed to support multitasking and multiple users.
 
-The core of A2osX is written entirely in 65C02 Assembly and built using the S-C Macro Assembler.  Assembly was chosen because at end of day it provides for the most strict and stringent memory management as well as the fastest performance of any language on the Apple II.  Work is underway to provide ASM running under A2osX (see Current and Future Development Process sections below).  There is also an entire shell scripting language (see below) and in the future we plan a CSH (C-Shell) which is the first step to an Interactive C interpreter and then a Compilter that will make C feed to built-in assembler.  Yes, that is a lot on our development plan, but the only way to make it feasible is by building the core using assembly to provide enough memory and processing sources to enable such features.
+The core of A2osX is written entirely in 65C02 Assembly and built using the S-C Macro Assembler.  Assembly was chosen because at end of day it provides for the most strict and stringent memory management as well as the fastest performance of any language on the Apple II.  Work is underway to provide ASM running under A2osX (see Current and Future Development Process sections below).  There is also an entire shell scripting language (see below) and in the future we plan a CSH (C-Shell) which is the first step to an Interactive C interpreter and then a Compiler that will make C feed to built-in assembler.  Yes, that is a lot on our development plan, but the only way to make it feasible is by building the core using assembly to provide enough memory and processing sources to enable such features.
 
 ### Developing for A2osX
 
@@ -50,11 +50,11 @@ The following are the primary sub-directories used by A2osX.  While A2osX suppor
 |/dev/| contains device files, note this directory does not actually exist|
 |./etc/| is where configuration files and scripts are located.|
 |./home/| is the default location for users home directories.|
-|./lib/ and ./usr/lib/ |hold library files used by programs in /bin/ and /sbin/.|
+|./lib/ |holds library files used by programs in /bin/ and /sbin/.|
 |/mnt/ |holds the mount points for file systems that were mounted after boot.  A2OSX does not use this directory at this time, but may in the future.|
-|./opt/ |is used primarily for installation and uninstallation of third-party software. Holds optional files and programs.|
+|./opt/ |is used primarily for installation and installation of third-party software. Holds optional files and programs.|
 |./root/ |is the home directory of the superuser "root"|
-|./sbin/ and ./usr/sbin/ |store system commands.|
+|./sbin/ |store system commands.|
 |./sys/| contains files used for system start-up including the kernel.|
 |./tmp/ |is the system temporary directory. All users have read+write access to /tmp/.|
 |./usr/ |contains files related to users such as application files and related library files |
@@ -97,7 +97,7 @@ Some notes on the above:
 - The ./ETC/INIT file can be used to automatically start the SSC.DRV and GETTY process for an external terminal.  It can also be used to load network drivers and processes at boot.
 - The ./${HOME}/PROFILE file can be used to change a users default $PATH, run a Shell Script or load a particular program when a user logs in.
 
-If you decide to install/copy A2osX to your own existing Hard Drive or volume, you just need to be sure to keep the A2osX file system structure in tact.  To start A2osX "manually" as it were, you just need to change your PREFIX to the appropriate sub-directory and then load A2OSX.SYSTEM.  So for example, if you had a CFFA card that booted to a volume called /HD1, you could make a subdirectory on this disk called A2OSX.  You would then set your PREFIX to /HD1/A2OSX and launch A2OSX.SYSTEM and the rest of the boot process outlined above would be followed.  Please see the section on Installation for more information on putting A2OSX on your own media.
+If you decide to install/copy A2osX to your own existing Hard Drive or volume, you just need to be sure to keep the A2osX file system structure in tact.  To start A2osX "manually" as it were, you change your PREFIX to the appropriate sub-directory and then load A2OSX.SYSTEM.  So for example, if you had a CFFA card that booted to a volume called /HD1, you could make a subdirectory on this disk called A2OSX.  You would then set your PREFIX to /HD1/A2OSX and launch A2OSX.SYSTEM and the rest of the boot process outlined above would be followed.  Please see the section on Installation for more information on putting A2OSX on your own media.
 
 ### Kernel Modules
 
@@ -165,7 +165,7 @@ Note: if only 2 virtual terminals are configured then OA-3 and OA-4 will have no
 
 A2osX supports physical terminals (or a PC running a terminal emulator) via a Super Serial Card and the A2osX SSC.DRV driver.  You will need to set the switches on your SSC and the parameters of your terminal emulator to match and of course you will need the appropriate null modem cable.  The terminal type supported is VT-100, so please set your emulator to VT-100 mode.  A2osX does not support modems connected to your SSC at this time.
 
-a2osx supports as many physical terminals as you have SSC cards and memory to load drivers for each card and support those users.  note that if you are running the KM.VSDRIVE module, it takes the first SSC card that has is not configured for interrupts (likely slot 1 or 2).  So if you INSDRV SSC.DRV with KM.VSDRIVE loaded, then it will use the next card.  You have to load a driver for each card you want to handle a terminal.  You also have to start the GETTY process for each terminal.  the Terminals will be named /DEV/COMx where x is the slot the card is in. 
+A2osX supports as many physical terminals as you have SSC cards and memory to load drivers for each card and support those users.  Note that if you are running the KM.VSDRIVE module, it takes the first SSC card that is not configured for interrupts (likely slot 1 or 2).  So if you INSDRV SSC.DRV with KM.VSDRIVE loaded, then it will use the next card.  You have to load a driver for each card you want to handle as a terminal.  You also have to start the GETTY process for each terminal.  The Terminals will be named /DEV/COMx where x is the slot the card is in. 
 
 ### Internet Terminals
 
@@ -177,17 +177,18 @@ Please note, if you are using Telnet Client Software such as PuTTY for Windows a
 
 ### Hardware Requirements
 
-Minimum Hardware Requirements
-128K Enhanced (65C02) Apple //e
-Apple //c
-Apple //GS
+*Minimum Hardware Requirements*<br>
+128K Enhanced (65C02) Apple //e<br>
+Apple //c<br>
+Apple //GS<br>
+Minimum 140K 5.25 disk drive, 800K 3.5 strongly recommended.
 
 ### Supported Hardware
 
-Any ProDOS Block Device (5.25 & 3.5 Floppy Drives, SmartPort Hard Drive and Ram Disks)
-NoSlot Clock or ThunderClock
-Super Serial Card
-Mouse Card
+Any ProDOS Block Device (5.25 & 3.5 Floppy Drives, SmartPort Hard Drive and Ram Disks)<br>
+NoSlot Clock or ThunderClock<br>
+Super Serial Card<br>
+Mouse Card<br>
 Network Card (Uthernet I or II, LanCEgs)
 
 ## Getting Started
@@ -200,7 +201,7 @@ Download one of the available 32MB images from GitHub.  Open AppleWin and then c
 
 ### Installing on Your Apple
 
-Check HW requirements.  Installing on your own media / Selecting your Media
+First check hardware requirements.  Installing on your own media / Selecting your Media
 Check that you have enough free space if you are installing to your own ProDOS volume.  For the base A2osX boot you need under 200K of free space, but a complete install may take a megabyte or more.
 Configure
 Explore

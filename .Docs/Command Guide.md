@@ -8,7 +8,7 @@ A2osX comes with a nice variety of system, file, network and data utilities -- w
 
 ## System Commands
 
-Typcically, you will not directly use the System group commands; they are more commonly found in A2osX system scripts such as ./ETC/INIT or they are launched by the A2osX Kernel itself.  All of these commands are found in **./SBIN/** letting you know they are special system commands.
+Typically, you will not directly use the System group commands; they are more commonly found in A2osX system scripts such as ./ETC/INIT or they are launched by the A2osX Kernel itself.  All of these commands are found in **./SBIN/** letting you know they are special system commands.
 
 ### CIFSD
 
@@ -24,7 +24,7 @@ CIFSD is a utility for mounting CIFS shares as volumes on A2osX.  This utility i
 | --- | --- |
 | GETTY | -E : Exit upon disconnect |
 
-GETTY, short for "get tty", is a system process for A2osX that manages physical or virtual terminals (TTYs). When it detects a connection, it prompts for a username and then loads the system process LOGIN to authenticate the user.  Each GETTY process creates a pseudo file such as /DEV/TTY1 or /DEV/TTY2 to allow A2osX pass input/output streams between processes and connected users.
+GETTY, short for "get tty", is a system process for A2osX that manages physical or virtual terminals (TTYs). When it detects a connection, it prompts for a user name and then loads the system process LOGIN to authenticate the user.  Each GETTY process creates a pseudo file such as /DEV/TTY1 or /DEV/TTY2 to allow A2osX pass input/output streams between processes and connected users.
 
 GETTY handles 3 types of connections:
   * *virtual terminals* presented and controlled by your Apple Screen and Keyboard.  One GETTY process serves one virtual terminal.  You can configure the number of virtual terminals on your A2osX system using the KCONFIG utility.  Please see **[KCONFIG](#kconfig)**.
@@ -45,7 +45,7 @@ This is a stub, or a placeholder, for a new service being added to A2osX.  It wi
 | ---- |
 | INITD RunLevel |
 
-This is a stub, or a placeholder, for a new routine being added to A2osX.  It will replace part of the startup process and allow for different run levels to be initiated included RunLevel 0 or shutdown.  Full implementation is targeted for 0.94.
+This is a stub, or a placeholder, for a new routine being added to A2osX.  It will replace part of the start up process and allow for different run levels to be initiated included RunLevel 0 or shutdown.  Full implementation is targeted for 0.94.
 
 ### INSDRV
 
@@ -78,7 +78,7 @@ In KCONFIG you can set:
 | ---- |
 | LOGIN |
 
-LOGIN is a system process for A2osX that authenticates users against the A2osX User Database stored in ./ETC/PASSWD.  Once a user is authenicated, LOGIN then loads the SH (./BIN/SH) process passing it the PROFILE script found in the users Home directory.
+LOGIN is a system process for A2osX that authenticates users against the A2osX User Database stored in ./ETC/PASSWD.  Once a user is authenticated, LOGIN then loads the SH (./BIN/SH) process passing it the PROFILE script found in the users Home directory.
 
 ### NETWORKD
 
@@ -96,17 +96,17 @@ This system command loads one or more libraries providing network services to A2
 
 TELNETD is a server process that listens for incoming requests to connect to your A2osX system.  By default it listens on Port 23.  You can change the Telnet Server port by starting the TELNETD process with the --d option and specifying an alternate port.  Typically this would be used to get around local firewall or port restrictions such as when you are running your server at home on a DSL or Cable connection and your provider blocks port 23.  In addition, if you are running in an environment with only one public IP address and you have another system at that site already running a Telnet server, you can use this option to move your A2osX host to alternate port.
 
-When TELNETD detects an incoming request it starts a GETTY process and creates a virtual internet terminal for the user and begins the LOGIN process same as the system would for a hardwired terminal.  Note TELNETD requires that you have a supported ethernet card and have configured your system for a network appropriately.
+When TELNETD detects an incoming request it starts a GETTY process and creates a virtual internet terminal for the user and begins the LOGIN process same as the system would for a hardwired terminal.  Note TELNETD requires that you have a supported Ethernet card and have configured your system for a network appropriately.
 
 ## BIN/External Shell commands:
 
-The BIN or "External" shell commands are the tools used by most users to display and manipulate data stored on their A2osX system.  Typcical commands allow you to display directory contents (LS), display file contents (CAT), copy files (CP), delete files (RM), etc.  These commands are found in **./BIN/** letting you know they are normal user commands.
+The BIN or "External" shell commands are the tools used by most users to display and manipulate data stored on their A2osX system.  Typical commands allow you to display directory contents (LS), display file contents (CAT), copy files (CP), delete files (RM), etc.  These commands are found in **./BIN/** letting you know they are normal user commands.
 
 ### BMP2PIX
 
 | Command | Options |
 | ----- | --- |
-| BMP2PIX BMP-File | -V : Versbose Mode |
+| BMP2PIX BMP-File | -V : Verbose Mode |
 
 BMP2PIX is a graphics conversion utility that will make PIX format files from standard PC format BMP graphics files.  The PIX format is used by A2osX to display logos and icons.
 
@@ -114,7 +114,7 @@ BMP2PIX is a graphics conversion utility that will make PIX format files from st
 
 | Command | Options |
 | --- | --- |
-| CAT filename | -A : Show All non printable caracters <br> -N : Number all output lines <br> -S : Suppress repeated empty output lines |
+| CAT filename | -A : Show All non printable characters <br> -N : Number all output lines <br> -S : Suppress repeated empty output lines |
 
 The CAT command is used to display the contents of files stored on any ProDOS volume.  While the primary use of this tool is to display the contents of TEXT or TXT files, it can be used to display the contents of other files by using the -A option, which will substitute non-printable characters with readable and displayable values such as [EOF] for End of File (Hex x04) or [LF] for Line Feed (Hex x0A).  In addition you can use the -N option to display the listing of a file with line numbers.
 
@@ -212,7 +212,7 @@ CSH is one of the interactive and script processing shells under development for
 | --- | --- |
 | CUT \<opt\> "line"   or  <br>  CMD \| CUT \<opt\> |  -H : This help screen <br> -F nn : Output field nn <br> -M nn : Output starting at nn <br> -N nn : Output Ending at nn <br> -S ch : Change default SPACE separator to 'ch' |
 
-The CUT command is used to extract a subpart or portion of a string.  Use this command to simply extract substrings much like Basic's MID, LEFT, or RIGHT might be used. It can also be used within the powerful FOR NEXT construct to process fields of columns from files or the output of processes.
+The CUT command is used to extract a sub-part or portion of a string.  Use this command to simply extract sub-strings much like Basic's MID, LEFT, or RIGHT might be used. It can also be used within the powerful FOR NEXT construct to process fields of columns from files or the output of processes.
 
 As an example, normally when you execute the **LS -L /** command you get output similar to:
 
@@ -344,7 +344,7 @@ MKDIR will create a new empty directory based on the filespec.  If a simple file
 | --- | --- |
 | MORE \<File\> or <br> CMD\|MORE \<opt\> | -H : This help screen <br> -N : Number all output lines <br> -P : Page mode, no scroll <br> -S : Process ESC codes
 
-The MORE utility allows you to scroll through the output of a file or command one screenfull or line at a time.  You can use MORE on existing text files, or in conjunction with the PIPE facility (\|)  you can direct the output of a command or script to MORE to page through that output.  This can be very useful for long directory listings `LS -L | MORE`.
+The MORE utility allows you to scroll through the output of a file or command one screen full or line at a time.  You can use MORE on existing text files, or in conjunction with the PIPE facility (\|)  you can direct the output of a command or script to MORE to page through that output.  This can be very useful for long directory listings `LS -L | MORE`.
 
 ### MV
 
@@ -354,7 +354,7 @@ The MORE utility allows you to scroll through the output of a file or command on
 
 The MV command moves files (and directories) from one directory of an A2osX file system to another directory on that same or a different file system.  MV like the CP command can operate on a single file, a set files using wildcards, a directory or entire directory tree with the Recurse option (-R).  Unlike CP, MV does not just copy files to the new destination it removes them from the source once the copy has been completed.
 
-If you are copying an entire directory structure using the Recurse option, MV will not only copy all the files it will create the necessary directories as well and then delete both the source files and directories.  Be sure that your destination has sufficent space to hold the files as running out of space mid-copy could result in the directory tree you are attempting to move becoming split between the old and new location. 
+If you are copying an entire directory structure using the Recurse option, MV will not only copy all the files it will create the necessary directories as well and then delete both the source files and directories.  Be sure that your destination has sufficient space to hold the files as running out of space mid-copy could result in the directory tree you are attempting to move becoming split between the old and new location. 
 
 Normally MV displays each file name being moved.  With the Quiet option (-Q), this output is suppressed.  The Quiet option may be helpful in scripts where maintaining control of the display is important.
 
@@ -372,7 +372,7 @@ NSCUTIL is a tool for setting the time of a No Slot Clock or DL1216E.
 | --- | --- |
 | PAK Archive [File/Dir, *,? wildcards allowed\]| -A: Append to Archive<br> -R: Recurse subdirectories |
 
-PAK is a utility for combining multiple files into a single compact archive.  Use the UNPAK utility to separate the files back out.  PAK is great for software destribution and installation as it allows the developer to gather up all the files that make up an application into a single distributable archive. 
+PAK is a utility for combining multiple files into a single compact archive.  Use the UNPAK utility to separate the files back out.  PAK is great for software distribution and installation as it allows the developer to gather up all the files that make up an application into a single distributable archive. 
 
 ### PS
 
@@ -399,6 +399,14 @@ Normally RM displays each file name being deleted.  With the Quiet option (-Q), 
 | SH Script |
 
 SH is one of the interactive and script processing shells under development for A2osX. The SH shell is similar to the BASH Shell in Linux and uses primarily the BASH syntax structure for scripting.  A SH Shell Developers Guide is available in the Documentation Library of A2osX.
+
+### UNPAK
+
+| Command | 
+| --- |
+| UNPAK Archive |
+
+UNPAK is a utility for extracting files from an A2osxX archive created with the PAK utility (See PAK above).
 
 ### USERADD
 
@@ -434,7 +442,7 @@ The WHO command displays a list of users currently logged into the A2osX system 
 
 ## Network Tools
 
-The Network Tools group of comands allow you to load or start networking services, option IP addresses, connect to other systems, or get the status of your network.  Some of these commands are designed specifically as user programs such as Telnet to interactively connect to another computer such as a BBS.  Others are intended to be used by system scripts for loading and initializing the network, though they can be run on the command line and therefore are explained here.  These commands are found in **./BIN/** letting you know they are user commands.
+The Network Tools group of commands allow you to load or start networking services, option IP addresses, connect to other systems, or get the status of your network.  Some of these commands are designed specifically as user programs such as Telnet to interactively connect to another computer such as a BBS.  Others are intended to be used by system scripts for loading and initializing the network, though they can be run on the command line and therefore are explained here.  These commands are found in **./BIN/** letting you know they are user commands.
 
 ###ARP
 
@@ -458,7 +466,7 @@ The DNSINFO command can display the current DNS cache or setup a new static DNS 
 | ----- |
 | HTTPD |
 
-HTTPD is a server process thats listens for incomming requests to server web pages from your A2osX system.  It listens for these requests on port 80.  This server process is in development and is in fact being used for test purposes only right now.  Further document and options will be made available in a future A2osX release.  Network services must be started to use this command.
+HTTPD is a server process that listens for incoming requests to server web pages from your A2osX system.  It listens for these requests on port 80.  This server process is in development and is in fact being used for test purposes only right now.  Further document and options will be made available in a future A2osX release.  Network services must be started to use this command.
 
 ### HTTPGET 
 
