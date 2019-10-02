@@ -10,8 +10,10 @@ NEW
 				.INB INC/LIBPAK.I
 *--------------------------------------
 ZPSrcPtr		.EQ ZPLIB
-ZPSrcWPtr		.EQ ZPLIB+2
-ZPCnt			.EQ ZPLIB+4
+ZPCnt			.EQ ZPLIB+2
+ZPSrcBLPtr		.EQ ZPLIB+4
+ZPBLCnt			.EQ ZPLIB+6
+ZPCntTmp		.EQ ZPLIB+8
 
 ZPDstPtr		.EQ ZPLIB+16
 ZPStatPtr		.EQ ZPLIB+18
@@ -33,6 +35,8 @@ CS.START		cld
 .1				.DA LIB.LOAD
 				.DA LIB.UNLOAD
 				.DA Pak
+L.MSG.Stats		.DA MSG.Stats
+L.MSG.Top24		.DA MSG.Top24
 				.DA 0
 *--------------------------------------
 LIB.LOAD
@@ -40,12 +44,15 @@ LIB.UNLOAD		clc
 				rts
 */--------------------------------------
 * # Pak
-* **In:**
 * ##ASM 
-* PUSHW = S.PAKSTAT Ptr
-* PUSHW = Output Buffer Ptr
-* PUSHW = Input Buffer Len
-* PUSHW = Input Buffer Ptr 
+* `>PUSHW StatPtr`
+* `>PUSHW DstPtr`
+* `>PUSHW SrcLen`
+* `>PUSHW SrcPtr`
+* `>LIBCALL hLIBPAK,Pak`
+* ## RETURN VALUE 
+* CC, Y,A = CLEN
+* CS, Pak failure
 *\--------------------------------------
 Pak				>PULLW Pak.SrcPtr
 				>PULLW Pak.SrcLen
@@ -60,7 +67,32 @@ Pak				>PULLW Pak.SrcPtr
 				stz Pak.CntH,x
 				inx
 				bne .1
+
+* Select best BL.BitCnt
+
+				ldx #8
+				ldy #0
 				
+				lda Pak.SrcLen+1
+				beq .22
+					
+				ldy #8
+					
+.2				asl
+				bcs .4
+				dey
+				bra .2
+				
+.22				lda Pak.SrcLen
+
+.3				asl
+				bcs .4
+				dex
+				bra .3
+
+.4				stx Pak.BL.BitCntL
+				sty Pak.BL.BitCntH
+
 * PASS #1 : no store, update byte counters
 
 				stz Pak.bPass2
@@ -69,8 +101,10 @@ Pak				>PULLW Pak.SrcPtr
 
 				jsr Pak.Run
 				bcs .9
-				
+
 				jsr Pak.BuildTOPTable
+
+				jsr Pak.PrintStats
 				
 * PASS #2 : store with TOP bytes
 
@@ -84,31 +118,28 @@ Pak				>PULLW Pak.SrcPtr
 				
 				jsr Pak.Run
 				bcs .9
+				jsr Pak.PrintStats
 				
 				ldy #S.PAKSHNK-1
 				
-.2				lda Pak.Shnk,y
+.6				lda Pak.Shnk,y
 				
 				dey
-				bpl .2
+				bpl .6
 				
 				ldy #S.PAKSTAT-1
 				
-.3				lda Pak.Stat,y
+.7				lda Pak.Stat,y
 				sta (ZPStatPtr),y
 				dey
-				bpl .3
+				bpl .7
 				
 				clc
-				rts
 
-.9				lda #E.OOM
-				sec
-				rts		
+.9				rts		
 *--------------------------------------
 Pak.InitPass	>LDYA Pak.SrcPtr
 				>STYA ZPSrcPtr
-				>STYA Pak.WPtr
 				
 				lda Pak.SrcLen
 				eor #$ff
@@ -117,8 +148,9 @@ Pak.InitPass	>LDYA Pak.SrcPtr
 				lda Pak.SrcLen+1
 				eor #$ff
 				sta Pak.SrcCnt+1
-
-				stz Pak.RepCnt
+				
+				sec
+				ror Pak.RepCnt
 				stz Pak.LastByte
 				
 				ldx #S.PAKSTAT.PASS1
@@ -135,168 +167,134 @@ Pak.InitPass	>LDYA Pak.SrcPtr
 				
 				rts
 *--------------------------------------
-Pak.Run			lda #$ff
-				cmp Pak.SrcCnt+1		return 255 if not $ffxx
+Pak.Run			
+
+Pak.Run.1		inc Pak.SrcCnt
 				bne .1
 				
-				lda Pak.SrcCnt
-				eor #$ff				return !xx if $ffxx
+				inc Pak.SrcCnt+1
 				beq .8					0 byte left...
 				
-.1				cmp #4					less than 4 chars, give up BL						
-				bcc .4
+.1				jsr Pak.ScanBL
+				bcs .4
 				
-				sta Pak.MaxReadAhead
-				stz Pak.BestBLLen
+				bit Pak.bPass2
+				bpl .11
 				
-				ldx #3
-				
-.2				inx
-				jsr Pak.ScanBL
-				bcs .3
-				>STYA Pak.BestBL
-				stx Pak.BestBLLen
-				
-				cpx Pak.MaxReadAhead
-				bne .2
-				
-.3				lda Pak.BestBLLen
-				beq .4					NO BL found....
-				
-				lda Pak.BestBL+1
-				ora #PAK.B.BACKLINK     %1110 + Ofs.HI
-				jsr Pak.PutA
-				bcs .9
-				
-				lda Pak.BestBL			get Ofs.LO
-				jsr Pak.PutA
-				bcs .9
-				
-				lda Pak.BestBLLen		get back len
-				jsr Pak.PutA
-				bcs .9
-				
-				lda Pak.BestBLLen
-				jsr Pak.SrcForward
-				
-				ldx #S.PAKSTAT.BL
+				ldx #S.PAKSTAT.PASS1
+				jsr Pak.UpdateStats
+				jsr Pak.UpdateStats
 				jsr Pak.UpdateStats
 				
-				bra Pak.Run
-
-.4				lda (ZPSrcPtr)
-
-				jsr Pak.PutA
-				bcs .9
+				bra .3
 				
-				lda #1
-				jsr Pak.SrcForward
+.11				sec
+				lda Pak.Out.PutBitC
 				
-				bra Pak.Run
+				ldy Pak.BL.BitCntH
+				beq .2
 				
-.8				lda Pak.RepCnt			do we have a pending REP ?
-				beq .80
+				lda Pak.BestBL+1
+				jsr Pak.Out.PutYBits
 				
-				ora #PAK.B.REPn			yes, add it
-				jmp  Pak.PutA.1
+.2				ldy Pak.BL.BitCntL
+				lda Pak.BestBL
+				jsr Pak.Out.PutYBits
 				
-.80				clc				
-.9				rts
-*--------------------------------------
-Pak.SrcForward	pha						Len
-
+				ldy #6
+				lda Pak.BestBLLen
+				jsr Pak.Out.PutYBits
+				
+				lda Pak.BestBLLen
 				clc
 				adc ZPSrcPtr
 				sta ZPSrcPtr
-				bcc .1
-				clc
+				bcc .3
 				inc ZPSrcPtr+1
 				
-.1				pla
+.3				ldx #S.PAKSTAT.BL
+				jsr Pak.UpdateStats
+				
+				lda Pak.BestBLLen
+				clc
 				adc Pak.SrcCnt
 				sta Pak.SrcCnt
-				bcc .2
+				bcc .1
 				inc Pak.SrcCnt+1
+				bmi .1
+			
+.8				clc				
+.9				rts
 				
-.2				sec
-				lda ZPSrcPtr
-				sbc #WSIZE
-				tay
-				lda ZPSrcPtr+1
-				sbc /WSIZE
-				tax
+.4				lda (ZPSrcPtr)
+				jsr Pak.PutA
 				
-				cpy Pak.WPtr
-				sbc Pak.WPtr+1
-				bcc .8
-
-				sty Pak.WPtr
-				stx Pak.WPtr+1
-.8				rts
+				inc ZPSrcPtr
+				bne Pak.Run.1
+				inc ZPSrcPtr+1
+				bra Pak.Run.1
 *--------------------------------------
-* Scan between Pak.WPtr & ZPSrcPtr-A
-* Byte string at ZPSrcPtr (len A)
-* IN : X = Byte string length
-* OUT : CC: Y,A=offset to BL
-*--------------------------------------
-Pak.ScanBL		stx Pak.WStrLen
-
+Pak.ScanBL		>LDYA Pak.SrcPtr
+				>LDYA ZPSrcBLPtr
+				
 				sec
-				lda ZPSrcPtr			WLimit=ZPSrcPtr-WStrLen
-				sbc Pak.WStrLen
-				sta Pak.WLimit
+				ror Pak.bBLFound
 				
-				lda ZPSrcPtr+1
-				sbc #0
-				sta Pak.WLimit+1
+.1				sec
+				lda ZPSrcBLPtr
+				sbc ZPSrcPtr
+				sta ZPBLCnt
 				
-				lda Pak.WLimit
-				sec
-				sbc Pak.WPtr
-				eor #$ff
-				sta Pak.Cnt
+				lda ZPSrcBLPtr+1
+				sbc ZPSrcPtr+1
+				sta ZPBLCnt+1			ZPSrcBLPtr < !BlCnt < ZPSrcPtr 
+				bcs .8					ZPSrcBLPtr = ZPSrcPtr, exit
+				
+				>LDYA ZPCnt
+				>STYA ZPCntTmp			Stop at end of Src Data
+				
+				ldy #0					...or Y = BL.MAX
 
-				lda Pak.WLimit+1
-				sbc Pak.WPtr+1
-				eor #$ff
-				sta Pak.Cnt+1
+.2				inc ZPBLCnt
+				bne .3
 				
-				bcc .9					WLimit < Pak.WPtr
+				inc ZPBLCnt+1
+				beq .4					ZPSrcBLPtr = ZPSrcPtr	
 				
-				lda Pak.WPtr
-				sta ZPSrcWPtr
+.3				lda (ZPSrcPtr),y
+				cmp (ZPSrcBLPtr),y
+				bne .4					End of string matching
 				
-				lda Pak.WPtr+1
-				sta ZPSrcWPtr+1
-
-				ldy #0
-
-.1				lda (ZPSrcWPtr),y		
-				cmp (ZPSrcPtr),y
-				bne .6
 				iny
-				cpy Pak.WStrLen
-				bne .1
-				sec
-				lda ZPSrcPtr
-				sbc ZPSrcWPtr
-				tay
-				lda ZPSrcPtr+1
-				sbc ZPSrcWPtr+1
+				cpy #BL.MAX
+				beq .4					Max BL len
 				
-				clc
-				rts
+				inc ZPCntTmp
+				bne .2
+				inc ZPCntTmp+1
+				bne .2					Last Src Data
 				
-.6				inc ZPSrcWPtr
-				bne .7
-				inc ZPSrcWPtr+1
+.4				dey						Adjust BL len Range
+				dey						(0 = 3 matching chars...etc..)
 				
-.7				inc Pak.Cnt				
-				bne .1
-				inc Pak.Cnt+1
-				bne .1
+				bmi .5					not long enough
+				
+				cpy Pak.BestBLLen
+				bcs .5					not better ...
+				
+				sty Pak.BestBLLen
+				>LDYA ZPBLCnt
+				>STYA Pak.BestBL
 
-.9				sec
+				stz Pak.bBLFound
+	
+.5				inc ZPSrcBLPtr
+				bne .1
+				inc ZPSrcBLPtr+1
+				bra .1
+				
+.8				rol Pak.bBLFound
+
 				rts
 *--------------------------------------
 Pak.BuildTOPTable
@@ -310,8 +308,8 @@ Pak.BuildTOPTable
 				
 				ldx #0
 				
-.2				lda Pak.Cnt
-				ora Pak.Cnt+1
+.2				lda Pak.CntL,x
+				ora Pak.CntH,x
 				beq .3
 
 				stz Pak.bStop
@@ -344,11 +342,28 @@ Pak.BuildTOPTable
 				cpy #24
 				bne .1
 				
-.8				sty Pak.TopCnt
+.8				sty Pak.Shnk+S.PAKSHNK.TOPCNT
 				
 				rts
 *--------------------------------------
-Pak.PutA		bit Pak.RepCnt
+Pak.PutA		bit Pak.bPass2
+				bmi Pak.PutA.2
+				
+				tax
+				inc Pak.CntL,x
+				bne .1
+
+				inc Pak.CntH,x				
+
+.1				ldx #S.PAKSTAT.PASS1
+				jsr Pak.UpdateStats
+				ldx #S.PAKSTAT.BYTE8
+				jsr Pak.UpdateStats
+				
+				clc
+				rts
+
+Pak.PutA.2		bit Pak.RepCnt
 				bpl .1
 
 				stz Pak.RepCnt			LastByte invalid...		
@@ -375,7 +390,7 @@ Pak.PutA		bit Pak.RepCnt
 				
 .3				inc Pak.RepCnt
 				lda Pak.RepCnt
-				cmp #REPMAX
+				cmp #REP.MAX
 				bne .8
 
 				dec
@@ -441,7 +456,7 @@ Pak.PutA.1		bit Pak.bPass2
 Pak.Flush		ldx Pak.StringLen 
 				beq .8
 				
-				lda #PAK.B.STOREn
+				lda #PAK.B.STRING
 				ldy #4
 				jsr Pak.Out.PutYBits
 				bcs .9
@@ -472,11 +487,43 @@ Pak.UpdateStats	inc Pak.Stat,x
 				inc Pak.Stat+1,x
 .8				rts
 *--------------------------------------
+Pak.PrintStats	ldx #14
+
+.1				>PUSHW Pak.Stat,x
+				dex
+				dex
+				bpl .1
+				
+				>PUSHBI 16
+				>LDYA L.MSG.Stats
+				>SYSCALL printf
+				
+				ldx #24
+				
+.2				>PUSHB Pak.Shnk+S.PAKSHNK.TOPCNT,x
+				dex
+				bpl .2
+				
+				>PUSHBI 25
+				>LDYA L.MSG.Top24
+				>SYSCALL printf
+			>DEBUG
+				rts
+*--------------------------------------
 *				.INB USR/SRC/LIB/LIBPAK.S.IN
 				.INB USR/SRC/LIB/LIBPAK.S.OUT
 *--------------------------------------
 CS.END
 *--------------------------------------
+MSG.Stats		.AS "\r\nPass 1 : %5D\r\n"
+				.AS "Pass 2 : %5D\r\n"
+				.AS "Byte 8 : %5D\r\n"
+				.AS "Top  8 : %5D\r\n"
+				.AS "Top 16 : %5D\r\n"
+				.AS "Top 24 : %5D\r\n"
+				.AS "Rep  N : %5D\r\n"
+				.AZ "BLNK   : %5D\r\n"
+MSG.Top24		.AZ "Top24 : %d\r\n%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h\r\n"
 TOP.Bits		.DA #%10000,#%110000,#%1110000
 TOP.BitCnt		.DA #5,#6,#7
 TOP.Stat		.DA #S.PAKSTAT.TOP8,S.PAKSTAT.TOP16,S.PAKSTAT.TOP24
@@ -490,18 +537,22 @@ Pak.DstCnt		.BS 2
 Pak.RepCnt		.BS 1
 Pak.LastByte	.BS 1
 
-Pak.StringLen	.BS 1
-Pak.StringBuf	.BS STRINGMAX
+Pak.BL.BitCntL	.BS 1
+Pak.BL.BitCntH	.BS 1
 
-Pak.TopCnt		.BS 1
+Pak.bBLFound	.BS 1
+Pak.BestBLLen	.BS 1
+Pak.BestBL		.BS 2
+
+Pak.StringLen	.BS 1
+Pak.StringBuf	.BS STRING.MAX
+
 Pak.Cnt			.BS 2
 Pak.bStop		.BS 1
 
 Pak.bPass2		.BS 1
 Pak.MaxReadAhead	.BS 1
 
-Pak.BestBLLen	.BS 1
-Pak.BestBL		.BS 2
 Pak.WPtr		.BS 2
 Pak.WLimit		.BS 2
 Pak.WStrLen		.BS 1
