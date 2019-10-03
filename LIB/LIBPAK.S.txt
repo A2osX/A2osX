@@ -55,7 +55,7 @@ LIB.UNLOAD		clc
 * CS, Pak failure
 *\--------------------------------------
 Pak				>PULLW Pak.SrcPtr
-				>PULLW Pak.SrcLen
+				>PULLW Pak.Shnk+S.PAKSHNK.ULEN
 				>PULLW ZPDstPtr
 				>PULLW ZPStatPtr
 
@@ -73,7 +73,7 @@ Pak				>PULLW Pak.SrcPtr
 				ldx #8
 				ldy #0
 				
-				lda Pak.SrcLen+1
+				lda Pak.Shnk+S.PAKSHNK.ULEN+1
 				beq .22
 					
 				ldy #8
@@ -83,7 +83,7 @@ Pak				>PULLW Pak.SrcPtr
 				dey
 				bra .2
 				
-.22				lda Pak.SrcLen
+.22				lda Pak.Shnk+S.PAKSHNK.ULEN
 
 .3				asl
 				bcs .4
@@ -97,8 +97,6 @@ Pak				>PULLW Pak.SrcPtr
 
 				stz Pak.bPass2
 								
-				jsr Pak.InitPass
-
 				jsr Pak.Run
 				bcs .9
 
@@ -110,22 +108,14 @@ Pak				>PULLW Pak.SrcPtr
 
 				dec Pak.bPass2
 				
-				jsr Pak.InitPass
-
 				jsr Pak.Out.Init		Initialize properly for first "PutBit" Call
 
 				stz Pak.StringLen
-				
+
 				jsr Pak.Run
 				bcs .9
+
 				jsr Pak.PrintStats
-				
-				ldy #S.PAKSHNK-1
-				
-.6				lda Pak.Shnk,y
-				
-				dey
-				bpl .6
 				
 				ldy #S.PAKSTAT-1
 				
@@ -134,40 +124,61 @@ Pak				>PULLW Pak.SrcPtr
 				dey
 				bpl .7
 				
+				>LDYA Pak.Stat+S.PAKSTAT.PASS2
 				clc
 
 .9				rts		
 *--------------------------------------
-Pak.InitPass	>LDYA Pak.SrcPtr
-				>STYA ZPSrcPtr
-				
-				lda Pak.SrcLen
-				eor #$ff
-				sta Pak.SrcCnt
-				
-				lda Pak.SrcLen+1
-				eor #$ff
-				sta Pak.SrcCnt+1
+Pak.BuildTOPTable
+				ldy #0
+
+.1				stz Pak.Cnt				Init best score to 0
+				stz Pak.Cnt+1
 				
 				sec
-				ror Pak.RepCnt
-				stz Pak.LastByte
+				ror Pak.bStop
 				
-				ldx #S.PAKSTAT.PASS1
-				bit Pak.bPass2
-				bpl .1
+				ldx #0
 				
-				inx
-				inx
+.2				lda Pak.CntL,x
+				ora Pak.CntH,x
+				beq .3
+
+				stz Pak.bStop
+
+				lda Pak.Cnt
+				cmp Pak.CntL,x			is it better at X
+				lda Pak.Cnt+1
+				sbc Pak.CntH,x
+				bcs .3					not better or equal...
 				
-.1				stz Pak.Stat,x			Reset Stats
-				inx
-				cpx #S.PAKSTAT
+				stx Pak.LastByte		save new score index...
+				
+				lda Pak.CntL,x
+				sta Pak.Cnt				...and value
+				lda Pak.CntH,x
+				sta Pak.Cnt+1
+				
+.3				inx
+				bne .2
+				
+				bit Pak.bStop
+				bmi .8
+				
+				lda Pak.LastByte
+				sta Pak.Shnk+S.PAKSHNK.TOPBYTES,y
+				tax
+				stz Pak.CntL,x			Discard this entry
+				stz Pak.CntH,x
+				iny
+				cpy #24
 				bne .1
+				
+.8				sty Pak.Shnk+S.PAKSHNK.TOPCNT
 				
 				rts
 *--------------------------------------
-Pak.Run			
+Pak.Run			jsr Pak.InitPass
 
 Pak.Run.1		inc Pak.SrcCnt
 				bne .1
@@ -179,7 +190,7 @@ Pak.Run.1		inc Pak.SrcCnt
 				bcs .4
 				
 				bit Pak.bPass2
-				bpl .11
+				bmi .11
 				
 				ldx #S.PAKSTAT.PASS1
 				jsr Pak.UpdateStats
@@ -234,8 +245,37 @@ Pak.Run.1		inc Pak.SrcCnt
 				inc ZPSrcPtr+1
 				bra Pak.Run.1
 *--------------------------------------
+Pak.InitPass	>LDYA Pak.SrcPtr
+				>STYA ZPSrcPtr
+				
+				lda Pak.Shnk+S.PAKSHNK.ULEN
+				eor #$ff
+				sta Pak.SrcCnt
+				
+				lda Pak.Shnk+S.PAKSHNK.ULEN+1
+				eor #$ff
+				sta Pak.SrcCnt+1
+				
+				sec
+				ror Pak.RepCnt
+				stz Pak.LastByte
+				
+				ldx #S.PAKSTAT.PASS1
+				bit Pak.bPass2
+				bpl .1
+				
+				inx
+				inx
+				
+.1				stz Pak.Stat,x			Reset Stats
+				inx
+				cpx #S.PAKSTAT
+				bne .1
+				
+				rts
+*--------------------------------------
 Pak.ScanBL		>LDYA Pak.SrcPtr
-				>LDYA ZPSrcBLPtr
+				>STYA ZPSrcBLPtr
 				
 				sec
 				ror Pak.bBLFound
@@ -276,11 +316,13 @@ Pak.ScanBL		>LDYA Pak.SrcPtr
 				
 .4				dey						Adjust BL len Range
 				dey						(0 = 3 matching chars...etc..)
+				dey
 				
 				bmi .5					not long enough
 				
 				cpy Pak.BestBLLen
-				bcs .5					not better ...
+				bcc .5					not better ...
+				beq .5					same...
 				
 				sty Pak.BestBLLen
 				>LDYA ZPBLCnt
@@ -288,6 +330,8 @@ Pak.ScanBL		>LDYA Pak.SrcPtr
 
 				stz Pak.bBLFound
 	
+				jsr PrintBL
+
 .5				inc ZPSrcBLPtr
 				bne .1
 				inc ZPSrcBLPtr+1
@@ -297,53 +341,36 @@ Pak.ScanBL		>LDYA Pak.SrcPtr
 
 				rts
 *--------------------------------------
-Pak.BuildTOPTable
+PrintBl			lda #'{'
+				>SYSCALL putchar
+				
 				ldy #0
-
-.1				stz Pak.Cnt				Init best score to 0
-				stz Pak.Cnt+1
+				ldx Pak.BestBLLen
+				inx
+				inx
+				inx
 				
-				sec
-				ror Pak.bStop
-				
-				ldx #0
-				
-.2				lda Pak.CntL,x
-				ora Pak.CntH,x
-				beq .3
-
-				stz Pak.bStop
-
-				lda Pak.Cnt
-				cmp Pak.CntL,x			is it better at X
-				lda Pak.Cnt+1
-				sbc Pak.CntH,x
-				bcs .3					not better or equal...
-				
-				stx Pak.In.Byte			save new score index...
-				
-				lda Pak.CntL,x
-				sta Pak.Cnt				...and value
-				lda Pak.CntH,x
-				sta Pak.Cnt+1
-				
-.3				inx
-				bne .2
-				
-				bit Pak.bStop
-				bmi .8
-				
-				lda Pak.In.Byte
-				sta Pak.Shnk+S.PAKSHNK.TOPBYTES,y
-				tax
-				stz Pak.CntL,x			Discard this entry
-				stz Pak.CntH,x
+.40				lda (ZPSrcBLPtr),y
+				phy
+				phx
+				cmp #C.SPACE
+				bcs .41
+	
+				lda #'_'
+.41				>SYSCALL putchar
+				plx
+				ply
 				iny
-				cpy #24
-				bne .1
+				dex
+				bne .40
 				
-.8				sty Pak.Shnk+S.PAKSHNK.TOPCNT
-				
+				lda #'}'
+				>SYSCALL putchar
+				lda #C.CR
+				>SYSCALL putchar
+				lda #C.LF
+				>SYSCALL putchar
+				>DEBUG
 				rts
 *--------------------------------------
 Pak.PutA		bit Pak.bPass2
@@ -363,12 +390,14 @@ Pak.PutA		bit Pak.bPass2
 				clc
 				rts
 
-Pak.PutA.2		bit Pak.RepCnt
+Pak.PutA.2		bra Pak.PutA.2.Out
+
+				bit Pak.RepCnt
 				bpl .1
 
 				stz Pak.RepCnt			LastByte invalid...		
 				sta Pak.LastByte
-				bra Pak.PutA.1			send first byte.
+				bra Pak.PutA.2.Out		send first byte.
 				
 .1				cmp Pak.LastByte
 				beq .3
@@ -378,7 +407,7 @@ Pak.PutA.2		bit Pak.RepCnt
 				beq .2
 				
 				ora #PAK.B.REPn			yes, send it
-				jsr  Pak.PutA.1
+				jsr  Pak.PutA.2.Out
 				bcs .9
 
 				ldx #S.PAKSTAT.REPN
@@ -386,7 +415,7 @@ Pak.PutA.2		bit Pak.RepCnt
 				stz Pak.RepCnt
 				
 .2				lda Pak.LastByte
-				bra Pak.PutA.1
+				bra Pak.PutA.2.Out
 				
 .3				inc Pak.RepCnt
 				lda Pak.RepCnt
@@ -395,7 +424,7 @@ Pak.PutA.2		bit Pak.RepCnt
 
 				dec
 				ora #PAK.B.REPn
-				jsr Pak.PutA.1
+				jsr Pak.PutA.2.Out
 				bcs .9
 				
 				lda #1
@@ -406,24 +435,8 @@ Pak.PutA.2		bit Pak.RepCnt
 				
 .8				clc
 .9				rts
-									
-Pak.PutA.1		bit Pak.bPass2
-				bmi .10
-				
-				tax
-				inc Pak.CntL,x
-				bne .11
-				inc Pak.CntH,x
-				
-.11				inc Pak.Stat+S.PAKSTAT.PASS1
-				bne .12
-				inc Pak.Stat+S.PAKSTAT.PASS1+1
-.12				clc
-				rts
-				
-* Pak.PutA.1  PASS #2
-				
-.10				ldy #S.PAKSHNK.TOPCNT
+
+Pak.PutA.2.Out	ldy Pak.Shnk+S.PAKSHNK.TOPCNT
 
 .1				cmp Pak.Shnk+S.PAKSHNK.TOPBYTES-1,y
 				beq .3
@@ -440,7 +453,7 @@ Pak.PutA.1		bit Pak.bPass2
 				lsr
 				lsr
 				lsr
-				tax
+				tax						Range 0-2
 				tya
 				and #7
 				ora TOP.Bits,x
@@ -482,6 +495,102 @@ Pak.Flush		ldx Pak.StringLen
 .8				clc				
 .9				rts
 *--------------------------------------
+Pak.Out.Init	lda Pak.Shnk+S.PAKSHNK.TOPCNT
+				jsr Pak.Out.PutByte
+				bcs .9
+				
+				ldy #0
+				
+.1				lda Pak.Shnk+S.PAKSHNK.TOPBYTES
+				jsr Pak.Out.PutByte
+				bcs .9
+
+				iny
+				cpy Pak.Shnk+S.PAKSHNK.TOPCNT
+				bne .1
+				
+				lda #$80
+				sta Pak.Out.Mask
+				stz Pak.Out.Byte
+
+				clc				
+.9				rts
+*--------------------------------------
+Pak.Out.Close	bit Pak.Out.Mask
+				bmi .8
+				lda Pak.Out.Byte
+				jmp Pak.Out.PutByte
+.8				clc
+				rts
+*--------------------------------------
+Pak.Out.PutCA	jsr Pak.Out.PutBitC
+				bcs Pak.Out.Put.rts
+
+				ldy #8
+
+.1				asl
+				jsr Pak.Out.PutBitC
+				bcs Pak.Out.Put.rts
+				dey
+				bne .1
+Pak.Out.Put.rts	rts
+*--------------------------------------
+Pak.Out.PutYBits
+				asl
+				jsr Pak.Out.PutBitC
+				bcs .9
+				dey
+				bne Pak.Out.PutYBits
+.9				rts
+*--------------------------------------
+Pak.Out.PutBitC	pha
+
+				bcc .1
+				lda Pak.Out.Mask
+				tsb Pak.Out.Byte
+
+.1				lsr Pak.Out.Mask
+				bne .8
+
+				ror Pak.Out.Mask
+				
+				jsr Pak.Out.PutByte
+				bcs .9
+
+				
+
+.8				pla
+*				clc
+				rts
+
+.9				pla
+*				sec
+				rts
+*--------------------------------------
+Pak.Out.PutByte	inc Pak.DstCnt
+				bne .1
+
+				inc Pak.DstCnt+1
+				beq .9
+
+.1				sta (ZPDstPtr)
+
+				inc ZPDstPtr
+				bne .2
+				
+				inc ZPDstPtr+1
+
+.2				inc Pak.Stat+S.PAKSTAT.PASS2
+				bne .8
+
+				inc Pak.Stat+S.PAKSTAT.PASS2+1
+
+.8				clc
+				rts
+
+.9				sec
+				rts
+*--------------------------------------
 Pak.UpdateStats	inc Pak.Stat,x
 				bne .8
 				inc Pak.Stat+1,x
@@ -507,11 +616,8 @@ Pak.PrintStats	ldx #14
 				>PUSHBI 25
 				>LDYA L.MSG.Top24
 				>SYSCALL printf
-			>DEBUG
+
 				rts
-*--------------------------------------
-*				.INB USR/SRC/LIB/LIBPAK.S.IN
-				.INB USR/SRC/LIB/LIBPAK.S.OUT
 *--------------------------------------
 CS.END
 *--------------------------------------
@@ -523,13 +629,12 @@ MSG.Stats		.AS "\r\nPass 1 : %5D\r\n"
 				.AS "Top 24 : %5D\r\n"
 				.AS "Rep  N : %5D\r\n"
 				.AZ "BLNK   : %5D\r\n"
-MSG.Top24		.AZ "Top24 : %d\r\n%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h\r\n"
-TOP.Bits		.DA #%10000,#%110000,#%1110000
+MSG.Top24		.AZ "Top (%2d) : %h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h\r\n"
+TOP.Bits		.DA #PAK.B.TOP8,PAK.B.TOP16,PAK.B.TOP24
 TOP.BitCnt		.DA #5,#6,#7
-TOP.Stat		.DA #S.PAKSTAT.TOP8,S.PAKSTAT.TOP16,S.PAKSTAT.TOP24
+TOP.Stat		.DA #S.PAKSTAT.TOP8,#S.PAKSTAT.TOP16,#S.PAKSTAT.TOP24
 *--------------------------------------
 Pak.SrcPtr		.BS 2
-Pak.SrcLen		.BS 2
 
 Pak.SrcCnt		.BS 2
 Pak.DstCnt		.BS 2
@@ -551,14 +656,6 @@ Pak.Cnt			.BS 2
 Pak.bStop		.BS 1
 
 Pak.bPass2		.BS 1
-Pak.MaxReadAhead	.BS 1
-
-Pak.WPtr		.BS 2
-Pak.WLimit		.BS 2
-Pak.WStrLen		.BS 1
-
-Pak.In.Byte		.BS 1
-Pak.In.Mask		.BS 1
 
 Pak.Out.Byte	.BS 1
 Pak.Out.Mask	.BS 1
@@ -568,7 +665,6 @@ Pak.CntH		.BS 256
 Pak.Shnk		.BS S.PAKSHNK
 Pak.Stat		.BS S.PAKSTAT
 *--------------------------------------
-Pak.In.BitMask	.HS 8040201008040201
 MAN
 SAVE USR/SRC/LIB/LIBPAK.S
 ASM
