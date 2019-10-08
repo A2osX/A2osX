@@ -19,6 +19,17 @@ ZPPtr1			.BS 2
 ZPPtr2			.BS 2
 ZPPtrFD			.BS 2
 ZPPtrDevName	.BS 2
+
+ArgIndex		.BS 1
+
+hDevID			.BS 1
+bLL				.BS 1
+bCustomBlkSize 	.BS 1
+MediaBlkSize	.BS 2
+CatSize			.BS 1
+CatBlkCnt		.BS 1
+CatOptions		.BS 1
+
 ZS.END
 				.ED
 *--------------------------------------
@@ -51,77 +62,93 @@ L.MSG.INIT		.DA MSG.INIT
 L.FMT.BLANK		.DA FMT.BLANK
 				.DA 0
 *--------------------------------------
-CS.INIT			ldy #S.PS.ARGC
-				lda (pPs),y
-				beq .90
+CS.INIT			>LDYA L.LIBBLKDEV
+				>SYSCALL LoadLib
+				bcs .9
+				sta hLIBBLKDEV
 
-.1				>INC.G ArgIndex
+.9				rts
+*--------------------------------------
+CS.RUN			ldy #S.PS.ARGC
+				lda (pPs),y
+				beq .99
+
+.1				inc ArgIndex
+				lda ArgIndex
 				>SYSCALL ArgV
 				bcc .11
+				
 				jmp .8
+
 .11				>STYA ZPPtr1
 				lda (ZPPtr1)
 				cmp #'-'
 				bne .4
+
 				ldy #1 
 				lda (ZPPtr1),y
-				beq .90
+				beq .99
 
 				cmp #'0'
-				bcc .20
+				bcc .2
 				cmp #'9'+1
-				bcs .20
+				bcs .2
 				and #$0F
-				>STA.G CatSize
-				bra .1
-.20				ldx OptionList
-.2				cmp OptionList,x
-				beq .3
-				dex
-				bne .2
-.90				bra .99
-.3				ldy OptionVars-1,x
-				lda #$80
-				sta (pData),y
-				bra .1
-.4				>LDA.G hDevID
-				bne .5					Already have a dev...go get VolName
+				sta CatSize
+.10				bra .1
 
-				>LDYA ZPPtr1
-				>SYSCALL GetDevByName
+.2				jsr CS.RUN.CheckOpt
 				bcs .99
-				>STYA ZPPtrFD
-				txa
-				>STA.G hDevID
-				>LDYA ZPPtr1
-				>STYA ZPPtrDevName
+				
+				cpy #bCustomBlkSize
+				bne .1
+				
+				inc ArgIndex
+				lda ArgIndex
+				>SYSCALL ArgV
+				bcs .99
+				
+				>SYSCALL atoi
+				>STYA MediaBlkSize
 				bra .1
-.5				ldy #$ff
-.6				iny
-				lda (ZPPtr1),y
-				beq .61
-				cpy #15
-				beq .99					VolName too long
-
-.61				>PUSHW ZPPtr1
-				>LEA.G VolName
-				>SYSCALL StrCpy
-				jmp .1					success, scan for any other args
-
-.8				>LDYA L.LIBBLKDEV
-				>SYSCALL LoadLib
-				bcs .9
-				sta hLIBBLKDEV
-				clc
-.9				rts
+				
 .99				>PUSHBI 0
 				>LDYA L.MSG.USAGE
 				>SYSCALL printf
 				lda #E.SYN
 				sec
-				rts
+				rts			
+
+.4				lda hDevID
+				bne .5					Already have a dev...go get VolName
+
+				>LDYA ZPPtr1
+				>SYSCALL GetDevByName
+				bcs .99
+
+				>STYA ZPPtrFD
+				stx hDevID
+				>LDYA ZPPtr1
+				>STYA ZPPtrDevName
+				bra .10
+
+.5				ldy #$ff
+
+.6				iny
+				lda (ZPPtr1),y
+				sta (pData),y			VolName
+				beq .10
+
+				cpy #16
+				bcc .6
+				bra .99					VolName too long
+
+.8				lda hDevID
+				beq .99
 *--------------------------------------
-CS.RUN			jsr CS.RUN.InitCat
+CS.RUN.Format	jsr CS.RUN.GetBlockSize
+				bcs .9
+				jsr CS.RUN.InitCat
 				bcs .9
 				jsr CS.RUN.BuildCat
 				bcs .9
@@ -133,6 +160,7 @@ CS.RUN			jsr CS.RUN.InitCat
 				lda #0
 				sec
 				rts
+
 .9				pha
 				>PUSHA
 				>PUSHBI 1
@@ -142,10 +170,39 @@ CS.RUN			jsr CS.RUN.InitCat
 				sec
 				rts
 *--------------------------------------
-CS.RUN.InitCat	>LDA.G CatSize
+CS.RUN.GetBlockSize
+				lda bCustomBlkSize
+				bmi .8
+				
+				>PUSHEA.G DIB
+				lda hDevID
+
+				>SYSCALL GetDevStatus
+				bcs .9
+
+				>LDA.G DIB+S.DIB.SIZE
+				tax
+				iny
+				ora (pData),y
+				beq .9
+				
+				lda (pData),y
+				sta MediaBlkSize+1
+				stx MediaBlkSize
+.8				clc
+				rts
+
+.9				>LDYA L.MSG.NOSIZE
+				>SYSCALL puts
+				lda #MLI.E.IO
+				sec
+				rts
+*--------------------------------------
+CS.RUN.InitCat	lda CatSize
 				bne .1
+
 				lda #4
-				sta (pData),y
+				sta CatSize
 
 .1				>LDA.G VolName
 				bne .8					Volume name ok
@@ -157,44 +214,26 @@ CS.RUN.InitCat	>LDA.G CatSize
 				>LEA.G VolName
 				>SYSCALL sprintf
 				rts
+
 .8				clc
 				rts
 *--------------------------------------
-CS.RUN.BuildCat	>PUSHEA.G DIB
-				>LDA.G hDevID
-
-				>SYSCALL GetDevStatus
-				bcs .99
-				>LDA.G DIB+S.DIB.SIZE
-				iny
-				ora (pData),y
-				bne .1
-				>PUSHBI 0
-				>LDYA L.MSG.NOSIZE
-				>SYSCALL printf
-				lda #MLI.E.IO
-				sec
-				rts
-.1				>PUSHEA.G VolName
-				>PUSHW.G DIB+S.DIB.SIZE
+CS.RUN.BuildCat	>PUSHEA.G VolName
+				>PUSHW MediaBlkSize
 				>PUSHW ZPPtrDevName
 
 				>PUSHBI 6
 				>LDYA L.MSG.INIT
 				>SYSCALL printf
-.99				bcs .9
+				bcs .9
 
 				jsr .7
 
 				>LIBCALL hLIBBLKDEV,LIBBLKDEV.GetProDOSCatSize			
 				bcs .9
 
-				phy
-				pha
-				txa
-				>STA.G BlkCnt
-				pla
-				ply
+				stx CatBlkCnt
+
 				>SYSCALL GetMem0		BufferSize
 				bcs .9
 				phx
@@ -207,14 +246,14 @@ CS.RUN.BuildCat	>PUSHEA.G DIB
 				>LIBCALL hLIBBLKDEV,LIBBLKDEV.BuildProDOSCat
 .9				rts
 
-.7				>PUSHW.G DIB+S.DIB.SIZE
-				>PUSHB.G CatSize
-				>PUSHB.G CatOptions
+.7				>PUSHW MediaBlkSize
+				>PUSHB CatSize
+				>PUSHB CatOptions
 				rts
 *--------------------------------------
 CS.RUN.WriteCat	>PUSHEA.G IOCTL
 				>PUSHBI IOCTL.WRITEBLOCK		
-				>LDA.G hDevID
+				lda hDevID
 
 				>SYSCALL IOCTL
 				bcs .9
@@ -226,7 +265,7 @@ CS.RUN.WriteCat	>PUSHEA.G IOCTL
 				sta (pData),y
 				>INC.G IOCTL+S.IOCTL.BLKNUM
 				>SLEEP
-				>DEC.G BlkCnt
+				dec CatBlkCnt
 				bne CS.RUN.WriteCat
 .9				rts
 *--------------------------------------
@@ -242,6 +281,25 @@ CS.QUIT			>LDA.G hBuf
 .8				clc
 				rts
 *--------------------------------------
+CS.RUN.CheckOpt	ldy #1 
+				lda (ZPPtr1),y
+
+				ldx #OptionVars-OptionList-1
+
+.2				cmp OptionList,x
+				beq .3
+				dex
+				bpl .2
+
+				sec
+				rts
+
+.3				ldy OptionVars,x
+				ldx #$ff
+				stx 0,y
+				clc
+				rts
+*--------------------------------------
 CS.END
 *--------------------------------------
 LIBBLKDEV		.AZ "libblkdev"
@@ -249,6 +307,7 @@ hLIBBLKDEV		.BS 1
 *--------------------------------------
 MSG.USAGE		.AS "Usage : FORMAT <BLOCKDEV> [VOLUME.NAME]\r\n"
 				.AS "   -L : Low-Level Format\r\n"
+				.AS "   -B xxxx : override Device block size\r\n"
 				.AZ " -1-9 : Catalog Size (Blocks)\r\n"
 MSG.OK			.AZ "[OK]"
 MSG.ERR			.AZ "[%h]\r\n"
@@ -256,19 +315,14 @@ MSG.NOSIZE		.AZ "Unable to get media size."
 MSG.INIT		.AZ "Formatting %s (%D Blks),Volname:%s..."
 FMT.BLANK		.AZ "BLANK%H%H"
 *--------------------------------------
-OptionList		>PSTR "Ll"
-OptionVars		.DA #bLL,#bLL
+OptionList		.AS "LlBb"
+OptionVars		.DA #bLL,#bLL,#bCustomBlkSize,#bCustomBlkSize
 *--------------------------------------
 				.DUMMY
 				.OR 0
 DS.START
-ArgIndex		.BS 1
-bLL				.BS 1
 VolName			.BS 16
-hDevID			.BS 1
-CatSize			.BS 1
-CatOptions		.BS 1
-BlkCnt			.BS 1
+
 IOCTL			.BS S.IOCTL
 hBuf			.BS 1
 DIB				.BS S.DIB
