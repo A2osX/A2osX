@@ -147,7 +147,7 @@ Pak.Run.1		inc Pak.SrcCnt
 				bcc .2
 
 				lda (ZPSrcPtr)			Not found...
-				jsr Pak.PutA
+				jsr Pak.PutByte
 				bcs .9
 				
 				inc ZPSrcPtr
@@ -306,7 +306,7 @@ Pak.ScanBL		>LDYA Pak.SrcPtr		Start at beginning of Src buf
 				cpy #BL.MAX
 				bne .2					Max BL len
 				
-.6				cpy #4
+.6				cpy #BL.MIN
 				bcc .7					not long enough
 
 				cpy Pak.BestBLLen
@@ -367,8 +367,9 @@ Pak.PutBL		ldx #S.PAKSTAT.BL
 				clc
 				rts
 				
-.20				sec
-				lda Pak.Out.PutBitC
+.20				ldy #PAK.B.BL.W
+				lda #PAK.B.BL
+				jsr Pak.Out.PutYBits
 				
 				ldy Pak.BL.OfsBitsH
 				beq .2
@@ -391,16 +392,35 @@ Pak.PutBL		ldx #S.PAKSTAT.BL
 				
 .9				rts
 *--------------------------------------
-Pak.PutA		bit Pak.bPass2
-				bmi Pak.PutA.2
+Pak.PutByte		bit Pak.bPass2
+				bmi Pak.PutByte.2
 				
-				tax
-				inc Pak.CntL,x
+				cmp Pak.LastByte
+				sta Pak.LastByte
+				bne .5
+				
+				inc Pak.RepCnt
+				lda Pak.RepCnt
+				cmp #REP.MAX
 				bne .1
+				
+				jsr Pak.FlushREP
+								
+.1				clc
+				rts
+				
+.5				tax
+				inc Pak.CntL,x
+				bne .6
 
 				inc Pak.CntH,x
+				
+.6				lda Pak.RepCnt
+				beq .8					No pending RepN
+				
+				jsr Pak.FlushREP
 
-.1				ldx #S.PAKSTAT.PASS1
+.8				ldx #S.PAKSTAT.PASS1
 				jsr Pak.UpdateStats
 				
 				ldx #S.PAKSTAT.BYTE8
@@ -409,51 +429,7 @@ Pak.PutA		bit Pak.bPass2
 				clc
 				rts
 
-Pak.PutA.2		bra Pak.PutA.2.Out
-
-				bit Pak.RepCnt
-				bpl .1
-
-				stz Pak.RepCnt			LastByte invalid...		
-				sta Pak.LastByte
-				bra Pak.PutA.2.Out		send first byte.
-				
-.1				cmp Pak.LastByte
-				beq .3
-				
-				sta Pak.LastByte		save new byte
-				lda Pak.RepCnt			do we have a pending REP ?
-				beq .2
-				
-				ora #PAK.B.REPn			yes, send it
-				jsr  Pak.PutA.2.Out
-				bcs .9
-
-				ldx #S.PAKSTAT.REPN
-				jsr Pak.UpdateStats
-				stz Pak.RepCnt
-				
-.2				lda Pak.LastByte
-				bra Pak.PutA.2.Out
-				
-.3				inc Pak.RepCnt
-				lda Pak.RepCnt
-				cmp #REP.MAX
-				bne .8
-
-				dec
-				ora #PAK.B.REPn
-				jsr Pak.PutA.2.Out
-				bcs .9
-				
-				lda #1
-				sta Pak.RepCnt
-				
-				ldx #S.PAKSTAT.REPN
-				jsr Pak.UpdateStats
-				
-.8				clc
-.9				rts
+Pak.PutByte.2	
 
 Pak.PutA.2.Out	ldy Pak.Shnk+S.PAKSHNK.TOPCNT
 
@@ -486,34 +462,23 @@ Pak.PutA.2.Out	ldy Pak.Shnk+S.PAKSHNK.TOPCNT
 				jsr Pak.UpdateStats
 				jmp Pak.Out.PutYBits
 *--------------------------------------
-Pak.Flush		ldx Pak.StringLen 
-				beq .8
+Pak.FlushREP	bit Pak.bPass2
+				bmi Pak.FlushREP.2
 				
-				lda #PAK.B.STRING
-				ldy #4
-				jsr Pak.Out.PutYBits
-				bcs .9
+				ldx #S.PAKSTAT.REPN
+				jsr Pak.UpdateStats
 				
-				ldx #0
+				ldx #S.PAKSTAT.PASS1
+				jsr Pak.UpdateStats
 				
-.1				lda Pak.StringBuf,x
-				sta Pak.LastByte		update last byte for REP
-				ldy #8
-				jsr Pak.Out.PutYBits
-				bcs .9
+				stz Pak.RepCnt
+				clc
+				rts
 				
-				inc Pak.Stat+S.PAKSTAT.BYTE8
-				bne .2
-				inc Pak.Stat+S.PAKSTAT.BYTE8+1
-				
-.2				inx
-				dec Pak.StringLen
-				bne .1
+Pak.FlushREP.2
 
-				stz Pak.RepCnt			Don't forget to set last byte valid
-				
-.8				clc				
-.9				rts
+				clc
+				rts
 *--------------------------------------
 Pak.Out.Init	lda Pak.Shnk+S.PAKSHNK.TOPCNT
 				jsr Pak.Out.PutByte
@@ -529,8 +494,6 @@ Pak.Out.Init	lda Pak.Shnk+S.PAKSHNK.TOPCNT
 				cpy Pak.Shnk+S.PAKSHNK.TOPCNT
 				bne .1
 				
-				stz Pak.StringLen
-
 				lda #$80
 				sta Pak.Out.Mask
 				stz Pak.Out.Byte
@@ -694,7 +657,7 @@ MSG.Stats		.AS "\r\nPass 1 : %5D\r\n"
 				.AZ "BLNK   : %5D, Longest : %d (%d bits), Farest : %D (%d bits)\r\n"
 MSG.Top24		.AZ "Top (%2d) : %h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h\r\n"
 TOP.Bits		.DA #PAK.B.TOP8,PAK.B.TOP16,PAK.B.TOP24
-TOP.BitCnt		.DA #5,#6,#7
+TOP.BitCnt		.DA #PAK.B.TOP8.W,#PAK.B.TOP16.W,#PAK.B.TOP24.W
 TOP.Stat		.DA #S.PAKSTAT.TOP8,#S.PAKSTAT.TOP16,#S.PAKSTAT.TOP24
 *--------------------------------------
 Pak.SrcPtr		.BS 2
@@ -720,9 +683,6 @@ Pak.bStop		.BS 1
 
 Pak.RepCnt		.BS 1
 Pak.LastByte	.BS 1
-
-Pak.StringLen	.BS 1
-Pak.StringBuf	.BS STRING.MAX
 
 Pak.Out.Byte	.BS 1
 Pak.Out.Mask	.BS 1
