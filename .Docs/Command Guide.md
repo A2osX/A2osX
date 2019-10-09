@@ -258,9 +258,9 @@ There is a help screen
 
 | Command | Options |
 | --- | --- |
-| FORMAT \<BLOCKDEV\> [VOLUME.NAME] | -L : Low-Level Format *not currently supported <br> -1..9 : Catalog Size (block count) | 
+| FORMAT \<BLOCKDEV\> [VOLUME.NAME] | -B Blocks : Force number of blocks to format <br> -L : Low-Level Format *not currently supported <br> -1..9 : Catalog Size (block count) | 
 
-The FORMAT command will erase an existing volume and update its name to the VOLUME.NAME supplied.  FORMAT does not currently support low level formatting.  The Volume/Device to be formatted must already be formatted.  Specifically this means that FORMAT cannot format a new (never been formatted) floppy disc.
+The FORMAT command will erase an existing volume and update its name to the VOLUME.NAME supplied.  FORMAT does not currently support low level formatting.  The Volume/Device to be formatted must already be formatted.  Specifically this means that FORMAT cannot format a new (never been formatted) floppy disc.  Use the -B option to force a block count to format.  This is useful in AppleWin because of its non-standard implementation of SmartPort on Slot 7.
 
 ### GREP
 
