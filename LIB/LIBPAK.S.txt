@@ -124,10 +124,11 @@ Pak.Run			>LDYA Pak.SrcPtr
 				eor #$ff
 				sta Pak.SrcCnt+1
 				sta Pak.DstCnt+1
-				
-				sec
-				ror Pak.RepCnt
+
+				stz Pak.RepCnt
 				stz Pak.LastByte
+				
+				stz Pak.Out.ByteCnt
 				
 				ldx #S.PAKSTAT.PASS1
 				bit Pak.bPass2
@@ -147,23 +148,24 @@ Pak.Run.1		inc Pak.SrcCnt
 				inc Pak.SrcCnt+1
 				beq .8					0 byte left...
 				
-.1				jsr Pak.ScanRep
-				bcs .10
+.1				jsr Pak.ScanBL
+				bcs .2
+
+				jsr Pak.PutBL
+				bcs .9
+				
+				ldy Pak.BestBLLen
+				bra .6
+				
+.2				jsr Pak.ScanRep
+				bcs .20
 
 				jsr Pak.PutRep
 				bcs .9
 
 				ldy Pak.RepCnt
-				bra .6
-				
-.10				jsr Pak.ScanBL
-				bcs .20
+				stz Pak.RepCnt
 
-.2				jsr Pak.PutBL
-				bcs .9
-				
-				ldy Pak.BestBLLen
-				
 .6				tya
 				clc
 				adc ZPSrcPtr
@@ -178,8 +180,9 @@ Pak.Run.1		inc Pak.SrcCnt
 				bcc .1
 				inc Pak.SrcCnt+1
 				bmi .1
+				
+.8				jmp Pak.Out.Flush
 			
-.8				clc
 .9				rts
 
 .20				lda (ZPSrcPtr)			Not found...
@@ -412,15 +415,18 @@ Pak.PutRep		ldx #S.PAKSTAT.REPN
 				clc
 				rts
 				
-Pak.PutRep.2	lda Pak.RepCnt
+Pak.PutRep.2	jsr Pak.Out.Flush
+				bcs .9
+				
+				lda Pak.RepCnt
 				dec						remap 1-8 to 0-7 range
 
 				ldy #PAK.B.REPn.W
 				ora #PAK.B.REPn
 				
-				jsr Pak.Out.PutYBits
+				jmp Pak.Out.PutYBits
 				
-				rts
+.9				rts				
 *--------------------------------------
 Pak.PutBL		ldx #S.PAKSTAT.BL
 				jsr Pak.UpdateStats
@@ -454,9 +460,13 @@ Pak.PutBL		ldx #S.PAKSTAT.BL
 				clc
 				rts
 				
-.20				ldy #PAK.B.BL.W
+.20				jsr Pak.Out.Flush
+				bcs .9
+
+				ldy #PAK.B.BL.W
 				lda #PAK.B.BL
 				jsr Pak.Out.PutYBits
+				bcs .9
 				
 				ldy Pak.BL.OfsBitsH
 				beq .2
@@ -475,14 +485,14 @@ Pak.PutBL		ldx #S.PAKSTAT.BL
 				dec
 				dec
 				dec
-				jsr Pak.Out.PutYBits
+				jmp Pak.Out.PutYBits
 				
 .9				rts
 *--------------------------------------
 Pak.PutByte8	sta Pak.LastByte
 
 				bit Pak.bPass2
-				bmi Pak.PutByte.2
+				bmi Pak.PutByte8.2
 				
 .5				tax
 				inc Pak.CntL,x
@@ -499,7 +509,7 @@ Pak.PutByte8	sta Pak.LastByte
 				clc
 				rts
 
-Pak.PutByte.2	ldy Pak.Shnk+S.PAKSHNK.TOPCNT
+Pak.PutByte8.2	ldy Pak.Shnk+S.PAKSHNK.TOPCNT
 
 .1				cmp Pak.Shnk+S.PAKSHNK.TOPBYTES-1,y
 				beq .3
@@ -509,10 +519,20 @@ Pak.PutByte.2	ldy Pak.Shnk+S.PAKSHNK.TOPCNT
 				ldx #S.PAKSTAT.BYTE8
 				jsr Pak.UpdateStats
 
-				clc
-				jmp Pak.Out.PutCA
+				inc Pak.Out.ByteCnt
+				ldy Pak.Out.ByteCnt
+				sta Pak.Out.ByteBuf,y
+				cpy #BYTE8.MAX
+				bcc .9
 				
-.3				dey						Range 0-23
+				jmp Pak.Out.Flush 
+				
+.3				phy
+				jsr Pak.Out.Flush
+				ply
+				bcs .9
+				
+				dey						Range 0-23
 				
 				tya
 				lsr
@@ -529,6 +549,8 @@ Pak.PutByte.2	ldy Pak.Shnk+S.PAKSHNK.TOPCNT
 				pla
 				jsr Pak.UpdateStats
 				jmp Pak.Out.PutYBits
+				
+.9				rts				
 *--------------------------------------
 Pak.Out.Init	lda Pak.Shnk+S.PAKSHNK.BLBITS
 				jsr Pak.Out.PutByte
@@ -552,6 +574,8 @@ Pak.Out.Init	lda Pak.Shnk+S.PAKSHNK.BLBITS
 				sta Pak.Out.Mask
 				stz Pak.Out.Byte
 
+				stz Pak.Out.ByteCnt
+				
 				clc				
 .9				rts
 *--------------------------------------
@@ -562,25 +586,53 @@ Pak.Out.Close	bit Pak.Out.Mask
 .8				clc
 				rts
 *--------------------------------------
-Pak.Out.PutCA	jsr Pak.Out.PutBitC
-				bcs Pak.Out.Put.rts
-
+Pak.Out.Flush	lda Pak.Out.ByteCnt
+				beq .8
+				
+				dec
+				ora #PAK.B.BYTE8
+				
+				ldy #PAK.B.BYTE8.W
+				jsr Pak.Out.PutYBits
+				bcs .9
+				
+				ldx #0
+				
+.1				inx
+				lda Pak.Out.ByteBuf,x
+				
 				ldy #8
-
-.1				asl
-				jsr Pak.Out.PutBitC
-				bcs Pak.Out.Put.rts
-				dey
+				jsr Pak.Out.PutYBits
+				bcs .9
+				
+				cpx Pak.Out.ByteCnt
 				bne .1
-
-Pak.Out.Put.rts	rts
+				
+				stz Pak.Out.ByteCnt
+				
+.8				clc				
+.9				rts				
 *--------------------------------------
 Pak.Out.PutYBits
+				phy
+				
+.1				cpy #8
+				beq .2
+
+				asl
+				iny
+				bra .1
+				
+.2				ply
 				asl
 				jsr Pak.Out.PutBitC
 				bcs .9
+
 				dey
 				bne Pak.Out.PutYBits
+
+*				clc
+
 .9				rts
 *--------------------------------------
 Pak.Out.PutBitC	pha
@@ -590,21 +642,14 @@ Pak.Out.PutBitC	pha
 				tsb Pak.Out.Byte
 
 .1				lsr Pak.Out.Mask
-				bne .8
+				bcc .8
 
 				ror Pak.Out.Mask
-				
-				jsr Pak.Out.PutByte
-				bcs .9
 
-				
+				lda Pak.Out.Byte
+				jsr Pak.Out.PutByte
 
 .8				pla
-*				clc
-				rts
-
-.9				pla
-*				sec
 				rts
 *--------------------------------------
 Pak.Out.PutByte	inc Pak.DstCnt
@@ -712,7 +757,7 @@ MSG.Stats		.AS "\r\nPass 1 : %5D\r\n"
 				.AS "Top 24 : %5D\r\n"
 				.AS "Rep  N : %5D, Longest : %d\r\n"
 				.AZ "BLNK   : %5D, Longest : %d (%d bits), Farest : %D (%d bits)\r\n"
-MSG.Top24		.AZ "Top    : %d, %h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h\r\n"
+MSG.Top24		.AZ "Top    : %5d, %h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h%h\r\n"
 TOP.Bits		.DA #PAK.B.TOP8,PAK.B.TOP16,PAK.B.TOP24
 TOP.BitCnt		.DA #PAK.B.TOP8.W,#PAK.B.TOP16.W,#PAK.B.TOP24.W
 TOP.Stat		.DA #S.PAKSTAT.TOP8,#S.PAKSTAT.TOP16,#S.PAKSTAT.TOP24
@@ -745,6 +790,9 @@ Pak.LastByte	.BS 1
 
 Pak.Out.Byte	.BS 1
 Pak.Out.Mask	.BS 1
+
+Pak.Out.ByteCnt	.BS 1
+Pak.Out.ByteBuf	.BS BYTE8.MAX
 *--------------------------------------
 Pak.CntL		.BS 256
 Pak.CntH		.BS 256
