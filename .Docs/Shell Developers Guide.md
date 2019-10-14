@@ -124,8 +124,7 @@ Notice that the DO X and DO Y logic is swapped between the two cases.
 | END       | Working | End of SWITCH Statement |
 | EXIT      | Working | exit function, script or shell |
 | FI        | Working | Terminator for IF block |
-| FUNCTION  | Working | FUNCTION fu
-nction_name { <br> \<body\> <br> } |
+| FUNCTION  | Working | FUNCTION function_name { <br> \<body\> <br> } |
 | IF        | Working | [ \<condition\> ] <br> ![ \<condition\> ]|
 | LOOP      | Working | Terminator for WHILE block |
 | MD        | Working | MD path or relative path <br> Create a directory |
@@ -183,7 +182,19 @@ if [] && []   is AND
 if [] || []   is OR
 
 
-functions
+### functions
+
+if you SET -F, it will discard ALL previously learnt FUNC in the current SH context
+if . FUNCS1 file add 3
+then . FUNCS2 file add 2
+all 5 are available until an set -X is met
+if you launch . MYFILE1, the code within MYFILE1 can CALL all 5 functions
+but MYFILE1 (wthout dot) will run in a separate SH process, so no access to the 5 functions known by parent SH
+functions bodies are stored in AUX ram
+so you can put around 30k of code in AUX ram then do a short MYFILE1 that calls a lot of FUNC in AUX
+FUNCs recursion is allowed (until you explode the stack!)
+
+CORE.STACK.MAX = 128....so each CALL consumes about 7 bytes of stack (return Ctx/Ptr, ArgVC,hArgV and CALL keywordID)
 
 * DIV/MOD
 

@@ -56,7 +56,7 @@ This is the functional specification for A2osX and its system modules, internal 
 | READ      | Working | -S : no echo (password) <br> -P : "prompt message"   |
 | REN       | Working | Rename a file, directory or volume |
 | RETURN    | In Progress | Exit function with return code |
-| SET       | Working | -X : toggle debug mode <br> -C : toggle Control-C break mode |
+| SET       | Working | -X : toggle debug mode <br> -C : toggle Control-C break mode <br> -F : remove all defined functions |
 | SHIFT     | Working | Remove $1 from cmd line |
 | SLEEP     | Working | Wait \<count\> 10th sec |
 | SWITCH    | Working | SWITCH <expression> |
