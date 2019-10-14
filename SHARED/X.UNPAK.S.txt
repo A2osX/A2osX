@@ -8,7 +8,7 @@ NEW
 * ZPnCnt = !ZPULen
 * ZPPtr1
 * ZPPtr2
-* ZPInMask,ZPOutLastByte
+* ZPInMask,ZPBLOfsLBits,ZPBLOfsHBits,ZPBLLenBits
 *--------------------------------------
 X.Unpak			lda (ZPInBufPtr)		ULEN LO
 				eor #$ff
@@ -23,14 +23,9 @@ X.Unpak			lda (ZPInBufPtr)		ULEN LO
 				jsr X.Unpak.NextByte
 				
 				lda (ZPInBufPtr)		CHNK.DATA.T
-				beq X.Unpak.T.STORE
-
-
-
-				sec
-				rts
-				
-X.Unpak.T.STORE	ldy #0					start at 1 to skip CHNK.DATA.T
+				bne X.Unpak.PAK
+*--------------------------------------
+X.Unpak.STORE	ldy #0
 
 .1				iny
 				bne .2
@@ -38,13 +33,34 @@ X.Unpak.T.STORE	ldy #0					start at 1 to skip CHNK.DATA.T
 				inc ZPInBufPtr+1
 
 .2				lda (ZPInBufPtr),y
-				jsr X.Unpak.PutByte.1
+				jsr X.Unpak.PutByte
 				bne .1
 
 				clc
 				rts
+*--------------------------------------
+X.Unpak.PAK		pha						A = BLBITS
+				and #$70
+				lsr
+				lsr
+				lsr
+				lsr
+				sta ZPBLLenBits
 				
-X.Unpak.T.PAK	jsr X.Unpak.NextByte	skip CHNK.DATA.T
+				pla
+				ldx #8
+				and #$0f
+				tax
+				cmp #8
+				bcc .10
+				
+				ldx #8
+				and #7
+				
+.10				stx ZPBLOfsLBits
+				sta ZPBLOfsHBits
+
+				jsr X.Unpak.NextByte	get TOPCNT
 
 				lda (ZPInBufPtr)		CHNK.DATA.PAK.TOPLEN
 				clc
@@ -57,7 +73,7 @@ X.Unpak.T.PAK	jsr X.Unpak.NextByte	skip CHNK.DATA.T
 
 				lda #$80
 				sta ZPInMask
-	
+*--------------------------------------	
 .1				lda ZPnCnt
 				ora ZPnCnt+1
 				bne .2
@@ -66,9 +82,6 @@ X.Unpak.T.PAK	jsr X.Unpak.NextByte	skip CHNK.DATA.T
 				rts
 *--------------------------------------	
 .2				jsr X.Unpak.GetBitInC
-				bcs .7					->BACKLINK
-				
-				jsr X.Unpak.GetBitInC
 				bcs .3					->TOP
 * BYTE8
 				jsr X.Unpak.GetByteInA
@@ -83,7 +96,7 @@ X.Unpak.T.PAK	jsr X.Unpak.NextByte	skip CHNK.DATA.T
 				bra .51
 *--------------------------------------				
 .4				jsr X.Unpak.GetBitInC
-				bcs .5					->TOP24
+				bcs .5					->TOP32
 * TOP16
 				ldx #3
 				jsr X.Unpak.GetXBitInA
@@ -92,11 +105,11 @@ X.Unpak.T.PAK	jsr X.Unpak.NextByte	skip CHNK.DATA.T
 				bra .51
 *--------------------------------------				
 .5				jsr X.Unpak.GetBitInC
-				bcs .6					->REPn
-* TOP24				
-				ldx #3
+				bcs .6					->BACKLINK
+* TOP32				
+				ldx #4
 				jsr X.Unpak.GetXBitInA
-				ora #16
+				ora #32
 
 .51				tay			
 				lda (ZPInBufPtr),y
@@ -106,46 +119,44 @@ X.Unpak.T.PAK	jsr X.Unpak.NextByte	skip CHNK.DATA.T
 				clc
 				rts
 *--------------------------------------
-* REPn			
-.6				lda ZPOutLastByte
-	
-.61				jsr X.Unpak.PutByte.1
+* BACKLINK : 1111 OfsLBits OfsHBits LenBits
+
+.6				ldx ZPBLOfsLBits
+				jsr X.Unpak.GetXBitInA
+				clc
+				adc ZPOutBufPtr
+				sta ZPPtr2
+				php
+				lda ZPBLOfsHBits
+				beq .61
+				
+				tax
+				jsr X.Unpak.GetXBitInA
+				
+.61				plp
+				adc ZPOutBufPtr+1
+				sta ZPPtr2+1
+				
+				ldx ZPBLLenBits
+				jsr X.Unpak.GetXBitInA
+
+				inc						+1
+				inc						+1
+				inc						+1
+				
+				tay
+				
+.62				lda (ZPPtr2),y
+				jsr X.Unpak.PutByte
 				beq .99
+
 				dey
-				bpl .61					+1
+				bne .62
 				
 				bra .1
 				
 .99				sec
 				rts
-*--------------------------------------
-* BACKLINK : 1 oooooooo OOOO llllll
-.7				jsr X.Unpak.GetByteInA
-				clc
-				adc ZPOutBufPtr
-				sta ZPPtr2
-				php
-				ldx #4
-				jsr X.Unpak.GetXBitInA
-				plp
-				adc ZPOutBufPtr+1
-				sta ZPPtr2+1
-				
-				jsr X.Unpak.GetByteInA
-
-				inc						+1
-				inc						+1
-*				inc						+1
-				
-				tay
-				
-.71				lda (ZPPtr2),y
-				jsr X.Unpak.PutByte
-				beq .99
-				dey
-				bpl .71					+1
-				
-				bra .1
 *--------------------------------------
 X.Unpak.GetByteInA
 				ldx #8
@@ -188,9 +199,7 @@ X.Unpak.NextByte
 
 .8				rts
 *--------------------------------------
-X.Unpak.PutByte	sta ZPOutLastByte
-X.Unpak.PutByte.1
-				sta (ZPOutBufPtr)
+X.Unpak.PutByte	sta (ZPOutBufPtr)
 				inc ZPOutBufPtr
 				bne .1
 				inc ZPOutBufPtr+1
