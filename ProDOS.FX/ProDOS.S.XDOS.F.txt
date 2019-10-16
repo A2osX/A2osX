@@ -1,0 +1,765 @@
+NEW
+  AUTO 3,1
+
+destroy			jsr findfile			look for file to be destroyed.
+				bcs L4B66			  	if error.
+				jsr tstopen				is it open ?
+				lda totent
+				bne L4B64			  	error if open.
+				stz reql			 	force proper free count in volume.
+				stz reqh			 	(no disk access occurs if already
+				jsr tstfrblk			proper)
+				bcc L4B39				no errors.
+				cmp #$48			 	was error a full disk ?
+				bne L4B66			  	no, report error.
+L4B39  			lda d_attr			 	make sure ok to destroy file.
+				and #$80
+				bne L4B45			  	branch if ok to destroy.
+				lda #MLI.E.LOCKED	 	access error
+				jsr GP.P8errv
+
+L4B45  			lda devnum			 	last device used.
+				jsr twrprot1			test for write protected hardware
+				bcs L4B66			  	before going thru deallocation.
+				lda d_frst			 	'detree' needs first block address
+				sta firstbl
+				lda d_frst+1
+				sta firstbh
+				lda d_stor			 	find out which storage type.
+				and #$F0			 	strip off name length.
+				cmp #$40			 	is it a seed, sapling or tree ?
+				bcc L4B68			  	branch if it is.
+				bra L4BCF			  	otherwise, test for directory destroy.
+L4B64  			lda #$50				file busy error.
+L4B66  			sec		 				can't be destroyed
+				rts
+L4B68  			sta stortyp				destroy a tree file. save storage type.
+				ldx #$05
+				lda #$00			 	set 'detree' input variables, must be
+L4B6F  			sta stortyp,x		   	in order: deblock, dtree, dsap, dseed.
+				dex
+				bne L4B6F			  	loop until all zero'd.
+				lda #$02			 	this avoids an extra file i/o and pre-
+				sta dseed+1				vents destruction of any deleted data.
+				inc delflag				don't allow detree to zero index blocks.
+				jsr detree				make trees and saplings into seeds.
+				dec delflag				reset flag.
+				bcs L4B93			  	(de-evolution)
+L4B85  			ldx firstbh
+				lda firstbl				now deallocate seed.
+				jsr dealloc
+				bcs L4B93
+				jsr upbmap
+L4B93  			pha		 				save possible error code.
+				lda #$00			 	update directory to free entry space.
+				sta d_stor
+				cmp h_fcnt			 	file entry wrap ?
+				bne L4BA1			 	branch if no carry adjustment.
+				dec h_fcnt+1			take carry from hi byte of file entries.
+L4BA1  			dec h_fcnt				mark header with one less file.
+				jsr dvcbrev				go update block count in vcb (ignore
+				jsr drevise				error, if any) and update dir last.
+				tax		 				save possible new error code,
+				pla		 				restore possible old error code.
+				bcc L4BAF			  	branch if last call succeeded.
+				txa		 				last call failed, use it's error code.
+L4BAF  			cmp #$01			 	adjust carry accordingly
+				rts
+dvcbrev			ldy vcbptr			 	update block free count in vcb. point to vcb of correct device.
+				lda deblock				get # of blocks recently freed.
+				adc vcbbuf+20,y
+				sta vcbbuf+20,y			update current free block count.
+				lda deblock+1
+				adc vcbbuf+21,y
+				sta vcbbuf+21,y
+				lda #$00			 	force re-scan from 1st bitmap
+				sta vcbbuf+28,y
+				rts
+L4BCD  			bcc L4B85			  	branch widened (always taken)
+L4BCF  			cmp #$D0			 	is this a directory file ?
+				bne L4C1B			  	no, file incompatible.
+				jsr fndbmap				make sure a buffer available for bitmap
+				bcs L4C1A			  	if error.
+				lda d_frst			 	read 1st block of directory into gbuf
+				sta bloknml
+				lda d_frst+1
+				sta bloknml+1
+				jsr rdgbuf
+				bcs L4C1A
+				lda gbuf+37				do any files exist in this directory ?
+				bne L4BF1			  	if so, access error.
+				lda gbuf+38
+				beq L4BF6
+L4BF1  			lda #$4E			 	access error.
+				jsr GP.P8errv
+L4BF6  			sta gbuf+4			 	make it an invalid subdirectory
+				jsr wrtgbuf
+				bcs L4C1A
+L4BFE  			lda gbuf+2			 	get forward link.
+				cmp #$01			 	test for null block into carry.
+				ldx gbuf+3				get the rest of the block address.
+				bne L4C0A			  	branch if not null.
+				bcc L4BCD			  	was the low part null as well ?
+L4C0A  			jsr dealloc				free this block.
+				bcs L4C1A
+				lda gbuf+2
+				ldx gbuf+3
+				jsr rdblk
+				bcc L4BFE			  	loop until all freed
+L4C1A  			rts
+L4C1B  			lda #MLI.E.INCFF	 	file incompatible
+				jsr GP.P8errv
+
+fcbused			pha		 				mark fcb as dirty so the directory will be flushed on 'flush'.
+				tya		 				save regs.
+				pha
+				ldy fcbptr
+				lda fcbbuf+28,y			fetch current fcb dirty byte.
+				ora #$80			 	mark fcb as dirty.
+				sta fcbbuf+28,y			save it back
+				pla		 				and restore regs.
+				tay
+				pla
+				rts
+
+* 'detree' deallocates blocks from tree files. it is assumed that the device has
+* been pre-selected and the 'gbuf' may be used.
+*
+* on entry:
+*  stortype = storage type in upper nibble, lower nibble is undisturbed.
+*  firstbl & firstbh = first block of file (index or data).
+*  deblock = 0
+*  dtree = ptr to 1st block with data to be deallocated at tree level.
+*  dsap = ptr to 1st block at sapling level.
+*  dseed = byte (0-511) position to be zeroed from (inclusive).
+*
+* on exit:
+*  stortype = modified result of storage type (if applicable).
+*  firstbl & h = modified if storage type changed.
+*  deblock = total number of blocks freed at all levels.
+*  dtree, dsap, deseed unchanged.
+*
+* to trim a tree to a seed file, both dtree and dsap must be zero.
+* to go from tree to sapling, dtree alone must be zero.
+
+detree			lda stortyp				which kind of tree ?
+				cmp #$20			 	is it a 'seed' ?
+				bcc L4C46			  	if yes.
+				cmp #$30			 	a sapling ?
+				bcc L4C51			  	if yes.
+				cmp #$40			 	is it at least a 'tree' ?
+				bcc L4C59			  	branch if it is.
+				lda #$0C			 	block allocation error.
+				jsr sysdeath			P8 system death vector
+
+* seedling file type - make sure first desireable block is the only
+* block available in a seedling file.
+
+L4C46  			lda dsap
+				ora dtree
+				bne L4CC2	
+				jmp seedel0
+
+* sapling file type - make sure first desireable block is within the range of
+* blocks available in a sapling file
+
+L4C51  			lda dtree				can't have any blocks in this range
+				bne L4CC2			  	if so then done
+				jmp sapdel0				else go deallocate
+L4C59			lda #$80
+				sta topdest				for tree top start at end, work backwards.
+L4C5E  			jsr drdfrst				read specified first block into gbuf.
+				bcs L4CC2			  	return errors.
+				ldy topdest				get current pointer to top indexes.
+				cpy dtree			  	have enough sapling indexes been
+				beq L4CC3			  	deallocated? yes, now deallocate blocks
+				ldx #$07				buffer up to 8 sapling index block
+L4C6D  			lda gbuf,y				addresses. fetch low block address
+				sta dealbufl,x			and save it.
+				ora gbuf+$100,y			is it a real block that is allocated?
+				beq L4C81			  	branch if phantom block.
+				lda gbuf+$100,y			fetch high block address
+				sta dealbufh,x			and save it.
+				dex		 				decrement and test for dealc buf filled.
+				bmi L4C93				branch if 8 addresses fetched.
+L4C81  			dey		 				look for end of deallocation limit.
+				cpy dtree			  	is this the last position on tree level?
+				bne L4C6D			  	if not.
+				iny
+				lda #$00			 	fill rest of dealc buffer with null addresses.
+L4C8A  			sta dealbufl,x
+				sta dealbufh,x
+				dex
+				bpl L4C8A
+L4C93  			dey		 				decrement to prepare for next time.
+				sty topdest				save index.
+				ldx #$07
+L4C99  			stx dtmpx			  	save index to dealc buf.
+				lda dealbufl,x
+				sta bloknml
+				ora dealbufh,x			finished ?
+				beq L4C5E			  	branch if done with this level.
+				lda dealbufh,x			complete address with high byte,
+				sta bloknml+1
+				jsr rdgbuf			 	read sapling level into gbuf.
+				bcs L4CC2			  	return errors.
+				jsr dealblk				go free all data indexes in this block
+				bcs L4CC2
+				jsr wrtgbuf				write the flipped index block
+				bcs L4CC2
+				ldx dtmpx			  	restore index to dealc buff.
+				dex		 				are there more to free?
+				bpl L4C99			  	branch if so.
+				bmi L4C5E			  	branch always to get up to 8 more
+L4CC2  			rts		 				sapling block numbers.
+L4CC3  			ldy dtree			  	deallocate all sapling blocks greater
+				iny		 				than specified block.
+				jsr dalblk1				(master index in gbuf)
+				bcs L4CC2			  	if errors.
+				jsr wrtgbuf				write updated master index back to disk.
+				bcs L4CC2
+				ldy dtree				figure out if tree can become sapling.
+				beq L4CEB			  	branch if it can.
+				lda gbuf,y			 	otherwise, continue with partial.
+				sta bloknml				deallocation of last sapling index.
+				ora gbuf+$100,y			is there such a sapling index block ?
+				beq L4CC2			  	all done if not.
+				lda gbuf+$100,y			read in sapling level to be modified.
+				sta bloknml+1
+				jsr rdgbuf			 	read highest sapling index into gbuf.
+				bcc L4CF5
+				rts
+L4CEB  			jsr shrink				shrink tree to sapling
+				bcs L4CC2
+sapdel0			jsr drdfrst				read specified sapling level index
+				bcs L4CC2			  	into gbuf. branch if error.
+L4CF5  			ldy dsap				pointer to last of desirable indexes.
+				iny		 				inc to 1st undesirable.
+				beq L4D05			  	branch if all are desirable.
+				jsr dalblk1				deallocate all indexes above specified.
+				bcs L4CC2
+				jsr wrtgbuf				write out the index block
+				bcs L4CC2
+L4D05  			ldy dsap			 	prepare to clean up last data block.
+				beq L4D1F			  	branch if possibility of making a seed.
+L4D0A  			lda gbuf,y			 	fetch low order data block address.
+				sta bloknml
+				ora gbuf+$100,y			is it a real block ?
+				beq L4CC2			  	if not, then done.
+				lda gbuf+$100,y
+				sta bloknml+1
+				jsr rdgbuf			 	go read data block into gbuf.
+				bcc L4D2E			  	branch if good read
+				rts		 				or return error.
+L4D1F  			lda dtree			  	are both tree and sap levels zero ?
+				bne L4D0A			  	if not.
+				jsr shrink				reduce this sap to a seed.
+				bcs L4D52			  	if error.
+seedel0			jsr drdfrst				go read data block.
+				bcs L4D52			  	if error.
+L4D2E  			ldy dseed+1				check high byte for no deletion.
+				beq L4D39			  	branch if all of 2nd page to be deleted.
+				dey						if dseed > $200 then all were done.
+				bne L4D52			  	branch if that is the case.
+				ldy dseed			  	clear only bytes >= dseed.
+L4D39  			lda #$00
+L4D3B  			sta gbuf+$100,y			zero out unwanted data
+				iny
+				bne L4D3B
+				ldy dseed+1				is that all ?
+				bne L4D4F			  	yes.
+				ldy dseed
+L4D49  			sta gbuf,y
+				iny
+				bne L4D49
+L4D4F  			jmp wrtgbuf				update data block to disk.
+L4D52  			rts		 				return error status.
+drdfrst			lda firstbl				read specified 1st block into gbuf
+				ldx firstbh
+				jmp rdblk			  	go read it
+
+* beware that dealloc may bring in a new bitmap block and may destroy
+* locations 46 and 47 which are used to point to the current index block.
+
+shrink			ldx firstbh				first deallocate top index block
+				txa
+				pha
+				lda firstbl
+				pha		 				save block address of this index block.
+				jsr dealloc				free it from the bitmap
+				pla
+				sta bloknml				set master of sapling
+				pla						index block address.
+				sta bloknml+1
+				bcs L4D8D			  	report errors.
+				lda gbuf			 	get # of new 1st block from old index.
+				sta firstbl
+				lda gbuf+$100
+				sta firstbh
+				ldy #$00
+				jsr swapme				flip that one entry in old top index.
+				sec		 				now change file type,
+				lda stortyp				from tree to sapling,
+				sbc #$10			 	or from sapling to seed.
+				sta stortyp
+				jsr wrtgbuf				write the (deallocated) old top index.
+L4D8D  			rts		 				return error status.
+dealblk			ldy #$00			 	start at beginning.
+dalblk1			lda bloknml				save disk address of gbuf's data.
+				pha
+				lda bloknml+1
+				pha
+L4D96  			sty saptr			  	save current index.
+				lda gbuf,y			 	get low address of block to deallocate.
+				cmp #$01			 	test for null block into carry.
+				ldx gbuf+$100,y			get remainder of block address.
+				bne L4DA5			  	branch if not null.
+				bcc L4DB0			  	was the low part null too ?
+L4DA5  			jsr dealloc				free it up on volume bitmap.
+				bcs L4DB4			  	return any error.
+				ldy saptr			  	get index to sapling level index block.
+				jsr swapme			 
+L4DB0  			iny		 				next block address.
+				bne L4D96			  	if more to deallocate or test.
+				clc		 				no error.
+L4DB4  			tax		 				save error code, if any.
+				pla		 				restore blocknm (16 bit)
+				sta bloknml+1
+				pla
+				sta bloknml
+				txa		 				restore return code
+				rts
+swapme			lda delflag				swapping or zeroing ?
+				bne L4DC5			  	skip if swapping.
+				tax		 				make x = 0.
+				beq L4DCB			  	zero the index (always taken).
+L4DC5  			ldx gbuf+$100,y		   	index high
+				lda gbuf,y			 	index low
+L4DCB  			sta gbuf+$100,y		   	save index high
+				txa
+				sta gbuf,y			 	save index low
+				rts						done.
+
+* MEMMGR memory manager
+*
+* allocate buffer in memory tables
+
+alcbuffr 		ldy #$04				index to user specified buffer.
+alcbufr1 		lda (A3L),y				this buffer must be on a page boundary.
+				tax		 				save for validation.
+				cmp #$08
+				bcc L4E1E			  	cannot be lower than video !
+				cmp #$BC				nor greater than $BB00
+				bcs L4E1E			  	since it would wipe out globals...
+				sta datptr+1
+				dey
+				lda (A3L),y				low address should be zero !
+				sta datptr
+				bne L4E1E			  	error if not page boundary.
+				inx		 				add 4 pages for 1k buffer.
+				inx
+				inx
+				inx
+L4DED			dex		 				test for conflicts.
+				jsr cmembit				test for free buffer space
+				and memmap,y			P8 memory bitmap
+				bne L4E1E			  	report memory conflict, if any.
+				cpx datptr+1			test all 4 pages.
+				bne L4DED
+				inx		 				add 4 pages again for allocation.
+				inx
+				inx
+				inx
+L4DFE  			dex		 				set proper bits to 1
+				jsr cmembit
+				ora memmap,y			to mark it's allocation.
+				sta memmap,y
+				cpx datptr+1			set all 4 pages
+				bne L4DFE
+				ldy fcbptr			 	calculate buffer number
+				lda fcbbuf,y
+				asl			  			buffer number = (entnum) * 2.
+				sta fcbbuf+11,y			save it in fcb.
+				tax		 				use entnum * 2 as index to global
+				lda datptr+1			buffer addr tables. get addr already
+				sta buftbl-1,x			validated as good. store hi addr
+				clc		 				(entnums start at 1, not 0)
+				rts
+L4E1E  			lda #$56			 	buffer is in use or not legal
+				sec
+				rts
+getbufadr 		tax						index into global buffer table.
+				lda buftbl-2,x
+				sta bufaddrl
+				lda buftbl-1,x
+				sta bufaddrh
+				rts
+relbuffr 		jsr getbufadr			preserve buffer address in 'bufaddr'
+				tay		 				returns high buffer address in acc.
+				beq L4E54			 	branch if unallocated buffer space.
+				stz buftbl-1,x			take address out of buffer list.
+				stz buftbl-2,x			(x was set up by getbufadr)
+freebuf			ldx bufaddrh			get hi buffer address
+				inx		 				add 4 pages to account for 1k space.
+				inx
+				inx
+				inx
+L4E43  			dex		 				drop to next lower page.
+				jsr cmembit				get bit and position to memtable of
+				eor #$FF			 	this page. invert mask.
+				and memmap,y			mark address as free space.
+				sta memmap,y
+				cpx bufaddrh			all pages freed ?
+				bne L4E43			  	no.
+L4E54  			clc		 				no error.
+				rts
+
+* calculate memory allocation bit position.
+* on entry: x = high address of buffer, low address assumed zero.
+* on exit: acc = allocation bit mask, x = unchanged, y = pointer to memtabl byte
+
+cmembit			txa						page address
+				and #$07			 	which page in any 2k set ?
+				tay		 				use as index to determine
+				lda whichbit,y			bit position representation.
+				pha		 				save bit position mask for now.
+				txa		 				page address.
+				lsr
+				lsr			  			determine 2k set
+				lsr
+				tay		 				return it in y.
+				pla		 				restore bit mask. return bit position
+				rts		 				in a & y, pointer to memtabl in x.
+valdbuf			lda usrbuf+1			high address of user's buffer
+				cmp #$02			 	must be greater than page 2.
+				bcc L4E1E			  	report bad buffer
+				ldx cbytes+1
+				lda cbytes			 	get cbytes-1 value.
+				sbc #$01			 	(carry is set)
+				bcs L4E76
+				dex
+L4E76  			clc
+				adc usrbuf			 	calculate end of request address.
+				txa		 				do high address.
+				adc usrbuf+1			the final address
+				tax		 				must be less than $BFnn (globals)
+				cpx #$BF
+				bcs L4E1E			  	report bad buffer.
+				inx		 				loop thru all affected pages.
+vldbuf1			dex		 				check next lower page.
+				jsr cmembit
+				and memmap,y			if 0 then no conflict.
+				bne L4E1E			  	branch if conflict.
+				cpx usrbuf+1			was that the last (lowest) page ?
+				bne vldbuf1			 	if not.
+				clc		 				all pages ok.
+				rts
+
+getbuf			ldy #$02			 	give user address of file buffer referenced by refnum.
+				lda bufaddrl
+				sta (A3L),y
+				iny
+				lda bufaddrh
+				sta (A3L),y
+				clc		 				no errors possible
+				rts
+
+setbuf			ldy #$03
+				jsr alcbufr1			allocate new buffer address over old one
+				bcs L4EC7				report any errors immediately
+				lda bufaddrh
+				sta usrbuf+1
+				lda bufaddrl
+				sta usrbuf
+				jsr freebuf				free address space of old buffer
+				ldy #$00
+				ldx #$03
+L4EB8  			lda (usrbuf),y			move all 4 pages of the buffer to
+				sta (datptr),y			new location.
+				iny
+				bne L4EB8
+				inc datptr+1
+				inc usrbuf+1
+				dex
+				bpl L4EB8
+				clc		 				no errors
+L4EC7  			rts
+
+
+* move 3 pages of dispatcher from 'displc2' to 'dispadr'
+* this move routine must be resident above $E000 at all times
+
+calldisp 		lda RRAMWRAMBNK2		read/write RAM bank 2
+				lda RRAMWRAMBNK2
+				lda /dispadr
+				sta A2L+1
+				lda #dispadr
+				sta A2L
+				lda /displc2
+				sta A1L+1
+				stz A1L
+				ldy #$00
+				ldx #$03				3 pages to move.
+L4EE0  			dey		 				move a page of code.
+				lda (A1L),y
+				sta (A2L),y
+				tya
+				bne L4EE0
+				inc	A1L+1			  	pointers to next page
+				inc	A2L+1
+				dex		 				move all pages needed
+				bne L4EE0
+				lda RRAMWRAMBNK1		read/write RAM bank 1
+				lda RRAMWRAMBNK1		swap mli space back in
+				stz mliact			 	MLI active flag
+				stz softev			 
+				lda /dispadr			point RESET to dispatch entry
+				sta softev+1
+				eor #$A5
+				sta pwredup				power up byte
+				jmp dispadr
+
+* translate a prodos call into a smartport call
+* to access unseen smartport devices
+
+remap_sp 		ldx #$03				assume 3 parameters.
+				lda A4L			  		command number
+				sta cmdnum
+				bne L4F1B				taken if not status call
+
+				ldy #spstatlist			set up memory for the status list buffer
+				sty buf					fake up the prodos parameters
+				ldy /spstatlist
+				sty buf+1
+				stz bloknml				set statcode = 0 for simple status call
+
+L4F1B  			cmp #$03			 	format command ?
+				bne L4F21			  	no.
+				ldx #$01			 	format has only 1 parameter.
+L4F21  			stx statparms			set # of parms.
+				lda unitnum			
+				lsr			  			turn unit number into an index
+				lsr
+				lsr
+				lsr
+				tax
+				lda spunit-1,x			get the smartport unit number and
+				sta sp_unitnum			store into smartport parm list.
+				lda spvectlo-1,x	
+				sta sp_vector+1			copy smartport entry address
+				lda spvecthi-1,x
+				sta sp_vector+2
+				ldx #$04				copy buffer pointer and block #
+L4F3F  			lda buf-1,x				from prodos parameters
+				sta sp_bufptr-1,x		to smartport parameter block
+				dex
+				bne L4F3F
+sp_vector 		jsr $0000				smartport call (entry address gets modified)
+cmdnum			.HS 00					command #
+				.DA statparms
+				bcs	L4F6E
+
+				ldx cmdnum				status call ?
+				bne L4F6E			  	no...
+				ldx spstatlist+1		else get the block count
+				ldy spstatlist+2
+				lda	spstatlist			get the returned status.
+				bit #$10			 	is there a disk present ?
+				bne L4F65			  	yes, check for write protected.
+				lda #$2F			 	return offline error.
+				bra L4F6D
+L4F65  			and #$44			 	mask all but write allowed and write
+				eor #$40			 	protected bits. if allowed and not
+				beq L4F6E			  	protected, exit with carry clear
+				lda #$2B			 	else return write protected error.
+L4F6D  			sec
+L4F6E  			rts
+spvectlo 		.HS 0000000000000000  	storage for low byte of smartport entry.
+				.HS 00000000000000
+spvecthi 		.HS 0000000000000000  	storage for high byte of smartport entry.
+				.HS 00000000000000
+statparms 		.HS 03					# of parms (always 3 except format)
+sp_unitnum 		.HS 00			  		unit number
+sp_bufptr 		.HS 0000				data buffer
+				.HS 000000				block number (3 bytes)
+
+* data tables
+
+scnums			.HS D3000000			table of valid mli command numbers.
+				.HS 40410000808182
+				.HS 65C0C1C2C3C4C5C6
+				.HS C7C8C9CACBCCCDCE
+				.HS CF00D0D1D2
+pcntbl			.HS 02FFFFFF			parameter counts for the calls
+				.HS 0201FFFF030300
+				.HS 04070102070A0201
+				.HS 0103030404010102
+				.HS 02FF020202
+
+* command table
+
+cmdtable 		.DA create
+				.DA destroy
+				.DA rename
+				.DA setinfo
+				.DA getinfo
+				.DA online
+				.DA setprefx
+				.DA getprefx
+				.DA openf
+				.DA newline
+				.DA readf
+				.DA writef
+				.DA closef
+				.DA flushf
+				.DA setmark
+				.DA getmark
+				.DA seteof
+				.DA geteof
+				.DA setbuf
+				.DA getbuf
+
+* corresponding command function bytes
+
+disptch			.HS A0A1A2A3
+				.HS 84050607
+				.HS 88494A4B
+				.HS 2C2D4E4F
+				.HS 50515253
+
+dinctbl			.HS 0100000200			table to increment directory usage/eof counts
+pass			.HS 75
+xdosver			.HS 00
+compat			.HS 00
+				.HS C3270D000000
+rootstuf 		.HS 0F02000400000800
+whichbit 		.HS 8040201008040201
+ofcbtbl			.HS 0C0D1819151617
+inftabl			.HS 1E101F2080939421
+				.HS 22232418191A1B
+deathmsg 		.HS 20
+				.AS -"RESTART SYSTEM-$01"
+				.HS 20
+
+*** work space ***
+
+* note: this area is accessed by code that depends on the order of these
+*   variables in the file control block and temporary directory.
+
+own_blk			.HS 0000
+own_ent			.HS 00
+own_len			.HS 00
+h_credt			.HS 0000				directory creation date
+				.HS 0000				directory creation time
+				.HS 00			 	 	version under which this dir created
+				.HS 00			 	 	earliest version that it's compatible
+h_attr			.HS 00				 	attributes (protect bit, etc.)
+h_entln			.HS 00				 	length of each entry in this directory
+h_maxent 		.HS 00				 	maximum number of entries per block
+h_fcnt			.HS 0000			 	current # of files in this directory
+h_bmap			.HS 0000			 	address of first allocation bitmap
+h_tblk			.HS 0000			 	total number of blocks on this unit
+d_dev			.HS 00				 	device number of this directory entry
+d_head			.HS 0000			 	address of <sub> directory header
+d_entblk 		.HS 0000				address of block which contains entry
+d_entnum 		.HS 00				 	entry number within block
+d_stor			.HS 0000000000000000  	file name
+				.HS 0000000000000000
+d_filid			.HS 00				 	user's identification byte
+d_frst			.HS 0000			 	first block of file
+d_usage			.HS 0000			 	# of blocks allocated to this file
+d_eof			.HS 000000			 	current end of file marker
+d_credt			.HS 0000				file creation date
+				.HS 0000				file creation time
+d_sosver 		.HS 00					sos version that created this file
+d_comp			.HS 00				 	backward version compatibility
+d_attr			.HS 00				 	attributes (protect, r/w, enable, etc.)
+d_auxid			.HS 0000			 	user auxilliary identification
+d_moddt			.HS 0000				file's last modification date
+				.HS 0000				file's last modification time
+d_dhdr			.HS 0000			 	file directory header block address
+
+scrtch			.HS 00000000			scratch area for allocation address conversion.
+oldeof			.HS 000000				temp used in r/w
+oldmark			.HS 000000
+xvcbptr			.HS 00				 	used in 'cmpvcb' as a temp
+vcbptr			.HS 00
+fcbptr			.HS 00
+fcbflg			.HS 00
+reql			.HS 00			  
+reqh			.HS 00
+levels			.HS 00
+totent			.HS 00
+entcntl			.HS 00
+entcnth			.HS 00
+cntent			.HS 00
+nofree			.HS 00
+bmcnt			.HS 00			  
+saptr			.HS 00
+pathcnt			.HS 00
+p_dev			.HS 00
+p_blok			.HS 0000
+bmptr			.HS 00
+basval			.HS 00
+half			.HS 00
+
+* bitmap info tables
+
+bmastat			.HS 00
+bmadev			.HS 00
+bmadadr			.HS 0000
+bmacmap			.HS 00
+tposll			.HS 00
+tposlh			.HS 00
+tposhi			.HS 00
+rwreql			.HS 00
+rwreqh			.HS 00
+nlchar			.HS 00
+nlmask			.HS 00
+ioaccess 		.HS 00			 		has a call been made to disk device handler ?
+cmdtemp			.HS 00
+bkbitflg		.HS 00					used to set or clear backup bit
+duplflag 		.HS 00
+vcbentry 		.HS 00
+
+* xdos temporary variables
+
+namcnt			.HS 00
+rnptr			.HS 00
+namptr			.HS 00
+vnptr			.HS 00
+prfxflg			.HS 00
+cferr			.HS 00
+
+* deallocation temporary variables
+
+firstbl			.HS 00
+firstbh			.HS 00
+stortyp			.HS 00
+deblock			.HS 0000
+dtree			.HS 00
+dsap			.HS 00
+dseed			.HS 0000
+topdest			.HS 00
+dtmpx			.HS 00
+loklst			.EQ	*					look list of recognized device numbers
+dealbufl 		.HS 0000000000000000
+dealbufh 		.HS 0000000000000000
+cbytes			.HS 0000
+				.HS 00					cbytes+2 must = 0
+bufaddrl		.HS 00			  
+bufaddrh 		.HS 00
+delflag			.HS 00			  		used by 'detree' to know if called from delete (destroy).
+
+* zero fill to page boundary - 3 ($FEFD). so that cortland flag stays within page boundary.
+				.LIST ON
+XDOS.FREE		.EQ $FEFD-*				(ProDOS 2.0.3 = $0C)
+				.LIST OFF
+				.BS XDOS.FREE
+				.DA calldisp
+cortflag 		.HS 00			  		cortland flag. 1 = Cortland system (must stay within page boundary)
+*--------------------------------------
+MAN
+SAVE USR/SRC/PRODOS.FX/PRODOS.S.XDOS.F
+LOAD USR/SRC/PRODOS.FX/PRODOS.S
+ASM

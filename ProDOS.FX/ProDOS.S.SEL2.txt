@@ -1,0 +1,440 @@
+NEW
+  AUTO 3,1
+* object code = sel_2
+*
+* Alternate program selector segment for P8 when used in conjunction with
+* gs/os. This code is used in place of the standard P8 interactive program
+* selector when P8 is started up by GQuit. It is called when passing control
+* from one application to another and the new application is 8-bit. This
+* code first loads the specified P8 application at $2000 in bank 0 of memory.
+* It then checks the message center for a possible name of a file. this file
+* is passed on to the 8-bit application. This segment then passes control to
+* the freshly loaded app. This code does NOT start with a CLD instruction
+* (as other replacement quit code is supposed to do) because GQuit checks
+* this to see if this version of quit code is available.
+
+GQdisp			lda RRAMWRAMBNK1		read/write LC bank 1
+				clc
+				xce						16 bit native mode.
+				jmp	P8QUIT				go to GQuit.
+				.HS 0000000000			offset to paragraph boundary.
+				.AS "GQ"				id bytes so GQuit can identify this
+
+* load application
+*
+* Entry is in 16-bit native mode. Exit is in emulation mode.
+*
+* On entry and exit:
+*	Data bank register is set to $00.
+*	Direct register is set to $0000.
+*	Stack pointer is set to $01FB.
+*
+* Inputs: acc = value of E1_OS_Switch (0 or 1, 1 = yes to switch)
+*
+* This code is moved to $00/1010 and executed there.
+
+* first, copy the prefix passed from gs/os to our own volume name buffer
+* so in case of an error setting the P8 prefix, it can be displayed in the
+* error message.
+
+				>SHORTM					8 bit accumulator
+
+				pha						save the switch status.
+				ldx	##inbuf				point to passed prefix.
+				jsr copyvol				copy the name into the buffer.
+				pla						retrieve the switch status
+
+* go into emulation mode to load and run Prodos 8 application
+
+				sec
+				xce						8 bit emulation mode
+				ora #$00				switching from P16 to P8 ?
+				beq L602D				no.
+
+* switching from P16 to P8 so pass prefix 0 from P16 to the P8 prefix. the
+* prefix is passed at $00/0200 by GQuit.
+
+L6020			jsr MLI					set prefix
+				.DA #$C6
+				.DA pfxparms
+				bcc L602D				if prefix ok.
+				jsr gqerror				error handler.
+				bra L6020				try again
+
+* load application at $2000
+
+L602D			xce						native mode (carry clear)
+				>LONGX					16 bit regs, 8 bit acc.
+				lda pbuf+1				is the application name
+				cmp #$2F				a complete pathname ?
+				bne L603D				no, use prefix as volume name
+				ldx ##pbuf				else use the application name.
+				jsr copyvol				copy the volume name to buffer.
+L603D			sec						back to emulation mode.
+				xce
+L603F			jsr MLI				  	open the application file
+				.DA #$C8
+				.DA opnparms
+				bcc L604C				if open ok.
+				jsr gqerror				handle error.
+				bra L603F				try again.
+L604C			lda oprefnum			copy ref number to parameter lists
+				sta eofrefn
+				sta rdrefnum
+				sta closeref
+
+* do a geteof call for how many bytes to read
+
+L6058			jsr MLI				  	get eof
+				.DA #$D1
+				.DA eofparms
+				bcc L6065				eof ok.
+				jsr gqerror				handle error.
+				bra L6058				try again.
+
+* store the size of the file in the read parameter list
+
+L6065			lda eofval
+				sta rdcount
+				lda eofval+1
+				sta rdcount+1
+L6071			jsr MLI				  	read
+				.DA #$CA
+				.DA readparm
+				bcc L607E				read ok
+				jsr gqerror
+				bra L6071
+L607E			jsr MLI				  	close
+				.DA #$CC
+				.DA closeprm
+				bcc L608B				close ok
+				jsr gqerror
+				bra L607E
+L608B			jsr dolaunch			check for possible 2nd pathname.
+				bne L6099				if none then run program
+				jsr ckfordrv			else make sure the file is online.
+				bcc L6099				if so then run the program.
+				lda #$45				volume not found error.
+				bra L60AB
+L6099			lda RROMBNK2			enable ROM
+				jmp sysentry			execute the system application
+
+gqerror			clc
+				xce						16 bit native mode
+				>LONGMX
+				jsr mountvol			mount volume.
+				bcs L60AB				if error.
+				sec						back to emulation mode.
+				xce
+				rts
+
+* generate a fatal error while running under Prodos 8.
+* on input, acc = error code. this routine does not return.
+
+L60AB			clc						native mode
+				xce
+				>LONGMX
+				and ##$00FF				mask off high byte of error code.
+				pha						put on stack for IntMath tool call.
+				pea $0000				errval>>16
+				pea errval				push address of string buffer.
+				pea $0004				make string 4 digits long.
+				>IIGS Int2Hex			convert value to hex string.
+				pha						make space for return value.
+				pea $0000				quitstr1>>16
+				pea quitstr1			push first error message address
+				pea $0000				quitstr2>>16
+				pea quitstr2			push second error message address
+				pea $0000				button1>>16
+				pea button1				push first button text address
+				pea $0000				quitbtn2>>16
+				pea quitbtn2			push 2nd button text address (null)
+				>IIGS TLTextMountVolume			 make the dialog box
+				pla						retrieve button press (not used)
+				sec						emulation mode
+				xce
+				jsr MLI				  	quit back to GQuit
+				.DA #$65
+				.DA quitparms
+
+* p8 mount volume
+*
+* on entry: volbuf = name of volume to mount.
+* on exit: carry clear if mount volume displayed and 'return' was pressed.
+*		  carry set if no window displayed or if had window and 'esc' pressed.
+
+mountvol 		ldy ##$0000				volbuf>>16
+				ldx ##volbuf			set up pointer to volume name.
+
+* if error is 'volume not found' or 'no disk in drive' then display the
+* Mount Volume window, otherwise return with carry set.
+
+				and ##$00FF				mask just in case.
+				cmp ##$0045				volume not found ?
+				beq L6101				yes
+				cmp ##$002F				no disk in drive ?
+				beq L6101				yes
+				sec						indicate error not handled.
+				rts						return with error code still in acc.
+
+L6101			pha						save error code in case esc pressed.
+				phy						pointer to volume name.
+				phx
+				tsc
+				phd						save D reg.
+				tcd						point D reg at stack.
+				lda [$01]				get length byte and leading separator.
+				dec						don't count leading separator.
+				xba						then swap the bytes so the volume name
+				sta [$01]				doesn't cpntain the separator.
+				pha						room for result.
+				pea $0000				mountmsg>>16
+				pea mountmsg
+				phy						hi word of pointer to volume name.
+				inx						skip separator.
+				phx						lo word of pointer to volume name.
+				pea $0000				button1>>16
+				pea button1				'Return'
+				pea $0000				button2>>16
+				pea button2				'Escape'
+				>IIGS TLTextMountVolume
+				lda [$01]				restore first 2 bytes of vilume name
+				xba						back to their original positions
+				inc						and values.
+				sta [$01]
+				pla						which button: 1=Return 2=Escape.
+				pld						restore D reg.
+				plx						pull volume name pointer off stack
+				plx
+				cmp ##$0001				which button was pressed ?
+				bne L613C				if Escape pressed.
+				clc						indicate Return was pressed.
+				pla						pull original error code off stack.
+				rts						return with carry clear.
+L613C			sec						indicate Escape was pressed.
+				pla						restore error code.
+				rts						return with carry set.
+
+* copy the volume name from the given pathname to the volume name buffer.
+*
+* inputs: x = length byte of complete pathname containing volume name.
+* output: volume name is stored in volbuf.
+
+copyvol			lda	>1,x				get the first slash
+				sta volbuf+1
+				ldy ##$0002				initialize the length count.
+
+L6148			lda	>2,x				now copy the volume name up to
+				cmp #$2F				the separating slash.
+				beq	L6156
+				sta	volbuf,y
+				inx
+				iny
+				bra L6148
+L6156			dey						fix character count.
+				tya						length.
+				sta	volbuf				store the resultant string length.
+				rts
+
+* translate a filename message from the message center to the currently
+* launching P8 application if it can accept a second filename. If found,
+* copy the filename into the application's filename buffer.
+* on exit, the z-flag is set if a filename was correctly passed to the
+* application elst the z-flag is clear if it couldn't be done.
+
+dolaunch 		lda sysentry			does the app start with a jump ?
+				cmp #$4C
+				bne	L616F				no, doesn't follow the convention.
+				lda	#$EE				check for the signature bytes.
+				cmp sysentry+3
+				bne L616F				1st one doesn't match, skip it.
+				cmp sysentry+4
+				beq L6170				both match, go get a filename message.
+L616F			rts						just return to launch the app.
+
+L6170			lda #$FF				put flag conditioning value on
+				pha						the stack (assume error).
+				clc						native 16-bit mode.
+				xce
+				>LONGMX
+				pha						make room on stack for user id.
+				>IIGS MMStartUp			start up the memory manager.
+				pla						get the user id and
+				pha						leave it on the stack.
+				pha
+				pha						make room on stack for new handle.
+				pea $0000
+				pea $000A				get a 10 byte block of memory.
+				pha						put user id on stack.
+				pea $0000				totally unrestricted block.
+				pha						LocationPtr (not used)
+				pha
+				>IIGS NewHandle			go get the block of memory.
+				pla						get the handle from the stack.
+				plx
+				bcs L620A				branch if error, no memory available.
+				phx						leave the handle on the stack.
+				pha
+				pea $0002				'get' a message.
+				pea $0001				get a type 1 (filename) message.
+				phx						put the message handle on the stack
+				pha						(still in acc and x regs)
+				>IIGS MessageCenter
+				bcs L6203				branch if no message.
+				pha						leave 4 bytes free on stack
+				pha						(will be used as a direct page pointer)
+				tsc						get the stack pointer.
+				phd						save current direct register.
+				inc   					point to new direct page space.
+				tcd						make a new direct page.
+				lda [$04]				de-reference the handle.
+				sta $00
+				ldy ##$0002
+				lda [$04],y
+				sta $02
+				ldy ##$0006				get the message command.
+				lda [$00],y
+				bne bad_msg				if print, then skip it.
+				lda $00					adjust pointer to filename string.
+				clc
+				adc ##$0008
+				sta $00
+				bcc L61D1
+				inc $02
+L61D1			lda [$00]				get the length of the string.
+				and ##$00FF				mask off high (leaving just the length)
+				>SHORTM					8 bit accumulator
+				cmp sysentry+5			check against length of app buffer.
+				beq L61DF				if equal then continue with move.
+				bcs bad_msg				if too long then bad message.
+L61DF			tay	string length.
+L61E0			lda [$00],y				get a character.
+				sta sysentry+6,y		store it in the app's filename buffer
+				sta inbuf,y				and in prefix buffer.
+				dey
+				bpl L61E0
+				lda #$00				change flag conditioning value on stack
+				sta $0D,s				to indicate a filename is passed.
+bad_msg
+				>LONGM					16-bit acc.
+				pld						restore direct register.
+				pla						fix stack because handle and userid
+				pla						still on stack.
+				pea $0003				now delete the message (done with it).
+				pea $0001				message type 1.
+				pha						garbage handle (not used).
+				pha
+				>IIGS MessageCenter		go delete the message.
+L6203			>IIGS DisposeHandle		throw away message (handle is on stack)
+L620A			>IIGS MMShutDown		shutdown the memory manager (userid is
+				sec						on stack).
+				xce						back to emulation mode.
+
+				pla						condition z-flag with value on stack.
+				bne L6231				then done.
+				ldx inbuf				get length of pathname.
+				lda #$2F				 look for slash.
+L621B			cmp	inbuf,x
+				beq L6225				when found, set prefix.
+				dex
+				bne L621B
+				bra L6231				if no slash, just skip it.
+L6225			dex						don't include trailing slash.
+				stx inbuf				set new length.
+				jsr MLI				  	set the P8 prefix.
+				.DA #$C6
+				.DA pfxparms
+				lda #$00				set z-flag
+L6231			rts						and go launch the app.
+
+* check for disk volume
+*
+* on exit:
+*	carry clear = disk was found
+*	carry set = disk not found
+
+ckfordrv 		clc						native mode
+				xce
+				>LONGX					16-bit regs, 8-bit acc.
+				ldx ##sysentry+6		point to pathname buffer.
+				jsr copyvol				copy volume name to pathname buffer.
+.1				sec						emulation mode.
+				xce
+				jsr MLI				  	get info on the volume.
+				.DA #$C4
+				.DA gfiparms
+				bcc .2			   		branch if volume found,
+				clc						(native mode)
+				xce
+				>LONGMX
+				jsr  mountvol			else ask user to mount the volume.
+				bcc .1					if <return> pressed, then try again.
+				sec						emulation mode.
+				xce
+				sec						disk not found.
+.2				rts
+
+* Prodos 8 parameter lists
+
+pfxparms 		.DA #01					one parm.
+				.DA inbuf				address of prefix.
+opnparms 		.DA #3					3 parms.
+				.DA pbuf				pathname
+				.DA op_buf			   	i/o buffer
+oprefnum 		.HS 00					reference #
+eofparms 		.DA #02					2 parms
+eofrefn			.HS 00					reference #
+eofval			.HS 000000				3 byte eof value
+readparm 		.DA #04					4 parms
+rdrefnum 		.HS 00				  	reference #
+				.DA sysentry			read into $2000 (bank 0).
+rdcount			.HS 0000				# of bytes to read.
+				.HS 0000				transfer count
+closeprm 		.DA #1					1 parm
+closeref 		.HS 00				 	reference #
+quitparms 		.DA #04					4 parms.
+				.HS 00					quit back to launcher (GQuit)
+				.HS 0000
+				.HS 00
+				.HS 0000
+gfiparms 		.DA #$0A				10 parms
+				.DA volbuf			   	volume buffer
+				.DA #0					access
+				.DA #0					file type
+				.DA 0				  	aux type
+				.DA #0					storage type
+				.DA 0				  	blocks used
+				.DA 0				  	modification date
+				.DA 0				  	modification time
+				.DA 0				  	creation date
+				.DA 0				  	creation time
+
+* messages for P8 fatal error. maximum length of message is 35 characters.
+* the error code will be displayed immediately after the final character.
+
+quitstr1 		.DA #$1B
+				.AS "Can't run next application."
+quitstr2 		.DA #$14
+				.AS "ProDOS Error = $"
+errval			.AS "    "
+quitbtn2 		.HS 00
+
+* messages for P8 mount volume. maximum length of message is 35 characters.
+* the button labels must not be more than 16 characters.
+
+mountmsg 		.DA #$17
+				.AS "Please insert the disk:"
+button1			.DA #$0D
+				.AS "Accept: "
+				.DA #$1B				mousetext on
+				.DA #$0F				inverse on
+				.DA #$4D				mousetext return
+				.DA #$0E				normal on
+				.DA #$18				mousetext off
+button2			.DA #$0B
+				.AS "Cancel: Esc"
+*--------------------------------------
+MAN
+SAVE USR/SRC/PRODOS.FX/PRODOS.S.SEL2
+LOAD USR/SRC/PRODOS.FX/PRODOS.S
+ASM

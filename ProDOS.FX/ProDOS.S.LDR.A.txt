@@ -1,0 +1,742 @@
+NEW
+  AUTO 3,1
+*--------------------------------------
+H2000			jmp prostart
+				jmp atalkset			appletalk setup for network boot
+				jmp p16start			GQuit setup for gs/os
+
+LDR.MSG.AppleII	.AS	-"Apple II"
+LDR.MSG.ProDOS	.AS	-"ProDOS 8 V2.0.3      "
+				.AS -"06-May-93"
+H202F			.AS	-"A2osX Custom"
+LDR.MSG.Copyright
+				.AS	-"Copyright Apple Computer, Inc., 1983-93"
+LDR.MSG.Reserved
+				.AS	-"All Rights Reserved."
+
+p16start 		inc setuprts			set = 2 for GQuit rts
+atalkset 		inc setuprts			set = 1 for appletalk rts
+prostart 		lda unitnum
+				sta LDR.MLIONLINE.P+1
+				jsr LDR.Splash
+
+* test for at least a 65c02
+
+				sed
+				lda #$99				a negative #
+				clc
+				adc #$01				+1 in decimal = 0 (positive)
+				cld
+				bmi m48k				if 6502 because will not clear N flag
+
+* machine at least an m65c02
+
+				lda #$01				patch for the gs rom
+				trb statereg			to force off intcxrom
+				ldx #H232B				yx=232B location table
+				ldy /H232B
+				jsr reloc				move interpreter loader to $800
+				bcs m48k				error
+
+* test for at least 64k
+
+				ldy #$00
+				lda #$FF
+				sta kversion			at least 48k ?
+				eor kversion
+				sec
+				bne m48k	  			if not.
+
+				sta kversion			try again to be sure
+				lda kversion
+				bne m48k	  			still not.
+
+				lda RROMBNK2			read ROM
+				jsr whchrom				get preliminary system config
+				bcs m48k				machine too small
+				lda idapple
+				and #$20
+				bne m64k	  			if at least 64k //+.
+m48k  			jmp H22EB				need enhanced IIe
+
+* we have 64k, now determine model: //e , iic, or Cortland (//gs)
+
+m64k  			ldx #H2367				yx=2367 relocation table
+				ldy /H2367
+				jsr reloc
+				lda kversion
+				sta xdosver				save current version for dir use
+H20CE  			bcc H20D3
+				jmp relocerr
+H20D3  			lda RROMBNK2			read ROM
+				ldx version	  			ROM id byte
+				cpx #$06
+				bne H211D				then it's a //e
+				lda #$E0
+				bit zidbyte	  			another ROM id byte
+				php
+				lda idapple
+				and #$37
+				plp
+				bvc set3				if //c or //x
+				bmi set7				if //e
+
+set3  			php
+				ora #$08
+				plp
+				bpl mach2				if //c
+				ora #$40
+				bpl H20FD				always taken.
+mach2 			inc cflag				//c or later
+				bvs H20FD
+set7  			ora #$80
+
+H20FD 			sta idapple
+				lda RROMBNK2			read ROM
+				sec
+				jsr idroutine	  		returns system info
+				bcs H211D				branch if // family
+				inc cortland	   		it's a Cortland, set loader flag
+				stz vmode				force setvid to reset cursor
+				jsr setvid	   			reset output to screen
+				lda setuprts
+				bne H211D				branch if prodos 8 alone
+
+* running from gs/os shell so zero out os_boot for appletalk
+
+				sta OS_BOOT	   			indicates O/S initially booted.
+				jsr patch101	   		patch for gs/os - rev note #101
+
+* put dispatcher in bank 2 of language card
+
+H211D 			lda LDR.MLIONLINE.P+1	place boot devnum in globals
+				sta LDR.MLIREADBLOCK.P+1
+				sta devnum	   			last device used
+				jsr devsrch				finish setting up globals
+				lda LDR.MLIREADBLOCK.P+1
+				sta devnum
+				jsr lc1in				switch in language card bank 1.
+				ldx #rlclk64	  		set up clock
+				ldy /rlclk64
+				jsr reloc
+
+H2139 			bcs H20CE
+				lda #calldisp
+				sta jspare+1			P8 system death vector
+				lda /calldisp
+				sta jspare+2
+				lda RRAMWRAMBNK2		read/write RAM bank 2
+				lda RRAMWRAMBNK2
+				ldx #altdsptbl			GQuit dispatcher
+				ldy /altdsptbl
+				lda setuprts
+				cmp #$02				is this a GQuit setup?
+				beq H216E				taken to use GQuit dispatcher.
+				ldx #newquitbl			else, use Bird's Better Bye
+				ldy /newquitbl	  		if correct machine.
+				lda machid	  			 machine ID byte
+				bit #$00	   			//c ?
+				bne H216E				if yes, can use.
+				and #$C2
+				cmp #$82	   			//e with 80 col card ?
+				beq H216E				if yes, can use.
+				ldx #dsp64				else, use original quit code
+				ldy /dsp64
+				inc newquitflag			using old quit code so set flag
+
+H216E 			jsr reloc
+				lda #$EE				byte to distinguish LC bank 2
+				sta $D000
+				jsr lc1in				switch in LC bank 1
+				bcs H2139
+
+* test for 128k needed to install ram disk
+
+				lda machid	   			machine ID byte
+				and #$30
+				eor #$30
+				bne noramdsk			if < 128k
+				ldx #$FF
+				php						save interrupt status
+				pla		  				in acc.
+				sei		  				no interrupts.
+				sta SETALTZP	   		use alt zero page/stack
+				stx auxsp				init aux sp to $FF
+				sta CLRALTZP	  		use main zero page/stack
+				pha		  				restore interrupt status
+				plp
+				sta CLRC3ROM	  		enable internal slot 3 ROM
+				jsr RAMDRV.Install
+
+* check interrupt vector to determine ROM version
+
+noramdsk 		lda RROMWRAMBNK2	   	read ROM/write RAM bank 2
+				ldy irqv	   			interrupt vector
+				ldx irqv+1	   			x = high byte
+				jsr lc1in				set language card bank 1 to r/w
+				cpx #$D0	   			is it > $D000 (old roms)
+				lda #$00
+				bcs H21C5				branch if old roms
+
+				sta SETALTZP	   		use alt zero page/stack
+				lda #$FF	   			set aux sp = $FF
+				sta auxsp
+				stx irqv+1	   			interrupt vector
+				sty irqv	   			save irq vector in aux lc
+				sta CLRALTZP	  		use main zero page/stack
+				stx irqv+1	   			save irq vector in main lc
+				sty irqv
+				lda #$01
+H21C5 			sta irqflag				1 = new roms
+				stz cortflag			assume not Cortland system
+				lda cortland	   		running on a Cortland ?
+				beq H21D5				branch if not.
+				inc cortflag	   		yes it's Cortland
+				bra docard
+
+* check for a rom in slot 3. if no rom, use internal $C300 firmware
+
+H21D5 			sta CLRC3ROM			enable internal slot 3 ROM
+				lda rommap	   			slot ROM bit map
+				and #$08				mask all but slot 3
+				bne isromin3	   		taken if rom in slot 3
+				bra H2247				else continue booting
+
+* found a rom in slot 3. is it an external, identifiable 80 col card
+* with interrupt routines? if so, enable it else use internal $C300 firmware.
+
+isromin3 		sta SETC3ROM	   		enable slot 3 rom
+				lda $C305	   			check card id bytes
+				cmp #$38
+				bne hitswtch	   		not terminal card
+				lda $C307
+				cmp #$18
+				bne hitswtch	
+				lda $C30B
+				cmp #$01
+				bne hitswtch
+				lda $C30C				is it an apple 80 col compatible card?
+				and #$F0
+				cmp #$80
+				bne hitswtch	   		if not.
+				lda machid	  			machine ID byte
+				and #$C8
+				cmp #$C0	   			is it a //+ ?
+				beq docard	   			yes
+				lda $C3FA
+				cmp #$2C	   			does card have an interrupt handler?
+				beq docard	   			yes
+
+hitswtch 		sta CLRC3ROM			enable internal $C300 firmware
+
+* verify that the card in aux slot is actually present
+
+				sta SET80STORE	  		enable 80-col store
+				sta SETPAGE2	   		switch in text page 2
+				lda #$EE
+				sta txtp2
+				asl
+				asl txtp2
+				cmp txtp2
+				bne H2230
+				lsr
+				lsr txtp2
+				cmp txtp2
+
+H2230 			sta CLRPAGE2			main memory
+				sta CLR80STORE			disable 80-col store
+				beq docard	   			branch if card is there
+				lda machid	   			machine ID byte
+				and #$FD	   			clear 80-col bit 2 (no card)
+				bne H2244				always
+docard 			lda machid
+				ora #$02				turn bit 2 on (80-col card is present)
+H2244  			sta machid
+H2247  			lda cortland			are we running on a //gs ?
+				beq H225D				if not.
+				lda #$4C	   			enable clock routine by putting a jmp
+				sta clockv	   			in front of clock vector
+				ldx #cortclock	  		yx = relocation table
+				ldy /cortclock	 		for cortland clock driver
+				jsr reloc
+				lda #$01				set bit 0 = clock present
+				tsb machid
+H225D 			lda setuprts			get setup entry point flag
+				beq H2267				taken if normal boot.
+				lda RROMBNK2			read ROM
+				rts		  				return to caller at setup entry point.
+setuprts 		.DA #$00				0 = normal boot, <>0 = return
+
+* set prefix to boot device
+
+H2267 			jsr MLI
+				.DA #MLIONLINE
+				.DA LDR.MLIONLINE.P
+				bcs relocerr
+		 
+				lda pbuf+1				get volume name length.
+				and #$0F	   			strip devnum
+				beq relocerr
+				inc						add 1 for leading '/'
+				sta pbuf	   			save prefix length.
+				lda #'/'	   			place leading '/' in prefix buffer
+				sta pbuf+1
+		 
+				jsr MLI
+				.DA #MLISETPREFIX
+				.DA LDR.MLISETPREFIX.P
+				bcs relocerr
+				tax	=0
+				stx dst
+				ldy #$02	  			read directory into buffer
+				lda /DirBlkBuf
+H228E  			sta dst+1
+				sta LDR.MLIREADBLOCK.P+3
+				sty LDR.MLIREADBLOCK.P+4
+				stx LDR.MLIREADBLOCK.P+5
+				jsr MLI
+				.DA #MLIREADBLOCK
+				.DA LDR.MLIREADBLOCK.P
+				bcs relocerr
+				ldy #$03				get next block# from link
+				lda (dst),y
+				tax
+				dey
+				ora (dst),y				if both bytes are the same
+				beq H22B7				then no more blocks of directory.
+				lda (dst),y
+				tay
+				lda dst+1
+				clc
+				adc #$02				add $200 to buffer pointer
+				cmp /dbuf+$800	  		until it points past end of buffer.
+				bcc H228E				if ok, read next block.
+
+H22B7  			jmp $800				jmp to "load interpreter" code
+
+* relocation/configuration error
+
+relocerr 		sta RROMBNK2			read ROM
+				jsr home
+				ldy #$1D
+
+.1	  			lda LDR.MSG.LdrErr,y
+				sta vline12+4,y
+				dey
+				bpl .1
+
+				bmi *
+
+LDR.MSG.LdrErr	.AS -"Relocation/Configuration Error"
+
+H22EB			ldy #$23
+.1			  	lda LDR.MSG.EnhErr,y
+				sta vline14+2,y
+				dey
+				bpl .1
+				bmi *
+
+LDR.MSG.EnhErr	.AS -"REQUIRES ENHANCED APPLE IIE OR LATER"
+
+LDR.MLIONLINE.P	.DA #2
+				.DA #$60
+				.DA pbuf+1
+LDR.MLISETPREFIX.P
+				.DA #1
+				.DA pbuf
+LDR.MLIREADBLOCK.P
+				.DA #3
+				.DA #0	  				unit number
+				.DA 0					2 byte data buffer
+				.DA 0		 			2 byte block number
+
+cortland 		.BS 1					cortland loader flag (1 = Cortland)
+newquitflag 	.BS 1					1 = old quit code
+
+H232B  			.DA #1	  				move interpreter loader code
+				.DA $800				destination address
+				.DA licode.end-licode	length to move
+				.DA LOADINT	 			source address
+				.DA #$01	  			move $3F0 vectors
+				.DA p3vect	 			destination
+				.DA $0010	  			16 bytes to move
+				.DA H257B				source
+				.DA #$01
+				.DA lookptr				destination address
+				.DA $0002				length to move
+				.DA dst					source
+				.DA #$01	  			move 128k test to zero page
+				.DA tst128				destination
+				.DA LDR.Test128.Len		length to move
+				.DA LDR.Test128			source
+				.HS FF					done
+		 
+dsp64	 		.DA #$01	  			move p8 dispatcher code
+				.DA displc2	  			destination
+				.DA $0300				length (must be <= 3 pages)
+				.DA SEL0		 		source
+				.HS FF					done
+		 
+newquitbl 		.DA #$01	  			move Bird's Bye code
+				.DA displc2	  			dest
+				.DA $0300				length (must be <= 3 pages)
+				.DA SEL1	  			source
+				.HS FF					done
+		 
+altdsptbl 		.DA #$01	  			move GQuit launcher
+				.DA displc2				destination
+				.DA $0300	  			length (must be <= 3 pages)
+				.DA SEL2	 			source
+				.DA #$01	  			move a copy of GQuit launcher
+				.DA dispadr	  			to dispadr for gsos
+				.DA $0300	  			length (must be <= 3 pages)
+				.DA SEL2	 			source
+				.HS FF	done
+
+* tables for moving 64k version of mli for execution
+
+H2367			.DA #$01	  			relocation table. 1=move src to dst
+				.DA $ff9b	 			destination
+				.DA $100-$9B			length to move
+				.DA IRQ		  			source
+				.DA #$01
+				.DA MLI					dst
+				.DA $0100				in one page
+				.DA GP					src
+				.HS 00					0=clear buffers $D700-$DDFF
+				.DA $D700				start
+				.DA $0700				len
+				.DA #$01
+				.DA $DE00				dst
+				.DA $2100				length of mli
+				.DA XDOS				src
+				.DA #$01
+				.DA $D000
+				.DA $0700				length of disk ii driver
+				.DA XRW
+				.HS FF					done
+
+* move thunderclock
+
+rlclk64   		.DA #$01	  			relocation table. 1=move src to dst
+				.DA $D742				destination
+				.DA TCLK.END-TCLK.START	length of thunderclock driver
+				.DA TCLK				source
+
+				.DA #$04	  			4=relocate and move program
+				.DA TCLK.START
+				.DA TCLK.CEND-TCLK.START
+				.DA TCLK.START
+				.HS 00
+				.HS C1C1
+clock64			.DA #$00
+				.HS FF					done
+
+* move cortland clock
+
+cortclock 		.DA #$01	  			relocation table. 1=move src to dst
+				.DA $D742				destination
+				.DA CCLK.END-CCLK.START	length of cortland clock driver
+				.DA CCLK				source
+				.HS FF					done
+
+* load and run appletalk configuration file (atinit) if present
+* or continue loading and running .system file
+
+* loader origin $800
+
+LOADINT			.PH $800
+
+licode 			jsr MLI	  				check for file 'atinit'
+				.DA #MLIGETFILEINFO
+				.DA gfi_list
+				bcc gfi_ok	   			branch if 'atinit' file found
+				cmp #$46				file not found?
+				beq H23DF				if so, continue loading interpreter
+				bne H23E2
+gfi_ok 			lda gfi_type
+				cmp #$E2				is 'atinit' correct file type?
+				bne H23E2				error - wrong file type
+				jsr MLI	  				open 'atinit' file
+				.DA #$C8
+				.DA atopen
+				bne H23E2				error
+				lda #$9F				max size = 39.75k ($2000-$BF00)
+				sta rdlen+1
+				stz rdlen
+				jsr MLI	  				read 'atinit' file to 'sysentry'
+				.DA #$CA
+				.DA rdparm
+				bne H23E2				error - too big
+				jsr MLI	  				close 'atinit' file
+				.DA #$CC
+				.DA clparm
+				bne H23E2				error
+				lda RROMBNK2			enable ROM
+				jsr sysentry			execute ATinit
+H23DF  			jmp goloadint			execute .system file
+
+* fatal error
+
+H23E2 			ldx $23F0				BUG: should be ATINIT.ERR
+H23E5  			lda $23F0,x				BUG: should be ATINIT.ERR
+				sta vline16,x
+				dex
+				bne H23E5
+				beq *
+
+ATINIT.ERR		.DA #$1A				length of message
+				.AS -"Unable to load ATInit file"
+gfi_list 		.DA #$0A
+				.DA atinitname
+				.HS 00
+gfi_type 		.HS 00000000
+				.HS 0000000000000000
+				.HS 0000
+atopen			.HS 03
+				.DA atinitname
+				.DA iobuf				i/o buffer
+				.HS 01					ref# hard coded since no other files
+atinitname 		.DA #06					length of name
+				.AS -"atinit"	  		name of appletalk config file
+goloadint 		
+				lda /dbuf				search directory buffer
+				sta idxl+1
+				lda #$04	   			start 1 entry past header
+				bne H2434				always.
+H2432  			lda idxl				calc next entry position
+H2434  			clc
+				adc dbuf+35	  			inc to next entry address
+				sta idxl
+				bcs H2451				branch if page cross.
+				adc dbuf+35	  			test for end of block.
+				bcc H2453				branch if not page cross
+				lda idxl+1
+				lsr						end of block?
+				bcc H2453				no.
+				cmp #$09	   			end of directory?
+				bne H244D				no.
+				jmp nointrp				no interpreter, go quit.
+H244D  			lda #$04				reset index to 1st entry in next block.
+				sta idxl
+H2451  			inc idxl+1				inc to next page.
+H2453  			ldy #$10	   			check file type.
+				lda #$FF	   			must be a prodos sys file
+				eor (idxl),y
+				bne H2432				if not sys.
+				tay		  				see if active
+				lda (idxl),y
+				beq H2432				if deleted file.
+				and #$0F	   			strip file 'kind'.
+				sta pbuf	   			save length of name.
+				cmp #$08	   			must be at least 'x.system'
+				bcc H2432				else, ignore it.
+				tay		  				compare last 7 chars for '.system'
+				ldx #$06
+H246C  			lda (idxl),y
+				eor iterp,x
+				asl
+				bne H2432				branch if something else
+				dey
+				dex
+				bpl H246C
+				ldy #$00
+H247A  			iny
+				lda (idxl),y
+				sta pbuf,y
+				ora #$80				msb on so can be displayed if error
+				sta iomess+$11,y
+				cpy pbuf
+				bne H247A
+				lda #$A0				space after name
+				sta iomess+$12,y
+				tya			 			error message length
+				adc #$13	   			(carry set)
+				sta ierlen
+				jsr MLI	  				open interpreter file
+				.DA #$C8
+				.DA opparm
+				bne badlod
+				jsr MLI	  				get eof (length of file)
+				.DA #$D1
+				.DA efparm
+				bne badlod
+				lda eof+2
+				bne toolong
+				lda eof+1
+				cmp #$9F				max size = 39.75k ($2000-$BF00)
+				bcs toolong
+				sta rdlen+1
+				lda eof
+				sta rdlen				(read entire file)
+				jsr MLI	  				read interpreter file
+				.DA #$CA
+				.DA rdparm
+				beq H24C8				go close if successfully read.
+				cmp #$56	   			memory conflict?
+				beq toolong	  			then too large
+				bne badlod	   			else, unable to load.
+H24C8  			jsr MLI	  				close interpreter file
+				.DA #$CC
+				.DA clparm
+				bne badlod	   			hopefully never taken
+
+* if booting on a //c then see if esc is in keyboard buffer
+* and clear it. it may have been pressed to shift speed
+* of accelerator chip
+
+				lda cflag
+				beq H24DF				taken if not booting on a //c
+				lda kbd					else, check for keypress
+				cmp #$9B	   			escape?
+				bne H24DF				if not.
+				sta KBDSTROBE	  		clear keyboard
+H24DF  			lda RROMBNK2			enable ROM
+				jmp sysentry			go run interpreter
+
+cflag			.HS 00					set if a //c.
+
+nointrp			jsr MLI	  				no interpreter found,so quit.
+				.DA #$65
+				.DA quitparm
+
+badlod			ldy ierlen				center the error message
+				lda #$27
+				sec
+				sbc ierlen
+				lsr
+				adc ierlen
+				tax
+H24FA  			lda iomess,y
+				sta vline16,x
+				dex
+				dey
+				bpl H24FA
+				bmi H2511
+toolong  		ldy #$1E
+H2508  			lda lgmess,y
+				sta vline16+5,y
+				dey
+				bpl H2508
+H2511  			bmi H2511
+lgmess			.AS -"**  System program too large  **"
+iomess			.AS -"** Unable to load"
+				.AS -" X.System *********"
+ierlen			.HS 00
+opparm			.HS 03
+				.DA pbuf
+				.DA iobuf
+				.HS 01
+efparm			.HS 02
+				.DA #01
+eof				.HS 000000				length of file.
+rdparm			.HS 04
+				.HS 01
+				.DA sysentry
+rdlen			.HS 0000
+				.HS 0000
+clparm			.HS 01
+				.HS 00
+quitparm		.HS 04
+				.HS 00
+				.HS 0000
+				.HS 00
+				.HS 0000
+iterp			.AS -".SYSTEM"			interpreter suffix that is required
+
+licode.end		.EP
+
+* 16 bytes moved to $03F0 vectors
+
+H257B			.DA breakv
+				.DA oldrst
+				.DA #$5A				powerup byte
+				jmp oldrst	  			'&' vector
+				jmp oldrst	   			ctrl-y vector
+				.HS 004000
+				.DA irqent				global page interrupt vector
+lc1in  			lda RRAMWRAMBNK1		read/write language card RAM bank 1
+				lda RRAMWRAMBNK1
+				rts
+
+* determine which system model and save in machine id (idapple)
+
+whchrom			stz idapple				assume standard apple //
+				ldx version	  			check hardware id
+				cpx #$38	   			is it apple // (autostart rom)?
+				beq H25BE				if yes
+				lda #$80
+				cpx #$06	   			apple //e?
+				beq H25BC				if yes
+				lda #$40	   
+				cpx #$EA	   			apple //+?
+				bne H25B6				it not, then machine is unknown.
+				ldx $FB1E				apple /// in emulation?
+				cpx #$AD
+				beq H25BC				taken if apple //+.
+				lda #$D0	   			test again for apple /// emulation
+				cpx #$8A	   			because will only have 48k memory.
+				bne H25B6				if taken, then machine is unknown.
+H25B4  			sec						apple /// emulation is not allowed
+				rts		  				because insufficient memory.
+H25B6  			lda #$02				machine unknown
+				sta (dst),y
+				bne H25D9				always.
+H25BC  			sta idapple				save machine id
+
+* check for language card ram
+
+H25BE  			jsr lc1in				switch in language card bank 1
+				lda #$AA
+				sta $D000
+				eor $D000				if LC present, result = 0.
+				bne H25B4				othewise, insufficient memory.
+				lsr $D000				check lc again
+				lda #$55
+				eor $D000
+				bne H25B4				not sufficent memory.
+				lda #$20				LC ram is available
+				ora idapple
+H25D9  			jmp tst128				jumps to page 0 routine below
+
+* test for 128k. use page 0 for this routine
+
+LDR.Test128		sta idapple				H25DC-2621 was moved to location tst128
+				bpl not128	   			if already determined < 128k
+				lda #$EE
+				sta SETWRITEAUX	  		write to aux mem while on main zp
+				sta SETREADAUX	  		and read aux mem.
+				sta dbuf				write these locs just to test aux mem
+				sta $800		   		1k apart from each other.
+				lda dbuf
+				cmp #$EE
+				bne noaux
+				asl dbuf				may be sparse mem mapping so
+				asl						change value and see what happens.
+				cmp dbuf
+				bne noaux				branch if not sparse mapping.
+				cmp $800
+				bne H2606				if not sparse.
+noaux  			sec						no aux memory available.
+				bcs H2607
+H2606  			clc
+H2607  			sta CLRWRITEAUX	  		switch back to main memory
+				sta CLRREADAUX	  
+				bcs not128	  			if < 128k
+				lda idapple
+				ora #$30				set id = 128k present
+				sta idapple
+not128 			lda lookptr+1
+				sec
+				sbc #$05
+				sta lookptr+1
+				bcs H2620
+				dec lookptr
+H2620  			clc
+				rts
+LDR.Test128.len	.EQ *-LDR.Test128
+*--------------------------------------
+MAN
+SAVE USR/SRC/PRODOS.FX/PRODOS.S.LDR.A
+LOAD USR/SRC/PRODOS.FX/PRODOS.S
+ASM
