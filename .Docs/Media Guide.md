@@ -13,13 +13,13 @@
 
 ## Disk images :
 
-You can use and/or install A2osX from the media found in our Media directory found **[here](.Floppies)**.  The current set of available media includes:
+You can use and/or install A2osX from the media found in our Media directory found **[here](../.Floppies)**.  The current set of available media includes:
 
 | Image Name | Edition | Description !
 | --- | --- | --- |
-| **[RC.140.po](.Floppies/RC.140.po)** | **RC** |**An 140K 5.25" disk image containing the main BOOT and support files for running A2osX.**  |
-| **[RC.800.po](.Floppies/RC.800.po)** | **RC** |**An 800K 3.5" disk image containing the main BOOT and support files for running A2osX.**  |
-| **[RC.32MB.po](.Floppies/RC.32MB.po)** | **RC** |** A formatted empty ProDOS 32MB HD disk image, suitable for use with emulators such as AppleWin **  |
+| **[RC.140.po](../.Floppies/RC.140.po)** | **RC** |**An 140K 5.25" disk image containing the main BOOT and support files for running A2osX.**  |
+| **[RC.800.po](../.Floppies/RC.800.po)** | **RC** |**An 800K 3.5" disk image containing the main BOOT and support files for running A2osX.**  |
+| **[RC.32MB.po](../.Floppies/RC.32MB.po)** | **RC** |** A formatted empty ProDOS 32MB HD disk image, suitable for use with emulators such as AppleWin **  |
 | A2OSX.BUILD.po | Bleed | 32MB disk image with S-C MASM 3.0, all binaries and all source for A2osX <br> This is primary development media for A2osX, especially pre-launch of Release, Stable and official Build Media.  See below.|
 | A2OSX.MAKE.po | Bleed | 32MB disk image with S-C MASM 3.0, all binaries and all source for multiple BUILD versions of A2osX stored in directories on MAKE.  The image also includes the TEST, ADMIN, and EXAMPLE scripts being created to support A2osX. |
 | A2OSX.B800.po | Bleed | An 800K 3.5" disk image containing the main BOOT and support files for running A2osX. |
