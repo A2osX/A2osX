@@ -1,5 +1,9 @@
 # A2osX (0.92) Multi-Tasking OS for Apple II  
 
+## Latest News 2019-10-15
+
+**The first A2osX Release Candidate is now available and can be found in our [Media directory](.Floppies)**.  
+
 ## Latest News 2019-04-19
 
 Major updates have occurred to the kernel and many of the A2osX API's to support a greatly enhanced shell that boasts significant new scripting capabilities since 0.92.  Also added is the the ability to redirect input and output, including errors, and the ability to pipe (|) the output of one command or operation to another (i.e. **ls \* | more** ).  A2osX now provides for multiple virtual terminals as well as users/terminals via TCP (through TELNETD) and serial devices (through a SSC driver).

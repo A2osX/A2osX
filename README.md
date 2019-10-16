@@ -40,7 +40,7 @@ You can use and/or install A2osX from the media in our Media directory found **[
 
 ## Documentation...
 
-A lot of work has been done to expand and enhance the documentation for A2osX.  Some of this documentation is still in the rough draft stage, provided to bring you as much information about A2osX as quickly as possible.  We happily welcome any help and contributions from others to this or any area of the A2osX project.
+A lot of work has been done to expand and enhance the documentation for A2osX.  Some of this documentation is still in the rough draft stage, provided to you to bring you as much information about A2osX as quickly as possible.  We happily welcome any help and contributions from others to this or any area of the A2osX project.
 
 The repository all A2osX documentation can be found **[here](.Docs)**.  This directory includes the system generated specifications for all the A2osX APIs as well as all our other documentation. 
 
