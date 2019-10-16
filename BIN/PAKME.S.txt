@@ -1,0 +1,632 @@
+NEW
+  AUTO 3,1
+				.LIST OFF
+				.OP	65C02
+				.OR	$2000
+				.TF BIN/PAKME
+*--------------------------------------
+				.INB INC/MACROS.I
+				.INB INC/A2OSX.I
+				.INB INC/KERNEL.I
+				.INB INC/PAK.I
+				.INB INC/LIBPAK.I
+				.INB INC/MLI.E.I
+*--------------------------------------
+				.DUMMY
+				.OR ZPBIN
+ZS.START
+ZPPtr1			.BS 2
+ZPPtr2			.BS 2
+ZPFileName		.BS 2
+ZPFileStat		.BS 2
+
+ZPFullPath		.BS 2
+ZPRelPath		.BS 2
+
+ZPSrcBufPtr		.BS 2
+ZPDstBufPtr		.BS 2
+
+bAppend			.BS 1
+bRecurse		.BS 1
+bPause			.BS 1
+
+ZS.END			.ED
+*--------------------------------------
+*			File Header (16 Bytes)
+*--------------------------------------
+CS.START		cld
+				jmp (.1,x)
+				.DA #$61				6502,Level 1 (65c02)
+				.DA #1					BIN Layout Version 1
+				.DA 0
+				.DA CS.END-CS.START		Code Size (without Constants)
+				.DA DS.END-DS.START		Data SegmentSize
+				.DA #64					Stack Size
+				.DA #ZS.END-ZS.START	Zero Page Size
+				.DA 0
+*--------------------------------------
+* Relocation Table
+*--------------------------------------
+.1				.DA CS.INIT
+				.DA CS.RUN
+				.DA CS.DOEVENT		
+				.DA	CS.QUIT
+L.LIBPAK		.DA LIBPAK
+L.MSG.USAGE		.DA MSG.USAGE
+L.MSG.DIR		.DA MSG.DIR
+L.MSG.FILE		.DA MSG.FILE
+L.MSG.OK		.DA MSG.OK
+L.MSG.ERR		.DA MSG.ERR
+L.MSG.E.IARC	.DA MSG.E.IARC
+L.ARC.Header	.DA ARC.Header
+				.DA 0
+*--------------------------------------
+CS.INIT			>LDYA L.LIBPAK
+				>SYSCALL LoadLib
+				bcs .9
+				
+				sta hLIB
+
+.9				rts
+*--------------------------------------
+CS.RUN			>INC.G ArgIndex
+				>SYSCALL ArgV
+				bcs .8
+				>STYA ZPPtr1
+				
+				lda (ZPPtr1)
+				cmp #'-'
+				bne .4
+				
+				jsr CS.RUN.CheckOpt
+				bcc CS.RUN
+				
+.9				>PUSHBI 0
+				>LDYA L.MSG.USAGE
+				>SYSCALL printf
+				lda #E.SYN
+				sec
+.99				rts
+*--------------------------------------
+.4				>LDA.G ArcName
+				bne .5
+
+				>LDA.G ArgIndex
+				>STA.G ArcName
+				bra CS.RUN
+				
+.5				>LDA.G hSrcBasePath
+				bne .9
+				
+				>LDYA ZPPtr1
+				jsr InitSrcDirYA
+				bcc CS.RUN
+				rts
+				
+.8				>LDA.G ArcName
+				beq .9
+				
+				>LDA.G hSrcBasePath
+				beq .9
+				
+				>LDYAI 256
+				>SYSCALL getmem
+				bcs .99
+				>STYA ZPFullPath
+				txa
+				>STA.G hSrcFullPath
+				
+				>LDA.G hSrcBasePath
+				>SYSCALL GetMemPtr
+				>STYA ZPPtr1
+				
+				ldy #$ff
+				
+.80				iny
+				lda (ZPPtr1),y
+				bne .80
+				
+				tya
+				clc
+				adc ZPFullPath
+				sta ZPRelPath
+				lda ZPFullPath+1
+				adc #0
+				sta ZPRelPath+1
+				
+				jsr CS.RUN.OpenArc
+.98				bcs .99
+				
+				>LDYAI CHNK.SIZE
+				>SYSCALL getmem
+				bcs .99
+				>STYA ZPSrcBufPtr
+				txa
+				>STA.G hSrcBuf
+
+				>LDYAI CHNK.SIZE
+				>SYSCALL getmem
+				bcs .98
+				>STYA ZPDstBufPtr
+				txa
+				>STA.G hDstBuf
+*--------------------------------------
+CS.RUN.LOOP		ldy #S.PS.hStdIn
+				lda (pPS),y
+				>SYSCALL feof
+				bcs .99
+				
+				tay
+				bne .1
+				
+				>SYSCALL GetChar
+				bcs .99
+				
+				cmp #$03				Ctrl-C
+				beq .99					Abort....
+				
+				cmp #$13				Ctrl-S
+				bne .1
+
+				lda bPause
+				eor	#$ff
+				sta bPause
+				bne CS.RUN.LOOP
+				
+.1				lda bPause
+				bne CS.RUN.LOOP			Pause...
+*--------------------------------------
+				jsr GetEntry
+				bcs .9
+				
+				ldy #S.STAT.P.DRIVE
+				lda (ZPFileStat),y		ProDOS Device ?
+				beq .5
+				
+				jsr CS.RUN.DEV
+				bcc CS.RUN.LOOP
+				rts
+				
+.5				ldy #S.STAT.P.TYPE
+				lda (ZPFileStat),y
+				cmp #$0F				Directory ?
+				bne .6
+
+				jsr CS.RUN.DIR
+				bcs .99
+				bra .8
+				
+.6				jsr CS.RUN.FILE
+				bcs .99
+				bra .8
+
+.9				jsr LeaveSubDir
+				bcs .90
+
+				jsr BasePath..
+				
+.8				jsr GetNextEntry
+				jmp CS.RUN.LOOP
+				
+.90				lda #0
+				sec
+.99				rts
+*--------------------------------------
+CS.RUN.DEV		lda #E.BADPATH
+				sec				
+				rts
+*--------------------------------------
+CS.RUN.DIR		lda bRecurse
+				bpl .8
+				
+				lda (ZPFileName)
+				cmp #'.'
+				beq .8
+				
+				jsr CS.RUN.GetFilePath
+				
+				>PUSHW ZPRelPath
+				
+				>PUSHBI 2
+				>LDYA L.MSG.DIR
+				>SYSCALL printf
+				bcs .9
+				
+				jsr CS.RUN.WriteArcHdrDir
+				bcs .9
+				
+				>LDYA ZPFileName
+				jsr EnterSubDirYA
+				
+.9				jmp CS.RUN.CheckErr
+								
+.8				clc
+				rts
+*--------------------------------------
+CS.RUN.FILE		jsr FilterMatch
+				bcs .8					no match, skip....
+
+				jsr CS.RUN.GetFilePath
+				
+				>PUSHW ZPFullPath
+				>LDA.G hArcFile
+				tay
+				lda OF.Table.hPath-1,y
+				>SYSCALL getmemptr
+				>SYSCALL strcmp
+				bcc .8
+
+				>PUSHW ZPRelPath
+				
+				>PUSHBI 2
+				>LDYA L.MSG.FILE
+				>SYSCALL printf
+				bcs .9
+				
+				jsr CS.RUN.WriteArcHdrFile
+				bcs .9
+
+				jsr CS.RUN.OpenFile
+				bcs .9
+				
+.1				lda #'.'
+				>SYSCALL putchar
+	
+				jsr CS.RUN.ReadFile
+				bcc .2
+				
+				cmp #MLI.E.EOF
+				bne .4
+				
+				jsr CS.RUN.CloseFile
+				
+				bra .9
+				
+.2				jsr CS.RUN.Pak
+				bcs .3
+
+				jsr CS.RUN.WritePakData
+				bcc .1
+				
+				bra .4
+				
+.3				jsr CS.RUN.WriteSrcData
+				bcc .1
+				
+.4				pha
+				jsr CS.RUN.CloseFile
+				pla
+				sec
+				
+.9				jmp CS.RUN.CheckErr
+				
+.8				clc
+				rts
+*--------------------------------------
+CS.RUN.CheckErr	bcs .1
+				>LDYA L.MSG.OK
+				>SYSCALL puts
+				rts
+				
+.1				pha
+				>PUSHA
+				>PUSHBI 1
+				>LDYA L.MSG.ERR
+				
+				>SYSCALL printf
+
+				pla
+				sec
+				rts
+*--------------------------------------
+CS.RUN.GetFilePath
+				>LDA.G hSrcBasePath
+				>SYSCALL GetMemPtr
+				>PUSHYA
+				
+				>LDYA ZPFullPath
+				
+				>SYSCALL StrCpy
+				
+				>PUSHW ZPFileName
+				>LDYA ZPFullPath
+				>SYSCALL StrCat
+				rts
+*--------------------------------------
+CS.RUN.OpenFile	>PUSHWZ					Aux type
+				>PUSHBI 0				Type
+				>PUSHBI	O.RDONLY
+				>LDYA ZPFullPath
+
+				>SYSCALL FOpen
+				bcs .9
+				
+				>STA.G hFile
+
+.9				rts
+*--------------------------------------
+CS.RUN.ReadFile >PUSHWI CHNK.SIZE
+				>PUSHW ZPSrcBufPtr
+				>LDA.G hFile
+				>SYSCALL fread
+				bcs .9
+				
+				>STYA.G Shunk.SrcSize
+				
+.9				rts				
+*--------------------------------------
+CS.RUN.CloseFile
+				>LDA.G hFile
+				>SYSCALL fclose
+				bcs .9
+				
+				>STZ.G hFile
+.9				rts
+*--------------------------------------
+CS.RUN.Pak		>PUSHEA.G PAKSTAT
+				>PUSHW ZPDstBufPtr
+				>PUSHW.G Shunk.SrcSize
+				>PUSHW ZPSrcBufPtr
+				>LIBCALL hLIB,LIBPAK.Pak
+				bcs .9
+				>STYA.G Shunk.DstSize
+.9				rts
+*--------------------------------------
+CS.RUN.OpenArc	>PUSHWZ					Aux type
+				>PUSHBI $CF				PAK
+				
+				bit bAppend
+				bmi .1
+				
+				>PUSHBI	O.CREATE+O.WRONLY
+				>LDA.G ArcName
+				>SYSCALL Argv
+
+				>SYSCALL FOpen
+				bcs .9
+				
+				>STA.G hArcFile
+
+				>PUSHW L.ARC.Header
+				>LDA.G hArcFile
+				>SYSCALL fputs
+.9				rts
+*--------------------------------------
+.1				>PUSHBI	O.RDWR
+				>LDA.G ArcName
+				>SYSCALL Argv
+				
+				>SYSCALL FOpen
+				bcs .9
+				>STA.G hArcFile
+				
+				pha
+				>PUSHWI 3
+				>PUSHW ZPSrcBufPtr
+				pla
+				>SYSCALL fread
+				bcs .9
+				
+				cpy #3
+				bne .99
+				
+				dey
+				
+.2				lda ARC.Header,y
+				cmp (ZPSrcBufPtr),y
+				bne .99
+				dey
+				bpl .2
+				
+				>PUSHBI SEEK.END
+				>PUSHWI 0
+				>PUSHWI 0
+				>LDA.G hArcFile
+				>SYSCALL fseek
+				bcc .8
+				cmp #MLI.E.EOF
+				bne .99
+				clc
+.8				rts
+
+.99				>LDYA L.MSG.E.IARC
+				>SYSCALL puts
+				lda #E.SYN
+				sec
+				rts
+*--------------------------------------
+CS.RUN.WriteArcHdrDir
+				lda #CHNK.T.DIR
+				jsr CS.RUN.WriteArcByteA
+				bcc CS.RUN.WriteArcHdr
+				rts
+				
+CS.RUN.WriteArcHdrFile
+				lda #CHNK.T.FILE
+				jsr CS.RUN.WriteArcByteA
+				bcs CS.RUN.WriteArcHdr.9
+				
+				ldy #S.STAT.P.TYPE
+				jsr CS.RUN.WriteArcByteY
+				bcs CS.RUN.WriteArcHdr.9
+				
+				ldy #S.STAT.P.AUXTYPE
+				jsr CS.RUN.WriteArcByteY
+				bcs CS.RUN.WriteArcHdr.9
+
+				ldy #S.STAT.P.AUXTYPE+1
+				jsr CS.RUN.WriteArcByteY
+				bcs CS.RUN.WriteArcHdr.9
+
+CS.RUN.WriteArcHdr
+				ldy #$ff
+				
+.1				iny
+				lda (ZPRelPath),y
+				bne .1
+				
+				tya
+				jsr CS.RUN.WriteArcByteA
+				bcs CS.RUN.WriteArcHdr.9
+				
+				>PUSHW ZPRelPath
+				>LDA.G hArcFile
+				>SYSCALL fputs
+			
+CS.RUN.WriteArcHdr.9
+				rts
+*--------------------------------------
+CS.RUN.WriteSrcData
+				lda #CHNK.T.DATA
+				jsr CS.RUN.WriteArcByteA
+				bcs .9
+				
+				>PUSHW.G Shunk.SrcSize
+				>PUSHBI 2
+				>LDYA L.MSG.DBG
+				>SYSCALL printf
+
+				>LDA.G Shunk.SrcSize
+				jsr CS.RUN.WriteArcByteA
+				bcs .9
+				
+				>LDA.G Shunk.SrcSize+1
+				jsr CS.RUN.WriteArcByteA
+				bcs .9
+				
+				lda #0					NO COMPRESSION
+				jsr CS.RUN.WriteArcByteA
+				bcs .9
+	
+				>PUSHW.G Shunk.SrcSize
+				>PUSHW ZPSrcBufPtr
+				>LDA.G hArcFile
+				>SYSCALL fwrite
+.9				rts
+*--------------------------------------
+CS.RUN.WritePakData
+				lda #CHNK.T.DATA
+				jsr CS.RUN.WriteArcByteA
+				bcs .9
+				
+*				>PUSHW.G Shunk.DstSize
+*				>PUSHBI 2
+*				>LDYA L.MSG.DBG
+*				>SYSCALL printf
+
+				>LDA.G Shunk.DstSize
+				jsr CS.RUN.WriteArcByteA
+				bcs .9
+				
+				>LDA.G Shunk.DstSize+1
+				jsr CS.RUN.WriteArcByteA
+				bcs .9
+
+				>PUSHW.G Shunk.DstSize
+				>PUSHW ZPDstBufPtr
+				>LDA.G hArcFile
+				>SYSCALL fwrite
+.9				rts
+*--------------------------------------
+CS.RUN.WriteArcByteY
+				lda (ZPFileStat),y
+				
+CS.RUN.WriteArcByteA
+				>PUSHA		
+				>LDA.G hArcFile
+				>SYSCALL fputc
+				rts
+*--------------------------------------
+CS.DOEVENT		sec
+				rts
+*--------------------------------------
+CS.QUIT			jsr LeaveSubDir
+				bcc CS.QUIT
+				
+				>LDA.G hFilter
+				beq .1
+				>SYSCALL FreeMem
+				
+.1				>LDA.G hSrcFullPath
+				beq .2
+				>SYSCALL FreeMem
+				
+.2				>LDA.G hArcFile
+				beq .3
+				>SYSCALL fclose
+				
+.3				>LDA.G hDstBuf
+				beq .4
+				>SYSCALL FreeMem
+
+.4				>LDA.G hSrcBuf
+				beq .5
+				>SYSCALL FreeMem
+
+.5				lda hLIB
+				beq .8
+				
+				>SYSCALL UnloadLib
+				
+.8				clc
+				rts
+*--------------------------------------
+CS.RUN.CheckOpt	ldy #1 
+				lda (ZPPtr1),y
+
+				ldx #OptionVars-OptionList-1
+
+.2				cmp OptionList,x
+				beq .3
+				dex
+				bpl .2
+
+				sec
+				rts
+				
+.3				ldy OptionVars,x
+				lda #$ff
+				sta 0,y
+				clc
+				rts
+*--------------------------------------
+				.INB USR/SRC/BIN/X.FILEENUM.S
+*--------------------------------------
+CS.END
+*--------------------------------------
+OptionList		.AS "AaRr"
+OptionVars		.DA #bAppend,#bAppend,#bRecurse,#bRecurse
+*--------------------------------------
+MSG.USAGE		.AZ "Usage : PAKME SourceBIN PackedBIN\r\n"
+MSG.OK			.AZ "[OK]"
+MSG.ERR			.AZ "[%h]\r\n"
+MSG.E.IARC		.AZ "Invalid/corrupt archive"
+MSG.DIR			.AZ "Reading Dir:%s..."
+MSG.FILE		.AZ "Adding File:%s..."
+ARC.Header		.AZ "PAKME"
+*--------------------------------------
+LIBPAK			.AZ "libpak"
+hLIB			.BS 1
+*--------------------------------------
+				.DUMMY
+				.OR 0
+DS.START
+ArgIndex		.BS 1
+ArcName			.BS 1
+hSrcFullPath	.BS 1
+
+hFile			.BS 1
+hArcFile		.BS 1
+
+hSrcBuf			.BS 1
+hDstBuf			.BS 1
+
+Shunk.SrcSize	.BS 2
+Shunk.DstSize	.BS 2
+
+PAKSTAT			.BS S.PAKSTAT
+DS.END			.ED
+*--------------------------------------
+MAN
+SAVE USR/SRC/BIN/PAKME.S
+ASM
