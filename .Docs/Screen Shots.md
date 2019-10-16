@@ -1,4 +1,4 @@
-# A2osX (0.92) Multi-Tasking OS for Apple II  
+# A2osX (0.93) Multi-Tasking OS for Apple II  
 
 
 ## Screenshots

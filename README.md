@@ -1,5 +1,9 @@
 # A2osX (0.93) Multi-Tasking OS for Apple II  
 
+## A2osX Release Candidate now available
+
+See the **[news](#news)** section below for more information.
+
 ![](./.screen-shots/ScreenShot.Logo.png)
 
 If you would like to see more screen shots of A2osX click **[here](.Docs/Screen%20Shots.md)**.
@@ -16,7 +20,7 @@ A2osX is designed to work on any 128k Enhanced Apple //e or newer computer.  Spe
 
 Consult the **[documentation](#documentation)** section below to find other resources available to you for learning how to install, use, develop and test A2osX.  The Hardware section of the User Guide contains more information on supported hardware.
 
-## Latest News 2019-04-19
+## News 2019-10-15
 
 Major updates have occurred to the kernel and many of the A2osX API's to support a greatly enhanced shell that boasts significant new scripting capabilities since 0.92.  Also added is the the ability to redirect input and output, including errors, and the ability to pipe (|) the output of one command or operation to another (i.e. **ls \* | more** ).  A2osX now provides for multiple virtual terminals as well as users/terminals via TCP (through TELNETD) and serial devices (through a SSC driver).
 
@@ -26,7 +30,7 @@ If you would like to read all the past news articles for A2osX, you can read the
 
 ## **Visit us at [A2osX](http://www.a2osx.com)**
 
-This is just a place holder and plug for our A2osx internet site.  Stay tuned here for news about this site.  We have also created a Page to discuss A2osX on **[Facebook](https://www.facebook.com/A2osx-372512896625840/)**.  He also have a new **[Twitter](https://twitter.com/A2Osx)** handle that we have been using to test new A2osX features but will soon be using as a messaging channel, so please follow.
+This is just a place holder and plug for our [A2osX](http://www.a2osx.com) internet site.  Stay tuned here for news about this site.  We have created a Page to discuss A2osX on **[Facebook](https://www.facebook.com/A2osx-372512896625840/)** and have a new **[Twitter](https://twitter.com/A2Osx)** handle to test new A2osX features which will soon be used as a messaging channel, so please follow.
 
 ## Disk images...
 
