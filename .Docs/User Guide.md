@@ -1,8 +1,11 @@
 # A2osX User Guide
 
+This Guide provides information on getting started with A2osX.  This Guide helps you understand the basic features, capabilities and operation of A2osX.  This should be the first document you read before, or soon after, installing or running A2osX.
+
 ## What is A2osX?
 
 It is a new operating environment, layered on top of ProDOS, that brings a powerful new way of building and running programs on the venerable Apple // platform. A2osX is a pre-emptive multitasking and multi-user system that employs libraries and drivers to provide multiple applications consistent access to system resources such as terminals, network, and files.
+
 Part of what makes A2osX different, is that all programs, utilities, drivers and libraries are made re-entrant and relocatable so that they can be run concurrently and do not depend on a set memory location.  One of the clear benefits is that multiple users can run the same program and it is only loaded once, and more significantly, drivers and libraries for resources such as networking are only loaded once and can be used my multiple applications at the same time.
 
 A2osX is already much more then a "primitive" command line operating system.  While A2osX runs on top of ProDos, leveraging its support for block devices such as floppy drives, hard drives, SmartPort drives, etc.; it adds a preemptive multitasking kernel with a greatly enhanced shell that supports arguments, redirection, piping, and probably the biggest enhancement, a full scripting language.  In addition, at its core, the A2osX supports multiple virtual terminals (i.e. OA-1 OA-2 gets you different sessions) as well as concurrent external terminals via SSC (getty on SSC serial) or network (TELNETD).  A GUI interface is being built and will be part of a future release.
@@ -68,7 +71,7 @@ The following are the primary sub-directories used by A2osX.  While A2osX suppor
 
 Please note that not all of the above directories are found on every disk or image for A2osX.  Several of them are optionally installed or omitted from systems during initial configuration and may be added or removed at a later time.
 
-## A2osX Boot Process
+### A2osX Boot Process
 
 To help you install, configure, run and maintain your A2osX system, this section delineates the A2osX boot process.  This discussion is based on a standard installation and configuration of A2osX on a bootable drive named /A2OSX.  As will be discussed below, it is possible to run A2osX from drive other then the boot device.  For example, if you have a hard drive with 2 partitions named HD1 and HD2; you can boot from HD1 and then load and run A2osX that is stored on HD2.  Reading this section and the section on installation will help you with this type of configuration.
 
@@ -99,7 +102,7 @@ Some notes on the above:
 
 If you decide to install/copy A2osX to your own existing Hard Drive or volume, you just need to be sure to keep the A2osX file system structure in tact.  To start A2osX "manually" as it were, you change your PREFIX to the appropriate sub-directory and then load A2OSX.SYSTEM.  So for example, if you had a CFFA card that booted to a volume called /HD1, you could make a subdirectory on this disk called A2OSX.  You would then set your PREFIX to /HD1/A2OSX and launch A2OSX.SYSTEM and the rest of the boot process outlined above would be followed.  Please see the section on Installation for more information on putting A2OSX on your own media.
 
-### Kernel Modules
+### A2osX Kernel Modules
 
 As stated above, when A2OSX first launches, it looks in the ./SYS subdirectory and loads and runs all files that start with KM.. Currently the following Kernel Modules are available:
 
@@ -116,11 +119,12 @@ The KM.RAMWORKS is needed only on systems with greater then 128K of memory.  It 
 
 The KM.VSDRIVE module helps you connect to an ADTPRO server via a Super Serial Card (SSC).  This module will use the first Super Serial Card in your system set with Interrupts off.  It is also best if you set this SSC at a baud rate of 115200.  If you have more then one SSC system and you are using the others for terminals you should fully understand how to configure the cards, Kernel Modules, and the SSC drivers for optimal performance.
 
-PK Note: Fill in actual details of confirmed Apple //e and GS setup for VSDRIVE with and without terminals as well.
+
+- PK Note: Fill in actual details of confirmed Apple //e and GS setup for VSDRIVE with and without terminals as well.
 
 The KM.APPLETALK module helps ProDOS talk to APPLETALK, though at the moment A2osX cannot use this facility until we complete the ATLOGIN/Mount programs.  On most of our media you will find this KM stored in a subdirectory of ./SYS which means it is not loaded at start up.
 
-### Maintenance mode
+### A2osX Maintenance mode
 
 A2osX supports a special maintenance mode that you can invoke while A2osX is loading.  As the system begins to load, press Control-R (hold down the Control Key and press R) to enable ROOT Mode.  In this mode, A2osX starts up in a special mode that
 
@@ -134,19 +138,19 @@ In maintenance mode, you still have access to all A2osX utilities and scripts, s
 
 A2osX is a multiuser multitasking operating system.  As with any such operating system running on a single core single CPU system such as an Apple II with the 6502, A2osX switches between all of the running processes automatically ensuring that each gets serviced in a reasonable time. It is the A2osX Kernel that performs this task in 1 of 2 manners: Cooperative or Preemptive mode.  In Cooperative mode, the default, switching between processes occurs whenever an application makes a "blocking" API call (i.e. waiting for a key press or a network frame) or cooperatively relinquishes control (by explicitly calling >SLEEP, see the A2osX Developers Guide).  In Preemptive Mode, set by option in the KCONFIG utility (see A2osX Command Guide), the kernel switches between "sleeping" processes automatically at 1/10th-second intervals.  In order to use Preemptive Mode, your system must have supported hardware that generates an interrupt used by A2osX such as an Apple II Mouse or ThunderClock interface.
 
-## Devices
+### A2osX Devices
 
 A2osX supports a number of block or file devices for input and output (I/O).  Devices should not be confused with hardware, though many devices correspond to actual hardware and not all hardware is presented as an A2osX device.  For example, while A2osX supports getting the date and time from ProDOS, there is no "time" device; and while your Apple has a screen and keyboard, with A2osX a user interacts with a Terminal Device (i.e. /DEV/TTY1).  This section discusses the devices with witch users or A2osX programs can interact.  Please see the Hardware Section of this User guide for a fuller discussion of the hardware A2osX supports.
 
-### Null Device
+#### Null Device
 
 There is a standard Null device that you can use in your scripts, typically to redirect error messages.  This device is /DEV/NULL.
 
-### Block Devices
+#### Block Devices
 
 A2osX supports all the ProDOS block devices including floppy drives, hard drives and Ram Disks.  It has been tested to work with both 140K and 800K floppy drives, the FloppyEMU (both floppy types), the CFFA3000 and the ReActiveMicro Turbo as well as RAMWorks and Apple 1MB Memory cards.  While these drives may be listed with the device identifier (i.e. S6D2 or S7D1) they are reference using their ProDOS names and pathing (i.e. /BOOT or /RAM3).
 
-### Virtual Terminals
+#### Virtual Terminals
 
 A2osX supports multiple virtual terminals on your a single Apple system.  By default the system is configured to support 2 virtual terminals (/DEV/TTY1 and /DEV/TTY2).  This will be configurable in the future using the KCONFIG utility.  In addition to these virtual terminals there is also a console device (/DEV/CONSOLE) and in the future a Double-High Graphics Resolution (/DEV/DHGR??) display.  You can switch between these various devices by using the special Open-Apple key.
 
@@ -161,21 +165,21 @@ A2osX supports multiple virtual terminals on your a single Apple system.  By def
  
 Note: if only 2 virtual terminals are configured then OA-3 and OA-4 will have no effect.  Once terminals are configurable in KCONFIG, please note that increasing and reducing the number of virtual terminals impacts the amount of memory used by A2osX.
 
-### Physical Terminals
+#### Physical Terminals
 
 A2osX supports physical terminals (or a PC running a terminal emulator) via a Super Serial Card and the A2osX SSC.DRV driver.  You will need to set the switches on your SSC and the parameters of your terminal emulator to match and of course you will need the appropriate null modem cable.  The terminal type supported is VT-100, so please set your emulator to VT-100 mode.  A2osX does not support modems connected to your SSC at this time.
 
 A2osX supports as many physical terminals as you have SSC cards and memory to load drivers for each card and support those users.  Note that if you are running the KM.VSDRIVE module, it takes the first SSC card that is not configured for interrupts (likely slot 1 or 2).  So if you INSDRV SSC.DRV with KM.VSDRIVE loaded, then it will use the next card.  You have to load a driver for each card you want to handle as a terminal.  You also have to start the GETTY process for each terminal.  The Terminals will be named /DEV/COMx where x is the slot the card is in. 
 
-### Internet Terminals
+#### Internet Terminals
 
 A2osX supports multiple internet connected terminals via a TELNETD server process.  The TELNETD process supports VT-100 terminals, so you should set your Telnet client (i.e. PuTTY) to use VT-100 emulation.  Of course you can use another Apple running A2osX and the TELNET client to connect to an Apple running A2osX and the TELNETD server.
 
 Please note, if you are using Telnet Client Software such as PuTTY for Windows and see random garbled characters (odd graphics symbols), you may need to change your **Remote Character Set** to something other than **UTF-8**, such as **ISO-8859-1:1998 (Latin-1, West Europe)**.
 
-## Hardware
+### Hardware
 
-### Hardware Requirements
+#### Hardware Requirements
 
 *Minimum Hardware Requirements*<br>
 128K Enhanced (65C02) Apple //e<br>
@@ -183,7 +187,7 @@ Apple //c<br>
 Apple //GS<br>
 Minimum 140K 5.25 disk drive, 800K 3.5 strongly recommended.
 
-### Supported Hardware
+#### Supported Hardware
 
 Any ProDOS Block Device (5.25 & 3.5 Floppy Drives, SmartPort Hard Drive and Ram Disks)<br>
 NoSlot Clock or ThunderClock<br>
@@ -209,7 +213,7 @@ Find out more
 MAN
 Additional resources
 
-## Networking
+### Networking
 
 install the drivers for the hardware (uther, lances, ssc, etc.)
 then NETWORKD lib lib  (and the libs are tcpip or etalk maybe) libs are protocalls here
@@ -242,12 +246,12 @@ Telnetd
 httpd
 
 
-## Utilities
+### Utilities
 
-### Using Text Editors
+#### Using Text Editors
 EDIT
 
-### Commands for navigating the file system
+#### Commands for navigating the file system
 CD
 CD ..
 PWD
@@ -257,13 +261,13 @@ POPD
 LS
 LS -L or L
 
-### Commands for working with files
+#### Commands for working with files
 
 MV
 CP
 RM
 
-### Commands for working with directories
+#### Commands for working with directories
 
 MD
 RD
