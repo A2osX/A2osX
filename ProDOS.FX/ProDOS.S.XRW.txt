@@ -1,7 +1,7 @@
 NEW
   AUTO 3,1
-* disk ii driver. object code = xrw_0
-* $5300-5A00 moved to language card bank 1 at $D000
+*--------------------------------------
+FASTSEEK		.EQ 0
 *--------------------------------------
 blockio			cld						$D8 to flag language card bank 1 (main)
 				jsr rsetphse
@@ -167,6 +167,7 @@ L53FD  			ldx A2L
 				rol		 				write protect-->carry-->bit 0=1
 				lda q6l,x				keep in read mode
 				jmp statdne
+				
 myseek			asl						assume two phase stepper
 				sta track				save destination track * 2
 				jsr alloff				turn all phases off to be sure.
@@ -175,7 +176,9 @@ myseek			asl						assume two phase stepper
 				sta curtrk	   			current position.
 				lda track				where to go next.
 				sta iobpdn,x
+
 				jsr seek				move head there
+
 alloff			ldy #$03	   			turn off all phases before returning.
 L5427  			tya		  				(send phase in acc)
 				jsr clrphase			carry clear, phases should be turned off
@@ -184,7 +187,7 @@ L5427  			tya		  				(send phase in acc)
 				lsr curtrk				divide back down
 				clc
 				rts
-
+*--------------------------------------
 * fast seek subroutine
 *
 * on entry:
@@ -201,53 +204,111 @@ L5427  			tya		  				(send phase in acc)
 *	   seek for motor on time overlap.
 *
 * variables used: curtrk, trkn, countn, prior, A2L, montimel, montimeh
-
+*--------------------------------------
+				.DO FASTSEEK=0
 seek			sta trkn				save target track.
 				cmp curtrk	   			on desired track ?
-				beq setphase			yes, energize phase and return
+				beq setphase			CS, yes, phase OFF and return
+
 				lda #$00
 				sta trkcnt	   			half track count.
+
 L5440  			lda curtrk	   			save curtrk for delayed turnoff
 				sta prior
 				sec
 				sbc trkn	   			delta-tracks.
 				beq L5483				branch if curtrk = destination
+
 				bcs mvout				move out, not in.
+
 				eor #$FF	   			calculate tracks to go.
 				inc curtrk	   			increment current track (in).
 				bcc L545A				always taken.
+
 mvout  			adc #$FE				calculate tracks to go.
 				dec curtrk	   			decrement current track (out).
+
 L545A 			cmp trkcnt
 				bcc L5462				and 'tracks moved'
+
 				lda trkcnt
+
 L5462  			cmp #$09
 				bcs L5468				if trkcnt > 8 then leave y alone (y=8)
 				tay						else set acceleration index in y
 				sec
+
 L5468  			jsr setphase
 				lda ontable,y			for 'ontime'
 				jsr mswait	   			(100us intervals)
+
 				lda prior
 				clc		  				for phaseoff
 				jsr clrphase	  		turn off prior phase
+
 				lda offtable,y	 		then wait 'offtime'
 				jsr mswait	   			(100us intervals)
+
 				inc trkcnt	   			count of 'tracks moved'
 				bne L5440				always taken
+
 L5483  			jsr mswait	   			settle 25 msec
 
 				clc		  				set for phase off
 
 setphase 		lda curtrk	  			get current track
+
 clrphase 		and #$03	   			mask for 1 of 4 phases
-				rol						double for phaseon/off index
-				ora A2L
+				rol						double for phase on(CS)/off(CC) index
+				ora A2L					Slot $n0
 				tax
 				lda phaseoff,x			turn on/off one phase
 				ldx A2L					restore x reg
 				rts		  				and return
+				.FIN
+*--------------------------------------
+				.DO FASTSEEK=1
+XRW.NewSeek		STA   $26
 
+.1		       	LDA   $FF
+				STA   $27
+				SEC
+				SBC   $26
+				BEQ   XRW.NewSeek.rts
+
+				BCS   .2
+
+				INC   $FF
+				BCC   .3
+				
+.2		    	DEC   $FF
+
+.3			    JSR   XRW.NewSeek.TrOff
+
+				JSR   XRW.NewSeek.Wait
+XRW.NewSeek.TrOn
+				LDA   $27
+				AND   #$03
+				ASL
+				TAY
+				LDA   $C0E0,Y
+				JSR   XRW.NewSeek.Wait
+				BEQ   .1
+
+XRW.NewSeek.TrOff
+				LDA   $FF
+				AND   #$03
+				ASL
+				TAY
+				LDA   $C0E1,Y
+XRW.NewSeek.rts
+				rts
+
+XRW.NewSeek.Wait
+				LDA   #$25
+				JMP   $FCA8    F8ROM:WAIT
+				.FIN
+*--------------------------------------
 * 7-bit to 6-bit 'deniblize' table (16-sector format)
 *
 * valid codes are $96 to $FF only. codes with more than one pair of
@@ -255,7 +316,7 @@ clrphase 		and #$03	   			mask for 1 of 4 phases
 *
 * nibles in the ranges of $A0-$A3, $C0-$C7, $E0-$E3 are used for
 * other tables since no valid nibles are in these ranges.
-
+*--------------------------------------
 dnibl			.HS 0004FFFF080CFF10	aligned to page boundary minus $96
 				.HS 1418
 twobit3			.HS 008040C0FFFF		used in fast prenib as lookup for 2-bit quantities.
@@ -350,15 +411,13 @@ montimel 		.HS 00
 montimeh 		.HS 00					also 'volume'
 prior			.HS 00
 trkn			.HS 00
-
+				.DO FASTSEEK=0
 * phase on, off time tables
 * in 100 usec intervals (seek)
 
-ontable			.HS 013028
-				.HS 24201E1D1C1C
-offtable 		.HS 702C
-				.HS 26221F1E1D1C1C
-
+ontable			.HS 01302824201E1D1C1C
+offtable 		.HS 702C26221F1E1D1C1C
+				.FIN
 * mswait subroutine
 *
 * delays a specified number of 100 usec intervals for motor timing.
