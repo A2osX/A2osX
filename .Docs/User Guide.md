@@ -205,7 +205,11 @@ Download one of the available 32MB images from GitHub.  Open AppleWin and then c
 
 ### Installing on Your Apple
 
-First check hardware requirements.  Installing on your own media / Selecting your Media
+First check that your system meets the minimum hardware requirements.  Download one of the available images from GitHub.  Images are available in 140K (5 1/4 floppy), 800K (3.5 floppy) and 32MB (suitable for use with hard drive emulators).  You will need to use ADTPro to convert an image to physical media or a device such as a FloppyEMU or CFFA to load/boot one of these images on a real Apple.  If you are using a device such as the FloppyEMU or CFFA, you should use either the 800K or 32MB images (ProDOS volume name: FULLBOOT) as the smaller 140K image (ProDOS volume: MINIBOOT) is a pared down copy of A2osX that omits several utilities to fit in 140K.
+
+>If you have your own hard drive, you can install A2osX on your drive.
+
+Installing on your own media / Selecting your Media
 Check that you have enough free space if you are installing to your own ProDOS volume.  For the base A2osX boot you need under 200K of free space, but a complete install may take a megabyte or more.
 Configure
 Explore
