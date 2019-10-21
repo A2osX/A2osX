@@ -1,5 +1,7 @@
 # A2osX Command Guide
 
+### Updated October 20, 2019
+
 This Guide provides information on all the A2osX commands and utilities.  This Guide helps you not only learn the purpose of each command but also what options a command supports and what arguments it either supports or requires.
 
 A2osX comes with a nice variety of system, file, network and data utilities -- what we refer to as external commands.  This just means that each of the following commands or utilities is built as a separate BIN or executable file that runs under A2osX.  The source for all of these external commands is readily available, so you can make your own or modify these as your needs dictate.
@@ -92,9 +94,9 @@ This system command loads one or more libraries providing network services to A2
 
 | Command | Options |
 | ----- | --- |
-| TELNETD | -d [port] : Specify optional port |
+| TELNETD | [port] : Specify optional port |
 
-TELNETD is a server process that listens for incoming requests to connect to your A2osX system.  By default it listens on Port 23.  You can change the Telnet Server port by starting the TELNETD process with the --d option and specifying an alternate port.  Typically this would be used to get around local firewall or port restrictions such as when you are running your server at home on a DSL or Cable connection and your provider blocks port 23.  In addition, if you are running in an environment with only one public IP address and you have another system at that site already running a Telnet server, you can use this option to move your A2osX host to alternate port.
+TELNETD is a server process that listens for incoming requests to connect to your A2osX system.  By default it listens on Port 23.  You can change the Telnet Server port by starting the TELNETD process and specifying an alternate port.  Typically this would be used to get around local firewall or port restrictions such as when you are running your server at home on a DSL or Cable connection and your provider blocks port 23.  In addition, if you are running in an environment with only one public IP address and you have another system at that site already running a Telnet server, you can use this option to move your A2osX host to alternate port.
 
 When TELNETD detects an incoming request it starts a GETTY process and creates a virtual internet terminal for the user and begins the LOGIN process same as the system would for a hardwired terminal.  Note TELNETD requires that you have a supported Ethernet card and have configured your system for a network appropriately.
 
@@ -210,7 +212,7 @@ CSH is one of the interactive and script processing shells under development for
 
 | Command | Options |
 | --- | --- |
-| CUT \<opt\> "line"   or  <br>  CMD \| CUT \<opt\> |  -H : This help screen <br> -F nn : Output field nn <br> -M nn : Output starting at nn <br> -N nn : Output Ending at nn <br> -S ch : Change default SPACE separator to 'ch' |
+| CUT \<opt\> "line"   or  <br>  CMD \| CUT \<opt\> | -F nn : Output field nn <br> -M nn : Output starting at nn <br> -N nn : Output Ending at nn <br> -S ch : Change default SPACE separator to 'ch' |
 
 The CUT command is used to extract a sub-part or portion of a string.  Use this command to simply extract sub-strings much like Basic's MID, LEFT, or RIGHT might be used. It can also be used within the powerful FOR NEXT construct to process fields of columns from files or the output of processes.
 
@@ -266,7 +268,7 @@ The FORMAT command will erase an existing volume and update its name to the VOLU
 
 | Command | Options |
 | --- | --- |
-| GREP \<opt\> PATTERN FILE <br>  CMD \| GREP \<opt\> PATTERN | -H : This help screen <br> -I : Ignore Case <br> -N : Print line Number | 0.93 |
+| GREP \<opt\> PATTERN FILE <br>  CMD \| GREP \<opt\> PATTERN | -I : Ignore Case <br> -N : Print line Number | 0.93 |
 
 The GREP command parses multiple lines of input (either from a file or from the redirected output of another command) and only outputs those lines that contain the PATTERN.  In this way, you can think of the GREP command as a filter.  You can use the -I option to force GREP to ignore case in the PATTERN and the INPUT lines (i.e. it capitalizes both the source and the PATTERN before doing the compare) though it still outputs the actual lines of content that match (their original capitalization is preserved).
 
@@ -282,7 +284,7 @@ In this example, only those volumes that are attached to Slot 7 are listed.
 
 | Command | Options |
 | --- | --- |
-| KILL \<signal\> PID | -0 : No Signal <br> -1 : SIGQUIT | 0.93 |
+| KILL \<signal\> PID | -0 : No Signal <br> -1 : SIGQUIT <br> -2 : SIGKILL | 0.93 |
 
 The KILL command kills or terminates a running process.  This can be most useful when you have a running process that is stuck (perhaps you are debugging a program or script).  Switch to another virtual terminal (by pressing Open Apple-1) and executing the PS command to list currently running processes.  Then execute the KILL command on the errand process by its PID found in the displayed process list (i.e. KILL 27 to terminate process with a PIP of 27).  Consult the A2osX User Guide for information on using and switching between virtual terminal sessions on your Apple.
 
@@ -424,7 +426,7 @@ The USERADD command is used to add a new User ID and Password to the A2osX User 
 
 The USERDEL command is used to delete a User ID from the A2osX User Database.  Optionally you can have USERDEL remove the users Home directory and any files contained therein.  Please see the User Guide for more information on User Management.
 
-###WC
+### WC
 
 | Command | Options |
 | ----- | --- |
@@ -432,19 +434,19 @@ The USERDEL command is used to delete a User ID from the A2osX User Database.  O
 
 The WC command is used to display the char, line and word counts of one or more files.  If more then one file is processed then a total count of all files is also displayed.
 
-###WHO
+### WHO
 
 | Command |
 | ----- |
 | WHO |
 
-The WHO command displays a list of users currently logged into the A2osX system and the device used for the login.
+The WHO command displays a list of users currently logged into the A2osX system and which device they are using to connect to the system.
 
 ## Network Tools
 
 The Network Tools group of commands allow you to load or start networking services, option IP addresses, connect to other systems, or get the status of your network.  Some of these commands are designed specifically as user programs such as Telnet to interactively connect to another computer such as a BBS.  Others are intended to be used by system scripts for loading and initializing the network, though they can be run on the command line and therefore are explained here.  These commands are found in **./BIN/** letting you know they are user commands.
 
-###ARP
+### ARP
 
 | Command |
 | ----- |

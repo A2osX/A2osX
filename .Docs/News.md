@@ -1,5 +1,7 @@
 # A2osX (0.92) Multi-Tasking OS for Apple II  
 
+### Updated October 20, 2019
+
 ## Latest News 2019-10-15
 
 **The first A2osX Release Candidate is now available and can be found in our [Media directory](.Floppies)**.  
