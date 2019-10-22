@@ -1,6 +1,6 @@
 # A2osX (0.93) Multi-Tasking OS for Apple II  
 
-### Updated October 20, 2019
+### Updated October 22, 2019
 
 ## A2osX Release Candidate now available
 
@@ -23,6 +23,8 @@ A2osX is designed to work on any 128k Enhanced Apple //e or newer computer.  Spe
 Consult the **[documentation](#documentation)** section below to find other resources available to you for learning how to install, use, develop and test A2osX.  The Hardware section of the User Guide contains more information on supported hardware.
 
 ## News...
+
+**2019-10-22** - Updated RC images to Build 1664 which fixed RESTART SYSTEM bug on //GS.
 
 **2019-10-19** - Updated RC images to Build 1653 which fixed bugs in CUT and includes a patched version of ProDOS 2.03 to correct year display for ThunderClocks.
 
