@@ -142,12 +142,13 @@ Dev.ParseArgs	>LDYA ARGS
 				clc
 				rts
 
-.1				>PUSHW L.MAC5
-				>PUSHW L.MAC4
-				>PUSHW L.MAC3
-				>PUSHW L.MAC2
-				>PUSHW L.MAC1
-				>PUSHW L.MAC0
+.1				ldx #10
+
+.2				>PUSHW L.MAC0,x
+				dex
+				dex
+				bpl .2
+				
 				>PUSHBI 12				6 x byte PTRs
 				>PUSHW L.SSCANF.MAC
 				>LDYA ZPArgPtr
@@ -186,8 +187,9 @@ ZPBufPtr		.EQ ZPDRV+2
 Counter			.EQ ZPDRV+4
 Offset			.EQ ZPDRV+6
 RXTX.Size		.EQ ZPDRV+8
+BUF.Size		.EQ ZPDRV+10
 				.DO U2AI=1
-RX.IP			.EQ ZPDRV+10
+RX.IP			.EQ ZPDRV+12
 				.FIN
 *--------------------------------------
 DRV.CS.START	cld
@@ -372,7 +374,7 @@ CLOSE			ldx DEVSLOTx0
 *--------------------------------------
 READWRITE.9		lda #E.NODATA
 
-READWRITE.99	plp
+				plp
 				sec
 				rts
 *--------------------------------------
@@ -403,32 +405,70 @@ READ			php
 				.DO U2AI=1
 				ldy #0
 				
-.10				lda W5100.DR,x
+.10				lda W5100.DR,x			IPRAW:Get Source IP
 				sta RX.IP,y
 				iny
 				cpy #4
 				bne .10
 				
-				ldy W5100.DR,x			get RX.Size HI
-				sty RXTX.Size+1
+				lda W5100.DR,x			get RX.Size HI (not including 6 bytes Header)
+				sta RXTX.Size+1
+				eor #$ff
+				sta Counter+1
 				lda W5100.DR,x			get RX.Size LO
 				sta RXTX.Size
+				eor #$ff
+				sta Counter
+
+				eor #$ff
 				
 				clc
 				adc #S.IP
-				pha
-				tya
+				sta BUF.Size
+				ldy #S.IOCTL.BYTECNT
+				sta (ZPIOCTL),y
+				
+				iny
+				
+				lda RXTX.Size+1
 				adc /S.IP
-				ply
+				sta BUF.Size+1
+
+				lda RXTX.Size
+				clc
+				adc #6				 IPRAW: Add 6 bytes to Total Size
+				sta RXTX.Size
+
+				lda RXTX.Size+1
+				adc #0
+				sta RXTX.Size+1				
+				
 				.ELSE
-				lda W5100.DR,x			get RX.Size HI
+				lda W5100.DR,x			get RX.Size HI (Frame size + 2)
 				sta RXTX.Size+1
-				ldy W5100.DR,x			get RX.Size LO
-				sty RXTX.Size
+				lda W5100.DR,x			get RX.Size LO
+				sta RXTX.Size
+
+				ldy #S.IOCTL.BYTECNT
+				sec
+				sbc #2					MACRAW:strip 2 bytes Header from Size 
+				sta (ZPIOCTL),y
+				sta BUF.Size
+				eor #$ff
+				sta Counter
+
+				iny
+				lda RXTX.Size+1
+				sbc #0
+				sta (ZPIOCTL),y
+				sta BUF.Size+1
+				eor #$ff
+				sta Counter+1				
 				.FIN
 
+				>LDYA BUF.Size
 				>SYSCALL2 getmem
-				bcs READWRITE.99
+				bcs .9
 
 				>STYA ZPBufPtr
 				phx
@@ -440,39 +480,6 @@ READ			php
 				pla
 				sta (ZPIOCTL),y
 
-				ldy #S.IOCTL.BYTECNT
-				.DO U2AI=1
-				lda RXTX.Size
-				sta (ZPIOCTL),y
-				eor #$ff
-				sta Counter
-				eor #$ff
-				clc
-				adc #6				Total Size : Add 6 bytes for IPRAW
-				sta RXTX.Size
-				iny
-
-				lda RXTX.Size+1
-				eor #$ff
-				sta Counter+1
-				eor #$ff
-				adc #0
-				sta RXTX.Size+1
-				.ELSE
-				lda RXTX.Size
-				sec
-				sbc #2				Header Size : strip 2 bytes for MACRAW
-				sta (ZPIOCTL),y
-				eor #$ff
-				sta Counter
-				iny
-
-				lda RXTX.Size+1
-				sbc #0
-				sta (ZPIOCTL),y
-				eor #$ff
-				sta Counter+1
-				.FIN
 				.DO U2AI=1
 				ldx #3
 				ldy #S.IP.SRC+3
@@ -502,7 +509,7 @@ READ			php
 				bne .2
 
 				inc ZPBufPtr+1
-				bne .2
+				bra .2
 
 .4				>AR.SELECT S0.RX.RD
 
@@ -526,6 +533,10 @@ READ			php
 				plp
 				clc
 				rts
+				
+.9				plp
+				sec
+				rts
 *--------------------------------------
 WRITE			php
 				sei
@@ -548,6 +559,7 @@ WRITE			php
 				sta RXTX.Size+1
 				eor #$ff
 				sta Counter+1
+
 				ldx DEVSLOTx0
 
 				>AR.SELECT S0.TX.FSR
@@ -563,6 +575,7 @@ WRITE			php
 
 				.DO U2AI=1
 				>AR.SELECT S0.DIPR
+
 				ldy #S.IP.DST
 
 .1				lda (ZPBufPtr),y
@@ -572,6 +585,7 @@ WRITE			php
 				bne .1
 
 				>AR.SELECT S0.PROTO
+
 				ldy #S.IP.PROTOCOL
 				lda (ZPBufPtr),y
 				sta W5100.DR,x
