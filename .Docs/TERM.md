@@ -1,3 +1,9 @@
+# A2osX Terminal Codes
+
+### Updated October 22, 2019
+
+A2osX terminal capabilities are based off of the standard VT100 Terminal.  This applies to users connected via Super Serial Cards, Telnet (via TelnetD server daemon) and Apple console (physical keyboard/screen).  All programs can use this facility to create rich interactive text mode applications.  This includes both programs written in Assembly or Scripts written for the Shell (SH).  The table below lists the codes you can use in your applications and their function.  Consult the A2osX Shell Developers Guide for information on using these codes in scripts.  Note, the Apple Console implementation only supports a subset of the VT100 codes, these are noted in the last column as OK.
+
 | Esc Sequence | Description | DEC Code | A2osX TERM |  
 |--------------|-------------|----------|------------|
 |Esc[20h 	   |Set new line mode|LMN|OK|
@@ -82,3 +88,22 @@
 |Esc[0c 	|Identify what terminal type (another)| 	DA||  
 |Esc[?1;Value0c 	|Response: terminal type code n |	DA  ||
 |Escc 	|Reset terminal to initial state| 	RIS  |OK|
+
+## License
+A2osX is licensed under the GNU General Pulic License.
+
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 2 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+The full A2osX license can be found **[Here](../LICENSE)**.
+
+## Copyright
+
+Copyright 2015 - 2019, Remy Gibert and the A2osX contributors.

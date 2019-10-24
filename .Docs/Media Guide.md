@@ -10,7 +10,7 @@ We have changed the media set for A2osX.  New A2osX Users should download the mo
 | --- | --- | --- | --- |
 | RELEASE | This is a locked down set of media that will change infrequently, only upon a major update. | | * |
 | **RC** | **This is a RELEASE candidate, if available, for the next coming major release.  There should be very few RC releases before one of them becomes the actual RELEASE media.  RC releases should be relatively bug free and feature complete (to the scope planned for that release).**  | **1664** | **Oct-22-2019** |
-| STABLE | Stable releases are significant updates over the last RELEASE but may not included in their own scope.  STABLE releases will be made from BLEED builds that have no significant bugs, but may have documented issues that have not yet been resolved, especially in new features.  | | * |
+| STABLE | Stable releases are significant updates over the last RELEASE but may not included in their own scope.  STABLE releases will be made from BLEED builds that have no significant bugs, but may have documented issues that have not yet been resolved, especially in new features.  **This will likely become RC shortly.  Anyone with network cards, please download and test.**  | **1669** | **Oct-22-2019** |
 | BLEED| The media in this edition are very cutting edge, changing almost daily, particularly A2OSX.BUILD.po.  This edition is targeted at core developers who are creating and maintaining A2osX.  For most users, it is recommended that you use one of the other editions.  |  | * |
 
 * Note this is a new system of Editions and Disk Images.  A2osX 0.93 will be the first Release that uses this new system.  The first **RC** set of media are now available and are based on build No 1600.  If no significant issues are found with **RC**, a set of **RELEASE** media will be made available based on this build (the RC media will then be removed until a 0.94 RC is ready).  
@@ -23,8 +23,12 @@ You can use and/or install A2osX from the media found in our Media directory fou
 | --- | --- | --- |
 | **[RC.140.po](../.Floppies/RC.140.po)** | **RC** |**An 140K 5.25" disk image containing the main BOOT and support files for running A2osX.**  |
 | **[RC.800.po](../.Floppies/RC.800.po)** | **RC** |**An 800K 3.5" disk image containing A2osX system, utilities and application files for running A2osX.**  |
-| **[RC.32MB.po](../.Floppies/RC.32MB.po)** | **RC** |**A 32MB HD disk image containing A2osX system, utilities and applications; suitable for use with emulators such as AppleWin** or for use with the CFFA card.  |
-| **[TDBOOT.po](../.Floppies/TDBOOT.po)** | **RC** |**A formatted empty ProDOS 32MB HD disk image, suitable for use with emulators such as AppleWin** or for use with the CFFA card. |
+| **[RC.32MB.po](../.Floppies/RC.32MB.po)** | **RC** |**A 32MB HD disk image containing A2osX system, utilities and applications; suitable for use with emulators such as AppleWin or for use with the CFFA card.**  |
+| **[TDBOOT.po](../.Floppies/TDBOOT.po)** | **RC** |**A special 32MB HD disk image, preconfigured to automatically load Uthernet2 driver, start network services and launch the TelnetD server process for use with the CFFA or similar card.** |
+| **[DEBUG.po](../.Floppies/DEBUG.po)** | **STABLE** |**An 140K 5.25 disk image containing the main BOOT and support files for A2osX and preconfigured with the least options enabled.  This is intended to be used as a minimal boot to help identify hardware conflicts.** |
+| [STABLE.140.po](../.Floppies/STABLE.140.po) | STABLE |An 140K 5.25" disk image containing the main BOOT and support files for running A2osX.  |
+| [STABLE.800.po](../.Floppies/STABLE.800.po) | STABLE | An 800K 3.5" disk image containing the main BOOT and support files for running A2osX. |
+| [STABLE.32MB.po](../.Floppies/STABLE.32MB.po) | STABLE | A formatted empty ProDOS 32MB HD disk image, suitable for use with emulators such as AppleWin |
 | A2OSX.BUILD.po | Bleed | 32MB disk image with S-C MASM 3.0, all binaries and all source for A2osX <br> This is primary development media for A2osX, especially pre-launch of Release, Stable and official Build Media.  See below.|
 | A2OSX.MAKE.po | Bleed | 32MB disk image with S-C MASM 3.0, all binaries and all source for multiple BUILD versions of A2osX stored in directories on MAKE.  The image also includes the TEST, ADMIN, and EXAMPLE scripts being created to support A2osX. |
 | A2OSX.B800.po | Bleed | An 800K 3.5" disk image containing the main BOOT and support files for running A2osX. |
@@ -35,9 +39,6 @@ You can use and/or install A2osX from the media found in our Media directory fou
 | RELEASE.140.po | RELEASE |An 140K 5.25" disk image containing the main BOOT and support files for running A2osX.  |
 | RELEASE.800.po | RELEASE |An 800K 3.5" disk image containing the main BOOT and support files for running A2osX.  |
 | RELEASE.32MB.po | RELEASE | A formatted empty ProDOS 32MB HD disk image, suitable for use with emulators such as AppleWin  |
-| STABLE.140.po | STABLE |An 140K 5.25" disk image containing the main BOOT and support files for running A2osX.  |
-| STABLE.800.po | STABLE | An 800K 3.5" disk image containing the main BOOT and support files for running A2osX. |
-| STABLE.32MB.po | STABLE | A formatted empty ProDOS 32MB HD disk image, suitable for use with emulators such as AppleWin |
 
 ## License
 A2osX is licensed under the GNU General Pulic License.

@@ -24,6 +24,8 @@ Consult the **[documentation](#documentation)** section below to find other reso
 
 ## News...
 
+**2019-10-24** - Created STABLE images with Build 1669 with improvements to TCP networking.  There is also a new DEBUG 140k disk image.  See the media guide for more info.
+
 **2019-10-22** - Updated RC images to Build 1664 which fixed RESTART SYSTEM bug on //GS.
 
 **2019-10-19** - Updated RC images to Build 1653 which fixed bugs in CUT and includes a patched version of ProDOS 2.03 to correct year display for ThunderClocks.

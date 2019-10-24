@@ -1,5 +1,7 @@
 # A2osX User Guide
 
+### Updated October 22, 2019
+
 This Guide provides information on getting started with A2osX.  This Guide helps you understand the basic features, capabilities and operation of A2osX.  This should be the first document you read before, or soon after, installing or running A2osX.
 
 ## What is A2osX?
