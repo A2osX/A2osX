@@ -20,6 +20,21 @@ ZS.START
 ZPIPCfgPtr		.BS 2
 ZPSktPtr		.BS 2
 ZPMsgPtr		.BS 2
+ZPMsgDataPtr	.BS 2
+ZPMsgDataLen	.BS 2
+ZPMsgDataCnt	.BS 2
+
+ArgIndex		.BS 1
+hRootdir		.BS 1
+ZPRootDirPtr	.BS 2
+ZPStrPtr		.BS 2
+
+hSrvSocket		.BS 1
+hClntSocket		.BS 1
+hMsg			.BS 1
+hStr			.BS 1
+TimeOut			.BS 1
+
 ZS.END			.ED
 *--------------------------------------
 *			File Header (16 Bytes)
@@ -45,10 +60,9 @@ CS.START		cld
 L.LIBTCPIP		.DA LIBTCPIP
 L.SA.Local		.DA SA.Local
 L.MSG.TCPWAIT	.DA MSG.TCPWAIT
-L.MSG.INITOK	.DA MSG.INITOK
 L.MSG.TCPIPERR	.DA MSG.TCPIPERR
+L.MSG.INITOK	.DA MSG.INITOK
 L.MSG.SKTERR	.DA MSG.SKTERR
-L.MSG.ABORT		.DA MSG.ABORT
 L.MSG.INCOMING	.DA MSG.INCOMING
 L.HTTP.200OK	.DA HTTP.200OK
 				.DA 0
@@ -62,8 +76,9 @@ CS.INIT			>LDYA L.LIBTCPIP
 *--------------------------------------
 CS.RUN			>LDYA L.MSG.TCPWAIT
 				>SYSCALL puts
-			>DEBUG
-				jsr Init.Timeout
+
+				lda #TIMEOUT.MAX
+				sta TimeOut
 				
 .1				>SLEEP
 				>LIBCALL hLIBTCPIP,LIBTCPIP.GETCFG	is TCPIP loaded ?
@@ -73,7 +88,7 @@ CS.RUN			>LDYA L.MSG.TCPWAIT
 				lda (ZPIPCfgPtr)		Configured ?
 				bmi CS.RUN.INIT
 
-				jsr Wait.Timeout
+				lda Timeout
 				bcs .99
 
 				ldy #S.PS.hStdIn
@@ -89,14 +104,12 @@ CS.RUN			>LDYA L.MSG.TCPWAIT
 				cmp #$03
 				bne .1
 
-				>LDYA L.MSG.ABORT
-				>SYSCALL puts
-				lda #3
 				sec
 				rts
 
 .99				>LDYA L.MSG.TCPIPERR
 				>SYSCALL puts
+CS.RUN.SYN
 				lda #E.SYN
 				sec	
 CS.RUN.RTS		rts
@@ -109,24 +122,56 @@ CS.RUN.INIT		ldx #3
 				dey
 				dex
 				bpl .1
-			>DEBUG
-				>PUSHBI 0				no protocol
+
+				lda #1
+				sta ArgIndex
+				
+				>SYSCALL ArgV
+				bcs CS.RUN.SYN
+				>SYSCALL atoi
+				bcs .2
+
+				>STYA SA.LOCAL+S.SOCKADDR.PORT
+				inc ArgIndex
+
+.2				lda ArgIndex
+				>SYSCALL ArgV
+				bcs CS.RUN.SYN
+
+				>SYSCALL realpath
+				bcs CS.RUN.RTS
+				
+				>STYA ZPRootDirPtr
+
+CS.RUN.ARGSOK	>PUSHBI 0				no protocol
 				lda #S.SOCKET.T.SEQPACKET
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Socket
 				bcs CS.RUN.ERR
 
-				>STA.G hSrvSocket
-				pha
+				sta hSrvSocket
+
 				>PUSHW L.SA.LOCAL
-				pla
+				lda hSrvSocket
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Bind
 				bcs CS.RUN.ERR
-				>LDA.G hSrvSocket
+				
+				lda hSrvSocket
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Listen
 				bcs CS.RUN.ERR
 
+				>LDYAI 256
+				>SYSCALL getmem
+				bcs CS.RUN.ERR
+				
+				>STYA ZPStrPtr
+				stx hStr
+				
+				>PUSHW ZPRootDirPtr
+				>PUSHW SA.LOCAL+S.SOCKADDR.PORT
+				>PUSHBI 4 
+				
 				>LDYA L.MSG.INITOK
-				>SYSCALL puts
+				>SYSCALL printf
 
 CS.RUN.LOOP		>SLEEP
 				jsr CS.RUN.SERVER
@@ -139,10 +184,11 @@ CS.RUN.LOOP		>SLEEP
 				sec	
 CS.RUN.ERR		rts
 *--------------------------------------
-CS.RUN.SERVER	>LDA.G hSrvSocket
+CS.RUN.SERVER	lda hSrvSocket
 				>LIBCALL hLIBTCPIP,LIBTCPIP.accept
 				bcs .8
-				>STA.G hClntSocket
+				
+				sta hClntSocket
 				>SYSCALL GetMemPtr
 				>STYA ZPSktPtr
 
@@ -154,7 +200,7 @@ CS.RUN.SERVER	>LDA.G hSrvSocket
 				dex
 				bpl .3
 
-				>PUSHB.G hClntSocket
+				>PUSHB hClntSocket
 
 				>PUSHBI 5
 				>LDYA L.MSG.INCOMING
@@ -174,41 +220,112 @@ CS.RUN.CLIENT
 				beq .1
 				bra .8
 
-.2				pha
-				>SYSCALL getmemptr
-				>STYA ZPMsgPtr
+.2				jsr CS.RUN.MSG.INIT
 
-				>PUSHW ZPMsgPtr
+.3				jsr CS.RUN.MSG.GetStr
+				bcs .7
+
+				>PUSHW ZPStrPtr
 				ldy #S.PS.hStdOut
 				lda (pPS),y
 
 				>SYSCALL fwrite
+				bra .3
 
-				pla
+				lda hMsg
 				>SYSCALL freemem
 
 .7				>PUSHWI HTTP.200OK.len
 				>PUSHW L.HTTP.200OK
-				>LDA.G hClntSocket
+				lda hClntSocket
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Send
 				
-.8				>LDA.G hClntSocket
+.8				lda hClntSocket
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Shutdown
 
 				clc
 				rts
 *--------------------------------------
+CS.RUN.MSG.INIT	sta hMsg
+				>SYSCALL getmemptr
+				>STYA ZPMsgPtr
+				pha
+				tya
+*				clc
+				adc #S.TCP
+				sta ZPMsgDataPtr
+				
+				pla
+				adc /S.TCP
+				sta ZPMsgDataPtr+1
+				
+				ldy #S.IP.TOTAL.LENGTH+1
+				lda (ZPMsgPtr),y
+				sec
+				sbc #S.IP
+				sta ZPMsgDataLen
+				eor #$ff
+				sta ZPMsgDataCnt
+				
+				dey
+				lda (ZPMsgPtr),y
+				sbc /S.IP
+				sta ZPMsgDataLen+1
+				eor #$ff
+				sta ZPMsgDataCnt+1
+
+				rts
+*--------------------------------------
+CS.RUN.MSG.GetStr
+				ldy #0
+
+.1				inc ZPMsgDataCnt
+				bne .2
+				inc ZPMsgDataCnt+1
+				beq .9
+
+.2				lda (ZPMsgDataPtr)
+				inc ZPMsgDataPtr
+				bne .21
+				inc ZPMsgDataPtr+1
+				
+.21				cmp #C.CR
+				bne .4
+				
+				inc ZPMsgDataCnt
+				bne .3
+				inc ZPMsgDataCnt+1
+				beq .9
+				
+.3				lda (ZPMsgDataPtr)
+				inc ZPMsgDataPtr
+				bne .31
+				inc ZPMsgDataPtr+1
+
+.31				eor #C.LF
+				bne .9
+
+				sta (ZPStrPtr),y
+				clc
+				rts
+				
+.4				sta (ZPStrPtr),y
+				iny
+				bra .1
+				
+.9				sec
+				rts
+*--------------------------------------
 CS.DOEVENT		lda (pEvent)
 				bpl .9					is it a TIMER event?
-				>LDA.G TimeOut
+				lda TimeOut
 				beq .9
-				dec
-				sta (pData),y
+				dec TimeOut
+
 .9				sec						do not discard TIMER event
 				rts
 *--------------------------------------
-CS.QUIT			ldy #hSrvSocket
-				lda (pData),y
+CS.QUIT			lda hSrvSocket
 				beq .3
 				
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Shutdown
@@ -221,32 +338,19 @@ CS.QUIT			ldy #hSrvSocket
 .8				clc
 				rts
 *--------------------------------------
-Init.Timeout	ldy #TimeOut
-				lda #TIMEOUT.MAX
-				sta (pData),y
-				rts
-*--------------------------------------
-Wait.TimeOut	sec
-				ldy #TimeOut
-				lda (pData),y
-				beq .9
-				clc
-.9				rts
-*--------------------------------------
 CS.END
 *--------------------------------------
 hLIBTCPIP		.BS 1
 LIBTCPIP		.AZ "libtcpip"
 MSG.TCPWAIT		.AZ "HTTPD:Waiting for TCP/IP initializing..."
-MSG.INITOK		.AZ "HTTPD:Init Ok, Listening."
 MSG.TCPIPERR	.AZ "HTTPD:TCP/IP Not initialized properly."
+MSG.INITOK		.AZ "HTTPD:Listening on port %D, root dir: %s.\r\n"
 MSG.SKTERR		.AZ "HTTPD:Listen Error."
-MSG.ABORT		.AZ "HTTPD:User Aborted."
 MSG.INCOMING	.AZ "HTTPD:Incoming Connection [SKT=%h] From : %d.%d.%d.%d\r\n"
 *--------------------------------------
 HTTP.200OK		.AS "HTTP/1.1 200 OK"
 				.DA #C.CR,#C.LF
-				.AS "Server: A2osX-HTTPD 0.92"
+				.AS "Server: A2osX-HTTPD 0.93"
 				.DA #C.CR,#C.LF
 				.AS "Content-Type: text/html"
 				.DA #C.CR,#C.LF
@@ -267,9 +371,6 @@ SA.LOCAL		.DA #AF.INET			S.SOCKADDR.AF
 				.DUMMY
 				.OR 0
 DS.START
-hSrvSocket		.BS 1
-hClntSocket		.BS 1
-TimeOut			.BS 1
 DS.END
 				.ED
 *--------------------------------------
