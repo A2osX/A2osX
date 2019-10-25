@@ -217,7 +217,9 @@ First check that your system meets the minimum hardware requirements.  Download 
 - If the A2osX media is set as the boot device, A2osX will load automatically.
 - If your volume, say /MYHD boots to ProDOS and then BASIC.SYSTEM you can then type PREFIX /FULLBOOT and press return and then -A2OSX.SYSTEM and press return, this will load A2osX.
 - If your volume boots to a Program selection, simply change the Volume to /FULLBOOT and select A2OSX.SYSTEM to run, A2osX will load.
-- Once A2osX fully loads, you will be greeted as the the Root User and presented a shell prompt.  You can then enter these commands to put A2osx on your Volume **/MYHD**  (replace MYHD in this example with your actual volume name).
+- Once A2osX fully loads, you will be greeted as the the Root User and presented a shell prompt.
+
+You can then enter these commands to put A2osx on your Volume **/MYHD**  (replace MYHD in this example with your actual volume name).
 
     /FULLBOOT/ROOT/$ MD /MYHD/A2OSX
 	/FULLBOOT/ROOT/$ CD ..
@@ -225,15 +227,15 @@ First check that your system meets the minimum hardware requirements.  Download 
 	/FULLBOOT/$ ECHO "PREFIX /MYHD/A2OSX" > /MYHD/AOSX
 	/FULLBOOT/$ ECHO "-A2OSX.SYSTEM" >> /MYHD/AOSX
 
+All of the commands above are documented in the A2osX Command Guide or the Shell Developers Guide, but briefly:
+- MD creates a sub-directory on your volume named A2OSX
+- CD .. moves up one directory level.  The ROOT subdirectory is the home directory for the root user.  We move up to the FULLBOOT volumes main directory so that the CP (copy) command issued next will copy all the files on this volume. 
+- CP copies files and in this case recursively (-R option) selecting all files (* wildcard) and puts them in the destination we created early /MYHD/A2OSX
+- The next two lines create a bat file, or in ProDOS/BASIC terms an EXEC file that will first change the PREFIX to our new A2OSX subdirectory and then launch A2osX.  Note the first line use > which will create a file and the 2nd uses >> which appends to a file.  Also note that we named the file AOSX and not A2OSX as the laters name is already used by the sub-directory we created. 
 
+### Configuring A2osX
 
-Installing on your own media / Selecting your Media
-Check that you have enough free space if you are installing to your own ProDOS volume.  For the base A2osX boot you need under 200K of free space, but a complete install may take a megabyte or more.
-Configure
-Explore
-Find out more
-MAN
-Additional resources
+### Exploring A2osX
 
 ### Networking
 

@@ -460,7 +460,7 @@ The ARP command can displays the current ARP cache or you can use it to setup a 
 | ----- |
 | DNSINFO [HOST IP] |
 
-The DNSINFO command can display the current DNS cache or setup a new static DNS entry.  When adding an entry, HOST is typically a fully qualified domain name such as **server.acme.com** and IP is a standard IP4 address such as 10.0.0.77.  Network services must be started to use this command.
+The DNSINFO command can display the current DNS cache or setup a new static DNS entry.  When adding an entry, HOST is typically a fully qualified domain name such as **server.acme.com** and IP is a standard IP4 address such as 10.0.0.77.  Network services must be started to use this command.  If you run this command for a Host with 1 IP Address, you can run the command again for the same host but with a new IP address and the DHS table will be updated appropriately.  Note, once you add a host to the DNS table this way, you must reboot your system to clear the entry from memory.
 
 ### HTTPD
 

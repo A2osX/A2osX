@@ -27,7 +27,7 @@ Special Keys
 | BACKSPACE | Deletes character under the cursor.  Note this key does not exist on Apple keyboards, but may on terminals connected via an SSC or through a Telnet Session |
 | DELETE | Deletes character to left of cursor and moves cursor/rest of line to the left |
 | Control-C | Erases entire command line |
-| Control-D | Exits SHell and if the top most SHell logs you out of your session |
+| Control-D | Exits Shell and if the top most Shell logs you out of your session |
 | Control-Z | Deletes character under the cursor |
 | Up Arrow | Displays previous command from history.  Multiple Up Arrows scrolls progressively through history |
 | Down Arrow | Displays next command from history.  Multiple Down Arrows scrolls progressively through history |
@@ -45,6 +45,11 @@ Variables
 Special Variables
 
 Scripts
+
+Calling other scripts
+calling scripts with . (dot space) before script name from within a script
+loading functions this way
+
 
 Redirection
 
