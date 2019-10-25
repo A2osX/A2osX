@@ -1,6 +1,6 @@
 # A2osX User Guide
 
-### Updated October 22, 2019
+### Updated October 24, 2019
 
 This Guide provides information on getting started with A2osX.  This Guide helps you understand the basic features, capabilities and operation of A2osX.  This should be the first document you read before, or soon after, installing or running A2osX.
 
@@ -97,6 +97,7 @@ Some notes on the above:
 - A2osX has been tested on ProDOS versions 2.0.3 and 2.4.2.  We welcome testing and feedback on using A2osX with other versions.
 - The NS.CLOCK.SYSTEM is not needed by A2osX because there is a Kernel Module that accomplishes the same thing, please see the section on KMs.  A user may want the NS.CLOCK.SYSTEM file if they are running other applications (i.e. AppleWorks) from the same volume so that the NSC patch gets enabled for their apps use of the clock.
 - There are enhancements planned for the QUIT CODE routine.  In the future, we hope to allow you to execute another SYSTEM file from the Shell in A2osX whereby QC routine will unload A2osX, load your other SYSTEM program (again i.e. AppleWorks) and then when you quit that application, the QC routine will reload A2osX.
+- When A2OSX.SYSTEM starts, it initializes the system in stages as described above (load KMs, load Kernel, execute INIT, etc.).  If during this process you hold down the Open-Apple key, A2osX will stop at the end of each stage until you press another key.  You can use this to debug startup problems/hardware conflicts.
 - When the KERNEL first starts, if the user presses Control-R a special maintenance mode is enabled.  This is discussed in detail below.
 - Currently the entire User/Group system is incomplete.  As such we have temporarily set GETTY to automatically login each Terminal as user ROOT and execute the profile stored in ./ROOT.  This may change prior to release.
 - The ./ETC/INIT file can be used to automatically start the SSC.DRV and GETTY process for an external terminal.  It can also be used to load network drivers and processes at boot.
@@ -209,7 +210,22 @@ Download one of the available 32MB images from GitHub.  Open AppleWin and then c
 
 First check that your system meets the minimum hardware requirements.  Download one of the available images from GitHub.  Images are available in 140K (5 1/4 floppy), 800K (3.5 floppy) and 32MB (suitable for use with hard drive emulators).  You will need to use ADTPro to convert an image to physical media or a device such as a FloppyEMU or CFFA to load/boot one of these images on a real Apple.  If you are using a device such as the FloppyEMU or CFFA, you should use either the 800K or 32MB images (ProDOS volume name: FULLBOOT) as the smaller 140K image (ProDOS volume: MINIBOOT) is a pared down copy of A2osX that omits several utilities to fit in 140K.
 
->If you have your own hard drive, you can install A2osX on your drive.
+>If you have your own hard drive, you can install A2osX on your drive.  The best way to accomplish this is to first start A2osX from one of the supplied media and use its built in commands to copy A2osX to your own drive.  For instance, if you have a bootable ProDOS-8 volume on your system named **/MYHD** and one of the A2osX images named **/FULLBOOT** follow these steps:
+>
+
+- Boot your system.
+- If the A2osX media is set as the boot device, A2osX will load automatically.
+- If your volume, say /MYHD boots to ProDOS and then BASIC.SYSTEM you can then type PREFIX /FULLBOOT and press return and then -A2OSX.SYSTEM and press return, this will load A2osX.
+- If your volume boots to a Program selection, simply change the Volume to /FULLBOOT and select A2OSX.SYSTEM to run, A2osX will load.
+- Once A2osX fully loads, you will be greeted as the the Root User and presented a shell prompt.  You can then enter these commands to put A2osx on your Volume **/MYHD**  (replace MYHD in this example with your actual volume name).
+
+    /FULLBOOT/ROOT/$ MD /MYHD/A2OSX
+	/FULLBOOT/ROOT/$ CD ..
+	/FULLBOOT/$ CP -R * /MYHD/A2OSX
+	/FULLBOOT/$ ECHO "PREFIX /MYHD/A2OSX" > /MYHD/AOSX
+	/FULLBOOT/$ ECHO "-A2OSX.SYSTEM" >> /MYHD/AOSX
+
+
 
 Installing on your own media / Selecting your Media
 Check that you have enough free space if you are installing to your own ProDOS volume.  For the base A2osX boot you need under 200K of free space, but a complete install may take a megabyte or more.
