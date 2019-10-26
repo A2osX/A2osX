@@ -124,7 +124,7 @@ Notice that the DO X and DO Y logic is swapped between the two cases.
 | CASE      | Working | CASE <expression> |
 | CD        | Working | CD path or relative path |
 | ..        | Working | CD .. |
-| DATE      | Working | |
+| DATE      | Working | %a : Abbreviated weekday name : Thu <br> %A : Full weekday name : Thursday <br> %b : Abbreviated month name : Aug <br> %B : Full month name : August <br> %d : Day of the month, zero-padded (01-31) <br> %H : Hour in 24h format (00-23) 14 <br> %I : Hour in 12h format (01-12) 02 <br> %m : Month as a decimal number (01-12) 08 <br> %M : Minute (00-59) 55 <br> %p : AM or PM designation PM <br> %S : Second (00-61) 02 <br> %w : Weekday as a decimal number with Sunday as 0 (0-6) <br> %y : Year, last two digits (00-99) <br> %Y : Year four digits 2001 |
 | DEFAULT   | Working | Default CASE for SWITCH |
 | ECHO      | Working | \b,\e,\f,\n,\\\ and \\% supported <br> -N : Suppress \r\n |
 | ELSE      | Working | Optional branch for IF block |
@@ -147,7 +147,6 @@ Notice that the DO X and DO Y logic is swapped between the two cases.
 | SHIFT     | Working | Remove $1 from cmd line |
 | SLEEP     | Working | Wait \<count\> 10th sec |
 | SWITCH    | Working | SWITCH <expression> |
-| TIME      | Working | |
 | WHILE     | Working | [ \<condition\> ] |
 
 ## Shell variables:

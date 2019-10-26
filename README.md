@@ -1,6 +1,6 @@
 # A2osX (0.93) Multi-Tasking OS for Apple II  
 
-### Updated October 22, 2019
+### Updated October 26, 2019
 
 ## A2osX Release Candidate now available
 
@@ -23,6 +23,8 @@ A2osX is designed to work on any 128k Enhanced Apple //e or newer computer.  Spe
 Consult the **[documentation](#documentation)** section below to find other resources available to you for learning how to install, use, develop and test A2osX.  The Hardware section of the User Guide contains more information on supported hardware.
 
 ## News...
+
+**2019-10-26** - Starting with Build 1675, the SH(ell) command **TIME** has been removed and the **DATE** command will now return both the Date and Time.  Additionally, if DATE command has been updated to support options for returning formatted strings with just the portions of the date and time you desire.  Consult the Shell Developers Guide for syntax.
 
 **2019-10-24** - Created STABLE images with Build 1669 with improvements to TCP networking.  There is also a new DEBUG 140k disk image.  See the media guide for more info.
 
