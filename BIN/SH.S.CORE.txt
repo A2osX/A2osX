@@ -107,35 +107,34 @@ CORE.Run.SYN	lda #E.SYN
 				sec
 				rts
 *--------------------------------------
-CORE.Run		>LDYA ZPInputBufPtr		Save Actual cmd for looping
+CORE.Run	 	jsr IO.Reset
+
+				clc
+				.HS B0					BCS
+
+CORE.Run.1		sec						coming from PIPE OUT
+				ror
+				>STA.G CORE.bPipeIn
+
+				>LDYA ZPInputBufPtr		Save Actual cmd for looping
 				>STYA ZPInputCmdPtr
 
 				>LDYA ZPArgVBuf
 				>STYA ZPArgVBufPtr
+
 				lda #0					Reset ArgV Buffer
 				sta (ZPArgVBuf)
-				lda #S.PS.F.HOLD
-				sta CORE.PSFlags
-				lda #$ff
+				dec
+*				lda #$ff
 				sta CORE.IntCmd			assume external
 
-				jsr CORE.GetCharNB
+				lda #S.PS.F.HOLD
+				sta CORE.PSFlags
+
+.3				jsr CORE.GetCharNB
 				bcs CORE.Run.EOF
-				cmp #'|'
-				bne .21
 
-				jsr IO.Pipe.In
-				bcs .9
-
-				jsr CORE.GetNextCharNB	Skip |
-				bcs CORE.Run.SYN
-				bra .3
-
-.21				pha
-				jsr IO.Reset
-				pla
-
-.3				cmp #C.CR				empty line ?
+				cmp #C.CR				empty line ?
 				bne .33
 				jsr CORE.GetNextChar	skip CR...
 				bra .8
@@ -145,8 +144,7 @@ CORE.Run		>LDYA ZPInputBufPtr		Save Actual cmd for looping
 
 .12				jsr CORE.SkipLine
 
-.8				jsr IO.Reset
-				lda #0
+.8				lda #0
 				clc
 .9				rts						EOL, CS,A=0
 
@@ -197,36 +195,64 @@ CORE.Run.5		>LDYA L.CORE.IO
 CORE.Run.6		jsr CORE.ArgV.Add
 
 CORE.Run.7		jsr CORE.GetCharNB
-				bcs CORE.ExecCmd.1		Nothing to skip
+				bcs .2					Nothing to skip
+
 				jsr CORE.IsEndCmd
 				bcs CORE.Run.5
 
-				cmp #'|'
-				bne CORE.ExecCmd		skip CR, ;
+				tax
+				
+				jsr CORE.GetNextCharNB	Skip EoL char
+				
+				cpx #'|'				Pipe OUT ?
+				bne .2
+				sec
+.1				.HS 90					BCC
 
+.2				clc
+				ror
+				>STA.G CORE.bPipeOut
+
+				>LDA.G CORE.bPipeIn
+				bpl .3
+				
+				jsr IO.Pipe.In
+				bcs CORE.Run.RTS
+				
+.3				>LDA.G CORE.bPipeOut
+				bpl CORE.ExecCmd
+				
 				jsr IO.Pipe.Out
 				bcs CORE.Run.RTS
 
-				lda CORE.PSFlags
-				and #$ff^S.PS.F.HOLD	Run in the background...
-				ora #S.PS.F.CLOSEONX	...and close PIPE on exit
-				sta CORE.PSFlags
-				jsr CORE.ExecCmd.1		Do not skip |
+				lda #S.PS.F.HOLD		Run in the background...
+				trb CORE.PSFlags
+				lda #S.PS.F.CLOSEONX	...and close PIPE OUT on exit
+				tsb CORE.PSFlags
+
+				jsr CORE.ExecCmd
 				
 				php
 				pha
 				
-				jsr IO.Pop.Out			restore Output
+				>LDA.G CORE.bPipeIn
+				bpl .4
+				
+				jsr IO.Pop.In			restore Input
+				
+.4				jsr IO.Pop.Out			restore Output
 				
 				pla
 				plp
+				bcs CORE.Run.RTS
+				
+				jmp CORE.Run.1			Loop with Pipe IN
+				
 CORE.Run.RTS	rts
 *--------------------------------------
 * Input : ZPArgVBuf
 *--------------------------------------
-CORE.ExecCmd	jsr CORE.GetNextCharNB	Skip EoL char
-
-CORE.ExecCmd.1	lda #0
+CORE.ExecCmd	lda #0
 				sta (ZPArgVBufPtr)
 				>LDYA ZPArgVBuf
 				>STYA ZPArgVBufPtr
@@ -252,10 +278,7 @@ CORE.ExecExtCmd	>PUSHB CORE.PSFlags
 				>PUSHA
 				>PUSHBI 1
 				>PUSHW L.MSG.PID
-				ldy #S.PS.hStdErr
-				lda (pPS),y
-				>SYSCALL fprintf
-				rts
+				jmp IO.PrintErr
 
 .4				>SLEEP					Suspend this PID
 				sec
