@@ -1,30 +1,35 @@
 # A2osX Shell Developers Guide
 
-### Updated October 22, 2019
+### Updated October 26, 2019
 
-One of the most significant parts of A2osX is its shell which can perform both interactive and scripted tasks.  With the interactive part of the shell you can perform many common and complex tasks using both built-in (native or internal to shell) and external (BINs or executables) commands.  Internal commands include CD (change directory), MD (make directory), DATE, TIME, etc.  External commands include CP (copy), RM (remove), CAT (display file contents), TELNET, etc.
+One of the most significant parts of A2osX is its shell which can perform both interactive and scripted tasks.  With the interactive part of the shell you can perform many common and complex tasks using both built-in (native or internal to shell) and external (BINs or executables) commands.  Internal commands include CD (change directory), MD (make directory), PWD, DATE, etc.  External commands include CP (copy), RM (remove), CAT (display file contents), TELNET, etc.
 
-It should be noted, that it is possible to create and execute short scripts right on the interactive command line (these are run once and not saved like true scripts).  An example  
+It should be noted, that it is possible to create and execute short scripts right on the interactive command line (these are run once and not saved like true scripts).  An example
+
+```
+FOR FILE IN `LS -C CT*`; CAT ${FILE}; NEXT
+```
+
+In this example, the system will generate a list of files found in the current directory that match the CT* wild card and perform the CAT operation on each.  The semicolons act as a line separator allowing you to type in multiple commands, or short scripts on a single line, to execute as a script.
+
+This Developers Guide will cover the basic operation of the interactive shell, the available commands as well as creating and using complex scripts that can be run by the shell.
 
 ## The A2osX Shell (SH)
 
-### Variables
+The default A2osX Shell, ./BIN/SH, is an A2osX external command program like many others included with A2osX.  It is probably the most complex and capable, as suggested by its size compared to other commands (7K vs 1K for TELNET), and is the primary tool for interacting with the A2osX system.  The SH shell is based somewhat on the Linux BASH shell, to the extend possible on an 8-bit machine.  Alternative shells are planned for the future and will be announced as they become available.
 
-Variable overflow strings and ints
-Ints only no real num it just ignore
+As the primary mechanism for working with A2osX, the SH shell is launched automatically when you log into A2osX.  In the case where no ./ETC/PASSWD file is present, A2osX automatically logs you in as the ROOT user.  When a user login occurs and SH is launched, it looks for a file called PROFILE in the users HOME directory and if found executes that script, so the information below on writing scripts applies to the PROFILE file.
 
-The 32-bit int data type can hold integer values in the range of −2,147,483,648 to 2,147,483,647.  If you add to or subtract from INTs that would cause a RANGE error, you actually get a result that wraps around the range, so if you add 1 to 2,147,483,647 you will get −2,147,483,648.
+### Interacting with the Shell
 
-Strings can be up to 255 characters in length.  Note, like INTs, if you try to store more then 255 chars in a string, you get the same wraparound affect where the first 255 chars are tossed out the string is set to the remaining chars, so if you concatenate 3 strings of 100 chars the resulting string will be the last 45 chars of the 3rd original string. 
+To interact with the A2osX shell, you type commands at the presented prompt, which ends with a **$** character.  The prompt usually includes your current working directory such as **/FULLBOOT/ROOT/$**.  You can change the prompt by changing the **$PS1** variable (see below).  At the **$** you can enter any of the valid internal shell commands or an external program name.  For external programs, A2osX will search in the current directory and then in the directories specified in the **$PATH** variable.  
 
+#### Special Keys
 
-The Shell
-Interacting with the Shell.
-Special Keys
+While entering commands at the A2osX shell prompt, you can use the following special keys to edit the command line:
 
 | Key | Usage |
 | -- | -- |
-| BACKSPACE | Deletes character under the cursor.  Note this key does not exist on Apple keyboards, but may on terminals connected via an SSC or through a Telnet Session |
 | DELETE | Deletes character to left of cursor and moves cursor/rest of line to the left |
 | Control-C | Erases entire command line |
 | Control-D | Exits Shell and if the top most Shell logs you out of your session |
@@ -33,25 +38,60 @@ Special Keys
 | Down Arrow | Displays next command from history.  Multiple Down Arrows scrolls progressively through history |
 | Left Arrow | Moves cursor to the left to edit current command |
 | Right Arrow | Moves cursor to the right to edit current command |
+
+In addition to the editing keys above, you can use the following special keys while running scripts or executing commands:
+
+| Key | Usage |
+| -- | -- |
+| Control-C | Interrupts running command or script |
 | Open Apple-0 | Switches you to the console display |
 | Open Apple-1 to 4 | Switches you to Virtual Terminals 1 through 4 if so configured |
 
-Internal Commands
+#### Internal Commands
 
-External Commands
+CD
+DATE
+ECHO
+EXIT
+MD
+NOHUP
+POPD
+PUSHD
+PWD
+RD
+REN
+SET
+SLEEP
+TIME
 
-Variables
+#### Redirection
 
-Special Variables
 
-Scripts
+### Writing Scripts
 
 Calling other scripts
 calling scripts with . (dot space) before script name from within a script
 loading functions this way
 
 
-Redirection
+#### Variables
+
+Variable overflow strings and ints
+Ints only no real num it just ignore
+
+The 32-bit int data type can hold integer values in the range of −2,147,483,648 to 2,147,483,647.  If you add to or subtract from INTs that would cause a RANGE error, you actually get a result that wraps around the range, so if you add 1 to 2,147,483,647 you will get −2,147,483,648.
+
+Strings can be up to 255 characters in length.  Note, like INTs, if you try to store more then 255 chars in a string, you get the same wraparound affect where the first 255 chars are tossed out the string is set to the remaining chars, so if you concatenate 3 strings of 100 chars the resulting string will be the last 45 chars of the 3rd original string. 
+
+##### Special Variables
+
+$BOOT
+$ROOT
+$PATH
+$TERM
+$PS1
+$DRV
+$LIB
 
 ## Advanced Display Techniques
 
@@ -197,7 +237,8 @@ all 5 are available until an set -X is met
 if you launch . MYFILE1, the code within MYFILE1 can CALL all 5 functions
 but MYFILE1 (wthout dot) will run in a separate SH process, so no access to the 5 functions known by parent SH
 functions bodies are stored in AUX ram
-so you can put around 30k of code in AUX ram then do a short MYFILE1 that calls a lot of FUNC in AUX
+so you can put around 30k of code in AUX ram then do a short MYFILE1 that calls a lot of FUNC 
+in AUX
 FUNCs recursion is allowed (until you explode the stack!)
 
 CORE.STACK.MAX = 128....so each CALL consumes about 7 bytes of stack (return Ctx/Ptr, ArgVC,hArgV and CALL keywordID)
