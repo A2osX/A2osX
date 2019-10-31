@@ -64,6 +64,8 @@ SET
 SLEEP
 TIME
 
+A note on arguments, for internal and external commands: When passing a command a series of arguments, you must include between each argument.  In addition, if a command has an option that requires an argument, there must also be a space between the option and its argument.  For example, when using the READ command which has the -S -P and -N options, the -P and -N options both require an argument so the full use of the command would be **READ -S -N 3 -P "My Prompt" AVAR**.  Do not use -N3 as you might in Linux or DOS as you will generate a Syntax Error and the command will fail to execute.
+
 #### Redirection
 
 

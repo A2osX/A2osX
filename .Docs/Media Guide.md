@@ -1,6 +1,6 @@
 # A2osX Media Guide
 
-### Updated October 22, 2019
+### Updated October 31, 2019
 
 We have changed the media set for A2osX.  New A2osX Users should download the most current version as shown in the table below.  **A new Release Candidate (RC) edition has been made available (highlighted below), you should choose one of the media options from this set.**  The Bleed media are the primary images used by the developers to hold the most current version of the A2osX binaries (and a copy of the source, although of course GitHub is the primary source repository) and may be unstable.  You should not use this media unless directed by the A2osX development team.
 
@@ -9,8 +9,8 @@ We have changed the media set for A2osX.  New A2osX Users should download the mo
 | Edition | Description | Build No | Date |
 | --- | --- | --- | --- |
 | RELEASE | This is a locked down set of media that will change infrequently, only upon a major update. | | * |
-| **RC** | **This is a RELEASE candidate, if available, for the next coming major release.  There should be very few RC releases before one of them becomes the actual RELEASE media.  RC releases should be relatively bug free and feature complete (to the scope planned for that release).**  | **1664** | **Oct-22-2019** |
-| STABLE | Stable releases are significant updates over the last RELEASE but may not included in their own scope.  STABLE releases will be made from BLEED builds that have no significant bugs, but may have documented issues that have not yet been resolved, especially in new features.  **This will likely become RC shortly.  Anyone with network cards, please download and test.**  | **1675** | **Oct-26-2019** |
+| **RC** | This is a RELEASE candidate, if available, for the next coming major release.  There should be very few RC releases before one of them becomes the actual RELEASE media.  RC releases should be relatively bug free and feature complete (to the scope planned for that release).  | **1664** | Oct-22-2019 |
+| **STABLE** | **Stable releases are significant updates over the last RELEASE but may not included in their own scope.  STABLE releases will be made from BLEED builds that have no significant bugs, but may have documented issues that have not yet been resolved, especially in new features.  This will likely become RC shortly.**  | **1694** | **Oct-31-2019** |
 | BLEED| The media in this edition are very cutting edge, changing almost daily, particularly A2OSX.BUILD.po.  This edition is targeted at core developers who are creating and maintaining A2osX.  For most users, it is recommended that you use one of the other editions.  |  | * |
 
 * Note this is a new system of Editions and Disk Images.  A2osX 0.93 will be the first Release that uses this new system.  The first **RC** set of media are now available and are based on build No 1600.  If no significant issues are found with **RC**, a set of **RELEASE** media will be made available based on this build (the RC media will then be removed until a 0.94 RC is ready).  

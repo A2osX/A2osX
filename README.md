@@ -24,6 +24,8 @@ Consult the **[documentation](#documentation)** section below to find other reso
 
 ## News...
 
+**2019-10-31** - Media have been updated based on Build 1694.  This version fixes issues with Piping of commands, adds new READ functionality.  Please note, KM.NSC is no longer loaded by default on any media.  If you have a No Slot Clock in your system, you should move the file KM.NSC from ./SYS/KM into ./SYS which will make it load on boot.
+
 **2019-10-26** - Starting with Build 1675, the SH(ell) command **TIME** has been removed and the **DATE** command will now return both the Date and Time.  Additionally, if DATE command has been updated to support options for returning formatted strings with just the portions of the date and time you desire.  Consult the Shell Developers Guide for syntax.
 
 **2019-10-24** - Created STABLE images with Build 1669 with improvements to TCP networking.  There is also a new DEBUG 140k disk image.  See the media guide for more info.
