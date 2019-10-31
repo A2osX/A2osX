@@ -32,13 +32,26 @@ CL.PrintPrompt	>LDYA L.PS1
 				>SYSCALL printf
 .9				rts
 *--------------------------------------
+CL.READN0X		txa
+CL.READN0A		>PUSHA
+				>PUSHBI 1
+				>PUSHW L.FMT.Byte
+				>LDYA ZPCLBuf
+				>SYSCALL sprintf
+				bcs .9
+				
+				lda #$ff
+				>STA.G CL.bReady
+*				clc
+.9				rts
+*--------------------------------------
 CL.CHARIN		tax
 
-				>LDA.G bEscMode
+				>LDA.G CL.bEscMode		\e ?
 				beq .13
 
 				cpx #'['
-				beq .9
+				beq .8					\e[
 
 				lda #0
 				sta (pData),y			Y=bEscMode
@@ -48,26 +61,91 @@ CL.CHARIN		tax
 
 .17				cmp EscChars,x
 				beq .18
+
 				dex
 				bpl .17
-				clc
-				rts
 
-.18				txa
+.8				rts						invalid \e[ sequence
+
+.18				>LDA.G READ.N
+				bne .19
+				
+				lda EscChars.Remap,x
+				bra CL.READN0A
+				
+.19				txa
 				asl
 				tax
 				jmp (J.ESC,x)
 *--------------------------------------
-.13				cpx #C.SPACE
+.13				cpx #C.ESC
+				bne .11
+
+				lda #$ff
+				>STA.G CL.bEscMode
+				clc
+				rts
+
+.11				>LDA.G READ.N
+				beq CL.READN0X
+				
+				cpx #C.SPACE
 				bcc CL.CHARIN.CTRL
 
 .1				cpx #C.DEL
-				bne .2
+				bne CL.Insert
+*--------------------------------------
+* Erase char BEFORE cursor
+*--------------------------------------
+				>LDA.G CL.Len
+				beq .8
+				>LDA.G CL.Ptr
+				beq .8
+
+				lda #C.BS
+				>SYSCALL PutChar
+
+				>DEC.G CL.Ptr
 				jmp CL.DEL
+*--------------------------------------
+CL.Insert		>LDA.G CL.Len
+				>CMP.G READ.N
+				beq .8					Buffer full, discard...
 
-.2				jmp CL.Insert
+				inc
+				>STA.G CL.Len
 
-.9				clc
+				pha
+.1				ply
+				dey
+				lda (ZPCLBuf),y			Move from Ptr To end of buffer forward...
+				iny
+				sta (ZPCLBuf),y
+				dey
+				phy
+				tya
+				>CMP.G CL.Ptr
+				bne .1
+
+				ply						Y=CL.Ptr
+*				>LDA.G CL.Ptr
+
+				txa
+				sta (ZPCLBuf),y
+				>INC.G CL.Ptr
+
+				>LDA.G bREAD.S
+				bmi .7
+				txa
+				>SYSCALL PutChar
+				jsr CL.PrintEOL
+
+.7				>LDA.G READ.N			READ N = 1, don't wait for CR
+				dec
+				bne .8
+				lda #$ff
+				>STA.G CL.bReady
+.8				clc
 				rts
 *--------------------------------------
 CL.CHARIN.CTRL	cpx #C.CR
@@ -76,18 +154,11 @@ CL.CHARIN.CTRL	cpx #C.CR
 				cpx #C.EOF
 				beq .18
 
-.10				cpx #C.ESC
-				bne .11
-				lda #$ff
-				>STA.G bEscMode
-				clc
-				rts
-
-.11				cpx #3					Ctrl-C
+				cpx #3					Ctrl-C
 				beq CL.CLR
 
 				cpx #26					Ctrl-Z
-				bne .13
+				bne .8
 				jmp CL.SUPPR
 				
 .18				jsr CheckLFAfterCR		Check for any extra LF
@@ -96,7 +167,7 @@ CL.CHARIN.CTRL	cpx #C.CR
 				lda #$ff
 				>STA.G CL.bReady
 
-.13				clc
+.8				clc
 .9				rts
 *--------------------------------------
 CL.CLR			lda (ZPCLBuf)
@@ -124,46 +195,20 @@ CL.CLR			lda (ZPCLBuf)
 *--------------------------------------
 CL.RESET		lda #0
 				sta (ZPCLBuf)
-CL.RESET.1		>STA.G CL.bReady
-				>STA.G CL.Ptr
+
+CL.RESET.1		>STA.G CL.Ptr
 				>STA.G CL.Len
-				rts
-*--------------------------------------
-CL.Insert		>LDA.G CL.Len
-				>CMP.G READ.N
-				beq .8					Buffer full, discard...
-				inc
-				>STA.G CL.Len
-
-				pha
-.1				ply
-				dey
-				lda (ZPCLBuf),y			Move from Ptr To end of buffer forward...
-				iny
-				sta (ZPCLBuf),y
-				dey
-				phy
-				tya
-				>CMP.G CL.Ptr
-				bne .1
-				ply						Y=CL.Ptr
-*				>LDA.G CL.Ptr
-
-				txa
-				sta (ZPCLBuf),y
-				>INC.G CL.Ptr
-
-				>LDA.G bREAD.S
-				bmi .7
-				txa
-				>SYSCALL PutChar
-				jsr CL.PrintEOL
-.7				>LDA.G READ.N			READ N = 1, don't wait for CR
-				dec
-				bne .8
-				lda #$ff
 				>STA.G CL.bReady
-.8				clc
+				>STA.G CL.bEscMode
+				rts
+
+*ldy #CL.Ptr
+
+*.1				sta (pData),y
+*				iny
+*				cpx #CL.bEscMode+1
+*				bne .1
+
 				rts
 *--------------------------------------
 CL.BS			>LDA.G CL.Ptr
@@ -190,21 +235,8 @@ CL.SUPPR		>LDA.G CL.Len
 				>LDA.G CL.Ptr
 				>CMP.G CL.Len
 				beq CL.PrintEOL.8
-
-				bra CL.DEL.1
 *--------------------------------------
-* Erase char BEFORE cursor
-*--------------------------------------
-CL.DEL			>LDA.G CL.Len
-				beq CL.PrintEOL.8
-				>LDA.G CL.Ptr
-				beq CL.PrintEOL.8
-
-				lda #C.BS
-				>SYSCALL PutChar
-
-				>DEC.G CL.Ptr
-CL.DEL.1		pha
+CL.DEL			pha
 .1				ply
 				iny
 				lda (ZPCLBuf),y
