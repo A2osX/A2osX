@@ -66,6 +66,10 @@ There are two types of Technical Documentation available.  First there is the Au
 
 In addition, there is the developer generated Technical Specifications that document the internal and external A2osX commands, utilities and shell language.  The master technical spec file can be found **[here](.Docs/Technical%20Spec.md)**.
 
+## How You Can Help
+
+The A2osX Team welcomes your help in making this the best operating enviroment for the Apple 2!  Specifically, the more users who can test the most current RELEASE, CANDIDATE or STABLE media on their unique and report back their findings, the better A2osX becomes.  In additions, comments on, suggestions, or contributions to our documentation are greatly appreciated.  Lastly, A2osX would not be what it is without our great core development team. We could certainly use more developers, especially in Assembly (S-C Assembler familiar even better) to contribute new utilities, applications and features for A2osX.
+
 ## License
 A2osX is licensed under the GNU General Pulic License.
 
