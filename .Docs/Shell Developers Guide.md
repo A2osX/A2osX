@@ -1,3 +1,4 @@
+
 # A2osX Shell Developers Guide
 
 ### Updated October 31, 2019
@@ -51,6 +52,14 @@ In addition to the editing keys above, you can use the following special keys wh
 
 The A2osX Shell contains an advanced set of internal commands.  Several of these commands are commonly used interactively (at the $ prompt) while others are most useful in scripts.  Technically all of these commands can be used both interactively or in scripts, many really show their power in scripts you develop or run.
 
+Whether in scripts or typed in at the interactive Shell prompt ($), most commands support, or even require, one or more *\<arguments\>* and/or *\<options\>*.  Commands typically use *\<values\>* as their *\<arguments\>* and *\<switches\>* as their *\<options\>*, however in some cases you may use *\<expressions\>*  or *<conditions\>*.  A full command line may be in the form of <br> <br> **command \<switch\> \<value\> \<switch\> argument argument**   or
+**command \[ <\expression\> \]**
+
+where in the first nomenclature a **command** performs an action with or on the objects passed as *\<arguments\>*, modifying its behavior (the action it performs) based on *\<switches\>* if present.  For example in the case of **LS -L /MYVOL** the command is **LS**, the option or switch is **-L** and the argument (target of the operation) is **/MYVOL**, which in this case the command would print a long listing of the root directory fo the ProDOS volume named /MYVOL.  The second nomenclature is used with the logic/control commands **IF** and **WHILE** where an *\<expressions\>* is evaluated and the result is processed by the command to effect program flow.
+
+> A note on command line structure for internal and external commands: When passing a command a series of arguments, you must a space include between each argument.  In addition, if a command has an option that requires an argument, there must also be a space between the option and its argument.  For example, when using the READ command which has the -S -P and -N options, the -P and -N options both require an argument so the full use of the command would be **READ -S -N 3 -P "My Prompt" AVAR**.  Do not use -N3 as you might in Linux or DOS as you will generate a Syntax Error and the command will fail to execute.  Also note, for many commands the order of the arguments is important (i.e. CP sourcefile destfile, order critical), however the order of Options is not.  **READ -S -N 3 -P "MyPrompt" AVAR** is the same as **READ -P "MyPrompt" AVAR -S -N 3 ** as well as **READ -S AVAR -N 3 -P "MyPrompt"**.  What is critical here is that you **must** have a number immediately after -N and a string after -P which will be the prompt.
+> 
+
 CD
 DATE
 ECHO
@@ -65,8 +74,6 @@ REN
 SET
 SLEEP
 TIME
-
-A note on arguments, for internal and external commands: When passing a command a series of arguments, you must include between each argument.  In addition, if a command has an option that requires an argument, there must also be a space between the option and its argument.  For example, when using the READ command which has the -S -P and -N options, the -P and -N options both require an argument so the full use of the command would be **READ -S -N 3 -P "My Prompt" AVAR**.  Do not use -N3 as you might in Linux or DOS as you will generate a Syntax Error and the command will fail to execute.  Also note, for many commands the order of the arguments is important (i.e. CP sourcefile destfile, order critical), however the order of Options is not.  **READ -S -N 3 -P "MyPrompt" AVAR** is the same as **READ -P "MyPrompt" AVAR -S -N 3 ** as well as **READ -S AVAR -N 3 -P "MyPrompt"**.  What is critical here is that you **must** have a number immediately after -N and a string after -P which will be the prompt.
 
 ###### READ
 
@@ -132,6 +139,7 @@ The REN command allows you to Rename a single file, directory or Volume.  It doe
 Calling other scripts
 calling scripts with . (dot space) before script name from within a script
 loading functions this way
+
 
 
 #### Variables
