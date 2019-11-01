@@ -1,6 +1,6 @@
 # A2osX Shell Developers Guide
 
-### Updated October 26, 2019
+### Updated October 31, 2019
 
 One of the most significant parts of A2osX is its shell which can perform both interactive and scripted tasks.  With the interactive part of the shell you can perform many common and complex tasks using both built-in (native or internal to shell) and external (BINs or executables) commands.  Internal commands include CD (change directory), MD (make directory), PWD, DATE, etc.  External commands include CP (copy), RM (remove), CAT (display file contents), TELNET, etc.
 
@@ -49,6 +49,8 @@ In addition to the editing keys above, you can use the following special keys wh
 
 #### Internal Commands
 
+The A2osX Shell contains an advanced set of internal commands.  Several of these commands are commonly used interactively (at the $ prompt) while others are most useful in scripts.  Technically all of these commands can be used both interactively or in scripts, many really show their power in scripts you develop or run.
+
 CD
 DATE
 ECHO
@@ -64,7 +66,63 @@ SET
 SLEEP
 TIME
 
-A note on arguments, for internal and external commands: When passing a command a series of arguments, you must include between each argument.  In addition, if a command has an option that requires an argument, there must also be a space between the option and its argument.  For example, when using the READ command which has the -S -P and -N options, the -P and -N options both require an argument so the full use of the command would be **READ -S -N 3 -P "My Prompt" AVAR**.  Do not use -N3 as you might in Linux or DOS as you will generate a Syntax Error and the command will fail to execute.
+A note on arguments, for internal and external commands: When passing a command a series of arguments, you must include between each argument.  In addition, if a command has an option that requires an argument, there must also be a space between the option and its argument.  For example, when using the READ command which has the -S -P and -N options, the -P and -N options both require an argument so the full use of the command would be **READ -S -N 3 -P "My Prompt" AVAR**.  Do not use -N3 as you might in Linux or DOS as you will generate a Syntax Error and the command will fail to execute.  Also note, for many commands the order of the arguments is important (i.e. CP sourcefile destfile, order critical), however the order of Options is not.  **READ -S -N 3 -P "MyPrompt" AVAR** is the same as **READ -P "MyPrompt" AVAR -S -N 3 ** as well as **READ -S AVAR -N 3 -P "MyPrompt"**.  What is critical here is that you **must** have a number immediately after -N and a string after -P which will be the prompt.
+
+###### READ
+
+The READ command allows you to accept input from the user which can be used or evaluated in other commands.  For instance you can use the READ command to get the name of a file to copy, ask the user for confirmation (Proceed?) and evaluate their response with an IF command, etc.  READ has several powerful options including: Prompt, Suppress and NumChars. In all cases you must specify a variable in which to place the results of the READ command.
+
+    #!/BIN/SH
+	#READ Command Examples
+	#    Get Input from User and Store in Variable $A
+	READ A
+	#    Display a prompt, Get Input and Store in $A
+	READ -P "Enter your name: " A
+	#    Display a prompt, Get Suppressed Input and Store in $A
+    #    The suppress option will keep any input from appearing but you can
+	#    edit normally and $A will be correct.
+	READ -S -P "Enter your name: " A
+	#    Display a prompt, Get Input limited to 8 characters and Store in $A
+	READ -N 1 -P "Enter your name: " A
+	#    Display a prompt, Get Input limited to 1 characters and Store in $A
+    #	 Special case of -N option.  As soon as the user types any character
+    #    input will be ended and the single character will be stored in $A.
+    #	 The user does NOT need to press return to accept the input.
+	READ -N 1 -P "Proceed (Y/N): " A
+	#    Get Input limited to 1 key press and Store the ASCII value of the key in $A
+    #	 Special case of -N option.  As soon as the user types any key, input will
+    #    be ended and the single key code will be stored in $A as an Integer.
+    #	 This can be used to capture/process special keys like TAB, Arrows and DEL.
+	READ -N 0 A
+
+
+###### REN
+
+The REN command allows you to Rename a single file, directory or Volume.  It does not support wild cards.  While REN and MV may seem similar, they are very different commands and you should use each for its intended purpose.  In the case of REN, it changes the name of an item (Vol, Dir, File) in place; the item itself is not changed.  For those familiar with ProDOS file systems, REN changes the entry of an item in the CATALOG.  MV on the other hand actually copies files (and removes the original) to move them.  Obviously REN is more efficient at RENaming an item in its current location, whereas MV could be used to change the location of a file (MV it from one directory or even volume to another).  Yes you can use MV MYFILE NEWFILE to do the same thing as REN MYFILE NEWFILE, but since a copy must occur, it will be slower and you will have to have sufficient disk space free to make this copy.
+
+    #!/BIN/SH
+	#REN Command Examples
+	#    REName a Volume
+	#	 Note How you need to use a full volume name as the Original Name and
+	#	 the new name must not be proceeded by a slash (/).  The following
+	#	 will rename the volume /MYVOL to NEWVOL.
+	REN /MYVOL NEWVOL
+	#    REName a Directory in the current working directory ($PWD)
+	REN ADIR NEWDIR
+	#    REName a Directory in another relative directory
+	#	 In this example, the directory ADIR in SUBDIR will be renamed.
+	#	 Notice that the new name does not contain a path.
+	REN SUBDIR/ADIR NEWDIR
+	#    REName a Directory using a full path
+	#	 This example renames the dir MYDIR found in /FULLBOOT/TMP to YOURDIR.
+	REN /FULLBOOT/TMP/MYDIR YOURDIR
+	#	 REName File Examples
+	#	 REName a file in the current directory
+	REN MYFILE NEWFILENAME
+	#	 REName a file in a relative (the parent) directory
+	REN ../MYFILE NEWFILENAME
+	#	 REName a file using a full path
+	REN /FULLBOOT/TMP/MYFILE NEWFILENAME
 
 #### Redirection
 
@@ -97,22 +155,57 @@ $LIB
 
 ## Advanced Display Techniques
 
-VT100 Codes
-\f	Clear Screen
-\b	backspace
-\n	newline
-\r	return (beginning of line with no new line)
+A2osX provides advanced screen handling capabilities for the Apple console (keyboard/screen) as well as terminals connected directly (via Super Serial Cards) or remotely (via Telnet using a supported network card and the TELNETD server daemon).  These features are based on the VT100 Terminal definition and scripts you develop can pass VT100 codes (via the ECHO command) to enhance the appearance of your scripts.  In addition to VT100 codes, ECHO has been augmented with some short codes to perform the more common and to help display special characters.  The examples below will help you understand what is possible with ECHO.  For a fuller listing of the available VT100 Terminal Codes, consult the **[A2osX Terminal Codes Guide](.Docs/TERM.md).**
 
-\eM	Scroll Screen Down 1 Line
-\eD	Scroll the Screen Up 1 Line
-\ec	Clear Screen
+    #!/BIN/SH
+	#	ECHO / Advanced Display Techniques Examples
+	#	Note codes are CASE SENSITVE.  \F is not the same as \f
+	#   Clear the Screen (\f)
+	ECHO \f
+	#   Clear the Screen and Display text in the top left corner
+	ECHO "\fThis line will appear on the first line of your Apple"
+	#	ECHO on a line byself will create a blank line (moving the cursor down one line)
+    #	Multiple ECHOs in a row, will skip multiple lines.  The \n shortcode makes this easier.
+	#	This example is the same as ECHO; ECHO; ECHO "HELLO"; ECHO; ECHO; ECHO "WORLD"
+	ECHO "\n\nHELLO\n\nWORLD"
+	#	Backspace shortcode \b moves the cursor one space to the left.
+	#	This example would print ABEF on the screen.  The two \b overwrite the CD.
+	ECHO "ABCD\b\bEF"
+	#	Turn Inverse on: \e[7m		off: \e[0m
+	#	This example HELLO INVERSE WORLD with the word INVERSE in inverse.
+	ECHO "HELLO \e[7mINVERSE\e[0m WORLD"
+	#	Print a backslash (\).  Since \ is a special character, you need a way to print it.
+	ECHO "\\"
+	#	Print a percent (%).  Since % is a special character, you need a way to print it.
+	ECHO "\%"
+	#	Supress Newline (-N).  ECHO -N allows you to print multiple things on the same line
+	#	This code segment will print ONE TWO THREE all on one line.
+	ECHO -N ONE
+	ECHO -N TWO
+	ECHO -N THREE
+	#	Move cursor to beginning of current line (\r)
+	#	This example will print WORLD HELLO, note spaces.
+	ECHO "      HELLO\rWORLD"
+	#	Scroll Screen Down 1 Line (\eM)
+	ECHO \eM
+	#	Scroll the Screen Up 1 Line (\eD)
+	ECHO \eD
+	#	Clear Screen VT100 Code alternative, same as \f (\ec)
+	ECHO \ec
+	#	Move cursor to [x,y] \e[x;yH
+	#	Move cursor to row 5 and col 15 and print I AM HERE
+	ECHO "\e[05;15HI AM HERE"
+	#	Move to home position [0,0] (\e[H)
+	ECHO \e[H
+	#	Clear from cursor to end of line (\e[K)
+	ECHO \e[K
+	#	Clear from cursor to beginning of line (\e[1K)
+	ECHO \e[1K
+	#	Clear line (\e[2K)
+	ECHO \e[2K
+	#	Clear line 15
+	ECHO \e[15;01H\e[2K
 
-\e[05;15H	Move cursor to row 5 and col 15
-\e[H	Move to home position (0,0)
-\e[K	Clear from cursor to end of line
-\e[1K	Clear from cursor to beginning of line
-\e[2K	Clear line
-Plus Colors
 
 ###Examples
 
