@@ -1,165 +1,322 @@
 NEW
   AUTO 3,1
 H2000			jmp prostart
-				jmp atalkset			appletalk setup for network boot
-				jmp p16start			GQuit setup for gs/os
-LDR.MSG.16		.AS	-"Apple II"
-LDR.MSG.12		.AS	-"ProDOS 8 V2.0.3      06-May-93"
-LDR.MSG.14		.AS	-"A2osX Custom"
-LDR.MSG.23		.AS	-"Copyright Apple Computer, Inc., 1983-93"
-LDR.MSG.10		.AS	-"All Rights Reserved."
+				jmp atalkset
+				jmp p16start
+				
+LDR.MSG.0		.AS	-"PRODOS FX:                              "
+LDR.MSG.0.LEN	.EQ *-LDR.MSG.0
+
 p16start 		inc setuprts			set = 2 for GQuit rts
 atalkset 		inc setuprts			set = 1 for appletalk rts
 prostart 		lda unitnum
-				sta LDR.MLIONLINE.P+1
-				jsr LDR.Splash
-* test for at least a 65c02
-				sed
-				lda #$99				a negative #
-				clc
-				adc #$01				+1 in decimal = 0 (positive)
-				cld
-				bmi m48k				if 6502 because will not clear N flag
+				sta LDR.MLIOL.P+1
 
+				cld
+				bit RROMBNK2
+
+				sta CLR80DISP
+				sta	CLR80STORE
+				jsr setnorm
+				jsr init
+				jsr setvid
+				jsr setkbd
+				jsr home
+
+				ldx #LDR.MSG.0.LEN-1
+.1		 		lda LDR.MSG.0,x
+				sta $400,x
+				dex
+				bpl .1
+
+				sec
+				jsr idroutine   		returns system info
+				bcs .2					taken if not a //gs
+
+				lda #$80
+				trb newvideo			video mode select
+
+* test for at least a 65c02
+
+.2				sed
+				lda #$99
+				clc
+				adc #$01
+				cld
+				bmi LDR.UNSUPP.HW
+
+LDR.CheckROM	lda #MACHID.T.IIe
+				
+				ldx $FBB3	  			check hardware id
+				cpx #$06	   			apple //e?
+				beq .1					if yes
+
+				cpx #$EA	   			apple //+ or ///?
+				beq LDR.UNSUPP.HW
+
+				bra m64k				machine is unknown, Assume //e Enh 64k
+
+.1  			ldx $FBC0				//c ?
+				bne .2
+				
+				inc cflag				//c or later
+				lda #MACHID.T.IIc+MACHID.M.128+MACHID.COL80
+				sta idapple				save machine id
+				bra m128k
+				
+.2				cpx #$EA
+				beq LDR.UNSUPP.HW		//e UNenh....
+				
+				cpx #$E0
+				bne m64k				not a //e Enh....
+
+				sec
+				jsr $FE1F				//gs ????
+				bcs m64k
+				
+				inc cortland
+				lda #MACHID.T.IIe+MACHID.M.128+MACHID.COL80+MACHID.CLK
+				sta idapple
+				bra m128k
+
+m64k			sta idapple				save machine id
+				
+				ldx #LDR.Test128.len-1
+	
+.5				lda LDR.Test128,x
+				sta $80,x
+				dex
+				bpl .5
+
+				jsr $80					Test For 128k
+				bcs LDR.UNSUPP.HW
+				
+				lda #MACHID.M.128+MACHID.COL80
+				tsb idapple
+				
+				bra m128k
+
+LDR.UNSUPP.HW  	jmp H22EB				need enhanced IIe
+
+* we have 128k
+
+m128k  			lda #$30				set id = 128k present
+				tsb idapple
+
+				ldx #$FF
+				php						save interrupt status
+				pla		  				in acc.
+				sei		  				no interrupts.
+				sta SETALTZP
+				stx auxsp				init aux sp to $FF
+				sta CLRALTZP
+				pha		  				restore interrupt status
+				plp
+				sta CLRC3ROM
+
+				ldx #$F
+				
+.2				lda LDR.3F0,x
+				sta $3F0,x
+				dex
+				bpl .2
+				
 				lda #$01				patch for the gs rom
 				trb statereg			to force off intcxrom
-				ldx #H232B				yx=232B location table
-				ldy /H232B
-				jsr reloc				move interpreter loader to $800
-				bcs m48k				error
-* test for at least 64k
-				ldy #$00
-				lda #$FF
-				sta kversion			at least 48k ?
-				eor kversion
-				sec
-				bne m48k	  			if not.
 
-				sta kversion			try again to be sure
-				lda kversion
-				bne m48k	  			still not.
+				lda PAKME.ILDR
+				sta ZPInBufPtr
+				lda PAKME.ILDR+1
+				sta ZPInBufPtr+1
+				lda #ILDR.START
+				sta ZPOutBufPtr
+				lda /ILDR.START
+				sta ZPOutBufPtr+1
+				jsr X.Unpak
+	
+				lda PAKME.GP
+				sta ZPInBufPtr
+				lda PAKME.GP+1
+				sta ZPInBufPtr+1
+				lda #MLI
+				sta ZPOutBufPtr
+				lda /MLI
+				sta ZPOutBufPtr+1
+				jsr X.Unpak
 
-				lda RROMBNK2			read ROM
-				jsr whchrom				get preliminary system config
-				bcs m48k				machine too small
-				lda idapple
-				and #$20
-				bne m64k	  			if at least 64k //+.
-m48k  			jmp H22EB				need enhanced IIe
+				lda PAKME.XRW
+				sta ZPInBufPtr
+				lda PAKME.XRW+1
+				sta ZPInBufPtr+1
+				lda #$D000
+				sta ZPOutBufPtr
+				lda /$D000
+				sta ZPOutBufPtr+1
+				jsr X.Unpak
 
-* we have 64k, now determine model: //e , iic, or Cortland (//gs)
+				ldx #0
+				
+.1				stz $D700,x
+				stz $D800,x
+				stz $D900,x
+				stz $DA00,x
+				stz $DB00,x
+				stz $DC00,x
+				stz $DD00,x
+				inx
+				bne .1
+				
+				lda PAKME.XDOS
+				sta ZPInBufPtr
+				lda PAKME.XDOS+1
+				sta ZPInBufPtr+1
+				lda #$DE00
+				sta ZPOutBufPtr
+				lda /$DE00
+				sta ZPOutBufPtr+1
+				jsr X.Unpak
 
-m64k  			ldx #H2367				yx=2367 relocation table
-				ldy /H2367
-				jsr reloc
+				lda PAKME.IRQ
+				sta ZPInBufPtr
+				lda PAKME.IRQ+1
+				sta ZPInBufPtr+1
+				lda #$FF9B
+				sta ZPOutBufPtr
+				lda /$FF9B
+				sta ZPOutBufPtr+1
+				jsr X.Unpak
+
 				lda kversion
 				sta xdosver				save current version for dir use
-H20CE  			bcc H20D3
-				jmp relocerr
 
-H20D3  			lda RROMBNK2			read ROM
-				ldx version	  			ROM id byte
-				cpx #$06
-				bne H211D				then it's a //e
-				lda #$E0
-				bit zidbyte	  			another ROM id byte
-				php
-				lda idapple
-				and #$37
-				plp
-				bvc set3				if //c or //x
-				bmi set7				if //e
-
-set3  			php
-				ora #$08
-				plp
-				bpl mach2				if //c
-				ora #$40
-				bpl H20FD				always taken.
-mach2 			inc cflag				//c or later
-				bvs H20FD
-set7  			ora #$80
-
-H20FD 			sta idapple
-				lda RROMBNK2			read ROM
-				sec
-				jsr idroutine	  		returns system info
-				bcs H211D				branch if // family
-				inc cortland	   		it's a Cortland, set loader flag
+				lda cortland
+				beq LDR.II				branch if // family
+				
+LDR.IIGS		inc cortland	   		it's a Cortland, set loader flag
 				stz vmode				force setvid to reset cursor
 				jsr setvid	   			reset output to screen
+
+				ldx PAKME.SEL2
+				ldy PAKME.SEL2+1
+
+				stx ZPInBufPtr
+				sty ZPInBufPtr+1
+				lda #$1000
+				sta ZPOutBufPtr
+				lda /$1000
+				sta ZPOutBufPtr+1
+				jsr X.Unpak
+
+				ldx PAKME.SEL2
+				ldy PAKME.SEL2+1
+
+				stx ZPInBufPtr
+				sty ZPInBufPtr+1
+				lda #$D100
+				sta ZPOutBufPtr
+				lda /$D100
+				sta ZPOutBufPtr+1
+				jsr X.Unpak
+
+				lda PAKME.CCLK
+				sta ZPInBufPtr
+				lda PAKME.CCLK+1
+				sta ZPInBufPtr+1
+				lda #$D742
+				sta ZPOutBufPtr
+				lda /$D742
+				sta ZPOutBufPtr+1
+				jsr X.Unpak
+
 				lda setuprts
-				bne H211D				branch if prodos 8 alone
+				bne .1					branch if prodos 8 alone
 
 * running from gs/os shell so zero out os_boot for appletalk
 
 				sta OS_BOOT	   			indicates O/S initially booted.
 				jsr patch101	   		patch for gs/os - rev note #101
 
+.1				jmp RAMDRV.Install
 * put dispatcher in bank 2 of language card
 
-H211D 			lda LDR.MLIONLINE.P+1	place boot devnum in globals
-				sta LDR.MLIREADBLOCK.P+1
+LDR.II			lda LDR.MLIOL.P+1		place boot devnum in globals
+				sta LDR.MLIRB.P+1
 				sta devnum	   			last device used
-				jsr devsrch				finish setting up globals
-				lda LDR.MLIREADBLOCK.P+1
-				sta devnum
-				jsr lc1in				switch in language card bank 1.
-				ldx #rlclk64	  		set up clock
-				ldy /rlclk64
-				jsr reloc
 
-H2139 			bcs H20CE
+				jsr devsrch				finish setting up globals
+
+				lda LDR.MLIRB.P+1
+				sta devnum
+
+				jsr lc1in				switch in language card bank 1.
+
+				lda PAKME.TCLK
+				sta ZPInBufPtr
+				lda PAKME.TCLK+1
+				sta ZPInBufPtr+1
+				lda #$D742
+				sta ZPOutBufPtr
+				lda /$D742
+				sta ZPOutBufPtr+1
+				jsr X.Unpak
+
 				lda #calldisp
 				sta jspare+1			P8 system death vector
 				lda /calldisp
 				sta jspare+2
+
 				lda RRAMWRAMBNK2		read/write RAM bank 2
 				lda RRAMWRAMBNK2
-				ldx #altdsptbl			GQuit dispatcher
-				ldy /altdsptbl
-				lda setuprts
-				cmp #$02				is this a GQuit setup?
-				beq H216E				taken to use GQuit dispatcher.
-				ldx #newquitbl			else, use Bird's Better Bye
-				ldy /newquitbl	  		if correct machine.
-				lda machid	  			 machine ID byte
-				bit #$00	   			//c ?
-				bne H216E				if yes, can use.
-				and #$C2
-				cmp #$82	   			//e with 80 col card ?
-				beq H216E				if yes, can use.
-				ldx #dsp64				else, use original quit code
-				ldy /dsp64
-				inc newquitflag			using old quit code so set flag
 
-H216E 			jsr reloc
+				ldx PAKME.SEL1			else, use Bird's Better Bye
+				ldy PAKME.SEL1+1	  		if correct machine.
+
+	 			stx ZPInBufPtr
+				sty ZPInBufPtr+1
+				lda #$D100
+				sta ZPOutBufPtr
+				lda /$D100
+				sta ZPOutBufPtr+1
+				jsr X.Unpak
+
 				lda #$EE				byte to distinguish LC bank 2
 				sta $D000
 				jsr lc1in				switch in LC bank 1
-				bcs H2139
 
-* test for 128k needed to install ram disk
+RAMDRV.Install	ldy #$99				move $9A bytesfrom lcsrc to lcdest.
 
-				lda machid	   			machine ID byte
-				and #$30
-				eor #$30
-				bne noramdsk			if < 128k
-				ldx #$FF
-				php						save interrupt status
-				pla		  				in acc.
-				sei		  				no interrupts.
-				sta SETALTZP	   		use alt zero page/stack
-				stx auxsp				init aux sp to $FF
-				sta CLRALTZP	  		use main zero page/stack
-				pha		  				restore interrupt status
-				plp
-				sta CLRC3ROM	  		enable internal slot 3 ROM
-				jsr RAMDRV.Install
+.1	  			lda	RAM,y				transfer main bank portion of driver
+				sta RAMDRV,y
+				dey
+				cpy #$FF
+				bne	.1
+
+				ldx	#RAMX				set up to move aux portion of driver
+				stx	A1L
+				dex
+				stx	A2L
+				ldx	/RAMX
+				stx A1L+1
+				inx
+				stx A2L+1
+				lda #RAMXDRV
+				sta	A4L
+				lda	/RAMXDRV			RAMX to RAMXDRV
+				sta	A4L+1
+				sec			 			irection = to aux bank.
+				jsr auxmove				move aux bank portion of driver.
+				lda #RAMDRV				put driver address into
+				sta	drivertbl2+6		slot 3, drive 2.
+				lda /RAMDRV
+				sta	drivertbl2+7
+				inc numdevs				count (-1) active devices
+				ldx numdevs
+				lda #$BF				unit num of /RAM
+				sta	devlist,x
 
 * check interrupt vector to determine ROM version
 
-noramdsk 		lda RROMWRAMBNK2	   	read ROM/write RAM bank 2
+noramdsk 		lda RROMWRAMBNK2
 				ldy irqv	   			interrupt vector
 				ldx irqv+1	   			x = high byte
 				jsr lc1in				set language card bank 1 to r/w
@@ -170,12 +327,12 @@ noramdsk 		lda RROMWRAMBNK2	   	read ROM/write RAM bank 2
 				
 				jmp H22EB				need enhanced Roms
 
-.1				sta SETALTZP	   		use alt zero page/stack
+.1				sta SETALTZP
 				lda #$FF	   			set aux sp = $FF
 				sta auxsp
 				stx irqv+1	   			interrupt vector
 				sty irqv	   			save irq vector in aux lc
-				sta CLRALTZP	  		use main zero page/stack
+				sta CLRALTZP
 				stx irqv+1	   			save irq vector in main lc
 				sty irqv
 *				lda #$01				was for setting removed IRQFLAG
@@ -183,13 +340,13 @@ noramdsk 		lda RROMWRAMBNK2	   	read ROM/write RAM bank 2
 				stz cortflag			assume not Cortland system
 
 				lda cortland	   		running on a Cortland ?
-				beq H21D5				branch if not.
+				beq .2					branch if not.
 				inc cortflag	   		yes it's Cortland
 				bra docard
 
 * check for a rom in slot 3. if no rom, use internal $C300 firmware
 
-H21D5 			sta CLRC3ROM			enable internal slot 3 ROM
+.2	 			sta CLRC3ROM
 				lda rommap	   			slot ROM bit map
 				and #$08				mask all but slot 3
 				bne isromin3	   		taken if rom in slot 3
@@ -198,7 +355,7 @@ H21D5 			sta CLRC3ROM			enable internal slot 3 ROM
 * found a rom in slot 3. is it an external, identifiable 80 col card
 * with interrupt routines? if so, enable it else use internal $C300 firmware.
 
-isromin3 		sta SETC3ROM	   		enable slot 3 rom
+isromin3 		sta SETC3ROM
 				lda $C305	   			check card id bytes
 				cmp #$38
 				bne hitswtch	   		not terminal card
@@ -220,43 +377,53 @@ isromin3 		sta SETC3ROM	   		enable slot 3 rom
 				cmp #$2C	   			does card have an interrupt handler?
 				beq docard	   			yes
 
-hitswtch 		sta CLRC3ROM			enable internal $C300 firmware
+hitswtch 		sta CLRC3ROM
 
 * verify that the card in aux slot is actually present
 
-				sta SET80STORE	  		enable 80-col store
-				sta SETPAGE2	   		switch in text page 2
+				sta SET80STORE
+				sta SETPAGE2
 				lda #$EE
 				sta txtp2
 				asl
 				asl txtp2
 				cmp txtp2
-				bne H2230
+				bne .1
 				lsr
 				lsr txtp2
 				cmp txtp2
 
-H2230 			sta CLRPAGE2			main memory
-				sta CLR80STORE			disable 80-col store
+.1	 			sta CLRPAGE2
+				sta CLR80STORE
 				beq docard	   			branch if card is there
 				lda machid	   			machine ID byte
 				and #$FD	   			clear 80-col bit 2 (no card)
 				bne H2244				always
+				
 docard 			lda machid
 				ora #$02				turn bit 2 on (80-col card is present)
+
 H2244  			sta machid
 H2247  			lda cortland			are we running on a //gs ?
 				beq H225D				if not.
 				lda #$4C	   			enable clock routine by putting a jmp
 				sta clockv	   			in front of clock vector
-				ldx #cortclock	  		yx = relocation table
-				ldy /cortclock	 		for cortland clock driver
-				jsr reloc
+
+				lda PAKME.CCLK
+				sta ZPInBufPtr
+				lda PAKME.CCLK+1
+				sta ZPInBufPtr+1
+				lda #$D742
+				sta ZPOutBufPtr
+				lda /$D742
+				sta ZPOutBufPtr+1
+				jsr X.Unpak
+
 				lda #$01				set bit 0 = clock present
 				tsb machid
 H225D 			lda setuprts			get setup entry point flag
 				beq H2267				taken if normal boot.
-				lda RROMBNK2			read ROM
+				lda RROMBNK2
 				rts		  				return to caller at setup entry point.
 setuprts 		.DA #$00				0 = normal boot, <>0 = return
 
@@ -264,7 +431,7 @@ setuprts 		.DA #$00				0 = normal boot, <>0 = return
 
 H2267 			jsr MLI
 				.DA #MLIONLINE
-				.DA LDR.MLIONLINE.P
+				.DA LDR.MLIOL.P
 				bcs relocerr
 		 
 				lda pbuf+1				get volume name length.
@@ -277,19 +444,19 @@ H2267 			jsr MLI
 		 
 				jsr MLI
 				.DA #MLISETPREFIX
-				.DA LDR.MLISETPREFIX.P
+				.DA LDR.MLISETP.P
 				bcs relocerr
 				tax	=0
 				stx dst
 				ldy #$02	  			read directory into buffer
 				lda /DirBlkBuf
 H228E  			sta dst+1
-				sta LDR.MLIREADBLOCK.P+3
-				sty LDR.MLIREADBLOCK.P+4
-				stx LDR.MLIREADBLOCK.P+5
+				sta LDR.MLIRB.P+3
+				sty LDR.MLIRB.P+4
+				stx LDR.MLIRB.P+5
 				jsr MLI
 				.DA #MLIREADBLOCK
-				.DA LDR.MLIREADBLOCK.P
+				.DA LDR.MLIRB.P
 				bcs relocerr
 				ldy #$03				get next block# from link
 				lda (dst),y
@@ -309,7 +476,7 @@ H22B7  			jmp $800				jmp to "load interpreter" code
 
 * relocation/configuration error
 
-relocerr 		sta RROMBNK2			read ROM
+relocerr 		sta RROMBNK2
 				jsr home
 				ldy #$1D
 
@@ -331,13 +498,13 @@ H22EB			ldy #$23
 
 LDR.MSG.EnhErr	.AS -"REQUIRES ENHANCED APPLE IIE OR LATER"
 
-LDR.MLIONLINE.P	.DA #2
+LDR.MLIOL.P		.DA #2
 				.DA #$60
 				.DA pbuf+1
-LDR.MLISETPREFIX.P
+LDR.MLISETP.P
 				.DA #1
 				.DA pbuf
-LDR.MLIREADBLOCK.P
+LDR.MLIRB.P
 				.DA #3
 				.DA #0	  				unit number
 				.DA 0					2 byte data buffer
@@ -346,74 +513,11 @@ LDR.MLIREADBLOCK.P
 cortland 		.BS 1					cortland loader flag (1 = Cortland)
 newquitflag 	.BS 1					1 = old quit code
 
-H232B  			.DA #1	  				move interpreter loader code
-				.DA $800				destination address
-				.DA licode.end-licode	length to move
-				.DA LOADINT	 			source address
-				.DA #$01	  			move $3F0 vectors
-				.DA p3vect	 			destination
-				.DA $0010	  			16 bytes to move
-				.DA H257B				source
-				.DA #$01
-				.DA lookptr				destination address
-				.DA $0002				length to move
-				.DA dst					source
-				.DA #$01	  			move 128k test to zero page
-				.DA tst128				destination
-				.DA LDR.Test128.Len		length to move
-				.DA LDR.Test128			source
-				.HS FF					done
-		 
-dsp64	 		.DA #$01	  			move p8 dispatcher code
-				.DA displc2	  			destination
-				.DA $0300				length (must be <= 3 pages)
-				.DA SEL0		 		source
-				.HS FF					done
-		 
-newquitbl 		.DA #$01	  			move Bird's Bye code
-				.DA displc2	  			dest
-				.DA $0300				length (must be <= 3 pages)
-				.DA SEL1	  			source
-				.HS FF					done
-		 
-altdsptbl 		.DA #$01	  			move GQuit launcher
-				.DA displc2				destination
-				.DA $0300	  			length (must be <= 3 pages)
-				.DA SEL2	 			source
-				.DA #$01	  			move a copy of GQuit launcher
-				.DA dispadr	  			to dispadr for gsos
-				.DA $0300	  			length (must be <= 3 pages)
-				.DA SEL2	 			source
-				.HS FF					done
-
-* tables for moving 64k version of mli for execution
-
-H2367			.DA #$01	  			relocation table. 1=move src to dst
-				.DA $ff9b	 			destination
-				.DA $100-$9B			length to move
-				.DA IRQ		  			source
-				.DA #$01
-				.DA MLI					dst
-				.DA $0100				in one page
-				.DA GP					src
-				.HS 00					0=clear buffers $D700-$DDFF
-				.DA $D700				start
-				.DA $0700				len
-				.DA #$01
-				.DA $DE00				dst
-				.DA $2100				length of mli
-				.DA XDOS				src
-				.DA #$01
-				.DA $D000
-				.DA $0700				length of disk ii driver
-				.DA XRW
-				.HS FF					done
-
 * move thunderclock
 
 rlclk64   		.DA #$01	  			relocation table. 1=move src to dst
 				.DA $D742				destination
-				.DA TCLK.END-TCLK.START	length of thunderclock driver
+				.DA TCLK.END-TCLK.START
 				.DA TCLK				source
 
 				.DA #$04	  			4=relocate and move program
@@ -425,153 +529,12 @@ rlclk64   		.DA #$01	  			relocation table. 1=move src to dst
 clock64			.DA #$00
 				.HS FF					done
 
-* move cortland clock
-
-cortclock 		.DA #$01	  			relocation table. 1=move src to dst
-				.DA $D742				destination
-				.DA CCLK.END-CCLK.START	length of cortland clock driver
-				.DA CCLK				source
-				.HS FF					done
-
-* 16 bytes moved to $03F0 vectors
-
-H257B			.DA breakv
-				.DA oldrst
-				.DA #$5A				powerup byte
-				jmp oldrst	  			'&' vector
-				jmp oldrst	   			ctrl-y vector
-				.HS 004000
-				.DA GP.IRQV				global page interrupt vector
-lc1in  			lda RRAMWRAMBNK1		read/write language card RAM bank 1
-				lda RRAMWRAMBNK1
-				rts
-
 * determine which system model and save in machine id (idapple)
 
-whchrom			stz idapple				assume standard apple //
-				ldx version	  			check hardware id
-				cpx #$38	   			is it apple // (autostart rom)?
-				beq H25BE				if yes
-				lda #$80
-				cpx #$06	   			apple //e?
-				beq H25BC				if yes
-				lda #$40	   
-				cpx #$EA	   			apple //+?
-				bne H25B6				it not, then machine is unknown.
-				ldx $FB1E				apple /// in emulation?
-				cpx #$AD
-				beq H25BC				taken if apple //+.
-				lda #$D0	   			test again for apple /// emulation
-				cpx #$8A	   			because will only have 48k memory.
-				bne H25B6				if taken, then machine is unknown.
-H25B4  			sec						apple /// emulation is not allowed
-				rts		  				because insufficient memory.
-H25B6  			lda #$02				machine unknown
-				sta (dst),y
-				bne H25D9				always.
-H25BC  			sta idapple				save machine id
-
-* check for language card ram
-
-H25BE  			jsr lc1in				switch in language card bank 1
-				lda #$AA
-				sta $D000
-				eor $D000				if LC present, result = 0.
-				bne H25B4				othewise, insufficient memory.
-				lsr $D000				check lc again
-				lda #$55
-				eor $D000
-				bne H25B4				not sufficent memory.
-				lda #$20				LC ram is available
-				ora idapple
-H25D9  			jmp tst128				jumps to page 0 routine below
-
-* test for 128k. use page 0 for this routine
-
-LDR.Test128		sta idapple				H25DC-2621 was moved to location tst128
-				bpl not128	   			if already determined < 128k
-				lda #$EE
-				sta SETWRITEAUX	  		write to aux mem while on main zp
-				sta SETREADAUX	  		and read aux mem.
-				sta dbuf				write these locs just to test aux mem
-				sta $800		   		1k apart from each other.
-				lda dbuf
-				cmp #$EE
-				bne noaux
-				asl dbuf				may be sparse mem mapping so
-				asl						change value and see what happens.
-				cmp dbuf
-				bne noaux				branch if not sparse mapping.
-				cmp $800
-				bne H2606				if not sparse.
-noaux  			sec						no aux memory available.
-				bcs H2607
-H2606  			clc
-H2607  			sta CLRWRITEAUX	  		switch back to main memory
-				sta CLRREADAUX	  
-				bcs not128	  			if < 128k
-				lda idapple
-				ora #$30				set id = 128k present
-				sta idapple
-not128 			lda lookptr+1
-				sec
-				sbc #$05
-				sta lookptr+1
-				bcs H2620
-				dec lookptr
-H2620  			clc
-				rts
-LDR.Test128.len	.EQ *-LDR.Test128
-*--------------------------------------
-LDR.Splash		cld
-				sta CLR80DISP			disable 80 col hardware
-				sta	CLR80STORE			disable 80 col store
-				jsr setnorm	 			set normal text mode
-				jsr init	  			init text screen
-				jsr setvid	  			reset output to screen
-				jsr setkbd	  			reset input to keyboard
-				jsr home
-				ldx #$07
-.1		 		lda LDR.MSG.16,x
-				sta vline10+16,x
-				dex
-				bpl .1
-		 
-				ldx #$1D
-.2	  			lda LDR.MSG.12,x
-				sta vline12+5,x
-				dex
-				bpl .2
-				ldx #$0B
-.3	  			lda LDR.MSG.14,x
-				sta vline14+14,x
-				dex
-				bpl .3
-				ldx #$26
-.4	  			lda LDR.MSG.23,x
-				sta vline23,x
-				dex
-				bpl .4
-				ldx #$13
-.5	  			lda LDR.MSG.10,x
-				sta vline24+10,x
-				dex
-				bpl .5
-				sec
-				jsr idroutine   		returns system info
-				bcs .8					taken if not a //gs
-				lda #$80
-				trb newvideo			video mode select
-.8	  			bit $C000
-				bpl .8
-				sta $C010
-				rts
-*--------------------------------------
 * find all disk devices in system slots and set up address
 * and device table in prodos global page. if there is a disk
 * card in slot 2 then limit the # of devices in slot 5
 * smartport to only 2
-*--------------------------------------
 numdev2			.HS 0000000000000000	8 bytes for smartport call
 driveradr		.DA	0
 d2idx  			.DA #0
@@ -709,11 +672,12 @@ H2777			pla
 				sta devlist,x
 				dex
 				bpl H2777
+				
 H277E  			jsr fndtrd	   			save accumulated machine id.
-				beq H2787
+				beq .1
 				sta machid	  			machine ID byte
-				rts
-H2787  			jmp H25B6
+.1				rts
+
 stadrv 			ora devid				combine with attributes.
 				ldx numdevs	  
 				inx		  				put device # into device list.
@@ -724,12 +688,12 @@ sltrom 			bcc H27F3				branch if disk drive
 * test for clock card
 				ldy #$06
 
-H2799  			lda (idxl),y
+.1  			lda (idxl),y
 				cmp dskid,y
-				bne H27BA				no clock
+				bne .2					no clock
 				dey
 				dey
-				bpl H2799
+				bpl .1
 
 				lda idxl+1	   			transfer hi slot address
 				sbc #$C1	   			minus $C1 (default) to relocate
@@ -745,7 +709,7 @@ H2799  			lda (idxl),y
 
 * test for 80 col card
 
-H27BA  			ldy #$05
+.2  			ldy #$05
 				lda (idxl),y
 				cmp #$38
 				bne H27E4
@@ -755,7 +719,7 @@ H27BA  			ldy #$05
 				bne H27E4
 				ldy #$0B
 				lda (idxl),y
-				dec 		must = 1
+				dec 					must = 1
 				bne H27E4
 				iny
 				lda (idxl),y
@@ -793,14 +757,14 @@ sltbit			.HS 0002040810204080
 
 fndtrd			clc
 				ldy sltbit
-H2818  			lda (lookptr),y
+.1  			lda (lookptr),y
 				and #$DF
 				adc sltbit
 				sta sltbit
 				rol sltbit
 				iny
 				cpy sltbit+3
-				bne H2818
+				bne .1
 				tya
 				asl
 				asl
@@ -809,11 +773,11 @@ H2818  			lda (lookptr),y
 				tay
 				eor sltbit
 				adc #$0B
-				bne H283B
+				bne .2
 				lda idapple
 				rts
 
-H283B  			lda #$00
+.2  			lda #$00
 				rts
 
 installdev 		php						how many drives (carry).
@@ -827,23 +791,23 @@ installdev 		php						how many drives (carry).
 				jsr stadrv				OR in low nibble, store in dev list.
 				plp						restore # of devices in carry.
 				ror						if 2 drives, then bit 7=1.
-				bpl H2853				branch if a 1 drive device (e.g. hard drive)
+				bpl .1					branch if a 1 drive device (e.g. hard drive)
 				inx		  				else presume that 2nd drive is present.
 				sta devlist,x	  		active device list.
 
-H2853  			stx numdevs	  			save updated device count.
+.1  			stx numdevs	  			save updated device count.
 				asl						shift # of drives back into carry.
 				lda driveradr			get high address of device driver.
 				sta drivertbl1,y	 	device driver table 1.
-				bcc H2862				branch if single drive.
+				bcc .2					branch if single drive.
 				sta drivertbl2,y	 	device driver table 2.
 
-H2862  			lda driveradr+1
+.2  			lda driveradr+1
 				sta drivertbl1+1,y
-				bcc H286D
+				bcc .3
 				sta drivertbl2+1,y
 
-H286D  			rts
+.3  			rts
 
 * query smartport status to determine # of devices
 * and install up to 4 units in table if card is in slot 5
@@ -860,7 +824,7 @@ smartprt 		jsr setdevid			setup the devid byte from attributes
 				lda driveradr+1
 				sta spvect+2
 				sta pscall+2			modify operand
-				asl		convert $Cn to $n0
+				asl						convert $Cn to $n0
 				asl
 				asl
 				asl
@@ -878,7 +842,7 @@ pscall			jsr	$0000				self modifying code
 				ldy #$FB	
 				lda (idxl),y			check device id
 				and #$02	   			SCSI?
-				beq H28B1				no, no need to init Cocoon
+				beq .1				no, no need to init Cocoon
 				sta statunit	   		device = 2 for SCSI
 
 * initialize SCSI Cocoon to build internal device tables
@@ -888,7 +852,7 @@ pscall			jsr	$0000				self modifying code
 				.HS 00
 				.DA spcparms	 		ignore any errors.
 
-H28B1  			stz statunit	   		set unit# = 0
+.1  			stz statunit	   		set unit# = 0
 				jsr spvect	   			call to get the device count.
 				.HS 00					this is a status call
 				.DA spcparms
@@ -935,15 +899,15 @@ setdevid 		ldy #$FE				check attributes byte.
 
 cmpid  			lda CLRC8ROM	   		switch out $C8 ROMs
 				ldy #$05
-H28F6  			lda (idxl),y	   		compare id bytes
+.1  			lda (idxl),y	   		compare id bytes
 				cmp dskid,y
 				sec		  				set if no disk card
-				bne H2903
+				bne .2
 				dey
 				dey
-				bpl H28F6				loop until all 4 id bytes match.
+				bpl .1				loop until all 4 id bytes match.
 				clc						clear if disk card
-H2903  			rts
+.2  			rts
 
 * smartport call parameters
 
@@ -1033,20 +997,18 @@ H2974  			dec idxl+1
 
 mount  			ldx #$0C
 
-H297F  			ldy driveridx,x
+.1  			ldy driveridx,x
 				lda drivertbl1,y	 	device driver table 1
 				cmp #nodevice
-				bne H2990
+				bne .2
 				lda drivertbl1+1,y
 				cmp /nodevice
-				beq H2994
-H2990  			dex
-				bpl H297F
+				beq .3
+.2  			dex
+				bpl .1
 				rts						ran out of space for devices, exit.
-
 * empty slot found
-
-H2994  			lda idxl+1
+.3  			lda idxl+1
 				pha
 				phx
 				phy
@@ -1060,7 +1022,7 @@ H2994  			lda idxl+1
 				plx
 				pla
 				sta idxl+1
-				bcc H2990				yes, can't use to mirror the device.
+				bcc .2					yes, can't use to mirror the device.
 				jsr lc1in				write enable LC ram bank 1.
 				tya		  				divide index by 2
 				lsr
@@ -1093,14 +1055,54 @@ nodev2 			asl
 				bra H296E
 
 H29EB  			jsr cmpid				is it a disk controller?
-				bcs H29F8				no, so return.
+				bcs .9					no, so return.
 				sec		  				assume no smartport
 				ldy #$07
 				lda (idxl),y			is it a smartport?
-				bne H29F8				if not.
+				bne .9					if not.
 				clc						smartport found
-H29F8  			rts
-*--------------------------------------
+.9  			rts
+
+* test for 128k. use page 0 for this routine
+
+LDR.Test128		lda #$EE
+				sta SETWRITEAUX
+				sta SETREADAUX
+				sta $C00				write these locs just to test aux mem
+				sta $800		   		1k apart from each other.
+				lda $C00
+				cmp #$EE
+				bne noaux
+				asl $C00				may be sparse mem mapping so
+				asl						change value and see what happens.
+				cmp $C00
+				bne noaux				branch if not sparse mapping.
+				cmp $800
+				bne H2606				if not sparse.
+
+noaux  			sec						no aux memory available.
+				bcs H2607
+H2606  			clc
+
+H2607  			sta CLRWRITEAUX
+				sta CLRREADAUX	  
+				rts
+
+LDR.Test128.len	.EQ *-LDR.Test128
+
+* 16 bytes moved to $03F0 vectors
+
+LDR.3F0			.DA breakv
+				.DA oldrst
+				.DA #$5A				powerup byte
+				jmp oldrst	  			'&' vector
+				jmp oldrst	   			ctrl-y vector
+				.HS 004000
+				.DA GP.IRQV				global page interrupt vector
+lc1in  			lda RRAMWRAMBNK1
+				lda RRAMWRAMBNK1
+				rts
+
 MAN
 SAVE USR/SRC/PRODOS.FX/PRODOS.S.LDR.A
 LOAD USR/SRC/PRODOS.FX/PRODOS.S
