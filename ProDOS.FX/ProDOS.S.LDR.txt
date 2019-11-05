@@ -1,25 +1,25 @@
 NEW
   AUTO 3,1
-  
+*--------------------------------------
   				.MA	DEBUG
 :1				bit $C000
 				bpl :1
 				sta	$C010
 				.EM
-				
+*--------------------------------------
 READCAT			.EQ 0					Boot Block read Catalog at $C00				
-				
+*--------------------------------------
 H2000			jmp prostart
 				jmp atalkset
 				jmp p16start
-				
+*--------------------------------------
 LDR.MSG.0		.AS	"PRODOS FX:                              "
 LDR.MSG.0.LEN		.EQ *-LDR.MSG.0
 LDR.MSG.UNSUPP	.AS -"UNSUPPORTED HARDWARE."
 LDR.MSG.UNSUPP.LEN	.EQ *-LDR.MSG.UNSUPP
 LDR.MSG.ROOTERR	.AS -"Unable To read ROOT dir."
 LDR.MSG.ROOTERR.LEN	.EQ *-LDR.MSG.ROOTERR
-
+*--------------------------------------
 p16start 		inc LDR.BootFlag		set = 2 for GQuit rts
 atalkset 		inc LDR.BootFlag		set = 1 for appletalk rts
 prostart 		lda unitnum
@@ -59,7 +59,24 @@ prostart 		lda unitnum
 				cld
 				bmi LDR.UNSUPP.HW
 
-LDR.CheckROM	lda #MACHID.T.IIe
+				stz auxsp
+				
+				sta SETALTZP
+
+				stz auxsp
+				lda auxsp
+				bne LDR.UNSUPP.HW
+
+				dec auxsp				init aux sp to $FF
+				lda auxsp
+				beq LDR.UNSUPP.HW
+
+				sta CLRALTZP
+
+				lda auxsp
+				bne LDR.UNSUPP.HW		NO 128k
+
+LDR.CheckROM	lda #MACHID.T.IIe+MACHID.M.128+MACHID.COL80
 				
 				ldx $FBB3	  			check hardware id
 				cpx #$06	   			apple //e?
@@ -68,46 +85,31 @@ LDR.CheckROM	lda #MACHID.T.IIe
 				cpx #$EA	   			apple //+ or ///?
 				beq LDR.UNSUPP.HW
 
-				bra m64k				machine is unknown, Assume //e Enh 64k
+				bra m128k				machine is unknown, Assume //e Enh 128k
 
 .1  			ldx $FBC0				//c ?
 				bne .2
 				
-				inc cflag				//c or later
-				lda #MACHID.T.IIc+MACHID.M.128+MACHID.COL80
-				sta idapple				save machine id
+				ldy kbd					//c, check for keypress
+				cpy #$9B	   			escape? (to disable accelerator)
+				bne .11
+				sta KBDSTROBE	  		clear keyboard
+				
+.11				lda #MACHID.T.IIc+MACHID.M.128+MACHID.COL80
 				bra m128k
 				
 .2				cpx #$EA
 				beq LDR.UNSUPP.HW		//e UNenh....
 				
 				cpx #$E0
-				bne m64k				not a //e Enh....
+				bne m128k				not a //e Enh....
 
 				sec
 				jsr $FE1F				//gs ????
-				bcs m64k
+				bcs m128k				no.....
 				
 				inc cortland
 				lda #MACHID.T.IIe+MACHID.M.128+MACHID.COL80+MACHID.CLK
-				sta idapple
-				bra m128k
-
-m64k			sta idapple				save machine id
-				
-				ldx #LDR.Test128.len-1
-	
-.5				lda LDR.Test128,x
-				sta $80,x
-				dex
-				bpl .5
-
-				jsr $80					Test For 128k
-				bcs LDR.UNSUPP.HW
-				
-				lda #MACHID.M.128+MACHID.COL80
-				tsb idapple
-				
 				bra m128k
 
 LDR.UNSUPP.HW  	ldy #LDR.MSG.UNSUPP.LEN-1
@@ -117,20 +119,8 @@ LDR.UNSUPP.HW  	ldy #LDR.MSG.UNSUPP.LEN-1
 				bpl .1
 				bmi *
 
-* we have 128k
+m128k  			sta idapple				Save MACHID in temp location
 
-m128k  			lda #$30				set id = 128k present
-				tsb idapple
-
-				ldx #$FF
-				php						save interrupt status
-				pla		  				in acc.
-				sei		  				no interrupts.
-				sta SETALTZP
-				stx auxsp				init aux sp to $FF
-				sta CLRALTZP
-				pha		  				restore interrupt status
-				plp
 				sta CLRC3ROM
 
 				ldx #$F
@@ -361,11 +351,10 @@ RAMDRV.Install	jsr lc1in
 LDR.IRQ			lda RROMWRAMBNK2
 				ldy irqv	   			interrupt vector
 				ldx irqv+1	   			x = high byte
+
 				jsr lc1in				set language card bank 1 to r/w
 
 				sta SETALTZP
-				lda #$FF	   			set aux sp = $FF
-				sta auxsp
 				stx irqv+1	   			interrupt vector
 				sty irqv	   			save irq vector in aux lc
 
@@ -661,31 +650,6 @@ stadrv 			ora devid				combine with attributes.
 				rts
 
 sltrom 			bcc H27F3				branch if disk drive
-
-* test for 80 col card
-
-				ldy #$05
-				lda (idxl),y
-				cmp #$38
-				bne H27E4
-				ldy #$07
-				lda (idxl),y
-				cmp #$18
-				bne H27E4
-				ldy #$0B
-				lda (idxl),y
-				dec 					must = 1
-				bne H27E4
-				iny
-				lda (idxl),y
-				and #$F0	   			mask off low nibble.
-				cmp #$80	   			generic for 80-col card.
-				bne H27E4
-				lda idapple
-				beq H277E
-				ora #$02
-				sta idapple				xxxxxx1x = 80 col card.
-				bne H27F3				always taken.
 
 * test for any other rom
 
@@ -998,33 +962,6 @@ numdev2			.HS 0000000000000000	8 bytes for smartport call
 driveradr		.DA	0
 d2idx  			.DA #0
 diskins2 		.DA #0					msb clear if drive in slot 2
-
-* test for 128k. use page 0 for this routine
-
-LDR.Test128		lda #$EE
-				sta SETWRITEAUX
-				sta SETREADAUX
-				sta $C00				write these locs just to test aux mem
-				sta $800		   		1k apart from each other.
-				lda $C00
-				cmp #$EE
-				bne noaux
-				asl $C00				may be sparse mem mapping so
-				asl						change value and see what happens.
-				cmp $C00
-				bne noaux				branch if not sparse mapping.
-				cmp $800
-				bne H2606				if not sparse.
-
-noaux  			sec						no aux memory available.
-				bcs H2607
-H2606  			clc
-
-H2607  			sta CLRWRITEAUX
-				sta CLRREADAUX	  
-				rts
-
-LDR.Test128.len	.EQ *-LDR.Test128
 
 * 16 bytes moved to $03F0 vectors
 
