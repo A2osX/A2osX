@@ -476,7 +476,9 @@ HTTPD is a server process that listens for incoming requests to server web pages
 | --- | --- |
 |HTTPGET <ip\|host> [port]| -U Url <br> -F UrlFile|
 
-The HTTPGET command is a utility for retrieving a network page or message from a specified host/URL.  Network services must be started to use this command.
+The HTTPGET command is a utility for retrieving a network page or message from a specified host/URL.  Network services must be started to use this command.  You must specify a Url to retrieve either with the -U switch or in a text file specified with the -F switch.  Without a Url you will likely get a standard 404 looking web page returned as the result of this command.  Typically you would use a command line like the following for httpget:
+
+	HTTPGET www.a2osx.com -U index.html
 
 ### IPCONFIG 
 
@@ -492,7 +494,7 @@ The IPCONFIG command will display the current network configuration for your sys
 | ----- |
 | NETSTAT |
 
-The NETSTAT command displays the current socket status of your A2osX system.  Network services must be started to use this command.
+The NETSTAT command displays the current socket status of your A2osX system.  Network services must be started to use this command.  Netstat will show the Type, Protocol, Local Port, Remote IP and Port as well as the status of any current connection.
 
 ### PING 
 

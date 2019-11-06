@@ -192,11 +192,13 @@ Minimum 140K 5.25 disk drive, 800K 3.5 strongly recommended.
 
 #### Supported Hardware
 
-Any ProDOS Block Device (5.25 & 3.5 Floppy Drives, SmartPort Hard Drive and Ram Disks)<br>
-NoSlot Clock or ThunderClock<br>
-Super Serial Card<br>
-Mouse Card<br>
-Network Card (Uthernet I or II, LanCEgs)
+Any ProDOS Block Device (5.25 & 3.5 Floppy Drives, SmartPort Hard Drive and Ram Disks)<br> NoSlot Clock or ThunderClock<br> Super Serial Card<br> Mouse Card<br> Network Card (Uthernet I or II, LanCEgs)
+
+While A2osX supports a many Apple II hardware devices, it is possible a conflict will occur with a particular card in your unique hardware configuration.  In these cases, the conflict usually arises when A2osX attempts to load a driver for a supported device it triggers a conflict with the ROM of an unsupported card when it searches your Apple II for the appropriate card.  You can tell A2osX to not search the slots containing unsupported cards using the KCONFIG utility.  In addition, a DEBUG boot disk is available in our Media collection that loads the absolute minimal parts of A2osX which can help in identifying and conflicting hardware. 
+
+> A note on Accelerator Cards:  A2osX has been tested and successfully runs on Apples with accelerator cards such as the Transwarp //e, Titan, or FastChip.  Care must be taken, however, in making sure that the configuration of your card is correct for your system, especially while running A2osX.  First you should ensure that the FAST/SLOW switches are set to slow as is appropriate for the cards installed in your system.  Specifically you must set them to slow for Floppy Controllers, Network Controllers, Mouse Cards and Super Serial Cards.  If you are unsure, set the switch to slow.  In addition, with the FastChip, you may need to disable the RAMFACTOR and/or RAMWORKS emulation (further testing is underway).
+
+**INSERT SECTION HERE ON DEBUG.po and how to use it to solve HW conflict issues**
 
 ## Getting Started
 
@@ -404,6 +406,9 @@ This range may be reused by multiple BINs so scripts checking these results shou
 
 ### Reserved for internal Kernel Use : $FA->$FF 
 
+## Thanks
+
+The A2osX Development thanks the many Apple II hobbyists out there who have contributed their time and resources testing and contributing to the success of A2osX.  Your efforts make a positive difference in the quality and completeness of A2osX and are greatly appreciated.  A special thanks to Dan Chisarick for providing an Apple //GS system to our team for testing and setting up an A2osX Telnet Server. We would also like to thank A2Heaven for their help and support of the A2osX team testing and documenting A2osX running on Fast Chip //e equipped Apples.
 
 ## License
 A2osX is licensed under the GNU General Pulic License.
