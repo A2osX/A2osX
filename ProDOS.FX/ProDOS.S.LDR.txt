@@ -288,7 +288,7 @@ LDR.IIGS		sta cortflag
 
 * running from gs/os shell so zero out os_boot for appletalk
 
-				stz OS_BOOT	   			indicates O/S initially booted.
+				sta OS_BOOT	   			indicates O/S initially booted.
 				jsr patch101	   		patch for gs/os - rev note #101
 
 .1				bra LDR.Common
@@ -513,7 +513,11 @@ LDR.SetupCLK	stx ZPInBufPtr
 LDR.SetupCLK.RTS
 				rts
 *--------------------------------------
-LDR.SetupRAM	jsr lc1in
+LDR.SetupRAM	lda GP.numdevs
+				cmp #13
+				bcs LDR.SetupCLK.RTS
+
+				jsr lc1in
 
 				ldx PAKME.RAM
 				ldy PAKME.RAM+1
@@ -542,9 +546,9 @@ LDR.SetupRAM	jsr lc1in
 				sta CLRWRITEAUX
 
 				lda #RAMDRV				put driver address into
-				sta	drivertbl2+6		slot 3, drive 2.
+				sta	DEVPTRS3D2
 				lda /RAMDRV
-				sta	drivertbl2+7
+				sta	DEVPTRS3D2+1
 
 				inc GP.numdevs			count (-1) active devices
 				ldx GP.numdevs
@@ -561,7 +565,10 @@ LDR.BlkDevScan	stz idxl
 				lda #$C7	  			search slots from high to low
 				sta idxl+1
 
-.1	  			jsr cmpid
+				lda #7
+				sta LDR.SlotIdx
+				
+.1	  			jsr LDR.CheckDiskID
 				bcs .8					if no ProDOS device in this slot.
 
 				ldy #$ff
@@ -572,115 +579,158 @@ LDR.BlkDevScan	stz idxl
 				lda #RWTS
 				sta driveradr
 				lda /RWTS
+				sta driveradr+1
 				sec						2 devices
-				jsr installdev
-				bra .8
+				jsr LDR.AddBlkDevs
+				bra .7
 
 .2				cmp #$FF	   			if = $FF then 13 sector disk II.
 				beq .8					ignore if 13 sector boot ROM
 
 				ldy #$07	   			check for a smartport device.
 				lda (idxl),y
-				bne .2					no smartport
+				bne .3					no smartport
 
-				jsr smartprt
-				bra .8
+				jsr LDR.AddSPDevs
+				bra .7
 
-.2  			ldy #$FE				BLK device...
+.3  			ldy #$FE				BLK device...
 				lda (idxl),y			get attributes.
 				and #$03	   			verify it provides read and status calls.
 				cmp #$03
 				bne .7					assume it's an off-brand disk
 				
-				jsr setdevid	   		set up the devid byte from attributes
-				clc
-				php		  				remember that it's not a disk //.
+				lda (idxl),y			get back ID byte
+				lsr
+				lsr
+				lsr
+				lsr
+				sta devid				->DEV LIST NIBBLE
 
-				lsr						move # of units (0=1, 1=2) to carry.
-				lda idxl+1	   			store hi entry addr (low already done)
+				and #$3					Device count minus 1
+				inc
+				ldx LDR.SlotIdx
+				sta LDR.DevCnt-1,x
+				tax
 				
+				iny						$CnFF
+				lda (idxl),y
+				sta driveradr
+				lda idxl+1	   			store hi entry addr (low already done)
 				sta driveradr+1
 
-				jsr installdev			install 1 or 2 devices from this slot.
+				cpx #2					CS if 2 devs or more
+				jsr	LDR.AddBlkDevs		install 1 or 2 devices from this slot.
 
-.7  			lda idxl+1				mark a bit in slot byte
-				and #$07	   			to indicate rom present.
-				tax
+.7  			ldx LDR.SlotIdx
 				lda sltbit,x
 				tsb rommap	   			mark bit to flag rom present
 				
 .8				dec idxl+1				next lower slot.
-				lda idxl+1
-				and #$07	   			have all slots been checked ?
+				dec LDR.SlotIdx 		have all slots been checked ?
+				bne .1
+*--------------------------------------
+LDR.AddExtraDevs
+				lda #7
+				sta LDR.SlotIdx
+
+.1  			ldx LDR.SlotIdx
+				lda LDR.DevCnt-1,x
+				cmp #3
+				bcc .8
+
+				ldy LDR.DevType-1,x
+				bne .2
+				
+				jsr LDR.AddExtraBlkDev
+				bra .8
+
+.2				jsr LDR.AddExtraSPDevs
+
+.8  			dec LDR.SlotIdx
 				bne .1
 
-* perform the new device search, mapping unmounted smartport devices
-* to empty slots in the device table.
-
-				jsr newmount
-
-* now copy the disk // list to the end of the regular list.
-* start by making the device count include disk //'s
-
-				ldx GP.numdevs			current device count - 1
-
-				clc
-				adc GP.numdevs	  		sum of disk //'s and others.
-				sta GP.numdevs
-				inx						move to open space in regular list.
-				ldy #$0D	   			first disk // entry.
-
-H272F  			lda devlist,y
-				pha
-				lda devlist,x	  
-				sta devlist,y	  
-				pla
-				sta devlist,x	  
-
-H2747  			ldy #$00
-				ldx GP.numdevs	  		now change the device order so that
-
-H274C  			lda devlist,x	  		the boot device will have highest
-				pha		  				priority.
-				and #$7F	   			strip off high bit
-				eor devnum	   			for comparison.
-				asl
-				bne H275A
-				pla
-				iny
-				
-H275A  			dex
-				bpl H274C
-
-				ldx GP.numdevs	  		now reverse order of search, hi to lo.
-				tya		  				was boot device found ?
-				beq H2777
-				lda devnum	   			make boot device 1st in search order.
-				sta devlist,x
-				dex
-				bmi H277E				branch if only one device.
-				dey		  				is this a 2 drive device ?
-				beq H2777				branch if not.
-				eor #$80	   			make boot device, drive 2 next.
-				sta devlist,x
-				dex
-				bmi H277E				branch if only 1 device, 2 drives.
-
-H2777			pla
-				sta devlist,x
-				dex
-				bpl H2777
-				
-H277E  			rts
-
-stadrv 			ora devid				combine with attributes.
-				ldx GP.numdevs	  
-				inx		  				put device # into device list.
-				sta devlist,x
-				asl						now form drive 2 device number, if any.
 				rts
 *--------------------------------------
-installdev 		php						how many drives (carry).
+LDR.AddSPDevs 	jsr LDR.SetDevID		setup the devid byte from attributes
+
+				iny						#$ff
+				lda (idxl),y
+				
+				sta driveradr
+				sta pscall+1			modify operand
+				clc
+				adc #$03
+				sta spvect+1
+
+				lda idxl+1
+				sta driveradr+1
+				sta spvect+2
+				sta pscall+2			modify operand
+
+				asl						convert $Cn to $n0
+				asl
+				asl
+				asl
+				sta unitnum	  			unit number
+
+				stz A4L					force a prodos status call
+
+				stz buf					dummy pointer
+				lda #$10
+				sta buf+1				dummy pointer should be <> 0
+
+				stz bloknml	  			# of bytes to transfer
+				stz bloknml+1
+
+pscall			jsr	$0000				self modifying code
+
+				ldy #$FB	
+				lda (idxl),y			check device id
+				and #$02	   			SCSI?
+				beq .1					no, no need to init Cocoon
+
+				sta LDR.SPStatus.U 		device = 2 for SCSI
+
+				jsr spvect				status of Cocoon
+				.HS 00
+				.DA LDR.SPStatus.P 		ignore any errors.
+
+.1  			stz LDR.SPStatus.U 		set unit# = 0
+				jsr spvect	   			call to get the device count.
+				.HS 00					this is a status call
+				.DA LDR.SPStatus.P
+
+				lda LDR.SPStatus.Buf
+				beq .8					no devices, so done.
+
+				ldx LDR.SlotIdx
+				inc LDR.DevType-1,x		set as smartport
+				
+.2				inc LDR.SPStatus.U
+
+				jsr spvect	   			call to get the device status
+				.HS 00					this is a status call
+				.DA LDR.SPStatus.P
+				bcs .7					no more device
+
+				lda LDR.SPStatus.Buf
+				bpl .2					not a block device
+				
+				ldx LDR.SlotIdx
+				inc LDR.DevCnt-1,x
+				bra .2
+
+.7				ldx LDR.SlotIdx
+				lda LDR.DevCnt-1,x
+				beq .8
+
+				cmp #2					add 1 or 2 devs
+				jmp LDR.AddBlkDevs
+				
+.8				rts
+*--------------------------------------
+LDR.AddBlkDevs	php						how many drives (carry).
 				lda idxl+1	   			get index to global device table
 				and #$07	  			for this slot...
 				asl
@@ -689,7 +739,12 @@ installdev 		php						how many drives (carry).
 				asl
 				asl						now form device # = slot #
 				asl						in high nibble.
-				jsr stadrv				OR in low nibble, store in dev list.
+
+				ora devid				combine with attributes.
+				ldx GP.numdevs	  
+				inx		  				put device # into device list.
+				sta devlist,x
+				asl						now form drive 2 device number, if any.
 
 				plp						restore # of devices in carry.
 				ror						if 2 drives, then bit 7=1.
@@ -712,81 +767,122 @@ installdev 		php						how many drives (carry).
 
 .3  			rts
 *--------------------------------------
-* query smartport status to determine # of devices
-* and install up to 4 units in table if card is in slot 5
-* otherwise only 2 units. this includes a patch #74
-*--------------------------------------
-smartprt 		jsr setdevid			setup the devid byte from attributes
-				lda idxl+1
-				sta driveradr+1
-				lda driveradr
-				sta pscall+1			modify operand
-				clc
-				adc #$03
-				sta spvect+1
-				lda driveradr+1
-				sta spvect+2
-				sta pscall+2			modify operand
-				asl						convert $Cn to $n0
-				asl
-				asl
-				asl
-				sta unitnum	  			unit number
-				stz A4L					force a prodos status call
-				stz buf					dummy pointer
-				stz bloknml	  			# of bytes to transfer
-				stz bloknml+1
-				lda #$10
-				sta buf+1				dummy pointer should be <> 0
-
-pscall			jsr	$0000				self modifying code
-				ldy #$FB	
-				lda (idxl),y			check device id
-				and #$02	   			SCSI?
-				beq .1					no, no need to init Cocoon
-				sta statunit	   		device = 2 for SCSI
-
-				jsr spvect				status of Cocoon
-				.HS 00
-				.DA spcparms	 		ignore any errors.
-
-.1  			stz statunit	   		set unit# = 0
-				jsr spvect	   			call to get the device count.
-				.HS 00					this is a status call
-				.DA spcparms
-
-				lda numdev2
-				beq donesp				no devices, so done.
-				cmp #$02				carry set if 2,3,4
-				jsr installdev			do the 1st and 2nd device if exists.
-				lda idxl+1
-				cmp #$C5
-				bne donesp				if not slot 5
-
-				lda numdev2
-				cmp #$03				carry set if 3,4,...
-				bcc donesp
-
-				cmp #$04	   			carry set if 4,5,6,...
-				lda #$C2				map extra devices as slot 2
-				sta idxl+1
-				jsr installdev
-
-				lda #$C5
-				sta idxl+1
-donesp			rts
-*--------------------------------------
-setdevid 		ldy #$FE				check attributes byte.
-
-				lda (idxl),y
-				lsr						move hi nibble to lo nibble for
-				lsr						device table entries.
-				lsr
-				lsr
-				sta devid
+LDR.AddExtraBlkDev
 				rts
 *--------------------------------------
-cmpid  			lda CLRC8ROM	   		switch out $C8 ROMs
+LDR.AddExtraSPDevs
+				rts
+				
+
+				ldy #$FF	   			get smartport address.
+				lda (idxl),y
+				clc
+				adc #$03				add 3 for smartport call
+				sta spvect+1
+				lda idxl+1
+				sta spvect+2
+
+				jsr LDR.SetDevID		set up device attributes
+				stz LDR.SPStatus.U
+
+				jsr spvect				do a status call on smartport itself
+				.HS 00
+				.DA LDR.SPStatus.P
+				
+				lda LDR.SPStatus.Buf	# of devices on smartport
+				cmp #$03
+				bcc .8					only 2 devices,skip to next one.
+				inc						add 1 for comparisons.
+				sta driveradr	  		# of devices + 1.
+
+* find block devices on this smartport
+
+.1  			cmp driveradr	  		have we done all units in this slot?
+				bcs .8				yes, skip to next slot.
+
+				sta LDR.SPStatus.U 		store the unit#.
+				jsr spvect	   			do status call
+				.HS 00
+				.DA LDR.SPStatus.P
+				lda LDR.SPStatus.Buf	is this a block device?
+				bpl .2
+
+
+
+				
+
+.2  			lda LDR.SPStatus.U		go check the next unit#
+				inc
+				bra .1
+				
+.8				rts
+*--------------------------------------
+LDR.FindFree	dec						Drive 0-1
+				asl
+				asl
+				asl
+				tay
+
+				ldx #$0C
+
+.1  			ldy driveridx,x
+				lda drivertbl1,y	 	device driver table 1
+				cmp #nodevice
+				bne .2
+				lda drivertbl1+1,y
+				cmp /nodevice
+				beq .8
+				
+.2  			dex
+				bpl .1
+				clc
+.8				rts						ran out of space for devices, exit.
+*--------------------------------------
+LDR.MountSPDevs	jsr lc1in				write enable LC ram bank 1.
+				tya		  				divide index by 2
+				lsr
+				tax
+
+				lda LDR.SPStatus.U
+				sta spunit-1,x			store the smartport unit #
+
+				lda spvect+1	  		and entry address.
+				sta spvectlo-1,x
+
+				lda spvect+2
+				sta spvecthi-1,x
+
+				lda RROMBNK2			write protect lc ram.
+
+				inc GP.numdevs
+				ldx GP.numdevs
+				tya
+				lsr
+				cmp #$08
+				bcc .4					drive 2 mount
+
+				sbc #$08
+				ora #$08
+
+.4	 			asl
+				asl
+				asl
+				asl
+
+				ora devid				include device attributes
+				sta devlist,x	  		in the active device list.
+
+				lda #remap_sp
+				sta drivertbl1,y	 	device driver table 1
+				lda /remap_sp
+				sta drivertbl1+1,y
+				rts
+*--------------------------------------
+* self modifying jmp = smartport entry address
+*--------------------------------------
+spvect 			jmp	$0000				self modifying
+*--------------------------------------
+LDR.CheckDiskID	lda CLRC8ROM	   		switch out $C8 ROMs
 
 				ldy #$05
 
@@ -802,127 +898,15 @@ cmpid  			lda CLRC8ROM	   		switch out $C8 ROMs
 				clc						clear if disk card
 .2  			rts
 *--------------------------------------
-* self modifying jmp = smartport entry address
-*--------------------------------------
-spvect 			jmp	$0000				self modifying
-*--------------------------------------
-newmount 		stz idxl
-				lda #$C7				start with slot 7 ($C700)
-				sta idxl+1
+LDR.SetDevID	ldy #$FE				check attributes byte.
 
-H291F  			jsr H29EB				is there a smartport device here?
-				bcs H2974				no, next device.
-
-				ldy #$FF	   			get smartport address.
 				lda (idxl),y
-				clc
-				adc #$03				add 3 for smartport call
-				sta spvect+1
-				lda idxl+1
-				sta spvect+2
-
-				jsr setdevid			set up device attributes
-				stz statunit
-
-				jsr spvect				do a status call on smartport itself
-				.HS 00
-				.DA spcparms
-				
-				lda numdev2				# of devices on smartport
-				cmp #$03
-				bcc H2974				only 2 devices,skip to next one.
-				inc						add 1 for comparisons.
-				sta driveradr	  		# of devices + 1.
-
-* find block devices on this smartport
-
-H295B  			cmp driveradr	  		have we done all units in this slot?
-				bcs H2974				yes, skip to next slot.
-
-				sta statunit	   		store the unit#.
-				jsr spvect	   			do status call
-				.HS 00
-				.DA spcparms
-				lda numdev2	  			is this a block device?
-				bmi mount				yes, so mount it.
-
-H296E  			lda statunit	  		go check the next unit#
-				inc
-				bra H295B
-
-H2974  			dec idxl+1
-				lda idxl+1
-				cmp #$C0				searched down to slot 0?
-				bne H291F				if not.
+				lsr						move hi nibble to lo nibble for
+				lsr						device table entries.
+				lsr
+				lsr
+				sta devid
 				rts
-*--------------------------------------
-mount  			ldx #$0C
-
-.1  			ldy driveridx,x
-				lda drivertbl1,y	 	device driver table 1
-				cmp #nodevice
-				bne .2
-				lda drivertbl1+1,y
-				cmp /nodevice
-				beq .3
-.2  			dex
-				bpl .1
-				rts						ran out of space for devices, exit.
-* empty slot found
-.3  			lda idxl+1
-				pha
-				phx
-				phy
-				tya						which slot is empty?
-				lsr 					shift into slot#
-				and #$07	   			now 1-7
-				ora #$C0	   			now $C1-$C7
-				sta idxl+1
-				jsr H29EB				smartport interface in this slot?
-				ply
-				plx
-				pla
-				sta idxl+1
-				bcc .2					yes, can't use to mirror the device.
-				jsr lc1in				write enable LC ram bank 1.
-				tya		  				divide index by 2
-				lsr
-				tax
-				lda statunit
-				sta spunit-1,x			store the smartport unit #
-				lda spvect+1	  		and entry address.
-				sta spvectlo-1,x
-				lda spvect+2
-				sta spvecthi-1,x
-				lda RROMBNK2			write protect lc ram.
-				inc GP.numdevs
-				ldx GP.numdevs
-				tya
-				lsr
-				cmp #$08
-				bcc nodev2				drive 2 mount
-				sbc #$08
-				ora #$08
-nodev2 			asl
-				asl
-				asl
-				asl
-				ora devid				include device attributes
-				sta devlist,x	  		in the active device list.
-				lda #remap_sp
-				sta drivertbl1,y	 	device driver table 1
-				lda /remap_sp
-				sta drivertbl1+1,y
-				bra H296E
-
-H29EB  			jsr cmpid				is it a disk controller?
-				bcs .9					no, so return.
-				sec		  				assume no smartport
-				ldy #$07
-				lda (idxl),y			is it a smartport?
-				bne .9					if not.
-				clc						smartport found
-.9  			rts
 *--------------------------------------
 LDR.PrintA		ldy LDR.Print.CX
 				and #$7F
@@ -974,9 +958,9 @@ LDR.MLIRB.P		.DA #3
 				.DA 0		 			2 byte block number
 				.FIN
 
-spcparms		.DA #$03				# of parms
-statunit		.DA #$00				unit number (code for smartport stat)
-				.DA numdev2
+LDR.SPStatus.P	.DA #$03				# of parms
+LDR.SPStatus.U	.DA #$00				unit number (code for smartport stat)
+				.DA LDR.SPStatus.Buf
 				.DA #00	 				status code (0 = general status)
 
 driveridx   	.DA #$06
@@ -994,10 +978,12 @@ driveridx   	.DA #$06
 				.DA #$08
 *--------------------------------------
 LDR.Print.CX	.BS 1
-
-numdev2			.BS 8					8 bytes for smartport call
-driveradr		.DA	0
-
+*--------------------------------------
+LDR.SPStatus.Buf .BS 8					8 bytes for smartport call
+driveradr		.BS 2
+LDR.SlotIdx		.BS 1
+LDR.DevCnt		.BS 7
+LDR.DevType		.BS 7
 LDR.cortland 	.DA #0					cortland loader flag (1 = Cortland)
 LDR.BootFlag	.DA #0					0 = normal boot, <>0 = return
 *--------------------------------------
