@@ -185,7 +185,8 @@ m128k  			sta idapple				Save MACHID in temp location
 
 				ldx #0
 				
-.1				stz $D700,x
+.1				
+*				stz $D700,x
 				stz $D800,x
 				stz $D900,x
 				stz $DA00,x
@@ -205,8 +206,8 @@ m128k  			sta idapple				Save MACHID in temp location
 				sta ZPOutBufPtr+1
 				jsr X.Unpak
 
-				ldx #XDOS.DATA.LEN
-
+				ldx #XDOS.DATA.LEN0		
+				
 .3				stz XDOS.DATA-1,x
 				dex
 				bne .3
@@ -513,7 +514,7 @@ LDR.SetupCLK	stx ZPInBufPtr
 LDR.SetupCLK.RTS
 				rts
 *--------------------------------------
-LDR.SetupRAM	lda GP.numdevs
+LDR.SetupRAM	lda DEVCNT
 				cmp #13
 				bcs LDR.SetupCLK.RTS
 
@@ -550,10 +551,10 @@ LDR.SetupRAM	lda GP.numdevs
 				lda /RAMDRV
 				sta	DEVPTRS3D2+1
 
-				inc GP.numdevs			count (-1) active devices
-				ldx GP.numdevs
+				inc DEVCNT				count (-1) active devices
+				ldx DEVCNT
 				lda #$BF				unit num of /RAM
-				sta	devlist,x
+				sta	DEVLST,x
 				
 				ldx #LDR.MSG.RAM
 				jmp LDR.PrintX
@@ -568,7 +569,8 @@ LDR.BlkDevScan	stz idxl
 				lda #7
 				sta LDR.SlotIdx
 				
-.1	  			jsr LDR.CheckDiskID
+.1	  			lda LDR.SlotIdx
+				jsr LDR.CheckDiskID
 				bcs .8					if no ProDOS device in this slot.
 
 				ldy #$ff
@@ -610,7 +612,7 @@ LDR.BlkDevScan	stz idxl
 				and #$3					Device count minus 1
 				inc
 				ldx LDR.SlotIdx
-				sta LDR.DevCnt-1,x
+				sta LDR.SlotDevCnt-1,x
 				tax
 				
 				iny						$CnFF
@@ -631,25 +633,29 @@ LDR.BlkDevScan	stz idxl
 				bne .1
 *--------------------------------------
 LDR.AddExtraDevs
+				stz idxl
+				lda #$C7
+				sta idxl+1
+				
 				lda #7
 				sta LDR.SlotIdx
 
 .1  			ldx LDR.SlotIdx
-				lda LDR.DevCnt-1,x
+				lda LDR.SlotDevCnt-1,x
 				cmp #3
 				bcc .8
 
-				ldy LDR.DevType-1,x
+				ldy LDR.SlotDevType-1,x
 				bne .2
 				
-				jsr LDR.AddExtraBlkDev
+				jsr LDR.AddExtraBlkDevs
 				bra .8
 
 .2				jsr LDR.AddExtraSPDevs
 
 .8  			dec LDR.SlotIdx
 				bne .1
-
+LDR.AddExtraDevs.RTS
 				rts
 *--------------------------------------
 LDR.AddSPDevs 	jsr LDR.SetDevID		setup the devid byte from attributes
@@ -658,7 +664,7 @@ LDR.AddSPDevs 	jsr LDR.SetDevID		setup the devid byte from attributes
 				lda (idxl),y
 				
 				sta driveradr
-				sta pscall+1			modify operand
+				sta .1+1				modify operand
 				clc
 				adc #$03
 				sta spvect+1
@@ -666,7 +672,7 @@ LDR.AddSPDevs 	jsr LDR.SetDevID		setup the devid byte from attributes
 				lda idxl+1
 				sta driveradr+1
 				sta spvect+2
-				sta pscall+2			modify operand
+				sta .1+2				modify operand
 
 				asl						convert $Cn to $n0
 				asl
@@ -683,12 +689,12 @@ LDR.AddSPDevs 	jsr LDR.SetDevID		setup the devid byte from attributes
 				stz bloknml	  			# of bytes to transfer
 				stz bloknml+1
 
-pscall			jsr	$0000				self modifying code
-
+.1				jsr	$0000				SELF MODIFIED
+				
 				ldy #$FB	
 				lda (idxl),y			check device id
 				and #$02	   			SCSI?
-				beq .1					no, no need to init Cocoon
+				beq .2					no, no need to init Cocoon
 
 				sta LDR.SPStatus.U 		device = 2 for SCSI
 
@@ -696,39 +702,39 @@ pscall			jsr	$0000				self modifying code
 				.HS 00
 				.DA LDR.SPStatus.P 		ignore any errors.
 
-.1  			stz LDR.SPStatus.U 		set unit# = 0
+.2  			stz LDR.SPStatus.U 		set unit# = 0
 				jsr spvect	   			call to get the device count.
 				.HS 00					this is a status call
 				.DA LDR.SPStatus.P
-
 				lda LDR.SPStatus.Buf
-				beq .8					no devices, so done.
+				beq LDR.AddExtraDevs.RTS	no devices, so done.
 
-				ldx LDR.SlotIdx
-				inc LDR.DevType-1,x		set as smartport
+				sta LDR.DevCnt
 				
-.2				inc LDR.SPStatus.U
+				ldx LDR.SlotIdx
+				inc LDR.SlotDevType-1,x	set as smartport
+				
+.3				inc LDR.SPStatus.U
 
 				jsr spvect	   			call to get the device status
 				.HS 00					this is a status call
 				.DA LDR.SPStatus.P
-				bcs .7					no more device
+				bcs .7
 
 				lda LDR.SPStatus.Buf
-				bpl .2					not a block device
+				bpl .7					not a block device
 				
 				ldx LDR.SlotIdx
-				inc LDR.DevCnt-1,x
-				bra .2
+				inc LDR.SlotDevCnt-1,x
 
-.7				ldx LDR.SlotIdx
-				lda LDR.DevCnt-1,x
-				beq .8
-
-				cmp #2					add 1 or 2 devs
-				jmp LDR.AddBlkDevs
+.7				dec LDR.DevCnt
+				bne .3
 				
-.8				rts
+				ldx LDR.SlotIdx
+				lda LDR.SlotDevCnt-1,x
+				beq LDR.AddBlkDevs.RTS
+
+				cmp #2					CC/CS, add 1 or 2 devs
 *--------------------------------------
 LDR.AddBlkDevs	php						how many drives (carry).
 				lda idxl+1	   			get index to global device table
@@ -741,9 +747,9 @@ LDR.AddBlkDevs	php						how many drives (carry).
 				asl						in high nibble.
 
 				ora devid				combine with attributes.
-				ldx GP.numdevs	  
+				ldx DEVCNT	  
 				inx		  				put device # into device list.
-				sta devlist,x
+				sta DEVLST,x
 				asl						now form drive 2 device number, if any.
 
 				plp						restore # of devices in carry.
@@ -751,29 +757,28 @@ LDR.AddBlkDevs	php						how many drives (carry).
 				bpl .1					branch if a 1 drive device (e.g. hard drive)
 
 				inx		  				else presume that 2nd drive is present.
-				sta devlist,x	  		active device list.
+				sta DEVLST,x	  		active device list.
 
-.1  			stx GP.numdevs	  		save updated device count.
+.1  			stx DEVCNT	  		save updated device count.
 				asl						shift # of drives back into carry.
 				lda driveradr			get high address of device driver.
-				sta drivertbl1,y	 	device driver table 1.
+				sta DEVPTRS,y	 		device driver table 1.
 				bcc .2					branch if single drive.
-				sta drivertbl2,y	 	device driver table 2.
+				sta DEVPTRS+16,y	 	device driver table 2.
 
 .2  			lda driveradr+1
-				sta drivertbl1+1,y
+				sta DEVPTRS+1,y
 				bcc .3
-				sta drivertbl2+1,y
+				sta DEVPTRS+17,y
 
-.3  			rts
+.3
+LDR.AddBlkDevs.RTS  			
+				rts
 *--------------------------------------
-LDR.AddExtraBlkDev
+LDR.AddExtraBlkDevs
 				rts
 *--------------------------------------
 LDR.AddExtraSPDevs
-				rts
-				
-
 				ldy #$FF	   			get smartport address.
 				lda (idxl),y
 				clc
@@ -790,59 +795,55 @@ LDR.AddExtraSPDevs
 				.DA LDR.SPStatus.P
 				
 				lda LDR.SPStatus.Buf	# of devices on smartport
+
 				cmp #$03
 				bcc .8					only 2 devices,skip to next one.
-				inc						add 1 for comparisons.
-				sta driveradr	  		# of devices + 1.
 
-* find block devices on this smartport
+				dec
+				dec
+				sta LDR.DevCnt
 
-.1  			cmp driveradr	  		have we done all units in this slot?
-				bcs .8				yes, skip to next slot.
+				lda #3
+				sta LDR.SPStatus.U
 
-				sta LDR.SPStatus.U 		store the unit#.
-				jsr spvect	   			do status call
+.1				jsr spvect	   			do status call
 				.HS 00
 				.DA LDR.SPStatus.P
 				lda LDR.SPStatus.Buf	is this a block device?
 				bpl .2
 
-
-
+				jsr LDR.MountSPDevs
+				bcs .8
 				
-
-.2  			lda LDR.SPStatus.U		go check the next unit#
-				inc
-				bra .1
+.2  			inc LDR.SPStatus.U
+				dec LDR.DevCnt
+				bne .1
 				
 .8				rts
 *--------------------------------------
-LDR.FindFree	dec						Drive 0-1
-				asl
-				asl
-				asl
-				tay
+LDR.MountSPDevs	ldx #LDR.DEVPTRS.CNT-1
 
-				ldx #$0C
-
-.1  			ldy driveridx,x
-				lda drivertbl1,y	 	device driver table 1
+.1  			ldy LDR.DEVPTRS.IDX,x
+				lda DEVPTRS,y	 		device driver table 1
 				cmp #nodevice
 				bne .2
-				lda drivertbl1+1,y
+
+				lda DEVPTRS+1,y
 				cmp /nodevice
-				beq .8
+				beq .3
 				
 .2  			dex
 				bpl .1
-				clc
-.8				rts						ran out of space for devices, exit.
-*--------------------------------------
-LDR.MountSPDevs	jsr lc1in				write enable LC ram bank 1.
-				tya		  				divide index by 2
+				
+				sec
+				rts
+				
+.3				jsr lc1in				write enable LC ram bank 1.
+
+				tya						divide index by 2
 				lsr
 				tax
-
+				
 				lda LDR.SPStatus.U
 				sta spunit-1,x			store the smartport unit #
 
@@ -854,28 +855,22 @@ LDR.MountSPDevs	jsr lc1in				write enable LC ram bank 1.
 
 				lda RROMBNK2			write protect lc ram.
 
-				inc GP.numdevs
-				ldx GP.numdevs
+				inc DEVCNT
+				ldx DEVCNT
 				tya
-				lsr
-				cmp #$08
-				bcc .4					drive 2 mount
 
-				sbc #$08
-				ora #$08
-
-.4	 			asl
-				asl
+				asl						convert to DSSS0000
 				asl
 				asl
 
 				ora devid				include device attributes
-				sta devlist,x	  		in the active device list.
+				sta DEVLST,x	  		in the active device list.
 
-				lda #remap_sp
-				sta drivertbl1,y	 	device driver table 1
-				lda /remap_sp
-				sta drivertbl1+1,y
+				lda #XDOS.SPREMAP
+				sta DEVPTRS,y	 		device driver table 1
+				lda /XDOS.SPREMAP
+				sta DEVPTRS+1,y
+				clc
 				rts
 *--------------------------------------
 * self modifying jmp = smartport entry address
@@ -963,27 +958,31 @@ LDR.SPStatus.U	.DA #$00				unit number (code for smartport stat)
 				.DA LDR.SPStatus.Buf
 				.DA #00	 				status code (0 = general status)
 
-driveridx   	.DA #$06
-				.DA #$1E
-				.DA #$0E
-				.DA #$1C
-				.DA #$0C
-				.DA #$1A
-				.DA #$0A
-				.DA #$14
-				.DA #$04
-				.DA #$12
-				.DA #$02
-				.DA #$18
-				.DA #$08
+LDR.DEVPTRS.CNT	.EQ 14
+
+LDR.DEVPTRS.IDX	.DA #$16				S3D2
+				.DA #$06				S3D1
+				.DA #$1E				S7D2
+				.DA #$0E				S7D1
+				.DA #$1C				S6D2
+				.DA #$0C				S6D1
+				.DA #$1A				S5D2
+				.DA #$0A				S5D1
+				.DA #$14				S2D2
+				.DA #$04				S2D1
+				.DA #$12				S1D2
+				.DA #$02				S1D1
+				.DA #$18				S4D2
+				.DA #$08				S4D1
 *--------------------------------------
 LDR.Print.CX	.BS 1
 *--------------------------------------
 LDR.SPStatus.Buf .BS 8					8 bytes for smartport call
 driveradr		.BS 2
 LDR.SlotIdx		.BS 1
-LDR.DevCnt		.BS 7
-LDR.DevType		.BS 7
+LDR.DevCnt		.BS 1
+LDR.SlotDevCnt	.BS 7
+LDR.SlotDevType	.BS 7
 LDR.cortland 	.DA #0					cortland loader flag (1 = Cortland)
 LDR.BootFlag	.DA #0					0 = normal boot, <>0 = return
 *--------------------------------------

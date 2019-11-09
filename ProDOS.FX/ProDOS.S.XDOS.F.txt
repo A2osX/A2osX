@@ -362,7 +362,7 @@ alcbufr1 		lda (A3L),y				this buffer must be on a page boundary.
 				inx
 L4DED			dex		 				test for conflicts.
 				jsr cmembit				test for free buffer space
-				and memmap,y			P8 memory bitmap
+				and MEMTABL,y			P8 memory bitmap
 				bne L4E1E			  	report memory conflict, if any.
 				cpx datptr+1			test all 4 pages.
 				bne L4DED
@@ -372,8 +372,8 @@ L4DED			dex		 				test for conflicts.
 				inx
 L4DFE  			dex		 				set proper bits to 1
 				jsr cmembit
-				ora memmap,y			to mark it's allocation.
-				sta memmap,y
+				ora MEMTABL,y			to mark it's allocation.
+				sta MEMTABL,y
 				cpx datptr+1			set all 4 pages
 				bne L4DFE
 				ldy fcbptr			 	calculate buffer number
@@ -409,8 +409,8 @@ freebuf			ldx bufaddrh			get hi buffer address
 L4E43  			dex		 				drop to next lower page.
 				jsr cmembit				get bit and position to memtable of
 				eor #$FF			 	this page. invert mask.
-				and memmap,y			mark address as free space.
-				sta memmap,y
+				and MEMTABL,y			mark address as free space.
+				sta MEMTABL,y
 				cpx bufaddrh			all pages freed ?
 				bne L4E43			  	no.
 L4E54  			clc		 				no error.
@@ -450,7 +450,7 @@ L4E76  			clc
 				inx		 				loop thru all affected pages.
 vldbuf1			dex		 				check next lower page.
 				jsr cmembit
-				and memmap,y			if 0 then no conflict.
+				and MEMTABL,y			if 0 then no conflict.
 				bne L4E1E			  	branch if conflict.
 				cpx usrbuf+1			was that the last (lowest) page ?
 				bne vldbuf1			 	if not.
@@ -486,11 +486,10 @@ L4EB8  			lda (usrbuf),y			move all 4 pages of the buffer to
 				bpl L4EB8
 				clc		 				no errors
 L4EC7  			rts
-
-
+*--------------------------------------
 * move 3 pages of dispatcher from 'displc2' to 'dispadr'
 * this move routine must be resident above $E000 at all times
-
+*--------------------------------------
 calldisp 		lda RRAMWRAMBNK2		read/write RAM bank 2
 				lda RRAMWRAMBNK2
 
@@ -527,14 +526,11 @@ calldisp 		lda RRAMWRAMBNK2		read/write RAM bank 2
 				sta pwredup				power up byte
 
 				jmp $1000
-
-* translate a prodos call into a smartport call
-* to access unseen smartport devices
-
-remap_sp 		ldx #$03				assume 3 parameters.
+*--------------------------------------
+XDOS.SPREMAP	ldx #$03				assume 3 parameters.
 				lda A4L			  		command number
 				sta cmdnum
-				bne L4F1B				taken if not status call
+				bne .1					taken if not status call
 
 				ldy #spstatlist			set up memory for the status list buffer
 				sty buf					fake up the prodos parameters
@@ -542,55 +538,66 @@ remap_sp 		ldx #$03				assume 3 parameters.
 				sty buf+1
 				stz bloknml				set statcode = 0 for simple status call
 
-L4F1B  			cmp #$03			 	format command ?
-				bne L4F21			  	no.
+.1  			cmp #$03			 	format command ?
+				bne .2				  	no.
+
 				ldx #$01			 	format has only 1 parameter.
-L4F21  			stx statparms			set # of parms.
-				lda unitnum			
+
+.2  			stx statparms			set # of parms.
+
+				lda unitnum				DSSS0000
 				lsr			  			turn unit number into an index
 				lsr
 				lsr
 				lsr
-				tax
+				tax						range = 1-15
+
 				lda spunit-1,x			get the smartport unit number and
 				sta sp_unitnum			store into smartport parm list.
 				lda spvectlo-1,x	
 				sta sp_vector+1			copy smartport entry address
 				lda spvecthi-1,x
 				sta sp_vector+2
+
 				ldx #$04				copy buffer pointer and block #
-L4F3F  			lda buf-1,x				from prodos parameters
+
+.3  			lda buf-1,x				from prodos parameters
 				sta sp_bufptr-1,x		to smartport parameter block
 				dex
-				bne L4F3F
+				bne .3
+
 sp_vector 		jsr $0000				smartport call (entry address gets modified)
 cmdnum			.HS 00					command #
 				.DA statparms
-				bcs	L4F6E
+				bcs	.9
 
 				ldx cmdnum				status call ?
-				bne L4F6E			  	no...
+				bne .9				  	no...
+
 				ldx spstatlist+1		else get the block count
 				ldy spstatlist+2
 				lda	spstatlist			get the returned status.
 				bit #$10			 	is there a disk present ?
-				bne L4F65			  	yes, check for write protected.
-				lda #$2F			 	return offline error.
-				bra L4F6D
-L4F65  			and #$44			 	mask all but write allowed and write
-				eor #$40			 	protected bits. if allowed and not
-				beq L4F6E			  	protected, exit with carry clear
-				lda #$2B			 	else return write protected error.
-L4F6D  			sec
-L4F6E  			rts
+				beq .8
 
+				and #$44			 	mask all but write allowed and write
+				eor #$40			 	protected bits. if allowed and not
+*				clc
+				beq .9				  	protected, exit with carry clear
+
+				lda #MLI.E.WRTPROT	 	else return write protected error.
+				.HS 2C					BIT ABS
+.8				lda #MLI.E.OFFLINE		return offline error.
+				sec
+.9  			rts
+*--------------------------------------
 statparms 		.HS 03					# of parms (always 3 except format)
 sp_unitnum 		.HS 00			  		unit number
 sp_bufptr 		.HS 0000				data buffer
 				.HS 000000				block number (3 bytes)
-
+*--------------------------------------
 * data tables
-
+*--------------------------------------
 scnums			.HS D3000000			table of valid mli command numbers.
 				.HS 40410000808182
 				.HS 65C0C1C2C3C4C5C6
@@ -601,9 +608,6 @@ pcntbl			.HS 02FFFFFF			parameter counts for the calls
 				.HS 04070102070A0201
 				.HS 0103030404010102
 				.HS 02FF020202
-
-* command table
-
 cmdtable 		.DA create
 				.DA destroy
 				.DA rename
@@ -646,7 +650,7 @@ inftabl			.HS 1E101F2080939421
 deathmsg 		.HS 20
 				.AS -"RESTART SYSTEM-$01"
 				.HS 20
-
+*--------------------------------------
 XDOS.DATA		.DUMMY
 
 * note: this area is accessed by code that depends on the order of these
@@ -669,8 +673,9 @@ d_dev			.HS 00				 	device number of this directory entry
 d_head			.HS 0000			 	address of <sub> directory header
 d_entblk 		.HS 0000				address of block which contains entry
 d_entnum 		.HS 00				 	entry number within block
-d_stor			.HS 0000000000000000  	file name
-				.HS 0000000000000000
+
+d_stor			.BS 16				  	file name
+
 d_filid			.HS 00				 	user's identification byte
 d_frst			.HS 0000			 	first block of file
 d_usage			.HS 0000			 	# of blocks allocated to this file
@@ -757,24 +762,36 @@ bufaddrl		.HS 00
 bufaddrh 		.HS 00
 delflag			.HS 00			  		used by 'detree' to know if called from delete (destroy).
 
+pathbuf			.BS 64+2
+
+				.LIST ON
+XDOS.DATA.LEN0	.EQ *-XDOS.DATA
+				.LIST OFF
+
 * variables used by mli for smartport interface
 
 spstatlist 		.HS 00000000
-spunit			.HS 0000000000000000
-				.HS 0000000000000000
+
+spunit			.HS 00000000000000		14+1 for S0D2
+				.HS	00					
+				.HS 00000000000000
+
+spvectlo 		.HS 00000000000000  	storage for low byte of smartport entry.
+				.HS 00
+				.HS 00000000000000
+
+spvecthi 		.HS 00000000000000  	storage for high byte of smartport entry.
+				.HS 00
+				.HS 00000000000000
 				
-spvectlo 		.HS 0000000000000000  	storage for low byte of smartport entry.
-				.HS 00000000000000
-spvecthi 		.HS 0000000000000000  	storage for high byte of smartport entry.
-				.HS 00000000000000
-
+				.LIST ON
 XDOS.DATA.LEN	.EQ *-XDOS.DATA
-
+				.LIST OFF
 				.ED
 				
 * zero fill to page boundary - 3 ($FEFD). so that cortland flag stays within page boundary.
 				.LIST ON
-XDOS.FREE		.EQ $FEFD-*-XDOS.DATA.LEN		(ProDOS 2.0.3 = $0C)
+XDOS.FREE		.EQ $FEFD-*-XDOS.DATA.LEN	(2.0.3 = $0C)
 				.LIST OFF
 cortdisp		.EQ $FEFD				
 cortflag 		.EQ $FEFF			  		cortland flag. 1 = Cortland system (must stay within page boundary)			
