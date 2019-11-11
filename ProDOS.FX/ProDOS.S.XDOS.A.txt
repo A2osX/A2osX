@@ -208,29 +208,38 @@ sysdeath1 		tax						death error code.
 				sta CLR80DISP			disable 80 col hardware.
 				lda SETTEXT				switch in text.
 				lda cortflag			is this a Cortland?
-				beq H321A				if not, don't use super hires switch.
+				beq .1					if not, don't use super hires switch.
 
 				stz newvideo			force off super hires.
 
-H321A  			lda CLRPAGE2			switch in text page 1.
-				ldy #$13
+.1	  			lda CLRPAGE2			switch in text page 1.
 
-H321F  			lda #$20				inverse space border
-				sta vline11+10,y
-				sta vline13+10,y
-				lda deathmsg,y
-				sta vline12+10,y		'RESTART SYSTEM-$0x'
+				ldy #deathmsg.LEN-1
+
+.2  			lda deathmsg,y
+				sta $400,y				'RESTART SYSTEM-$'
 				dey
-				bpl H321F
+				bpl .2
 
 				txa						x = death error code
 				and #$0F				convert to ascii
-				ora #$B0
-				cmp #$BA
-				bcc H323B				branch if not > 9.
+				ora #$30
+				cmp #$3A
+				bcc .3					branch if not > 9.
+
 				adc #$06				inc to alpha a-f
-H323B  			sta vline12+28			death error code 1 to F
-				bra *					end of xdos mli
+
+.3  			ldy #deathmsg.LEN
+				sta $400,y
+				
+				lda #' '
+				
+.4				iny
+				sta $400,y
+				cpy #39
+				bne .4
+
+				bra *
 *--------------------------------------
 * ProDOS Block File Manager
 *--------------------------------------
@@ -247,7 +256,7 @@ XDOS.bfmgr		lda disptch,x			translate into command address.
 				sta bkbitflg			to say 'file modified'
 				bcc nopath
 
-				jsr setpath				process pathname before calling command
+				jsr XDOS.GetPath		process pathname before calling command
 				bcs errorsys			branch if bad name.
 
 nopath			asl cmdtemp				test for refnum processing
@@ -266,16 +275,20 @@ H3274  			jsr $FFFF				SELF MODIFIED : execute command
 errorsys 		jsr GP.P8errv
 goodop			rts
 *--------------------------------------
-setpath			ldy #$01				index to pathname pointer
+* entry used by rename for 2nd pathname.
+*--------------------------------------
+XDOS.GetRenPath	ldy #$03			 	get address to new pathname
+				.HS 2C
+*--------------------------------------
+XDOS.GetPath	ldy #$01				index to pathname pointer
 				lda (A3L),y				low pointer address
 				sta zpt
+
 				iny
 				lda (A3L),y				hi pointer address
 				sta zpt+1
 
-* entry used by rename for 2nd pathname.
-
-synpath			ldx #$00				x = index to pathbuf
+				ldx #$00				x = index to pathbuf
 				ldy #$00				y = index to input pathname.
 
 				stz prfxflg				assume prefix is in use.
@@ -371,7 +384,7 @@ endname  		lda namcnt				validate local name < 16
 				beq errsyn
 H3323  			rts
 *--------------------------------------
-XDOS.SetPrefix	jsr setpath				call is made to detect if a null path.
+XDOS.SetPrefix	jsr XDOS.GetPath		call is made to detect if a null path.
 				bcc H3333				path ok.
 
 				ldy pathbuf				is it a null pathname?
@@ -750,7 +763,7 @@ H3588  			lda (zpt),y
 
 				jmp XDOS.Create
 crerr2 			rts						return and report errors
-
+*--------------------------------------
 creat1			ldx #$00				zero out gbuf
 
 H35A0  			stz gbuf,x
@@ -807,7 +820,7 @@ crname			lda pathbuf,x			move local name as filename
 				bcc .3
 				cmp #'z'+1
 				bcs .3
-				
+
 				eor #$20
 				sta d_stor,y
 				
@@ -891,41 +904,56 @@ cmvparnt 		lda d_entblk,x
 
 				lda h_entln				lastly, the length of parent's
 				sta gbuf+42				directory entries.
+
 cralcblk 		jsr alc1blk				get address of file's data block
 				bcs crerr3
+
 				sta d_frst
 				sty d_frst+1
 				sta bloknml
 				sty bloknml+1
 				jsr wrtgbuf				go write data block of file
 				bcs crerr3
+
 				inc h_fcnt			 	add 1 to total # of files in this dir
 				bne credone
+
 				inc h_fcnt+1
+
 credone			jsr drevise				go revise directories with new file
 				bcs crerr3
+
 				jmp upbmap			 	lastly, update volume bitmap
+*--------------------------------------
 entcalc			lda /gbuf				set high address of dir entry
 				sta zpt+1			  	index pointer.
 				lda #$04			 	calc address of entry based
 				ldx d_entnum			on the entry #.
+
 H3689  			clc
+
 H368A  			dex		 				addr = gbuf + ((d_entnum-1) * h_entln)
 				beq H3696			  	branch with carry clear = no errors.
+
 				adc h_entln
 				bcc H368A
+
 				inc zpt+1			  	inc hi address.
 				bcs H3689				always.
+
 H3696  			sta zpt			  		newly calculated low address.
 crerr3 			rts		 				carry set if error.
-
+*--------------------------------------
 drevise			lda p8date
 				beq drevise1		  	if no clock, then don't mod date/time.
+
 				ldx #$03
+
 modtime			lda p8date,x			move last modification date/time
 				sta d_moddt,x			to entry being updated.
 				dex
 				bpl modtime
+
 drevise1 		lda d_attr				mark entry as backupable
 				ora bkbitflg			(bit 5 = backup needed)
 				sta d_attr
@@ -935,38 +963,51 @@ drevise1 		lda d_attr				mark entry as backupable
 				ldx d_entblk+1
 				jsr rdblk			  	read block into general purpose buffer
 				bcs crerr3
+
 				jsr entcalc				fix up ptr to entry location within gbuf.
+
 				ldy h_entln				now move 'd.' info to directory.
+
 				dey
+
 H36CA  			lda d_stor,y
 				sta (zpt),y
 				dey
 				bpl H36CA
+
 				lda d_head				is the entry block same as
 				cmp bloknml				the entry's header block?
 				bne H36E0			  	if no, go save entry block
+
 				lda d_head+1			then maybe, so test high addresses.
 				cmp bloknml+1
 				beq uphead			 	branch if they are the same block.
+
 H36E0  			jsr wrtgbuf				go write updated directory block.
 				bcs crerr3
+
 				lda d_head			 	get address of header block and
 				ldx d_head+1
 				jsr rdblk			  	go read in header block to modify.
 				bcs crerr3
+
 uphead			ldy #$01				update current # of files in this dir.
+
 H36F2  			lda h_fcnt,y
 				sta gbuf+37,y			(current entry count)
 				dey
 				bpl H36F2
+
 				lda h_attr			 	also update header's attributes.
 				sta gbuf+34
 				jsr wrtgbuf				go write updated header
 				bcs H375A
+
 ripple			lda gbuf+4				test for 'root' directory because
 				and #$F0			 	if it is, then directory revision
 				eor #$F0			 	is complete (leaves carry clear).
 				beq H3770			  	branch if done.
+
 				lda gbuf+41				get entry #
 				sta d_entnum
 				lda gbuf+42				and the length of ertries in that dir
@@ -975,42 +1016,54 @@ ripple			lda gbuf+4				test for 'root' directory because
 				ldx gbuf+40
 				jsr rdblk			  	read it
 				bcs H375A
+
 				jsr entcalc				get indirect ptr to parent entry in gbuf
 				lda p8date				don't touch mod
 				beq H373B			  	if no clock...
+
 				ldx #$03			 	update the modification date & time
 				ldy #$24			 	for this entry too
+
 H3732  			lda p8date,x
 				sta (zpt),y
 				dey
 				dex
 				bpl H3732
+
 H373B  			jsr wrtgbuf				write updated entry back to disk.
 				bcs H375A			  	if error.
+
 				ldy #$25			 	compare current block # to this
 				lda (zpt),y				entry's header block.
 				iny
 				cmp bloknml				are low addresses the same?
 				sta bloknml
 				bne H3751			 	branch if entry doesn't reside in same
+
 				lda (zpt),y				block as header.
 				cmp bloknml+1			are high address the same?
 				beq ripple			 	they are the same, continue to root dir.
+
 H3751  			lda (zpt),y				not same so read in this dir's header.
 				sta bloknml+1
 				jsr rdgbuf
 				bcc ripple				continue if read was good
+
 H375A  			rts
-tsterr 			lda #$52				not tree or dir, unrecognized type
+
+tsterr 			lda #MLI.E.NOTPRODOS	not tree or dir, unrecognized type
 				sec
 				rts
+
 tstsos			lda gbuf			 	pointer to previous dir block
 				ora gbuf+1			 	must be null
 				bne tsterr
+
 				lda gbuf+4			 	test for header
 				and #$E0
 				cmp #$E0
 				bne tsterr
+
 H3770  			clc		 				no error
 				rts
 *--------------------------------------
