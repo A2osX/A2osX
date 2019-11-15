@@ -38,11 +38,14 @@ MEM.GetMem.YAX	stx MEM.ReqFlags
 				tya
 				bit #K.MEM.ALIGN-1		aligned ?
 				beq .10					yes, request it	
+
 				and #K.MEM.nALIGNm1		align on boundary
 				clc
 				adc #K.MEM.ALIGN
 				bcc .10
+
 				inc ZPMemMgrSize+1
+
 .10				sta ZPMemMgrSize
 				>LDYAI Mem.Table
 				>STYA ZPMemMgrSPtr
@@ -51,18 +54,35 @@ MEM.GetMem.YAX	stx MEM.ReqFlags
 				stx MEM.BestScore
 				stx MEM.BestScore+1
 				ldx #0					Current slot=0
-
 				bra .4					skip slot 0, Check if some free slot to reuse first
+
 .1				inx						move to next slot
 				jsr Mem.NextSlot
 				lda (ZPMemMgrSPtr)		Get Flags
 				bmi .4					in use ?
+
 .2				lda MEM.ReqFlags		Found an empty slot
-				and #S.MEM.F.ALIGN		is request needs a page align ?
-				beq .3
+				bit #S.MEM.F.NOCROSS
+				beq .21
+
+				ldy ZPMemMgrSize+1		> 255, not applicable
+				bne .22					Align to page if $100
+				
 				ldy #S.MEM.PTR
 				lda (ZPMemMgrSPtr),y	get LO of PTR
+				clc
+				adc ZPMemMgrSize
+				bcs .4					cross page boundary....
+				
+				lda MEM.ReqFlags		get back flags to test if match
+				
+.21				bit #S.MEM.F.ALIGN		is request needs a page align ?
+				beq .3
+
+.22				ldy #S.MEM.PTR
+				lda (ZPMemMgrSPtr),y	get LO of PTR
 				bne .4					not page-aligned
+
 .3				ldy #S.MEM.LEN
 				sec
 				lda (ZPMemMgrSPtr),y	get LEN of this block
@@ -72,7 +92,6 @@ MEM.GetMem.YAX	stx MEM.ReqFlags
 				lda (ZPMemMgrSPtr),y
 				sbc ZPMemMgrSize+1
 				ply						Y,A = SlotLen - ReqSize
-
 				bcc .4					req size > slot size
 
 				cpy MEM.BestScore
@@ -80,8 +99,8 @@ MEM.GetMem.YAX	stx MEM.ReqFlags
 				sbc MEM.BestScore+1
 				pla
 				bcs	.4					Delta is >= BestScore	
-
 				bne .4					Delta is > 255...
+
 				sty MEM.BestScore
 				sta MEM.BestScore+1
 				stx MEM.BestSlot
@@ -96,18 +115,41 @@ MEM.GetMem.YAX	stx MEM.ReqFlags
 *-------------- Create a New SLOT
 
 .5				lda MEM.ReqFlags
-				and #S.MEM.F.ALIGN		is request needs a page align ?
-				beq .6
-				lda Mem.Free			target PTR will be page aligned ?
-				sec
-				sbc ZPMemMgrSize
-				beq .6					yes, allocate
+				bit #S.MEM.F.NOCROSS
+				beq .51
+
+				lda ZPMemMgrSize+1		> 255, not applicable
+				bne .52					Align to page if $100
+				
+				lda Mem.Free			target PTR will be in same page ?
+				cmp ZPMemMgrSize
+				bcs .6					yes, allocate
+
 				tay						no, reserve a free slot to fill gap
 				lda #0
 				jsr Mem.AddSlot			X = new slot
 				bcs .9
+
+				lda #S.MEM.F.NOCROSS	Make sure marked FREE
+				sta (ZPMemMgrSPtr)
+				bra .6
+				
+.51				bit #S.MEM.F.ALIGN		is request needs a page align ?
+				beq .6
+
+.52				lda Mem.Free			target PTR will be page aligned ?
+				sec
+				sbc ZPMemMgrSize
+				beq .6					yes, allocate
+
+				tay						no, reserve a free slot to fill gap
+				lda #0
+				jsr Mem.AddSlot			X = new slot
+				bcs .9
+
 				lda #S.MEM.F.ALIGN		Make sure marked FREE
 				sta (ZPMemMgrSPtr)
+
 .6				>LDYA ZPMemMgrSize
 				jsr Mem.AddSlot			X = new slot
 				bcs .9
@@ -119,30 +161,8 @@ MEM.GetMem.YAX	stx MEM.ReqFlags
 				and #S.MEM.F.INIT0
 				beq .8
 
-				ldy #S.MEM.PTR
-				lda (ZPMemMgrSPtr),y	ZPMemMgrSPtr already set
-				sta .12+1
-				iny
-				lda (ZPMemMgrSPtr),y
-				sta .12+2
-				lda ZPMemMgrSize
-				eor #$ff
-				tay						y=not lo count
-				lda ZPMemMgrSize+1
-				eor #$ff				a=not hi count			
-				phx
-				ldx #0
-.11				iny
-				bne .12
-				inc
-				beq .13
-.12				stz $ffff,x
-				inx
-				bne .11
-				inc .12+2
-				bra .11
-.13				plx
-
+				jsr MEM.Init0
+				
 .8				lda #0
 				ldy #S.MEM.BIN
 				sta (ZPMemMgrSPtr),y
@@ -167,6 +187,7 @@ Mem.AddSlot  	>STYA ZPMemMgrTmp1		save req size
 				ldx Mem.LastSlot
 				inx
 				beq .99					> 255 ERR:OUT OF SLOT
+
 				lda Mem.Free			Compute base PTR=FREE-REQ size
 				sec
 				sbc ZPMemMgrTmp1
@@ -199,6 +220,7 @@ Mem.AddSlot  	>STYA ZPMemMgrTmp1		save req size
 				clc
 				rts
 .98				pla						discard new Mem.Free HI
+
 .99				lda #E.OOM
 				sec
 				rts	
@@ -209,7 +231,38 @@ MEM.NextSlot	lda ZPMemMgrSPtr
 				sta ZPMemMgrSPtr
 				bcc .8
 				inc ZPMemMgrSPtr+1
-.8				rts				
+.8				rts
+*--------------------------------------
+MEM.Init0		phx
+				ldy #S.MEM.PTR
+				lda (ZPMemMgrSPtr),y	ZPMemMgrSPtr already set
+				sta .12+1
+				iny
+				lda (ZPMemMgrSPtr),y
+				sta .12+2
+				lda ZPMemMgrSize
+				eor #$ff
+				tay						y=not lo count
+				lda ZPMemMgrSize+1
+				eor #$ff				a=not hi count			
+
+				ldx #0
+
+.11				iny
+				bne .12
+
+				inc
+				beq .13
+
+.12				stz $ffff,x
+				inx
+				bne .11
+
+				inc .12+2
+				bra .11
+
+.13				plx
+				rts
 */--------------------------------------
 * # FreeMem
 *  A = hMem To Free
