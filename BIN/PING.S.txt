@@ -15,8 +15,19 @@ TIMEOUT.MAX		.EQ 100					10 sec.
 				.DUMMY
 				.OR ZPBIN
 ZS.START
-ZPIPCfgPtr		.EQ ZPBIN
-ZPTmpPtr		.EQ ZPBIN+2
+ZPIPCfgPtr		.BS 2
+ZPTmpPtr		.BS 2
+Identifier		.BS 2
+Sequence		.BS 2
+
+TimeOut.ms		.BS 2
+ArgIndex		.BS 1
+ArgHostName		.BS 1
+hSocket			.BS 1
+hFrame			.BS 1
+PingCount		.BS 1
+TimeOut			.BS 1
+
 ZS.END			.ED
 *--------------------------------------
 *			File Header (16 Bytes)
@@ -41,7 +52,6 @@ L.LIBTCPIP		.DA LIBTCPIP
 L.SA.LOCAL		.DA SA.LOCAL
 L.SA.REMOTE		.DA SA.REMOTE
 L.SA.REMOTE.AD	.DA SA.REMOTE+S.SOCKADDR.ADDR
-L.ICMP.Request	.DA ICMP.Request
 L.MSG.IPKO		.DA MSG.IPKO
 L.MSG.USAGE		.DA MSG.USAGE
 L.MSG.UNKNOWN	.DA MSG.UNKNOWN
@@ -62,19 +72,22 @@ CS.RUN			>LIBCALL hLIBTCPIP,LIBTCPIP.GETCFG	is TCPIP loaded ?
 				>STYA ZPIPCfgPtr
 				lda (ZPIPCfgPtr)		Configured ?
 				bmi CS.RUN.IPOK
+
 				>LDYA L.MSG.IPKO
 				>SYSCALL puts
 				lda #E.SYN
 				sec
 				rts
-CS.RUN.IPOK		
-.1				>INC.G ArgIndex
+	
+CS.RUN.IPOK		inc ArgIndex
+				lda ArgIndex
 				>SYSCALL ArgV
 				bcs .8
+
 				>STYA ZPTmpPtr
 				lda (ZPTmpPtr)
 				cmp #'-'
-				bne .21
+				bne .1
 
 				ldy #1 
 				lda (ZPTmpPtr),y
@@ -82,29 +95,38 @@ CS.RUN.IPOK
 
 				cmp #'0'
 				bcc .9
+
 				cmp #'9'+1
 				bcs .9
+
 				and #$0F
-				>STA.G PingCount
-				bra .1			
-.21				jsr Init.Timeout
+				sta PingCount
+				bra CS.RUN.IPOK	
+
+.1				lda #TIMEOUT.MAX
+				sta Timeout
+
 .2				>PUSHW L.SA.REMOTE.AD
 				>PUSHW ZPTmpPtr
 				>LIBCALL hLIBTCPIP,LIBTCPIP.HST.GETBYNAME
 				bcc .3
+
 				>SLEEP
-				jsr Wait.Timeout
-				bcc .2
+				lda Timeout
+				bne .2
 
 				>PUSHW ZPTmpPtr
 				>PUSHBI 2
 				>LDYA L.MSG.UNKNOWN
 				bra .99
-.3				>LDA.G ArgIndex
-				>STA.G ArgHostName
-				jmp .1
+
+.3				lda ArgIndex
+				sta ArgHostName
+				bra CS.RUN.IPOK
+
 .8				lda SA.REMOTE+S.SOCKADDR.ADDR
 				bne CS.RUN.ARGSOK
+
 .9				>PUSHBI 0
 				>LDYA L.MSG.USAGE
 .99				>SYSCALL printf
@@ -113,81 +135,99 @@ CS.RUN.IPOK
 				sec
 				rts
 
-CS.RUN.ARGSOK	>LDA.G ArgHostName
+CS.RUN.ARGSOK	lda ArgHostName
 				>SYSCALL ArgV
 				>PUSHYA
+
 				ldx #3
+
 .1				lda SA.REMOTE+S.SOCKADDR.ADDR,x
 				>PUSHA
 				dex
 				bpl .1
+
 				>PUSHBI 6
 				>LDYA L.MSG.HOSTOK
 				>SYSCALL printf
 		
 CS.RUN.OPENSKT	ldx #3
 				ldy #S.IPCFG.IP+3
+
 .1				lda (ZPIPCfgPtr),y
 				sta SA.LOCAL+S.SOCKADDR.ADDR,x
 				dey
 				dex
 				bpl .1
-				ldy #Identifier
+
 				lda A2OSX.RANDOM16
 				sta SA.LOCAL+S.SOCKADDR.PORT
 				sta SA.REMOTE+S.SOCKADDR.PORT
-				sta (pData),y
-				iny
+				sta Identifier
+
 				lda A2OSX.RANDOM16+1
 				sta SA.LOCAL+S.SOCKADDR.PORT+1
 				sta SA.REMOTE+S.SOCKADDR.PORT+1
-				sta (pData),y
+				sta Identifier+1
+
 				>PUSHBI S.IP.PROTOCOL.ICMP
 				lda #S.SOCKET.T.RAW
 				>LIBCALL hLIBTCPIP,LIBTCPIP.socket
 				bcs .9
-				>STA.G hSocket
-				pha
+
+				sta hSocket
+				
 				>PUSHW L.SA.LOCAL
-				pla
+				lda hSocket
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Bind
 				bcs .9
+
 				>PUSHW L.SA.REMOTE
-				>LDA.G hSocket
+				lda hSocket
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Connect
-				bcc CS.RUN.SEND.ECHO
+				bcc CS.RUN.SEND
+
 .9				>LDYA L.MSG.SKTKO
 				>SYSCALL puts
 				lda #E.SYN
 				sec
 				rts
 
+CS.RUN.SEND		ldy #ICMP.RequestLen-1
+
+.1				lda ICMP.Request,y
+				sta (pData),y
+				dey
+				bpl .1
+				
 CS.RUN.SEND.ECHO
-				>LDA.G Identifier
-				sta ICMP.Request.ID+1
-				iny
-				lda (pData),y
-				sta ICMP.Request.ID
-				>LDA.G Sequence
-				sec
-				adc #0
-				sta (pData),y
-				sta ICMP.Request.SQ+1
+				lda Identifier
+				>STA.G Request-S.IP+S.ICMP.IDENTIFIER+1
 
-				iny
-				lda (pData),y
-				adc #0
+				lda Identifier+1
+				dey
 				sta (pData),y
-				sta ICMP.Request.SQ
 
-				jsr Init.Timeout
+				inc Sequence
+				bne .1
+				
+				inc Sequence+1
+				
+.1				lda Sequence
+				>STA.G Request-S.IP+S.ICMP.SEQUENCE+1
+
+				lda Sequence+1
+				dey
+				sta (pData),y
+
 				>PUSHWI ICMP.RequestLen
-				>PUSHW L.ICMP.Request
-				>LDA.G hSocket
+				>PUSHW pData
+				lda hSocket
 
 				>LIBCALL hLIBTCPIP,LIBTCPIP.send
 				bcs CS.RUN.ERR
-				jsr Init.Timeout
+				
+				lda #TIMEOUT.MAX
+				sta Timeout
 CS.RUN.WAIT.REPLY
 				>SLEEP
 				ldy #S.PS.hStdIn
@@ -196,35 +236,38 @@ CS.RUN.WAIT.REPLY
 				bcs CS.RUN.ERR
 				tay
 				bne	.1		
+
 				>SYSCALL GetChar
 				bcs CS.RUN.ERR
+
 				cmp #3					Ctrl-C
 				beq CS.RUN.ERR			CS
-.1				>LDA.G hSocket
 
+.1				lda hSocket
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Recv
 				bcc .2
-				jsr Wait.Timeout
-				bcc CS.RUN.WAIT.REPLY
+
+				lda Timeout
+				bne CS.RUN.WAIT.REPLY
 
 				jsr CS.Print.UNREACH
 				bcs CS.RUN.ERR
 				bra .7
-.2				>STA.G hFrame
+
+.2				sta hFrame
 				>SYSCALL GetMemPtr
 				>STYA ZPTmpPtr
 				jsr CS.Print.REPLY
 				bcs CS.RUN.ERR
 
-				>LDA.G hFrame
+				lda hFrame
 				>SYSCALL FreeMem
-				>STZ.G hFrame
+				stz hFrame
 
-.7				>LDA.G PingCount
+.7				lda PingCount
 				beq .8
-				dec
+				dec	PingCount
 				beq .9					A=0
-				sta (pData),y
 
 .8				jmp CS.RUN.SEND.ECHO
 .9				sec
@@ -232,18 +275,22 @@ CS.RUN.ERR		rts
 *--------------------------------------
 CS.DOEVENT		lda (pEvent)
 				bpl .9					is it a TIMER event?
-				>LDA.G TimeOut
+
+				lda TimeOut
 				beq .9
-				dec
-				sta (pData),y
+
+				dec TimeOut
+
 .9				sec						do not discard TIMER event
 				rts
 *--------------------------------------
 CS.Print.UNREACH
 				ldx #3
+
 .1				>PUSHB SA.REMOTE+S.SOCKADDR.ADDR,x
 				dex
 				bpl .1
+
 				>PUSHBI 4
 				>LDYA L.MSG.UNREACH
 				>SYSCALL printf
@@ -251,44 +298,51 @@ CS.Print.UNREACH
 *--------------------------------------
 CS.Print.REPLY	lda #TIMEOUT.MAX
 				sec
-				ldy #TimeOut
-				sbc (pData),y
-				>STZ.G TimeOut.ms
-				>STA.G TimeOut.ms+1
+				sbc TimeOut
+
+				stz TimeOut.ms
+				stz TimeOut.ms+1
 				tax
 				beq .3
-.1				>LDA.G TimeOut.ms
+
+.1				lda TimeOut.ms
 				clc 
 				adc #100
-				>STA.G TimeOut.ms
+				sta TimeOut.ms
 				bcc .2
-				>INC.G TimeOut.ms+1
+
+				inc TimeOut.ms+1
+
 .2				dex
 				bne .1
-.3				>PUSHW.G TimeOut.ms
+
+.3				>PUSHW TimeOut.ms
 
 				ldy #S.IP.TTL
 				>PUSHB (ZPTmpPtr),y
-				ldy #S.ICMP.SEQUENCE+1
+				ldy #S.ICMP.SEQUENCE
 				>PUSHB (ZPTmpPtr),y
-				dey 
+				iny 
 				>PUSHB (ZPTmpPtr),y
+
 				ldx #4
 				ldy #S.IP.SRC+3
+
 .4				>PUSHB (ZPTmpPtr),y
 				dey
 				dex
 				bne .4
+
 				>PUSHBI 9
 				>LDYA L.MSG.REPLY
 				>SYSCALL printf
 				rts
 *--------------------------------------
-CS.QUIT			>LDA.G hFrame
+CS.QUIT			lda hFrame
 				beq .1
 				>SYSCALL FreeMem
 
-.1				>LDA.G hSocket
+.1				lda hSocket
 				beq .2
 
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Shutdown
@@ -298,17 +352,6 @@ CS.QUIT			>LDA.G hFrame
 
 .8				clc
 				rts
-*--------------------------------------
-Init.Timeout	lda #TIMEOUT.MAX
-				>STA.G TimeOut
-				rts
-*--------------------------------------
-Wait.TimeOut	sec
-				>LDA.G TimeOut
-				beq .9
-
-				clc
-.9				rts
 *--------------------------------------
 CS.END
 LIBTCPIP		.AZ "LIBTCPIP"
@@ -335,8 +378,8 @@ SA.REMOTE		.DA #AF.INET			S.SOCKADDR.AF
 ICMP.Request	.DA #S.ICMP.TYPE.ECHOREQ
 				.DA #0					CODE
 				.DA 0					CHECKSUM
-ICMP.Request.ID	.BS 2
-ICMP.Request.SQ	.BS 2		
+				.BS 2					ID
+				.BS 2					DQ
 				.AS "ABCDEFGHIJKLMNOP"
 				.AS "QRSTUVWXYZ012345"
 ICMP.RequestLen	.EQ *-ICMP.Request
@@ -344,15 +387,7 @@ ICMP.RequestLen	.EQ *-ICMP.Request
 				.DUMMY
 				.OR 0
 DS.START
-ArgIndex		.BS 1
-PingCount		.BS 1
-ArgHostName		.BS 1
-hSocket			.BS 1
-hFrame			.BS 1
-Identifier		.BS 2
-Sequence		.BS 2
-TimeOut			.BS 1
-TimeOut.ms		.BS 2
+Request			.BS ICMP.RequestLen
 DS.END
 				.ED
 *--------------------------------------
