@@ -1,6 +1,6 @@
 # A2osX Command Guide
 
-### Updated October 20, 2019
+### Updated November 14, 2019
 
 This Guide provides information on all the A2osX commands and utilities.  This Guide helps you not only learn the purpose of each command but also what options a command supports and what arguments it either supports or requires.
 
@@ -249,6 +249,8 @@ It looks like the same results, but from now instead of LS simply outputting all
 | EDIT [filename] | 
 
 The EDIT command allows the user to interactively read and edit standard text files in A2osX.  If you do not specify a file name on the command line, you will be prompted to enter one when you save your work (control-S).  Consult the help screen below for a list of the special keys that can be used while editing a file.
+
+>A note for the touch typists!: While EDIT is not a word processor, it still is one of the most complex programs included in A2osX.  It does a lot!  A side affect of this, and due to the lack of a keyboard buffer in the Apple //e, if you try to speed type while using EDIT some keystrokes may be dropped.  This is most noticeable when using the AppleWin emulator set to 1.0 speed.  Changing the emulator speed to at least 2.0 will significantly reduce or eliminate the dropped keys.
 
 ![](../.screen-shots/ScreenShot.EDIT.png)
 

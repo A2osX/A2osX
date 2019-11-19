@@ -1,6 +1,6 @@
 # A2osX User Guide
 
-### Updated October 24, 2019
+### Updated November 14, 2019
 
 This Guide provides information on getting started with A2osX.  This Guide helps you understand the basic features, capabilities and operation of A2osX.  This should be the first document you read before, or soon after, installing or running A2osX.
 
@@ -118,7 +118,7 @@ As stated above, when A2OSX first launches, it looks in the ./SYS subdirectory a
 
 The KM.NSC module gives you the same functionality as the NS.CLOCK.SYSTEM routine found in the Boot volume of ProDOS.  You do not need both files.  If you are running NS.CLOCK.SYSTEM to support other applications, you can remove the KM.NSC module.  Conversly, if you are only running A2osX off this booted volume, you can remove NS.CLOCK.SYSTEM and just use our KM since it is smaller in size (saving disk space).
 
-The KM.RAMWORKS is needed only on systems with greater then 128K of memory.  It turns any additional memory into a ram disk /RAM3.
+The KM.RAMWORKS is needed only on systems with greater then 128K of memory provided by a RamWorks compatible 80-col card in an Apple //e.  It turns any additional memory into a ram disk /RAM3.  You should **NOT** load the KM.RAMWORKS module on Apple //GS systems.
 
 The KM.VSDRIVE module helps you connect to an ADTPRO server via a Super Serial Card (SSC).  This module will use the first Super Serial Card in your system set with Interrupts off.  It is also best if you set this SSC at a baud rate of 115200.  If you have more then one SSC system and you are using the others for terminals you should fully understand how to configure the cards, Kernel Modules, and the SSC drivers for optimal performance.
 

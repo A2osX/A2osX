@@ -1,6 +1,6 @@
 # A2osX (0.93) Multi-Tasking OS for Apple II
 
-### Updated October 20, 2019
+### Updated November 19, 2019
 
 This is the functional specification for A2osX and its system modules, internal and external commands and shell language.  Please refer to the other A2osX documentation such as the User Guide, Notes for Developers and Shell Programming Guide for more information on the use of these commands and modules.
 
@@ -46,12 +46,13 @@ This is the functional specification for A2osX and its system modules, internal 
 | ARP | Working | dump ARP cache, setup a static ARP entry | 0.93 | 
 | ASM | In Progress | S-C MASM based multi CPU assembler | 0.94 |
 | CAT | Working | -A : Show All non printable caracters <br> -N : Number all output lines <br> -S : Suppress repeated empty output lines | 0.93 |
-| CUT | Working | CUT \<opt\> "line" or CMD \| CUT \<opt\> <br> -F nn : Output field nn <br> -M nn : Output starting at nn <br> -N nn : Output Ending at nn <br> -S ch : Change default SPACE separator to 'ch' | 0.93 |
 | CHGRP | Future | -C : Continue On Error <br> -R : Recurse subdirectories |  |
 | CHMOD | Future | -C : Continue On Error <br> -R : Recurse subdirectories |  |
 | CHOWN | Future | -C : Continue On Error <br> -R : Recurse subdirectories |  |
 | CHTYP | Working | -C : Continue On Error <br> -R : Recurse subdirectories | 0.93 |
+| CMP | Working | CMP File1 File2 [SKIP1 [SKIP2]] <br> -A : Shows All differences <br> -V : Verbose Mode | 0.93 |
 | CP | Working | -C : Continue On Error <br> -Q : Quiet <br> -R : Recurse subdirectories <br> -Y : Dont't Prompt For Override | 0.93 |
+| CUT | Working | CUT \<opt\> "line" or CMD \| CUT \<opt\> <br> -F nn : Output field nn <br> -M nn : Output starting at nn <br> -N nn : Output Ending at nn <br> -S ch : Change default SPACE separator to 'ch' | 0.93 |
 | DNSINFO | Working | dump DNS cache, setup a static DNS entry |  0.93 |
 | EDIT | Working | still missing : find/replace | 0.93 |
 | FORMAT | In Progress | FORMAT \<BLOCKDEV\> [VOLUME.NAME] <br> -B Blocks : Force number of blocks to format <br> -L : Low-Level Format *not currently supported <br> -1..9 : Catalog Size (block count) | 0.93 |
@@ -67,28 +68,40 @@ This is the functional specification for A2osX and its system modules, internal 
 | MEMDUMP | Working | Tool to track memory leak|  0.93 |
 | MKDIR | Working | Make Directory|  0.93 |
 | MORE | Working | MORE \<File\> or CMD\|MORE \<opt\> <br> -N : Number all output lines <br> -P : Page mode, no scroll <br> -S : Process ESC codes | 0.93 |
+| MV | Working | -C : Continue On Error <br> -Q : Quiet <br> -R : Recurse subdirectories <br> -Y : Dont't Prompt For Override | 0.93 |
 | NETSTAT | Working | Display socket status |  0.93 |
 | NSCUTIL | Working | NSCUTIL DD/MM/YY,hh:mm:ss <br> Tool for setting time in NSC/DL1216E | 0.93 |
-| MV | Working | -C : Continue On Error <br> -Q : Quiet <br> -R : Recurse subdirectories <br> -Y : Dont't Prompt For Override | 0.93 |
+| PAK | Working| PAK Archive [File/Dir, *,? wildcards allowed\] <br> -A: Append to Archive<br> -R: Recurse subdirectories | 0.93 |
 | PING | Working | PING <ip\|host> <br> -1..9 : Ping Count | 0.93 |
 | PS | Working | List Processes|  0.93 |
 | RM | Working | RM \[File/Dir, *,? wildcards allowed\] <br> -C : Continue On Error <br> -Q : Quiet <br> -R : Recurse subdirectories | 0.93 |
+| RPCDUMP | In Progress | Tool based on UDP socket API, renamed from RPCINFO <br> RPCDUMP <ip\|host> | 0.93 |
 | SH    | Working     | Shell Command Processor<br>(See Internal Shell commands) | 0.93 |
 | TELNET | Working | TELNET <ip\|host> [port] |  0.93 |
-| RPCDUMP | In Progress | Tool based on UDP socket API, renamed from RPCINFO <br> RPCDUMP <ip\|host> | 0.93 |
+| TERM | Testing | TERM \<device\> | 0.93 |
+| UNPAK | Testing | UNPAK archive | 0.93 |
+| USERADD | Testing | USERADD username <br> -c Comment : GECOS comment<br> -d HD : Home Directory <br> -p PW : Password <br> -s SH : Shell | 0.93 |
+| USERDEL | Testing | USERDEL username <br> -r : Force removes files in home directory | 0.93 |
+| WC | Testing | WC File(s) (*,? wildcards allowed) <br> -C: Continue on error<br> -R: Recurse Subdirectories<br> -M: Print CHAR counts<br> -L: Print LINE counts<br> -W: Print WORD counts | 0.93 |
+| WHO | Testing | List Users Online | 0.93 |
 
 ## Internal Shell commands:
 
 | Name      | Status  | Comment |
 | ----      | ------  | ------- |
-| \<value\> | Working | $VAR \| string \| "string with SPACE" \| 123 \| -456 |
+| \<condition\> | Working |[ -D direxists ] <br> [ -E fileordirexists ] <br> [ -F fileexists ]<br> [ -I $VAR variable is an integer ] <br> [ -N $VAR variable is not empty ] <br> [ -Z $VAR variable is empty ] <br> [ string1 = string2 ] <br> [ string1 != string2 ] <br> [ string1 .< string2 ] <br> [ string1 <= string2 ] <br> [ string1 .> string2 ] <br> [ string1 >= string2 ] <br> [ int32 -eq int32 ] <br> [ int32 -ne int32 ] <br> [ int32 -lt int32 ] <br> [ int32 -le int32 ] <br> [ int32 -gt int32 ] <br> [ int32 -ge int32 ] |
 | \<expression\> | Working | \<value\> [\<op\> \<value\>] ... |
 | \<op\> | Working  | \+ : signed int32 add <br> \- : signed int32 subtract <br>  \* : signed int32 multiply<br> / : signed int32 divide <br> mod : signed int32 modulo |
-| \<condition\> | Working |[ -D direxists ] <br> [ -E fileordirexists ] <br> [ -F fileexists ]<br> [ -N $VAR variable is not empty ] <br> [ -Z $VAR variable is empty ] <br> [ string1 = string2 ] <br> [ string1 != string2 ] <br> [ string1 .< string2 ] <br> [ string1 <= string2 ] <br> [ string1 .> string2 ] <br> [ string1 >= string2 ] <br> [ int32 -eq int32 ] <br> [ int32 -ne int32 ] <br> [ int32 -lt int32 ] <br> [ int32 -le int32 ] <br> [ int32 -gt int32 ] <br> [ int32 -ge int32 ] |
+| \<value\> | Working | $VAR \| string \| "string with SPACE" \| 123 \| -456 |
+| !         | Working | ![ \<condition\> ] : Negate condition |
+| ( )       | Working | Parens used define list as FOR argument |
+| { }       | Working | Braces used to define FUNCTION body |
+| AND       | Working | Add mandatory condition |
 | BREAK     | Working | Exit CASE of SWITCH |
+| CALL      | Working | CALL function \<arg\> ... |
 | CASE      | Working | CASE <expression> |
 | CD        | Working | CD path or relative path |
-| DATE      | Working | |
+| DATE      | Working | %a : Abbreviated weekday name : Thu <br> %A : Full weekday name : Thursday <br> %b : Abbreviated month name : Aug <br> %B : Full month name : August <br> %d : Day of the month, zero-padded (01-31) <br> %H : Hour in 24h format (00-23) 14 <br> %I : Hour in 12h format (01-12) 02 <br> %m : Month as a decimal number (01-12) 08 <br> %M : Minute (00-59) 55 <br> %p : AM or PM designation PM <br> %S : Second (00-61) 02 <br> %w : Weekday as a decimal number with Sunday as 0 (0-6) <br> %y : Year, last two digits (00-99) <br> %Y : Year four digits 2001 |
 | DEFAULT   | Working | Default CASE for SWITCH |
 | ECHO      | Working | \b,\e,\f,\n,\\\ and \\% supported <br> -N : Suppress \r\n |
 | ELSE      | Working | Optional branch for IF block |
@@ -100,6 +113,7 @@ This is the functional specification for A2osX and its system modules, internal 
 | LOOP      | Working | Terminator for WHILE block |
 | MD        | Working | MD path or relative path <br> Create a directory |
 | NOHUP     | Working | Start a process with PPID=PS0 (Daemon) |
+| OR        | Working | Add optional condition |
 | PAUSE     | Working | Wait until CR |
 | POPD      | Working | Restore previously saved working directory |
 | PUSHD     | Working | Save actual working directory <br> PUSHD \<dir\> do also a CD to \<dir\> |
@@ -111,7 +125,6 @@ This is the functional specification for A2osX and its system modules, internal 
 | SHIFT     | Working | Remove $1 from cmd line |
 | SLEEP     | Working | Wait \<count\> 10th sec |
 | SWITCH    | Working | SWITCH <expression> |
-| TIME      | Working | |
 | WHILE     | Working | [ \<condition\> ] |
 
 ## Shell variables:

@@ -1,29 +1,29 @@
 
 # A2osX Shell Developers Guide
 
-### Updated October 31, 2019
+### Updated November 19, 2019
 
-One of the most significant parts of A2osX is its shell which can perform both interactive and scripted tasks.  With the interactive part of the shell you can perform many common and complex tasks using both built-in (native or internal to shell) and external (BINs or executables) commands.  Internal commands include CD (change directory), MD (make directory), PWD, DATE, etc.  External commands include CP (copy), RM (remove), CAT (display file contents), TELNET, etc.
+One of the most significant parts of A2osX is its shell which can perform both interactive and scripted tasks.  With the interactive part of the shell you can perform many common and complex tasks using both built-in (native or internal to shell) and external (BIN or executable) commands.  Internal commands include CD (change directory), MD (make directory), PWD, DATE, etc.  External commands include CP (copy), RM (remove), CAT (display file contents), TELNET, etc.
 
-It should be noted, that it is possible to create and execute short scripts right on the interactive command line (these are run once and not saved like true scripts).  An example
+It should be noted, that it is even possible to create and execute short scripts right on the interactive command line (these are run once and not saved like true scripts).  An example
 
 ```
 FOR FILE IN `LS -C CT*`; CAT ${FILE}; NEXT
 ```
 
-In this example, the system will generate a list of files found in the current directory that match the CT* wild card and perform the CAT operation on each.  The semicolons act as a line separator allowing you to type in multiple commands, or short scripts on a single line, to execute as a script.
+In this example, the system will generate a list of files found in the current directory which match the CT* wild card and perform the CAT operation on each.  The semicolons act as line separators allowing you to type in multiple commands, or short scripts on a single line.
 
-This Developers Guide will cover the basic operation of the interactive shell, the available commands as well as creating and using complex scripts that can be run by the shell.
+This Developers Guide will cover the basic operation of the interactive shell, the internal shell commands and creating complex scripts that can be run by the shell.  For information on external commands consult the **[A2osX Command Guide](.Docs/Command%20Guide.md)**.
 
 ## The A2osX Shell (SH)
 
-The default A2osX Shell, ./BIN/SH, is an A2osX external command program like many others included with A2osX.  It is probably the most complex and capable, as suggested by its size compared to other commands (7K vs 1K for TELNET), and is the primary tool for interacting with the A2osX system.  The SH shell is based somewhat on the Linux BASH shell, to the extend possible on an 8-bit machine.  Alternative shells are planned for the future and will be announced as they become available.
+The default A2osX Shell, ./BIN/SH, is an A2osX external command program like many others included with A2osX.  It is probably the most complex and capable, as suggested by its size compared to other commands (7K vs 1K for TELNET), and is the primary tool for interacting with the A2osX system.  The SH shell is based losely on the Linux BASH shell, to the extent possible on an 8-bit machine.  Alternative shells are planned for the future and will be announced as they become available.
 
-As the primary mechanism for working with A2osX, the SH shell is launched automatically when you log into A2osX.  In the case where no ./ETC/PASSWD file is present, A2osX automatically logs you in as the ROOT user.  When a user login occurs and SH is launched, it looks for a file called PROFILE in the users HOME directory and if found executes that script, so the information below on writing scripts applies to the PROFILE file.
+As the primary mechanism for working with A2osX, the SH shell is launched automatically when you log into A2osX.  In the case where no ./ETC/PASSWD file is present, A2osX automatically logs you in as the ROOT user.  When a user login occurs and SH is launched, it looks for a file called PROFILE in the users HOME directory and if found executes that script, so the information below on writing scripts applies to the PROFILE script file.
 
 ### Interacting with the Shell
 
-To interact with the A2osX shell, you type commands at the presented prompt, which ends with a **$** character.  The prompt usually includes your current working directory such as **/FULLBOOT/ROOT/$**.  You can change the prompt by changing the **$PS1** variable (see below).  At the **$** you can enter any of the valid internal shell commands or an external program name.  For external programs, A2osX will search in the current directory and then in the directories specified in the **$PATH** variable.  
+To interact with the A2osX shell, you type commands at the prompt, which ends with a **$** character.  The prompt usually includes your current working directory such as **/FULLBOOT/ROOT/$**.  You can change the prompt by changing the **$PS1** variable (see below).  At the **$** you can enter any of the valid internal shell commands, an external program file name or a script file name.  For external programs and scripts, A2osX will search in the current directory and then in the directories specified in the **$PATH** variable.  
 
 #### Special Keys
 
@@ -48,34 +48,293 @@ In addition to the editing keys above, you can use the following special keys wh
 | Open Apple-0 | Switches you to the console display |
 | Open Apple-1 to 4 | Switches you to Virtual Terminals 1 through 4 if so configured |
 
-#### Internal Commands
+### Internal Commands
 
-The A2osX Shell contains an advanced set of internal commands.  Several of these commands are commonly used interactively (at the $ prompt) while others are most useful in scripts.  Technically all of these commands can be used both interactively or in scripts, many really show their power in scripts you develop or run.
+The A2osX Shell contains an advanced set of internal commands.  Several of these commands are commonly used interactively (at the $ prompt) while others are most useful in scripts.  Technically all of these commands can be used both interactively or in scripts, though many really only show their power in scripts you develop or run.
 
-Whether in scripts or typed in at the interactive Shell prompt ($), most commands support, or even require, one or more *\<arguments\>* and/or *\<options\>*.  Commands typically use *\<values\>* as their *\<arguments\>* and *\<switches\>* as their *\<options\>*, however in some cases you may use *\<expressions\>*  or *<conditions\>*.  A full command line may be in the form of <br> <br> **command \<switch\> \<value\> \<switch\> argument argument**   or
-**command \[ <\expression\> \]**
+Whether in scripts or typed in at the interactive Shell prompt ($), most commands support, or even require, one or more *\<arguments\>* and/or *\<options\>*.  Commands typically use *\<values\>* as their *\<arguments\>* and *\<switches\>* as their *\<options\>*, however in some cases you may use *\<expressions\>*  or *<conditions\>*.  A full command line may be in the form of
 
-where in the first nomenclature a **command** performs an action with or on the objects passed as *\<arguments\>*, modifying its behavior (the action it performs) based on *\<switches\>* if present.  For example in the case of **LS -L /MYVOL** the command is **LS**, the option or switch is **-L** and the argument (target of the operation) is **/MYVOL**, which in this case the command would print a long listing of the root directory fo the ProDOS volume named /MYVOL.  The second nomenclature is used with the logic/control commands **IF** and **WHILE** where an *\<expressions\>* is evaluated and the result is processed by the command to effect program flow.
+	**command \<switch\> \<value\> \<switch\> argument argument**   or
+	**command \[ <\condition\> \]**
 
-> A note on command line structure for internal and external commands: When passing a command a series of arguments, you must a space include between each argument.  In addition, if a command has an option that requires an argument, there must also be a space between the option and its argument.  For example, when using the READ command which has the -S -P and -N options, the -P and -N options both require an argument so the full use of the command would be **READ -S -N 3 -P "My Prompt" AVAR**.  Do not use -N3 as you might in Linux or DOS as you will generate a Syntax Error and the command will fail to execute.  Also note, for many commands the order of the arguments is important (i.e. CP sourcefile destfile, order critical), however the order of Options is not.  **READ -S -N 3 -P "MyPrompt" AVAR** is the same as **READ -P "MyPrompt" AVAR -S -N 3 ** as well as **READ -S AVAR -N 3 -P "MyPrompt"**.  What is critical here is that you **must** have a number immediately after -N and a string after -P which will be the prompt.
-> 
+where in the first nomenclature a **command** performs an action with or on the objects passed as *\<arguments\>*, modifying its behavior (the action it performs) based on *\<switches\>* if present.  For example in the case of **LS -L /MYVOL** the command is **LS**, the option or switch is **-L** and the argument (target of the operation) is **/MYVOL**, which in this case the command would print a long listing of the root directory fo the ProDOS volume named /MYVOL.  The second nomenclature is used with the logic/control commands **IF** and **WHILE** where a *\<condition\>* is evaluated and the result is processed by the command to effect program flow.
 
-CD
-DATE
-ECHO
-EXIT
-MD
-NOHUP
-POPD
-PUSHD
-PWD
-RD
-REN
-SET
-SLEEP
-TIME
+> A note on command line structure for internal and external commands: When passing a command a series of arguments, you must include a space between each argument.  In addition, if a command has an option that requires an argument, there must also be a space between the option and its argument.  For example, when using the READ command which has the -S -P and -N options, the -P and -N options both require an argument so the full use of the command would be **READ -S -N 3 -P "My Prompt" AVAR**.  Do not use -N3 as you might in Linux or DOS as you will generate a Syntax Error and the command will fail to execute.  Also note, for many commands the order of the arguments is important (i.e. CP sourcefile destfile, order critical), however the order of Options is not.  **READ -S -N 3 -P "MyPrompt" AVAR** is the same as **READ -P "MyPrompt" AVAR -S -N 3 ** as well as **READ -S AVAR -N 3 -P "MyPrompt"**.  What is critical here is that you **must** have a number immediately after -N and a string after -P which will be the prompt.
 
-###### READ
+#### Arguments
+
+As briefly discussed above, almost all commands take and most even require an argument which affects the command's behavior.  For example the **SLEEP** command requires that you pass it an argument that indicates the amount of time to SLEEP.  Arguments come in many forms; each of these is discussed here.  
+
+##### \<conditions\>
+
+The shell features a lot of built-in checks and comparisons called \<conditions\> throughout this guide.  This particular form of an argument is used exclusively by the **IF** and **WHILE** commands where the \<condition\> is evaluated and result is used to control program flow with in the defined **IF-ELSE-FI** or **WHILE-LOOP** block.  In addition to the capabilities found in the extensive list of checks and comparisons listed below, conditional execution can be enhanced by negating with an ! in front of a condition and/or compounding with AND and OR between two or more conditions.  The following scripts show examples of the possible conditions you can use while writing your own scripts.
+
+> Note: 	The examples below make use of the **;** directive which allows you to put multiple statements on one line.  So for example
+
+	IF [ condition ] ; ECHO result ; ELSE ; ECHO message ; FI
+ 
+> Is the same as 
+
+	IF [ condition ]
+		ECHO result
+	ELSE
+		ECHO message
+	FI
+
+> The single line notation allows these sample scripts to be significantly shorter; there operation is not affected.  Also note, you are not limited to a single command line between the IF/ELSE/FI statements.  See the documentation of the IF command for more information.
+
+This script demonstrates the usage of the various "Check" Conditions.
+
+    #!/BIN/SH
+	#
+	#   IF [ -CHECK arg ] Examples
+	#
+	#	Echo "Found" if their is a subdirectory TEST is in the current directory
+	#	If TEST is not present, or is present but a file, this Check would fail
+	IF [ -D TEST ] ; ECHO "Found" ; FI
+	#	Echo "Found" if a file or a subdirectory named TEST is in the current directory
+	IF [ -E TEST ] ; ECHO "Found" ; FI
+	#	Echo "Found" if the file PROFILE is in the top most directory of the volume MYVOL
+	#   IF PROFILE were a directory name and not a file, this Check would fail
+	IF [ -F /MYVOL/PROFILE ] ; ECHO "Found" ; FI
+	#	Echo "True" if the variable ABC contains an Integer
+	SET ABC = 123 ; IF [ -I $ABC ] ; ECHO "True" ; FI	# Would Echo True
+	SET ABC = "Hello" ; IF [ -I $ABC ] ; ECHO "True" ; FI	# False no Echo
+	SET ABC = 123.456 ; IF [ -I $ABC ] ; ECHO "True" ; ELSE ; ECHO "False" ; FI	# Echo False
+	#	Note the next two -N and -Z are in affect opposites of each other ![ -N ] = [ -Z ]
+	#	Echo "True" if the variable is not empty (non-null)
+	SET ABC = "Hello" ; IF [ -N $ABC ] ; ECHO "True" ; FI	# True
+	#	Echo "True" if the variable is empty/does not exist (null)
+	SET ABC =  ; IF [ -Z $ABC ] ; ECHO "True" ; FI		# True
+	SET ABC = "Hello" ; IF [ -Z $ABC ] ; ECHO "True" ; FI	# False
+
+This script demonstrates the usage of the various String evaluation Conditions.  They are equals (=), not equals (!=), less than (.<), less than or equal (<=), greater than (.>) and greater than or equal (>=).
+
+    #!/BIN/SH
+	#
+	#   IF [ String <comparator> String ] <conditions> Examples
+	#
+	SET A = "ABC"
+	SET B = "DEF"
+	IF [ $A  = $B ] ; ECHO HI ; ELSE ; ECHO BYE ; FI		# False - BYE
+	IF [ $A != $B ] ; ECHO HI ; ELSE ; ECHO BYE ; FI		# True  - HI
+	IF [ $A .< $B ] ; ECHO HI ; ELSE ; ECHO BYE ; FI		# True  - HI
+	IF [ $A <= $B ] ; ECHO HI ; ELSE ; ECHO BYE ; FI		# True  - HI
+	IF [ $A .> $B ] ; ECHO HI ; ELSE ; ECHO BYE ; FI		# False - BYE
+	IF [ $A >= $B ] ; ECHO HI ; ELSE ; ECHO BYE ; FI		# False - BYE
+
+> Note if you set A = 123 and B = "DEF" and do those tests you will get an error on some of the tests since one of the variables is an integer and both variables should be strings.  
+
+This script demonstrates the usage of the various Integer evaluation Conditions.  They are equals (-eq), not equals (-ne), less than (-lt), less than or equal (-le), greater than (-gt) and greater than or equal (-ge).
+
+    #!/BIN/SH
+	#
+	#   IF [ Int32 <comparator> Int32 ] <conditions> Examples
+	#
+	SET A = 123
+	SET B = 456
+	IF [ $A -eq  $B ] ; ECHO HI ; ELSE ; ECHO BYE ; FI		# False - BYE
+	IF [ $A -ne  $B ] ; ECHO HI ; ELSE ; ECHO BYE ; FI		# True  - HI
+	IF [ $A -lt  $B ] ; ECHO HI ; ELSE ; ECHO BYE ; FI		# True  - HI
+	IF [ $A -le  $B ] ; ECHO HI ; ELSE ; ECHO BYE ; FI		# True  - HI
+	IF [ $A -gt  $B ] ; ECHO HI ; ELSE ; ECHO BYE ; FI		# False - BYE
+	IF [ $A -ge  $B ] ; ECHO HI ; ELSE ; ECHO BYE ; FI		# False - BYE
+
+> Note if you set A = 123 and B = "Hello" and do those tests you will get an error since one of the variables is string and both variables must be integers.  
+
+To help simplify scripts in some cases, you can modify any of the above \<conditions\> by preceding it with an exclamation (!) or NOT symbol.  For instance you might have a script that creates a temporary file that normally would be stored in **${ROOT}TMP/**.  Before attempting to create a file in this directory you might check to see if it exists and if not create it.  This script would do that:
+
+    #!/BIN/SH
+	#
+	#   Check for TMP and create if missing
+	#
+	IF [ -D ${ROOT}/TMP ]
+	ELSE
+		MD ${ROOT}/TMP
+	FI
+
+Notice that the work being done here is in the ELSE block, or when the check fails.  You may find it better to use the NOT (!) modifier and write the script this way:
+
+    #!/BIN/SH
+	#
+	#   Check for TMP and create if missing
+	#
+	IF ![ -D ${ROOT}/TMP ]
+		MD ${ROOT}/TMP
+	FI
+
+You can further extend \<conditions\> by building complex evaluations that consist of multiple check or comparison \<conditions\> joined by AND and/or OR.  The following are examples using AND and OR.
+
+    #!/BIN/SH
+	#
+	#   IF <conditions> with AND and OR Examples
+	#
+	SET A = 123
+	SET B = 456
+	# With AND you can test 2 or more things at once
+	IF [ $A -eq 123 ] AND [ $B -eq 456 ]
+		ECHO HI
+	ELSE
+		ECHO BYE
+	FI			# True  - HI
+	# Test that 3 conditions are ALL true
+	IF [ $A -eq 123 ] AND [ $B -eq 456 ] AND [ $C = "Your Name" ]
+		ECHO HI
+	ELSE
+		ECHO BYE
+	FI			# False - BYE  (because 3rd condition not met)
+	# With OR you can test if either condition is met 
+	IF [ $A -eq 123 ] OR [ $B -eq 456 ]
+		ECHO HI
+	ELSE
+		ECHO BYE
+	FI			# True  - HI
+	IF [ $A -eq 999 ] OR [ $B -eq 456 ]
+		ECHO HI
+	ELSE
+		ECHO BYE
+	FI			# True  - HI	(2nd condition is met)
+
+When using multiple of these joiners with a single command such as **IF**, care should be made  in the structuring of your \<condition\> statements.  The shell processes command lines linearly from left to right and is very binary in nature.  Consider first a math example of **SET A = 1 + 2 * 3 - 4 * 8 + 2 / 2**, the result placed into **A** is 42 (process the calculations like a calculator would, one at a time, there is no precedence).  When evaluating a set of \<conditions\>, the shell processes them one at a time the same way and when it encounters an AND or an OR it evaluates the current "state" to determine if it should return a result or continue to evaluate the conditions ont he line.  Let us say you have 4 conditions, A, B, C and D (each one represents something like [ -d adir ]), and you are doing something like IF A AND B OR C AND D.  The Shell will determine a result for A (for example that [ -d adir]) and then it sees "AND", at that moment if A is false all processing ends there because it does not matter what else is on the command line (The IF fails).  Now assume A and B are both true and it gets to that OR, again processing stops be cause there is already a true case on one side of the OR (The IF succeeds).  As you can see, its easy to predict the behavior of constructs like IF A and B and C and D (all must be true) as well as IF A or B or C (any one need be true), but complex IF A or B and C or D and E need to be tested that they perform as you imagined.  Once mastered though, you will see that when structured correctly you can perform very complex \<condition\> sets.  Say you wanted to do IF ( A and B ) or C, realizing there is no actual groupings (parens) in conditions, if you simply structure your if as IF C OR A AND B, it will have the effect you wanted.  There is an example of complex compound conditions that you can run and even modify to test different patterns/structures of complex conditions.  It can be found at **[ANDORTESTS](EXAMPLES/ANDORTESTS.txt)**.
+
+##### \<expression\>
+
+The A2osX shell contains a simple expression evaluator that can perform simple integer math operations using the \+ \- \* \/ and MOD operators.  Expressions are a form of an argument used by only a handful of commands, most notably SET (to store the result of the expression into a variable) and CASE/SWITCH.
+
+    #!/BIN/SH
+	#
+	#   Shell Expressions Example
+	#
+	SET A = 123
+	SET B = 10
+	SET C = A + B		# 133
+	SET C = A - B		# 113
+	SET C = A * B		# 1230
+	SET C = A / B		# 12
+	SET C = A MOD B		# 3
+
+##### \<op\>
+
+\<Op\> are operators, the simple integer math functions that can be performed in the shell.  They are a special argument used only in \<Expressions\>, see above.   The valid \<Ops\> are \+ \- \* \/  and MOD.
+
+##### \<switch\>
+
+A switch is a special type of argument to internal and external commands that changes the behavior of that command.  For instance, the standard ECHO command ends its output with a carriage return (ASCII 13), adding the -N switch to ECHO (i.e. ECHO -N "Hello") will cause ECHO to omit the CR.  All switches begin with hyphen (-) and are immediately followed by a valid single character (in the case of ECHO -N is the only valid switch) and then a space (or carriage return if the end of the line). There should be no space between the hyphen (-) and the switch character, and if the switch itself requires an argument, then switch must be followed by a space and then the argument for that switch (see the READ command for an example). Please make sure you read the note at the start of this section regarding command line structure and the ordering of arguments, in particular with switches that themselves require arguments. 
+
+##### \<value\>
+
+Values are the simplest of arguments, usually a string or an integer, which may be presented in the form of a variable.  Technically the format of the ECHO command is **ECHO [-N] [\<value\> ...]**.  This means that the ECHO command can be followed by the optional switch -N and one or more optional \<values\>.  In the case of ECHO, it is these \<values\> that are output by the command.  In this case, values are separated by spaces, so you can do ECHO $A HELLO $B and echo will output the value stored in the variable A and then the world HELLO and then the value stored in B.  A word about values, command lines and spaces: **ECHO Hello World** is not the same as **ECHO "Hello World"**.  In the first case you ECHO treats Hello and World as separate values and in the second, "Hello World" as one value.  Since ECHO takes multiple values, you might not notice the difference, but in the case of **IF [ $A = "Hello World" ]** if you omitted the quotes you would get a syntax error because the = operator only accepts one value on each side.  In addition, when not enclosed in quotes, extra spaces are removed so **ECHO Hello&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;World"** would be output as **Hello World** as ECHO would treat each Hello and World as values and output value space value.
+
+#### AND
+
+The **AND** reserved word is used to join 2 or more conditions together to create complex logic statements.  See \<condition\> section above for more information on **AND** and examples of its usage.  In addition, look at **[ANDORTESTS](EXAMPLES/ANDORTESTS.txt)**, a complete script using **AND**.
+
+#### BREAK
+
+The **BREAK** command is used to exit a particular **CASE** that is part of a **SWITCH** script block.  See the **CASE** command below for more information and example of using **BREAK**. 
+
+#### CALL
+
+| CALL      | Working | CALL function \<arg\> ... |
+
+#### CASE
+
+| CASE      | Working | CASE <expression> |
+
+#### CD
+
+| CD        | Working | CD path or relative path |
+
+#### DATE
+
+| DATE      | Working | %a : Abbreviated weekday name : Thu <br> %A : Full weekday name : Thursday <br> %b : Abbreviated month name : Aug <br> %B : Full month name : August <br> %d : Day of the month, zero-padded (01-31) <br> %H : Hour in 24h format (00-23) 14 <br> %I : Hour in 12h format (01-12) 02 <br> %m : Month as a decimal number (01-12) 08 <br> %M : Minute (00-59) 55 <br> %p : AM or PM designation PM <br> %S : Second (00-61) 02 <br> %w : Weekday as a decimal number with Sunday as 0 (0-6) <br> %y : Year, last two digits (00-99) <br> %Y : Year four digits 2001 |
+
+#### DEFAULT
+
+| DEFAULT   | Working | Default CASE for SWITCH |
+
+#### ECHO
+
+| ECHO      | Working | \b,\e,\f,\n,\\\ and \\% supported <br> -N : Suppress \r\n |
+
+#### ELSE
+
+| ELSE      | Working | Optional branch for IF block |
+
+#### END
+
+| END       | Working | End of SWITCH Statement |
+
+#### EXIT
+
+| EXIT      | Working | exit function, script or shell |
+
+#### FI
+
+| FI        | Working | Terminator for IF block |
+
+#### FUNCTION
+
+| FUNCTION  | Working | FUNCTION function_name { <br> \<body\> <br> } |
+
+if you SET -F, it will discard ALL previously learnt FUNC in the current SH context
+if . FUNCS1 file add 3
+then . FUNCS2 file add 2
+all 5 are available until an set -X is met
+if you launch . MYFILE1, the code within MYFILE1 can CALL all 5 functions
+but MYFILE1 (wthout dot) will run in a separate SH process, so no access to the 5 functions known by parent SH
+functions bodies are stored in AUX ram
+so you can put around 30k of code in AUX ram then do a short MYFILE1 that calls a lot of FUNC 
+in AUX
+FUNCs recursion is allowed (until you explode the stack!)
+
+CORE.STACK.MAX = 128....so each CALL consumes about 7 bytes of stack (return Ctx/Ptr, ArgVC,hArgV and CALL keywordID)
+
+
+#### IF
+
+| IF        | Working | [ \<condition\> ] <br> ![ \<condition\> ]|
+
+#### LOOP
+
+| LOOP      | Working | Terminator for WHILE block |
+
+#### MD
+
+| MD        | Working | MD path or relative path <br> Create a directory |
+
+#### NOHUP
+
+| NOHUP     | Working | Start a process with PPID=PS0 (Daemon) |
+
+
+#### OR
+
+The **OR** reserved word is used to join 2 or more conditions together to create complex logic statements.  See \<condition\> section above for more information on **OR** and examples of its usage.  In addition, look at **[ANDORTESTS](EXAMPLES/ANDORTESTS.txt)**, a complete script using **OR**.
+
+#### PAUSE
+
+| PAUSE     | Working | Wait until CR |
+
+#### POPD
+
+| POPD      | Working | Restore previously saved working directory |
+
+#### PUSHD
+
+| PUSHD     | Working | Save actual working directory <br> PUSHD \<dir\> do also a CD to \<dir\> |
+
+#### PWD
+
+| PWD       | Working | Print Working Directory |
+
+#### RD
+
+| RD        | Working | Delete an empty directory |
+
+#### READ
+
+| READ      | Working | -S : no echo (password) <br> -P : "prompt message" <br> -N maxchar  |
 
 The READ command allows you to accept input from the user which can be used or evaluated in other commands.  For instance you can use the READ command to get the name of a file to copy, ask the user for confirmation (Proceed?) and evaluate their response with an IF command, etc.  READ has several powerful options including: Prompt, Suppress and NumChars. In all cases you must specify a variable in which to place the results of the READ command.
 
@@ -102,8 +361,9 @@ The READ command allows you to accept input from the user which can be used or e
     #	 This can be used to capture/process special keys like TAB, Arrows and DEL.
 	READ -N 0 A
 
+#### REN
 
-###### REN
+| REN       | Working | Rename a file, directory or volume |
 
 The REN command allows you to Rename a single file, directory or Volume.  It does not support wild cards.  While REN and MV may seem similar, they are very different commands and you should use each for its intended purpose.  In the case of REN, it changes the name of an item (Vol, Dir, File) in place; the item itself is not changed.  For those familiar with ProDOS file systems, REN changes the entry of an item in the CATALOG.  MV on the other hand actually copies files (and removes the original) to move them.  Obviously REN is more efficient at RENaming an item in its current location, whereas MV could be used to change the location of a file (MV it from one directory or even volume to another).  Yes you can use MV MYFILE NEWFILE to do the same thing as REN MYFILE NEWFILE, but since a copy must occur, it will be slower and you will have to have sufficient disk space free to make this copy.
 
@@ -131,16 +391,46 @@ The REN command allows you to Rename a single file, directory or Volume.  It doe
 	#	 REName a file using a full path
 	REN /FULLBOOT/TMP/MYFILE NEWFILENAME
 
-#### Redirection
+#### SET
 
+| SET       | Working | -X : toggle debug mode <br> -C : toggle Control-C break mode <br> -E : toggle error printing mode <br> -F : delete all declared functions |
+
+#### SHIFT
+
+| SHIFT     | Working | Remove $1 from cmd line |
+
+#### SLEEP
+
+| SLEEP     | Working | Wait \<count\> 10th sec |
+
+#### SWITCH
+
+| SWITCH    | Working | SWITCH <expression> |
+
+#### WHILE
+
+| WHILE     | Working | [ \<condition\> ] |
+
+### Redirection
+
+| Token  | Status  | Comment |
+| ----   | ------  | ------- |
+| .      | Working | use same env |
+| &      | Working | start proc |
+| \|     | Working | pipe |
+| <      | Working | StdIn redirection |
+| >      | Working | StdOut redirection |
+| >>     | Working | Append StdOut  |
+| 1>>    | Working |  |
+| 1>     | Working |  |
+| 2>>    | Working | StdErr redirection |
+| 2>     | Working |  |
 
 ### Writing Scripts
 
 Calling other scripts
 calling scripts with . (dot space) before script name from within a script
 loading functions this way
-
-
 
 #### Variables
 
@@ -154,14 +444,29 @@ Strings can be up to 255 characters in length.  Note, like INTs, if you try to s
 ##### Special Variables
 
 $BOOT
-$ROOT
-$PATH
-$TERM
-$PS1
 $DRV
 $LIB
+$PATH
+$PS1
+$ROOT
+$TERM
 
-## Advanced Display Techniques
+| Name  | Status  | Comment |
+| ----  | ------  | ------- |
+| $0    | Working | Command Full Path |
+| $1-$9 | Working | Arg[n] |
+| $*    | Working | All Args |
+| $#    | Working | Arg Count |
+| $?    | Working | Return Code |
+| $@    | Working | Parent PID |
+| $$    | Working | PID |
+| $!    | Working | Child PID |
+| $UID  | Working | PS Owner UID |
+| $PWD  | Working | Working Directory |
+
+note : '$VAR' does NOT expand Variable
+
+### Advanced Display Techniques
 
 A2osX provides advanced screen handling capabilities for the Apple console (keyboard/screen) as well as terminals connected directly (via Super Serial Cards) or remotely (via Telnet using a supported network card and the TELNETD server daemon).  These features are based on the VT100 Terminal definition and scripts you develop can pass VT100 codes (via the ECHO command) to enhance the appearance of your scripts.  In addition to VT100 codes, ECHO has been augmented with some short codes to perform the more common and to help display special characters.  The examples below will help you understand what is possible with ECHO.  For a fuller listing of the available VT100 Terminal Codes, consult the **[A2osX Terminal Codes Guide](.Docs/TERM.md).**
 
@@ -214,7 +519,6 @@ A2osX provides advanced screen handling capabilities for the Apple console (keyb
 	#	Clear line 15
 	ECHO \e[15;01H\e[2K
 
-
 ###Examples
 
 IFTTT Tweet using HTTPGET
@@ -253,100 +557,6 @@ is the same as
     FI
 
 Notice that the DO X and DO Y logic is swapped between the two cases.
-
-## Internal Shell commands:
-
-| Name      | Status  | Comment |
-| ----      | ------  | ------- |
-| \<value\> | Working | $VAR \| string \| "string with SPACE" \| 123 \| -456 |
-| \<expression\> | Working | \<value\> [\<op\> \<value\>] ... |
-| \<op\> | Working | \+ signed int32 add <br> \- signed int32 sub <br>   \* <br> / <br> mod |
-| \<condition\> | Working |[ -D direxists ] <br> [ -E fileordirexists ] <br> [ -F fileexists ]<br> [ -N $VAR variable is not empty ] <br> [ -Z $VAR variable is empty ] <br> [ string1 = string2 ] <br> [ string1 != string2 ] <br> [ string1 .< string2 ] <br> [ string1 <= string2 ] <br> [ string1 .> string2 ] <br> [ string1 >= string2 ] <br> [ int32 -eq int32 ] <br> [ int32 -ne int32 ] <br> [ int32 -lt int32 ] <br> [ int32 -le int32 ] <br> [ int32 -gt int32 ] <br> [ int32 -ge int32 ]|
-| BREAK     | Working | Exit CASE of SWITCH |
-| CALL      | Working | CALL function <arg> ... |
-| CASE      | Working | CASE <expression> |
-| CD        | Working | CD path or relative path |
-| ..        | Working | CD .. |
-| DATE      | Working | %a : Abbreviated weekday name : Thu <br> %A : Full weekday name : Thursday <br> %b : Abbreviated month name : Aug <br> %B : Full month name : August <br> %d : Day of the month, zero-padded (01-31) <br> %H : Hour in 24h format (00-23) 14 <br> %I : Hour in 12h format (01-12) 02 <br> %m : Month as a decimal number (01-12) 08 <br> %M : Minute (00-59) 55 <br> %p : AM or PM designation PM <br> %S : Second (00-61) 02 <br> %w : Weekday as a decimal number with Sunday as 0 (0-6) <br> %y : Year, last two digits (00-99) <br> %Y : Year four digits 2001 |
-| DEFAULT   | Working | Default CASE for SWITCH |
-| ECHO      | Working | \b,\e,\f,\n,\\\ and \\% supported <br> -N : Suppress \r\n |
-| ELSE      | Working | Optional branch for IF block |
-| END       | Working | End of SWITCH Statement |
-| EXIT      | Working | exit function, script or shell |
-| FI        | Working | Terminator for IF block |
-| FUNCTION  | Working | FUNCTION function_name { <br> \<body\> <br> } |
-| IF        | Working | [ \<condition\> ] <br> ![ \<condition\> ]|
-| LOOP      | Working | Terminator for WHILE block |
-| MD        | Working | MD path or relative path <br> Create a directory |
-| NOHUP     | Working | Start a process with PPID=PS0 (Daemon) |
-| PAUSE     | Working | Wait until CR |
-| POPD      | Working | Restore previously saved working directory |
-| PUSHD     | Working | Save actual working directory <br> PUSHD \<dir\> do also a CD to \<dir\> |
-| PWD       | Working | Print Working Directory |
-| RD        | Working | Delete an empty directory |
-| READ      | Working | -S : no echo (password) <br> -P : "prompt message" <br> -N maxchar  |
-| REN       | Working | Rename a file, directory or volume |
-| SET       | Working | -X : toggle debug mode <br> -C : toggle Control-C break mode <br> -E : toggle error printing mode <br> -F : delete all declared functions |
-| SHIFT     | Working | Remove $1 from cmd line |
-| SLEEP     | Working | Wait \<count\> 10th sec |
-| SWITCH    | Working | SWITCH <expression> |
-| WHILE     | Working | [ \<condition\> ] |
-
-## Shell variables:
-
-| Name  | Status  | Comment |
-| ----  | ------  | ------- |
-| $0    | Working | Command Full Path |
-| $1-$9 | Working | Arg[n] |
-| $*    | Working | All Args |
-| $#    | Working | Arg Count |
-| $?    | Working | Return Code |
-| $@    | Working | Parent PID |
-| $$    | Working | PID |
-| $!    | Working | Child PID |
-| $UID  | Working | PS Owner UID |
-| $PWD  | Working | Working Directory |
-
-note : '$VAR' does NOT expand Variable
-
-## Shell I/O control/redirection:
-
-| Token  | Status  | Comment |
-| ----   | ------  | ------- |
-| .      | Working | use same env |
-| &      | Working | start proc |
-| \|     | Working | pipe |
-| <      | Working | StdIn redirection |
-| >      | Working | StdOut redirection |
-| >>     | Working | Append StdOut  |
-| 1>>    | Working |  |
-| 1>     | Working |  |
-| 2>>    | Working | StdErr redirection |
-| 2>     | Working |  |
-
-
-## Stuff to work on
-
-if [] && []   is AND
-if [] || []   is OR
-
-
-### functions
-
-if you SET -F, it will discard ALL previously learnt FUNC in the current SH context
-if . FUNCS1 file add 3
-then . FUNCS2 file add 2
-all 5 are available until an set -X is met
-if you launch . MYFILE1, the code within MYFILE1 can CALL all 5 functions
-but MYFILE1 (wthout dot) will run in a separate SH process, so no access to the 5 functions known by parent SH
-functions bodies are stored in AUX ram
-so you can put around 30k of code in AUX ram then do a short MYFILE1 that calls a lot of FUNC 
-in AUX
-FUNCs recursion is allowed (until you explode the stack!)
-
-CORE.STACK.MAX = 128....so each CALL consumes about 7 bytes of stack (return Ctx/Ptr, ArgVC,hArgV and CALL keywordID)
-
-* DIV/MOD
 
 ## License
 A2osX is licensed under the GNU General Pulic License.
