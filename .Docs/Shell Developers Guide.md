@@ -13,7 +13,7 @@ FOR FILE IN `LS -C CT*`; CAT ${FILE}; NEXT
 
 In this example, the system will generate a list of files found in the current directory which match the CT* wild card and perform the CAT operation on each.  The semicolons act as line separators allowing you to type in multiple commands, or short scripts on a single line.
 
-This Developers Guide will cover the basic operation of the interactive shell, the internal shell commands and creating complex scripts that can be run by the shell.  For information on external commands consult the **[A2osX Command Guide](.Docs/Command%20Guide.md)**.
+This Developers Guide will cover the basic operation of the interactive shell, the internal shell commands and creating complex scripts that can be run by the shell.  For information on external commands consult the **[A2osX Command Guide](Command%20Guide.md)**.
 
 ## The A2osX Shell (SH)
 
