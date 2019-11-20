@@ -216,7 +216,7 @@ isname 			and #$0F			 	strip byte (is checked by 'filfound')
 cmpname  		inx		 				(first) next letter index
 				iny
 
-				.DO LOWERCASE=1
+				.DO LOWERCASE=2
 				phy
 				cpy #8					CS if MIN_VERSION to use
 				
@@ -347,9 +347,6 @@ L398A  			cmp pathbuf,y			is it the same as requested vol name?
 				dec namcnt			 	last character?
 				bpl L398A			  	if not.
 
-				.DO LOWERCASEMATCH=1
-				.FIN
-				
 				plx		 				restore pointer to matching vcb.
 				stx vcbptr			 	save it for future reference.
 				lda vcbbuf+16,x			get it's device #
@@ -375,8 +372,10 @@ L39AC  			tay		 				if prefix then find ptr to prefixed
 
 L39C2  			jsr rdgbuf				read in directory (or prefix dir)
 				bcs L39CC			  	if error then look on other devices.
-				jsr cmppnam				compare dir name with path name.
+
+				jsr XDOS.CheckVolName	compare dir name with path name.
 				bcc L39F0			  	if they match, stop looking.
+
 L39CC  			ldx vcbptr			 	check if current (matched) vcb is active
 				lda vcbbuf+17,x			i.e. does it have open files?
 				bmi L39ED			  	report not found if active.
@@ -398,12 +397,14 @@ L39ED  			lda #MLI.E.VNOTFND	 	no mounted volume
 				sec						error
 L39F0  			rts
 
-L39F1  			ldx DEVCNT			now remove the device from the list
+L39F1  			ldx DEVCNT				now remove the device from the list
+
 L39F4  			cmp loklst,x			of prospective devices.
 				beq L39FE			  	branch if match.
 				dex		 				look until found.
 				bpl L39F4			  	always taken (usually) unless
 				bmi L39ED			  	if dev was removed from devlst (/RAM).
+
 L39FE  			sta devnum			 	preserve device to be checked next.
 				stz loklst,x			mark this one as tested.
 				jsr fnddvcb				find vcb that claims this dev (if any).
@@ -413,26 +414,33 @@ L39FE  			sta devnum			 	preserve device to be checked next.
 				beq L3A16				if free vcb.
 				lda vcbbuf+17,x			is this volume active?
 				bmi L39E2			  	if so, no need to re-log.
+
 L3A16  			lda #$02			 	go read root dir into gbuf
 				ldx #$00
 				jsr rdblk
 				bcs L39E2			  	ignore if unable to read.
+
 				jsr logvcb				go log in volume name.
 				bcs L39E2			  	look at next if non-xdos disk mounted.
-				jsr cmppnam				is this the volume ?
+
+				jsr XDOS.CheckVolName	is this the volume ?
 				bcs L39E2			  	if not
 L3A29  			rts
 *--------------------------------------
 mvdevnums 		ldx DEVCNT				copy all dev #'s to be checked.
+
 L3A2D  			lda DEVLST,x		   	active device list.
 				and #$F0			 	strip device type info.
 				sta loklst,x			copy them to a temp workspace
 				dex
 				bpl L3A2D
+
 				ldx DEVCNT
 				rts
+*--------------------------------------
 fnddvcb			lda #$00				look for vcb with this device#
 				ldy #$FF
+
 L3A40  			tax						new index to next vcb
 				lda vcbbuf+16,x			check all devnums
 				cmp devnum				is this the vcb?
@@ -440,17 +448,22 @@ L3A40  			tax						new index to next vcb
 				stx vcbptr
 				clc		 				indicates found
 				rts
+
 L3A4E  			lda vcbbuf,x			is this a free vcb?
 				bne L3A57				if not
+
 				iny
 				stx vcbptr
 L3A57  			txa
 				clc						inc index to next vcb
 				adc #$20
 				bne L3A40
+
 				tya		 				any free vcb's available?
 				bpl L3A79			  	yes
+
 				lda #$00			 	look for an entry to kick out
+
 L3A62  			tax
 				lda vcbbuf+17,x			any open files?
 				bpl L3A70			  	no, kick this one out.
@@ -459,42 +472,70 @@ L3A62  			tax
 				adc #$20			 	(vcb entry size)
 				bne L3A62
 				beq L3A7A			  	all vcb entries have open files
+
 L3A70  			stx vcbptr			 	save entry index.
 				stz vcbbuf,x			free this entry
 				stz vcbbuf+16,x
 L3A79  			clc		 				no error.
+
 L3A7A  			lda #$55			 	# vcb full error
 				rts
-cmppnam			ldx #$00			 	index to directory name.
+*--------------------------------------
+XDOS.CheckVolName
+				ldx #$00			 	index to directory name.
 				ldy namptr			 	index to pathname.
+
 				lda gbuf+4			 	get dir name length and type.
 				cmp #$E0				is it a directory?
 				bcc L3A90			  	if not.
+
 				and #$0F			 	isolate name length and
 				sta namcnt			 	save as a counter.
 				bne L3A95			  	branch if valid length.
+
 L3A90  			sec		 				indicate not found
 				rts
 
-L3A92  			lda gbuf+4,x			next char
+L3A92  			.DO LOWERCASE=2
+				lda gbuf+$20			VERSION
+				bpl .8
+
+				cpx #8
+				bcs .1
+
+				and whichbit,x
+				beq .8
+				bra .2
+				
+.1				lda gbuf+$21			MIN_VERSION			
+				and whichbit-8,x
+				beq .8
+				
+.2				lda gbuf+4,x
+				jsr XDOS.ToLower
+				bra L3A95
+				
+.8				.FIN
+				lda gbuf+4,x			next char
+				
 L3A95  			cmp pathbuf,y
 				bne L3A90			  	if not the same.
+
 				inx		 				check next char
 				iny
 				dec namcnt
 				bpl L3A92			  	if more to compare.
 
-				.DO LOWERCASEMATCH=1
-				.FIN
-
 				clc		 				match found
 				rts
-
+*--------------------------------------
 logvcb			ldx vcbptr			 	previously logged in volume?
 				lda vcbbuf,x			(acc = 0?)
 				beq logvcb1			  	no, go prepare vcb.
+
 				jsr cmpvcb			 	does vcb match vol read?
 				bcc L3B05			  	yes, do not disturb.
+
 logvcb1			ldy #$1F			 	zero out vcb entry
 
 L3AB2  			stz vcbbuf,x
@@ -514,11 +555,13 @@ L3AB2  			stz vcbbuf,x
 				pha
 				ora vcbptr
 				tax
+
 L3ACE  			lda gbuf+4,y
 				sta vcbbuf,x
 				dex
 				dey
 				bne L3ACE
+
 				pla		 				get length again
 				sta vcbbuf,x			and save.
 				lda devnum			 	last device used.
@@ -535,9 +578,10 @@ L3ACE  			lda gbuf+4,y
 				sta vcbbuf+26,x
 				lda gbuf+40
 				sta vcbbuf+27,x
+
 L3B04  			clc		 				indicate logged if possible
 L3B05  			rts
-
+*--------------------------------------
 cmpvcb			lda gbuf+4			 	with name in directory.
 				and #$0F
 				cmp vcbbuf,x			are they the same length?
@@ -574,6 +618,7 @@ L3B41  			txa		 				index to next vcb
 				bcc L3B2C			  	branch if more to check
 L3B49  			clc
 				rts
+
 L3B4B  			sta duplflag			duplicate has been found.
 				stx vcbentry			save pointer to conflicting vcb.
 				sec		 				error.
