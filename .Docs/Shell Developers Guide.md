@@ -199,7 +199,7 @@ When using multiple of these joiners with a single command such as **IF**, care 
 
 ##### \<expression\>
 
-The A2osX shell contains a simple expression evaluator that can perform simple integer math operations using the \+ \- \* \/ and MOD operators.  Expressions are a form of an argument used by only a handful of commands, most notably SET (to store the result of the expression into a variable) and CASE/SWITCH.
+The A2osX shell contains a expression evaluator that can perform simple integer math operations using the \+ \- \* \/ and MOD operators.  Expressions are a form of an argument used by only a handful of commands, most notably SET (to store the result of the expression into a variable) and CASE/SWITCH.
 
     #!/BIN/SH
 	#
@@ -215,7 +215,7 @@ The A2osX shell contains a simple expression evaluator that can perform simple i
 
 ##### \<op\>
 
-\<Op\> are operators, the simple integer math functions that can be performed in the shell.  They are a special argument used only in \<Expressions\>, see above.   The valid \<Ops\> are \+ \- \* \/  and MOD.
+\<Op\> are operators, the simple integer math functions that can be performed in the shell.  They are a special kind of argument used only in \<Expressions\>, see above.   The valid \<Ops\> are \+ \- \* \/  and MOD.
 
 ##### \<switch\>
 
@@ -227,23 +227,32 @@ Values are the simplest of arguments, usually a string or an integer, which may 
 
 #### AND
 
+	IF|WHILE [ <\expression\> ] AND [ <\expression\> ]...
+
 The **AND** reserved word is used to join 2 or more conditions together to create complex logic statements.  See \<condition\> section above for more information on **AND** and examples of its usage.  In addition, look at **[ANDORTESTS](EXAMPLES/ANDORTESTS.txt)**, a complete script using **AND**.
 
 #### BREAK
 
+	BREAK
+
 The **BREAK** command is used to exit a particular **CASE** that is part of a **SWITCH** script block.  See the **CASE** command below for more information and example of using **BREAK**. 
 
-#### CALL
+#### CALL 
 
+	CALL function [\<argument\>]...
+
+The **CALL** command is used to execute and previously defined and loaded function.  When calling a function with the **CALL** command, you may pass one or more arguments which the function can use as part of its execution.  See the **FUNCTION** command below for more information on creating and calling functions including examples.
 | CALL      | Working | CALL function \<arg\> ... |
 
 #### CASE
 
-| CASE      | Working | CASE <expression> |
+	CASE <expression>
 
 #### CD
 
-| CD        | Working | CD path or relative path |
+	CD path
+
+The **CD** command is used to change the current working directory.  You must supply the **CD** command a valid relative or absolute path.  Examples of relative paths include SUBDIR1 (a sub-directory in the current directory), ../SUBDIR2 (a sub-directory in the parent of the current directory), and SUBDIR1/SUBDIR3 ( a subdirectory in the subdirectory SUBDIR1 of the current directory).  An absolute path always begins with a / and includes the volume name of the disk drive to which change the current working directory such as /MYVOL1/VAR/LOGS (the subdirectory LOGS in the directory VAR on the disk with a volume label of MYVOL1).  
 
 #### DATE
 
@@ -251,7 +260,9 @@ The **BREAK** command is used to exit a particular **CASE** that is part of a **
 
 #### DEFAULT
 
-| DEFAULT   | Working | Default CASE for SWITCH |
+	DEFAULT
+
+The **DEFAULT** commands is used to select the block of commands to execute for the Default Case for the **SWITCH** command.  Structured appropriately, the commands after the **DEFAULT** keyword are executed when no other **CASE** was valid.  See the section on **CASE** and **SWITCH** for more information and complete examples for creating your own **SWITCH** login/execution blocks. 
 
 #### ECHO
 
@@ -293,11 +304,14 @@ CORE.STACK.MAX = 128....so each CALL consumes about 7 bytes of stack (return Ctx
 
 #### IF
 
-| IF        | Working | [ \<condition\> ] <br> ![ \<condition\> ]|
+	IF [ <\expression\> ]...
+  
 
 #### LOOP
 
-| LOOP      | Working | Terminator for WHILE block |
+	LOOP
+
+The **LOOP** command...
 
 #### MD
 
@@ -307,9 +321,10 @@ CORE.STACK.MAX = 128....so each CALL consumes about 7 bytes of stack (return Ctx
 
 | NOHUP     | Working | Start a process with PPID=PS0 (Daemon) |
 
-
 #### OR
 
+	IF|WHILE [ <\expression\> ] OR [ <\expression\> ]...
+  
 The **OR** reserved word is used to join 2 or more conditions together to create complex logic statements.  See \<condition\> section above for more information on **OR** and examples of its usage.  In addition, look at **[ANDORTESTS](EXAMPLES/ANDORTESTS.txt)**, a complete script using **OR**.
 
 #### PAUSE
