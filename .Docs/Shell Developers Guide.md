@@ -17,9 +17,9 @@ This Developers Guide will cover the basic operation of the interactive shell, t
 
 ## The A2osX Shell (SH)
 
-The default A2osX Shell, ./BIN/SH, is an A2osX external command program like many others included with A2osX.  It is probably the most complex and capable, as suggested by its size compared to other commands (7K vs 1K for TELNET), and is the primary tool for interacting with the A2osX system.  The SH shell is based losely on the Linux BASH shell, to the extent possible on an 8-bit machine.  Alternative shells are planned for the future and will be announced as they become available.
+The default A2osX Shell **./BIN/SH** is an external command program like many others included with A2osX.  It is probably the most complex and capable, as suggested by its size compared to other commands (7K vs 1K for TELNET).  It is the primary tool for interacting with the A2osX system.  The SH shell is based loosely on the Linux BASH shell, to the extent possible on an 8-bit machine.  Alternative shells are planned for the future and will be announced as they become available.
 
-As the primary mechanism for working with A2osX, the SH shell is launched automatically when you log into A2osX.  In the case where no ./ETC/PASSWD file is present, A2osX automatically logs you in as the ROOT user.  When a user login occurs and SH is launched, it looks for a file called PROFILE in the users HOME directory and if found executes that script, so the information below on writing scripts applies to the PROFILE script file.
+As the primary mechanism for working with A2osX, the SH shell is launched automatically when you log into A2osX.  In the case where no ./ETC/PASSWD file is present, A2osX automatically logs you in as the ROOT user.  When a user login occurs and SH is launched, it looks for a file called PROFILE in the users HOME directory and if found executes that script, so the information below on writing scripts applies to PROFILE script files.
 
 ### Interacting with the Shell
 
@@ -50,12 +50,12 @@ In addition to the editing keys above, you can use the following special keys wh
 
 ### Internal Commands
 
-The A2osX Shell contains an advanced set of internal commands.  Several of these commands are commonly used interactively (at the $ prompt) while others are most useful in scripts.  Technically all of these commands can be used both interactively or in scripts, though many really only show their power in scripts you develop or run.
+The A2osX Shell contains an advanced set of internal commands.  Several of these commands are typically used interactively (at the $ prompt) while others are typically used in scripts.  Technically all of these commands can be used both interactively or in scripts, though many really only show their power in scripts you develop or run.
 
 Whether in scripts or typed in at the interactive Shell prompt ($), most commands support, or even require, one or more *\<arguments\>* and/or *\<options\>*.  Commands typically use *\<values\>* as their *\<arguments\>* and *\<switches\>* as their *\<options\>*, however in some cases you may use *\<expressions\>*  or *<conditions\>*.  A full command line may be in the form of
 
-	**command \<switch\> \<value\> \<switch\> argument argument**   or
-	**command \[ <\condition\> \]**
+	command \<switch\> \<value\> \<switch\> argument argument   or
+	command \[ <\condition\> \]
 
 where in the first nomenclature a **command** performs an action with or on the objects passed as *\<arguments\>*, modifying its behavior (the action it performs) based on *\<switches\>* if present.  For example in the case of **LS -L /MYVOL** the command is **LS**, the option or switch is **-L** and the argument (target of the operation) is **/MYVOL**, which in this case the command would print a long listing of the root directory fo the ProDOS volume named /MYVOL.  The second nomenclature is used with the logic/control commands **IF** and **WHILE** where a *\<condition\>* is evaluated and the result is processed by the command to effect program flow.
 
@@ -81,7 +81,7 @@ The shell features a lot of built-in checks and comparisons called \<conditions\
 		ECHO message
 	FI
 
-> The single line notation allows these sample scripts to be significantly shorter; there operation is not affected.  Also note, you are not limited to a single command line between the IF/ELSE/FI statements.  See the documentation of the IF command for more information.
+> The single line notation allows these sample scripts to be significantly shorter; their operation is not affected.  Also note, you are not limited to a single command line between the IF/ELSE/FI statements.  See the documentation of the IF command for more information.
 
 This script demonstrates the usage of the various "Check" Conditions.
 
@@ -195,7 +195,7 @@ You can further extend \<conditions\> by building complex evaluations that consi
 		ECHO BYE
 	FI			# True  - HI	(2nd condition is met)
 
-When using multiple of these joiners with a single command such as **IF**, care should be made  in the structuring of your \<condition\> statements.  The shell processes command lines linearly from left to right and is very binary in nature.  Consider first a math example of **SET A = 1 + 2 * 3 - 4 * 8 + 2 / 2**, the result placed into **A** is 42 (process the calculations like a calculator would, one at a time, there is no precedence).  When evaluating a set of \<conditions\>, the shell processes them one at a time the same way and when it encounters an AND or an OR it evaluates the current "state" to determine if it should return a result or continue to evaluate the conditions ont he line.  Let us say you have 4 conditions, A, B, C and D (each one represents something like [ -d adir ]), and you are doing something like IF A AND B OR C AND D.  The Shell will determine a result for A (for example that [ -d adir]) and then it sees "AND", at that moment if A is false all processing ends there because it does not matter what else is on the command line (The IF fails).  Now assume A and B are both true and it gets to that OR, again processing stops be cause there is already a true case on one side of the OR (The IF succeeds).  As you can see, its easy to predict the behavior of constructs like IF A and B and C and D (all must be true) as well as IF A or B or C (any one need be true), but complex IF A or B and C or D and E need to be tested that they perform as you imagined.  Once mastered though, you will see that when structured correctly you can perform very complex \<condition\> sets.  Say you wanted to do IF ( A and B ) or C, realizing there is no actual groupings (parens) in conditions, if you simply structure your if as IF C OR A AND B, it will have the effect you wanted.  There is an example of complex compound conditions that you can run and even modify to test different patterns/structures of complex conditions.  It can be found at **[ANDORTESTS](EXAMPLES/ANDORTESTS.txt)**.
+When using multiple of these joiners with a single command such as **IF**, care should be made  in the structuring of your \<condition\> statements.  The shell processes command lines linearly from left to right and is very binary in nature.  Consider first a math example of **SET A = 1 + 2 * 3 - 4 * 8 + 2 / 2**, the result placed into **A** is 42 (process the calculations like a calculator would, one at a time, there is no precedence).  When evaluating a set of \<conditions\>, the shell processes them one at a time the same way and when it encounters an AND or an OR it evaluates the current "state" to determine if it should return a result or continue to evaluate the conditions ont he line.  Let us say you have 4 conditions, A, B, C and D (each one represents something like [ -d adir ]), and you are doing something like IF A AND B OR C AND D.  The Shell will determine a result for A (for example that [ -d adir]) and then it sees "AND", at that moment if A is false all processing ends there because it does not matter what else is on the command line (The IF fails).  Now assume A and B are both true and it gets to that OR, again processing stops be cause there is already a true case on one side of the OR (The IF succeeds).  As you can see, its easy to predict the behavior of constructs like IF A and B and C and D (all must be true) as well as IF A or B or C (any one need be true), but complex IF A or B and C or D and E need to be tested that they perform as you imagined.  Once mastered though, you will see that when structured correctly you can perform very complex \<condition\> sets.  Say you wanted to do IF ( A and B ) or C, realizing there is no actual groupings (parens) in conditions, if you simply structure your if as IF C OR A AND B, it will have the effect you wanted.  There is an example of complex compound conditions that you can run and even modify to test different patterns/structures of complex conditions.  It can be found at **[ANDORTESTS](../EXAMPLES/ANDORTESTS.txt)**.
 
 ##### \<expression\>
 
