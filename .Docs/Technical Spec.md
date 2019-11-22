@@ -18,8 +18,8 @@ This is the functional specification for A2osX and its system modules, internal 
 | Name     | Status      | Comment | K.Ver |
 | ----     | ------      | ------- | ------|
 | GETTY    | Working     | -E : Exit on remote close | 0.93 |
-| HTTPD    | Future      | Web Page Server Daemon |  |
-| INITD    | In Progress | Run Level Manger     | 0.93 |
+| HTTPD    | In Progress | Web Page Server Daemon | 0.94 |
+| INITD    | In Progress | Run Level Manger     | 0.94 |
 | INSDRV   | Working     | Loads HW Drivers        | 0.93 |
 | KCONFIG  | Working     | Kernel Configuration Utility | 0.93 |
 | LOGIN    | Working     | Authorization using /etc/passwd       | 0.93 |
@@ -35,7 +35,7 @@ This is the functional specification for A2osX and its system modules, internal 
 | Mouse.DRV | Future | Apple Mouse Card/Mouse Port | |
 | PIC.DRV | Future | Apple "Parallel Interface Card" Driver, renamed from PPIC.DRV |  |
 | SSC.DRV     | Working | Apple "Super Serial Card" Driver | 0.93 |
-| SSC.I.DRV   | In Progress | Apple "Super Serial Card" Driver (IRQ enabled) | 0.93 |
+| SSC.I.DRV   | Working | Apple "Super Serial Card" Driver (IRQ enabled) | 0.93 |
 | Uthernet.DRV  | Working |  Ethernet Network Interface | 0.93 |
 | Uthernet2.DRV | Working | Ethernet Network Interface | 0.93 |
 | Uther2.AI.DRV | In Progress | Network Interface With ARP/IP Offloading | 0.93 |
@@ -57,7 +57,7 @@ This is the functional specification for A2osX and its system modules, internal 
 | EDIT | Working | still missing : find/replace | 0.93 |
 | FORMAT | In Progress | FORMAT \<BLOCKDEV\> [VOLUME.NAME] <br> -B Blocks : Force number of blocks to format <br> -L : Low-Level Format *not currently supported <br> -1..9 : Catalog Size (block count) | 0.93 |
 | GREP | Working | GREP \<opt\> PATTERN FILE or CMD \| GREP \<opt\> PATTERN <br> -I : Ignore Case <br> -N : Print line Number | 0.93 |
-| HTTPGET | In Progress | HTTPGET <ip\|host> [port] <br> -U Url <br> -F UrlFile | 0.93 |
+| HTTPGET | Working | HTTPGET <ip\|host> [port] <br> -U Url <br> -F UrlFile | 0.93 |
 | IPCONFIG | Working | -D : Try to get IP address from DHCP <br> -E : Read ETC files <br> -S : Set/Reset TCPIP configuration (-E, then -D if required) | 0.93 |
 | KILL | Working | KILL \<signal\> PID <br> -0 : No Signal <br> -1 : SIGQUIT <br> -2 : SIGKILL  | 0.93 |
 | LS | Working | -A : Print . & .. <br> -C : Single column listing <br> -F : Single column, includes full path <br> -L : long listing with size/date... <br> -R : Recurse subdirectories | 0.93 |
@@ -79,17 +79,17 @@ This is the functional specification for A2osX and its system modules, internal 
 | SH    | Working     | Shell Command Processor<br>(See Internal Shell commands) | 0.93 |
 | TELNET | Working | TELNET <ip\|host> [port] |  0.93 |
 | TERM | Testing | TERM \<device\> | 0.93 |
-| UNPAK | Testing | UNPAK archive | 0.93 |
+| UNPAK | Working | UNPAK archive | 0.93 |
 | USERADD | Testing | USERADD username <br> -c Comment : GECOS comment<br> -d HD : Home Directory <br> -p PW : Password <br> -s SH : Shell | 0.93 |
 | USERDEL | Testing | USERDEL username <br> -r : Force removes files in home directory | 0.93 |
-| WC | Testing | WC File(s) (*,? wildcards allowed) <br> -C: Continue on error<br> -R: Recurse Subdirectories<br> -M: Print CHAR counts<br> -L: Print LINE counts<br> -W: Print WORD counts | 0.93 |
-| WHO | Testing | List Users Online | 0.93 |
+| WC | Working | WC File(s) (*,? wildcards allowed) <br> -C: Continue on error<br> -R: Recurse Subdirectories<br> -M: Print CHAR counts<br> -L: Print LINE counts<br> -W: Print WORD counts | 0.93 |
+| WHO | Working | List Users Online | 0.93 |
 
 ## Internal Shell commands:
 
 | Name      | Status  | Comment |
 | ----      | ------  | ------- |
-| \<condition\> | Working |[ -D direxists ] <br> [ -E fileordirexists ] <br> [ -F fileexists ]<br> [ -I $VAR variable is an integer ] <br> [ -N $VAR variable is not empty ] <br> [ -Z $VAR variable is empty ] <br> [ string1 = string2 ] <br> [ string1 != string2 ] <br> [ string1 .< string2 ] <br> [ string1 <= string2 ] <br> [ string1 .> string2 ] <br> [ string1 >= string2 ] <br> [ int32 -eq int32 ] <br> [ int32 -ne int32 ] <br> [ int32 -lt int32 ] <br> [ int32 -le int32 ] <br> [ int32 -gt int32 ] <br> [ int32 -ge int32 ] |
+| \<condition\> | Working |[ -D direxists ] <br> [ -E fileordirexists ] <br> [ -F fileexists ]<br> [ -I isaninteger ] <br> [ -N $VAR variable is not empty ] <br> [ -Z $VAR variable is empty ] <br> [ string1 = string2 ] <br> [ string1 != string2 ] <br> [ string1 .< string2 ] <br> [ string1 <= string2 ] <br> [ string1 .> string2 ] <br> [ string1 >= string2 ] <br> [ int32 -eq int32 ] <br> [ int32 -ne int32 ] <br> [ int32 -lt int32 ] <br> [ int32 -le int32 ] <br> [ int32 -gt int32 ] <br> [ int32 -ge int32 ] |
 | \<expression\> | Working | \<value\> [\<op\> \<value\>] ... |
 | \<op\> | Working  | \+ : signed int32 add <br> \- : signed int32 subtract <br>  \* : signed int32 multiply<br> / : signed int32 divide <br> mod : signed int32 modulo |
 | \<value\> | Working | $VAR \| string \| "string with SPACE" \| 123 \| -456 |
