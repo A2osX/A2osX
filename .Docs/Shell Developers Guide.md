@@ -374,11 +374,13 @@ The **EXIT** command is used to immediately end the processing of a script or fu
 			BREAK
 	END
 
+>Besides the **EXIT** command, the example above also demonstrates how to check that input is a number rather then a string (-I), using newlines (\n) to properly format the screen (the READ command leaves the cursor on the line of input), and passing a variable name to a function (this is a clever way to get return values from commands).
+
 ### FI
 
 	FI
 
-Terminator for IF block
+The **FI** command is used at the end of an **IF** script block. See the **IF** command below for more information and example of using **FI** as part of **IF**.
 
 ### FUNCTION
 
@@ -410,13 +412,17 @@ CORE.STACK.MAX = 128....so each CALL consumes about 7 bytes of stack (return Ctx
 
 	LOOP
 
-The **LOOP** command...
+The **LOOP** command is used at the end of a **WHILE** script block. See the **WHILE** command below for more information and example of using **LOOP** as part of **WHILE**.
 
 ### MD
 
-| MD        | Working | MD path or relative path <br> Create a directory |
+	MD <value>
+
+MD path or relative path <br> Create a directory |
 
 ### NOHUP
+
+	NOHUP <value> [&]
 
 | NOHUP     | Working | Start a process with PPID=PS0 (Daemon) |
 
@@ -428,7 +434,9 @@ The **OR** reserved word is used to join 2 or more conditions together to create
 
 ### PAUSE
 
-| PAUSE     | Working | Wait until CR |
+	PAUSE
+
+The **PAUSE** commands halts the execution of a script until the user pressing the return key. 
 
 ### POPD
 
@@ -436,19 +444,25 @@ The **OR** reserved word is used to join 2 or more conditions together to create
 
 ### PUSHD
 
-| PUSHD     | Working | Save actual working directory <br> PUSHD \<dir\> do also a CD to \<dir\> |
+	PUSHD [ <value> ]
+
+Save actual working directory <br> PUSHD \<dir\> do also a CD to \<dir\>
 
 ### PWD
 
-| PWD       | Working | Print Working Directory |
+	PWD
+
+the **PWD** command prints the current working directory.  You can change the working directory with the **CD** command or with the **POPD** command is a working directory has been previously **PUSHD**.
 
 ### RD
 
-| RD        | Working | Delete an empty directory |
+	RD <value>
+
+Delete an empty directory
 
 ### READ
 
-| READ      | Working | -S : no echo (password) <br> -P : "prompt message" <br> -N maxchar  |
+	READ [ -S ] [ -P <value> ] [ -N int32 ] <variable>
 
 The READ command allows you to accept input from the user which can be used or evaluated in other commands.  For instance you can use the READ command to get the name of a file to copy, ask the user for confirmation (Proceed?) and evaluate their response with an IF command, etc.  READ has several powerful options including: Prompt, Suppress and NumChars. In all cases you must specify a variable in which to place the results of the READ command.
 
@@ -477,7 +491,7 @@ The READ command allows you to accept input from the user which can be used or e
 
 ### REN
 
-| REN       | Working | Rename a file, directory or volume |
+	REN <value> <value>
 
 The REN command allows you to Rename a single file, directory or Volume.  It does not support wild cards.  While REN and MV may seem similar, they are very different commands and you should use each for its intended purpose.  In the case of REN, it changes the name of an item (Vol, Dir, File) in place; the item itself is not changed.  For those familiar with ProDOS file systems, REN changes the entry of an item in the CATALOG.  MV on the other hand actually copies files (and removes the original) to move them.  Obviously REN is more efficient at RENaming an item in its current location, whereas MV could be used to change the location of a file (MV it from one directory or even volume to another).  Yes you can use MV MYFILE NEWFILE to do the same thing as REN MYFILE NEWFILE, but since a copy must occur, it will be slower and you will have to have sufficient disk space free to make this copy.
 
