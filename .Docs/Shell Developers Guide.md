@@ -1,29 +1,25 @@
 
 # A2osX Shell Developers Guide
 
-### Updated November 20, 2019
+### Updated November 22, 2019
 
-One of the most significant parts of A2osX is its shell which can perform both interactive and scripted tasks.  With the interactive part of the shell you can perform many common and complex tasks using both built-in (native or internal to shell) and external (BIN or executable) commands.  Internal commands include CD (change directory), MD (make directory), PWD, DATE, etc.  External commands include CP (copy), RM (remove), CAT (display file contents), TELNET, etc.
+One of the most significant parts of A2osX is its shell which can perform both interactive and scripted tasks.  Using the interactive part of the shell, you can perform many common and complex tasks using both built-in (native or internal to shell) and external (BIN or executable) commands.  Internal commands include CD (change directory), MD (make directory), PWD, DATE, etc.  External commands include CP (copy), RM (remove), CAT (display file contents), TELNET, etc.  It is even possible to create and execute short scripts right on the interactive command line (these are run once and not saved like true scripts) such as:
 
-It should be noted, that it is even possible to create and execute short scripts right on the interactive command line (these are run once and not saved like true scripts).  An example
-
-```
-FOR FILE IN `LS -C CT*`; CAT ${FILE}; NEXT
-```
+	FOR FILE IN `LS -C CT*`; CAT ${FILE}; NEXT
 
 In this example, the system will generate a list of files found in the current directory which match the CT* wild card and perform the CAT operation on each.  The semicolons act as line separators allowing you to type in multiple commands, or short scripts on a single line.
 
-This Developers Guide will cover the basic operation of the interactive shell, the internal shell commands and creating complex scripts that can be run by the shell.  For information on external commands consult the **[A2osX Command Guide](Command%20Guide.md)**.
+This Developers Guide will cover the basic operation of the interactive shell, the internal shell commands and creation of complex scripts that can be run by the shell.  For information on external commands consult the **[A2osX Command Guide](Command%20Guide.md)**.
 
 ## About the A2osX Shell (SH)
 
 The default A2osX Shell **./BIN/SH** is an external command program like many others included with A2osX.  It is probably the most complex and capable, as suggested by its size compared to other commands (7K vs 1K for TELNET).  It is the primary tool for interacting with the A2osX system.  The SH shell is based loosely on the Linux BASH shell, to the extent possible on an 8-bit machine.  Alternative shells are planned for the future and will be announced as they become available.
 
-As the primary mechanism for working with A2osX, the SH shell is launched automatically when you log into A2osX.  In the case where no ./ETC/PASSWD file is present, A2osX automatically logs you in as the ROOT user.  When a user login occurs and SH is launched, it looks for a file called PROFILE in the users HOME directory and if found executes that script, so the information below on writing scripts applies to PROFILE script files.
+As the primary mechanism for working with A2osX, the shell (SH) is launched automatically when you log into A2osX.  In the case where no ./ETC/PASSWD file is present, A2osX automatically logs you in as the ROOT user.  When a user login occurs and SH is launched, it looks for a file called PROFILE in the users HOME directory and if found, executes that script.  The information below on writing scripts applies to PROFILE script files.
 
 ## Interacting with the Shell
 
-To interact with the A2osX shell, you type commands at the prompt, which ends with a **$** character.  The prompt usually includes your current working directory such as **/FULLBOOT/ROOT/$**.  You can change the prompt by changing the **$PS1** variable (see below).  At the **$** you can enter any of the valid internal shell commands, an external program file name or a script file name.  For external programs and scripts, A2osX will search in the current directory and then in the directories specified in the **$PATH** variable.  
+To interact with the A2osX shell, you type commands at the prompt, which ends with a **$** character.  The prompt usually includes your current working directory such as **/FULLBOOT/ROOT/$**.  You can change the prompt by changing the **$PS1** variable (see below).  At the **$** prompt you can enter any of the valid internal shell commands, an external program file name or a script file name.  For external programs and scripts, A2osX will search in the directories specified in the **$PATH** variable and then in the current directory.  
 
 ### Special Keys
 
@@ -83,7 +79,7 @@ The shell features a lot of built-in checks and comparisons called \<conditions\
 
 > The single line notation allows these sample scripts to be significantly shorter; their operation is not affected.  Also note, you are not limited to a single command line between the IF/ELSE/FI statements.  See the documentation of the IF command for more information.
 
-The shell includes several "checks" that can be used to easily determine if certain \<conditions> are true or false.  The format of a check is **[ -CHECK \<value> ]** where -CHECK is one **-D** (is a directory), **-E** (is a directory or a file), **-F** (is a file), **-I** (is an integer), **-N** (is a null) or **-Z** (is not null) and where \<value> is a variable or literal on which to perform the check.  This script demonstrates the usage of these "Check" Conditions.
+The shell includes several "checks" that can be used to easily determine if certain \<conditions> are true or false.  The format of a check is **[ -CHECK \<value> ]** where -CHECK is one **-D** (is a directory), **-E** (is a directory or a file), **-F** (is a file), **-I** (is an integer), **-N** (is a null), **-X** (is a defined function) or **-Z** (is not null) and where \<value> is a variable or literal on which to perform the check.  This script demonstrates the usage of these "Check" Conditions.
 
     #!/BIN/SH
 	#
@@ -106,6 +102,9 @@ The shell includes several "checks" that can be used to easily determine if cert
 	#	Note the next two -N and -Z are in affect opposites of each other ![ -N ] = [ -Z ]
 	#	Echo "True" if the variable is not empty (non-null)
 	SET ABC = "Hello" ; IF [ -N $ABC ] ; ECHO "True" ; FI	# True
+	#	Echo "True" if a function named MYFUNC has been defined
+	#	See the section on functions for more information on this check
+	IF [ -X MYFUNC ] ; ECHO "True" ; FI					# False
 	#	Echo "True" if the variable is empty/does not exist (null)
 	SET ABC =  ; IF [ -Z $ABC ] ; ECHO "True" ; FI		# True
 	SET ABC = "Hello" ; IF [ -Z $ABC ] ; ECHO "True" ; FI	# False
@@ -201,7 +200,7 @@ When using multiple of these joiners with a single command such as **IF**, care 
 
 #### \<expression\>
 
-The A2osX shell contains a expression evaluator that can perform simple integer math operations using the \+ \- \* \/ and MOD operators.  Expressions are a form of an argument used by only a handful of commands, most notably SET (to store the result of the expression into a variable) and CASE/SWITCH.
+The A2osX shell contains an expression evaluator that can perform simple integer math operations using the **\+ \- \* \/** and **MOD** operators.  Expressions are a form of an argument used by only a handful of commands, most notably SET (to store the result of the expression into a variable) and CASE/SWITCH.
 
     #!/BIN/SH
 	#
@@ -231,7 +230,7 @@ Please note, that the shell does string substitution when processing \<values>. 
 
 ### AND
 
-	IF|WHILE [ <\expression\> ] AND [ <\expression\> ]...
+	[ <\expression\> ] AND [ <\expression\> ]...
 
 The **AND** reserved word is used to join 2 or more conditions together to create complex logic statements.  See \<condition\> section above for more information on **AND** and examples of its usage.  In addition, look at **[ANDORTESTS](EXAMPLES/ANDORTESTS.txt)**, a complete script using **AND**.
 
@@ -294,7 +293,7 @@ The following script highlights sample \<expressions> you can pass the **DATE** 
 
 	DEFAULT
 
-The **DEFAULT** commands is used to select the block of commands to execute for the Default Case for the **SWITCH** command.  Structured appropriately, the commands after the **DEFAULT** keyword are executed when no other **CASE** was valid.  See the section on **CASE** and **SWITCH** for more information and complete examples for creating your own **SWITCH** login/execution blocks. 
+The **DEFAULT** commands is used to select the block of commands to execute for the Default Case for the **SWITCH** command.  Structured appropriately, the commands after the **DEFAULT** keyword are executed when no other **CASE** was valid.  See the section on **CASE** and **SWITCH** for more information and complete examples for creating your own **SWITCH** execution blocks. 
 
 ### ECHO
 
@@ -302,25 +301,27 @@ The **DEFAULT** commands is used to select the block of commands to execute for 
 
 The **ECHO** command is used to print <values> to an output device, by default the screen.  The **ECHO** command optional switch **-N** causes **ECHO** to suppress output of the carriage return that normally occurs.  Technically the format of the ECHO command is **ECHO [-N] [\<value\> ...]**.  This means that the ECHO command can be followed by the optional switch -N and one or more optional \<values\>.  In the case of ECHO, it is these \<values\> that are output by the command.  Here, values are separated by spaces, so you can do ECHO $A HELLO $B and echo will output the value stored in the variable A and then the world HELLO and then the value stored in B.  Please see \<values> for more information on how values are processed, especially in the handling of variables ($VAR) contained in a \<value>.
 
-A word about values, command lines and spaces: **ECHO Hello World** is not the same as **ECHO "Hello World"**.  In the first case you ECHO treats Hello and World as separate values and in the second, "Hello World" as one value.  Since ECHO takes multiple values, you might not notice the difference, but in the case of **IF [ $A = "Hello World" ]** if you omitted the quotes you would get a syntax error because the = operator only accepts one value on each side.  In addition, when not enclosed in quotes, extra spaces are removed so **ECHO Hello&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;World** would be output as **Hello World** as ECHO would treat Hello and World as values and output value space value. 
+A word about values, command lines and spaces: **ECHO Hello World** is not the same as **ECHO "Hello World"**.  In the first case ECHO treats Hello and World as separate values and in the second, "Hello World" as one value.  Since ECHO takes multiple values, you might not notice the difference, but in the case of **IF [ $A = "Hello World" ]** if you omitted the quotes you would get a syntax error because the = operator only accepts one value on each side.  In addition, when not enclosed in quotes, extra spaces are removed so **ECHO Hello&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;World** would be output as **Hello World** as ECHO would treat Hello and World as values and output value space value. 
 
- \b,\e,\f,\n,\\\ and \\% supported <br> -N : Suppress \r\n |
+In addition to the usual variable substitution that occurs with \<values> (see \<value> above), the **ECHO** command performs some special character substitutions while sending output to the screen or terminal.  If placed inside a value like a string, **ECHO** will automatically substitute a backspace for the sequence **\b**, substitute an escape for **\e**, clear the screen for **\f**, send a newline for **\n**, send a \ for **\\\\** and send a % for **\\%**.  The **\e** (escape) code is useful for sending VT100 escape sequences to the screen/terminal (see the VT100 example script).  The **\\\\** and **\\%** are necessary to send those chars to the screen since normally those characters are interpreted as special command line arguments.    There is also a special **\xHH** option, that will send explicitly the char represented by the HEX value HH to the output device (screen or file).
 
     #!/BIN/SH
 	#
 	#   ECHO Command Examples
 	#
 	ECHO Hello    World		'Hello World	#Note SH treats as 2 <values>
-	ECHO "Hello    World"   'Hello    World
-	ECHO \f					'Clears Screen
+	ECHO "Hello    World"   	'Hello    World
+	ECHO \f				'Clears Screen
 	ECHO "\fHello"			'Clears Screen puts Hello on first line
 	ECHO "\n\nHello'		'Sends to Carraige Returns then Hello to output
 	SET A$ = HELLO
-	ECHO A$					'HELLO
-	ECHO "$A, How are you?"	'HELLO, How are you?
+	ECHO A$				'HELLO
+	ECHO "$A, How are you?"		'HELLO, How are you?
 	ECHO "$AB, fine!"		', fine!		#Note AB is not defined
 	ECHO "${A}B, fine!"		'HELLOB, fine!	#Brackets ensure A substitution
 	ECHO "123\b\b456"		'1456			#two backspaces (\b) over the 23
+	ECHO -N "\xFF\xFF" > afile	'Create file called afile and put exactly the
+					'bytes Hex FF and Hex FF into it.
 
 ### ELSE
 
@@ -338,22 +339,40 @@ The **END** command is used at the end of a **SWITCH** script block. See the **S
 
 	EXIT [int32]
 
-The **EXIT** command is used to immediately end the processing of a script or function.  **EXIT** accepts an optional argument that sets the return code (**$?**) which may be checked by a calling script.  If no argument is provided the return code is set to 0 (No Error).
+The **EXIT** command is used to immediately end the processing of a script or function.  **EXIT** accepts an optional argument that sets the return code (**$?**) which may be checked by a calling script.  If no argument is provided the return code is set to 0 (No Error).  The following script demonstrating the use of the EXIT command can be found in the [EXAMPLES](EXAMPLES) folder.
 
     #!/BIN/SH
 	#
 	#   EXIT Command Examples
 	#
-	# THis example shows the use of EXIT from a function with a return code
+	# This example shows the use of EXIT from a function with a return code
 	#
 	FUNCTION DIVIDE
-		{
-			SET $3
-		}
-	READ -P "Enter a number: " $A
-	READ -P "Another number: " $B
+	{
+		IF ![ -I $A ] AND ![ -I $B ]
+			# Error not vars not integers
+			EXIT 3
+		FI
+		IF [ $B -EQ 0 ]
+			# Error Zero Divisor
+			EXIT 7
+		FI 
+		SET $3 = $A / $B
+	}
+	READ -P "\nEnter a number: " $A
+	READ -P "\nAnother number: " $B
 	CALL DIVIDE $A $B C
-	
+	SWITCH $?
+		CASE 0
+			ECHO "\n$A divided by $B is $C\n"
+			BREAK
+		CASE 3
+			ECHO "\nError: Input not Integers\n"
+			BREAK
+		CASE 7
+			ECHO "\nError: Divide by Zero Prohibitied\n"
+			BREAK
+	END
 
 ### FI
 
@@ -403,7 +422,7 @@ The **LOOP** command...
 
 ### OR
 
-	IF|WHILE [ <\expression\> ] OR [ <\expression\> ]...
+	[ <\expression\> ] OR [ <\expression\> ]...
   
 The **OR** reserved word is used to join 2 or more conditions together to create complex logic statements.  See \<condition\> section above for more information on **OR** and examples of its usage.  In addition, look at **[ANDORTESTS](EXAMPLES/ANDORTESTS.txt)**, a complete script using **OR**.
 
