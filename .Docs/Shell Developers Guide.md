@@ -1,7 +1,7 @@
 
 # A2osX Shell Developers Guide
 
-### Updated November 22, 2019
+### Updated November 23, 2019
 
 One of the most significant parts of A2osX is its shell which can perform both interactive and scripted tasks.  Using the interactive part of the shell, you can perform many common and complex tasks using both built-in (native or internal to shell) and external (BIN or executable) commands.  Internal commands include CD (change directory), MD (make directory), PWD, DATE, etc.  External commands include CP (copy), RM (remove), CAT (display file contents), TELNET, etc.  It is even possible to create and execute short scripts right on the interactive command line (these are run once and not saved like true scripts) such as:
 
@@ -339,7 +339,7 @@ The **END** command is used at the end of a **SWITCH** script block. See the **S
 
 	EXIT [int32]
 
-The **EXIT** command is used to immediately end the processing of a script or function.  **EXIT** accepts an optional argument that sets the return code (**$?**) which may be checked by a calling script.  If no argument is provided the return code is set to 0 (No Error).  The following script demonstrating the use of the EXIT command can be found in the [EXAMPLES](EXAMPLES) folder.
+The **EXIT** command is used to immediately end the processing of a script or function.  **EXIT** accepts an optional argument that sets the return code (**$?**) which may be checked by a calling script.  If no argument is provided the return code is set to 0 (No Error).  The following script demonstrating the use of the EXIT command can be found in the [EXAMPLES](../EXAMPLES) folder.
 
     #!/BIN/SH
 	#
