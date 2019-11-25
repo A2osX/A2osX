@@ -230,42 +230,6 @@ Change The type of a ProDOS File
 
 ## RETURN VALUE  
 
-# LoadTxtFile  
-Load TXT a file in memory (with ending 0)  
-
-## C  
-`int loadtxtfile ( const char * filename, short int flags, short int ftype, int auxtype );`  
-
-## ASM  
-**In:**  
-`>PUSHW auxtype`  
-`>PUSHB ftype`  
-`>PUSHB flags`  
-`>LDYA filename`  
-`>SYSCALL loadtxtfile`  
-
-## RETURN VALUE  
- Y,A = File Length (without ending 0)  
- X = hMem of Loaded File  
-
-# LoadFile  
-Load a file in memory  
-
-## C  
-`int loadfile ( const char * filename, short int flags, short int ftype, int auxtype );`  
-
-## ASM  
-**In:**  
-`>PUSHW auxtype`  
-`>PUSHB ftype`  
-`>PUSHB flags`  
-`>LDYA filename`  
-`>SYSCALL loadfile`  
-
-## RETURN VALUE  
- Y,A = File Length  
- X = hMem of Loaded File  
-
 # ChOwn  
 **In:**  
  PUSHW = mod  
@@ -275,6 +239,19 @@ Load a file in memory
 **In:**  
  PUSHW = GID  
  PUSHW = PATH  
+
+# Add32,Sub32,Mul32,IMul32,Div32,IDiv32,Mod32,IMod32,Cmp32,ICmp32  
+Return X+Y, X-Y, X*Y, X/Y, X mod Y....  
+
+## ASM  
+**In:**  
+`>PUSHF X (long)`  
+`>PUSHF Y (long)`  
+`>FPU add32`  
+`...`  
+
+## RETURN VALUE  
+ On stack (long)  
 
 # FAdd,FSub,FMult,FDiv,FPwr  
 Return X+Y, X-Y, X*Y, X/Y, X^Y  
@@ -316,11 +293,12 @@ Return Log(x), Sqr(x), E^X, Cos(x), Sin(X), Tan(x), ATan(x)
 Return 'floated' long  
 
 ## C  
-`float f = (float)12345678;  
+`float f = (float)l;  
 
 ## ASM  
 **In:**  
- `>PUSHL X` (long)  
+`>PUSHL l` (long)  
+`>FPU float`  
 
 ## RETURN VALUE  
  On stack (float)  
@@ -334,67 +312,10 @@ Return float rounded into a long
 ## ASM  
 **In:**  
 `>PUSHF x`  
-`>SYSCALL lrintf`  
+`>FPU lrintf`  
 
 ## RETURN VALUE  
  On stack (long)  
-
-# open  
-
-## C  
-`hFD open(const char *pathname, short int flags);`  
-
-## ASM  
-**In:**  
-`>PUSHB flags`  
-`>LDYA pathname`  
-`>SYSCALL open`  
-
-## RETURN VALUE  
-A = hFD  
-REG File created on ProDOS : T=TXT,X=$0000  
-
-# close  
-
-## C  
-`int close(hFD fd);`  
-
-## ASM  
-**In:**  
-`lda fd`  
-`>SYSCALL close`  
-
-# read  
-
-## C  
-`int read(hFD fd, void *buf, int count);`  
-
-## ASM  
-**In:**  
-`>PUSHWI count`  
-`>PUSHW buf`  
-`lda fd`  
-`>SYSCALL read`  
-
-## RETURN VALUE  
-CC: Y,A = bytes read  
-CS: A = EC  
-
-# write  
-
-## C  
-`int write(hFD fd, const void *buf, int count);`  
-
-## ASM  
-**In:**  
-`>PUSHWI count`  
-`>PUSHW buf`  
-`lda fd`  
-`>SYSCALL write`  
-
-## RETURN VALUE  
-CC: Y,A = bytes written  
-CS: A = EC  
 
 # IOCTL  
 
@@ -444,12 +365,165 @@ A = hMem
 Y,A = PTR to MemBlock  
 (X unmodified)  
 
+# NewStkObj  
+ Y,A = Size Requested  
+
+## RETURN VALUE  
+ CC : success  
+  YA = PTR to Mem (Uninitialised)  
+*	X = hMem  
+ CS :  
+  A = EC  
+
+# LoadStkObj  
+Load a file in AUX memory (Stock Objects)  
+ PUSHW = AUXTYPE (Handled by....  
+ PUSHB = TYPE  ...  
+ PUSHB = MODE  ...  
+ LDYA = PATH ...FOpen)  
+
+## RETURN VALUE  
+ Y,A = File Length  
+ X = hMem of Loaded Object in AUX mem  
+
+# GetStkObjPtr  
+
+## ASM  
+`lda hStkObj`  
+`>SYSCALL GetStkObjPtr`  
+
+## RETURN VALUE  
+
+# FreeStkObj  
+ A = hMem To Free (AUX Memory)  
+
+## RETURN VALUE  
+ none.  
+ (X,Y unmodified)  
+
+# ExecL  
+
+## C  
+`int execl(const char* cmdline, short int flags);`  
+
+## ASM  
+`>PUSHB flags`  
+`>LDYA cmdline`  
+`>SYSCALL execl`  
+
+## RETURN VALUE  
+A = Child PSID  
+
+# ExecV  
+
+## C  
+`int execv(const char* argv[], short int flags);`  
+
+## ASM  
+`>PUSHB flags`  
+`>LDYA argv`  
+`>SYSCALL execv`  
+
+## RETURN VALUE  
+A = Child PSID  
+
+# Kill  
+
+## C  
+`int kill(short int pid, short int sig);`  
+
+## ASM  
+`>PUSHB sig`  
+`lda pid`  
+`>SYSCALL kill`  
+
+## RETURN VALUE  
+A = Child PSID  
+
+# LoadTxtFile  
+Load TXT a file in memory (with ending 0)  
+
+## C  
+`int loadtxtfile ( const char * filename, short int flags, short int ftype, int auxtype );`  
+
+## ASM  
+**In:**  
+`>PUSHW auxtype`  
+`>PUSHB ftype`  
+`>PUSHB flags`  
+`>LDYA filename`  
+`>SYSCALL loadtxtfile`  
+
+## RETURN VALUE  
+ Y,A = File Length (without ending 0)  
+ X = hMem of Loaded File  
+
+# LoadFile  
+Load a file in memory  
+
+## C  
+`int loadfile ( const char * filename, short int flags, short int ftype, int auxtype );`  
+
+## ASM  
+**In:**  
+`>PUSHW auxtype`  
+`>PUSHB ftype`  
+`>PUSHB flags`  
+`>LDYA filename`  
+`>SYSCALL loadfile`  
+
+## RETURN VALUE  
+ Y,A = File Length  
+ X = hMem of Loaded File  
+
+# GetMemStat  
+**In:**  
+ Y,A = Ptr to 24 bytes buffer  
+
+## RETURN VALUE  
+ Buffer filled with memory stats  
+
+# GetPWUID  
+
+## C  
+`int getpwuid(short int uid, S.PW* passwd );`  
+
+## ASM  
+`>PUSHW passwd`  
+`lda uid`  
+`>SYSCALL getpwuid`  
+
+## RETURN VALUE  
+
+# GetPWName  
+
+## C  
+`int getpwname(const char* name, S.PW* passwd );`  
+
+## ASM  
+`>PUSHW passwd`  
+`>LDYA name`  
+`>SYSCALL getpwname`  
+
+## RETURN VALUE  
+
+# PutPW  
+
+## C  
+`int putpw( S.PW* passwd );`  
+
+## ASM  
+`>LDYA passwd`  
+`>SYSCALL putpw`  
+
+## RETURN VALUE  
+
 # SListGetData  
 
 ## ASM  
-`PUSHW DataOfs`  
-`PUSHW DataLen`  
-`PUSHW DataPtr`  
+`PUSHW DataOfs` (Start offset in Data)  
+`PUSHW DataLen` (Data bytes to return, 0 if String mode)  
+`PUSHW DataPtr` (0 if KERNEL should allocate a buffer)  
 `PUSHW KeyID`  
 `lda hSList`  
 `>SYSCALL SListGetData`  
@@ -528,123 +602,6 @@ A=hSList
 `>SYSCALL SListFree`  
 
 ## RETURN VALUE  
-
-# NewStkObj  
- Y,A = Size Requested  
-
-## RETURN VALUE  
- CC : success  
-  YA = PTR to Mem (Uninitialised)  
-*	X = hMem  
- CS :  
-  A = EC  
-
-# LoadStkObj  
-Load a file in AUX memory (Stock Objects)  
- PUSHW = AUXTYPE (Handled by....  
- PUSHB = TYPE  ...  
- PUSHB = MODE  ...  
- LDYA = PATH ...FOpen)  
-
-## RETURN VALUE  
- Y,A = File Length  
- X = hMem of Loaded Object in AUX mem  
-
-# GetStkObjPtr  
-
-## ASM  
-`lda hStkObj`  
-`>SYSCALL GetStkObjPtr`  
-
-## RETURN VALUE  
-
-# FreeStkObj  
- A = hMem To Free (AUX Memory)  
-
-## RETURN VALUE  
- none.  
- (X,Y unmodified)  
-
-# ExecL  
-
-## C  
-`int execl(const char* cmdline, short int flags);`  
-
-## ASM  
-`>PUSHB flags`  
-`>LDYA cmdline`  
-`>SYSCALL execl`  
-
-## RETURN VALUE  
-A = Child PSID  
-
-# ExecV  
-
-## C  
-`int execv(const char* argv[], short int flags);`  
-
-## ASM  
-`>PUSHB flags`  
-`>LDYA argv`  
-`>SYSCALL execv`  
-
-## RETURN VALUE  
-A = Child PSID  
-
-# Kill  
-
-## C  
-`int kill(short int pid, short int sig);`  
-
-## ASM  
-`>PUSHB sig`  
-`lda pid`  
-`>SYSCALL kill`  
-
-## RETURN VALUE  
-A = Child PSID  
-
-# GetPWUID  
-
-## C  
-`int getpwuid(short int uid, S.PW* passwd );`  
-
-## ASM  
-`>PUSHW passwd`  
-`lda uid`  
-`>SYSCALL getpwuid`  
-
-## RETURN VALUE  
-
-# GetPWName  
-
-## C  
-`int getpwname(const char* name, S.PW* passwd );`  
-
-## ASM  
-`>PUSHW passwd`  
-`>LDYA name`  
-`>SYSCALL getpwname`  
-
-## RETURN VALUE  
-
-# PutPW  
-
-## C  
-`int putpw( S.PW* passwd );`  
-
-## ASM  
-`>LDYA passwd`  
-`>SYSCALL putpw`  
-
-## RETURN VALUE  
-
-# GetMemStat  
-**In:**  
- Y,A = Ptr to 24 bytes buffer  
-
-## RETURN VALUE  
- Buffer filled with memory stats  
 
 # Stat  
 Return information about a file  
@@ -847,7 +804,7 @@ Specifiers :
 
 Modifiers for len and padding :   
 + %d	  : '9'  '12'  
-+ %2d	  : ' 9' '12'   				  
++ %2d	  : ' 9' '12'  
 + %02d  : '09' '12'  
 + %11s  : 'ABCDEFGH   '	  
 + %011s : 'ABCDEFGH000'  
@@ -1178,7 +1135,7 @@ Return the canonicalized absolute pathname
 
 ## RETURN VALUE  
 CC : success  
- Y,A = Ptr to Full Path (C-String)  
+ Y,A = Ptr to Full Path (C-String Buffer, MLI.MAXPATH+1)  
  X = hMem of Full Path  
 CS : A = Error Code  
 
@@ -1232,7 +1189,7 @@ Y,A = Ptr to source C-String
 ## RETURN VALUE  
 CC : success   
  Y,A = PTR to String  
- X = hMem (PSTR)  
+ X = hMem (C-String)  
 CS : error  
  A = SYS error code  
 
@@ -1357,6 +1314,63 @@ Convert S.TIME struct to CSTR
 
 ## RETURN VALUE  
   none. always succeed.  
+
+# open  
+
+## C  
+`hFD open(const char *pathname, short int flags);`  
+
+## ASM  
+**In:**  
+`>PUSHB flags`  
+`>LDYA pathname`  
+`>SYSCALL open`  
+
+## RETURN VALUE  
+A = hFD  
+REG File created on ProDOS : T=TXT,X=$0000  
+
+# close  
+
+## C  
+`int close(hFD fd);`  
+
+## ASM  
+**In:**  
+`lda fd`  
+`>SYSCALL close`  
+
+# read  
+
+## C  
+`int read(hFD fd, void *buf, int count);`  
+
+## ASM  
+**In:**  
+`>PUSHWI count`  
+`>PUSHW buf`  
+`lda fd`  
+`>SYSCALL read`  
+
+## RETURN VALUE  
+CC: Y,A = bytes read  
+CS: A = EC  
+
+# write  
+
+## C  
+`int write(hFD fd, const void *buf, int count);`  
+
+## ASM  
+**In:**  
+`>PUSHWI count`  
+`>PUSHW buf`  
+`lda fd`  
+`>SYSCALL write`  
+
+## RETURN VALUE  
+CC: Y,A = bytes written  
+CS: A = EC  
 
 ## License
 A2osX is licensed under the GNU General Pulic License.

@@ -4,20 +4,17 @@
 Copyright 2015 - 2019, Remy Gibert and the A2osX contributors. 
 
 # Pak  
-**In:**  
 
 ##ASM   
-PUSHW = Src PTR   
-PUSHW = Src Length   
-PUSHW = Dst PTR Output Buffer  
-PUSHW = Dst PTR S.PAKSTAT  
+`>PUSHW StatPtr`  
+`>PUSHW DstPtr`  
+`>PUSHW SrcLen`  
+`>PUSHW SrcPtr`  
+`>LIBCALL hLIBPAK,Pak`  
 
-#UnPak  
-
-##ASM  
-**In:**   
-PUSHW = Src PTR Compressed Buffer  
-PUSHW = Dst PTR  
+## RETURN VALUE   
+CC, Y,A = CLEN  
+CS, Pak failure  
 
 ## License
 A2osX is licensed under the GNU General Pulic License.
