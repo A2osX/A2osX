@@ -1,7 +1,7 @@
 
 # A2osX Shell Developers Guide
 
-### Updated November 24, 2019
+### Updated November 25, 2019
 
 One of the most significant parts of A2osX is its shell which can perform both interactive and scripted tasks.  Using the interactive part of the shell, you can perform many common and complex tasks using both built-in (native or internal to shell) and external (BIN or executable) commands.  Internal commands include CD (change directory), MD (make directory), PWD, DATE, etc.  External commands include CP (copy), RM (remove), CAT (display file contents), TELNET, etc.  It is even possible to create and execute short scripts right on the interactive command line (these are run once and not saved like true scripts) such as:
 
@@ -213,6 +213,7 @@ The A2osX shell contains an expression evaluator that can perform simple integer
 	SET C = A * B		# 1230
 	SET C = A / B		# 12
 	SET C = A MOD B		# 3
+	SET C = 100 * 2 / 4 + 2 / 13 * 4 	# 16
 
 #### \<op\>
 
