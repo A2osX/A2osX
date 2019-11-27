@@ -233,7 +233,7 @@ Please note, that the shell does string substitution when processing \<values>. 
 
 	[ <\expression\> ] AND [ <\expression\> ]...
 
-The **AND** reserved word is used to join 2 or more conditions together to create complex logic statements.  See \<condition\> section above for more information on **AND** and examples of its usage.  In addition, look at **[ANDORTESTS](EXAMPLES/ANDORTESTS.txt)**, a complete script using **AND**.
+The **AND** reserved word is used to join 2 or more conditions together to create complex logic statements.  See \<condition\> section above for more information on **AND** and examples of its usage.  In addition, look at **[ANDORDEMO](EXAMPLES/ANDORDEMO.txt)**, a complete script using **AND** and **OR**.
 
 ### BREAK
 
@@ -257,7 +257,7 @@ The **CASE** command is used at the start of a block of statements to be optiona
 
 	CD <value>
 
-The **CD** command is used to change the current working directory.  You must supply the **CD** command a valid relative or absolute path.  Examples of relative paths include SUBDIR1 (a sub-directory in the current directory), ../SUBDIR2 (a sub-directory in the parent of the current directory), and SUBDIR1/SUBDIR3 ( a subdirectory in the subdirectory SUBDIR1 of the current directory).  An absolute path always begins with a / and includes the volume name of the disk drive to which change the current working directory such as /MYVOL1/VAR/LOGS (the subdirectory LOGS in the directory VAR on the disk with a volume label of MYVOL1).  
+The **CD** command is used to change the current working directory.  You must supply the **CD** command a valid relative or absolute path.  Examples of relative paths include SUBDIR1 (a sub-directory in the current directory), ../SUBDIR2 (a sub-directory in the parent of the current directory), and SUBDIR1/SUBDIR3 ( a sub-directory in the sub-directory SUBDIR1 of the current directory).  An absolute path always begins with a / and includes the volume name of the disk drive to which change the current working directory such as /MYVOL1/VAR/LOGS (the sub-directory LOGS in the directory VAR on the disk with a volume label of MYVOL1).  
 
 ### DATE
 
