@@ -390,7 +390,7 @@ The **FI** command is used at the end of an **IF** script block. See the **IF** 
 		\<body\>
 	}
 
-if you SET -F, it will discard ALL previously learnt FUNC in the current SH context
+if you SET -F, it will discard ALL previously learned FUNC in the current SH context
 if . FUNCS1 file add 3
 then . FUNCS2 file add 2
 all 5 are available until an set -X is met
@@ -660,42 +660,7 @@ A2osX provides advanced screen handling capabilities for the Apple console (keyb
 
 ###Examples
 
-IFTTT Tweet using HTTPGET
-
-Also look at Microsoft Flow and Integromat and Automate.io
-
-
-where [ exp ] and [ condition ] allow to detail operators....
-
-
-anywhere you can have [ exp ] you can have ![ exp ] which means NOT exp.
-
-
-    while ![ $total -eq 0 ]
-    loop
-    
-is the same thing as 
-
-    while [ $total -ne 0 ]
-    loop
-
-Just like
-
-    IF [ A -GT 5 ]
-      DO X
-    ELSE
-      DO Y
-    FI
-
-is the same as
-
-    IF ![ A -LE 5 ]
-      DO Y
-    ELSE
-      DO X
-    FI
-
-Notice that the DO X and DO Y logic is swapped between the two cases.
+In addition to the scripts in this document, there are many example scripts included with A2osX which can be found on the A2osX repository on GitHub.  Besides the [EXAMPLES](../EXAMPLES) folder, you may also want to look at the scripts in the [TESTS](../TESTS), [MAKE](../EXAMPLES) and [MAKE](../ADMIN) folders.  The scripts in the **TESTS** folder are used to test the various commands of A2osX with each release.  The **MAKE** folder contains scripts used to make the published disk images for A2osX.  The **ADMIN** folder contains scripts that are in the development stage that one day might be used to help administer an A2osX installation.  All of these may be good for learning the capabilities available to the script developer.
 
 ## License
 A2osX is licensed under the GNU General Pulic License.
