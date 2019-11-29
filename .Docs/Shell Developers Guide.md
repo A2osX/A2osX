@@ -63,7 +63,8 @@ As briefly discussed above, almost all commands take and most even require an ar
 
 #### \<conditions\>
 
-The shell features a lot of built-in checks and comparisons called \<conditions\> throughout this guide.  This particular form of an argument is used exclusively by the **IF** and **WHILE** commands where the \<condition\> is evaluated and result is used to control program flow with in the defined **IF-ELSE-FI** or **WHILE-LOOP** block.  All conditions must be encloded with in brackets **[]**.  In addition to the capabilities found in the extensive list of checks and comparisons listed below, conditional execution can be enhanced by negating with an ! in front of a condition and/or compounding with AND and OR between two or more conditions.  The following scripts show examples of the possible conditions you can use while writing your own scripts.
+The shell features a lot of built-in checks and comparisons called \<conditions\> throughout this guide.  This particular form of an argument is used exclusively by the **IF** and **WHILE** commands where the \<condition\> is evaluated and result is used to control program flow with in the defined **IF-ELSE-FI** or **WHILE-LOOP** block.  All conditions must be encloded with in brackets **[]**.  In addition to the capabilities found in the extensive list of checks and comparisons listed below, conditional execution can be enhanced by negating with an ! in front of a condition and/or compounding with AND and OR between two or more conditions.  The following scripts show examples of the possible conditions 
+ can use while writing your own scripts.
 
 > Note: 	The examples below make use of the **;** directive which allows you to put multiple statements on one line.  So for example
 
