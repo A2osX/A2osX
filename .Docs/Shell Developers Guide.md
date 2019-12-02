@@ -1,7 +1,7 @@
 
 # A2osX Shell Developers Guide
 
-### Updated November 25, 2019
+### Updated December 1, 2019
 
 One of the most significant parts of A2osX is its shell which can perform both interactive and scripted tasks.  Using the interactive part of the shell, you can perform many common and complex tasks using both built-in (native or internal to shell) and external (BIN or executable) commands.  Internal commands include CD (change directory), MD (make directory), PWD, DATE, etc.  External commands include CP (copy), RM (remove), CAT (display file contents), TELNET, etc.  It is even possible to create and execute short scripts right on the interactive command line (these are run once and not saved like true scripts) such as:
 
@@ -523,7 +523,33 @@ The REN command allows you to Rename a single file, directory or Volume.  It doe
 
 ### SET
 
-| SET       | Working | -X : toggle debug mode <br> -C : toggle Control-C break mode <br> -E : toggle error printing mode <br> -F : delete all declared functions |
+The **SET** command is used to set or clear the value of variables as well as to set or clear flags that change the behavior of the shell (**SH**) especially when running scripts.
+
+#### Variables
+
+The most simplistic form of set is **SET var = value** such as SET myVar = 6, where the shell will create a new variable called MyVar and in this case make it an Interger (32-bit) and set its value to 6.
+
+#### Shell Flags
+
+There are a number of flags, or settings, for the shell that affect its behavior.  While these may be set interactively at the prompt (**$**), they have the most impact on scripts.  These flags/settings are: **-C** (Control-C break mode), **-E** (Error printing mode), **-F** ( Function Clear), and **-X** (Debug Mode).
+
+##### Control-C Break Mode
+
+This mode, set by the **-C** flag option of **SET**, allows you to change the shells behavior when a user presses Control-C (Break Key) while executing scripts.  Normally, when a script is running, the shell will stop execution of the script when the user presses Control-C (Break).  If Break Mode is set, then this will not occur.  This mode can be useful in scripts where it is important that the entire script is processed.  For example, if you modified a user's PROFILE file to always execute a particular application when the user logged in, then by putting **SET -C** at the top of the PROFILE script, you can ensure that the user cannot exit the PROFILE script before the application is run.
+
+##### Error Printing Mode
+
+This mode, set by the **-E** flag option of **SET**, allows you to change the shells behavior while executing scripts.  Normally the shell only outputs when it encounters a specific output command like **ECHO** or runs an external command (i.e. **LS**) that creates its out output.  It does not output to the screen the script itself during execution.
+
+##### Clear Functions
+
+**SET -F** is really more of a command, then a setting, and in this case, **SET -F** instructs the shell to forget or clear all functions from memory previously defined by **FUNCTION** commands.  Please see the **FUNCTION** section for more information on creating, using and clearing functions in the shell.
+
+##### Debug Mode
+
+This mode, set by the **-X** flag option of **SET**, allows you to change the shells behavior while executing scripts.  Normally the shell only outputs when it encounters a specific output command like **ECHO** or runs an external command (i.e. **LS**) that creates its own output.  It does not output to the screen the script itself during execution.  The **-X** changes this behavior.  When Debug Mode is set, the shell with echo to the screen each command line in a script as it is being executed.  These lines are proceeded by a **>** symbol to denote it is part of debug output.  If you are trying to debug a script, you can place one or more **SET -X** commands in your script to turn debug output on and off.
+
+>A clever trick for using **SET -X** for short scripts.  At the prompt (**$**), type SET -X to turn on Debug mode.  Then, run your script by using the dot calling convention (**. myscript**).  This will run the script in the current environment (the one with Debug Mode set).  Remember, that when you run a script normally (**myscript**), no dot then space then script name, the shell creates an all new environment to run that script and all modes/flags/settings are set to their defaults (off).
 
 ### SHIFT
 
@@ -573,6 +599,11 @@ calling scripts with . (dot space) before script name from within a script
 loading functions this way
 
 ### Variables
+
+As seen throughout this guide, scripts are very useful for automating many repetitive tasks.  To get the most out of scripts, you are likely going to want input from the user or gather existing data stored in your file system and then use this to control program flow.  To do this, you are likely going to want to use variables to store and process the data your script relies on.  This section will provide you with the information you need to get the most out of your own, as well as system provided, variables.
+
+All variables have names, starting with xxx, can be any length, but longer is not better.  They are case sensitive so AVAR, Avar, aVar, and avar are actually 4 different variables.  There are only two kinds of variables internally, strings and integers.  
+ 
 
 Variable overflow strings and ints
 Ints only no real num it just ignore
@@ -661,7 +692,7 @@ A2osX provides advanced screen handling capabilities for the Apple console (keyb
 
 ###Examples
 
-In addition to the scripts in this document, there are many example scripts included with A2osX which can be found on the A2osX repository on GitHub.  Besides the [EXAMPLES](../EXAMPLES) folder, you may also want to look at the scripts in the [TESTS](../TESTS), [MAKE](../EXAMPLES) and [MAKE](../ADMIN) folders.  The scripts in the **TESTS** folder are used to test the various commands of A2osX with each release.  The **MAKE** folder contains scripts used to make the published disk images for A2osX.  The **ADMIN** folder contains scripts that are in the development stage that one day might be used to help administer an A2osX installation.  All of these may be good for learning the capabilities available to the script developer.
+In addition to the scripts in this document, there are many example scripts included with A2osX which can be found on the A2osX repository on GitHub.  Besides the [EXAMPLES](../EXAMPLES) folder, you may also want to look at the scripts in the [TESTS](../TESTS), [MAKE](../MAKE) and [ADMIN](../ADMIN) folders.  The scripts in the **TESTS** folder are used to test the various commands of A2osX with each release.  The **MAKE** folder contains scripts used to make the published disk images for A2osX.  The **ADMIN** folder contains scripts that are in the development stage that one day might be used to help administer an A2osX installation.  All of these are good for learning the capabilities available to the script developer.
 
 ## License
 A2osX is licensed under the GNU General Pulic License.
