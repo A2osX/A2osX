@@ -1,7 +1,7 @@
 
 # A2osX Shell Developers Guide
 
-### Updated December 1, 2019
+### Updated December 2, 2019
 
 One of the most significant parts of A2osX is its shell which can perform both interactive and scripted tasks.  Using the interactive part of the shell, you can perform many common and complex tasks using both built-in (native or internal to shell) and external (BIN or executable) commands.  Internal commands include CD (change directory), MD (make directory), PWD, DATE, etc.  External commands include CP (copy), RM (remove), CAT (display file contents), TELNET, etc.  It is even possible to create and execute short scripts right on the interactive command line (these are run once and not saved like true scripts) such as:
 
@@ -226,9 +226,9 @@ A switch is a special type of argument to internal and external commands that ch
 
 #### \<value\>
 
-Values are the simplest of arguments, usually a string or an integer, which may be presented literally or in the form of a variable.  
+Values are the simplest form of arguments, usually a string or an integer, which may be presented literally or in the form of a variable.  
 
-Please note, that the shell does string substitution when processing \<values>.  This is done when the shell finds a variable within the string (a set of characters that begin with a $). For example if you had a variable called $BOOTVOL that is set to "/MYVOL/" and you passed a command the \<value> "${BOOTVOL}AFILE" would get expanded to "/MYVOL/AFILE".  Notice the use of braces **{}** surrounding the variable name, they are needed here otherwise the SHELL would look for the variable $BOOTVOLAFILE.  See the script below for the **ECHO** command for more examples of values that contain variables. 
+Please note, that the shell does string substitution when processing \<values>.  This is done when the shell finds a variable within the string (a set of characters that begin with a $). For example if you had a variable called $BOOTVOL that is set to "/MYVOL/" and you passed a command the \<value> "${BOOTVOL}AFILE", it would get expanded to "/MYVOL/AFILE".  Notice the use of braces **{}** surrounding the variable name, they are needed here otherwise the SHELL would look for the variable $BOOTVOLAFILE.  See the script below for the **ECHO** command for more examples of values that contain variables. Also look at the section on the **SET** command and the section below on **Variables**.
 
 ### AND
 
@@ -240,25 +240,25 @@ The **AND** reserved word is used to join 2 or more conditions together to creat
 
 	BREAK
 
-The **BREAK** command is used to exit or end a block of statements that were optionally executed for a particular **CASE** as part of a **SWITCH** script block.  See the **CASE** command below for more information and example of using **BREAK**. 
+The **BREAK** command is used to exit or end a block of statements that were optionally executed for a particular **CASE** as part of a **SWITCH** script block.  See the **SWITCH** command below for more information and example of using **BREAK**. 
 
 ### CALL 
 
 	CALL function [\<argument\>]...
 
-The **CALL** command is used to execute and previously defined and loaded function.  When calling a function with the **CALL** command, you may pass one or more arguments which the function can use as part of its execution.  See the **FUNCTION** command below for more information on creating and calling functions including examples.
+The **CALL** command is used to execute a previously defined and loaded function.  When calling a function with the **CALL** command, you may pass one or more arguments which can then be used by the function during execution.  See the **FUNCTION** command below for more information on creating and calling functions including examples.
 
 ### CASE
 
 	CASE <expression>
 
-The **CASE** command is used at the start of a block of statements to be optionally executed based on the evaluation of \<expression\> as part of a **SWITCH** script block. See the **CASE** command below for more information and example of using **BREAK**.
+The **CASE** command is used at the start of a block of statements to be optionally executed based on the evaluation of \<expression\> as part of a **SWITCH** script block. See the **SWITCH** command below for more information and example of using **CASE**.
 
 ### CD
 
 	CD <value>
 
-The **CD** command is used to change the current working directory.  You must supply the **CD** command a valid relative or absolute path.  Examples of relative paths include SUBDIR1 (a sub-directory in the current directory), ../SUBDIR2 (a sub-directory in the parent of the current directory), and SUBDIR1/SUBDIR3 ( a sub-directory in the sub-directory SUBDIR1 of the current directory).  An absolute path always begins with a / and includes the volume name of the disk drive to which change the current working directory such as /MYVOL1/VAR/LOGS (the sub-directory LOGS in the directory VAR on the disk with a volume label of MYVOL1).  
+The **CD** command is used to change the current working directory.  You must supply the **CD** command a valid relative or absolute path.  Examples of relative paths include SUBDIR1 (a sub-directory in the current directory), ../SUBDIR2 (a sub-directory in the parent of the current directory), and SUBDIR1/SUBDIR3 ( a sub-directory in the sub-directory SUBDIR1 of the current directory).  An absolute path always begins with a / and includes the volume name of the disk drive to which change the current working directory such as /MYVOL1/VAR/LOGS (the sub-directory LOGS in the directory VAR on the disk with a volume label of MYVOL1).  You can use the **PWD** command to display the current working directory if your prompt (**$**) does not automatically display it on the command line (the default, set in your PROFILE).  The current working directory is used my the shell to look for scripts not located in one of the directories specified by **$PATH** or as the directory for reading and writing files when no path is provided by a command.  For example, if you execute the **LS** command without arguments, **LS** assumes to list the files in the current working directory.  Similarly, if you specify a file without a path, for example the command **ECHO Hello > outfile**, shell will place the file outfile in the current working directory.  See the related **POPD** and **PUSHD** commands. 
 
 ### DATE
 
@@ -324,6 +324,61 @@ In addition to the usual variable substitution that occurs with \<values> (see \
 	ECHO "123\b\b456"		'1456			#two backspaces (\b) over the 23
 	ECHO -N "\xFF\xFF" > afile	'Create file called afile and put exactly the
 					'bytes Hex FF and Hex FF into it.
+
+Consult the subsection below on Advanced Display Techniques for more examples of using **ECHO** and additional VT100 escape sequences that can be used to control the display of output.
+
+#### Advanced Display Techniques
+
+A2osX provides advanced screen handling capabilities for the Apple console (keyboard/screen) as well as terminals connected directly (via Super Serial Cards) or remotely (via Telnet using a supported network card and the TELNETD server daemon).  These features are based on the VT100 Terminal definition and scripts you develop can pass VT100 codes (via the ECHO command) to enhance the appearance of your scripts.  In addition to VT100 codes, ECHO has been augmented with some short codes to perform the more common and to help display special characters.  The examples below will help you understand what is possible with ECHO.  For a fuller listing of the available VT100 Terminal Codes, consult the **[A2osX Terminal Codes Guide](.Docs/TERM.md).**
+
+    #!/BIN/SH
+	#	ECHO / Advanced Display Techniques Examples
+	#	Note codes are CASE SENSITVE.  \F is not the same as \f
+	#   Clear the Screen (\f)
+	ECHO \f
+	#   Clear the Screen and Display text in the top left corner
+	ECHO "\fThis line will appear on the first line of your Apple"
+	#	ECHO on a line byself will create a blank line (moving the cursor down one line)
+    #	Multiple ECHOs in a row, will skip multiple lines.  The \n shortcode makes this easier.
+	#	This example is the same as ECHO; ECHO; ECHO "HELLO"; ECHO; ECHO; ECHO "WORLD"
+	ECHO "\n\nHELLO\n\nWORLD"
+	#	Backspace shortcode \b moves the cursor one space to the left.
+	#	This example would print ABEF on the screen.  The two \b overwrite the CD.
+	ECHO "ABCD\b\bEF"
+	#	Turn Inverse on: \e[7m		off: \e[0m
+	#	This example HELLO INVERSE WORLD with the word INVERSE in inverse.
+	ECHO "HELLO \e[7mINVERSE\e[0m WORLD"
+	#	Print a backslash (\).  Since \ is a special character, you need a way to print it.
+	ECHO "\\"
+	#	Print a percent (%).  Since % is a special character, you need a way to print it.
+	ECHO "\%"
+	#	Supress Newline (-N).  ECHO -N allows you to print multiple things on the same line
+	#	This code segment will print ONE TWO THREE all on one line.
+	ECHO -N ONE
+	ECHO -N TWO
+	ECHO -N THREE
+	#	Move cursor to beginning of current line (\r)
+	#	This example will print WORLD HELLO, note spaces.
+	ECHO "      HELLO\rWORLD"
+	#	Scroll Screen Down 1 Line (\eM)
+	ECHO \eM
+	#	Scroll the Screen Up 1 Line (\eD)
+	ECHO \eD
+	#	Clear Screen VT100 Code alternative, same as \f (\ec)
+	ECHO \ec
+	#	Move cursor to [x,y] \e[x;yH
+	#	Move cursor to row 5 and col 15 and print I AM HERE
+	ECHO "\e[05;15HI AM HERE"
+	#	Move to home position [0,0] (\e[H)
+	ECHO \e[H
+	#	Clear from cursor to end of line (\e[K)
+	ECHO \e[K
+	#	Clear from cursor to beginning of line (\e[1K)
+	ECHO \e[1K
+	#	Clear line (\e[2K)
+	ECHO \e[2K
+	#	Clear line 15
+	ECHO \e[15;01H\e[2K
 
 ### ELSE
 
@@ -404,11 +459,9 @@ FUNCs recursion is allowed (until you explode the stack!)
 
 CORE.STACK.MAX = 128....so each CALL consumes about 7 bytes of stack (return Ctx/Ptr, ArgVC,hArgV and CALL keywordID)
 
-
 ### IF
 
 	IF [ <\expression\> ]...
-  
 
 ### LOOP
 
@@ -438,9 +491,11 @@ The **OR** reserved word is used to join 2 or more conditions together to create
 
 	PAUSE
 
-The **PAUSE** commands halts the execution of a script until the user pressing the return key. 
+The **PAUSE** commands halts the execution of a script until the user presses the return key. 
 
 ### POPD
+
+	POPD [ <value> ]
 
 | POPD      | Working | Restore previously saved working directory |
 
@@ -460,7 +515,7 @@ the **PWD** command prints the current working directory.  You can change the wo
 
 	RD <value>
 
-Delete an empty directory
+Remove the empty directory specified by \<value> which may be either a relative directory name such as ThisDir or ../SomeDir/ThisDir or it can be a full path name such as /MyVol/SomeDir/ThisDir.  The directory specified must be empty or an error will be thrown. To remove a non-empty directory (and all the files and subdirectories contained within) you can use the **RM** command with the **-R** switch.  See the **RM** for more information.
 
 ### READ
 
@@ -523,11 +578,67 @@ The REN command allows you to Rename a single file, directory or Volume.  It doe
 
 ### SET
 
+	SET <switch>
+	SET Variable = <value>
+	SET Variable = <expression>
+	SET Variable =
+
 The **SET** command is used to set or clear the value of variables as well as to set or clear flags that change the behavior of the shell (**SH**) especially when running scripts.
 
 #### Variables
 
 The most simplistic form of set is **SET var = value** such as SET myVar = 6, where the shell will create a new variable called MyVar and in this case make it an Interger (32-bit) and set its value to 6.
+
+As seen throughout this guide, scripts are very useful for automating many repetitive tasks.  To get the most out of scripts, you are likely going to want input from the user or gather existing data stored in your file system and then use this to control program flow.  To do this, you are likely going to want to use variables to store and process the data your script relies on.  This section will provide you with the information you need to get the most out of your own, as well as system provided, variables.
+
+All variables have names, starting with xxx, can be any length, but longer is not better.  They are case sensitive so AVAR, Avar, aVar, and avar are actually 4 different variables.  There are only two kinds of variables internally, strings and integers.  
+ 
+
+Variable overflow strings and ints
+Ints only no real num it just ignore
+
+The 32-bit int data type can hold integer values in the range of −2,147,483,648 to 2,147,483,647.  If you add to or subtract from INTs that would cause a RANGE error, you actually get a result that wraps around the range, so if you add 1 to 2,147,483,647 you will get −2,147,483,648.
+
+Strings can be up to 255 characters in length.  Note, like INTs, if you try to store more then 255 chars in a string, you get the same wraparound affect where the first 255 chars are tossed out the string is set to the remaining chars, so if you concatenate 3 strings of 100 chars the resulting string will be the last 45 chars of the 3rd original string. 
+
+#### Special Variables
+
+In addition to the variables you create, there are a number of predefined variables that you can use in scripts.  Several of these are set by **LOGIN** when a user logs on to A2osX.  These include $BOOT, $DRV, $LIB, $PATH, $ROOT and $TERM.
+
+The **$BOOT** variable holds the full path of the ProDOS PREFIX when you started A2osX (**-A2OSX.SYSTEM).  The **$ROOT** variable contains the same full path.
+
+>Note, while your PREFIX could be set to /MyVol/Adir and you can launch A2OSX.SYSTEM from another directory (i.e. -/MyVol/OtherDir/A2OSX.SYSTEM), A2osX will not fully load because it will look for support files in sub directories of PREFIX.  See the A2osX User Guide for more information on starting A2osX.
+
+The **$DRV** variable holds the full path A2osX can find hardware driver files for A2osX such as the driver for a Super Serial Card (SSC).  **LOGIN** automatically sets this variable to ${BOOT}DRV/, which means it will look for drivers in the DRV sub directory found in the full path $BOOT is set to.  If you have made your own drivers and store them in a different location, you could change or add to this variable.  It is used like the standard $PATH variable where multiple directories can be listed (and searched) by separating them with a colon (:).  So for example you could **SET $DRV = ${BOOT}DRV/:/MYVOL/DRIVERS/** and when INSDRV attempts to install a driver name you specify it will first look for the driver file in the DRV sub directory of $BOOT and then look in the /MYVOL/DRIVERS/ directory.  Note that these paths must end with a slash (/) as shell looks for files by appending a file name to these search paths.
+
+The **$LIB** variable holds the full path A2osX can find Library files for A2osX such as LIBCRYPT.  **LOGIN** automatically sets this variable to ${BOOT}LIB/, which means it will look for libraries in the LIB sub directory found in the full path $BOOT is set to.  If you have made your own libraries and store them in a different location, you could change or add to this variable.  It is used like the standard $PATH variable where multiple directories can be listed (and searched) by separating them with a colon (:).  So for example you could **SET $LIB = ${BOOT}LIB/:/MYVOL/LIBRARY/** and when your program attempts to load a library you specify it will first look for the library file in the LIB sub directory of $BOOT and then look in the /MYVOL/LIBRARY/ directory.  Note that these paths must end with a slash (/) as shell looks for files by appending a file name to these search paths.
+
+The **$LOGNAME** variable holds the login id (string) of the current user.  This variable is set by **LOGIN** and cannot be changed by the user.
+
+The **$PATH** variable holds the full paths the shell used to find external command or script files such as **LS** or **TELNET**.  **LOGIN** automatically sets this variable to ${BOOT}SBIN/:${BOOT}BIN/, which means it will look for commands/scripts in the SBIN and BIN sub directories found in the full path $BOOT is set to.  Shell will also look in the current working directory ($PWD) after looking at the directories listed in $PATH.  If you have a directory with your your own commands and scripts, you can change or add to this variable.  Just like the standard $PATH variable in linux, multiple directories can be listed (and searched) by separating them with a colon (:).  Note that these paths must end with a slash (/) as shell looks for files by appending a file name to these search paths.
+
+The **$PS1** variable holds optional text to display as part of the interactive shell prompt.  This variable is usually set in a user's PROFILE script and by default is set to **'$PWD'**.  
+
+>Note the single quotes surrounding $PWD.  If you look in you will see the full command is **SET PS1 = '$PWD'**.  Normally when you set one variable to include another, for example **SET PS1 = $PWD**, PS1 would get set to the value of $PWD as it is at the time it was set.  Meaning that as the user changes directories, the users prompt would never change.  By surrounding $PWD with single quotes, you are telling the shell to set PS1 not to the value of PWD, but to the variable itself (think pointer in C as a opposed to data).  In this way, every time the shell goes to display the prompt, it displays the current value stored in $PWD.
+
+The **$PWD** variable holds the current working directory used by shell.  This variable is maintained by the shell and cannot be changed directory by the user (**SET $PWD = anything** will be ignored).  It is updated through the use of **CD** and **PUSHD**.  You can **ECHO $PWD**, however the internal shell command **PWD** does the same thing and is shorter to type.
+
+The **$TERM** variable holds the name of the type of terminal codes used for screen handling and programming.  This is **always** set to **vt100** as that is the only terminal type A2osX supports. 
+
+The **$UID** variable holds the user id (integer) of the current user.  This variable is set by **LOGIN** and cannot be changed by the user.
+
+In addition to the variables defined above, there are a set of special variables updated by the shell that are particularly useful with scripts.  These variables are all a single character following the dollar sign (**$**).
+
+The **$0** variable holds current commands full path.  In the case of scripts would be the full path of the script (its file name preceded by the full path of the directory in which it is stored.
+
+
+| $1-$9 | Working | Arg[n] |
+| $*    | Working | All Args |
+| $#    | Working | Arg Count |
+| $?    | Working | Return Code |
+| $@    | Working | Parent PID |
+| $$    | Working | PID |
+| $!    | Working | Child PID |
 
 #### Shell Flags
 
@@ -597,98 +708,6 @@ The **SWITCH** statement is used at the start of a multiway program flow control
 Calling other scripts
 calling scripts with . (dot space) before script name from within a script
 loading functions this way
-
-### Variables
-
-As seen throughout this guide, scripts are very useful for automating many repetitive tasks.  To get the most out of scripts, you are likely going to want input from the user or gather existing data stored in your file system and then use this to control program flow.  To do this, you are likely going to want to use variables to store and process the data your script relies on.  This section will provide you with the information you need to get the most out of your own, as well as system provided, variables.
-
-All variables have names, starting with xxx, can be any length, but longer is not better.  They are case sensitive so AVAR, Avar, aVar, and avar are actually 4 different variables.  There are only two kinds of variables internally, strings and integers.  
- 
-
-Variable overflow strings and ints
-Ints only no real num it just ignore
-
-The 32-bit int data type can hold integer values in the range of −2,147,483,648 to 2,147,483,647.  If you add to or subtract from INTs that would cause a RANGE error, you actually get a result that wraps around the range, so if you add 1 to 2,147,483,647 you will get −2,147,483,648.
-
-Strings can be up to 255 characters in length.  Note, like INTs, if you try to store more then 255 chars in a string, you get the same wraparound affect where the first 255 chars are tossed out the string is set to the remaining chars, so if you concatenate 3 strings of 100 chars the resulting string will be the last 45 chars of the 3rd original string. 
-
-#### Special Variables
-
-$BOOT
-$DRV
-$LIB
-$PATH
-$PS1
-$ROOT
-$TERM
-
-| Name  | Status  | Comment |
-| ----  | ------  | ------- |
-| $0    | Working | Command Full Path |
-| $1-$9 | Working | Arg[n] |
-| $*    | Working | All Args |
-| $#    | Working | Arg Count |
-| $?    | Working | Return Code |
-| $@    | Working | Parent PID |
-| $$    | Working | PID |
-| $!    | Working | Child PID |
-| $UID  | Working | PS Owner UID |
-| $PWD  | Working | Working Directory |
-
-note : '$VAR' does NOT expand Variable
-
-### Advanced Display Techniques
-
-A2osX provides advanced screen handling capabilities for the Apple console (keyboard/screen) as well as terminals connected directly (via Super Serial Cards) or remotely (via Telnet using a supported network card and the TELNETD server daemon).  These features are based on the VT100 Terminal definition and scripts you develop can pass VT100 codes (via the ECHO command) to enhance the appearance of your scripts.  In addition to VT100 codes, ECHO has been augmented with some short codes to perform the more common and to help display special characters.  The examples below will help you understand what is possible with ECHO.  For a fuller listing of the available VT100 Terminal Codes, consult the **[A2osX Terminal Codes Guide](.Docs/TERM.md).**
-
-    #!/BIN/SH
-	#	ECHO / Advanced Display Techniques Examples
-	#	Note codes are CASE SENSITVE.  \F is not the same as \f
-	#   Clear the Screen (\f)
-	ECHO \f
-	#   Clear the Screen and Display text in the top left corner
-	ECHO "\fThis line will appear on the first line of your Apple"
-	#	ECHO on a line byself will create a blank line (moving the cursor down one line)
-    #	Multiple ECHOs in a row, will skip multiple lines.  The \n shortcode makes this easier.
-	#	This example is the same as ECHO; ECHO; ECHO "HELLO"; ECHO; ECHO; ECHO "WORLD"
-	ECHO "\n\nHELLO\n\nWORLD"
-	#	Backspace shortcode \b moves the cursor one space to the left.
-	#	This example would print ABEF on the screen.  The two \b overwrite the CD.
-	ECHO "ABCD\b\bEF"
-	#	Turn Inverse on: \e[7m		off: \e[0m
-	#	This example HELLO INVERSE WORLD with the word INVERSE in inverse.
-	ECHO "HELLO \e[7mINVERSE\e[0m WORLD"
-	#	Print a backslash (\).  Since \ is a special character, you need a way to print it.
-	ECHO "\\"
-	#	Print a percent (%).  Since % is a special character, you need a way to print it.
-	ECHO "\%"
-	#	Supress Newline (-N).  ECHO -N allows you to print multiple things on the same line
-	#	This code segment will print ONE TWO THREE all on one line.
-	ECHO -N ONE
-	ECHO -N TWO
-	ECHO -N THREE
-	#	Move cursor to beginning of current line (\r)
-	#	This example will print WORLD HELLO, note spaces.
-	ECHO "      HELLO\rWORLD"
-	#	Scroll Screen Down 1 Line (\eM)
-	ECHO \eM
-	#	Scroll the Screen Up 1 Line (\eD)
-	ECHO \eD
-	#	Clear Screen VT100 Code alternative, same as \f (\ec)
-	ECHO \ec
-	#	Move cursor to [x,y] \e[x;yH
-	#	Move cursor to row 5 and col 15 and print I AM HERE
-	ECHO "\e[05;15HI AM HERE"
-	#	Move to home position [0,0] (\e[H)
-	ECHO \e[H
-	#	Clear from cursor to end of line (\e[K)
-	ECHO \e[K
-	#	Clear from cursor to beginning of line (\e[1K)
-	ECHO \e[1K
-	#	Clear line (\e[2K)
-	ECHO \e[2K
-	#	Clear line 15
-	ECHO \e[15;01H\e[2K
 
 ###Examples
 
