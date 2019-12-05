@@ -1,7 +1,7 @@
 
 # A2osX Shell Developers Guide
 
-### Updated December 2, 2019
+### Updated December 4, 2019
 
 One of the most significant parts of A2osX is its shell which can perform both interactive and scripted tasks.  Using the interactive part of the shell, you can perform many common and complex tasks using both built-in (native or internal to shell) and external (BIN or executable) commands.  Internal commands include CD (change directory), MD (make directory), PWD, DATE, etc.  External commands include CP (copy), RM (remove), CAT (display file contents), TELNET, etc.  It is even possible to create and execute short scripts right on the interactive command line (these are run once and not saved like true scripts) such as:
 
@@ -544,8 +544,9 @@ The READ command allows you to accept input from the user which can be used or e
     #	 Special case of -N option.  As soon as the user types any key, input will
     #    be ended and the single key code will be stored in $A as an Integer.
     #	 This can be used to capture/process special keys like TAB, Arrows and DEL.
+	#	 In this special case of READ, the character pressed is NOT echoed.
 	READ -N 0 A
-
+ 
 ### REN
 
 	REN <value> <value>
@@ -611,9 +612,15 @@ The **$BOOT** variable holds the full path of the ProDOS PREFIX when you started
 
 The **$DRV** variable holds the full path A2osX can find hardware driver files for A2osX such as the driver for a Super Serial Card (SSC).  **LOGIN** automatically sets this variable to ${BOOT}DRV/, which means it will look for drivers in the DRV sub directory found in the full path $BOOT is set to.  If you have made your own drivers and store them in a different location, you could change or add to this variable.  It is used like the standard $PATH variable where multiple directories can be listed (and searched) by separating them with a colon (:).  So for example you could **SET $DRV = ${BOOT}DRV/:/MYVOL/DRIVERS/** and when INSDRV attempts to install a driver name you specify it will first look for the driver file in the DRV sub directory of $BOOT and then look in the /MYVOL/DRIVERS/ directory.  Note that these paths must end with a slash (/) as shell looks for files by appending a file name to these search paths.
 
+The **$GECOS** variable holds the Full Name (string) of the current user.  This variable is set by **LOGIN** and cannot be changed by the user.  Its value is taken from the ./etc/passwd file as set by the **USERADD** command.
+
+The **$GID** variable holds the group id (integer) of the current user.  This variable is set by **LOGIN** and cannot be changed by the user.  Its value is taken from the ./etc/passwd file as set by the **USERADD** command.
+
+The **$HOME** variable holds the full path of the logged in users HOME directory, the place where their personal files are stored.  This variable is set by **LOGIN** and its value is taken from the ./etc/passwd file as set by **USERADD**.
+
 The **$LIB** variable holds the full path A2osX can find Library files for A2osX such as LIBCRYPT.  **LOGIN** automatically sets this variable to ${BOOT}LIB/, which means it will look for libraries in the LIB sub directory found in the full path $BOOT is set to.  If you have made your own libraries and store them in a different location, you could change or add to this variable.  It is used like the standard $PATH variable where multiple directories can be listed (and searched) by separating them with a colon (:).  So for example you could **SET $LIB = ${BOOT}LIB/:/MYVOL/LIBRARY/** and when your program attempts to load a library you specify it will first look for the library file in the LIB sub directory of $BOOT and then look in the /MYVOL/LIBRARY/ directory.  Note that these paths must end with a slash (/) as shell looks for files by appending a file name to these search paths.
 
-The **$LOGNAME** variable holds the login id (string) of the current user.  This variable is set by **LOGIN** and cannot be changed by the user.
+The **$LOGNAME** variable holds the login id (string) of the current user.  This variable is set by **LOGIN** and cannot be changed by the user.  Its value is taken from the ./etc/passwd file as set by the **USERADD** command.
 
 The **$PATH** variable holds the full paths the shell used to find external command or script files such as **LS** or **TELNET**.  **LOGIN** automatically sets this variable to ${BOOT}SBIN/:${BOOT}BIN/, which means it will look for commands/scripts in the SBIN and BIN sub directories found in the full path $BOOT is set to.  Shell will also look in the current working directory ($PWD) after looking at the directories listed in $PATH.  If you have a directory with your your own commands and scripts, you can change or add to this variable.  Just like the standard $PATH variable in linux, multiple directories can be listed (and searched) by separating them with a colon (:).  Note that these paths must end with a slash (/) as shell looks for files by appending a file name to these search paths.
 
@@ -623,22 +630,29 @@ The **$PS1** variable holds optional text to display as part of the interactive 
 
 The **$PWD** variable holds the current working directory used by shell.  This variable is maintained by the shell and cannot be changed directory by the user (**SET $PWD = anything** will be ignored).  It is updated through the use of **CD** and **PUSHD**.  You can **ECHO $PWD**, however the internal shell command **PWD** does the same thing and is shorter to type.
 
+The **$SHELL** variable holds the full path for the Shell process of the logged in user, the shell being run currently.  This variable is set by **LOGIN** and its value is taken from the ./etc/passwd file as set by **USERADD**.
+
 The **$TERM** variable holds the name of the type of terminal codes used for screen handling and programming.  This is **always** set to **vt100** as that is the only terminal type A2osX supports. 
 
-The **$UID** variable holds the user id (integer) of the current user.  This variable is set by **LOGIN** and cannot be changed by the user.
+The **$UID** variable holds the user id (integer) of the current user.  This variable is set by **LOGIN** and cannot be changed by the user.  Its value is taken from the ./etc/passwd file as set by the **USERADD** command.
 
 In addition to the variables defined above, there are a set of special variables updated by the shell that are particularly useful with scripts.  These variables are all a single character following the dollar sign (**$**).
 
-The **$0** variable holds current commands full path.  In the case of scripts would be the full path of the script (its file name preceded by the full path of the directory in which it is stored.
+The **$0** variable holds current commands full path.  In the case of scripts this would be the full path of the script (its file name preceded by the full path of the directory in which it is stored (i.e. /MyVol/usr/share/examples/ExampleScript).
 
+The variables **$1** through **$9** hold the values of the first 9 arguments passed to a script or function.  If less then 9 arguments are passed the unused variables will be null.  If more then ten arguments are passed, you can use the **SHIFT** command to access the additional arguments.  See the **SHIFT** command for more information.
 
-| $1-$9 | Working | Arg[n] |
-| $*    | Working | All Args |
-| $#    | Working | Arg Count |
-| $?    | Working | Return Code |
-| $@    | Working | Parent PID |
-| $$    | Working | PID |
-| $!    | Working | Child PID |
+The **$*** variable is a string containing all the arguments passed to the script or function.  Since this is just a concatenation (space separated) of all the arguments, its usefulness is largely limited to debugging (i.e. **ECHO $* >> debuglog**).
+
+The **$?** variable is an integer holding the return or exit code of the last executed command or script.  Scripts can set the return code using the **EXIT** command (i.e. **EXIT 144** to set $? to 144).
+
+The **$@** variable is an integer that holds the Process ID (**PID**) of the parent process that called this script.  If a script is run from the prompt (**$**), then the PID would be of the /BIN/SH process running for the current user.  If a script is run by another script, then the PID would be of the calling script (except if called with the . then the called script is actually running in the same process as the calling script).
+
+The **$$** variable is an integer that holds the Process ID of the currently running process (**PID**), which is this scripts PID.
+
+The **$!** variable is an integer that holds the Process ID (PID) of the last Child process created by the currently running process (this scripts PID).  Note internal shell commands such as ECHO or DATE do not create new processes, but external commands and running other scripts do.  So, if a script performs a **CP afile bfile**, then examining **$!** right after the command would give you the PID for the process that was run.
+
+>Note, you can list the currently running processes and their IDs (PIDs), their parent PIDs and their child PID number using the **PS** command.  You can stop a running process by its PID by using the **KILL** command.  Running a command by using the **NOHUP** internal command (see **NOHUP** above) causes the command to be run with a parent PID of 0 (the system). Consult the Command Guide for more information on the **PS** and **KILL** commands. 
 
 #### Shell Flags
 
@@ -707,6 +721,13 @@ The **SWITCH** statement is used at the start of a multiway program flow control
 
 Calling other scripts
 calling scripts with . (dot space) before script name from within a script
+
+talk about duplicating env (no dot) and using current env (dot) and how vars are treated.  and that . calling script is treated as an INCLUDE, dont even need the bin/sh at top
+
+if using . you are using same ENV, like typing every line at the $, if not using . you start a new SH process with its own ENV (which gets tossed on exit).
+
+note that if you call a script normally, and it is in its own ENV it only can access functions it loads/defines.  but if called by dot  . script then it can use any function that already exists in the current ENV.
+
 loading functions this way
 
 ###Examples

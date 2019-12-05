@@ -1,6 +1,6 @@
 # A2osX Command Guide
 
-### Updated November 14, 2019
+### Updated December 3, 2019
 
 This Guide provides information on all the A2osX commands and utilities.  This Guide helps you not only learn the purpose of each command but also what options a command supports and what arguments it either supports or requires.
 
@@ -184,13 +184,17 @@ This utility allows you to change the type of a file to a standard files types s
 
 ### CMP
 
+	CMP [-V [-A]] File1 File2 [Skip1 [Skip2]]
+
 | Command | Options |
 | --- | --- |
 | CMP File1 File2 [SKIP1 [SKIP2]]| -A : Shows All differences <br> -V : Verbose Mode |
 
-CMP  will compare two files to determine if they are byte for byte equal.  If the files are equal CMP exits normally with an exit code of 0.  If the files have one or more bytes that are different, CMP will exit with an application error code of 223 (Hex $DF).  By using the Verbose option you can see the offset and values of the first different byte.  With the Verbose and All options you can see the list of all offsets and values that are different.  The SKIP options allow you specify a number of bytes to skip in the file(s) before starting the comparison.  CMP A B 100 200 would skip to the 100th byte of A and the 200th byte of B before starting the byte by byte comparison.  Note then that B would need to be 100 bytes larger then A for the comparison to ever end without error.
+CMP  will compare two files to determine if they are byte for byte equal.  If the files are equal CMP exits normally with an exit code of 0.  If the files have one or more bytes that are different, CMP will exit with an application error code of 224 (Hex $E0).  By using the Verbose option you can see the offset and values of the first different byte.  With the Verbose and All options you can see the list of all offsets and values that are different.  The SKIP options allow you specify a number of bytes to skip in the file(s) before starting the comparison.  CMP A B 100 200 would skip to the 100th byte of A and the 200th byte of B before starting the byte by byte comparison.  Note then that B would need to be 100 bytes larger then A for the comparison to ever end without error.
 
 ### CP
+
+	CP [-C] [-Q] [-R] SourceFileSpec [DestinationFileSpec]
 
 | Command | Options |
 | --- | --- |
