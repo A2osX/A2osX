@@ -1,6 +1,6 @@
 # A2osX (0.93) Multi-Tasking OS for Apple II  
 
-### Updated November 24, 2019
+### Updated December 5, 2019
 
 ## A2osX Release Candidate now available
 
@@ -23,6 +23,8 @@ A2osX is designed to work on any 128k Enhanced Apple //e or newer computer.  Spe
 Consult the **[documentation](#documentation)** section below to find other resources available to you for learning how to install, use, develop and test A2osX.  The Hardware section of the User Guide contains more information on supported hardware.
 
 ## News...
+
+**2019-12-05** - Media have been updated based on Build 1784.
 
 **2019-10-31** - Media have been updated based on Build 1694.  This version fixes issues with Piping of commands, adds new READ functionality.  Please note, KM.NSC is no longer loaded by default on any media.  If you have a No Slot Clock in your system, you should move the file KM.NSC from ./SYS/KM into ./SYS which will make it load on boot.
 

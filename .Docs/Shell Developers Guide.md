@@ -644,7 +644,7 @@ The variables **$1** through **$9** hold the values of the first 9 arguments pas
 
 The **$*** variable is a string containing all the arguments passed to the script or function.  Since this is just a concatenation (space separated) of all the arguments, its usefulness is largely limited to debugging (i.e. **ECHO $* >> debuglog**).
 
-The **$?** variable is an integer holding the return or exit code of the last executed command or script.  Scripts can set the return code using the **EXIT** command (i.e. **EXIT 144** to set $? to 144).
+The **$?** variable is an integer holding the return or exit code of the last executed command, function or script.  Scripts and functions can set the return code using the **EXIT** command (i.e. **EXIT 144** to set $? to 144).
 
 The **$@** variable is an integer that holds the Process ID (**PID**) of the parent process that called this script.  If a script is run from the prompt (**$**), then the PID would be of the /BIN/SH process running for the current user.  If a script is run by another script, then the PID would be of the calling script (except if called with the . then the called script is actually running in the same process as the calling script).
 
