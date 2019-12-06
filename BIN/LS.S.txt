@@ -23,6 +23,7 @@ ZPPtr1			.BS 2
 ZPPtr2			.BS 2
 ZPFileName		.BS 2
 ZPFileStat		.BS 2
+ZPPW			.BS 2
 ZS.END
 				.ED
 *--------------------------------------
@@ -56,6 +57,11 @@ L.MSG.CRLF		.DA MSG.CRLF
 L.PRODOS.FT.TXT	.DA PRODOS.FT.TXT
 L.FMT.Date		.DA FMT.Date
 L.FMT.Time		.DA FMT.Time
+L.FMT.int16		.DA FMT.int16
+L.MSG.Users		.DA MSG.Users
+L.MSG.Root		.DA MSG.Root
+L.UID			.DA UID
+L.GID			.DA GID
 				.DA 0
 *--------------------------------------
 CS.INIT			clc
@@ -99,6 +105,13 @@ CS.RUN
 				
 .8				>LEA.G TIME.SysTime
 				>SYSCALL time
+				
+				>LDYAI S.PW
+				>SYSCALL getmem
+				bcs .9
+				>STYA ZPPW
+				txa
+				>STA.G hPW
 *--------------------------------------
 CS.RUN.LOOP		ldy #S.PS.hStdIn
 				lda (pPS),y
@@ -202,6 +215,7 @@ CS.RUN.PRINT.DIR
 				cmp #'.'
 				bne .10
 				jmp .5
+
 .10				>LDA.G bLong
 				bmi .4
 
@@ -248,12 +262,17 @@ CS.RUN.PRINT.DIR
 .2				jsr CS.RUN.UpdateColCnt
 				bcc .5
 				rts
-.4				jsr CS.RUN.PUSHDATES
+*--------------------------------------
+.4				>PUSHW ZPFileName
+				
+				jsr CS.RUN.PUSHDATES
+
+				jsr CS.RUN.PushGidUid
 
 				jsr Mod2CSTR
 				>PUSHEA.G MOD				File Mod
-				>PUSHW ZPFileName
-				>PUSHBI 8
+				
+				>PUSHBI 12
 				>LDYA L.MSG.DIREXT
 				>SYSCALL printf
 
@@ -296,16 +315,9 @@ CS.RUN.PRINT.FILE
 				>SYSCALL printf
 				bcs .9
 				jmp CS.RUN.UpdateColCnt
-.1				jsr CS.RUN.PUSHDATES
-				ldy #S.STAT.SIZE+3
-				ldx #4
-.2				lda (ZPFileStat),y
-				>PUSHA
-				dey
-				dex
-				bne .2
-				jsr Mod2CSTR
-				>PUSHEA.G MOD			File Mod
+*--------------------------------------
+.1				>PUSHW ZPFileName
+				
 				ldy #S.STAT.P.AUXTYPE+1
 				lda (ZPFileStat),y
 				>PUSHA
@@ -317,12 +329,65 @@ CS.RUN.PRINT.FILE
 				lda (ZPFileStat),y
 				jsr FileType2PSTR
 				>PUSHYA
-				>PUSHW ZPFileName
-				>PUSHBI 16
+
+				jsr CS.RUN.PUSHDATES
+
+				ldy #S.STAT.SIZE+3
+				ldx #4
+
+.2				lda (ZPFileStat),y
+				>PUSHA
+				dey
+				dex
+				bne .2
+
+				jsr CS.RUN.PushGidUid
+
+				jsr Mod2CSTR
+				>PUSHEA.G MOD			File Mod
+
+				>PUSHBI 20
 				>LDYA L.MSG.FILEEXT
 				>SYSCALL printf
 
 .9				rts
+*--------------------------------------
+CS.RUN.PushGidUid
+				ldy #S.STAT.GID
+				lda (ZPFileStat),y
+				beq .1
+				
+				>LDYA L.MSG.Users
+				bra .2
+				
+.1				>LDYA L.MSG.Root
+								
+.2				>PUSHYA
+
+				>PUSHW ZPPW
+				ldy #S.STAT.UID
+				lda (ZPFileStat),y
+				>SYSCALL GetPWUID
+				bcs .3
+				
+				>PUSHW ZPPW
+				clc
+				rts
+				
+.3				ldy #S.STAT.UID+1
+				lda (ZPFileStat),y
+				>PUSHA
+				dey
+				lda (ZPFileStat),y
+				>PUSHA
+				
+				>PUSHB L.FMT.int16
+				>PUSHEA.G GID
+				>SYSCALL sprintf
+				
+				>PUSHEA.G GID
+				clc
+				rts
 *--------------------------------------
 CS.RUN.PUSHDATES
 				ldy #TIME.Mod-1			Set NODATE as default
@@ -447,9 +512,15 @@ CS.QUIT			jsr LeaveSubDir
 				bcc CS.QUIT
 				>LDA.G hFilter
 				beq .3
+
 				>SYSCALL FreeMem
 
-.3				clc
+.3				>LDA.G hPW
+				beq .8
+				
+				>SYSCALL FreeMem
+				
+.8				clc
 				rts
 *--------------------------------------
 FileType2PSTR	ldy #0
@@ -529,9 +600,9 @@ OptionVars		.DA #bAllmostAll,#bColumn,#bFullPath,#bLong,#bRecurse,#bAllmostAll,#
 MSG.DEVEXT		.AZ "/%15s S%dD%d Blocks Used:%5D Total:%5D\r\n"
 MSG.DIR			.AZ "\e[32m%s/\e[0m"
 MSG.ENTER		.AZ "Directory:%s\r\n"
-MSG.DIREXT		.AZ "\e[32m%16s\e[0m  <dir>   %s            %s %s\r\n"
+MSG.DIREXT		.AZ "%s %6s %6s            %s %s  <dir>   \e[32m%s/\e[0m\r\n"
 MSG.FILE		.AZ "%19s"
-MSG.FILEEXT		.AS "%15s %S $%H %s %10u %s %s"
+MSG.FILEEXT		.AS "%s %6s %6s %10u %s %s %S %H %s"
 MSG.CRLF		.AZ "\r\n"
 *--------------------------------------
 PRODOS.FT.HEX	.HS 0406FAFCFDE2CBCCCFFF
@@ -546,9 +617,12 @@ PRODOS.FT.TXT	>PSTR "txt"
 				>PSTR "pak"
 				>PSTR "sys"
 PRODOS.FT.DFLT	>PSTR "$  "
-MSG.NODATE		.AZ "   <No-Date>   "
+MSG.Users		.AZ "users"
+MSG.Root		.AZ "root"
+MSG.NODATE		.AZ "   <no-date>   "
 FMT.Date		.AZ "%d-%b-%y"
 FMT.Time		.AZ "%H:%M:%S "
+FMT.int16		.AZ "%i"
 TYPES			.AS "-dbclssp"
 ACCESS			.AS "rwxrwxrwx"
 *--------------------------------------
@@ -561,6 +635,8 @@ MOD				.BS 11					drwxrwxrwx0
 TIME.Create		.BS 20
 TIME.Mod		.BS 20
 TIME.SysTime	.BS S.TIME
+GID				.BS 6
+UID				.BS 6
 
 bPause			.BS 1
 bAllmostAll		.BS 1
@@ -570,6 +646,7 @@ bLong			.BS 1
 bRecurse		.BS 1
 
 ColCount		.BS 1
+hPW				.BS 1
 
 				.INB USR/SRC/BIN/X.FILEENUM.G
 DS.END
