@@ -28,6 +28,8 @@ hFrame			.BS 1
 PingCount		.BS 1
 TimeOut			.BS 1
 
+IP.Remote		.BS 4
+
 ZS.END			.ED
 *--------------------------------------
 *			File Header (16 Bytes)
@@ -49,9 +51,6 @@ CS.START		cld
 				.DA CS.DOEVENT		
 				.DA	CS.QUIT
 L.LIBTCPIP		.DA LIBTCPIP
-L.SA.LOCAL		.DA SA.LOCAL
-L.SA.REMOTE		.DA SA.REMOTE
-L.SA.REMOTE.AD	.DA SA.REMOTE+S.SOCKADDR.ADDR
 L.MSG.IPKO		.DA MSG.IPKO
 L.MSG.USAGE		.DA MSG.USAGE
 L.MSG.UNKNOWN	.DA MSG.UNKNOWN
@@ -71,13 +70,21 @@ CS.INIT			>LDYA L.LIBTCPIP
 CS.RUN			>LIBCALL hLIBTCPIP,LIBTCPIP.GETCFG	is TCPIP loaded ?
 				>STYA ZPIPCfgPtr
 				lda (ZPIPCfgPtr)		Configured ?
-				bmi CS.RUN.IPOK
+				bmi .1
 
 				>LDYA L.MSG.IPKO
 				>SYSCALL puts
 				lda #E.SYN
 				sec
 				rts
+	
+.1				ldy #DATA.Len-1
+
+.2				lda ICMP.Request,y
+				sta (pData),y
+				dey
+				bpl .2
+	
 	
 CS.RUN.IPOK		inc ArgIndex
 				lda ArgIndex
@@ -106,7 +113,7 @@ CS.RUN.IPOK		inc ArgIndex
 .1				lda #TIMEOUT.MAX
 				sta Timeout
 
-.2				>PUSHW L.SA.REMOTE.AD
+.2				>PUSHEA.G SA.REMOTE+S.SOCKADDR.ADDR
 				>PUSHW ZPTmpPtr
 				>LIBCALL hLIBTCPIP,LIBTCPIP.HST.GETBYNAME
 				bcc .3
@@ -124,7 +131,7 @@ CS.RUN.IPOK		inc ArgIndex
 				sta ArgHostName
 				bra CS.RUN.IPOK
 
-.8				lda SA.REMOTE+S.SOCKADDR.ADDR
+.8				>LDA.G SA.REMOTE+S.SOCKADDR.ADDR
 				bne CS.RUN.ARGSOK
 
 .9				>PUSHBI 0
@@ -140,9 +147,11 @@ CS.RUN.ARGSOK	lda ArgHostName
 				>PUSHYA
 
 				ldx #3
+				ldy #SA.REMOTE+S.SOCKADDR.ADDR+3
 
-.1				lda SA.REMOTE+S.SOCKADDR.ADDR,x
+.1				lda (pData),y
 				>PUSHA
+				dey
 				dex
 				bpl .1
 
@@ -154,19 +163,30 @@ CS.RUN.OPENSKT	ldx #3
 				ldy #S.IPCFG.IP+3
 
 .1				lda (ZPIPCfgPtr),y
-				sta SA.LOCAL+S.SOCKADDR.ADDR,x
+				sta IP.Remote,x
 				dey
 				dex
 				bpl .1
 
+				ldx #3
+				ldy #SA.LOCAL+S.SOCKADDR.ADDR+3
+
+.2				lda IP.Remote,x
+				sta (pData),y
+				dey
+				dex
+				bpl .2
+				
 				lda A2OSX.RANDOM16
-				sta SA.LOCAL+S.SOCKADDR.PORT
-				sta SA.REMOTE+S.SOCKADDR.PORT
+				eor A2osX.TIMER16+1
+				>STA.G SA.LOCAL+S.SOCKADDR.PORT
+				>STA.G SA.REMOTE+S.SOCKADDR.PORT
 				sta Identifier
 
 				lda A2OSX.RANDOM16+1
-				sta SA.LOCAL+S.SOCKADDR.PORT+1
-				sta SA.REMOTE+S.SOCKADDR.PORT+1
+				eor A2osX.TIMER16
+				>STA.G SA.LOCAL+S.SOCKADDR.PORT+1
+				>STA.G SA.REMOTE+S.SOCKADDR.PORT+1
 				sta Identifier+1
 
 				>PUSHBI S.IP.PROTOCOL.ICMP
@@ -176,30 +196,25 @@ CS.RUN.OPENSKT	ldx #3
 
 				sta hSocket
 				
-				>PUSHW L.SA.LOCAL
+				>PUSHEA.G SA.LOCAL
 				lda hSocket
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Bind
 				bcs .9
 
-				>PUSHW L.SA.REMOTE
+				>PUSHEA.G SA.REMOTE
 				lda hSocket
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Connect
-				bcc CS.RUN.SEND
+				bcc CS.RUN.SEND.ECHO
 
 .9				>LDYA L.MSG.SKTKO
 				>SYSCALL puts
 				lda #E.SYN
 				sec
 				rts
-
-CS.RUN.SEND		ldy #ICMP.RequestLen-1
-
-.1				lda ICMP.Request,y
-				sta (pData),y
-				dey
-				bpl .1
 				
 CS.RUN.SEND.ECHO
+				>SLEEP
+				
 				lda Identifier
 				>STA.G Request-S.IP+S.ICMP.IDENTIFIER+1
 
@@ -288,8 +303,11 @@ CS.DOEVENT		lda (pEvent)
 *--------------------------------------
 CS.Print.UNREACH
 				ldx #3
+				ldy #SA.REMOTE+S.SOCKADDR.ADDR+3
 
-.1				>PUSHB SA.REMOTE+S.SOCKADDR.ADDR,x
+.1				lda (pData),y
+				>PUSHA
+				dey
 				dex
 				bpl .1
 
@@ -367,16 +385,6 @@ MSG.UNREACH		.AZ "%d.%d.%d.%d: TimeOut/Host unreachable\r\n"
 MSG.REPLY		.AZ "32 bytes from %d.%d.%d.%d, icmp_seq=%D, ttl=%d, time=%D ms\r\n"
 hLIBTCPIP		.BS 1
 *--------------------------------------
-SA.LOCAL		.DA #AF.INET			S.SOCKADDR.AF
-				.BS 1
-				.BS 4					S.SOCKADDR.ADDR
-				.BS 2					S.SOCKADDR.PORT
-*--------------------------------------
-SA.REMOTE		.DA #AF.INET			S.SOCKADDR.AF
-				.BS 1
-				.BS 4					S.SOCKADDR.ADDR
-				.BS 2
-*--------------------------------------
 ICMP.Request	.DA #S.ICMP.TYPE.ECHOREQ
 				.DA #0					CODE
 				.DA 0					CHECKSUM
@@ -386,12 +394,24 @@ ICMP.Request	.DA #S.ICMP.TYPE.ECHOREQ
 				.AS "QRSTUVWXYZ012345"
 ICMP.RequestLen	.EQ *-ICMP.Request
 *--------------------------------------
+				.DA #AF.INET			S.SOCKADDR.AF
+				.BS 1
+				.BS 4					S.SOCKADDR.ADDR
+				.BS 2					S.SOCKADDR.PORT
+*--------------------------------------
+				.DA #AF.INET			S.SOCKADDR.AF
+				.BS 1
+				.BS 4					S.SOCKADDR.ADDR
+				.BS 2
+DATA.Len		.EQ *-ICMP.Request
+*--------------------------------------
 				.DUMMY
 				.OR 0
 DS.START
 Request			.BS ICMP.RequestLen
-DS.END
-				.ED
+SA.LOCAL		.BS S.SOCKADDR
+SA.REMOTE		.BS S.SOCKADDR
+DS.END			.ED
 *--------------------------------------
 MAN
 SAVE USR/SRC/BIN/PING.S
