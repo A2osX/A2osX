@@ -3,10 +3,11 @@ NEW
 				.LIST OFF
 				.OP	65C02
 				.OR	$2000
-				.TF BIN/WC
+				.TF bin/wc
 *--------------------------------------
 				.INB INC/MACROS.I
 				.INB INC/A2OSX.I
+				.INB INC/KERNEL.I
 				.INB INC/MLI.I
 				.INB INC/MLI.E.I
 *--------------------------------------
@@ -59,9 +60,13 @@ CS.START		cld
 				.DA CS.DOEVENT		
 				.DA	CS.QUIT
 L.MSG.USAGE		.DA MSG.USAGE
-L.MSG.FILE		.DA MSG.FILE
 L.MSG.ERR		.DA MSG.ERR
-L.MSG.TOTAL		.DA MSG.TOTAL
+L.MSG.FILE1		.DA MSG.FILE1
+L.MSG.FILE2		.DA MSG.FILE2
+L.MSG.FILE3		.DA MSG.FILE3
+L.MSG.TOTAL1	.DA MSG.TOTAL1
+L.MSG.TOTAL2	.DA MSG.TOTAL2
+L.MSG.TOTAL3	.DA MSG.TOTAL3
 				.DA 0
 *--------------------------------------
 CS.INIT			clc
@@ -69,29 +74,44 @@ CS.INIT			clc
 *--------------------------------------
 CS.RUN			>INC.G ArgIndex
 				>SYSCALL ArgV
-				bcs .8
+				bcs .5
 				>STYA ZPPtr1
 				lda (ZPPtr1)
 				cmp #'-'
 				bne .4
 				jsr CS.RUN.CheckOpt
 				bcc CS.RUN
+
 .9				>PUSHBI 0
 				>LDYA L.MSG.USAGE
 				>SYSCALL printf
 				lda #E.SYN
 				sec
-.99				rts
+				rts
 *--------------------------------------
 .4				>LDA.G hSrcBasePath
 				bne .9
 				>LDYA ZPPtr1
 				jsr InitSrcDirYA
 				bcc CS.RUN
-				rts
-.8				>LDA.G hSrcBasePath
-				beq .9
-				>LDYAI 256
+.99				rts
+
+.5				>LDA.G hSrcBasePath
+				bne .6
+				
+				ldy #S.PS.hStdIn
+				lda (pPS),y
+				tax
+				lda OF.Table.hFD-1,x
+				>SYSCALL GetMemPtr
+				>STYA ZPPtr1
+				lda (ZPPtr1)
+				cmp #S.FD.T.PIPE
+				bne .9
+				
+				jmp CS.RUN.PIPE
+
+.6				>LDYAI 256
 				>SYSCALL getmem
 				bcs .99
 				>STYA ZPFullPath
@@ -101,10 +121,13 @@ CS.RUN			>INC.G ArgIndex
 				>LDA.G hSrcBasePath
 				>SYSCALL GetMemPtr
 				>STYA ZPPtr1
+
 				ldy #$ff
+
 .80				iny
 				lda (ZPPtr1),y
 				bne .80
+
 				tya
 				clc
 				adc ZPFullPath
@@ -166,7 +189,27 @@ CS.RUN.LOOP		ldy #S.PS.hStdIn
 				jsr BasePath..
 .8				jsr GetNextEntry
 				jmp CS.RUN.LOOP
+
 .90				jsr CS.RUN.PrintTstat
+				lda #0
+				sec
+.99				rts
+*--------------------------------------
+CS.RUN.PIPE		>LDYAI 256
+				>SYSCALL getmem
+				bcs .99
+				>STYA ZPLineBuf
+				txa
+				>STA.G hMem
+
+				ldy #S.PS.hStdIn
+				lda (pPS),y
+				
+				>STA.G hFile
+
+				jsr CS.RUN.FILE.LOOP
+				jsr CS.RUN.PrintFstat
+				
 				lda #0
 				sec
 .99				rts
@@ -184,54 +227,37 @@ CS.RUN.DIR		lda bRecurse
 *--------------------------------------
 CS.RUN.DEV
 .8				jsr GetNextEntry
+
+CS.RUN.DEV.CLC.RTS
 				clc
-.9				rts
+				rts
 *--------------------------------------
 CS.RUN.FILE		jsr FilterMatch
-				bcs .8					no match, skip....
+				bcs CS.RUN.DEV.CLC.RTS	no match, skip....
 
 				jsr CS.RUN.GetFilePath
+
 				jsr CS.RUN.OpenFile
 				bcs .9
 
-.1				>PUSHWI 256
-				>PUSHW ZPLineBuf
-				>LDA.G hFile
-				>SYSCALL fgets
-				bcs .6
-				jsr CS.RUN.IncFLine
-				ldy #$ff
-				stz bInWord
-.2				iny
-				lda (ZPLineBuf),y
-				beq .1
-
-				cmp #C.SPACE
-				beq .3
-				cmp #C.TAB
-				bne .4
-.3				lda bInWord
-				beq .5 
-
-				jsr CS.RUN.IncFWord
-				stz bInWord
-				bra .5
-.4				inc bInWord
-.5				jsr CS.RUN.IncFChar
-				bra .2
-.6				cmp #MLI.E.EOF
-				bne .7 
+				jsr CS.RUN.FILE.LOOP
+				bcs .7
+				
 				jsr CS.RUN.CloseFile
 
 				jsr CS.RUN.PrintFstat
 				bcs .99
+
 				jsr CS.RUN.AddFstat2Tstat
 				lda bTotal
 				bmi .8
 				beq .61
+
 				lda #$fe
+
 .61				inc
 				sta bTotal
+
 .8				clc
 				rts
 
@@ -241,6 +267,52 @@ CS.RUN.FILE		jsr FilterMatch
 				sec
 .9				jmp CS.RUN.CheckErr
 .99				rts
+*--------------------------------------
+CS.RUN.FILE.LOOP
+.1				>PUSHWI 256
+				>PUSHW ZPLineBuf
+				>LDA.G hFile
+				>SYSCALL fgets
+				bcs .8
+
+				jsr CS.RUN.IncFLine
+				ldy #$ff
+				stz bInWord
+
+.2				iny
+				lda (ZPLineBuf),y
+				bne .21
+				
+				lda bInWord
+				beq .1
+
+				jsr CS.RUN.IncFWord
+				bra .1
+
+.21				cmp #C.SPACE
+				beq .3
+				cmp #C.TAB
+				bne .4
+
+.3				lda bInWord
+				beq .5 
+
+				jsr CS.RUN.IncFWord
+				stz bInWord
+				bra .5
+
+.4				inc bInWord
+
+.5				jsr CS.RUN.IncFChar
+				bra .2
+				
+.8				cmp #MLI.E.EOF
+				bne .9
+				clc
+				rts
+				
+.9				sec
+				rts
 *--------------------------------------
 CS.RUN.CheckErr	bcc .9
 				pha
@@ -329,24 +401,89 @@ CS.RUN.AddFstat2Tstat
 *--------------------------------------
 CS.RUN.PrintFstat
 				>PUSHW ZPRelPath
+				ldx #0
+
+				bit bWord
+				bpl .1
+				
 				>PUSHL.G fWordCount
+				inx
+				
+.1				bit bLine
+				bpl .2
+
+				>PUSHL.G fLineCount
+				inx
+				
+.2				bit bChar
+				bpl .3
+				
+				>PUSHL.G fCharCount
+				inx
+
+.3				txa
+				beq .4
+
+				asl
+				tax
+				asl
+*				clc				
+				adc #2
+				>PUSHA
+				>LDYA L.MSG.FILE1-2,x
+				>SYSCALL printf
+				rts
+				
+.4				>PUSHL.G fWordCount
 				>PUSHL.G fLineCount
 				>PUSHL.G fCharCount
 				>PUSHBI 14
-				>LDYA L.MSG.FILE
+				>LDYA L.MSG.FILE3
 				>SYSCALL printf
 				rts
 *--------------------------------------
 CS.RUN.PrintTstat
 				lda bTotal
 				bpl .8
+				
+				ldx #0
+				
+				bit bWord
+				bpl .1
+				
 				>PUSHL.G tWordCount
+				inx
+				
+.1				bit bLine
+				bpl .2
+
+				>PUSHL.G tLineCount
+				inx
+				
+.2				bit bChar
+				bpl .3
+				
+				>PUSHL.G tCharCount
+				inx
+
+.3				txa
+				beq .4
+
+				asl
+				tax
+				asl
+				>PUSHA
+				>LDYA L.MSG.TOTAL1-2,x
+				>SYSCALL printf
+.8				rts
+				
+.4				>PUSHL.G tWordCount
 				>PUSHL.G tLineCount
 				>PUSHL.G tCharCount
 				>PUSHBI 12
-				>LDYA L.MSG.TOTAL
+				>LDYA L.MSG.TOTAL3
 				>SYSCALL printf
-.8				rts
+				rts
 *--------------------------------------
 CS.DOEVENT		sec
 				rts
@@ -398,8 +535,12 @@ MSG.USAGE		.AS "Usage : WC File(s) (*,? wildcards allowed)\r\n"
 				.AS "   -L : Print the LINE counts\r\n"
 				.AZ "   -W : Print the WORD counts\r\n"
 MSG.ERR			.AZ "[%h]\r\n"
-MSG.FILE		.AZ "%10L %10L %10L %s\r\n"
-MSG.TOTAL		.AZ "%10L %10L %10L\r\n"
+MSG.FILE3		.AS "%10L "
+MSG.FILE2		.AS "%10L "
+MSG.FILE1		.AZ "%10L %s\r\n"
+MSG.TOTAL3		.AS "%10L "
+MSG.TOTAL2		.AS "%10L "
+MSG.TOTAL1		.AZ "%10L (total)\r\n"
 *--------------------------------------
 				.DUMMY
 				.OR 0
