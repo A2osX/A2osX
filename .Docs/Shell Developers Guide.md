@@ -1,7 +1,7 @@
 
 # A2osX Shell Developers Guide
 
-### Updated December 4, 2019
+### Updated December 6, 2019
 
 One of the most significant parts of A2osX is its shell which can perform both interactive and scripted tasks.  Using the interactive part of the shell, you can perform many common and complex tasks using both built-in (native or internal to shell) and external (BIN or executable) commands.  Internal commands include CD (change directory), MD (make directory), PWD, DATE, etc.  External commands include CP (copy), RM (remove), CAT (display file contents), TELNET, etc.  It is even possible to create and execute short scripts right on the interactive command line (these are run once and not saved like true scripts) such as:
 
@@ -50,8 +50,8 @@ The A2osX Shell contains an advanced set of internal commands.  Several of these
 
 Whether in scripts or typed in at the interactive Shell prompt ($), most commands support, or even require, one or more *\<arguments\>* and/or *\<options\>*.  Commands typically use *\<values\>* as their *\<arguments\>* and *\<switches\>* as their *\<options\>*, however in some cases you may use *\<expressions\>*  or *<conditions\>*.  A full command line may be in the form of
 
-	command \<switch\> \<value\> \<switch\> argument argument   or
-	command \[ <\condition\> \]
+	command <switch> <value> <switch> argument argument   or
+	command [ <condition> ]
 
 where in the first nomenclature a **command** performs an action with or on the objects passed as *\<arguments\>*, modifying its behavior (the action it performs) based on *\<switches\>* if present.  For example in the case of **LS -L /MYVOL** the command is **LS**, the option or switch is **-L** and the argument (target of the operation) is **/MYVOL**, which in this case the command would print a long listing of the root directory fo the ProDOS volume named /MYVOL.  The second nomenclature is used with the logic/control commands **IF** and **WHILE** where a *\<condition\>* is evaluated and the result is processed by the command to effect program flow.
 
@@ -97,18 +97,20 @@ The shell includes several "checks" that can be used to easily determine if cert
 	#   IF PROFILE were a directory name and not a file, this Check would fail
 	IF [ -F /MYVOL/PROFILE ] ; ECHO "Found" ; FI
 	#	Echo "True" if the <value> is an Integer
-	SET ABC = 123 ; IF [ -I $ABC ] ; ECHO "True" ; FI	# Would Echo True
-	SET ABC = "Hello" ; IF [ -I $ABC ] ; ECHO "True" ; FI	# False no Echo
-	IF [ -I 123.456 ] ; ECHO "True" ; ELSE ; ECHO "False" ; FI	# Echo False
+	SET ABC = 123 ; IF [ -I $ABC ] ; ECHO "True" ; FI ;		# Would Echo True
+	SET ABC = "Hello" ; IF [ -I $ABC ] ; ECHO "True" ; FI ;		# False no Echo
+	IF [ -I 123.456 ] ; ECHO "True" ; ELSE ; ECHO "False" ; FI ;	# Echo False
 	#	Note the next two -N and -Z are in affect opposites of each other ![ -N ] = [ -Z ]
 	#	Echo "True" if the variable is not empty (non-null)
-	SET ABC = "Hello" ; IF [ -N $ABC ] ; ECHO "True" ; FI	# True
+	SET ABC = "Hello" ; IF [ -N $ABC ] ; ECHO "True" ; FI ;		# True
 	#	Echo "True" if a function named MYFUNC has been defined
 	#	See the section on functions for more information on this check
-	IF [ -X MYFUNC ] ; ECHO "True" ; FI					# False
+	IF [ -X MYFUNC ] ; ECHO "True" ; FI ;				# False
 	#	Echo "True" if the variable is empty/does not exist (null)
-	SET ABC =  ; IF [ -Z $ABC ] ; ECHO "True" ; FI		# True
-	SET ABC = "Hello" ; IF [ -Z $ABC ] ; ECHO "True" ; FI	# False
+	SET ABC =  ; IF [ -Z $ABC ] ; ECHO "True" ; FI ;		# True
+	SET ABC = "Hello" ; IF [ -Z $ABC ] ; ECHO "True" ; FI ;		# False
+
+>In case you are wondering why there appears to be extra semicolons (;) in the lines above, unlike other languages (i.e. C, BASH, VB) you cannot put a comment on the same line as a command.  A comment must start with pound (#) at the start of a line.  Remember from the note above, that the semicolon allows you to concatenate multiple lines onto one, but they are treated as separate lines.  Here, that allows a comment to appear on the same line as executable statements, but to the shell its treated as its only line that starts with a #.
 
 This script demonstrates the usage of the various String evaluation Conditions.  They are equals (=), not equals (!=), less than (.<), less than or equal (<=), greater than (.>) and greater than or equal (>=).
 
@@ -118,12 +120,12 @@ This script demonstrates the usage of the various String evaluation Conditions. 
 	#
 	SET A = "ABC"
 	SET B = "DEF"
-	IF [ $A  = $B ] ; ECHO HI ; ELSE ; ECHO BYE ; FI		# False - BYE
-	IF [ $A != $B ] ; ECHO HI ; ELSE ; ECHO BYE ; FI		# True  - HI
-	IF [ $A .< $B ] ; ECHO HI ; ELSE ; ECHO BYE ; FI		# True  - HI
-	IF [ $A <= $B ] ; ECHO HI ; ELSE ; ECHO BYE ; FI		# True  - HI
-	IF [ $A .> $B ] ; ECHO HI ; ELSE ; ECHO BYE ; FI		# False - BYE
-	IF [ $A >= $B ] ; ECHO HI ; ELSE ; ECHO BYE ; FI		# False - BYE
+	IF [ $A  = $B ] ; ECHO HI ; ELSE ; ECHO BYE ; FI ;		# False - BYE
+	IF [ $A != $B ] ; ECHO HI ; ELSE ; ECHO BYE ; FI ;		# True  - HI
+	IF [ $A .< $B ] ; ECHO HI ; ELSE ; ECHO BYE ; FI ;		# True  - HI
+	IF [ $A <= $B ] ; ECHO HI ; ELSE ; ECHO BYE ; FI ;		# True  - HI
+	IF [ $A .> $B ] ; ECHO HI ; ELSE ; ECHO BYE ; FI ;		# False - BYE
+	IF [ $A >= $B ] ; ECHO HI ; ELSE ; ECHO BYE ; FI ;		# False - BYE
 
 > Note if you set A = 123 and B = "DEF" and do those tests you will get an error on some of the tests since one of the variables is an integer and both variables should be strings.  
 
@@ -135,12 +137,12 @@ This script demonstrates the usage of the various Integer evaluation Conditions.
 	#
 	SET A = 123
 	SET B = 456
-	IF [ $A -eq  $B ] ; ECHO HI ; ELSE ; ECHO BYE ; FI		# False - BYE
-	IF [ $A -ne  $B ] ; ECHO HI ; ELSE ; ECHO BYE ; FI		# True  - HI
-	IF [ $A -lt  $B ] ; ECHO HI ; ELSE ; ECHO BYE ; FI		# True  - HI
-	IF [ $A -le  $B ] ; ECHO HI ; ELSE ; ECHO BYE ; FI		# True  - HI
-	IF [ $A -gt  $B ] ; ECHO HI ; ELSE ; ECHO BYE ; FI		# False - BYE
-	IF [ $A -ge  $B ] ; ECHO HI ; ELSE ; ECHO BYE ; FI		# False - BYE
+	IF [ $A -eq  $B ] ; ECHO HI ; ELSE ; ECHO BYE ; FI ;		# False - BYE
+	IF [ $A -ne  $B ] ; ECHO HI ; ELSE ; ECHO BYE ; FI ;		# True  - HI
+	IF [ $A -lt  $B ] ; ECHO HI ; ELSE ; ECHO BYE ; FI ;		# True  - HI
+	IF [ $A -le  $B ] ; ECHO HI ; ELSE ; ECHO BYE ; FI ;		# True  - HI
+	IF [ $A -gt  $B ] ; ECHO HI ; ELSE ; ECHO BYE ; FI ;		# False - BYE
+	IF [ $A -ge  $B ] ; ECHO HI ; ELSE ; ECHO BYE ; FI ;		# False - BYE
 
 > Note if you set A = 123 and B = "Hello" and do those tests you will get an error since one of the variables is string and both variables must be integers.  
 
@@ -178,24 +180,24 @@ You can further extend \<conditions\> by building complex evaluations that consi
 		ECHO HI
 	ELSE
 		ECHO BYE
-	FI			# True  - HI
+	FI	 ;		# True  - HI
 	# Test that 3 conditions are ALL true
 	IF [ $A -eq 123 ] AND [ $B -eq 456 ] AND [ $C = "Your Name" ]
 		ECHO HI
 	ELSE
 		ECHO BYE
-	FI			# False - BYE  (because 3rd condition not met)
+	FI	 ;		# False - BYE  (because 3rd condition not met)
 	# With OR you can test if either condition is met 
 	IF [ $A -eq 123 ] OR [ $B -eq 456 ]
 		ECHO HI
 	ELSE
 		ECHO BYE
-	FI			# True  - HI
+	FI	 ;		# True  - HI
 	IF [ $A -eq 999 ] OR [ $B -eq 456 ]
 		ECHO HI
 	ELSE
 		ECHO BYE
-	FI			# True  - HI	(2nd condition is met)
+	FI	 ;		# True  - HI	(2nd condition is met)
 
 When using multiple of these joiners with a single command such as **IF**, care should be made  in the structuring of your \<condition\> statements.  The shell processes command lines linearly from left to right and is very binary in nature.  Consider first a math example of **SET A = 1 + 2 * 3 - 4 * 8 + 2 / 2**, the result placed into **A** is 42 (process the calculations like a calculator would, one at a time, there is no precedence).  When evaluating a set of \<conditions\>, the shell processes them one at a time the same way and when it encounters an AND or an OR it evaluates the current "state" to determine if it should return a result or continue to evaluate the conditions ont he line.  Let us say you have 4 conditions, A, B, C and D (each one represents something like [ -d adir ]), and you are doing something like IF A AND B OR C AND D.  The Shell will determine a result for A (for example that [ -d adir]) and then it sees "AND", at that moment if A is false all processing ends there because it does not matter what else is on the command line (The IF fails).  Now assume A and B are both true and it gets to that OR, again processing stops be cause there is already a true case on one side of the OR (The IF succeeds).  As you can see, its easy to predict the behavior of constructs like IF A and B and C and D (all must be true) as well as IF A or B or C (any one need be true), but complex IF A or B and C or D and E need to be tested that they perform as you imagined.  Once mastered though, you will see that when structured correctly you can perform very complex \<condition\> sets.  Say you wanted to do IF ( A and B ) or C, realizing there is no actual groupings (parens) in conditions, if you simply structure your if as IF C OR A AND B, it will have the effect you wanted.  There is an example of complex compound conditions that you can run and even modify to test different patterns/structures of complex conditions.  It can be found at **[ANDORTESTS](../EXAMPLES/ANDORTESTS.txt)**.
 
@@ -232,7 +234,7 @@ Please note, that the shell does string substitution when processing \<values>. 
 
 ### AND
 
-	[ <\expression\> ] AND [ <\expression\> ]...
+	[ <expression> ] AND [ <expression> ]...
 
 The **AND** reserved word is used to join 2 or more conditions together to create complex logic statements.  See \<condition\> section above for more information on **AND** and examples of its usage.  In addition, look at **[ANDORDEMO](EXAMPLES/ANDORDEMO.txt)**, a complete script using **AND** and **OR**.
 
@@ -244,7 +246,7 @@ The **BREAK** command is used to exit or end a block of statements that were opt
 
 ### CALL 
 
-	CALL function [\<argument\>]...
+	CALL function [ <argument> ]...
 
 The **CALL** command is used to execute a previously defined and loaded function.  When calling a function with the **CALL** command, you may pass one or more arguments which can then be used by the function during execution.  See the **FUNCTION** command below for more information on creating and calling functions including examples.
 
@@ -262,7 +264,7 @@ The **CD** command is used to change the current working directory.  You must su
 
 ### DATE
 
-	DATE [<expression>]
+	DATE [ <expression> ]
 
 The **DATE** command outputs the current date and time.  A supported clock card is needed to return accurate DATE and TIME values.  **DATE** accepts an optional \<expression> that should be a string that can contain any text as well as the following format options: 
 - %a : Abbreviated weekday name : Thu
@@ -346,7 +348,7 @@ A2osX provides advanced screen handling capabilities for the Apple console (keyb
 	#	This example would print ABEF on the screen.  The two \b overwrite the CD.
 	ECHO "ABCD\b\bEF"
 	#	Turn Inverse on: \e[7m		off: \e[0m
-	#	This example HELLO INVERSE WORLD with the word INVERSE in inverse.
+	#	This example displays HELLO INVERSE WORLD with the word INVERSE in inverse.
 	ECHO "HELLO \e[7mINVERSE\e[0m WORLD"
 	#	Print a backslash (\).  Since \ is a special character, you need a way to print it.
 	ECHO "\\"
@@ -443,8 +445,12 @@ The **FI** command is used at the end of an **IF** script block. See the **IF** 
 
 	FUNCTION function_name
 	{ 
-		\<body\>
+		<body>
 	}
+
+The **FUNCTION** command is used to define a function that can be called one or more times in your scripts.  
+
+>A note about the shell, memory usage and functions.  
 
 if you SET -F, it will discard ALL previously learned FUNC in the current SH context
 if . FUNCS1 file add 3
@@ -461,7 +467,7 @@ CORE.STACK.MAX = 128....so each CALL consumes about 7 bytes of stack (return Ctx
 
 ### IF
 
-	IF [ <\expression\> ]...
+	IF [ <expression> ]...
 
 ### LOOP
 
@@ -483,7 +489,7 @@ MD path or relative path <br> Create a directory |
 
 ### OR
 
-	[ <\expression\> ] OR [ <\expression\> ]...
+	[ <expression> ] OR [ <expression> ]...
   
 The **OR** reserved word is used to join 2 or more conditions together to create complex logic statements.  See \<condition\> section above for more information on **OR** and examples of its usage.  In addition, look at **[ANDORTESTS](EXAMPLES/ANDORTESTS.txt)**, a complete script using **OR**.
 
@@ -595,6 +601,8 @@ As seen throughout this guide, scripts are very useful for automating many repet
 All variables have names, starting with xxx, can be any length, but longer is not better.  They are case sensitive so AVAR, Avar, aVar, and avar are actually 4 different variables.  There are only two kinds of variables internally, strings and integers.  
  
 
+
+
 Variable overflow strings and ints
 Ints only no real num it just ignore
 
@@ -644,6 +652,8 @@ The variables **$1** through **$9** hold the values of the first 9 arguments pas
 
 The **$*** variable is a string containing all the arguments passed to the script or function.  Since this is just a concatenation (space separated) of all the arguments, its usefulness is largely limited to debugging (i.e. **ECHO $* >> debuglog**).
 
+The **$#** variable is an integer holding the total number of arguments pass to the script or function.  This variable can be used by a loop to process the passed arguments.  See the **SHIFT** command below for an example script using the **$#** variable.
+
 The **$?** variable is an integer holding the return or exit code of the last executed command, function or script.  Scripts and functions can set the return code using the **EXIT** command (i.e. **EXIT 144** to set $? to 144).
 
 The **$@** variable is an integer that holds the Process ID (**PID**) of the parent process that called this script.  If a script is run from the prompt (**$**), then the PID would be of the /BIN/SH process running for the current user.  If a script is run by another script, then the PID would be of the calling script (except if called with the . then the called script is actually running in the same process as the calling script).
@@ -678,15 +688,25 @@ This mode, set by the **-X** flag option of **SET**, allows you to change the sh
 
 ### SHIFT
 
-	SHIFT
+	SHIFT [int32]
 
-Remove $1 from cmd line
+The **SHIFT** command is used to remove the first argument ($1) and reorder the remaining arguments in the command line.  The **SHIFT** command is most useful when a script is passed more then nine (9) arguments and you need to process each one individually.  Since there are only special variables (see Variables above) for the first nine ($1 through $9), to process the data in arguments past nine, you first save off the early arguments then use **SHIFT** to be able to process the later arguments.  The **SHIFT** commands takes an optional argument which determines which arguments gets removed, so for examples **SHIFT 2** would remove the 2nd argument, moving arguments 3 and greater to the left.
+
+The following script accesses and displays every argument passed to it, regardless of the number.
+
+	#!/bin/sh
+	SET numArgs = $#
+	WHILE [ $numArgs -GT 0 ]
+		ECHO $1
+		SHIFT
+		SET numArgs = $numArgs - 1
+	LOOP 
 
 ### SLEEP
 
-	SLEEP	int32
+	SLEEP int32
 
-Wait 1/10 sec
+The **SLEEP** command is used to pause the execution of a script for 1/10th of a second.  A2osX does a reasonably good job of determining processor speed (in Mhz) at start up so that **SLEEP 100** is a consistent 10 seconds across systems, however note, that with emulators running at artificial speeds these calculations can be affected.  Plan accordingly.
 
 ### SWITCH
 
@@ -704,11 +724,7 @@ The **SWITCH** statement is used at the start of a multiway program flow control
 
 ## Redirection
 
-| Token  | Status  | Comment |
-| ----   | ------  | ------- |
-| .      | Working | use same env |
-| &      | Working | start proc |
-| \|     | Working | pipe |
+The shell 
 | <      | Working | StdIn redirection |
 | >      | Working | StdOut redirection |
 | >>     | Working | Append StdOut  |
@@ -716,6 +732,18 @@ The **SWITCH** statement is used at the start of a multiway program flow control
 | 1>     | Working |  |
 | 2>>    | Working | StdErr redirection |
 | 2>     | Working |  |
+
+## Piping
+
+| \|     | Working | pipe |
+
+## Environment
+
+| .      | Working | use same env |
+
+## Processes
+
+| &      | Working | start proc |
 
 ## Writing Scripts
 
@@ -730,7 +758,37 @@ note that if you call a script normally, and it is in its own ENV it only can ac
 
 loading functions this way
 
-###Examples
+>A note on memory.  All scripts get loaded into and run from Main Memory.  
+
+### Line Separator
+
+	<command> ; <command> ; <command> ; ...
+
+The shell supports a line separator, the semicolon (;), that can be used to concatenate one or more lines on to a single line.  Many of the examples in this guide make use of this **;** directive which allows you to put multiple statements on one line.  For example
+
+	IF [ condition ] ; ECHO result ; ELSE ; ECHO message ; FI
+ 
+> Is the same as 
+
+	IF [ condition ]
+		ECHO result
+	ELSE
+		ECHO message
+	FI
+
+As far as the shell is concerned, it processes both syntax as a series of individual command lines.  For this guide, the **;** is used to make these sample scripts shorter to display.  In writing your own scripts, it may be easier to read and understand scripts that use the longer syntax.  The real benefit of the **;** line separator is on the interactive command line ($ prompt) where you can type in a mini-script at the prompt.  This is especially useful with command loops using **FOR** or **WHILE**.
+
+### Comments
+
+	#!/bin/sh
+	#
+	#  This is a comment.
+	    #  This is a another comment.
+	#LastComment
+
+You add comments to your scripts by placing a pound sign at the start of the line of your script.  The # must be the first non-space character on the line, for the entire line to be treated as a comment.  As shown in the sample scripts throughout this guide, you can add a comment to a line containing a command (i.e.  ECHO "Hello") by using the semicolon to concatenate multiple lines (i.e. ECHO "Hello" ; # A Comment).
+
+### Examples
 
 In addition to the scripts in this document, there are many example scripts included with A2osX which can be found on the A2osX repository on GitHub.  Besides the [EXAMPLES](../EXAMPLES) folder, you may also want to look at the scripts in the [TESTS](../TESTS), [MAKE](../MAKE) and [ADMIN](../ADMIN) folders.  The scripts in the **TESTS** folder are used to test the various commands of A2osX with each release.  The **MAKE** folder contains scripts used to make the published disk images for A2osX.  The **ADMIN** folder contains scripts that are in the development stage that one day might be used to help administer an A2osX installation.  All of these are good for learning the capabilities available to the script developer.
 
