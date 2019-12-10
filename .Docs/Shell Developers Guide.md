@@ -1,7 +1,7 @@
 
 # A2osX Shell Developers Guide
 
-### Updated December 6, 2019
+### Updated December 8, 2019
 
 One of the most significant parts of A2osX is its shell which can perform both interactive and scripted tasks.  Using the interactive part of the shell, you can perform many common and complex tasks using both built-in (native or internal to shell) and external (BIN or executable) commands.  Internal commands include CD (change directory), MD (make directory), PWD, DATE, etc.  External commands include CP (copy), RM (remove), CAT (display file contents), TELNET, etc.  It is even possible to create and execute short scripts right on the interactive command line (these are run once and not saved like true scripts) such as:
 
@@ -82,7 +82,7 @@ The shell features a lot of built-in checks and comparisons called \<conditions\
 
 The shell includes several "checks" that can be used to easily determine if certain \<conditions> are true or false.  The format of a check is **[ -CHECK \<value> ]** where -CHECK is one **-D** (is a directory), **-E** (is a directory or a file), **-F** (is a file), **-I** (is an integer), **-N** (is a null), **-X** (is a defined function) or **-Z** (is not null) and where \<value> is a variable or literal on which to perform the check.  This script demonstrates the usage of these "Check" Conditions.
 
-    #!/BIN/SH
+    #!/bin/sh
 	#
 	#   IF [ -CHECK <value> ] Examples
 	#
@@ -114,7 +114,7 @@ The shell includes several "checks" that can be used to easily determine if cert
 
 This script demonstrates the usage of the various String evaluation Conditions.  They are equals (=), not equals (!=), less than (.<), less than or equal (<=), greater than (.>) and greater than or equal (>=).
 
-    #!/BIN/SH
+    #!/bin/sh
 	#
 	#   IF [ String <comparator> String ] <conditions> Examples
 	#
@@ -131,7 +131,7 @@ This script demonstrates the usage of the various String evaluation Conditions. 
 
 This script demonstrates the usage of the various Integer evaluation Conditions.  They are equals (-eq), not equals (-ne), less than (-lt), less than or equal (-le), greater than (-gt) and greater than or equal (-ge).
 
-    #!/BIN/SH
+    #!/bin/sh
 	#
 	#   IF [ Int32 <comparator> Int32 ] <conditions> Examples
 	#
@@ -148,7 +148,7 @@ This script demonstrates the usage of the various Integer evaluation Conditions.
 
 To help simplify scripts in some cases, you can modify any of the above \<conditions\> by preceding it with an exclamation (!) or NOT symbol.  For instance you might have a script that creates a temporary file that normally would be stored in **${ROOT}TMP/**.  Before attempting to create a file in this directory you might check to see if it exists and if not create it.  This script would do that:
 
-    #!/BIN/SH
+    #!/bin/sh
 	#
 	#   Check for TMP and create if missing
 	#
@@ -159,7 +159,7 @@ To help simplify scripts in some cases, you can modify any of the above \<condit
 
 Notice that the work being done here is in the ELSE block, or when the check fails.  You may find it better to use the NOT (!) modifier and write the script this way:
 
-    #!/BIN/SH
+    #!/bin/sh
 	#
 	#   Check for TMP and create if missing
 	#
@@ -169,7 +169,7 @@ Notice that the work being done here is in the ELSE block, or when the check fai
 
 You can further extend \<conditions\> by building complex evaluations that consist of multiple check or comparison \<conditions\> joined by AND and/or OR.  The following are examples using AND and OR.
 
-    #!/BIN/SH
+    #!/bin/sh
 	#
 	#   IF <conditions> with AND and OR Examples
 	#
@@ -205,7 +205,7 @@ When using multiple of these joiners with a single command such as **IF**, care 
 
 The A2osX shell contains an expression evaluator that can perform simple integer math operations using the **\+ \- \* \/** and **MOD** operators.  Expressions are a form of an argument used by only a handful of commands, most notably SET (to store the result of the expression into a variable) and CASE/SWITCH.
 
-    #!/BIN/SH
+    #!/bin/sh
 	#
 	#   Shell Expressions Example
 	#
@@ -284,7 +284,7 @@ The **DATE** command outputs the current date and time.  A supported clock card 
 
 The following script highlights sample \<expressions> you can pass the **DATE** command.
 
-    #!/BIN/SH
+    #!/bin/sh
 	#
 	#   DATE Command Examples
 	#
@@ -309,7 +309,7 @@ A word about values, command lines and spaces: **ECHO Hello World** is not the s
 
 In addition to the usual variable substitution that occurs with \<values> (see \<value> above), the **ECHO** command performs some special character substitutions while sending output to the screen or terminal.  If placed inside a value like a string, **ECHO** will automatically substitute a backspace for the sequence **\b**, substitute an escape for **\e**, clear the screen for **\f**, send a newline for **\n**, send a \ for **\\\\** and send a % for **\\%**.  The **\e** (escape) code is useful for sending VT100 escape sequences to the screen/terminal (see the VT100 example script).  The **\\\\** and **\\%** are necessary to send those chars to the screen since normally those characters are interpreted as special command line arguments.    There is also a special **\xHH** option, that will send explicitly the char represented by the HEX value HH to the output device (screen or file).
 
-    #!/BIN/SH
+    #!/bin/sh
 	#
 	#   ECHO Command Examples
 	#
@@ -333,7 +333,7 @@ Consult the subsection below on Advanced Display Techniques for more examples of
 
 A2osX provides advanced screen handling capabilities for the Apple console (keyboard/screen) as well as terminals connected directly (via Super Serial Cards) or remotely (via Telnet using a supported network card and the TELNETD server daemon).  These features are based on the VT100 Terminal definition and scripts you develop can pass VT100 codes (via the ECHO command) to enhance the appearance of your scripts.  In addition to VT100 codes, ECHO has been augmented with some short codes to perform the more common and to help display special characters.  The examples below will help you understand what is possible with ECHO.  For a fuller listing of the available VT100 Terminal Codes, consult the **[A2osX Terminal Codes Guide](.Docs/TERM.md).**
 
-    #!/BIN/SH
+    #!/bin/sh
 	#	ECHO / Advanced Display Techniques Examples
 	#	Note codes are CASE SENSITVE.  \F is not the same as \f
 	#   Clear the Screen (\f)
@@ -400,7 +400,7 @@ The **END** command is used at the end of a **SWITCH** script block. See the **S
 
 The **EXIT** command is used to immediately end the processing of a script or function.  **EXIT** accepts an optional argument that sets the return code (**$?**) which may be checked by a calling script.  If no argument is provided the return code is set to 0 (No Error).  The following script demonstrating the use of the EXIT command can be found in the [EXAMPLES](../EXAMPLES) folder.
 
-    #!/BIN/SH
+    #!/bin/sh
 	#
 	#   EXIT Command Examples
 	#
@@ -529,7 +529,7 @@ Remove the empty directory specified by \<value> which may be either a relative 
 
 The READ command allows you to accept input from the user which can be used or evaluated in other commands.  For instance you can use the READ command to get the name of a file to copy, ask the user for confirmation (Proceed?) and evaluate their response with an IF command, etc.  READ has several powerful options including: Prompt, Suppress and NumChars. In all cases you must specify a variable in which to place the results of the READ command.
 
-    #!/BIN/SH
+    #!/bin/sh
 	#READ Command Examples
 	#    Get Input from User and Store in Variable $A
 	READ A
@@ -559,7 +559,7 @@ The READ command allows you to accept input from the user which can be used or e
 
 The REN command allows you to Rename a single file, directory or Volume.  It does not support wild cards.  While REN and MV may seem similar, they are very different commands and you should use each for its intended purpose.  In the case of REN, it changes the name of an item (Vol, Dir, File) in place; the item itself is not changed.  For those familiar with ProDOS file systems, REN changes the entry of an item in the CATALOG.  MV on the other hand actually copies files (and removes the original) to move them.  Obviously REN is more efficient at RENaming an item in its current location, whereas MV could be used to change the location of a file (MV it from one directory or even volume to another).  Yes you can use MV MYFILE NEWFILE to do the same thing as REN MYFILE NEWFILE, but since a copy must occur, it will be slower and you will have to have sufficient disk space free to make this copy.
 
-    #!/BIN/SH
+    #!/bin/sh
 	#REN Command Examples
 	#    REName a Volume
 	#	 Note How you need to use a full volume name as the Original Name and
@@ -759,6 +759,10 @@ note that if you call a script normally, and it is in its own ENV it only can ac
 loading functions this way
 
 >A note on memory.  All scripts get loaded into and run from Main Memory.  
+
+### Shell Environment
+
+Copy Vars????, Different Context, own vars get lost, own funcs, when called with dot, is using the same env. 
 
 ### Line Separator
 
