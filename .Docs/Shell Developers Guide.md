@@ -441,6 +441,13 @@ The **EXIT** command is used to immediately end the processing of a script or fu
 
 The **FI** command is used at the end of an **IF** script block. See the **IF** command below for more information and example of using **FI** as part of **IF**.
 
+### FOR
+
+	FOR
+
+The **FOR** command is used 
+
+
 ### FUNCTION
 
 	FUNCTION function_name
