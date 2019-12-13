@@ -767,6 +767,35 @@ loading functions this way
 
 >A note on memory.  All scripts get loaded into and run from Main Memory.  
 
+### Getting and Validating Input
+
+One of the challenges when writing scripts is gathering input from the user and validating that input before performing a series of operations that would be affected by missing or invalid data.  For example, suppose you wrote a script that prompted a user to enter in an IP address which will be passed to the ping command.  You might want to gather the input as the 4 separate octets that make up an IP address and make sure each is a valid integer in the range of 1 to 255.  The A2osX shell provides a robust set of commands you can use to craft such a script with extensive error checking.  For instance the **READ** command (see above) has options to limit input to just 3 characters (the max an IP octet can be), in this case **READ -N 3 IP1** would accomplish this.  Next you might want to validate that the user did not press return without typing anything (a null) by using either the **IF [ -Z var ]** (is null) or **IF [ -N var ]** (not null) checks.  Then using the **IF [ -I var ]** check you could make sure the user entered an integer.  Once you know you have **an** integer, you can check to see if it is in an acceptable range by using the compound **IF [ $IP1 -gt 0 ] AND [ $IP1 -LT 256 ]**.
+
+>Note, it may seem expedient to just do that last compound **IF** to check the range of the input.  If you do that, should the user enter nothing (just press return) or enter a string (i.e. ABC) then when the script executes this **IF** command the shell will throw and error and stop execution of your script.  This is because **IF** checks like **-gt** can only handle integers and the integer check **-I** cannot handle nulls.
+
+The following example demonstrates the complete validation concept outlined above.  You could enhance this example further by putting the input and error checking in a **WHILE** loop to continue prompting the user for a valid octet until one was entered in the proper range.  In addition, you could put such a routine in a function so that you could have the same set of code executed for all 4 octets.
+
+	#!/bin/sh
+	#
+	#	Demo of Getting and Validating Input
+	#
+	ECHO \f 				; # Clear screen
+	ECHO "\n\n Enter Octet: "
+	READ -N 3 IP1
+	IF [ -Z $IP1 ]
+		ECHO "\n\nNothing entered"
+	ELSE
+		IF ![ -I $IP1 ]		; # Note the use of ! to negate IF
+			ECHO "\n\nNon-numeric characters entered"
+		ELSE
+			IF [ $IP1 -gt 0 ] AND [ $IP1 -lt 256 ]
+				ECHO "\n\nValid Octet Entered"
+			ELSE
+				ECHO "\n\nNumber out of range"
+			FI
+		FI
+	FI
+
 ### Shell Environment
 
 Copy Vars????, Different Context, own vars get lost, own funcs, when called with dot, is using the same env. 

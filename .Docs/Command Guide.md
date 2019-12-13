@@ -82,6 +82,8 @@ In KCONFIG you can set:
 
 LOGIN is a system process for A2osX that authenticates users against the A2osX User Database stored in ./ETC/PASSWD.  Once a user is authenticated, LOGIN then loads the SH (./BIN/SH) process passing it the PROFILE script found in the users Home directory.
 
+>Note, at the shell prompt you can execute the **LOGIN** command which will then ask you for a name/password and create a new user "session" for you as if you are that user.  You will have a new shell environment and be placed in that user's home directory.  When you type **EXIT** or press Control-D at the shell prompt, that session will be terminated and you will returned to your original session in tact.
+
 ### NETWORKD
 
 | Command |
