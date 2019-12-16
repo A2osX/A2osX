@@ -60,7 +60,7 @@ Write a track (NIBBLE)
       A=0, currently starting/seeking...  
 
 ## License
-A2osX is licensed under the GNU General Pulic License.
+A2osX is licensed under the GNU General Public License.
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
