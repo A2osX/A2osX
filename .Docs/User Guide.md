@@ -16,13 +16,13 @@ A core element at the foundation of A2osX that enables its multi-user multitaski
 
 The core of A2osX is written entirely in 65C02 Assembly and built using the S-C Macro Assembler.  Assembly was chosen because at end of day it provides for the most strict and stringent memory management as well as the fastest performance of any language on the Apple II.  Work is underway to provide **asm** running under A2osX (see Current and Future Development Process sections below).  There is also an entire shell scripting language (see below) and in the future we plan a **csh** (C-Shell) which is the first step to an Interactive C interpreter and then a Compiler that will make C feed to built-in assembler.  Yes, that is a lot on our development plan, but the only way to make it feasible is by building the core using assembly to provide enough memory and processing sources to enable such features.
 
-### Developing for A2osX
+## Developing for A2osX
 
 There has been a significant uptick in interest in A2osX and its development.  That's great!  Along with that has come a lot of questions and requests for documentation.  Besides this new user guide, which we hope will answer many of your questions, we have also written an extensive  **[Developers Guide](.Docs/Developers%20Guide.md).**  That guide explains our current development process (GitHub to delivery media) as well as our future plans.
 
 The Developers Guide is all about developing the core of A2osX, its drivers, utilities, libraries, etc. that is all done in Assembly.  There is another aspect of A2osX that will interest many developers and users alike and that is its significant scripting engine or Shell (*./bin/sh*).
 
-### The A2osX Shell (SH)
+## The A2osX Shell (SH)
 
 One of the most significant parts of A2osX is its shell which can perform both interactive and scripted tasks.  With the interactive part of the shell you can perform many common and complex tasks using both built-in (native or internal to shell) and external (BINs or executables) commands.  Internal commands include **cd** (change directory), **md** (make directory), **date**, **echo**, etc.  External commands include **cp** (copy), **rm** (remove), **cat** (display file contents), **telnet**, etc.
 
@@ -36,7 +36,7 @@ In this example, the system will generate a list of files found in the current d
 
 An entire Shell Developers Guide is being written to help you with both using and writing scripts for the A2osX Shell.  It can be found **[Here](.Docs/Shell%20Developers%20Guide.md).**
 
-### File System Layout of A2osX
+## File System Layout of A2osX
 
 To get the most out of the use of files and directories you need to understand the concept of a hierarchical file system.  This section introduces the A2osX file system and shows you how to work with files and directories using several A2osX commands.
 
@@ -73,7 +73,7 @@ The following are the primary sub-directories used by A2osX.  While A2osX suppor
 
 Please note that not all of the above directories are found on every disk or image for A2osX.  Several of them are optionally installed or omitted from systems during initial configuration and may be added or removed at a later time.
 
-### A2osX Boot Process
+## A2osX Boot Process
 
 To help you install, configure, run and maintain your A2osX system, this section delineates the A2osX boot process.  This discussion is based on a standard installation and configuration of A2osX on a bootable drive named /A2OSX.  As will be discussed below, it is possible to run A2osX from drive other then the boot device.  For example, if you have a hard drive with 2 partitions named HD1 and HD2; you can boot from HD1 and then load and run A2osX that is stored on HD2.  Reading this section and the section on installation will help you with this type of configuration.
 
@@ -137,19 +137,19 @@ In maintenance mode, you still have access to all A2osX utilities and scripts, s
 
 A2osX is a multi-user multitasking operating system.  As with any such operating system running on a single core single CPU system such as an Apple II with the 6502, A2osX switches between all of the running processes automatically ensuring that each gets serviced in a reasonable time. It is the A2osX Kernel that performs this task in 1 of 2 manners: Cooperative or Preemptive mode.  In Cooperative mode, the default, switching between processes occurs whenever an application makes a "blocking" API call (i.e. waiting for a key press or a network frame) or cooperatively relinquishes control (by explicitly calling >SLEEP, see the A2osX Developers Guide).  In Preemptive Mode, set by option in the **kconfig** utility (see A2osX Command Guide), the kernel switches between "sleeping" processes automatically at 1/10th-second intervals.  In order to use Preemptive Mode, your system must have supported hardware that generates an interrupt used by A2osX such as an Apple II Mouse or ThunderClock interface.
 
-### A2osX Devices
+## A2osX Devices
 
 A2osX supports a number of block or file devices for input and output (I/O).  Devices should not be confused with hardware, though many devices correspond to actual hardware and not all hardware is presented as an A2osX device.  For example, while A2osX supports getting the date and time from ProDOS, there is no "time" device; and while your Apple has a screen and keyboard, with A2osX a user interacts with a Terminal Device (i.e. */dev/tty1*).  This section discusses the devices with witch users or A2osX programs can interact.  Please see the Hardware Section of this User guide for a fuller discussion of the hardware A2osX supports.
 
-#### Null Device
+### Null Device
 
 There is a standard Null device that you can use in your scripts, typically to redirect error messages.  This device is */dev/null*.
 
-#### Block Devices
+### Block Devices
 
 A2osX supports all the ProDOS block devices including floppy drives, hard drives and Ram Disks.  It has been tested to work with both 140K and 800K floppy drives, the FloppyEMU (both floppy types), the CFFA3000 and the ReActiveMicro Turbo as well as RAMWorks and Apple 1MB Memory cards.  While these drives may be listed with the device identifier (i.e. *s6d2* or *s7d1*) they are reference using their ProDOS names and pathing (i.e. */BOOT* or */RAM3*).
 
-#### Virtual Terminals
+### Virtual Terminals
 
 A2osX supports multiple virtual terminals on your a single Apple system.  By default the system is configured to support 2 virtual terminals (*/dev/tty1* and */dev/tty2*).  This will be configurable in the future using the **kconfig** utility.  In addition to these virtual terminals there is also a console device (*/dev/console*) and in the future a Double-High Graphics Resolution (*/dev/dhgr??*) display.  You can switch between these various devices by using the special Open-Apple key.
 
@@ -164,21 +164,21 @@ A2osX supports multiple virtual terminals on your a single Apple system.  By def
  
 Note: if only 2 virtual terminals are configured then OA-3 and OA-4 will have no effect.  Once terminals are configurable in **kconfig**, please note that increasing and reducing the number of virtual terminals impacts the amount of memory used by A2osX.
 
-#### Physical Terminals
+### Physical Terminals
 
 A2osX supports physical terminals (or a PC running a terminal emulator) via a Super Serial Card and the A2osX *ssc.drv* driver.  You will need to set the switches on your SSC and the parameters of your terminal emulator to match and of course you will need the appropriate null modem cable.  The terminal type supported is VT-100, so please set your emulator to VT-100 mode.  A2osX does not support modems connected to your SSC at this time.
 
 A2osX supports as many physical terminals as you have SSC cards and memory to load drivers for each card and support those users.  Note that if you are running the *km.vsdrive* module, it takes the first SSC card that is not configured for interrupts (likely slot 1 or 2).  So if you **insdrv ssc.drv** with *km.vsdrive* loaded, then it will use the next card.  You have to load a driver for each card you want to handle as a terminal.  You also have to start the **getty** process for each terminal.  The Terminals will be named */dev/comx* where x is the slot the card is in. 
 
-#### Internet Terminals
+### Internet Terminals
 
 A2osX supports multiple internet connected terminals via a **telnetd** server process.  The **telnetd** process supports VT-100 terminals, so you should set your Telnet client (i.e. PuTTY) to use VT-100 emulation.  Of course you can use another Apple running A2osX and the **telnet** client to connect to an Apple running A2osX and the **telnetd** server.
 
 Please note, if you are using Telnet Client Software such as PuTTY for Windows and see random garbled characters (odd graphics symbols), you may need to change your **Remote Character Set** to something other than **UTF-8**, such as **ISO-8859-1:1998 (Latin-1, West Europe)**.
 
-### Hardware
+## Hardware
 
-#### Hardware Requirements
+### Requirements
 
 *Minimum Hardware Requirements*<br>
 128K Enhanced (65C02) Apple //e<br>
@@ -186,7 +186,7 @@ Apple //c<br>
 Apple //GS<br>
 Minimum 140K 5.25 disk drive, 800K 3.5 strongly recommended.
 
-#### Supported Hardware
+### Supported Hardware
 
 Any ProDOS Block Device (5.25 & 3.5 Floppy Drives, SmartPort Hard Drive and Ram Disks)<br> NoSlot Clock or ThunderClock<br> Super Serial Card<br> Mouse Card<br> Network Card (Uthernet I or II, LanCEgs)
 
@@ -235,7 +235,7 @@ All of the commands above are documented in the A2osX Command Guide or the Shell
 
 There are several ways you can configure A2osX to suit your needs.  Some of these 
 
-### Exploring A2osX
+## Exploring A2osX
 
 ### Networking
 
@@ -268,7 +268,6 @@ HTTPGET
 dhcpclnt
 Telnetd
 httpd
-
 
 ### Utilities
 
