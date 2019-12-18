@@ -61,8 +61,8 @@ A2osX terminal capabilities are based off of the standard VT100 Terminal.  This 
 |EscD 	|Move/scroll window up one line| 	IND  ||
 |EscM 	|Move/scroll window down one line| 	RI  ||
 |EscE 	|Move to next line| 	NEL  ||
-|Esc7 	|Save cursor position and attributes| 	DECSC  ||
-|Esc8 	|Restore cursor position and attributes| 	DECSC  ||
+|Esc7 	|Save cursor position and attributes| 	DECSC  | OK |
+|Esc8 	|Restore cursor position and attributes| 	DECSC  | OK |
 |EscH 	|Set a tab at the current column| 	HTS  ||
 |Esc[g 	|Clear a tab at the current column| 	TBC||  
 |Esc[0g 	|Clear a tab at the current column| 	TBC||  

@@ -1,6 +1,6 @@
 # A2osX User Guide
 
-### Updated December 16, 2019
+### Updated December 17, 2019
 
 This Guide provides information on getting started with A2osX.  This Guide helps you understand the basic features, capabilities and operation of A2osX.  This should be the first document you read before, or soon after, installing or running A2osX.
 
@@ -117,7 +117,7 @@ As stated above, when A2OSX first launches, it looks in the ./SYS subdirectory a
 
 The *km.nsc* module gives you the same functionality as the *NS.CLOCK.SYSTEM* routine found in the Boot volume of ProDOS.  You do not need both files.  If you are running *NS.CLOCK.SYSTEM* to support other applications, you can remove the KM.NSC module.  Conversely, if you are only running A2osX off this booted volume, you can remove *NS.CLOCK.SYSTEM* and just use our KM since it is smaller in size (saving disk space).
 
-The *km.ramworks* is needed only on systems with greater then 128K of memory provided by a RamWorks compatible 80-col card in an Apple //e.  It turns any additional memory into a ram disk */RAM3*.  You should **NOT** load the *km.ramworks* module on Apple //GS systems.
+The *km.ramworks* is used only on systems with greater then 128K of memory provided by a RamWorks compatible 80-col card in an Apple //e.  It turns any additional memory into a ram disk */RAM3*.  You should **NOT** load the *km.ramworks* module on Apple //GS systems.
 
 The *km.vsdrive* module helps you connect to an ADTPRO server via a Super Serial Card (SSC).  This module will use the first Super Serial Card in your system set with Interrupts off.  It is also best if you set this SSC at a baud rate of 115200.  If you have more then one SSC system and you are using the others for terminals you should fully understand how to configure the cards, Kernel Modules, and the SSC drivers for optimal performance.
 
@@ -128,8 +128,8 @@ The *km.appletalk* module helps ProDOS talk to APPLETALK, though at the moment A
 A2osX supports a special maintenance mode that you can invoke while A2osX is loading.  As the system begins to load, press Control-R (hold down the Control Key and press R) to enable ROOT Mode.  In this mode, A2osX starts up in a special mode that
 
 1. by-passes the login process, so if you have changed or forgotten your ROOT password, you can boot the system (only at the console) in ROOT mode to correct this.
-2. does not load the ETC/INIT, in case you have made some change to this file that is causing boot issues.
-3. does not load the root users PROFILE, in case you have made some change to this file that is causing ROOT login issues. 
+2. does not load the *etc/init*, in case you have made some change to this file that is causing boot issues.
+3. does not load the root users *profile*, in case you have made some change to this file that is causing ROOT login issues. 
 
 In maintenance mode, you still have access to all A2osX utilities and scripts, so you can run programs such as EDIT to make changes to any needed text file reconfigure the system before booting normally.
 
@@ -151,7 +151,7 @@ A2osX supports all the ProDOS block devices including floppy drives, hard drives
 
 ### Virtual Terminals
 
-A2osX supports multiple virtual terminals on your a single Apple system.  By default the system is configured to support 2 virtual terminals (*/dev/tty1* and */dev/tty2*).  This will be configurable in the future using the **kconfig** utility.  In addition to these virtual terminals there is also a console device (*/dev/console*) and in the future a Double-High Graphics Resolution (*/dev/dhgr??*) display.  You can switch between these various devices by using the special Open-Apple key.
+A2osX supports multiple virtual terminals on your a single Apple system.  By default the system is configured to support 2 virtual terminals (*/dev/tty1* and */dev/tty2*).  This is configurable using the **kconfig** utility.  In addition to these virtual terminals there is also a console device (*/dev/console*) and in the future a Double-High Graphics Resolution (*/dev/dhgr??*) display.  You can switch between these various devices by using the special Open-Apple key.
 
 | Device | Open Apple Combo |
 | --- | --- |
@@ -168,31 +168,64 @@ Note: if only 2 virtual terminals are configured then OA-3 and OA-4 will have no
 
 A2osX supports physical terminals (or a PC running a terminal emulator) via a Super Serial Card and the A2osX *ssc.drv* driver.  You will need to set the switches on your SSC and the parameters of your terminal emulator to match and of course you will need the appropriate null modem cable.  The terminal type supported is VT-100, so please set your emulator to VT-100 mode.  A2osX does not support modems connected to your SSC at this time.
 
-A2osX supports as many physical terminals as you have SSC cards and memory to load drivers for each card and support those users.  Note that if you are running the *km.vsdrive* module, it takes the first SSC card that is not configured for interrupts (likely slot 1 or 2).  So if you **insdrv ssc.drv** with *km.vsdrive* loaded, then it will use the next card.  You have to load a driver for each card you want to handle as a terminal.  You also have to start the **getty** process for each terminal.  The Terminals will be named */dev/comx* where x is the slot the card is in. 
+A2osX supports as many physical terminals as you have SSC cards and memory to load drivers for each card and support those users.  Note that if you are running the *km.vsdrive* module, it takes the first SSC card that is not configured for interrupts (likely slot 1 or 2).  So if you **insdrv ssc.drv** with *km.vsdrive* loaded, then it will use the next card.  You have to load a driver for each card you want to handle as a terminal.  You also have to start the **getty** process for each terminal.  The Terminals will be named */dev/comx* where x is the slot the card is in.  The default *./etc/init* file supplied with A2osX includes a commented out section for Serial Terminals.
 
 ### Internet Terminals
 
 A2osX supports multiple internet connected terminals via a **telnetd** server process.  The **telnetd** process supports VT-100 terminals, so you should set your Telnet client (i.e. PuTTY) to use VT-100 emulation.  Of course you can use another Apple running A2osX and the **telnet** client to connect to an Apple running A2osX and the **telnetd** server.
 
-Please note, if you are using Telnet Client Software such as PuTTY for Windows and see random garbled characters (odd graphics symbols), you may need to change your **Remote Character Set** to something other than **UTF-8**, such as **ISO-8859-1:1998 (Latin-1, West Europe)**.
+>Note, if you are using Telnet Client Software such as PuTTY for Windows and see random garbled characters (odd graphics symbols), you may need to change your **Remote Character Set** to something other than **UTF-8**, such as **ISO-8859-1:1998 (Latin-1, West Europe)**.
+
+One of the images available in the .Floppies folder is *TDBOOT.po* which is a preconfigured A2osX system that loads the Uthernet 2 Driver, TCP and **tetlnetd** at boot.  If you want to use this image on *AppleWin*, edit the *./etc/init* file to comment out the *uthernet2.drv* driver and remove the comment from the *uthernet.drv* line and reboot.  See the section on running A2osX under *AppleWin* for more information.
 
 ## Hardware
 
 ### Requirements
 
-*Minimum Hardware Requirements*<br>
-128K Enhanced (65C02) Apple //e<br>
-Apple //c<br>
-Apple //GS<br>
+*Minimum Hardware Requirements*
+128K Enhanced (65C02) Apple //e
+Apple //c
+Apple //GS
 Minimum 140K 5.25 disk drive, 800K 3.5 strongly recommended.
 
 ### Supported Hardware
 
-Any ProDOS Block Device (5.25 & 3.5 Floppy Drives, SmartPort Hard Drive and Ram Disks)<br> NoSlot Clock or ThunderClock<br> Super Serial Card<br> Mouse Card<br> Network Card (Uthernet I or II, LanCEgs)
+Any ProDOS Block Device (5.25 & 3.5 Floppy Drives, SmartPort Hard Drive and Ram Disks)<br> NoSlot Clock, ThunderClock or other ProDOS supported clock<br> Super Serial Card<br> Mouse Card<br> Network Card (Uthernet I or II, LanCEgs)
 
-While A2osX supports a many Apple II hardware devices, it is possible a conflict will occur with a particular card in your unique hardware configuration.  In these cases, the conflict usually arises when A2osX attempts to load a driver for a supported device it triggers a conflict with the ROM of an unsupported card when it searches your Apple II for the appropriate card.  You can tell A2osX to not search the slots containing unsupported cards using the **kconfig** utility.  In addition, a DEBUG.po boot disk is available in our Media collection that loads the absolute minimal parts of A2osX which can help in identifying and conflicting hardware. 
+While A2osX supports many Apple II hardware devices, it is possible a conflict will occur with a particular card in your unique hardware configuration.  In these cases, the conflict usually arises when A2osX attempts to load a driver for a supported device and it triggers a conflict with the ROM of an unsupported card when it searches your Apple II for the supported card.  You can tell A2osX to not search those slots containing unsupported cards using the **kconfig** utility.  In addition, a DEBUG.po boot disk is available in our Media collection that loads the absolute minimal parts of A2osX which can help in identifying any conflicting hardware. 
 
-> A note on Accelerator Cards:  A2osX has been tested and successfully runs on Apples with accelerator cards such as the Transwarp //e, Titan, or FastChip.  Care must be taken, however, in making sure that the configuration of your card is correct for your system, especially while running A2osX.  First you should ensure that the FAST/SLOW switches are set to slow as is appropriate for the cards installed in your system.  Specifically you must set them to slow for Floppy Controllers, Network Controllers, Mouse Cards and Super Serial Cards.  If you are unsure, set the switch to slow.  In addition, with the FastChip, you may need to disable the RAMFACTOR emulation (further testing is underway).
+> A note on Accelerator Cards:  A2osX has been tested and successfully runs on Apples with accelerator cards such as the Transwarp //e, Titan, or FastChip.  Care must be taken, however, in making sure that the configuration of your card is correct for your system, especially while running A2osX.  First you should ensure that the FAST/SLOW switches are set to slow as is appropriate for the cards installed in your system.  Specifically you must set them to slow for Floppy Controllers, Network Controllers, Mouse Cards and Super Serial Cards.  If you are unsure, set the switch to slow.  In addition, with the FastChip, you need to disable the RAMFACTOR emulation (further testing is underway).
+
+| Hardware Device | Status | Comments |
+|---|---|---
+| Apple ][ | Not Compatible ||
+| Apple ][+ | Not Compatible ||
+| Apple //e | Not Compatible | Unenhanced Version!|
+| Apple //e Enhanced][ | Working | Must have at least 128K of memory|
+| Apple //gs Rom1 | Working ||
+| Apple //gs Rom3 | Working ||
+| Disk ][ Controller | Working ||
+| 5.25 Controller | Working ||
+| Liron Controller | Working ||
+| 3.5 Controller | Working ||
+| Any SCSI Controller | Untested | Should work, need feebback!|
+| Disk ][ | Working ||
+| Unidisk 5.25 | Working ||
+| Duodisk | Working ||
+| 3.5 Disk | Working ||
+| FloppyEMU | Working ||
+| CFFA3000 | Working ||
+| BootI | Working ||
+| MicroDrive Turbo //e | Working ||
+| MicroDrive Turbo GS | Working ||
+| Super Serial Card | Working | for terminals and ADTPro|
+| Uthernet I | Working||
+| Uthernet II | Working||
+| LanCES | Working||
+| RamWorks III | Working ||
+| Transwarp 1.3 | Working| Possible Conflict with Apple Slinky Ram Card|
+| FastChip //e | Working | Must disable RAMFACTOR |
+| Apple 1mb Slinky Ram Card | Working | Possible conflict with Transwarp |
 
 >**Need new section here on DEBUG.po and how to use it to solve hardware conflict issues**
 
@@ -203,6 +236,8 @@ To get started with A2osX, the very first thing you need to do is download a dis
 ### Using AppleWin
 
 Download one of the available 32MB images from GitHub.  Open AppleWin and then click on the  configuration icon.  When the configuration screen appears, select the Disk tab.  Next, make sure the **Enable Hard disk controller in slot 7** box is checked and set the **HDD 1** to the image you downloaded.  Click OK to save your changes and finally boot the emulated Apple by clicking on the colored Apple icon.  Suggestion: on the configuration screen, for Video Mode, select Color (RGB Monitor).  You may also want to setup AppleWin for Ethernet as A2osX has many features that make use of the emulated Uthernet I card supplied by AppleWin (consult AppleWin documentation for more information on enabling this feature). 
+
+Note on speed of networking
 
 ### Installing on Your Apple
 
