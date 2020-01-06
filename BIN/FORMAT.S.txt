@@ -20,12 +20,15 @@ ZPPtr2			.BS 2
 ZPPtrFD			.BS 2
 ZPPtrDevName	.BS 2
 
-ArgIndex		.BS 1
+Index			.BS 1
 
 hDevID			.BS 1
 hBuf			.BS 1
+hMem			.BS 1
+
 bLL				.BS 1
 bCustomBlkSize 	.BS 1
+
 MediaBlkSize	.BS 2
 CatSize			.BS 1
 CatBlkCnt		.BS 1
@@ -58,8 +61,12 @@ L.LIBBLKDEV		.DA LIBBLKDEV
 L.MSG.USAGE		.DA MSG.USAGE
 L.MSG.OK		.DA MSG.OK
 L.MSG.ERR		.DA MSG.ERR
+L.MSG.CRLF		.DA MSG.CRLF
 L.MSG.NOSIZE	.DA MSG.NOSIZE
 L.MSG.INIT		.DA MSG.INIT
+L.MSG.LLDISK2	.DA MSG.LLDISK2
+L.MSG.LL		.DA MSG.LL
+L.MSG.WRITECAT	.DA MSG.WRITECAT
 L.FMT.BLANK		.DA FMT.BLANK
 				.DA 0
 *--------------------------------------
@@ -74,8 +81,8 @@ CS.RUN			ldy #S.PS.ARGC
 				lda (pPs),y
 				beq .99
 
-.1				inc ArgIndex
-				lda ArgIndex
+.1				inc Index
+				lda Index
 				>SYSCALL ArgV
 				bcc .11
 				
@@ -104,8 +111,8 @@ CS.RUN			ldy #S.PS.ARGC
 				cpy #bCustomBlkSize
 				bne .1
 				
-				inc ArgIndex
-				lda ArgIndex
+				inc Index
+				lda Index
 				>SYSCALL ArgV
 				bcs .99
 				
@@ -118,14 +125,14 @@ CS.RUN			ldy #S.PS.ARGC
 				>SYSCALL printf
 				lda #E.SYN
 				sec
-				rts			
+.9				rts			
 
 .4				lda hDevID
 				bne .5					Already have a dev...go get VolName
 
 				>LDYA ZPPtr1
 				>SYSCALL GetDevByName
-				bcs .99
+				bcs .9
 
 				>STYA ZPPtrFD
 				stx hDevID
@@ -147,14 +154,33 @@ CS.RUN			ldy #S.PS.ARGC
 .8				lda hDevID
 				beq .99
 *--------------------------------------
-CS.RUN.Format	jsr CS.RUN.GetBlockSize
+CS.RUN.Format	jsr CS.RUN.GetDevStatus
 				bcs .9
-				jsr CS.RUN.InitCat
+
+				>PUSHEA.G VolName
+				>PUSHW MediaBlkSize
+				>PUSHW ZPPtrDevName
+
+				>PUSHBI 6
+				>LDYA L.MSG.INIT
+				>SYSCALL printf
 				bcs .9
+
+				bit bLL
+				bpl .1
+				
+				jsr CS.RUN.LL
+				bcs .9
+
+.1				jsr CS.RUN.InitCat
+				bcs .9
+
 				jsr CS.RUN.BuildCat
 				bcs .9
+
 				jsr CS.RUN.WriteCat
 				bcs .9
+
 				>LDYA L.MSG.OK
 				>SYSCALL puts
 				lda #0
@@ -170,7 +196,7 @@ CS.RUN.Format	jsr CS.RUN.GetBlockSize
 				sec
 				rts
 *--------------------------------------
-CS.RUN.GetBlockSize
+CS.RUN.GetDevStatus
 				lda bCustomBlkSize
 				bmi .8
 				
@@ -198,6 +224,51 @@ CS.RUN.GetBlockSize
 				sec
 				rts
 *--------------------------------------
+CS.RUN.LL		>LDA.G DIB+S.DIB.T
+				cmp #S.DIB.T.DISKII
+				beq CS.RUN.LL.DISKII
+				
+				>PUSHBI 0
+				>LDYA L.MSG.LL
+				>SYSCALL printf
+				bcs .9
+				
+				>PUSHEA.G IOCTL
+				>PUSHBI IOCTL.FORMAT
+				lda hDevID
+
+				>SYSCALL IOCTL
+				
+.9				rts
+*--------------------------------------
+CS.RUN.LL.DISKII
+				>LDYAI 4096
+				>SYSCALL getmem0
+				bcs .9
+				>STYA ZPPtr1
+				stx hMem
+				
+				stz Index
+				
+.1				>PUSHB Index
+				>PUSHBI 1
+				>LDYA L.MSG.LLDISK2
+				>SYSCALL printf
+				bcs .9
+
+
+
+
+				inc Index
+				lda Index
+				cmp #35
+				bne .1
+				
+				>PUSHBI 0
+				>LDYA L.MSG.CRLF
+				>SYSCALL printf
+.9				rts				
+*--------------------------------------
 CS.RUN.InitCat	lda CatSize
 				bne .1
 
@@ -218,16 +289,7 @@ CS.RUN.InitCat	lda CatSize
 .8				clc
 				rts
 *--------------------------------------
-CS.RUN.BuildCat	>PUSHEA.G VolName
-				>PUSHW MediaBlkSize
-				>PUSHW ZPPtrDevName
-
-				>PUSHBI 6
-				>LDYA L.MSG.INIT
-				>SYSCALL printf
-				bcs .9
-
-				jsr .7
+CS.RUN.BuildCat	jsr .7
 
 				>LIBCALL hLIBBLKDEV,LIBBLKDEV.GetProDOSCatSize			
 				bcs .9
@@ -238,7 +300,9 @@ CS.RUN.BuildCat	>PUSHEA.G VolName
 				bcs .9
 				>STYA.G IOCTL+S.IOCTL.BUFPTR
 				stx hBuf
+
 				jsr .7
+
 				>PUSHEA.G VolName
 				>PUSHW.G IOCTL+S.IOCTL.BUFPTR
 				>LIBCALL hLIBBLKDEV,LIBBLKDEV.BuildProDOSCat
@@ -249,14 +313,21 @@ CS.RUN.BuildCat	>PUSHEA.G VolName
 				>PUSHB CatOptions
 				rts
 *--------------------------------------
-CS.RUN.WriteCat	>PUSHEA.G IOCTL
+CS.RUN.WriteCat	>PUSHBI 0
+				>LDYA L.MSG.WRITECAT
+				>SYSCALL printf
+
+.1				>PUSHEA.G IOCTL
 				>PUSHBI IOCTL.WRITEBLOCK		
 				lda hDevID
 
 				>SYSCALL IOCTL
 				bcs .9
+
 				lda #'.'
 				>SYSCALL PutChar
+				bcs .9
+
 				>LDA.G IOCTL+S.IOCTL.BUFPTR+1
 				inc
 				inc
@@ -264,7 +335,9 @@ CS.RUN.WriteCat	>PUSHEA.G IOCTL
 				>INC.G IOCTL+S.IOCTL.BLKNUM
 				>SLEEP
 				dec CatBlkCnt
-				bne CS.RUN.WriteCat
+				bne .1
+
+				clc
 .9				rts
 *--------------------------------------
 CS.DOEVENT		sec
@@ -272,9 +345,17 @@ CS.DOEVENT		sec
 *--------------------------------------
 CS.QUIT			lda hBuf
 				beq .1
+				
 				>SYSCALL FreeMem
-.1				lda hLIBBLKDEV
+				
+.1				lda hMem
+				beq .2
+				
+				>SYSCALL FreeMem
+				
+.2				lda hLIBBLKDEV
 				beq .8
+				
 				>SYSCALL UnloadLib
 .8				clc
 				rts
@@ -308,9 +389,13 @@ MSG.USAGE		.AS "Usage : FORMAT <BLOCKDEV> [VOLUME.NAME]\r\n"
 				.AS "   -B xxxx : override Device block size\r\n"
 				.AZ " -1-9 : Catalog Size (Blocks)\r\n"
 MSG.OK			.AZ "[OK]"
-MSG.ERR			.AZ "[%h]\r\n"
+MSG.ERR			.AS "[%h]"
+MSG.CRLF		.AZ "\r\n"
 MSG.NOSIZE		.AZ "Unable to get media size."
-MSG.INIT		.AZ "Formatting %s (%D Blks),Volname:%s..."
+MSG.INIT		.AZ "Formatting %s (%D Blks), Volname:%s\r\n"
+MSG.LLDISK2		.AZ "\rTrack %02d..."
+MSG.LL			.AZ "\rLow Level Format..."
+MSG.WRITECAT	.AZ "Writing Catalog..."
 FMT.BLANK		.AZ "BLANK%H%H"
 *--------------------------------------
 OptionList		.AS "LlBb"
