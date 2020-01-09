@@ -3,20 +3,6 @@
 ## Copyright 
 Copyright 2015 - 2019, Remy Gibert and the A2osX contributors. 
 
-# Args2ArgV  
-Expand String and convert to ArgV List  
-
-## C  
-short int args2argv(char* args, char* argv[])  
-
-## ASM  
-`>PUSHW argv`  
-`>LDYA args`  
-`>SYSCALL Args2ArgV`  
-
-## RETURN VALUE  
-A = Arg count  
-
 # ArgV  
 
 ## ASM  
@@ -482,6 +468,28 @@ Load a file in memory
 
 ## RETURN VALUE  
  Buffer filled with memory stats  
+
+# StrVDup  
+**In:**  
+ Y,A = Src StrV  
+
+## RETURN VALUE  
+ X = hMem of new StrV  
+ A = Str Count  
+
+# Str2StrV  
+Expand String and convert to ArgV List  
+
+## C  
+short int str2strv(char* args, char* argv[])  
+
+## ASM  
+`>PUSHW argv`  
+`>LDYA args`  
+`>SYSCALL Str2StrV`  
+
+## RETURN VALUE  
+A = Arg count  
 
 # GetPWUID  
 

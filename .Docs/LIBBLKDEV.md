@@ -35,7 +35,7 @@ int getprodoscatsize (short int options, short int catsize, int devsize );
   7 for Disk II(280blk),3.5(1600),3.5HD(2880)  
   22 for 32mb Hardisk...  
 
-# TrkW16s  
+# D2TrkW16s  
 Write a track (16 sectors)  
 **In:**  
  PUSHW = Ptr to 16*256 buffer  
@@ -47,7 +47,7 @@ Write a track (16 sectors)
  CS : A = Error  
       A=0, currently starting/seeking...  
 
-# TrkWNIB  
+# D2TrkWNIB  
 Write a track (NIBBLE)  
 **In:**  
  PUSHW = Ptr to NIBBLE buffer (0 ended)  
