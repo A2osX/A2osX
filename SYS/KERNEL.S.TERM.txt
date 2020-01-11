@@ -8,14 +8,15 @@ CURSOR.BLINK.SPEED	.EQ 2
 ZPIOCTL			.BS 2
 ZPDCBPtr		.BS 2
 ZPBufPtr		.BS 2
-ZPCount			.BS 2
+ZPBufBase		.BS 2
 
 ZPBufBaseL1		.BS 2
 ZPBufBaseL2		.BS 2
 ZPScrBaseL1		.BS 2
 ZPScrBaseL2		.BS 2
 *--------------------------------------
-ZPTmpWord		.BS 2
+ZPCount			.BS 2
+
 ZPTmpBool		.BS 1
 ZPTmpChar		.BS 1
 
@@ -25,9 +26,7 @@ CsiParamCnt		.BS 1
 CsiParams		.BS 4
 				.ED
 *--------------------------------------
-DRV.TERM.STATUS	ldy #S.IOCTL.STATCODE
-				lda (ZPIOCTL),y
-				beq .1
+DRV.TERM.STATUS	beq .1
 
 				cmp #S.IOCTL.STATCODE.GETDIB
 				bne .3
@@ -94,7 +93,7 @@ DRV.TERM.OPEN.1	txa
 				beq .3
 
 				inx
-				cpx #K.SCR.MAX
+				cpx #K.TTY.MAX+1
 				bne .2
 
 				lda #E.OOH
@@ -103,8 +102,8 @@ DRV.TERM.OPEN.1	txa
 
 .3				sta DevMgr.SCRNDEVS,x
 
-				ldy #S.DCB.TTY.DEVID
-				sta (ZPDCBPtr),y
+				sta (ZPDCBPtr)			#S.DCB.TTY.DEVID
+
 				ldy #S.DCB.TTY.STATUS
 				lda (ZPDCBPtr),y
 				ora #S.DIB.S.OPENED
@@ -113,8 +112,7 @@ DRV.TERM.OPEN.1	txa
 				jsr RESET
 *--------------------------------------
 DRV.TERM.CONTROL
-				ldy #S.DCB.TTY.DEVID
-				lda (ZPDCBPtr),y
+				lda (ZPDCBPtr)			#S.DCB.TTY.DEVID
 				sta DevMgr.ASCREEN
 
 				sta SETTEXT
@@ -136,10 +134,9 @@ DRV.TERM.CLOSE	jsr DRV.TERM.ISOPENED
 				lda DRV.TERM.DIB+S.DIB.S
 				sta (ZPDCBPtr),y
 				ldx #0
-				ldy #S.DCB.TTY.DEVID
 
 .1				lda DevMgr.SCRNDEVS,x
-				cmp (ZPDCBPtr),y
+				cmp (ZPDCBPtr)			#S.DCB.TTY.DEVID
 				bne .2
 
 				stz DevMgr.SCRNDEVS,x
@@ -147,7 +144,7 @@ DRV.TERM.CLOSE	jsr DRV.TERM.ISOPENED
 				rts
 				
 .2				inx
-				cpx #K.SCR.MAX+1
+				cpx #K.TTY.MAX+1
 				bne .1
 
 .9				lda #MLI.E.IO
@@ -228,12 +225,17 @@ DRV.TERM.READ	bit bActive				is screen active?
 				bcs .8
 
 				ldy .8+1
+				sta CLRWRITEAUX
 				sta (ZPBufPtr),y
+				sta SETWRITEAUX
 				iny
 				sty .8+1
 				bra .70
 
 .8				lda #$ff				SELF MODIFIED
+				
+				sta CLRWRITEAUX
+				
 				ldy #S.IOCTL.BYTECNT
 				sta (ZPIOCTL),y
 				iny
@@ -276,7 +278,7 @@ DRV.TERM.WRITE	jsr DRV.TERM.CUROFF
 .8				clc
 				rts
 *--------------------------------------
-DRV.TERM.COUT	lda (ZPBufPtr)
+DRV.TERM.COUT	jsr DRV.TERM.GetBufByte
 
 				cmp #IAC
 				bne .1
@@ -407,7 +409,7 @@ DRV.TERM.COUT.ESC
 				lda #S.DCB.TTY.MODE.ESC
 				bra DRV.TERM.SETMODE
 *--------------------------------------
-DRV.TERM.ESC	lda (ZPBufPtr)			y = #S.DCB.TTY.MODE
+DRV.TERM.ESC	jsr DRV.TERM.GetBufByte		y = #S.DCB.TTY.MODE
 
 				ldx #EscCodes.Cnt-1
 .2				cmp EscCodes,x
@@ -454,7 +456,9 @@ DRV.TERM.CSI	ldy #S.DCB.TTY.INBUFFER
 				inc
 				sta (ZPDCBPtr),y
 				tay
-				lda (ZPBufPtr)
+				
+				jsr DRV.TERM.GetBufByte
+				
 				sta (ZPDCBPtr),y
 				cmp #64					End of Seq ?
 				bcs DRV.TERM.CSI.Exec
@@ -725,7 +729,7 @@ DRV.TERM.G1		ldx #$40
 
 				ldy #S.DCB.TTY.bG0G1ALT
 
-				lda (ZPBufPtr)
+				jsr DRV.TERM.GetBufByte
 				cmp #'0'
 				beq .1
 				
@@ -745,7 +749,9 @@ DRV.TERM.IAC	ldy #S.DCB.TTY.INBUFFER
 				inc
 				sta (ZPDCBPtr),y
 				tay
-				lda (ZPBufPtr)
+				
+				jsr DRV.TERM.GetBufByte
+				
 				sta (ZPDCBPtr),y
 				cpy #S.DCB.TTY.INBUFFER+1	CMD ?
 				beq Csi.Home.8			yes, wait for additional bytes
@@ -755,7 +761,8 @@ DRV.TERM.IAC	ldy #S.DCB.TTY.INBUFFER
 				cmp #SB
 				bne .1					not a SB/SE....stop with CMD/SUBCMD
 
-				lda (ZPBufPtr)
+				jsr DRV.TERM.GetBufByte
+
 				cmp #SE
 				bne Csi.Home.8			wait for ending SE....keep bIACMode
 				bra COUT.IAC.SB
@@ -996,7 +1003,7 @@ DRV.TERM.CURBLNK
 				bit bActive
 				bpl .9
 
-				lda A2osX.TIMER16
+				lda DevMgr.Timer
 				and #CURSOR.BLINK.SPEED
 				ldy #S.DCB.TTY.bCURON
 				eor (ZPDCBPtr),y
@@ -1087,108 +1094,13 @@ Char.Out.Get	ldy #S.DCB.TTY.OUTTAIL
 				clc
 .9				rts
 *--------------------------------------
-DRV.TERM.GetIOCTLBufCntDCB
-				>STYA ZPIOCTL
-
-				ldy #S.IOCTL.BUFPTR
-				lda (ZPIOCTL),y
-				sta ZPBufPtr
-				iny 
-				lda (ZPIOCTL),y
-				sta ZPBufPtr+1
-
-				iny						#S.IOCTL.BYTECNT
-				lda (ZPIOCTL),y
-				eor #$ff
-				sta ZPCount
-				iny
-				lda (ZPIOCTL),y
-				eor #$ff
-				sta ZPCount+1
-*--------------------------------------
-DRV.TERM.GetDCB	ldy #S.FD.DEV.DCBPTR
-				lda (pFD),y
-				sta ZPDCBPtr
-				iny
-				lda (pFD),y
-				sta ZPDCBPtr+1
-
-				ldy #S.DCB.TTY.DEVID
-				lda (ZPDCBPtr),y
-				cmp DevMgr.ASCREEN
-				beq .1					CS
-
-				clc
-.1				ror bActive
-				rts
-*--------------------------------------
-DRV.TERM.Title.ON
-				ldy #S.DCB.TTY.bTITLE
-				lda (ZPDCBPtr),y
-				bmi DRV.TERM.Title.RTS
-
-				lda #$ff
-				sta (ZPDCBPtr),y
-
-				ldy #S.DCB.TTY.DEVID
-				lda (ZPDCBPtr),y
-				tax
-				lda Dev.Table-1,x
-				clc
-				adc #S.FD.DEV
-				tay
-				lda Dev.Table,x
-				adc /S.FD.DEV
-
-				>STYA ZPTmpWord
-
-				ldx #0
-				jsr DRV.TERM.SETUP.L1X.SCR
-
-				ldy #0
-
-.1				lda (ZPTmpWord),y
-				beq .3
-
-				cmp #$40
-				bcc .2
-				cmp #$60
-				bcs .2
-				and #$1F				remap UPPERCASE
-
-.2				phy
-				jsr SetCharAtY.SCR
-				ply
-				iny
-				bne .1
-
-.3				lda #C.SPACE
-
-.4				phy
-				jsr SetCharAtY.SCR
-				ply
-				iny
-				cpy #80
-				bne .4
-DRV.TERM.Title.RTS
-				rts
-
-DRV.TERM.Title.OFF
-				ldy #S.DCB.TTY.bTITLE
-				lda (ZPDCBPtr),y
-				bpl DRV.TERM.Title.RTS
-				lda #$0
-				sta (ZPDCBPtr),y
-				jmp DRV.TERM.LINE0CPY
-*--------------------------------------
 DRV.TERM.SETUP.L1X
-				ldy #S.FD.DEV.BUFPTR
-				lda (pFD),y
+				lda ZPBufBase
 				clc
 				adc BUF.BASEL,x
 				sta ZPBufBaseL1
-				iny
-				lda (pFD),y
+				
+				lda ZPBufBase+1
 				adc BUF.BASEH,x
 				sta ZPBufBaseL1+1
 
@@ -1254,6 +1166,54 @@ DRV.TERM.CLRSCR.2
 				bpl .8			
 .9				rts
 *--------------------------------------
+DRV.TERM.Title.ON
+				ldy #S.DCB.TTY.bTITLE
+				lda (ZPDCBPtr),y
+				bmi DRV.TERM.Title.RTS
+
+				lda #$ff
+				sta (ZPDCBPtr),y
+
+				jsr DRV.TERM.GetDevName
+				
+				ldx #0
+				jsr DRV.TERM.SETUP.L1X.SCR
+
+				ldy #0
+
+.1				jsr SHARED.TXTPTR.GetNext
+				beq .3
+
+				cmp #$40
+				bcc .2
+				cmp #$60
+				bcs .2
+				and #$1F				remap UPPERCASE
+
+.2				phy
+				jsr SetCharAtY.SCR
+				ply
+				iny
+				bne .1
+
+.3				lda #C.SPACE
+
+.4				phy
+				jsr SetCharAtY.SCR
+				ply
+				iny
+				cpy #80
+				bne .4
+DRV.TERM.Title.RTS
+				rts
+
+DRV.TERM.Title.OFF
+				ldy #S.DCB.TTY.bTITLE
+				lda (ZPDCBPtr),y
+				bpl DRV.TERM.Title.RTS
+				lda #$0
+				sta (ZPDCBPtr),y
+*--------------------------------------
 DRV.TERM.LINE0CPY
 				ldx #0
 				.HS 2C					BIT ABS
@@ -1261,13 +1221,12 @@ DRV.TERM.SCRCPY	ldx #23
 
 				sta SET80STORE
 
-.1				ldy #S.FD.DEV.BUFPTR
-				lda (pFD),y
+.1				lda ZPBufBase
 				clc
 				adc BUF.BASEL,x
 				sta .80+1
-				iny
-				lda (pFD),y
+
+				lda ZPBufBase+1
 				adc BUF.BASEH,x
 				sta .80+2
 				jsr DRV.TERM.SETUP.L1X.SCR
@@ -1293,23 +1252,26 @@ DRV.TERM.SCRCPY	ldx #23
 				dex
 				bpl .1
 				rts
+				
 .8				ldy #39
+
 .80				lda $ffff,x				SELF MODIFIED
-.81				sta (ZPScrBaseL1),y
+
+				sta (ZPScrBaseL1),y
 				dex
 				dex
 				dey
 				bpl .80
+
 				rts
 *--------------------------------------
 DRV.TERM.COPY.XtoL1
-				ldy #S.FD.DEV.BUFPTR
-				lda (pFD),y
+				lda ZPBufBase
 				clc
 				adc BUF.BASEL,x
 				sta ZPBufBaseL2
-				iny
-				lda (pFD),y
+
+				lda ZPBufBase+1
 				adc BUF.BASEH,x
 				sta ZPBufBaseL2+1
 
