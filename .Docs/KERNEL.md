@@ -135,10 +135,10 @@ And return, if found, the full path to it.
 
 ## ASM  
 **In:**  
-`>PUSHWI filestat`  
+`>PUSHWI filename`  
 `>PUSHWI fullpath`  
 `>PUSHWI searchpath`  
-`>LDYAI filename`  
+`>PUSHWI filestat`  
 
 ## RETURN VALUE  
 CC : success  
