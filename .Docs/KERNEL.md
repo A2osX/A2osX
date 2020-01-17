@@ -118,33 +118,20 @@ Create a hDEV
 ## RETURN VALUE  
  none, always succeed.   
 
-# ExpandStr  
-**In:**  
- Y,A = PTR to String to Expand (C-String)  
-
-## RETURN VALUE  
- X = hMem to Expanded String (C-String)  
- Y,A = PTR to Expanded String   
-
-# FileSearch  
-Search a file in the provided PATH list  
-And return, if found, the full path to it.  
+# Expand  
 
 ## C  
-`int filesearch ( char * filename, char * searchpath, char * fullpath, stat * filestat);`  
+`char *expand(const char *str, char *expanded);`  
 
 ## ASM  
 **In:**  
-`>PUSHWI filename`  
-`>PUSHWI fullpath`  
-`>PUSHWI searchpath`  
-`>PUSHWI filestat`  
+`>PUSHW string`  
+`>PUSHW expanded`  
+`>SYSCALL expand`  
 
 ## RETURN VALUE  
-CC : success  
-DstBuf = FilePath  
-DstStat = S.STAT  
-CS : not found  
+ Y,A = PTR to Expanded String   
+ X = hMem to Expanded String (C-String)  
 
 # PutEnv  
 Change or add an environment variable, string is 'NAME=VALUE'  
@@ -154,7 +141,7 @@ Change or add an environment variable, string is 'NAME=VALUE'
 
 ## ASM  
 **In:**  
-`>LDYA string`  
+`>PUSHW string`  
 `>SYSCALL putenv`  
 
 ## RETURN VALUE  
@@ -167,8 +154,8 @@ Change or add an environment variable
 
 ## ASM  
 **In:**  
+`>PUSHW name`  
 `>PUSHW value`  
-`>LDYA name`  
 `>SYSCALL setenv`  
 
 ## RETURN VALUE  
@@ -198,7 +185,7 @@ Remove an environment variable
 
 ## ASM  
 **In:**  
-`>LDYA name`  
+`>PUSHW name`  
 `>SYSCALL unsetenv`  
 
 ## RETURN VALUE  
@@ -462,6 +449,26 @@ Load a file in memory
 ## RETURN VALUE  
  Y,A = File Length  
  X = hMem of Loaded File  
+
+# FileSearch  
+Search a file in the provided PATH list  
+And return, if found, the full path to it.  
+
+## C  
+`int filesearch ( char * filename, char * searchpath, char * fullpath, stat * filestat);`  
+
+## ASM  
+**In:**  
+`>PUSHWI filename`  
+`>PUSHWI fullpath`  
+`>PUSHWI searchpath`  
+`>PUSHWI filestat`  
+
+## RETURN VALUE  
+CC : success  
+DstBuf = FilePath  
+DstStat = S.STAT  
+CS : not found  
 
 # GetMemStat  
 **In:**  
