@@ -1266,10 +1266,10 @@ CS : no match
 Get System Time in Buffer  
 
 ## C  
-`time_t time (S.TIME* timer);`  
+`int time (S.TIME* timer);`  
 
 ## ASM  
-`>LDYA timer`  
+`>PUSHW timer`  
 `>SYSCALL time`  
 
 ## RETURN VALUE  
@@ -1282,8 +1282,8 @@ S.TIME filled with System date/time
 `int PTime2Time (long* ptime, S.TIME* timer);`  
 
 ## ASM  
+`>PUSHW ptime`  
 `>PUSHW timer`  
-`>LDYA ptime`  
 `>SYSCALL PTime2Time`  
 
 ## RETURN VALUE  
@@ -1308,8 +1308,9 @@ Convert S.TIME struct to CSTR
 `void strftime (char* ptr, const char* format, const struct S.TIME* timeptr );`  
 
 ## ASM  
-`PUSHW timeptr`  
-`PUSHW format`  
+`>PUSHW ptr`  
+`>PUSHW format`  
+`>PUSHW timeptr`  
 + %a : Abbreviated weekday name : Thu  
 + %A : Full weekday name : Thursday   
 + %b : Abbreviated month name : Aug   
@@ -1325,7 +1326,6 @@ Convert S.TIME struct to CSTR
 + %y : Year, last two digits (00-99)  
 + %Y : Year four digits 2001   
 
-`>LDYA ptr`  
 `>SYSCALL strftime`  
 
 ## RETURN VALUE  
