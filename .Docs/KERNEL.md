@@ -125,7 +125,7 @@ Create a hDEV
 
 ## ASM  
 **In:**  
-`>PUSHW string`  
+`>PUSHW str`  
 `>PUSHW expanded`  
 `>SYSCALL expand`  
 
@@ -304,6 +304,58 @@ Return float rounded into a long
 
 ## RETURN VALUE  
  Y,A = ...  
+
+## MD5  
+Return MD5 Hash for input String  
+
+# C  
+`void md5 (const char* str, char* digest);`  
+
+# ASM  
+`>PUSHW str`  
+`>PUSHW digest`  
+`>SYSCALL md5`  
+
+## RETURN VALUE  
+CC  
+
+## MD5Init  
+Initialize a MD5 computation  
+
+# C  
+`hMD5 md5init ();`  
+
+# ASM  
+`>SYSCALL MD5Init`  
+
+## RETURN VALUE  
+A = hMem To S.MD5  
+
+## MD5Update  
+Add Data to MD5 computation  
+
+# C  
+`void md5update (hMD5 md5, char* data, int len);`  
+
+# ASM  
+`>PUSHB md5`  
+`>PUSHW data`  
+`>PUSHW len`  
+`>SYSCALL MD5Update`  
+
+## RETURN VALUE  
+
+## MD5Finalize  
+
+# C  
+`void md5finalize (hMD5 md5, char* digest);`  
+
+# ASM  
+`>PUSHB md5`  
+`>PUSHW digest`  
+`>SYSCALL MD5Finalize`  
+
+## RETURN VALUE  
 
 # GetMem0  
  Y,A = Size Requested  
@@ -1310,7 +1362,6 @@ Convert S.TIME struct to CSTR
 ## ASM  
 `>PUSHW ptr`  
 `>PUSHW format`  
-`>PUSHW timeptr`  
 + %a : Abbreviated weekday name : Thu  
 + %A : Full weekday name : Thursday   
 + %b : Abbreviated month name : Aug   
@@ -1326,6 +1377,7 @@ Convert S.TIME struct to CSTR
 + %y : Year, last two digits (00-99)  
 + %Y : Year four digits 2001   
 
+`>PUSHW timeptr`  
 `>SYSCALL strftime`  
 
 ## RETURN VALUE  
