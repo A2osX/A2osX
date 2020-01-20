@@ -2,14 +2,7 @@ NEW
   AUTO 3,1
 				.LIST OFF	
 *--------------------------------------
-CORE.Init		>LDYAI 256
-				>SYSCALL GetMem
-				bcs .9
-				>STYA ZPArgVBuf
-				txa
-				>STA.G CORE.hArgVBuf
-				
-				lda #PUSHD.STACK
+CORE.Init		lda #PUSHD.STACK
 				>STA.G PUSHD.STACK
 				
 .9				rts
@@ -67,7 +60,8 @@ CORE.Load.YAX	stx M32.ACC				X = Code to Execute
 *--------------------------------------
 * http://heirloom.sourceforge.net/sh/sh.1.html
 *--------------------------------------
-* Input : ZPArgVBuf (String)
+* CORE.Run
+* Input : ZPInputBufPtr (String)
 * Tokenize ZPArgVBuf
 * :LOOP
 * if CmdSep=| : 
@@ -102,13 +96,22 @@ CORE.Run.EOF	jsr CORE.StkPull
 				jsr IO.Reset
 				lda #0
 				sec
-				rts						Ending 0, CS,A=0
+				jmp CORE.Run.Exit		Ending 0, CS,A=0
 
 .9				lda #E.UNEXPEOF
 				sec
-				rts
+				jmp CORE.Run.Exit
+				
+CORE.Run.RTS	rts
 *--------------------------------------
 CORE.Run	 	jsr IO.Reset
+
+				>LDYAI 256+16
+				>SYSCALL GetMem
+				bcs CORE.Run.RTS
+				>STYA ZPArgVBuf
+				txa
+				>STA.G CORE.hArgVBuf
 
 				clc
 				.HS B0					BCS
@@ -117,22 +120,22 @@ CORE.Run.1		sec						coming from PIPE OUT
 				ror
 				>STA.G CORE.bPipeIn
 
-				>LDYA ZPInputBufPtr		Save Actual cmd for looping
+				>LDYA ZPInputBufPtr		Save Actual ptr for looping
 				>STYA ZPInputCmdPtr
 
-				>LDYA ZPArgVBuf
+				>LDYA ZPArgVBuf			Reset ArgV Buffer
 				>STYA ZPArgVBufPtr
 
-				lda #0					Reset ArgV Buffer
+				lda #0
 				sta (ZPArgVBuf)
-				dec
-*				lda #$ff
-				sta CORE.IntCmd			assume external
+
+				sec
+				ror CORE.IntCmd			assume external
 
 				lda #S.PS.F.HOLD
 				sta CORE.PSFlags
 
-.3				jsr CORE.GetCharNB
+				jsr CORE.GetCharNB
 				bcs CORE.Run.EOF
 
 				cmp #C.CR				empty line ?
@@ -147,7 +150,7 @@ CORE.Run.1		sec						coming from PIPE OUT
 
 .8				lda #0
 				clc
-.9				rts						EOL, CS,A=0
+.9				jmp CORE.Run.Exit		EOL, CS,A=0
 
 .4				>LDYA L.CMD				internal command ?
 				jsr CORE.LookupInputBuf
@@ -188,7 +191,7 @@ CORE.Run.1		sec						coming from PIPE OUT
 
 .44				jsr CORE.GetNextCharNB	Skip EoL char
 				clc
-.99				rts
+				jmp CORE.Run.Exit
 *--------------------------------------
 CORE.Run.5		>LDYA L.CORE.IO
 				jsr CORE.LookupInputBuf
@@ -198,7 +201,7 @@ CORE.Run.5		>LDYA L.CORE.IO
 
 				jsr CORE.IO.JMP
 				bcc CORE.Run.7
-CORE.Run.RTS	rts
+				jmp CORE.Run.Exit
 
 CORE.Run.6		jsr CORE.ArgV.Add
 
@@ -225,13 +228,13 @@ CORE.Run.7		jsr CORE.GetCharNB
 				bpl .3
 				
 				jsr IO.Pipe.In
-				bcs CORE.Run.RTS
+				bcs CORE.Run.Exit
 				
 .3				>LDA.G CORE.bPipeOut
-				bpl CORE.ExecCmd
+				bpl .7
 				
 				jsr IO.Pipe.Out
-				bcs CORE.Run.RTS
+				bcs CORE.Run.Exit
 
 				lda #S.PS.F.HOLD		Run in the background...
 				trb CORE.PSFlags
@@ -256,9 +259,22 @@ CORE.Run.7		jsr CORE.GetCharNB
 				
 .6				pla
 				plp
-				bcs CORE.Run.RTS
+				bcs CORE.Run.Exit
 				
 				jmp CORE.Run.1			Loop with Pipe IN
+				
+.7				jsr CORE.ExecCmd				
+*--------------------------------------
+CORE.Run.Exit	php
+				pha
+				>LDA.G CORE.hArgVBuf
+				>SYSCALL freemem
+				
+				>STZ.G CORE.hArgVBuf
+				
+				pla
+				plp
+				rts
 *--------------------------------------
 * Input : ZPArgVBuf
 *--------------------------------------
@@ -267,10 +283,9 @@ CORE.ExecCmd	lda #0
 				>LDYA ZPArgVBuf
 				>STYA ZPArgVBufPtr
 
-				lda CORE.IntCmd
+				ldx CORE.IntCmd
 				bmi CORE.ExecExtCmd
 
-				tax
 				jmp (J.CMD,x)
 
 CORE.ExecExtCmd	>PUSHB CORE.PSFlags
