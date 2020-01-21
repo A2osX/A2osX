@@ -1327,40 +1327,14 @@ Get System Time in Buffer
 ## RETURN VALUE  
 S.TIME filled with System date/time  
 
-# PTime2Time  
- Convert ProDOS Time To S.TIME  
-
-## C  
-`int PTime2Time (long* ptime, S.TIME* timer);`  
-
-## ASM  
-`>PUSHW ptime`  
-`>PUSHW timer`  
-`>SYSCALL PTime2Time`  
-
-## RETURN VALUE  
-
-# CTime2Time  
- Convert CTime Time To S.TIME  
-
-## C  
-`int CTime2Time (long* ctime, S.TIME* timer);`  
-
-## ASM  
-`>PUSHW timer`  
-`>LDYA ctime`  
-`>SYSCALL CTime2Time`  
-
-## RETURN VALUE  
-
 # StrFTime  
 
 ## C  
 Convert S.TIME struct to CSTR  
-`void strftime (char* ptr, const char* format, const struct S.TIME* timeptr );`  
+`void strftime (char* str, const char* format, const struct S.TIME* timeptr );`  
 
 ## ASM  
-`>PUSHW ptr`  
+`>PUSHW str`  
 `>PUSHW format`  
 + %a : Abbreviated weekday name : Thu  
 + %A : Full weekday name : Thursday   
@@ -1382,6 +1356,32 @@ Convert S.TIME struct to CSTR
 
 ## RETURN VALUE  
   none. always succeed.  
+
+# PTime2Time  
+ Convert ProDOS Time To S.TIME  
+
+## C  
+`int PTime2Time (long* ptime, S.TIME* timer);`  
+
+## ASM  
+`>PUSHW ptime`  
+`>PUSHW timer`  
+`>SYSCALL PTime2Time`  
+
+## RETURN VALUE  
+
+# CTime2Time  
+ Convert CTime Time To S.TIME  
+
+## C  
+`int CTime2Time (long* ctime, S.TIME* timer);`  
+
+## ASM  
+`>PUSHW ctime`  
+`>PUSHW timer`  
+`>SYSCALL CTime2Time`  
+
+## RETURN VALUE  
 
 # open  
 
