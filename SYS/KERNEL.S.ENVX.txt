@@ -1,0 +1,432 @@
+NEW
+  AUTO 3,1
+*--------------------------------------
+ENVX.PutEnv		ldy #$ff
+
+.1				iny
+				lda (TXTPTR),y		 NAME=
+				beq .9
+
+				cmp #'='
+				bne .1
+
+				tya
+				sec					skip =
+				adc TXTPTR
+				sta FORPNT
+				
+				lda #0
+				adc TXTPTR+1
+				sta FORPNT+1
+				
+				bra K.SetEnv.I
+
+.9				lda #E.SYN
+				sec
+				rts
+*--------------------------------------
+ENVX.SetEnv		jsr ENVX.UnsetEnv
+				
+.1				jsr ENV.InitEnvP3		ZPPtr3 -> Env (SETREADAUX)
+
+				lda #1
+				sta ZPPtr4
+				stz ZPPtr4+1			ZPPtr4 = ENVSIZE = 1
+
+.10				lda (ZPPtr3)			End of ENV
+				beq .15
+
+				jsr ENV.GetP3LenY
+				jsr ENV.NextEnvP3Y
+				jsr ENV.NextEnvP4Y
+				bra .10
+
+.15				.DO AUXENV=1
+				sta CLRREADAUX
+				.FIN
+				
+				ldy #$ff
+
+.16				iny
+				lda (TXTPTR),y
+				beq .17
+
+				jsr SHARED.IsIDValid
+				bcc .16
+
+.17				jsr ENV.NextEnvP4Y		ZPPtr4 = ENVSIZE + VAR
+
+				ldy #$ff
+
+.19				iny
+				lda (FORPNT),y
+				bne .19
+
+				jsr ENV.NextEnvP4Y		ZPPtr4 = ENVSIZE + VALUE
+				lda ZPPtr4
+				beq .20
+
+				inc ZPPtr4+1
+
+.20				ldy #S.PS.ENVPAGECNT
+				lda (pPs),y
+				cmp ZPPtr4+1
+				bcs .22				env is large enough
+
+				lda ZPPtr4+1
+				jsr ENV.Dup.A
+				bcs .9
+
+				pha
+				ldy #S.PS.hENV
+				lda (pPs),y
+				
+				.DO AUXENV=1
+				ldx #SYS.FreeStkObj
+				jsr K.SYSCALL2.AUX
+				.ELSE
+				jsr K.Freemem
+				.FIN
+				
+				pla
+				ldy #S.PS.hENV
+				sta (pPs),y
+				txa
+				dey					S.PS.ENVPAGECNT
+				sta (pPs),y
+				bra .1				Start over
+
+.22				ldy #$ff
+
+				.DO AUXENV=1
+				sta SETWRITEAUX
+				.FIN
+				
+.23				iny
+				lda (TXTPTR),y
+				sta (ZPPtr3),y
+				beq .24
+				jsr SHARED.IsIDValid
+				bcc .23
+
+.24				lda #'='
+				sta (ZPPtr3),y
+				
+				jsr ENV.NextEnvP3Y
+				ldy #$ff
+
+.25				iny
+				lda (FORPNT),y
+				sta (ZPPtr3),y
+				bne .25
+
+				iny
+				sta (ZPPtr3),y			don't forget array ending 0
+				clc
+
+.9				.DO AUXENV=1
+				sta CLRREADAUX
+				sta CLRWRITEAUX
+				.FIN
+				rts
+*--------------------------------------
+ENVX.GetEnv		lda TXTPTR
+				beq K.GetEnvDump
+
+				jsr ENV.FindVar
+				bcs .9
+
+				jsr ENV.NextEnvP3Y		Skip NAME=
+
+				lda FORPNT+1
+				bne .3
+
+				ldy #$ff
+				
+				.DO AUXENV=1
+				sta SETREADAUX
+				.FIN
+				
+.1				iny
+				lda (ZPPtr3),y
+				bne .1
+
+				.DO AUXENV=1
+				sta CLRREADAUX
+				.FIN
+				
+				iny
+				bne .2
+				inc
+
+.2				.DO AUXENV=1
+				sta CLRREADAUX
+				sta CLRWRITEAUX
+				.FIN
+				
+				jsr K.getmem
+				bcs .99
+				
+				>STYA FORPNT
+
+.3				.DO AUXENV=1
+				sta SETREADAUX
+				.FIN
+				
+				ldy #$ff
+
+.4				iny
+				lda (ZPPtr3),y
+				sta (FORPNT),y
+				bne .4
+				
+				>LDYA FORPNT
+				.DO AUXENV=1
+				sta CLRREADAUX
+				.FIN
+
+				clc
+				rts
+				
+.9				>LDYAI 0
+*				sec
+.99				rts
+
+K.GetEnvDump	ldy #S.PS.ENVPAGECNT
+				lda (pPs),y
+				sta .1+1
+				
+				ldy #0
+				jsr K.getmem
+				bcs .9
+
+				>STYA FORPNT
+				sty .80+1
+				sta .81+1
+				stx .82+1
+				
+				jsr ENV.InitEnvP3		SETREADAUX
+
+.1				ldx #$ff				SELF MODIFIED
+
+				ldy #0
+
+.2				lda (ZPPtr3),y
+				sta (FORPNT),y
+				iny
+				bne .2
+
+
+.80				ldy #$ff				SELF MODIFIED
+.81				lda #$ff				SELF MODIFIED
+.82				ldx #$ff				SELF MODIFIED
+
+				.DO AUXENV=1
+				sta CLRREADAUX
+				.FIN
+
+				clc
+.9				rts
+*--------------------------------------
+ENVX.UnsetEnv	jsr ENV.FindVar
+				bcs .			8		not found, quit
+
+				jsr ENV.DelVarP3		Ptr3 -> NAME=VALUE
+				clc
+				
+				rts
+*--------------------------------------
+* ENV.FindVar
+*  In:
+*	 TXTPTR -> NAME
+*  Out:
+*   CC: Found
+*    Y = NAME len
+*	 TXTPTR -> NAME
+*	 ZPPtr3 -> NAME=VALUE
+*	CS: Not Found
+*	 TXTPTR -> NAME
+*	 ZPPtr3 -> PTR to Ending 0
+*--------------------------------------
+ENVX.FindVar
+				.DO AUXENV=1
+				sta SETREADAUX
+				sta SETWRITEAUX
+				.FIN
+				
+				jsr ENV.InitEnvP3		Store ENV
+
+.1				lda (ZPPtr3)
+				beq .9					end of ENV
+
+				ldy #$ff
+
+.2				iny
+				.DO AUXENV=1
+				jsr SHARED.TXTPTR.GetY
+				.ELSE
+				lda (TXTPTR),y
+				.FIN
+				beq .3
+
+				jsr SHARED.IsIDValid
+				bcs .3
+
+				cmp	(ZPPtr3),y
+				beq .2
+
+				bra .4
+
+.3				lda (ZPPtr3),y
+				cmp #'='
+				bne .4
+
+				.DO AUXENV=1
+				sta CLRREADAUX
+				sta CLRWRITEAUX
+				.FIN
+				clc
+				rts
+
+.4				jsr ENV.NextEnvP3		Skip NAME=VALUE
+				bra .1
+
+.9				.DO AUXENV=1
+				sta CLRREADAUX
+				sta CLRWRITEAUX
+				.FIN
+				sec
+				rts	
+*--------------------------------------
+* ENV.DelVarP3
+*  In:
+*	ZPPtr3 -> ENV.NAME to Discard
+*--------------------------------------
+ENV.DelVarP3	.DO AUXENV=1
+				sta SETREADAUX
+				sta SETWRITEAUX
+				.FIN
+				>LDYA ZPPtr3			save actual Ptr
+				>STYA ZPPtr4
+				jsr ENV.NextEnvP3		Skip NAME=VALUE
+
+.1				ldy #$ff
+
+.2				iny
+				lda (ZPPtr3),y			Move back CSTRs...
+				sta (ZPPtr4),y
+				bne .2
+
+				tya
+				
+				beq .8					we moved back ending \0
+
+				jsr ENV.NextEnvP3Y
+				jsr ENV.NextEnvP4Y
+				bra .1
+				
+.8				.DO AUXENV=1
+				sta CLRREADAUX
+				sta CLRWRITEAUX
+				.FIN
+				rts
+*--------------------------------------
+ENV.InitEnvP3	.DO AUXENV=1
+				sta CLRREADAUX
+				.FIN
+				ldy #S.PS.hENV
+				lda (pPs),y
+				.DO AUXENV=1
+				sta SETREADAUX
+				.FIN
+				jsr K.GetMemPtr
+				>STYA ZPPtr3			Store ENV
+
+				rts
+*--------------------------------------
+ENV.NextEnvP3	jsr ENV.GetP3LenY
+*--------------------------------------
+ENV.NextEnvP3Y	tya
+ENV.NextEnvP3A	sec
+				adc ZPPtr3
+				sta ZPPtr3
+				bcc .8
+				inc ZPPtr3+1
+.8				rts
+*--------------------------------------
+ENV.GetP3LenY	ldy #$ff
+.1				iny
+				lda (ZPPtr3),y
+				bne .1
+				rts
+*--------------------------------------			
+ENV.NextEnvP4Y	tya
+				sec
+				adc ZPPtr4
+				sta ZPPtr4
+				bcc .8
+				inc ZPPtr4+1
+.8				rts
+*--------------------------------------
+* ENV.Dup
+*  In:
+*   A = ENV hMem To Duplicate
+*  Out:
+*   A = hMem to new ENV
+*   X = Page Count
+*--------------------------------------
+ENV.Dup			ldy #S.PS.ENVPAGECNT
+				lda (pPs),y
+
+ENV.Dup.A		sta .8+1				Store target page Count	
+
+				ldy #S.PS.ENVPAGECNT	get SOURCE page count
+				lda (pPs),y
+				sta .10+1
+
+				ldy	#S.PS.hENV
+				lda (pPs),y
+				.DO AUXENV=1
+				sta SETREADAUX
+				sta SETWRITEAUX
+				.FIN
+				jsr K.GetMemPtr
+				>STYA .1+1
+				
+				ldy #0
+				lda .8+1
+				jsr K.GetMem
+				bcs .9
+
+				>STYA .2+1				Target Buffer
+				phx						save hMem
+				jsr Mem.SetOwner		Set Ownership
+
+				ldy #0
+				
+.10				ldx #$ff				SELF MODIFIED				
+
+.1				lda $ffff,y				SELF MODIFIED
+.2				sta $ffff,y				SELF MODIFIED
+				iny
+				bne .1
+
+				inc .1+2
+				inc .2+2
+				dex
+				bne .1
+
+.8				ldx #$ff				SELF MODIFIED Target Page Count
+				pla						hMem
+				clc
+				
+.9				.DO AUXENV=1
+				sta CLRREADAUX
+				sta CLRWRITEAUX
+				.FIN
+				rts
+*--------------------------------------
+MAN
+SAVE USR/SRC/SYS/KERNEL.S.ENVX
+LOAD USR/SRC/SYS/KERNEL.S
+ASM
