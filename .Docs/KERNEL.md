@@ -335,7 +335,7 @@ A = hMem To S.MD5
 Add Data to MD5 computation  
 
 # C  
-`void md5update (hMD5 md5, char* data, int len);`  
+`void md5update (short int md5, char* data, int len);`  
 
 # ASM  
 `>PUSHB md5`  
@@ -348,7 +348,7 @@ Add Data to MD5 computation
 ## MD5Finalize  
 
 # C  
-`void md5finalize (hMD5 md5, char* digest);`  
+`void md5finalize (short int md5, char* digest);`  
 
 # ASM  
 `>PUSHB md5`  
@@ -433,8 +433,8 @@ Load a file in AUX memory (Stock Objects)
 `int execl(const char* cmdline, short int flags);`  
 
 ## ASM  
+`>PUSHW cmdline`  
 `>PUSHB flags`  
-`>LDYA cmdline`  
 `>SYSCALL execl`  
 
 ## RETURN VALUE  
@@ -528,28 +528,6 @@ CS : not found
 
 ## RETURN VALUE  
  Buffer filled with memory stats  
-
-# StrVDup  
-**In:**  
- Y,A = Src StrV  
-
-## RETURN VALUE  
- X = hMem of new StrV  
- A = Str Count  
-
-# Str2StrV  
-Expand String and convert to ArgV List  
-
-## C  
-short int str2strv(char* args, char* argv[])  
-
-## ASM  
-`>PUSHW argv`  
-`>LDYA args`  
-`>SYSCALL Str2StrV`  
-
-## RETURN VALUE  
-A = Arg count  
 
 # GetPWUID  
 
@@ -1313,6 +1291,44 @@ CC : match
 CS : no match  
  CC, Y,A=0  
  CS, Y,A > 0 or < 0  
+
+# NewStrV  
+**In:**  
+ A = Initial Size (Page)  
+
+## RETURN VALUE  
+ X = hStrV  
+ Y,A = Ptr  
+
+# StrVGet  
+**In:**  
+ A = hStrV  
+ X = index  
+
+## RETURN VALUE  
+ Y,A = Ptr  
+
+# StrVDup  
+**In:**  
+ Y,A = Src StrV  
+
+## RETURN VALUE  
+ X = hMem of new StrV  
+ A = Str Count  
+
+# Str2StrV  
+Expand String and convert to ArgV List  
+
+## C  
+short int str2strv(char* args, char* argv[])  
+
+## ASM  
+`>PUSHW argv`  
+`>LDYA args`  
+`>SYSCALL Str2StrV`  
+
+## RETURN VALUE  
+A = Arg count  
 
 # Time  
 Get System Time in Buffer  
