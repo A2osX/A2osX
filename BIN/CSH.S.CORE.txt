@@ -7,6 +7,11 @@ CSH.Init		>SYSCALL SListNew
 
 				>STA.G CSH.hSymbols
 
+				>SYSCALL SListNew
+				bcs .9
+
+				>STA.G CSH.hDefines
+
 				>LDYAI 256
 				>SYSCALL GetMem
 				bcs .9
@@ -23,7 +28,7 @@ CSH.Init		>SYSCALL SListNew
 				txa
 				>STA.G CSH.hStack
 
-				lda #$0
+				lda #0
 				>STA.G CSH.ConstPtr
 				>STA.G CSH.StackPtr
 				sta (ZPCSHConst)
@@ -36,7 +41,12 @@ CSH.Quit		>LDA.G CSH.hSymbols
 				
 				>SYSCALL SListFree
 
-.1				>LDA.G hFileBuf
+.1				>LDA.G CSH.hDefines
+				beq .2
+				
+				>SYSCALL SListFree
+
+.2				>LDA.G hFileBuf
 				jsr .7
 
 				>LDA.G CSH.hStack
@@ -51,18 +61,23 @@ CSH.Quit.RTS	rts
 CSH.Run			jsr CSH.GetCharNB
 				bcs CSH.Quit.RTS
 
-CSH.Run.1		cmp #'#'
-				bne .3					comments ...
-.1				jsr CSH.GetNextChar
-				bcs .2
-				cmp #C.CR
-				bne .1
-.2				jmp CSH.GetNextChar		Skip CR and exit
-.3				cmp #C.CR
+CSH.Run.1		cmp #C.CR				empty line....
 				beq .2
+				
+				cmp #'/'
+				bne .3					comments ...
 
-				cmp #'}'				End of block ?
+				jmp CSH.COMMENTS
+
+.2				jmp CSH.GetNextChar		Skip CR and exit
+
+.3				cmp #'#'				directive ?
 				bne .4
+
+				jmp CSH.DIRECTIVES
+
+.4				cmp #'}'				End of block ?
+				bne .40
 
 				jsr CSH.CheckStack		must be something on stack....
 				bcs .9
@@ -70,13 +85,15 @@ CSH.Run.1		cmp #'#'
 				jsr CSH.Pop				was expected....
 				jsr CSH.Pop				get stacked Cmd...
 				tax
-				jmp (J.CSH.KW.END,x) 
-.4				jsr CSH.IsLetter
+				jmp (J.CSH.KW.END,x)
+
+.40				jsr CSH.IsLetter
 				bcc .5
 
 
 
 				bra .99					error, todo : PREOPS ++ --.....
+
 .5				jsr CSH.SavePtr			Save Ptr, in case of while,for....
 				>LDYA L.CSH.KW
 				jsr CSH.LookupID
@@ -92,10 +109,13 @@ CSH.Run.1		cmp #'#'
 				>STYA ZPVarID
 				jsr CSH.GetCharNB
 				bcs .9
+
 				cmp #'='				TODO: all AOPS
 				bne .99
+
 				jsr CSH.GetNextChar		Skip =
 				bcs .99
+
 				lda #0					Any Type
 				jsr CSH.ExpEval
 				bcs .9
@@ -103,10 +123,14 @@ CSH.Run.1		cmp #'#'
 				>LDYA ZPVarID			X = Exp Type
 				jsr CSH.SetVarValueFromStack
 				bcs .9
+
 				jsr CSH.GetChar
 				cmp #';'
-				bne .99
-				bra .8
+				beq .8
+
+.99				lda #CSH.E.SYNTAX
+				sec
+.9				rts
 
 .7				lda #0					no return value type check required
 				jsr CSH.fCall
@@ -119,13 +143,77 @@ CSH.Run.1		cmp #'#'
 
 .8				jsr CSH.GetNextCharNB	Skip ;
 				bcs .9
+
 				cmp #C.CR
 				beq .80
+
 				jmp CSH.Run.1
+				
 .80				jmp CSH.GetNextChar		Skip CR
-.99				lda #CSH.E.SYNTAX
+*--------------------------------------
+CSH.COMMENTS	jsr CSH.GetNextChar
+				cmp #'/'
+				bne .90
+
+				jmp CSH.SkipLine		skip line.....
+				
+.90				lda #CSH.E.SYNTAX
 				sec
-.9				rts
+				rts
+*--------------------------------------
+CSH.DIRECTIVES	jsr CSH.GetNextCharNB
+				bcs .99
+				
+				cmp #'!'				#!/bin/csh
+				bne .1
+				
+				bra CSH.SkipLine
+				
+.1				>LDYA L.CSH.DIRS
+				jsr CSH.LookupID
+				bcs .91
+				
+				jmp (J.CSH.DIRS,x)
+				
+.91				lda #CSH.E.INVDIR
+				sec
+.99				rts
+*--------------------------------------
+CSH.DIR.DEFINE	jsr CSH.CheckSpace
+				bcs .99
+				
+				jsr CSH.IsLetter
+				bcs .90
+				
+				jsr CSH.AddDefine
+				bcs .99
+				
+				>STYA ZPVarID
+				
+				jsr CSH.CheckSpace
+				bcs .99
+
+				>PUSHWI 0
+				>PUSHW ZPFileBufPtr
+				>PUSHW ZPVarID
+				>LDA.G CSH.hSymbols
+				>SYSCALL SListAddData
+				bcs .99
+				
+				bra CSH.SkipLine
+				
+.90				lda #CSH.E.SYNTAX
+				sec
+.99				rts
+*--------------------------------------
+CSH.SkipLine	jsr CSH.GetNextChar
+				bcs .9
+				cmp #C.CR
+				bne CSH.SkipLine
+				
+				clc
+				
+.9				rts				
 *--------------------------------------
 * Built in Keywords
 *--------------------------------------
@@ -221,33 +309,28 @@ CSH.CONTINUE
 *--------------------------------------
 * Built in Types
 *--------------------------------------
-CSH.SIGNED		jsr CSH.GetChar
-				bcs .9
-				cmp #C.SPACE
-				bne .9
-				jsr CSH.GetNextCharNB
-				bcs .9
-				>LDYA L.CSH.STYPES
-				jsr CSH.LookupID
-
-				bcs .9
-				jmp (J.CSH.STYPES,x)
-.9				lda #CSH.E.SYNTAX
-				sec
-				rts
+CSH.SIGNED		sec
+				.HS 90					BCC
 *--------------------------------------
-CSH.UNSIGNED	jsr CSH.GetChar
+CSH.UNSIGNED	clc
+				php
+				
+				jsr CSH.CheckSpace
 				bcs .9
-				cmp #C.SPACE
-				bne .9
-				jsr CSH.GetNextCharNB
-				bcs .9
+				
 				>LDYA L.CSH.STYPES
 				jsr CSH.LookupID
 
 				bcs .9
+				
+				plp
+				bcs .8
 				jmp (J.CSH.UTYPES,x)
-.9				lda #CSH.E.SYNTAX
+				
+.8				jmp (J.CSH.STYPES,x)
+
+.9				plp
+				lda #CSH.E.SYNTAX
 				sec
 				rts	
 *--------------------------------------
@@ -269,19 +352,15 @@ CSH.ULONG		ldx #CSH.T.ULONG
 CSH.FLOAT		ldx #CSH.T.FLOAT
 
 CSH.TYPE		stx ZPVarType
-				jsr CSH.GetChar
+				jsr CSH.CheckSpace
 				bcs .9
-				cmp #C.SPACE
-				bne .9
 				
-.11				jsr CSH.GetNextCharNB
-				bcs .9
-
-				cmp #'*'
+.11				cmp #'*'
 				bne .10
 				
 				lda #CSH.Q.POINTER
 				tsb ZPVarType
+				jsr CSH.GetNextCharNB	Skip *
 				bra .11
 				
 .10				jsr CSH.IsLetter
@@ -475,12 +554,38 @@ CSH.ExpEval		ldx ZPPtr1
 				phx
 
 				sta ZPPtr2				local : expected type
-.10				lda #$ff
-				sta ZPPtr2+1			Reset BOP1
 
+.13				sec
+				ror ZPPtr2+1			Reset BOP1
+
+.10				jsr CSH.GetCharNB
+				bcs .19
+
+				cmp #'('
+				bne .20
+				
+				jsr CSH.GetNextCharNB	skip (
+				bcs .19
+				
+				lda ZPPtr2
+
+				jsr CSH.ExpEval
+				bcs .19
+				stx ZPPtr2
+				
 				jsr CSH.GetCharNB
-				bcs .33
-.20				jsr CSH.IsLetter		Fnc or Var ?
+				bcs .19
+				cmp #')'
+				bne .19
+				
+				jsr CSH.GetNextCharNB	skip )
+*			>DEBUG
+				bcs .19
+				jmp .12
+
+.19				jmp .90
+
+.20				jsr CSH.IsLetter		define, Fnc or Var ?
 				bcs .2
 
 				jsr CSH.GetVar 
@@ -492,13 +597,17 @@ CSH.ExpEval		ldx ZPPtr1
 
 				stx ZPPtr2				store real var type
 				bra .11
+
 .1				lda ZPPtr2				var type
 				jsr CSH.fCall			X = function index
 				bcs .99
+
 				stx ZPPtr2				store real var type
 				bra .11
+
 .2				jsr CSH.IsDigit10		number ?
 				bcs .3
+
 				ldx ZPPtr2
 				bne .22
 
@@ -507,16 +616,19 @@ CSH.ExpEval		ldx ZPPtr1
 
 .22				jsr CSH.GetNumOnStack
 .29				bcs .99
+
 .11				jsr CSH.GetCharNB
 				bcs .90
-				cmp #','
+
+.12				cmp #','
 				beq .8
 				cmp #')'
 				beq .8
 				cmp #';'
 				beq .8
+
 				jsr CSH.IsOPChar
-.33				bcs .90
+				bcs .90
 
 				>LDYA L.CSH.BOPS
 				jsr CSH.LookupOP
@@ -528,6 +640,7 @@ CSH.ExpEval		ldx ZPPtr1
 				jsr CSH.GetCharNB
 				bcc .20					go check for an ARG		
 				bra .90
+
 .3				cmp #'"'				String literal
 				bne .90
 				jsr CSH.AddContCharP
@@ -546,14 +659,17 @@ CSH.ExpEval		ldx ZPPtr1
 				bcs .99
 				jsr CSH.GetCharNB
 				bcs .90	
-				jmp .10
+				jmp .13					reset BOP & loop					
+				
 .8				ldx ZPPtr2+1
 				bmi .80
 				lda ZPPtr2				Var Type
 				jsr CSH.BOPExec
 				bcc .80
 				bcs .99
+				
 .90				lda #CSH.E.SYNTAX
+
 .99				sec
 				.HS 90					BCC
 .80				clc
@@ -740,8 +856,14 @@ CSH.GetNumOnStack
 * Input : ZPFileBufPtr
 * Output : Y,A = ZPVarID
 *--------------------------------------
-CSH.AddVar		>PUSHW ZPFileBufPtr
-				>LDA.G CSH.hSymbols
+CSH.AddDefine	>LDA.G CSH.hDefines
+				bra CSH.Add
+				
+CSH.AddVar		>LDA.G CSH.hSymbols
+
+CSH.Add			pha
+				>PUSHW ZPFileBufPtr
+				pla
 				>SYSCALL SListNewKey
 				bcs .9
 				pha
@@ -1115,6 +1237,18 @@ CSH.GetNextCharNB
 CSH.GetNextCharNB.RTS
 				rts
 *--------------------------------------
+CSH.CheckSpace	jsr CSH.GetChar
+				bcs .90
+				cmp #C.SPACE
+				bne .90
+
+				jsr CSH.GetNextCharNB
+				bcc CSH.GetNextCharNB.RTS
+				
+.90				lda #CSH.E.SYNTAX
+				sec
+				rts
+*--------------------------------------
 CSH.CheckCharNB	cmp #C.SPACE
 				beq .9
 				cmp #C.LF
@@ -1190,77 +1324,6 @@ CSH.SIZEOF		txa
 				rts
 
 .2				lda #2
-				rts
-*--------------------------------------
-* EXEC
-*--------------------------------------
-EXEC.log		>FPU LOG
-				clc
-				rts
-*--------------------------------------
-EXEC.sqr		>FPU SQR
-				clc
-				rts
-*--------------------------------------
-EXEC.exp		>FPU EXP
-				clc
-				rts
-*--------------------------------------
-EXEC.cos		>FPU COS
-				clc
-				rts
-*--------------------------------------
-EXEC.sin		>FPU SIN
-				clc
-				rts
-*--------------------------------------
-EXEC.tan		>FPU TAN
-				clc
-				rts
-*--------------------------------------
-EXEC.atan		>FPU ATAN
-				clc
-				rts
-*--------------------------------------
-EXEC.getchar	>SYSCALL getchar
-				>PUSHA
-				rts
-*--------------------------------------
-EXEC.puts		>PULLYA
-				>SYSCALL puts
-				>PUSHYA
-				rts
-*--------------------------------------
-EXEC.printf		>SYSCALL printf2
-				>PUSHYA
-				rts
-*--------------------------------------
-EXEC.execl		>SYSCALL execl
-				>PUSHYA
-				rts
-*--------------------------------------
-EXEC.putenv		>SYSCALL putenv
-				>PUSHYA
-				rts
-*--------------------------------------
-EXEC.setenv		>SYSCALL setenv
-				>PUSHYA
-				rts
-*--------------------------------------
-EXEC.getenv		>SYSCALL getenv
-				>PUSHYA
-				rts
-*--------------------------------------
-EXEC.unsetenv	>SYSCALL unsetenv
-				>PUSHYA
-				rts
-*--------------------------------------
-EXEC.MD5		>SYSCALL MD5
-				rts
-*--------------------------------------
-EXEC.malloc		>PULLYA
-				>SYSCALL getmem
-				>PUSHYA
 				rts
 *--------------------------------------
 MAN
