@@ -1,6 +1,6 @@
 # A2osX Media Guide
 
-### Updated December 5, 2019
+### Updated January 26, 2020
 
 We have changed the media set for A2osX.  New A2osX Users should download the most current version as shown in the table below.  **A new Release Candidate (RC) edition has been made available (highlighted below), you should choose one of the media options from this set.**  The Bleed media are the primary images used by the developers to hold the most current version of the A2osX binaries (and a copy of the source, although of course GitHub is the primary source repository) and may be unstable.  You should not use this media unless directed by the A2osX development team.
 
@@ -15,7 +15,7 @@ We have changed the media set for A2osX.  New A2osX Users should download the mo
 
 * Note this is a new system of Editions and Disk Images.  A2osX 0.93 will be the first Release that uses this new system.  The first **RC** set of media are now available and are based on build No 1600.  If no significant issues are found with **RC**, a set of **RELEASE** media will be made available based on this build (the RC media will then be removed until a 0.94 RC is ready).  
 
-## Disk images :
+## Disk images
 
 You can use and/or install A2osX from the media found in our Media directory found **[here](../.Floppies)**.  The current set of available media includes:
 
@@ -40,6 +40,10 @@ You can use and/or install A2osX from the media found in our Media directory fou
 | RELEASE.800.po | RELEASE |An 800K 3.5" disk image containing the main BOOT and support files for running A2osX.  |
 | RELEASE.32MB.po | RELEASE | A formatted empty ProDOS 32MB HD disk image, suitable for use with emulators such as AppleWin  |
 
+## ProDOS Versions
+
+The A2osX team has developed and now includes on its media new versions of ProDOS for use with A2osX.  Please consult the document **[A2osX and ProDOS](.Docs/ProDOS.md)** for detailed information on these versions.  Briefly there is ProDOS 2.03tc which is an 8 byte patch to ProDOS 2.03 to update the year table to support years through 2023 and ProDOS FX a **F**aster and e**X**tended version that adds many new features including lower case file, directory and volume name support.   These new versions are already being included in the latest **Stable** media and will become the versions of ProDOS supplied on all future media. The ProDOS 2.03tc version is included on the 800K media images listed above and provides the maximum compatibility with existing systems.  The ProDOS FX version is included on the 32MB media images which are designed to be standalone bootable images.  In addition, there is a very special ProDOS FX PAKED version, that is the same as the standard FX image once running, but the file has been compressed and contains a special loader to uncompress ProDOS as it initializes.  This version uses less disk space and is used on 140K media where space is at a premium. 
+
 ## License
 A2osX is licensed under the GNU General Pulic License.
 
@@ -57,4 +61,4 @@ The full A2osX license can be found **[Here](../LICENSE)**.
 
 ## Copyright
 
-Copyright 2015 - 2019, Remy Gibert and the A2osX contributors.
+Copyright 2015 - 2020, Remy Gibert and the A2osX contributors.

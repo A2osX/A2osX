@@ -12,6 +12,15 @@ ProDOS was marketed by Apple as meaning Professional Disk Operating System, and 
 
 ## New A2osX ProDOS Versions
 
+The A2osX team is proud to announce the availability of two new versions of ProDOS, one with a very minor tweak and the other a major update/overhaul.  These are discussed in detail below, but briefly there is ProDOS 2.03tc which is an 8 byte patch to ProDOS 2.03 to update the year table to support years through 2023 and ProDOS FX a **F**aster and e**X**tended version that adds many new features including lower case file, directory and volume name support.   These new versions are already being included in the latest **Stable** media and will become the versions of ProDOS supplied on all future media.  Please consult our **[Media Guide](.Docs/Media%20Guide.md)** for more information about which version is included on each media image.
+
+## Tested Versions
+
+
+ok, back on Prodos….  I am going to close saying, we test both 2.03 and 2.42.  people can use what they like (look at User Guide on installing a2osx on your own HD/booting your own prodos).  Have nice day.  Nothing to be said of FX.  I think one question to answer in future is when you do ProDos FX, will a2osx stop working on standard prodos?
+
+For 0.93, the current project milestone, we have decided to include on the A2osX media a very slightly modified version of 2.0.3 which you will notice during boot of ProDOS is labeled as 2.0.3tc.  This stands for ThunderClock and basically this version is an exact copy of 2.0.3 with 7 bytes changed to update the ProDOS year table to be current (it is the same work to correct the year that is done in 2.4.2/2.5 by John Brooks).  Note, we do test A2osX regularly with other versions of ProDOS (the author of this note regularly runs 2.4.2).  For consistency and support we will standardize on 2.03tc for this release and readdress which version of ProDOS should be included when we start creating 0.94 builds.
+Also note, users can replace ProDOS with another version, or as is expected for many with hard drives/emulators, they can install A2osX onto a subdirectory of their HD/Drive which boots their preferred version of ProDOS.  In fact, we are planning for an upcoming release an “INSTALL” method that will create this subdirectory, copy the necessary files and make any changes to A2osX config files needed so people can run A2osX in this manner.
 
 
 ## Version Overview Chart
@@ -45,14 +54,12 @@ The following chart lists all the known (to the author) versions of ProDOS and
 | FX || Yes | TC 2023<br>NSC<br>GS/Cortland | Advanced| 15244| |
 | FX Paked || Yes | TC 2023<br>NSC<br>GS/Cortland | Advanced|13295 | |
 
-Drive Remapping
+### Drive Remapping
 
 With the release of ProDOS 8 (Version 1.2) Apple Modified the ProDOS 8 loader code to automatically install up to four drives in slot 5 if a SmartPort device is found using slot 2 for the extra 2 drives.  With ProDOS 8 Version 2.0.1, ProDOS supports more than two SmartPort devices per slot by remapping the third device and beyond to different slots. There's still a limit of 14 devices altogether, though.
 
-ok, back on Prodos….  I am going to close saying, we test both 2.03 and 2.42.  people can use what they like (look at User Guide on installing a2osx on your own HD/booting your own prodos).  Have nice day.  Nothing to be said of FX.  I think one question to answer in future is when you do ProDos FX, will a2osx stop working on standard prodos?
+### Clock Support
 
-For 0.93, the current project milestone, we have decided to include on the A2osX media a very slightly modified version of 2.0.3 which you will notice during boot of ProDOS is labeled as 2.0.3tc.  This stands for ThunderClock and basically this version is an exact copy of 2.0.3 with 7 bytes changed to update the ProDOS year table to be current (it is the same work to correct the year that is done in 2.4.2/2.5 by John Brooks).  Note, we do test A2osX regularly with other versions of ProDOS (the author of this note regularly runs 2.4.2).  For consistency and support we will standardize on 2.03tc for this release and readdress which version of ProDOS should be included when we start creating 0.94 builds.
-Also note, users can replace ProDOS with another version, or as is expected for many with hard drives/emulators, they can install A2osX onto a subdirectory of their HD/Drive which boots their preferred version of ProDOS.  In fact, we are planning for an upcoming release an “INSTALL” method that will create this subdirectory, copy the necessary files and make any changes to A2osX config files needed so people can run A2osX in this manner.
 
 WHile you are on that....  I am working on an updated readme to go with next RC....  I am going to talk about new FX and how it supports LC (I think we need to talk more about FILE file File fILe...) and more info about FX.PAK on 140K media.  Is there anything else in FX to note [oh SP drive mapping stuff from produs enhancement channel).  Also in readme new PAK/UNPAK, TERM, ask for more devs, testers, especially with HW, and some doc readers would be nice.  Further on Pdos, say we have tested on 2.5a8 and works, unsupported at this time (you can file issue but may not be addresses).  known that date display in LS no work becasue 2.5 breaks standard and we may not adapt.  8 drive per slot "?works" but a2 reports multiple drives as D1/2 and again non-standard we may not change/adapt to.  so basically use 2.5 at own risk at moment.   What else should be talked about?
 
@@ -89,14 +96,12 @@ This is the final release of ProDOS from Apple Computer.
 ### ProDOS 2.03tc
 
 this version of ProDOS includes updated TCLOCK year table to year 2023
+The ProDOS 2.03tc version is included on the 800K media images listed above and provides the maximum compatibility with existing systems.  
 
 ### ProDOS.FX:
 
-
 FX supports extended syntax for filenames
-9:36
 1st char in  . _ a-z A-Z
-9:36
 char 2-15 in . _ a-z A-Z 0-9
 
 "Faster, eXtended"
@@ -132,7 +137,6 @@ old IRQ manager also
 
 add a note about FX smaller on disk...only 13k
 --->even smaller if paked  (what size)
-
 
 Added NSC clock support
 TCLOCK year -> 2023
@@ -173,11 +177,12 @@ so in the above….4 devs from card in 7, it takes the 2 for 7, now finds room f
 
 if S4D2 is free it will be used by remap....so S3D1....
 
+The ProDOS FX version is included on the 32MB media images which are designed to be standalone bootable images.  In addition, there is a very special ProDOS FX PAKED version, that is the same as the standard FX image once running, but the file has been compressed and contains a special loader to uncompress ProDOS as it initializes.  This version uses less disk space and is used on 140K media where space is at a premium. 
+
 ### ProDOS 2.4
 
 https://prodos8.com/releases/prodos-24/
 
-Apple II features of ProDOS 2.4
 For the first time, the features and improvements of ProDOS 2.x are available on 6502-based Apple ][, Apple ][+, and un-enhanced Apple //e computers.
 All Apple II computers with modern USB storage devices or hard drives can now support up to 14 ProDOS volumes per device.
 
@@ -205,18 +210,11 @@ You get multiple reseeks on drives when doing certain commands, most notable if 
 51-file limit on root directory removed (not tested with A2osX yet).
  lowercase, fully supported in A2osX.
 
+### ProDOS 16 / GSOS
 
-ProDOS 16 / GSOS
-
- am writing right now a ProDOS.md doc that will discuss 203tc, FX, and support of other versions out there.
-That was why i was asking about ProDOS 16.  I was wondering if there was anything I needed to test/write up anything related to 16.
-
-there s something about launching A2OSX.SYSTEM under GSOS
-not supported
-because of very sensitive IRQ managment in A2osX
+ProDOS 16 / GSOS are versions of the ProDOS operating system that run only on Apple //GS computers.  At this time, A2osX  is not supported under these operating systems because of A2OSX.SYSTEM's very sensitive IRQ management required by the multitasking multiuser nature of A2osX.  To run A2osX on an Apple //GS you must first switch to one of the supported ProDOS 8 versions such as the supplied ProDOS 2.03tc or ProDOS FX.
 
 ## Requirements
-All editions of ProDOS require an Apple II series computer or licensed compatible.
 
 ProDOS 8 requires 64kB of memory to run. The original ProDOS (8) 1.0 through 1.0.2 requires only 48kB for the kernel, but nearly all programs, including the BASIC.SYSTEM needed to use Applesoft BASIC, require 64kB, making a 48kB system useless for ProDOS as a practical matter, and support for 48kB machines was removed in version 1.1.
 
@@ -226,7 +224,9 @@ ProDOS 8 2.4 and 2.5 removes the 65C02 requirement and will run on all Apple II 
 
 ProDOS 16 requires an Apple IIGS.
 
-ProDOS FX requires a 64KB 65c02 or later CPU.  ProDOS FX will not run on a Apple ][ or ][+.
+ProDOS 2.03tc has the exact same requirements as ProDOS 2.03 since its only difference are the eight patched bytes to the date/year table.
+
+ProDOS FX requires a 64KB 65c02 or later CPU.  ProDOS FX will not run on a Apple ][ or ][+.  Note, however, that A2osX itself requires a minimum of 128kB to operate.
 
 ## License
 A2osX is licensed under the GNU General Public License.
