@@ -46,7 +46,10 @@ CSH.Quit		>LDA.G CSH.hSymbols
 				
 				>SYSCALL SListFree
 
-.2				>LDA.G hFileBuf
+.2				lda ZPhMacro
+				jsr .7
+				
+				>LDA.G hFileBuf
 				jsr .7
 
 				>LDA.G CSH.hStack
@@ -193,10 +196,25 @@ CSH.DIR.DEFINE	jsr CSH.CheckSpace
 				jsr CSH.CheckSpace
 				bcs .99
 
-				>PUSHWI 0
+				ldy #$ff
+	
+.1				iny
+				lda (ZPFileBufPtr),y
+				beq .2
+
+				cmp #C.CR
+				bne .1
+				
+				dey
+				
+.2				iny
+
+				lda #0
+				>PUSHYA					DataLen
+
 				>PUSHW ZPFileBufPtr
 				>PUSHW ZPVarID
-				>LDA.G CSH.hSymbols
+				>LDA.G CSH.hDefines
 				>SYSCALL SListAddData
 				bcs .99
 				
@@ -579,7 +597,7 @@ CSH.ExpEval		ldx ZPPtr1
 				bne .19
 				
 				jsr CSH.GetNextCharNB	skip )
-*			>DEBUG
+
 				bcs .19
 				jmp .12
 
@@ -588,7 +606,10 @@ CSH.ExpEval		ldx ZPPtr1
 .20				jsr CSH.IsLetter		define, Fnc or Var ?
 				bcs .2
 
-				jsr CSH.GetVar 
+				jsr CSH.GetDefine
+				bcc .10
+				
+				jsr CSH.GetVar
 				bcs .1
 
 				ldx ZPPtr2				expected var type (could be 0=any)
@@ -655,7 +676,7 @@ CSH.ExpEval		ldx ZPPtr1
 * Old OP has precedence, compute ACC=ARG <BOP> ACC
 .6				lda ZPPtr2				Var Type
 				ldx ZPPtr2+1			BOP
-				jsr CSH.BOPExec
+				jsr CSH.BOP.EXEC
 				bcs .99
 				jsr CSH.GetCharNB
 				bcs .90	
@@ -664,7 +685,7 @@ CSH.ExpEval		ldx ZPPtr1
 .8				ldx ZPPtr2+1
 				bmi .80
 				lda ZPPtr2				Var Type
-				jsr CSH.BOPExec
+				jsr CSH.BOP.EXEC
 				bcc .80
 				bcs .99
 				
@@ -716,10 +737,6 @@ CSH.AddContCharP
 *--------------------------------------
 CSH.SavePtr		>LDYA ZPFileBufPtr
 				>STYA.G CSH.BufPtrSave
-				rts
-*--------------------------------------
-CSH.RestorePtr	>LDYA.G CSH.BufPtrSave
-				>STYA ZPFileBufPtr
 				rts
 *--------------------------------------
 CSH.LookupFN	sec
@@ -809,11 +826,13 @@ CSH.GetNumOnStack
 .10				cpx #CSH.T.FLOAT
 				bcc .1
 				bne .99
+
 				>PUSHWI ZPFileBufPtr
 				>LDYA ZPFileBufPtr
 				>SYSCALL StrToF
 				clc
 				rts
+
 .1				>PUSHBI 10
 
 				>PUSHWI ZPFileBufPtr
@@ -900,6 +919,7 @@ CSH.SetVarValueFromStack
 				iny
 				dex
 				bne .1
+
 				>PUSHBI 0				Datalen HI
 				pla
 				inc
@@ -917,9 +937,38 @@ CSH.SetVarValueFromStack
 .2				>SYSCALL SListSetData
 				rts
 *--------------------------------------
+CSH.GetDefine	>PUSHW ZPFileBufPtr
+				>LDA.G CSH.hDefines
+				jsr CSH.Get
+				bcs .9
+				
+				pha
+				>PUSHWZ					From Start
+				>PUSHWZ					len = 0 (string mode)
+				>PUSHWZ					Allocate..
+				pla
+				>PUSHYA					KeyID
+				>LDA.G CSH.hDefines
+
+				>SYSCALL SListGetData
+				bcs .9				
+
+				stx ZPhMacro
+				
+				lda ZPFileBufPtr
+				sta ZPFileBufPtrBak
+				lda ZPFileBufPtr+1
+				sta ZPFileBufPtrBak+1
+				
+				txa
+				>SYSCALL getmemptr
+				>STYA ZPFileBufPtr
+
+.9				rts				
+*--------------------------------------
 CSH.GetVar		>PUSHW ZPFileBufPtr
 				>LDA.G CSH.hSymbols
-				>SYSCALL SListLookup
+CSH.Get			>SYSCALL SListLookup
 				bcs .9
 
 				pha
@@ -1004,118 +1053,6 @@ CSH.IsValue0	cpx #CSH.T.FLOAT
 				tax
 				beq .8
 .9				sec
-				rts
-*--------------------------------------
-* A = Type, X = OP
-*--------------------------------------
-CSH.BOPExec		jmp (J.CSH.BOPS,x)
-*--------------------------------------
-CSH.BOPS.ADD	asl
-				tax
-				jmp (J.CSH.BOPS.ADDt,x)
-
-CSH.BOPS.ADDi8
-CSH.BOPS.ADDu8	clc
-				>PULLA
-				adc (pStack)
-				sta (pStack)
-				clc
-				rts
-
-CSH.BOPS.ADDi16 
-CSH.BOPS.ADDu16 clc
-				ldy #1
-				>PULLA
-				adc (pStack),y
-				sta (pStack),y
-				>PULLA
-				adc (pStack),y
-				sta (pStack),y
-				clc
-				rts
-CSH.BOPS.ADDi32
-CSH.BOPS.ADDu32 >FPU ADD32
-				clc
-				rts
-
-CSH.BOPS.ADDf	>FPU FADD
-				clc
-				rts
-*--------------------------------------
-CSH.BOPS.SUB	asl
-				tax
-				jmp (J.CSH.BOPS.SUBt,x)
-
-CSH.BOPS.SUBi8
-CSH.BOPS.SUBu8	sec
-				ldy #1
-				lda (pStack),y
-				sbc (pStack)
-				sta (pStack),y
-				inc pStack
-				clc
-				rts
-
-CSH.BOPS.SUBi16 
-CSH.BOPS.SUBu16 sec
-				ldy #2
-				lda (pStack),y
-				sbc (pStack)
-				sta (pStack),y
-				iny
-				lda (pStack),y
-				ldy #1
-				sbc (pStack),y
-				inc pStack
-				inc pStack
-				sta (pStack),y
-				clc
-				rts
-CSH.BOPS.SUBi32
-CSH.BOPS.SUBu32 >FPU SUB32
-				clc
-				rts
-
-CSH.BOPS.SUBf	>FPU FSUB
-				clc
-				rts	
-*--------------------------------------
-CSH.BOPS.MUL	cmp #CSH.T.FLOAT
-				beq .8
-				clc
-				rts
-
-.8				>FPU FMULT
-				clc
-				rts
-*--------------------------------------
-CSH.BOPS.DIV	cmp #CSH.T.FLOAT
-				beq .8
-
-				clc
-				rts
-
-.8				>FPU FDIV
-				clc
-				rts
-*--------------------------------------
-CSH.BOPS.MOD
-CSH.BOPS.SHL
-CSH.BOPS.SHR
-CSH.BOPS.L
-CSH.BOPS.G
-CSH.BOPS.LE
-CSH.BOPS.GE
-CSH.BOPS.EQ
-CSH.BOPS.NE
-CSH.BOPS.AND
-CSH.BOPS.OR
-CSH.BOPS.EOR
-CSH.BOPS.LAND
-CSH.BOPS.LOR
-
-
-				clc
 				rts
 *--------------------------------------
 * Stack
@@ -1263,9 +1200,30 @@ CSH.GetNextChar	inc ZPFileBufPtr
 				inc ZPFileBufPtr+1
 *--------------------------------------
 CSH.GetChar		lda (ZPFileBufPtr)
+				bne .8
+
+				lda ZPhMacro
 				beq .9
-				clc
+				
+				stz ZPhMacro
+				
+				phx
+				phy
+				>SYSCALL freemem
+				ply
+				plx
+
+				lda ZPFileBufPtrBak
+				sta ZPFileBufPtr
+				
+				lda ZPFileBufPtrBak+1
+				sta ZPFileBufPtr+1
+
+				bra CSH.GetChar
+
+.8				clc
 				rts
+
 .9				lda #MLI.E.EOF
 				sec
 				rts
