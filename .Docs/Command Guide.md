@@ -1,6 +1,6 @@
 # A2osX Command Guide
 
-### Updated December 15, 2019
+### Updated January 16, 2020
 
 This Guide provides information on all the A2osX commands and utilities.  This Guide helps you not only learn the purpose of each command but also what options a command supports and what arguments it either supports or requires.
 
@@ -263,7 +263,7 @@ the errand process by its PID found in the displayed process list (i.e. KILL 27 
 
 	ls [-a] [-c|-f|-l] [-r] filespec
 
-The LS command is probably the most used and useful of all commands available to the A2osX user.  LS allows you to list the names of the files and directories in the current or specified directory.  If supplied with the all check (**-a**) **ls** will include the special directories **.** and **..**.  The recurse check (**-r**) tells **ls** to list files and directories of any directory listed (recursively).  The display checks (**-c -f and -l**) tell **ls** change the format of the display to a single column of just file/directory names (**-c**), to a single column that includes full paths (**-f**) or a listing with extended file information (**-l**) which includes file ownership, permissions, date/time, etc.. You can pass the **ls** command a *filespec* that includes a directory name and or wild card spec for filtering the listing.  For example the command `LS ../MYDIR/FT*` would only list files that begin with FT and are found in the MYDIR sub directory of the parent of the current directory.
+The LS command is probably the most used and useful of all commands available to the A2osX user.  **ls** allows you to list the names of the files and directories in the current or specified directory.  If supplied with the all check (**-a**) **ls** will include the special directories **.** and **..**.  The recurse check (**-r**) tells **ls** to list files and directories of any directory listed (recursively).  The display checks (**-c -f and -l**) tell **ls** change the format of the display to a single column of just file/directory names (**-c**), to a single column that includes full paths (**-f**) or a listing with extended file information (**-l**) which includes file ownership, permissions, date/time, etc.. You can pass the **ls** command a *filespec* that includes a directory name and or wild card spec for filtering the listing.  For example the command `LS ../MYDIR/FT*` would only list files that begin with FT and are found in the MYDIR sub directory of the parent of the current directory.
 
 ![](../.screen-shots/ScreenShot.LS.png)
 
@@ -471,4 +471,4 @@ The full A2osX license can be found **[Here](../LICENSE)**.
 
 ## Copyright
 
-Copyright 2015 - 2019, Remy Gibert and the A2osX contributors.
+Copyright 2015 - 2020, Remy Gibert and the A2osX contributors.
