@@ -1,7 +1,6 @@
-
 # A2osX Shell Developers Guide
 
-### Updated December 15, 2019
+### Updated January 27, 2020
 
 One of the most significant parts of A2osX is its shell which can perform both interactive and scripted tasks.  Using the interactive part of the shell, you can perform many common and complex tasks using both built-in (native or internal to shell) and external (BIN or executable) commands.  Internal commands include CD (change directory), MD (make directory), PWD, DATE, etc.  External commands include CP (copy), RM (remove), CAT (display file contents), TELNET, etc.  It is even possible to create and execute short scripts right on the interactive command line (these are run once and not saved like true scripts) such as:
 
@@ -13,7 +12,9 @@ This Developers Guide will cover the basic operation of the interactive shell, t
 
 ## About the A2osX Shell (SH)
 
-The default A2osX Shell **./bin/sh** is an external command program like many others included with A2osX.  It is probably the most complex and capable, as suggested by its size compared to other commands (7K vs 1K for **telnet**).  It is the primary tool for interacting with the A2osX system.  The **sh** shell is based loosely on the Linux BASH shell, to the extent possible on an 8-bit machine.  Alternative shells are planned for the future and will be announced as they become available.
+The default A2osX Shell **./bin/sh** is an external command program like many others included with A2osX.  It is probably the most complex and capable, as suggested by its size compared to other commands (7K vs 1K for **telnet**).  It is the primary tool for interacting with the A2osX system.  The **sh** shell is based loosely on
+
+ the Linux BASH shell, to the extent possible on an 8-bit machine.  Alternative shells are planned for the future and will be announced as they become available.
 
 As the primary mechanism for working with A2osX, the shell (**sh**) is launched automatically when you log into A2osX.  In the case where no *./etc/passwd* file is present, A2osX automatically logs you in as the *root* user.  When a user login occurs and **sh** is launched, it looks for a file called *profile* in the users HOME directory and if found, executes that script.  The information below on writing scripts applies to PROFILE script files.
 
@@ -643,11 +644,11 @@ The **SET** command is used to set or clear the value of variables as well as to
 
 The most simplistic form of set is **SET var = value** such as SET myVar = 6, where the shell will create a new variable called MyVar and in this case make it an Interger (32-bit) and set its value to 6.
 
-As seen throughout this guide, scripts are very useful for automating many repetitive tasks.  To get the most out of scripts, you are likely going to want input from the user or gather existing data stored in your file system and then use this to control program flow.  To do this, you are likely going to want to use variables to store and process the data your script relies on.  This section will provide you with the information you need to get the most out of your own, as well as system provided, variables.
+As seen throughout this guide, scripts are very useful for automating many repetitive tasks.  To get the most out of scripts, you are likely going to want input from the user or gather existing data stored in your file system and then use this to control program flow.  To do this, you are likely going to want to use variables to store and process the data your script relies on.  This section will provide
+ you with the information you need to get the most out of your own, as well as system provided, variables.
 
 All variables have names, starting with xxx, can be any length, but longer is not better.  They are case sensitive so AVAR, Avar, aVar, and avar are actually 4 different variables.  There are only two kinds of variables internally, strings and integers.  
  
-
 
 
 Variable overflow strings and ints
@@ -840,6 +841,12 @@ The following example demonstrates the complete validation concept outlined abov
 
 Copy Vars????, Different Context, own vars get lost, own funcs, when called with dot, is using the same env. 
 
+
+
+
+
+
+
 ### Line Separator
 
 	<command> ; <command> ; <command> ; ...
@@ -865,8 +872,9 @@ As far as the shell is concerned, it processes both syntax as a series of indivi
 	#  This is a comment.
 	    #  This is a another comment.
 	#LastComment
+	ECHO Hello ; # Comment after command using semi-colon
 
-You add comments to your scripts by placing a pound sign at the start of the line of your script.  The # must be the first non-space character on the line, for the entire line to be treated as a comment.  As shown in the sample scripts throughout this guide, you can add a comment to a line containing a command (i.e.  ECHO "Hello") by using the semicolon to concatenate multiple lines (i.e. ECHO "Hello" ; # A Comment).
+You add comments to your scripts by placing a pound sign (**#**) at the start of the line of your script.  The **#** must be the first non-space character on the line, for the entire line to be treated as a comment.  As shown in the sample scripts throughout this guide, you can add a comment to a line containing a command (i.e.  ECHO "Hello") by using the semicolon to concatenate multiple lines (i.e. ECHO "Hello" ; # A Comment).
 
 ### Examples
 
@@ -875,7 +883,7 @@ In addition to the scripts in this document, there are many example scripts incl
 ## License
 A2osX is licensed under the GNU General Public License.
 
-    This program is free software; you can redistribute it and/or modify
+    This program is free software; you can redistribute it and/or modify 
     it under the terms of the GNU General Public License as published by
     the Free Software Foundation; either version 2 of the License, or
     (at your option) any later version.
@@ -889,4 +897,4 @@ The full A2osX license can be found **[Here](../LICENSE)**.
 
 ## Copyright
 
-Copyright 2015 - 2019, Remy Gibert and the A2osX contributors.
+Copyright 2015 - 2020, Remy Gibert and the A2osX contributors.

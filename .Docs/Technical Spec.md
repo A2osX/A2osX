@@ -1,6 +1,6 @@
 # A2osX (0.93) Multi-Tasking OS for Apple II
 
-### Updated November 19, 2019
+### Updated January 27, 2020
 
 This is the functional specification for A2osX and its system modules, internal and external commands and shell language.  Please refer to the other A2osX documentation such as the User Guide, Notes for Developers and Shell Programming Guide for more information on the use of these commands and modules.
 
@@ -18,8 +18,8 @@ This is the functional specification for A2osX and its system modules, internal 
 | Name     | Status      | Comment | K.Ver |
 | ----     | ------      | ------- | ------|
 | GETTY    | Working     | -E : Exit on remote close | 0.93 |
-| HTTPD    | In Progress | Web Page Server Daemon | 0.94 |
-| INITD    | In Progress | Run Level Manger     | 0.94 |
+| HTTPD    | Future      | Web Page Server Daemon | 0.94 |
+| INITD    | Future      | Run Level Manger     | 0.94 |
 | INSDRV   | Working     | Loads HW Drivers        | 0.93 |
 | KCONFIG  | Working     | Kernel Configuration Utility | 0.93 |
 | LOGIN    | Working     | Authorization using /etc/passwd       | 0.93 |
@@ -44,7 +44,7 @@ This is the functional specification for A2osX and its system modules, internal 
 | Name | Status | Comment | K.Ver |
 | ---- | ------ | ------- | ----- |
 | ARP | Working | dump ARP cache, setup a static ARP entry | 0.93 | 
-| ASM | In Progress | S-C MASM based multi CPU assembler | 0.94 |
+| ASM | In Progress | S-C MASM based multi-CPU assembler | 0.94 |
 | CAT | Working | -A : Show All non printable caracters <br> -N : Number all output lines <br> -S : Suppress repeated empty output lines | 0.93 |
 | CHGRP | Future | -C : Continue On Error <br> -R : Recurse subdirectories |  |
 | CHMOD | Future | -C : Continue On Error <br> -R : Recurse subdirectories |  |
@@ -61,7 +61,7 @@ This is the functional specification for A2osX and its system modules, internal 
 | IPCONFIG | Working | -D : Try to get IP address from DHCP <br> -E : Read ETC files <br> -S : Set/Reset TCPIP configuration (-E, then -D if required) | 0.93 |
 | KILL | Working | KILL \<signal\> PID <br> -0 : No Signal <br> -1 : SIGQUIT <br> -2 : SIGKILL  | 0.93 |
 | LS | Working | -A : Print . & .. <br> -C : Single column listing <br> -F : Single column, includes full path <br> -L : long listing with size/date... <br> -R : Recurse subdirectories | 0.93 |
-| LSDEV | Working | Dump device Drivers | 0.93 | 
+| LSDEV | Working | List device Drivers | 0.93 | 
 | LSOF | Working | List Open Files |  0.93 |
 | MD5 | Working | MD5 \[ -D : String \| file \] | 0.93 | 
 | MEM | Working | Displays Main, Aux & Kernel Memory |  0.93 |
@@ -89,7 +89,7 @@ This is the functional specification for A2osX and its system modules, internal 
 
 | Name      | Status  | Comment |
 | ----      | ------  | ------- |
-| \<condition\> | Working |[ -D direxists ] <br> [ -E fileordirexists ] <br> [ -F fileexists ]<br> [ -I isaninteger ] <br> [ -N $VAR variable is not empty ] <br> [ -Z $VAR variable is empty ] <br> [ string1 = string2 ] <br> [ string1 != string2 ] <br> [ string1 .< string2 ] <br> [ string1 <= string2 ] <br> [ string1 .> string2 ] <br> [ string1 >= string2 ] <br> [ int32 -eq int32 ] <br> [ int32 -ne int32 ] <br> [ int32 -lt int32 ] <br> [ int32 -le int32 ] <br> [ int32 -gt int32 ] <br> [ int32 -ge int32 ] |
+| \<condition\> | Working |[ -D direxists ] <br> [ -E fileordirexists ] <br> [ -F fileexists ]<br> [ -I isaninteger ] <br> [ -N $VAR variable is not empty ] <br> [ -X functionexists ]<br> [ -Z $VAR variable is empty ] <br> [ string1 = string2 ] <br> [ string1 != string2 ] <br> [ string1 .< string2 ] <br> [ string1 <= string2 ] <br> [ string1 .> string2 ] <br> [ string1 >= string2 ] <br> [ int32 -eq int32 ] <br> [ int32 -ne int32 ] <br> [ int32 -lt int32 ] <br> [ int32 -le int32 ] <br> [ int32 -gt int32 ] <br> [ int32 -ge int32 ] |
 | \<expression\> | Working | \<value\> [\<op\> \<value\>] ... |
 | \<op\> | Working  | \+ : signed int32 add <br> \- : signed int32 subtract <br>  \* : signed int32 multiply<br> / : signed int32 divide <br> mod : signed int32 modulo |
 | \<value\> | Working | $VAR \| string \| "string with SPACE" \| 123 \| -456 |
@@ -160,9 +160,9 @@ note : '$VAR' does NOT expand Variable
 | 2>     | Working |  |
 
 ## License
-A2osX is licensed under the GNU General Pulic License.
+A2osX is licensed under the GNU General Public License.
 
-    This program is free software; you can redistribute it and/or modify
+    This program is free software; you can redistribute it and/or modify 
     it under the terms of the GNU General Public License as published by
     the Free Software Foundation; either version 2 of the License, or
     (at your option) any later version.
@@ -176,4 +176,4 @@ The full A2osX license can be found **[Here](../LICENSE)**.
 
 ## Copyright
 
-Copyright 2015 - 2019, Remy Gibert and the A2osX contributors.
+Copyright 2015 - 2020, Remy Gibert and the A2osX contributors.

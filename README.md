@@ -1,6 +1,6 @@
 # A2osX (0.93) Multi-Tasking OS for Apple II  
 
-### Updated December 5, 2019
+### Updated January 27, 2020
 
 ## A2osX Release Candidate now available
 
@@ -20,29 +20,27 @@ The foundation of A2osX enabling its multi-user multitasking capabilities is a r
 
 A2osX is designed to work on any 128k Enhanced Apple //e or newer computer.  Specifically, A2osX relies on the enhanced instruction set found in the 65C02 processor (this includes the 65C816 found in the //GS).  A2osX will not run on an Apple ][ or ][+, a non enhanced //e or on systems without at least 128K of memory.  A2osX does not require any special hardware cards, but does support and its operation can be enhanced with the presence of a mass storage devices (any ProDOS block device), a network card, Super Serial Card and/or a Time Card.
 
-Consult the **[documentation](#documentation)** section below to find other resources available to you for learning how to install, use, develop and test A2osX.  The Hardware section of the User Guide contains more information on supported hardware.
+Consult the **[documentation](#documentation)** section below to find other resources available to you for learning how to install, use, develop and test A2osX.  The Hardware section of the User Guide contains more information on tested and supported hardware.
 
 ## News...
 
-**2019-12-05** - Media have been updated based on Build 1784.
+**2020-01-27** - **Major update to A2osX 0.93**
 
-**2019-10-31** - Media have been updated based on Build 1694.  This version fixes issues with Piping of commands, adds new READ functionality.  Please note, KM.NSC is no longer loaded by default on any media.  If you have a No Slot Clock in your system, you should move the file KM.NSC from ./SYS/KM into ./SYS which will make it load on boot.
+The A2osX team is proud to announce the availability of two new versions of ProDOS, one with a very minor tweak and the other a major update/overhaul.  There is ProDOS 2.03tc which is an 8 byte patch to ProDOS 2.03 to update the year table to support years through 2023 and ProDOS FX, a **F**aster and e**X**tended version, that adds many new features including lower case file, directory and volume name support.   These new versions are already being included in the latest **Stable** media and will become the versions of ProDOS supplied on all future media.  The team added a new Document to our repository that covers these and other publically available versions of ProDOS and their use with A2osX.
 
-**2019-10-26** - Starting with Build 1675, the SH(ell) command **TIME** has been removed and the **DATE** command will now return both the Date and Time.  Additionally, if DATE command has been updated to support options for returning formatted strings with just the portions of the date and time you desire.  Consult the Shell Developers Guide for syntax.
+A2osX now act actually has for quite some time supports lower case in file, directory and volume names as long as this capability is available in the version of ProDOS you are running.  Consult the new **[A2osX and ProDOS](.Docs/ProDOS.md)** document for more information and a table on which versions of ProDOS provide this capability to A2osX.
 
-**2019-10-24** - Created STABLE images with Build 1669 with improvements to TCP networking.  There is also a new DEBUG 140k disk image.  See the media guide for more info.
+The *EDIT* utility has undergone a major update.  We need your testing and feedback.  Please make sure to open issues on any anomalies you discover.
 
-**2019-10-22** - Updated RC images to Build 1664 which fixed RESTART SYSTEM bug on //GS.
+Kernel/Shell rewrite to move more things to AUX freeing main mem.  with 2 tty used to be 22K free.  Now. 26.5K  with 1TTY 28.4K.  of course with 8 TTY  17.5K
 
-**2019-10-19** - Updated RC images to Build 1653 which fixed bugs in CUT and includes a patched version of ProDOS 2.03 to correct year display for ThunderClocks.
+Speaking of changing the number of virtual TTYs, A2osX has been enhanced to now support up to 8 virtual terminals on the console, configurable with the KCONFIG utility.  Consult the User Guide for more information.  Note that with 8 virutal TTYs defines, available main memory drops to 17.5K.  Open Apple 1 through 8 is used to be switched between the virtual terminals, Open Apple-0 is still used to access the A2osX Console (displays system errors and information) and Open Apple-9 is reserved for future use of DHGR (Double High-res Graphics).
 
-**2019-10-18** - Updated A2osX Release Candidate based on Build No 1650 is now available and can be found in our **[Media directory](.Floppies)**.  In addition, a new disk image **TDBOOT** has been created that is preconfigured to automatically load Uthernet2 driver, start network services and launch the TelnetD server process (hence name TD for TelnetD Boot).
+A new bell option (**Echo \a**) has been added to the *echo* command in the shell (*/bin/sh*) to ring a bell on VT-100 connected terminals (via the SSC driver or the TELNETD deamon).  The bell has no affect on the console.
 
-**2019-10-15** - The first A2osX Release Candidate is now available and can be found in our **[Media directory](.Floppies)**.  
+Multiple bugs have been address from issues posted on GitHub including updates to *cut*, *format*, *sh* (for internal command), *nscutil*, *ping*, *wc*, and many more.  Users can check the status of issues or create new ones for A2osX on **[Github](https://github.com/burniouf/A2osX/issues)**.
 
-2019-04-19 - Major updates have occurred to the kernel and many of the A2osX API's to support a greatly enhanced shell that boasts significant new scripting capabilities since 0.92.  Also added is the the ability to redirect input and output, including errors, and the ability to pipe (|) the output of one command or operation to another (i.e. **ls \* | more** ).  A2osX now provides for multiple virtual terminals as well as users/terminals via TCP (through TELNETD) and serial devices (through a SSC driver).
-
-As great as the changes to A2osX itself, we are also please to report that great strides have been made in terms of documentation.  While much of it is in draft form, there is a new **[Users Guide](.Docs/User%20Guide.md)**, **[Developers Guide](.Docs/Developers%20Guide.md)**, **[Shell Developers Guide](.Docs/Shell%20Developers%20Guide.md)**, **[Technical Spec](.Docs/Technical%20Spec.md)** and **[Command Guide](.Docs/Command%20Guide.md)**.  See the **[Documentation](#documentation)** Section below for more details.
+A great new networking utility, *wget* is now available which can be used to access/post to web servers.  This utility can be used in combination with services like IFTTT to send tweets from A2osX, or send message to apps like Slack.
 
 If you would like to read all the past news articles for A2osX, you can read the news article found **[here](.Docs/News.md)**.
 
@@ -56,11 +54,7 @@ You can use and/or install A2osX from the media in our Media directory found **[
 
 ## Documentation...
 
-A lot of work has been done to expand and enhance the documentation for A2osX.  Some of this documentation is still in the rough draft stage, provided to you to bring you as much information about A2osX as quickly as possible.  We happily welcome any help and contributions from others to this or any area of the A2osX project.
-
-The repository all A2osX documentation can be found **[here](.Docs)**.  This directory includes the system generated specifications for all the A2osX APIs as well as all our other documentation. 
-
-Of special note please check out our brand new **[Users Guide](.Docs/User%20Guide.md)** and **[Developers Guide](.Docs/Developers%20Guide.md)**. 
+The A2osX team is pleased to report that great strides have been made in terms of documentation.  While much of it is in draft form, there is a new **[Users Guide](.Docs/User%20Guide.md)**, **[Developers Guide](.Docs/Developers%20Guide.md)**, **[Shell Developers Guide](.Docs/Shell%20Developers%20Guide.md)**, **[Technical Spec](.Docs/Technical%20Spec.md)** and **[Command Guide](.Docs/Command%20Guide.md)**.   Work continues to expand and enhance the documentation for A2osX.  While still under construction, it is provided to you to bring you as much information about A2osX as quickly as possible.  We happily welcome any help and contributions from others to this or any area of the A2osX project.  The repository all A2osX documentation can be found **[here](.Docs)**.  This directory includes the system generated specifications for all the A2osX APIs as well as all our other documentation. 
 
 ### Technical Documentation...
 
@@ -89,4 +83,4 @@ The full A2osX license can be found **[Here](../LICENSE)**.
 
 ## Copyright
 
-Copyright 2015 - 2019, Remy Gibert and the A2osX contributors.
+Copyright 2015 - 2020, Remy Gibert and the A2osX contributors.

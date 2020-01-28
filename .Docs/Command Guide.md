@@ -1,6 +1,6 @@
 # A2osX Command Guide
 
-### Updated January 16, 2020
+### Updated January 27, 2020
 
 This Guide provides information on all the A2osX commands and utilities.  This Guide helps you not only learn the purpose of each command but also what options a command supports and what arguments it either supports or requires.
 

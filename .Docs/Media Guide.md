@@ -1,6 +1,6 @@
 # A2osX Media Guide
 
-### Updated January 26, 2020
+### Updated January 27, 2020
 
 We have changed the media set for A2osX.  New A2osX Users should download the most current version as shown in the table below.  **A new Release Candidate (RC) edition has been made available (highlighted below), you should choose one of the media options from this set.**  The Bleed media are the primary images used by the developers to hold the most current version of the A2osX binaries (and a copy of the source, although of course GitHub is the primary source repository) and may be unstable.  You should not use this media unless directed by the A2osX development team.
 

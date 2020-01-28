@@ -1,6 +1,34 @@
 # A2osX (0.92) Multi-Tasking OS for Apple II  
 
-### Updated October 20, 2019
+### Updated January 27, 2020
+
+## Latest News 2019-12-05
+
+Media have been updated based on Build 1784.
+
+## Latest News 2019-10-31
+
+Media have been updated based on Build 1694.  This version fixes issues with Piping of commands, adds new READ functionality.  Please note, KM.NSC is no longer loaded by default on any media.  If you have a No Slot Clock in your system, you should move the file KM.NSC from ./SYS/KM into ./SYS which will make it load on boot.
+
+## Latest News 2019-10-26
+
+Starting with Build 1675, the SH(ell) command **TIME** has been removed and the **DATE** command will now return both the Date and Time.  Additionally, if DATE command has been updated to support options for returning formatted strings with just the portions of the date and time you desire.  Consult the Shell Developers Guide for syntax.
+
+## Latest News 2019-10-24
+
+Created STABLE images with Build 1669 with improvements to TCP networking.  There is also a new DEBUG 140k disk image.  See the media guide for more info.
+
+## Latest News 2019-10-22
+
+Updated RC images to Build 1664 which fixed RESTART SYSTEM bug on //GS.
+
+## Latest News 2019-10-19
+
+Updated RC images to Build 1653 which fixed bugs in CUT and includes a patched version of ProDOS 2.03 to correct year display for ThunderClocks.
+
+## Latest News 2019-10-18
+
+Updated A2osX Release Candidate based on Build No 1650 is now available and can be found in our **[Media directory](.Floppies)**.  In addition, a new disk image **TDBOOT** has been created that is preconfigured to automatically load Uthernet2 driver, start network services and launch the TelnetD server process (hence name TD for TelnetD Boot).
 
 ## Latest News 2019-10-15
 
@@ -209,4 +237,4 @@ The full A2osX license can be found **[Here](../LICENSE)**.
 
 ## Copyright
 
-Copyright 2015 - 2019, Remy Gibert and the A2osX contributors.
+Copyright 2015 - 2020, Remy Gibert and the A2osX contributors.

@@ -1,6 +1,6 @@
 # A2osX Developers Guide
 
-### Updated October 22, 2019
+### Updated January 27, 2020
 
 This Guide provides information on the development process and tools used to build A2osX.  The core of A2osx is currently, and likely always will be, developed in 65C02 Assembly Language.  Assembly is used for the speed, compactness and efficient memory management necessary for the central core, or kernel, of A2osX.  Currently all of the programs distributed with A2osX are also written in Assembly, however, a it is expected that a C compiler or preprocessor that creates Assembly will be made available in the future.
 
@@ -104,4 +104,4 @@ The full A2osX license can be found **[Here](../LICENSE)**.
 
 ## Copyright
 
-Copyright 2015 - 2019, Remy Gibert and the A2osX contributors.
+Copyright 2015 - 2020 Remy Gibert and the A2osX contributors.

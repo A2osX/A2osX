@@ -1,6 +1,6 @@
 # A2osX User Guide
 
-### Updated December 17, 2019
+### Updated January 27, 2020
 
 This Guide provides information on getting started with A2osX.  This Guide helps you understand the basic features, capabilities and operation of A2osX.  This should be the first document you read before, or soon after, installing or running A2osX.
 
@@ -94,13 +94,15 @@ First, let's walk through the most standard and likely boot process of A2osX usi
 - This shell process executes the script *PROFILE* found in the users home directory.
 
 Some notes on the above:
-- A2osX has been tested on ProDOS versions 2.0.3 and 2.4.2.  We welcome testing and feedback on using A2osX with other versions.
+- A2osX has been tested on ProDOS versions 2.0.3 and 2.4.2 as well as with the special versions of ProDOS contained on the distribution media (these are discussed elsewhere).  We welcome testing and feedback on using A2osX with other versions.
 - The *NS.CLOCK.SYSTEM* is not needed by A2osX because there is a Kernel Module that accomplishes the same thing, please see the section on KMs.  A user may want the *NS.CLOCK.SYSTEM* file if they are running other applications (i.e. AppleWorks) from the same volume so that the NSC patch gets enabled for their apps use of the clock.
 - There are enhancements planned for the QUIT CODE routine.  In the future, we hope to allow you to execute another SYSTEM file from the Shell in A2osX whereby QC routine will unload A2osX, load your other SYSTEM program (again i.e. AppleWorks) and then when you quit that application, the QC routine will reload A2osX.
 - When *A2OSX.SYSTEM* starts, it initializes the system in stages as described above (load KMs, load Kernel, execute INIT, etc.).  If during this process you hold down the Open-Apple key, A2osX will stop at the end of each stage until you press another key.  You can use this to debug start up problems/hardware conflicts.
 - When the KERNEL first starts, if the user presses Control-R a special maintenance mode is enabled.  This is discussed in detail below.
 - The *./etc/init* file can be used to automatically start the *ssc.drv* and **getty** process for an external terminal.  It can also be used to load network drivers and processes at boot.
 - The ./${HOME}/profile file can be used to change a users default $PATH, run a Shell Script or load a particular program when a user logs in.
+
+>**Need new section here on DEBUG.po and how to use it to solve hardware conflict issues**
 
 If you decide to install/copy A2osX to your own existing Hard Drive or volume, you just need to be sure to keep the A2osX file system structure in tact.  To start A2osX "manually" as it were, you change your PREFIX to the appropriate sub-directory and then load *A2OSX.SYSTEM*.  So for example, if you had a CFFA card that booted to a volume called /HD1, you could make a subdirectory on this disk called A2OSX.  You would then set your PREFIX to */HD1/A2OSX* and launch *A2OSX.SYSTEM* and the rest of the boot process outlined above would be followed.  Please see the section on Installation for more information on putting A2OSX on your own media.
 
@@ -119,7 +121,7 @@ The *km.nsc* module gives you the same functionality as the *NS.CLOCK.SYSTEM* ro
 
 The *km.ramworks* is used only on systems with greater then 128K of memory provided by a RamWorks compatible 80-col card in an Apple //e.  It turns any additional memory into a ram disk */RAM3*.  You should **NOT** load the *km.ramworks* module on Apple //GS systems.
 
-The *km.vsdrive* module helps you connect to an ADTPRO server via a Super Serial Card (SSC).  This module will use the first Super Serial Card in your system set with Interrupts off.  It is also best if you set this SSC at a baud rate of 115200.  If you have more then one SSC system and you are using the others for terminals you should fully understand how to configure the cards, Kernel Modules, and the SSC drivers for optimal performance.
+The *km.vsdrive* module helps you connect to an *ADTPRO* server via a Super Serial Card (SSC).  This module will use the first Super Serial Card in your system set with Interrupts off.  It is also best if you set this SSC at a baud rate of 115200.  If you have more then one SSC system and you are using the others for terminals you should fully understand how to configure the cards, Kernel Modules, and the SSC drivers for optimal performance.  If you are using this module on an emulator, see the section below on *AppleWin* for important information about using *ADTPro*.
 
 The *km.appletalk* module helps ProDOS talk to APPLETALK, though at the moment A2osX cannot use this facility until we complete the ATLOGIN/Mount programs.  On most of our media you will find this KM stored in a subdirectory of ./SYS which means it is not loaded at start up.  As this module is in development, in may not be included on the media you download.
 
@@ -174,7 +176,7 @@ A2osX supports as many physical terminals as you have SSC cards and memory to lo
 
 A2osX supports multiple internet connected terminals via a **telnetd** server process.  The **telnetd** process supports VT-100 terminals, so you should set your Telnet client (i.e. PuTTY) to use VT-100 emulation.  Of course you can use another Apple running A2osX and the **telnet** client to connect to an Apple running A2osX and the **telnetd** server.
 
->Note, if you are using Telnet Client Software such as PuTTY for Windows and see random garbled characters (odd graphics symbols), you may need to change your **Remote Character Set** to something other than **UTF-8**, such as **ISO-8859-1:1998 (Latin-1, West Europe)**.
+>Note, if you are using Telnet Client Software such as *PuTTY* for Windows and see random garbled characters (odd graphics symbols), you may need to change your **Remote Character Set** to something other than **UTF-8**, such as **ISO-8859-1:1998 (Latin-1, West Europe)**.
 
 One of the images available in the .Floppies folder is *TDBOOT.po* which is a preconfigured A2osX system that loads the Uthernet 2 Driver, TCP and **tetlnetd** at boot.  If you want to use this image on *AppleWin*, edit the *./etc/init* file to comment out the *uthernet2.drv* driver and remove the comment from the *uthernet.drv* line and reboot.  See the section on running A2osX under *AppleWin* for more information.
 
@@ -227,24 +229,27 @@ While A2osX supports many Apple II hardware devices, it is possible a conflict w
 | FastChip //e | Working | Must disable RAMFACTOR |
 | Apple 1mb Slinky Ram Card | Working | Possible conflict with Transwarp |
 
->**Need new section here on DEBUG.po and how to use it to solve hardware conflict issues**
-
 ## Getting Started
 
 To get started with A2osX, the very first thing you need to do is download a disk image from GitHub.  Images are available in multiple versions from cutting edge developer seeds to release candidates as well as in multiple sizes suitable for placing on Disk II drives, 3.5 drives or hard drives of for use with emulators.  Please consult the **[A2osX Media Guide](.Docs/Media%20Guide.md).** for detailed information on the available images. 
 
 ### Using AppleWin
 
-Download one of the available 32MB images from GitHub.  Open AppleWin and then click on the  configuration icon.  When the configuration screen appears, select the Disk tab.  Next, make sure the **Enable Hard disk controller in slot 7** box is checked and set the **HDD 1** to the image you downloaded.  Click OK to save your changes and finally boot the emulated Apple by clicking on the colored Apple icon.  Suggestion: on the configuration screen, for Video Mode, select Color (RGB Monitor).  You may also want to setup AppleWin for Ethernet as A2osX has many features that make use of the emulated Uthernet I card supplied by AppleWin (consult AppleWin documentation for more information on enabling this feature). 
+Download one of the available 32MB images from GitHub.  Open *AppleWin* and then click on the  configuration icon.  When the configuration screen appears, select the Disk tab.  Next, make sure the **Enable Hard disk controller in slot 7** box is checked and set the **HDD 1** to the image you downloaded.  Click OK to save your changes and finally boot the emulated Apple by clicking on the colored Apple icon.  Suggestion: on the configuration screen, for Video Mode, select Color (RGB Monitor).  You may also want to setup *AppleWin* for Ethernet as A2osX has many features that make use of the emulated Uthernet I card supplied by AppleWin (consult *AppleWin* documentation for more information on enabling this feature). 
 
-Note on speed of networking
+>A note on enabling networking for A2osX while running in emulator such as *AppleWin*.  A2osX, fully supports the emulated UtherNet I network interface in *AppleWin*.  A2osX, does however, base its timing, or rather its time-out window, based on a calculated timing loop.  This works fine on real Apple computers, including ones with accelerators.  Unfortunately, while *AppleWin* can be accelerated, it actually artificially forces the system to report a 1mhz clock rate regardless of the accelerator level selected.  In real terms, what this does, is cause the network to miss or falsely timeout on some packets.  For most applications, this is not an issue as TCP will automatically re-transmit the packet over again.  Where this is a **REAL** problem is with DHCP that does not use TCP and you will seemingly never get a DHCP lease.  Simply set *AppleWin* to 2.0 speed and everything will work fine.  In fact, if you have A2osX set to load the network automatically when you boot, boot at 2.0 speed, and then once IP address has been set, you can up the acceleration speed to max if desired.
+
+As noted above in the section on Kernel Modules, A2osX comes with a special module to connect to ADTPro disk image servers, which is typically done on a real Apple with a Super Serial Card.  On *AppleWin* this is possible using its built in Virtual Serial over IP implementation which means serial traffic in and out of the virtual Apple II actually flows over a socket, but the Apple still understands it and treats it as if it is serial. The ADTPro server can take advantage of this and communicate to the emulator this way. Starting the ADTPro server with the command line parameter 'localhost' triggers this behavior.  Consult the ADTPro documentation for more information.
+
+The Virtual Serial Over IP emulation uses port 1977.  If you are not using *km.vsdrive* to talk to ADTPro, you can set up this serial port to be used as another terminal device for your A2osX system.  Then a 2nd user can log into the same A2osX system by using a telnet client such as *PuTTY* to your pc but with port 1977 instead of 23 (the default for telnet).
+
+>Note, the GSport/KEGS emulators offer a similar feature using port 6502.
 
 ### Installing on Your Apple
 
 First check that your system meets the minimum hardware requirements.  Download one of the available images from GitHub.  Images are available in 140K (5 1/4 floppy), 800K (3.5 floppy) and 32MB (suitable for use with hard drive emulators).  You will need to use ADTPro to convert an image to physical media or a device such as a FloppyEMU or CFFA to load/boot one of these images on a real Apple.  If you are using a device such as the FloppyEMU or CFFA, you should use either the 800K or 32MB images (ProDOS volume name: FULLBOOT) as the smaller 140K image (ProDOS volume: MINIBOOT) is a pared down copy of A2osX that omits several utilities to fit in 140K.
 
 >If you have your own hard drive, you can install A2osX on your drive.  The best way to accomplish this is to first start A2osX from one of the supplied media and use its built in commands to copy A2osX to your own drive.  For instance, if you have a bootable ProDOS-8 volume on your system named **/MYHD** and one of the A2osX images named **/FULLBOOT** follow these steps:
->
 
 - Boot your system.
 - If the A2osX media is set as the boot device, A2osX will load automatically.
@@ -254,17 +259,17 @@ First check that your system meets the minimum hardware requirements.  Download 
 
 You can then enter these commands to put A2osx on your Volume **/MYHD**  (replace MYHD in this example with your actual volume name).
 
-    /FULLBOOT/ROOT/$ MD /MYHD/A2OSX
-	/FULLBOOT/ROOT/$ CD ..
-	/FULLBOOT/$ CP -R * /MYHD/A2OSX
-	/FULLBOOT/$ ECHO "PREFIX /MYHD/A2OSX" > /MYHD/AOSX
-	/FULLBOOT/$ ECHO "-A2OSX.SYSTEM" >> /MYHD/AOSX
+    /FULLBOOT/ROOT/$ md /MYHD/A2OSX
+	/FULLBOOT/ROOT/$ cd ..
+	/FULLBOOT/$ cp -r * /MYHD/A2OSX
+	/FULLBOOT/$ echo "PREFIX /MYHD/A2OSX" > /MYHD/AOSX
+	/FULLBOOT/$ echo "-A2OSX.SYSTEM" >> /MYHD/AOSX
 
 All of the commands above are documented in the A2osX Command Guide or the Shell Developers Guide, but briefly:
 - **md** creates a sub-directory on your volume named A2OSX
-- **cd** .. moves up one directory level.  The ROOT subdirectory is the home directory for the root user.  We move up to the FULLBOOT volumes main directory so that the **cp** (copy) command issued next will copy all the files on this volume. 
+- **cd ..** moves up one directory level.  The ROOT subdirectory is the home directory for the root user.  We move up to the FULLBOOT volumes main directory so that the **cp** (copy) command issued next will copy all the files on this volume. 
 - **cp** copies files and in this case recursively (**-r** option) selecting all files (* wildcard) and puts them in the destination we created early /MYHD/A2OSX
-- The next two lines create a bat file, or in ProDOS/BASIC terms an EXEC file that will first change the PREFIX to our new A2OSX sub directory and then launch A2osX.  Note the first line use > which will create a file and the 2nd uses >> which appends to a file.  Also note that we named the file AOSX and not A2OSX as the latter's name is already used by the sub-directory we created. 
+- The next two lines create a bat file, or in ProDOS/BASIC terms an EXEC file that will first change the PREFIX to our new A2OSX sub directory and then launch A2osX.  Note the first line uses > which creates (or completely overwrites) a file and the 2nd uses >> which appends to a file (or creates it if it does not already exist).  Also note that we named the file AOSX and not A2OSX as the latter's name is already used by the sub-directory we created. 
 
 ### Configuring A2osX
 
@@ -459,4 +464,4 @@ The full A2osX license can be found **[Here](../LICENSE)**.
 
 ## Copyright
 
-Copyright 2015 - 2019, Remy Gibert and the A2osX contributors.
+Copyright 2015 - 2020, Remy Gibert and the A2osX contributors.

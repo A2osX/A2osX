@@ -1,6 +1,6 @@
 # A2osX and ProDOS
 
-### Updated January 16, 2020
+### Updated January 27, 2020
 
 As discussed in the **[Users Guide](.Docs/User%20Guide.md)**, A2osX runs on top of ProDOS, leveraging its support for block devices such as floppy drives, hard drives, SmartPort drives, etc.; it is limited in its ability to implement certain features based on the capabilities of the underlying operating system, in this case ProDOS.  This document will provide an overview of those features and their availability or absence from several versions of ProDOS including two new versions of ProDOS created by the makers of A2osX.
 
