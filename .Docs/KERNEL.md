@@ -133,19 +133,6 @@ Create a hDEV
  Y,A = PTR to Expanded String   
  X = hMem to Expanded String (C-String)  
 
-# PutEnv  
-Change or add an environment variable, string is 'NAME=VALUE'  
-
-## C  
-`int putenv(char *string);`  
-
-## ASM  
-**In:**  
-`>PUSHW string`  
-`>SYSCALL putenv`  
-
-## RETURN VALUE  
-
 # SetEnv  
 Change or add an environment variable  
 
@@ -176,6 +163,19 @@ and returns a pointer to the corresponding value string.
 ## RETURN VALUE  
  CC : Y,A = PTR to VALUE (C-String)  
  CS : not found  
+
+# PutEnv  
+Change or add an environment variable, string is 'NAME=VALUE'  
+
+## C  
+`int putenv(char *string);`  
+
+## ASM  
+**In:**  
+`>PUSHW string`  
+`>SYSCALL putenv`  
+
+## RETURN VALUE  
 
 # UnsetEnv  
 Remove an environment variable  
@@ -357,15 +357,19 @@ Add Data to MD5 computation
 
 ## RETURN VALUE  
 
-# GetMem0  
- Y,A = Size Requested  
+# Realloc  
+
+## C  
+`void *realloc(short int hMem, int size);`  
+
+## ASM  
+`>PUSHB hMem`  
+`>PUSHW size`  
+`>SYSCALL realloc`  
 
 ## RETURN VALUE  
- CC : success  
-  YA = PTR to Mem (ZERO Initialised)  
-*	X = hMem  
- CS :  
-  A = EC  
+ YA = ptr  
+ X = hMem  
 
 # GetMem  
  Y,A = Size Requested  
@@ -1292,24 +1296,41 @@ CS : no match
  CC, Y,A=0  
  CS, Y,A > 0 or < 0  
 
-# NewStrV  
-**In:**  
- A = Initial Size (Page)  
+# StrVShift  
+
+## ASM  
+`>PUSHB hSTRV`  
+`>PUSHB index`  
+`>SYSCALL StrVShift`  
 
 ## RETURN VALUE  
- X = hStrV  
- Y,A = Ptr  
 
 # StrVGet  
-**In:**  
- A = hStrV  
- X = index  
+
+## ASM  
+`>PUSHB hSTRV`  
+`>PUSHB index`  
+`>PUSHW ptr`  
+`>SYSCALL StrVGet`  
 
 ## RETURN VALUE  
- Y,A = Ptr  
+ CC: Y,A = Ptr  
+ CS: Y,A = NULL  
+
+# StrVAdd  
+
+## ASM  
+`>PUSHB hSTRV`  
+`>PUSHW str`  
+`>SYSCALL StrVAdd`  
+
+## RETURN VALUE  
+CC : str added to hSTRV  
+CS : hSTRV full  
 
 # StrVDup  
-**In:**  
+
+## ASM  
  Y,A = Src StrV  
 
 ## RETURN VALUE  
@@ -1317,7 +1338,7 @@ CS : no match
  A = Str Count  
 
 # Str2StrV  
-Expand String and convert to ArgV List  
+Expand String and convert to StrV List  
 
 ## C  
 short int str2strv(char* args, char* argv[])  
