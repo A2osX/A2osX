@@ -279,6 +279,12 @@ There are several ways you can configure A2osX to suit your needs.  Some of thes
 
 ### Networking
 
+In A2osX, using a command like *telnet* involves loading a driver for your hardware, loading a library for network functions, performing networking initialization (get IP address) and running your network centric application (in this case telnet).  One of the clear advantages to A2osX is its reusable or reentrant nature which allows multiple applications to use  the network library at the same time.
+
+>A note on memory management:  While the architecture of A2osX saves considerably on memory usage through shared libaries, the network stack still consumes approximately 10K.  There may be times when you no longer need the network but do need more free memory to execute an application or script.  In these cases, it is possible to unload portions of the network stack (specifically the library) but not others (the driver).  If you have no network applications running (this is important!) like *telnetd*, *httpd*, *ping*, *telnet*, etc. and you use *kill* on the **PID** of the *networkd* process this will unload the network library returning about 8K to the memory pool.
+
+>A more technical note: When you start networking, you load a driver and then you execute *networkd* passing it the names of the network libraries you want loaded (typically *libtcpip*).  After loading the library, *networkd* reads *etc/tcpip.conf* to configure TCP/IP and if not present requests settings via DHCP.  If for some reason the DHCP lease did not work you can use the command *ipconfig* to repeat the network config stage.  As stated above you can unload networking, this note explains what actually occurs under the covers (the internals).  When *networkd* starts and loads *libtcpip* a lock is placed on *libtcpip* to indicate a process is using it (in this case *networkd*).  Then when you load other network programs such as *telnetd*, the telnet server daemon, another lock is placed on *libtcpip*.  If you then run *ping* or *telnet* another lock is added, but then when they finish and exit, that lock is removed.  When all locks have been removed the library automatically unloads (this is how you recover the memory the library uses).  It is VERY important that you stop all the applications using *libtcpip* before stopping *networkd*.  This is because if you stop *networkd* first, then *telnetd* will be left in an unknown state (it is waiting on pulses from *networkd* which you just stopped) **and** it is holding a lock *libtcpip* so it never gets unloaded. 
+
 install the drivers for the hardware (uther, lances, ssc, etc.)
 then NETWORKD lib lib  (and the libs are tcpip or etalk maybe) libs are protocalls here
   in the LIB directory now are LIBTCPIP and LIBETALK
@@ -308,6 +314,7 @@ HTTPGET
 dhcpclnt
 Telnetd
 httpd
+
 
 ### Utilities
 

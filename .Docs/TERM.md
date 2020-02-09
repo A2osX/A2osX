@@ -47,6 +47,7 @@ A2osX terminal capabilities are based off of the standard VT100 Terminal.  This 
 |Esc[5m 	|Turn blinking mode on| 	SGR5  
 |Esc[7m 	|Turn reverse video on| 	SGR7  |OK|
 |Esc[8m 	|Turn invisible text mode on| 	SGR8  ||
+|Esc[FG;BGm| Set Text Color to FG and BG |OK|
 |Esc[Line;Liner 	|Set top and bottom lines of a window| 	DECSTBM |OK| 
 |Esc[ValueA 	|Move cursor up n lines| 	CUU  ||
 |Esc[ValueB 	|Move cursor down n lines| 	CUD  ||

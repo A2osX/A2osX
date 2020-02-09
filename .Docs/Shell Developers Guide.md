@@ -334,7 +334,7 @@ Consult the subsection below on Advanced Display Techniques for more examples of
 
 A2osX provides advanced screen handling capabilities for the Apple console (keyboard/screen) as well as terminals connected directly (via Super Serial Cards) or remotely (via Telnet using a supported network card and the **telnetd** server daemon).  These features are based on the VT100 Terminal definition and scripts you develop can pass VT100 codes (via the **echo** command) to enhance the appearance of your scripts.  In addition to VT100 codes, **echo** has been augmented with some short codes to perform the more common and to help display special characters.  The examples below will help you understand what is possible with **echo**.  For a fuller listing of the available VT100 Terminal Codes, consult the **[A2osX Terminal Codes Guide](.Docs/TERM.md).**
 
-    #!/bin/sh
+	#!/bin/sh
 	#	ECHO / Advanced Display Techniques Examples
 	#	Note codes are CASE SENSITVE.  \F is not the same as \f
 	#   Clear the Screen (\f)
@@ -342,7 +342,7 @@ A2osX provides advanced screen handling capabilities for the Apple console (keyb
 	#   Clear the Screen and Display text in the top left corner
 	echo "\fThis line will appear on the first line of your Apple"
 	#	ECHO on a line byself will create a blank line (moving the cursor down one line)
-    #	Multiple ECHOs in a row, will skip multiple lines.  The \n shortcode makes this easier.
+	#	Multiple ECHOs in a row, will skip multiple lines.  The \n shortcode makes this easier.
 	#	This example is the same as ECHO; ECHO; ECHO "HELLO"; ECHO; ECHO; ECHO "WORLD"
 	echo "\n\nHELLO\n\nWORLD"
 	#	Backspace shortcode \b moves the cursor one space to the left.
@@ -382,6 +382,38 @@ A2osX provides advanced screen handling capabilities for the Apple console (keyb
 	echo \e[2K
 	#	Clear line 15
 	echo \e[15;01H\e[2K
+
+In addition to the special codes above that can used to manage all displays (both the console and remotely connected users), there are additional codes that have great affect on VT-100 terminals and emulators such as putty.  Only the reverse video option works on an Apple II console/screen.  
+
+	#!/bin/sh
+	#	ECHO / VT100 Terminal Character Codes
+	#	Note codes are CASE SENSITVE.  \F is not the same as \f
+	#	Turn BOLD on: \e[1m		off: \e[0m
+	#	This example displays HELLO BOLD WORLD with the word BOLD in bold.
+	echo "HELLO \e[1mBOLD\e[0m WORLD"
+	#	Turn low intensity on: \e[2m		off: \e[0m
+	#	This example displays HELLO low WORLD with the word low in low intesity.
+	echo "HELLO \e[2mlow\e[0m WORLD"
+	#	Turn underline on: \e[4m		off: \e[0m
+	#	This example displays HELLO underline WORLD with the underline underlined.
+	echo "HELLO \e[4mlow\e[0m WORLD"
+	#	Turn blinking on: \e[5m		off: \e[0m
+	#	This example displays HELLO blinking WORLD with the blinking blinking.
+	echo "HELLO \e[5mblinking\e[0m WORLD"
+	#	Turn Inverse on: \e[7m		off: \e[0m
+	#	This example displays HELLO INVERSE WORLD with the word INVERSE in inverse.
+	echo "HELLO \e[7mINVERSE\e[0m WORLD"
+	#	Turn Invisible on: \e[8m		off: \e[0m
+	#	This example displays HELLO Invisible WORLD with the word Invisible is not displayed (blank spaces).
+	echo "HELLO \e[8mInvisible\e[0m WORLD"
+	#	Change Character Color: \e[COLOR;COLORm
+	#	This example displays HELLO COLOR WORLD with the word COLOR in Bright Yellow on a Dark Blue Background.
+	echo "HELLO \e[7mINVERSE\e[0m WORLD"
+
+
+As you can see \e[0m turns off all character attributes.  It is like a reset.  The following table shows color codes that can be used with VT-100 emulators like PuTTY.
+
+![image](https://user-images.githubusercontent.com/180313/70875571-5fb40980-1f84-11ea-8b2a-f537fce6c07c.png)
 
 ### ELSE
 
