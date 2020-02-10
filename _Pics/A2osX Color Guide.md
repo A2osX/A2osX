@@ -1,12 +1,12 @@
 # A2osX Color Guide
 
-### Updated December 17, 2019
+### Updated February 10, 2020
 
 This Guide provides information on the colors used for the logos supplied with A2osX.  This Guide is an internatl document to capture the RGB values of used in all the logos.
 
 ## Color Palette
 
-![](./PALETTE.bmp)
+![](../_Pics/PALETTE.bmp)
 
 
 | Color        | Red | Green | Blue |    Web   |
