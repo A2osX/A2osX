@@ -1,6 +1,6 @@
 # A2osX Developers Guide
 
-### Updated January 27, 2020
+### Updated February 10, 2020
 
 This Guide provides information on the development process and tools used to build A2osX.  The core of A2osx is currently, and likely always will be, developed in 65C02 Assembly Language.  Assembly is used for the speed, compactness and efficient memory management necessary for the central core, or kernel, of A2osX.  Currently all of the programs distributed with A2osX are also written in Assembly, however, a it is expected that a C compiler or preprocessor that creates Assembly will be made available in the future.
 
@@ -85,7 +85,7 @@ Use Notepad++ which you can download from....
 #### S-C MASM color scheme for Notepad++
 ...drop _Tools/userDefineLang.xml in %APPDATA%\Notepad++
 
-THere is a userDefinedLang.xlm file in the .Tools dir that you will want to copy to Notepad... then when editing ASM files (.S) you can change your language to S-C MASM 65C02 and notepad++ will do the proper highlighting.
+There is a userDefinedLang.xlm file in the .Tools dir that you will want to copy to Notepad... then when editing ASM files (.S) you can change your language to S-C MASM 65C02 and notepad++ will do the proper highlighting.
 
 ## License
 A2osX is licensed under the GNU General Pulic License.

@@ -1,6 +1,6 @@
 # A2osX (0.93) Multi-Tasking OS for Apple II
 
-### Updated January 27, 2020
+### Updated February 10, 2020
 
 This is the functional specification for A2osX and its system modules, internal and external commands and shell language.  Please refer to the other A2osX documentation such as the User Guide, Notes for Developers and Shell Programming Guide for more information on the use of these commands and modules.
 
@@ -18,7 +18,7 @@ This is the functional specification for A2osX and its system modules, internal 
 | Name     | Status      | Comment | K.Ver |
 | ----     | ------      | ------- | ------|
 | GETTY    | Working     | -E : Exit on remote close | 0.93 |
-| HTTPD    | Future      | Web Page Server Daemon | 0.94 |
+| HTTPD    | Partial      | Web Page Server Daemon | 0.94 |
 | INITD    | Future      | Run Level Manger     | 0.94 |
 | INSDRV   | Working     | Loads HW Drivers        | 0.93 |
 | KCONFIG  | Working     | Kernel Configuration Utility | 0.93 |
@@ -78,10 +78,10 @@ This is the functional specification for A2osX and its system modules, internal 
 | RPCDUMP | In Progress | Tool based on UDP socket API, renamed from RPCINFO <br> RPCDUMP <ip\|host> | 0.93 |
 | SH    | Working     | Shell Command Processor<br>(See Internal Shell commands) | 0.93 |
 | TELNET | Working | TELNET <ip\|host> [port] |  0.93 |
-| TERM | Testing | TERM \<device\> | 0.93 |
+| TERM | Working | TERM \<device\> | 0.93 |
 | UNPAK | Working | UNPAK archive | 0.93 |
-| USERADD | Testing | USERADD username <br> -c Comment : GECOS comment<br> -d HD : Home Directory <br> -p PW : Password <br> -s SH : Shell | 0.93 |
-| USERDEL | Testing | USERDEL username <br> -r : Force removes files in home directory | 0.93 |
+| USERADD | Working | USERADD username <br> -c Comment : GECOS comment<br> -d HD : Home Directory <br> -p PW : Password <br> -s SH : Shell | 0.93 |
+| USERDEL | Working | USERDEL username <br> -r : Force removes files in home directory | 0.93 |
 | WC | Working | WC File(s) (*,? wildcards allowed) <br> -C: Continue on error<br> -R: Recurse Subdirectories<br> -M: Print CHAR counts<br> -L: Print LINE counts<br> -W: Print WORD counts | 0.93 |
 | WHO | Working | List Users Online | 0.93 |
 

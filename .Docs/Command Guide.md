@@ -1,10 +1,10 @@
 # A2osX Command Guide
 
-### Updated January 27, 2020
+### Updated February 10, 2020
 
-This Guide provides information on all the A2osX commands and utilities.  This Guide helps you not only learn the purpose of each command but also what options a command supports and what arguments it either supports or requires.
+This Guide provides information on all the A2osX commands and utilities.  It helps you not only learn the purpose of each command but also what options a command supports and what arguments it either supports or requires.
 
-A2osX comes with a nice variety of system, file, network and data utilities -- what we refer to as external commands.  This just means that each of the following commands or utilities is built as a separate BIN or executable file that runs under A2osX.  The source for all of these external commands is readily available, so you can make your own or modify these as your needs dictate.
+A2osX comes with a variety of system, file, network and data utilities -- what we refer to as external commands.  This just means that each of the following commands or utilities is built as a separate BIN or executable file that runs under A2osX.  The source for all of these external commands is readily available, so you can make your own or modify these as your needs dictate.
 
 >Note: there are some **internal** commands built into the shell (the interactive prompt) such as CD (change directory) or PWD (print working directory).  Those commands are discussed in-depth in the **[Shell Developers Guide](.Docs/Shell%20Developers%20Guide.md).**  
 
@@ -59,7 +59,7 @@ In KCONFIG you can set:
 - Machine Timing, either 60 (Default) or 50Hz.  This should match the power/timing of your system.  A2osX uses the Apple's VBL signal and this setting to correctly produce 1-Second and 1/10th-Second events which are used to preemptively switch tasks.  If this setting does not match your actual machine timing, timing of task switches will be slower/faster by 10-20% but otherwise A2osX should operate normally.
 - CHRoot to /RAMx, either Disabled (Default) or Enabled.  This feature currently not implemented.
 - Preemptive Mode, either Disabled (Default) or Enabled.  See discussion on A2osX Preemptive Mode in the A2osX User Guide.
-- TTYs, between 1 and 4, default is 2.  This is the number of Virtual Terminals configured on your system.  Please note, increasing and decreasing the number of virtual terminals can have a significant impact on the amount of memory used by the system, which in turns impacts the amount of free memory available to run your A2osX programs and scripts.
+- TTYs, between 1 and 8, default is 2.  This is the number of Virtual Terminals configured on your system.  Please note, increasing and decreasing the number of virtual terminals can have a significant impact on the amount of memory used by the system, which in turns impacts the amount of free memory available to run your A2osX programs and scripts.
 - Slots 1-7, Enabled (Default) or Disabled.  Certain drivers in A2osX such as the ones for a Super Serial Card (SSC) or Ethernet Card search for a matching hardware device starting in Slot 1.  If you disable any of the slots in KConfig, these slots will be skipped in the search during driver load/initialization.  One use of this feature, if you have 2 SSCs in your system with the 1 in slot 1 connected to a printer and another in slot 2 connected to a PC for use with ADTPro.  Setting Slot 1 to Disabled, will have A2osX skip the card in Slot 1 connected to the printer from being used by the KM.VEDRIVE driver loaded during A2osX startup. 
 
 ### LOGIN
@@ -217,15 +217,13 @@ It looks like the same results, but instead of LS simply outputting all of its r
  
 	edit file
 
-The **edit** command allows the user to interactively read and edit standard text files in A2osX.  If you do not specify a file name on the command line, you will be prompted to enter one when you save your work (control-S).  Consult the help screen below for a list of the special keys that can be used while editing a file.
-
->A note for the touch typists!: While **edit** is not a word processor, it still is one of the most complex programs included in A2osX.  It does a lot!  A side affect of this, and due to the lack of a keyboard buffer in the Apple //e, if you try to speed type while using EDIT some keystrokes may be dropped.  This is most noticeable when using the AppleWin emulator set to 1.0 speed.  Changing the emulator speed to at least 2.0 will significantly reduce or eliminate the dropped keys.
-
 ![](../.screen-shots/ScreenShot.EDIT.png)
 
-There is a help screen
+The **edit** command allows the user to interactively read and edit standard text files in A2osX.  If you do not specify a file name on the command line, you will be prompted to enter one when you save your work (control-S).  Consult the help screen below for a list of the special keys that can be used while editing a file.
 
 ![](../.screen-shots/ScreenShot.EDIT%20Help.png)
+
+>A note for the touch typists!: While **edit** is not a word processor, it still is one of the most complex programs included in A2osX.  It does a lot!  A side affect of this, and due to the lack of a keyboard buffer in the Apple //e, if you try to speed type while using EDIT some keystrokes may be dropped.  This is most noticeable when using the AppleWin emulator set to 1.0 speed.  Changing the emulator speed to at least 2.0 will significantly reduce or eliminate the dropped keys.
 
 ### FORMAT
 
@@ -263,17 +261,17 @@ the errand process by its PID found in the displayed process list (i.e. KILL 27 
 
 	ls [-a] [-c|-f|-l] [-r] filespec
 
-The LS command is probably the most used and useful of all commands available to the A2osX user.  **ls** allows you to list the names of the files and directories in the current or specified directory.  If supplied with the all check (**-a**) **ls** will include the special directories **.** and **..**.  The recurse check (**-r**) tells **ls** to list files and directories of any directory listed (recursively).  The display checks (**-c -f and -l**) tell **ls** change the format of the display to a single column of just file/directory names (**-c**), to a single column that includes full paths (**-f**) or a listing with extended file information (**-l**) which includes file ownership, permissions, date/time, etc.. You can pass the **ls** command a *filespec* that includes a directory name and or wild card spec for filtering the listing.  For example the command `LS ../MYDIR/FT*` would only list files that begin with FT and are found in the MYDIR sub directory of the parent of the current directory.
-
 ![](../.screen-shots/ScreenShot.LS.png)
+
+The LS command is probably the most used and useful of all commands available to the A2osX user.  **ls** allows you to list the names of the files and directories in the current or specified directory.  If supplied with the all check (**-a**) **ls** will include the special directories **.** and **..**.  The recurse check (**-r**) tells **ls** to list files and directories of any directory listed (recursively).  The display checks (**-c -f and -l**) tell **ls** change the format of the display to a single column of just file/directory names (**-c**), to a single column that includes full paths (**-f**) or a listing with extended file information (**-l**) which includes file ownership, permissions, date/time, etc.. You can pass the **ls** command a *filespec* that includes a directory name and or wild card spec for filtering the listing.  For example the command `LS ../MYDIR/FT*` would only list files that begin with FT and are found in the MYDIR sub directory of the parent of the current directory.
 
 ### LSDEV
 
 	lsdev
 
-Displays a listing of the currently defined devices in the running A2osX system as seen in the screenshot below.
-
 ![](../.screen-shots/ScreenShot.LSDEV.png)
+
+Displays a listing of the currently defined devices in the running A2osX system as seen in the screenshot below.
 
 ### LSOF
 
@@ -415,6 +413,8 @@ The **httpget** command is a utility for retrieving a network page or message fr
 ### IPCONFIG 
 
 	ipconfig [-d|-e|-s]
+
+![](../.screen-shots/ScreenShot.IP1.png)
 
 The **ipconfig** command will display the current network configuration for your system.  In some cases, if the network drivers and libraries are loaded but not configured, **ipconfig** may configure your system by obtaining (through DHCP) or setting (statically through config files) your IP address and other settings.  Optionally you can force a set/reset of your configuration. If Network services are not started when you use this command, an error message will be displayed saying that TCP/IP is not bound to any device.
 

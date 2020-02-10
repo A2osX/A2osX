@@ -1,6 +1,6 @@
 # A2osX (0.93) Multi-Tasking OS for Apple II  
 
-### Updated January 27, 2020
+### Updated February 9, 2020
 
 ## Screenshots
 

@@ -1,8 +1,8 @@
 # A2osX Terminal Codes Guide
 
-### Updated January 27, 2020
+### Updated February 10, 2020
 
-A2osX terminal capabilities are based off of the standard VT100 Terminal.  This applies to users connected via Super Serial Cards, Telnet (via TelnetD server daemon) and Apple console (physical keyboard/screen).  All programs can use this facility to create rich interactive text mode applications.  This includes both programs written in Assembly or Scripts written for the Shell (SH).  The table below lists the codes you can use in your applications and their function.  Consult the A2osX Shell Developers Guide for information on using these codes in scripts.  Note, the Apple Console implementation only supports a subset of the VT100 codes, these are noted in the last column as OK.
+A2osX terminal capabilities are based off of the standard VT-100 Terminal.  This applies to users connected via Super Serial Cards, Telnet (via TelnetD server daemon) and the Apple console (physical keyboard/screen).  All programs can use this facility to create rich interactive text mode applications.  This includes both programs written in Assembly or Scripts written for the Shell (SH).  The table below lists the codes you can use in your applications and their function.  Consult the A2osX Shell Developers Guide for information on using these codes in scripts.  Note, the Apple Console implementation only supports a subset of the VT-100 codes, these are noted in the last column as OK.
 
 | Esc Sequence | Description | DEC Code | A2osX TERM |  
 |--------------|-------------|----------|------------|

@@ -1,6 +1,6 @@
 # A2osX Glossary
 
-### Updated January 27, 2020
+### Updated February 10, 2020
 
 This document contains a glossary of terms used throughout the A2osX documentation.
 
@@ -23,6 +23,8 @@ This document contains a glossary of terms used throughout the A2osX documentati
 **access (or access byte)**: An attribute of a ProDOS file that controls whether the file may be read from, written to, renamed, or backed up.
 
 **access byte**: An attribute of a ProDOS file that determines what types of operations, such as reading or writing, may be performed on the file.
+
+**ADTPro**: Apple Disk Transfer ProDOS (ADTPro) transfers physical disks and disk images between Apple II-era computers and the modern world. It can even get your Apple running if you don't have any disks at all. The host (server) component runs on today's computers with Java, and the 8-bit Apple (client) component runs on any Apple II computer with 64k of memory or more.
 
 **algorithm**: A step-by-step procedure for solving a problem or accomplishing a task.
 
@@ -57,6 +59,8 @@ This document contains a glossary of terms used throughout the A2osX documentati
 **AppleTalk connector**: A piece of equipment consisting of a connection box, a short cable, and an 8-pin miniature DIN connector that enables an Apple IIGS to be part of an AppleTalk network.
 
 **application**: A stand-alone program that performs a specific function, such as word processing, drawing, or telecommunications. Compare, for example, library or device driver.
+
+**archive file**: An archive file is a file that is composed of one or more computer files along with metadata. Archive files are used to collect multiple data files together into a single file for easier portability and storage, or simply to compress files to use less storage space. Archive files often store directory structures, error detection and correction information, arbitrary comments, and sometimes use built-in encryption.
 
 **argument**: A value on which a function or statement operates; it can be a number or a variable. For example, in the BASIC statement VTAB 10, the number 10 is the argument.
 
@@ -194,6 +198,8 @@ This document contains a glossary of terms used throughout the A2osX documentati
 
 **composite video**: A standard video signal that includes all color and timing information that is needed by a composite video monitor. Several video standards aie in use around the world: NTSC video is used in northern America and Japan; PAL video is used in much of Europe; SECAM is used in the USSR and many other countries. The Apple IIGS is capable of generating both NTSC and PAL video. Compare RGB.
 
+**compression**: Compression is the process of encoding information using fewer bits than the original representation. Compression is useful because it reduces resources required to store and transmit data.
+
 **computer**: An electronic device that performs predefined (programmed) computations at high speed and with great accuracy. A machine that is used to store, transfer, and transform information. 
 
 **computer language**: See programming language.
@@ -296,6 +302,8 @@ This document contains a glossary of terms used throughout the A2osX documentati
 
 **device handler**: See device driver
 
+**DHCP**: The Dynamic Host Configuration Protocol (DHCP) is a network management protocol used on Internet Protocol networks whereby a DHCP server dynamically assigns an IP address and other network configuration parameters to each device on a network so they can communicate with other IP networks.
+
 **dialog box**: A box on the screen that contains a message requesting more information from the user. See also alert.
 
 **DIP switches**: A bank of tiny switches, each of which can be moved manually one way or the other to represent one of two values (usually on and off. See dual inline package.
@@ -342,6 +350,8 @@ This document contains a glossary of terms used throughout the A2osX documentati
 
 **DMA**: See direct memory access.
 
+**DNS**: The Domain Name System (DNS) is a hierarchical and decentralized naming system for computers, services, or other resources connected to the Internet or a private network. It associates various information with domain names assigned to each of the participating entities. Most prominently, it translates more readily memorized domain names to the numerical IP addresses needed for locating and identifying computer services and devices with the underlying network protocols.
+
 **document**: A file created by an application.
 
 **DOS**: Acronym for disk operating system. An Apple II disk operating system. See Disk Operating System.
@@ -368,11 +378,13 @@ This document contains a glossary of terms used throughout the A2osX documentati
 
 **embedded**: Contained within. For example, the string 'HUMPTY DUMPTY' is said to contain an embedded space.
 
-**environment**: The complete set of machine registers associated with a running program. Saving the environment allows a program to be restored to its original operating mode with all of its registers intact as though nothing had happened. Saving and restoring an environment is most often associated with calling system functions or processing interrupts.
+**Encryption**: Ehe process of converting information or data into a code, especially to prevent unauthorized access.
+
+**environment**: The complete set of machine registers associated with a running program. Saving the environment allows a program to be restored to its original operating mode with all of its registers intact as though nothing had happened. Saving and restoring an environment is most often associated with calling system functions or processing interrupts.  With respect to A2osX, the environment is an area in memory used by the shell to store various information, especially variables.
 
 **EOF (end-of-file)**: The logical size of a ProDOS file; it is the number of bytes that may be read from or written to the file.
 
-**erase**:
+**erase**: See delete.
 
 **error**: The state of a computer after it has detected a fault in one or more commands sent to it. Also called error condition.
 
@@ -412,7 +424,7 @@ This document contains a glossary of terms used throughout the A2osX documentati
 
 **FIFO**: Acronym for "first in, first out" order, as in a queue.
 
-**file**: A named, ordered collection of information stored on a disk.
+**file**: A named, ordered collection of information stored on a disk. A file is an object on a computer that stores data, information, settings, or commands used with a computer program.
 
 **file control block (FCB)**: A data structure set up in memory by ProDOS to keep track of all open files.
 
@@ -450,6 +462,8 @@ This document contains a glossary of terms used throughout the A2osX documentati
 
 **function**: A preprogrammed calculation that can be carried out on request from any point in a program. A function takes in one or more arguments and returns a single value. It can therefore be embedded in an expression.
 
+**GECOS**: The gecos field, or GECOS field is a field of each record in the /etc/passwd file on Unix, and similar operating systems. On UNIX, it is the 5th of 7 fields in a record. It is typically used to record general information about the account or its user(s) such as their real name and phone number.
+
 **global page**: Under ProDOS, 256 bytes of data at a fixed location in memory, containing useful system information (such as a list of active devices) available to any application.
 
 **global page bit map**: A portion of the ProDOS global page that keeps track of memory use in the computer. Applications under ProDOS are responsible for marking and clearing parts of the bit map that correspond to memory they have allocated or freed.
@@ -470,9 +484,11 @@ This document contains a glossary of terms used throughout the A2osX documentati
 
 **hardware**: Collectively, electronic circuit components and associated fittings and attachments. In computers, the computer itself (the processor), disk drives, and other peripheral equipment. The saying goes, "If you can touch it, it's hardware. If you can't, it's software." Compare firmware, software.
 
+**Hash**: The result of an algorithm that generates a numeric, or fixed-size character output from a variable-sized piece of text or other data; used in cryptography and in error-checking
+
 **hertz**: The unit of frequency of vibration or oscillation, defined as the number of cycles per second. Named for the physicist Heinrich Hertz and abbreviated Hz. The 6502 microprocessor used in the 8-bit Apple II systems operates at a clock frequency of about 1 million hertz, or 1 megahertz (MHz).
 
-**hex**: See hexadecimal. (GSTR, PI)
+**hex**: See hexadecimal.
 
 **hexadecimal**: The base-16 system of numbers, using the ten digits 0 through 9 and the six letters A through F. Hexadecimal numbers can be converted easily and directly to binary form, because each hexadecimal digit corresponds to a sequence of 4 bits. In Apple manuals, hexadecimal numbers are usually preceded by a dollar sign ($).
 
@@ -483,6 +499,8 @@ This document contains a glossary of terms used throughout the A2osX documentati
 **high ASCII characters**: ASCII characters with decimal values of 128 to 255. Called high ASCII because their high bit (first binary digit) is set to 1 (for on) rather than 0 (for off ).
 
 **high-level language**: A programming language that is relatively easy for people to understand. A single statement in a high-level language typically corresponds to several instructions of machine language. Compare low-level language.
+
+**HTTPD**: A daemon process designed to serve HTTP requests and data.
 
 **I/O**: Input/Output. A general term that encompasses input/output activity, the devices that accomplish it, and the data involved. See input/output.
 
@@ -516,7 +534,7 @@ This document contains a glossary of terms used throughout the A2osX documentati
 
 **information bar**: An optional component of the displaym if present, the information bar may contain any information the application wishes.
 
-**initialization file**:
+**initialization file**: A file read at computer, operating system or application startup that contains variables or preferences used to set or control initialization behavior such as specifying which hardware drivers to load or enable.
 
 **initialize**: (1) To set to an initial state or value in preparation for some computation. (2) To prepare a blank disk to receive information by organizing its surface into tracks and sectors; see format.
 
@@ -562,6 +580,10 @@ This document contains a glossary of terms used throughout the A2osX documentati
 
 **inverse video**: The display of text on the computer's display screen in the form of dark dots on a light (or other single phosphor color) background, instead of the usual light dots on a dark background.
 
+**IP**: Internet Protocol, part of TCP/IP.  Used to define the transmission of data over network interfaces.
+
+**IP Address**: a unique string of numbers separated by periods that identifies each computer using the Internet Protocol to communicate over a network.
+
 **IRQ**: A 65C816 signal line that, when activated, causes an interrupt request to be generated.
 
 **IWM**: "Integrated Woz Machine"; the custom chip that controls Apple's 3.5-inch disk drives.
@@ -578,7 +600,7 @@ This document contains a glossary of terms used throughout the A2osX documentati
 
 **K**: Abbreviation for the prefix kilo-, meaning 1024. A kilobyte (expressed as 1K) of memory is 1,024 memory locations. See kilobyte.
 
-**kernel**: The central part of an operating system. ProDOS is the kernel of the Apple operating system.
+**kernel**: The central part of an operating system. ProDOS is the kernel of the Apple operating system.  The A2osX "Kernel" is the core process that manages all other processes and handles task switching between processes and overall memory management.
 
 **key block**: The first block in any ProDOS file.
 
@@ -597,6 +619,8 @@ This document contains a glossary of terms used throughout the A2osX documentati
 **kilobyte**: A unit of measurement, 1024 bytes, commonly used in specifying the capacity of memory or disk storage systems. In this usage, kilo (from the Greek, meaning a thousand) stands for 1,024. Thus, 64K memory equals 65,536 bytes. See also megabyte. Compare kilobit.
 
 **kilohertz**: A unit of measurement of frequency, equal to L000 hertz (abbreviated kHz). See also megahertz.
+
+**LanCeGS**: An Ethernet card for the Apple II series of computers. 
 
 **landscape mode**: A printing mode in which text is printed top to bottom (that is, longways) on the paper.
 
@@ -634,7 +658,7 @@ This document contains a glossary of terms used throughout the A2osX documentati
 
 **location**: See memory location.
 
-**lock**: 
+**lock**: (1) For files, a lock prevents a file from being overwritten or changed. (2) For processes, a lock can restrict write access to a portion of memory so only one process can make a change at a time.  (3) In A2osX libraries, a lock counter is incremented for the library as each application registers its use of the library and decrements the count as they exit.  When the count reaches zero, the library is automatically unloaded. 
 
 **logic**: (1) In microcomputers, a mathematical treatment of formal logic using a set of symbols to represent quantities and relationships that can be translated into switching circuits, or gates. AND, OR, and NOT are examples of logical gates. Each gate has two states, open or closed, allowing the application of binary numbers for solving problems. (2) The systematic scheme that defines the interactions of signals in the design of an automatic data processing system.
 
@@ -757,9 +781,17 @@ memory.
 
 **most significant bit**: The leftmost bit of a binary number. The most significant bit contributes the largest quantity to the value of the number. For example, in the binary number 10110 (decimal value 22), the leftmost bit has the decimal value 76 (24). Compare least significant bit.
 
+**Multi-tasking**: A system that executes more than one program or task simultaneously.
+
+**Multi-user**: A computer system able to be used by a number of people simultaneously.
+
 **nanosecond**: One billionth of a second. Abbreviated ns.
 
 **native mode**: The 16-bit configuration of the 65C816 microprocessor.
+
+**negate**: Make a program condition or statement negative in meaning.
+
+**Network Stack**: The protocol stack or network stack is an implementation of a computer networking protocol suite or protocol family. Strictly speaking, the suite is the definition of the communication protocols, and the stack is the software implementation of them.  In A2osX, the device drivers, the network libraries and the NetworkD program manage the network stack that network aware applications utilize.
 
 **newline (read) mode**: A file-reading mode in which each character read from the file is compared to a specified character (called the newline character); if there is a match, the read is terminated. Newline mode is typically used to read individual lines of text, with the newline character defined as a carriage return.
 
@@ -772,6 +804,8 @@ memory.
 **non-special, normal memory**: Memory that has no special restrictions on it. On the Apple IIGS, such memory includes banks $2-$DF and parts of banks $E0 and $E1.
 
 **NOT**: A unary logical operator that produces a true result if its operand is false, and a false result if its operand is true. Compare AND, OR, exclusive OR.
+
+**NSC, No Slot Clock**: The No-Slot Clock, also known as the Dallas Smartwatch (DS1216E), was a 28-pin chip-like device that could be used directly in any Apple II or Apple II compatible with a 28-pin ROM.
 
 **NTSC**: (1) Abbreviation for National Television Standards Committee, which defined the standard format used for transmitting broadcast video signals in the United States. (2) The standard video format defined by the NTSC; also called composite because it combines all video information, including color, into a single signal.
 
@@ -871,6 +905,10 @@ memory.
 
 **phase**: (1) A stage in a periodic process. A point in a cycle. For example, the 6502 and 65C816 microprocessors use a clock cycle consisting of two phases called F0 and F1. (2) The relationship between two periodic signals or processes.
  
+**ping**: Ping is a computer network administration software utility used to test the reachability of a host on an Internet Protocol (IP) network.
+
+**pipe**: In computer programming, especially in UNIX operating systems, a pipe is a technique for passing information from one program process to another. Basically, a pipe passes a parameter such as the output of one process to another process which accepts it as input.
+
 **pixel**: A contraction of picture element, the smallest dot you can draw on the screen. Also a location in video memory that corresponds to a point on the graphics screen when the viewing window includes that location. In the Super Hi-Res display on the Apple IIGS, each pixel is represented by either 2 or 4 bits.
 
 **pointer**: (1) An item of information consisting of the memory address of some other item. For example, the 65816 stack register contains a pointer to the top of the stack. (2) The mouse pointer, an arrow-shaped cursor whose screen location is controlled by mouse movements.
@@ -890,9 +928,15 @@ Apple IIGS that divides and conditions the household current, supplying the volt
 
 **precedence**: The order in which operators are applied in evaluating an expression. Precedence varies from language to language, but usually resembles the precedence rules of algebra.
 
+**Preemptive**: Preemptive multitasking is task in which a computer operating system uses some criteria to decide how long to allocate to any one task before giving another task a turn to use the operating system. The act of taking control of the operating system from one task and giving it to another task is called preempting.
+
 **prefix**: A pathname starting with a volume name and ending with a subdirectory name. It is the part of a full pathname that precedes a partial pathname-a prefix and a partial pathname together constitute a full pathname. A prefix always starts with a slash "/" because a volume directory name always starts with a slash.
 
 **procedure**: In the Pascal and Logo programming languages, a sequence of instructions that work as a unit; approximately equivalent to the term function in C or subroutine in BASIC.
+
+**Process**: In computing, a process is the instance of a computer program that is being executed by one or many threads. It contains the program code and its activity. Depending on the operating system (OS), a process may be made up of multiple threads of execution that execute instructions concurrently.
+
+**process id**: The unique identifier A2osX uses to identify a running process.
 
 **processor**: The hardware component of a computer that performs the actual computation by directly executing instructions represented in machine language and stored in main memory. See microprocessor.
 
@@ -900,6 +944,18 @@ Apple IIGS that divides and conditions the household current, supplying the volt
 
 **ProDOS**: A disk operating system for the Apple II family of computers. ProDOS stands for Professional Disk Operating System, and includes ProDOS 8 and ProDOS 16. Compare
 Disk Operating System (DOS).
+
+**ProDOS 1.0**: The first released version of ProDOS by Apple. 
+
+**ProDOS 2.0.3**: The last official ProDOS release by Apple.
+
+**ProDOS 2.0.3tc**:  A modified version of ProDOS 2.0.3 to correct the date table to support years through 2023.  See the ProDOS.md doc for more information.
+
+**ProDOS 2.4.2**: See https://prodos8.com/releases/prodos-242/
+
+**ProDOS 2.5**: https://prodos8.com/releases/prodos-25/
+
+**ProDOSfx**:   A new version of ProDOS made by the A2osX to support enhancements such as lowercase in file names, volumes and directories.  See the ProDOS.md doc for more information.
 
 **ProDOS 16**: A disk operating system developed for 65816 native-mode operation on the Apple IIGS. It is functionally similar to ProDOS 8 but more powerful.
 
@@ -943,6 +999,8 @@ routines used to support external I/O devices such as the Apple Memory Expansion
 
 **RAM disk**: A feature of some operating systems which makes it possible to use programmable memory (RAM) as a disk volume. Large applications designed for machines with limited amounts of RAM must load program segments from disk as needed; on machines with RAM disk, the entire application is first loaded into RAM, where it runs as if still resident on disk, but much faster.
 
+**RamWorks**: A memory board and access specification for extended memory on Apple II computer systems.
+
 **random-access device**: See block device.
 
 **random-access memory (RAM)**: Memory in which information can be referred to in an arbitrary or random order. As an analogy, a book is a random-access storage device in that it can be opened and read at any point. RAM  usually means the part of memory available for programs from a disk; the programs and other data are lost when the computer is turned off. A computer with 512K RAM has 512 kilobytes available to the user. (Technically, the read-only memory (ROM) is also random access, and what's called RAM should correctly be termed read-write memory.) Compare read-only memory, read-write memory.
@@ -961,7 +1019,9 @@ routines used to support external I/O devices such as the Apple Memory Expansion
 
 **real-time clock (RTC)**: A custom IC that, once set, retains the current time of day, day, month, and year. Chapter 7 provides details of the RTC and other built-in I/O devices.
 
-**record**: 
+**record**: A portion of data file for one entity.  For example all the information about one person in a contact or address book data file.
+
+**redirection**: Redirection describes the process of sending a data or other information to an alternate location. In A2osX, redirection allows sending data intended for one location such as standard output (the screen) to another (a file).
 
 **reentrant**: Said of a routine that is able to accept a call while one or more previous calls to it are pending, without invalidating the previous calls. Under certain conditions, the Apple IIGS Scheduler manages execution of routines that are not reentrant.
 
@@ -984,6 +1044,8 @@ routines used to support external I/O devices such as the Apple Memory Expansion
 **resident**: See memory-resident, disk-resident.
 
 **return address**: The point in a program to which control returns on completion of a subroutine or function.
+
+**return code**: An exit code, or sometimes known as a return code, is the code returned to a parent process by an executable.
 
 **RF**: See radio frequency.
 
@@ -1042,6 +1104,16 @@ needed.
 **screen holes**: Locations in the text display buffer (text Page 1) used for temporary storage either by l/O routines running in peripheral card ROM or by firmware routines addressed as if they were in card ROM. Text Page 1 occupies memory from $0400 to $07FF; the screen holes are locations in that area that are neither displayed nor modified by the display firmware.
 
 **scroll**: To move all the text on the screen upward or downward, and, in some cases, sideways. See viewport, window.
+
+**SCSI**: Small Computer System Interface is a set of standards for physically connecting and transferring data between computers and peripheral devices. The SCSI standards define commands, protocols, electrical, optical and logical interfaces.
+
+**SCSI Cable**: A cable used to connect a SCSI device to a SCSI controller or interface card.
+
+**SCSI Card**: A card for the computer that implements the SCSI standard.
+
+**SCSI Drive**: A block devices that utilizes the SCSI standard.
+
+**SCSI Interface**: See SCSI Card.
 
 **SECAM**: A French acronym meaning "sequential color with memory." A video standard originating in France and used in the USSR and other countries.
 
@@ -1127,6 +1199,12 @@ needed.
 
 **status registers**: A location in the ACIA (at $C099 for port 1 and $COe9 for port 2) that stores the state of two RS-232-C signals and the state of the transmit and receive data registers, as well as the outcome of the most recent character transfer. A register in the 65816 microprocessor that contains flags reflecting the various aspects of machine state and operation results.
 
+**StdErr**: Standard error is another output stream typically used by programs to output error messages or diagnostics. It is a stream independent of standard output and can be redirected separately.
+
+**StdIn**: Standard input is a stream from which a program reads its input data. The program requests data transfers by use of the read operation. Not all programs require stream input. Unless redirected, standard input is inherited from the parent process. In the case of an interactive shell, that is usually associated with the keyboard.
+
+**StdOut**: Standard output is a stream to which a program writes its output data. The program requests data transfer with the write operation. Not all programs generate output. Unless redirected, standard output is inherited from the parent process. In the case of an interactive shell, that is usually the text terminal which initiated the program.
+
 **step value**: The amount by which the index variable changes on each pass through a loop.
 
 **stop bit**: A bit indicating the end of a character in a string of serially transmitted characters. A MARK signal following a data string (or the optional parity bit), indicating the end of a character.
@@ -1175,11 +1253,25 @@ needed.
 
 **TAB**: An ASCII character that commands a device such as a printer to start printing at a preset location (called a tab stop). There are two such characters: horizontal tab (hex 09) and vertical tab (hex 0B). TAB works like the tabs on a typewriter.
 
+**TCP**: The Transmission Control Protocol (TCP) is one of the main protocols of the Internet protocol suite. It originated in the initial network implementation in which it complemented the Internet Protocol (IP). Therefore, the entire suite is commonly referred to as TCP/IP. TCP provides reliable, ordered, and error-checked delivery of a stream of octets (bytes) between applications running on hosts communicating via an IP network. Major internet applications such as the World Wide Web, email, remote administration, and file transfer rely on TCP, which is part of the Transport Layer of the TCP/IP suite. SSL/TLS often runs on top of TCP.
+
 **television set**: A display device capable of receiving broadcast video signals (such as commercial television broadcasts) by means of an antenna. Can be used in combination with a radio-frequency modulator as a display device for the Apple II family of computers. Compare video monitor.
+
+**Telnet**: Telnet is an application protocol used on the Internet or local area network to provide a bidirectional interactive text-oriented communication facility using a virtual terminal connection. User data is interspersed in-band with Telnet control information in an 8-bit byte oriented data connection over the Transmission Control Protocol (TCP).
+
+**Telnet Server**: See TelnetD.
+
+**TelnetD**: The telnetd program is a server which supports the DARPA telnet interactive communication protocol.
+
+**terminal**: A computer terminal is an electronic or electromechanical hardware device that is used for entering data into, and displaying or printing data from, a computer or a computing system.
+
+**terminal emulator**: A terminal emulator, terminal application, or term, is a computer program that emulates a video terminal within some other display architecture. A terminal window allows the user access to a text terminal and all its applications such as command-line interfaces (CLI) and text user interface (TUI) applications.
 
 **terminal mode**: The mode of operation in which the Apple acts like an intelligent terminal.
 
 **text**: (1) Information presented in the form of readable characters. (2) The display of characters on a display screen. Compare graphics.
+
+**text editor**: A text editor is a type of computer program that edits plain text. Text editors are provided with operating systems and software development packages, and can be used to change files such as configuration files, documentation files and programming language source code.
 
 **text file**: A file consisting of the ASCII representation of characters.
 
@@ -1211,21 +1303,29 @@ needed.
 
 **type-ahead buffer**: A buffer that accepts and holds characters that" are typed faster than the computer can process them.
 
+**UDP**: UDP (User Datagram Protocol) is an alternative communications protocol to Transmission Control Protocol (TCP) used primarily for establishing low-latency and loss-tolerating connections between applications on the internet.
+
 **unary operator**: An operator that applies to a single operand. For example, the minus sign (-) in a negative number such as 4 ts a unary arithmetic operator. Compare binary operator.
 
 **unbuffered**: A style of input and output that does not use a buffer for I/O; reading and writing is done one character at a time.
 
 **unclaimed interrupt**: This occurs when the hardware Interrupt Request Line is active, indicating that an interrupt-producing device needs attention, but none of the installed interrupt handlers claims responsibility for the interrupt.
 
-**unload**:
+**unload**:  To remove from memory, such as to unload a program or library from memory.
 
-**update**:
+**update**:  An update is new, improved, or fixed software, which replaces older versions of the same software. For example, updating your operating system or A2osX brings it up-to-date with the latest drivers, system utilities, and program libraries.
 
 **user**: A person operating or controlling a computer system.
 
-**User ID**: An identification number that specifies the owner of 
+**User ID**: An identification number that specifies the owner of a resource of the record of that user in the system user database.
 
 **user interface**: The rules and conventions by which a computer system communicates with the person operating it.
+
+**User Name**: The full name of a user.
+
+**Uthernet**: An Ethernet card for the Apple II series of computers. 
+
+**Uthernet II**: An Ethernet card for the Apple II series of computers. 
 
 **utilities**: Programs that let you rename, copy, format, delete, and otherwise manipulate files and volumes.
 
@@ -1247,7 +1347,17 @@ needed.
 
 **volume name**: The name by which a particular volume is identified. It is the same as the filename of the volume directory file.
 
+**VSDrive**: A virtual drive over Super Serial Card emulator supported by ADTPro software.
+
+**VT-100**: The VT-100 is a video terminal, introduced in August 1978 by Digital Equipment Corporation (DEC). It was one of the first terminals to support ANSI escape codes for cursor control and other tasks, and added a number of extended codes for special features like controlling the status lights on the keyboard.
+
+**VT100 Escape Code**: The set of special control codes used by the VT-100 to control the behavior of the display.
+
 **warm start**: The process of transferring control back to the operating system in response to a failure in an application program. Compare cold start.
+
+**Web Server**: A web server is server software, or hardware dedicated to running said software, that can satisfy World Wide Web client requests. A web server can, in general, contain one or more websites. A web server processes incoming network requests over HTTP and several other related protocols.
+
+**WiModem**: WiModem is an internet modem for your 8 bit computer that emulates a standard Hayes compatible modem.
 
 **wraparound**: The automatic continuation of text from the end of one line to the beginning of the next; wraparound means that you don't have to press the Return key at the end of each line as you type.
 
@@ -1266,134 +1376,6 @@ needed.
 **XON**: A special character (ASCII value $13) used for controlling the transfer of data between a microcomputer and a serial peripheral device. See handshaking, XOFF.
 
 **Y register**: One of the two index registers in the 6502 OR 65C816 microprocessor.
-
-**ADTPro**: Apple Disk Transfer ProDOS (ADTPro) transfers physical disks and disk images between Apple II-era computers and the modern world. It can even get your Apple running if you don't have any disks at all. The host (server) component runs on today's computers with Java, and the 8-bit Apple (client) component runs on any Apple II or Apple /// compatible computer with 64k of memory or more.
-
-**archive file**: An archive file is a file that is composed of one or more computer files along with metadata. Archive files are used to collect multiple data files together into a single file for easier portability and storage, or simply to compress files to use less storage space. Archive files often store directory structures, error detection and correction information, arbitrary comments, and sometimes use built-in encryption.
-
-**compression**: Compression is the process of encoding information using fewer bits than the original representation. Compression is useful because it reduces resources required to store and transmit data.
-
-**device driver**: A device driver is a computer program that operates or controls a particular type of device that is attached to a computer. A driver provides a software interface to hardware devices, enabling operating systems and other computer programs to access hardware functions without needing to know precise details about the hardware being used.
-
-**DHCP**: The Dynamic Host Configuration Protocol (DHCP) is a network management protocol used on Internet Protocol networks whereby a DHCP server dynamically assigns an IP address and other network configuration parameters to each device on a network so they can communicate with other IP networks.
-
-**DNS**: The Domain Name System (DNS) is a hierarchical and decentralized naming system for computers, services, or other resources connected to the Internet or a private network. It associates various information with domain names assigned to each of the participating entities. Most prominently, it translates more readily memorized domain names to the numerical IP addresses needed for locating and identifying computer services and devices with the underlying network protocols.
-
-**driver**: See device driver.
-
-**editor**: See text editor. 
-
-**Encryption**: 
-
-**environment**: 
-
-**File**: 
-
-**function**: 
-
-**GECOS**: 
-
-**Hash**: 
-
-**HTTPD**: 
-
-**IP**: 
-
-**IP Address**: 
-
-**LanCeGS**: 
-
-**loop**: 
-
-**Multi-tasking**: 
-
-**Multi-user**: 
-
-**negate**: 
-
-**Network Stack**: 
-
-**NSC, No Slot Clock**: 
-
-**ping**: 
-
-**pipe**: 
-
-**Preemptive**: 
-
-**Process**: 
-
-**process id**: 
-
-**RamWorks**: 
-
-**redirection**: 
-
-**return code**: 
-
-**SCSI**: 
-
-**SCSI Cable**: 
-
-**SCSI Card**: 
-
-**SCSI Drive**: 
-
-**SCSI Interface**: 
-
-**StdErr**: 
-
-**StdIn**: 
-
-**StdOut**: 
-
-**TCP**: 
-
-**Telnet**: 
-
-**Telnet Server**: 
-
-**TelnetD**: 
-
-**terminal**: 
-
-**terminal emulator**: 
-
-**text editor**: A text editor is a type of computer program that edits plain text. Text editors are provided with operating systems and software development packages, and can be used to change files such as configuration files, documentation files and programming language source code.
-
-**UDP**: 
-
-**User**: 
-
-**User ID**: 
-
-**User Name**: 
-
-**Uthernet**: 
-
-**Uthernet II**: 
-
-**VSDrive**: 
-
-**VT100**: 
-
-**VT100 Escape Code**: 
-
-**Web Server**: 
-
-**WiModem**: 
-
-**ProDOS 1.0**: 
-
-**ProDOS 2.0.3**: 
-
-**ProDOS 2.0.3tc**: 
-
-**ProDOS 2.4.2**: 
-
-**ProDOS 2.5**: 
-
-**ProDOSfx**: 
 
 ## License
 A2osX is licensed under the GNU General Public License.
