@@ -1,6 +1,8 @@
-# A2osX (0.93) Multi-Tasking OS for Apple II  
+# A2osX Multi-Tasking OS for Apple II  
 
 ### Updated February 10, 2020
+
+A2osX Version 0.93 Release Candidate has been finalized.  Media for this release, based on Build 193x are now available.  Future STABLE and BLEED builds will be based on work to complete 0.94.  Work has already started to make the A2osX API fully C compliant.  This will allow a new CSH shell and CC compiler to be added to A2osX as well as an enhanced web server (*httpd*) that can serve active server pages formed by user created CSH scripts.  In addition, Double High Graphics Resolution (DHGR) and Mouse drivers are being finalized which will allow developers to create games and new user interfaces for their A2osX applications.
 
 ## Latest News 2020-01-27
 

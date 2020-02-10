@@ -20,7 +20,7 @@ Most of our developers are using Notepad++ to edit the files stored in the repos
 
 So how do we get from a source text file on GH to a running binary on an Apple...that magic or rather our current particular flow is achieved by combining two tools, the **S-C Macro Assembler running under ProDos** hosted on **The AppleWin Emulator** running on Windows.  If you were to look at any (well most) of our source files in the GH repository you will see non-source like extras at the top and bottom of each file.  These are actually S-C Assembler directives.  If in AppleWin (AW) you mount and boot from the current BUILD media (found in .Floppies) the default behavior is to load the S-C Macro Assembler (you see the : prompt).  In our source files you will see at the top directives such as AUTO 4,1 which means start automatic line numbering at 4 incrementing by 1.  At the bottom of the file are directives such as TEXT SRC/LS.S which means save the source listing to the ProDOS disk in directory SRC as file LS.S.
 
-In our current work flow, we edit the file with Notepad++, save locally to sync with GH, and then we select all text in the file (Ctrl-A), Copy (control-C) and then switch to AW with the S-C : prompt and paste (Shift-Insert in AW).  That types the source into the assembler and the other bits at the top and bottom of the file which Assembles and saves everything to the BUILD disk image.  To test our new program (bin), you type -RUN which is the same as -A2OSX.SYSTEM which loads A2osX.   
+In our current work flow, we edit the file with Notepad++, save locally to sync with GH, and then we select all text in the file (Ctrl-A), Copy (control-C) and then switch to AW with the S-C **:** prompt and paste (Shift-Insert in AW).  That types the source into the assembler and the other bits at the top and bottom of the file which Assembles and saves everything to the BUILD disk image.  To test our new program (bin), you type -RUN which is the same as -A2OSX.SYSTEM which loads A2osX.   
 
 >As stated at the very beginning, technically this Assemble/BUILD is a native Apple II process.  Technically, you could run any ProDOS text editor, edit your source files and if using the right S-C Assembler commands you could Assemble binaries all in AW or on real Apple Hardware.  We do not do this ourselves as it would then break the GH/SVN part of the work flow which we think has value.  This document does not cover the Apple only dev process, but read the Planned Development Process for what is coming in that area.
 
@@ -37,24 +37,24 @@ by the S-C Software Corporation
 
 You can find more information about this assembler here: http://www.txbobsc.com/scsc/scassembler/index.html
 
-### Github
+### GitHub
+
+*GitHub* hosts the A2osX repository, of which this document is a part.  The whole repository can be found at http://www.github.com/a2osx/a2osx . As a standard *GitHub* repository you can use tools like *Git* and *Atom* to work with the files that make up A2osX. 
 
 ### TortoiseSVN
 
-We use TortoiseSNV to pull/push changes to GitHUb (commit/update).  Specifically we use version 1.10.2.28392 because we have found later versions have conflicts with GitHub.  There are other software packages available, many of them public domain, that can be used to manage GitHub respositories on your desktop.
+The A2osX development team uses *TortoiseSNV* to pull (sync) and push (commit) changes with *GitHub* .  Specifically we use version 1.10.2.28392 because we have found later versions have conflicts with *GitHub*.  There are other software packages available, many of them public domain, that can be used to manage *GitHub* respositories on your desktop including *GitHub Desktop*.
 
 ### MarkdownPad 2
 
-MD is a standard language for making documentation files.  We use MarkdownPad 2/Pro to edit our MD files, but there are many many alternatives, including some in the Public Domain.  In fact, ATOM is a standard alternate utilized by many in the GitHub community.
+Markdown is a standard language for making documentation files.  We use *MarkdownPad 2/Pro* to edit our documentation (.MD) files, but there are many many alternatives, including some in the Public Domain.  In fact, ATOM is a standard open source alternate utilized by many in the *GitHub* community.
 
-If you decide to use MarkdownPad 2 as we do, you may want to add support for GitHub Tables in Live preview you need to go into Options and change the Markdown Processor to GitHub Flavor and then you need to fix GitHub login because it it only supports SSL/TLS 1.0 which is not enabled by default in Windows.   to fix that you have to change some registry settings.
+If you decide to use *MarkdownPad 2* as we do, you may want to add support for *GitHub Tables* in Live preview you need to go into *Options* and change the *Markdown Processor* to *GitHub Flavor* and then you need to fix *GitHub login* because it it only supports SSL/TLS 1.0 which is not enabled by default in Windows.   to fix that you have to change some registry settings.
 
-Documentation for A2osX is written in standard Github Markdown language.  There are many editors you can use to read/make these files.  THis includes Atom??? and our favorite MarkdownPad 2.  Note though to use this edititor you need 
-
-Use MarkdownPad 2 Pro to edit Github Markdown files such as this one.  Note to fully use its features you need a pro license and you need to enable the Github markdown preview options.  If you have a GH account you will immediately get a login error because GH and Windows TLS settings are mismatched.  YOu should read this article: 
+>Note to fully use its features you need a pro license and you need to enable the Github markdown preview options.  If you have a *GitHub* account you will immediately get a login error because *GitHub* and Windows TLS settings are mismatched.  You should read this article: 
 https://stackoverflow.com/questions/33761919/tls-1-2-in-net-framework-4-0/44153734#44153734
 
-Basically you are going to have to use regedit to create the following keys:
+Basically you are going to have to use *regedit* to create the following keys:
 
 | Registry Entry | Items |
 | ----------- | ------------------- |
@@ -66,26 +66,19 @@ Basically you are going to have to use regedit to create the following keys:
 
 ### AppleWin
 
-If you use AppleWin and want to enable support for networking (AW supports the UtherNet I network card protocol) you must install a network shim that enables AppleWin to talk to the Internet.  You can search with Google how to do this, but basically you need to install WinPcap 4.1.3.
-
-VSDrive, Localhostmode ADTPro and setting this up...  
-make a bat file called adtlocal.bat and put in it
-@call "%~dp0adtpro.bat" localhost
+If you use AppleWin and want to enable support for networking (AW supports the UtherNet I network card protocol) you must install a network shim that enables AppleWin to talk to the Internet.  You can search with Google how to do this, but basically you need to install WinPcap 4.1.3.  See the **[Users Guide](.Docs/User%20Guide.md)** for more information on running A2osX on the AppleWin Emulator.
 
 ### CiderPress 4.0.3
 
+CiderPress is a nice utility for inspecting disk images on a Windows PC such as those provided by the A2osX team for running A2osX on Emulators.  More information on CiderPress can be found at **https://a2ciderpress.com** .
+
 ### PuTTY
 
-To Telnet to A2osX running TELNETD.
+A2osX supports additional connected users via either Super Serial Cards or the provided TELNETD daemon process.  For Telnet sessions of for connecting via the serial interface on A2osX running on AppleWin, you may find PuTTY for Windows to be readily available and compatible option.  See the **[Users Guide](.Docs/User%20Guide.md)** for more information on both SSC and TELNETD connected users.
 
 ### Notepad++
 
-Use Notepad++ which you can download from....
-
-#### S-C MASM color scheme for Notepad++
-...drop _Tools/userDefineLang.xml in %APPDATA%\Notepad++
-
-There is a userDefinedLang.xlm file in the .Tools dir that you will want to copy to Notepad... then when editing ASM files (.S) you can change your language to S-C MASM 65C02 and notepad++ will do the proper highlighting.
+The A2osX development team use Notepad++ to edit and maintain many of the source files.  You can learn about and download NotePad++ from **https://notepad-plus-plus.org** .  If you use Notepad++ a language specific color scheme plugin for S-C MASM has been made available to easy Apple Assembly development for A2osX.  This tool can be found in the .Tools folder of the A2osX repository.  You will need to copy this file (.Tools/userDefineLang.xml) into your %APPDATA%\Notepad++ directory on your PC.  Then in Notepad++ change your language to S-C MASM 65C02 and notepad++ will do the proper highlighting.
 
 ## License
 A2osX is licensed under the GNU General Pulic License.

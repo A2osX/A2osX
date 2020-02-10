@@ -245,6 +245,15 @@ The Virtual Serial Over IP emulation uses port 1977.  If you are not using *km.v
 
 >Note, the GSport/KEGS emulators offer a similar feature using port 6502.
 
+If you use AppleWin and want to enable support for networking (AW supports the UtherNet I network card protocol) you must install a network shim that enables AppleWin to talk to the Internet.  You can search with Google how to do this, but basically you need to install WinPcap 4.1.3.
+
+VSDrive, Localhostmode ADTPro and setting this up...  
+make a bat file called adtlocal.bat and put in it
+@call "%~dp0adtpro.bat" localhost
+
+
+
+
 ### Installing on Your Apple
 
 First check that your system meets the minimum hardware requirements.  Download one of the available images from GitHub.  Images are available in 140K (5 1/4 floppy), 800K (3.5 floppy) and 32MB (suitable for use with hard drive emulators).  You will need to use ADTPro to convert an image to physical media or a device such as a FloppyEMU or CFFA to load/boot one of these images on a real Apple.  If you are using a device such as the FloppyEMU or CFFA, you should use either the 800K or 32MB images (ProDOS volume name: FULLBOOT) as the smaller 140K image (ProDOS volume: MINIBOOT) is a pared down copy of A2osX that omits several utilities to fit in 140K.
