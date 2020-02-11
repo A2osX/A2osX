@@ -81,7 +81,7 @@ A2osX supports additional connected users via either Super Serial Cards or the p
 The A2osX development team use Notepad++ to edit and maintain many of the source files.  You can learn about and download NotePad++ from **https://notepad-plus-plus.org** .  If you use Notepad++ a language specific color scheme plugin for S-C MASM has been made available to easy Apple Assembly development for A2osX.  This tool can be found in the .Tools folder of the A2osX repository.  You will need to copy this file (.Tools/userDefineLang.xml) into your %APPDATA%\Notepad++ directory on your PC.  Then in Notepad++ change your language to S-C MASM 65C02 and notepad++ will do the proper highlighting.
 
 ## License
-A2osX is licensed under the GNU General Pulic License.
+A2osX is licensed under the GNU General Public License.
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by

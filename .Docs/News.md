@@ -241,7 +241,7 @@ Anyway, i'm convinced that a small team of developers could reach "version 1.0" 
 Well, let me know if you can bring "fresh blood" to this stuff... 
 
 ## License
-A2osX is licensed under the GNU General Pulic License.
+A2osX is licensed under the GNU General Public License.
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by

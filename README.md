@@ -1,8 +1,8 @@
-# A2osX (0.93) Multi-Tasking OS for Apple II  
+# A2osX Multi-Tasking OS for Apple II  
 
-### Updated January 27, 2020
+### Updated February 10, 2020
 
-## A2osX Release Candidate now available
+## A2osX Final Release Candidate for 0.93 now available
 
 See the **[news](#news)** section below for more information.
 
@@ -24,23 +24,9 @@ Consult the **[documentation](#documentation)** section below to find other reso
 
 ## News...
 
-**2020-01-27** - **Major update to A2osX 0.93**
+A2osX Version 0.93 Release Candidate has been finalized.  Media for this release, based on Build 193x are now available.  Future STABLE and BLEED builds will be based on work to complete 0.94.  Work has already started to make the A2osX API fully C compliant.  This will allow a new CSH shell and CC compiler to be added to A2osX as well as an enhanced web server (*httpd*) that can serve active server pages formed by user created CSH scripts.  In addition, Double High Graphics Resolution (DHGR) and Mouse drivers are being finalized which will allow developers to create games and new user interfaces for their A2osX applications.
 
-The A2osX team is proud to announce the availability of two new versions of ProDOS, one with a very minor tweak and the other a major update/overhaul.  There is ProDOS 2.03tc which is an 8 byte patch to ProDOS 2.03 to update the year table to support years through 2023 and ProDOS FX, a **F**aster and e**X**tended version, that adds many new features including lower case file, directory and volume name support.   These new versions are already being included in the latest **Stable** media and will become the versions of ProDOS supplied on all future media.  The team added a new Document to our repository that covers these and other publically available versions of ProDOS and their use with A2osX.
-
-A2osX now act actually has for quite some time supports lower case in file, directory and volume names as long as this capability is available in the version of ProDOS you are running.  Consult the new **[A2osX and ProDOS](.Docs/ProDOS.md)** document for more information and a table on which versions of ProDOS provide this capability to A2osX.
-
-The *EDIT* utility has undergone a major update.  We need your testing and feedback.  Please make sure to open issues on any anomalies you discover.
-
-Kernel/Shell rewrite to move more things to AUX freeing main mem.  with 2 tty used to be 22K free.  Now. 26.5K  with 1TTY 28.4K.  of course with 8 TTY  17.5K
-
-Speaking of changing the number of virtual TTYs, A2osX has been enhanced to now support up to 8 virtual terminals on the console, configurable with the KCONFIG utility.  Consult the User Guide for more information.  Note that with 8 virutal TTYs defines, available main memory drops to 17.5K.  Open Apple 1 through 8 is used to be switched between the virtual terminals, Open Apple-0 is still used to access the A2osX Console (displays system errors and information) and Open Apple-9 is reserved for future use of DHGR (Double High-res Graphics).
-
-A new bell option (**Echo \a**) has been added to the *echo* command in the shell (*/bin/sh*) to ring a bell on VT-100 connected terminals (via the SSC driver or the TELNETD deamon).  The bell has no affect on the console.
-
-Multiple bugs have been address from issues posted on GitHub including updates to *cut*, *format*, *sh* (for internal command), *nscutil*, *ping*, *wc*, and many more.  Users can check the status of issues or create new ones for A2osX on **[Github](https://github.com/burniouf/A2osX/issues)**.
-
-A great new networking utility, *wget* is now available which can be used to access/post to web servers.  This utility can be used in combination with services like IFTTT to send tweets from A2osX, or send message to apps like Slack.
+>Note, an issue has been found in the user management system, specifically with the *useradd* command.  This is being investigated and will be fixed in 0.94.  A potential work around is being tested.  This issue is being tracked in GitHub as **[Issue #148](https://github.com/A2osX/A2osX/issues/148)**.
 
 If you would like to read all the past news articles for A2osX, you can read the news article found **[here](.Docs/News.md)**.
 
@@ -64,10 +50,10 @@ In addition, there is the developer generated Technical Specifications that docu
 
 ## How You Can Help
 
-The A2osX Team welcomes your help in making this the best operating enviroment for the Apple 2!  Specifically, the more users who can test the most current RELEASE, CANDIDATE or STABLE media on their unique and report back their findings, the better A2osX becomes.  In additions, comments on, suggestions, or contributions to our documentation are greatly appreciated.  Lastly, A2osX would not be what it is without our great core development team. We could certainly use more developers, especially in Assembly (S-C Assembler familiar even better) to contribute new utilities, applications and features for A2osX.
+The A2osX Team welcomes your help in making this the best operating environment for the Apple 2!  Specifically, the more users who can test the most current RELEASE, CANDIDATE or STABLE media on their unique hardware and report back their findings, the better A2osX becomes.  In additions, comments on, suggestions, or contributions to our documentation are greatly appreciated.  Lastly, A2osX would not be what it is without our great core development team. We could certainly use more developers, especially in Assembly (S-C Assembler familiar even better) to contribute new utilities, applications and features for A2osX.
 
 ## License
-A2osX is licensed under the GNU General Pulic License.
+A2osX is licensed under the GNU General Public License.
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by

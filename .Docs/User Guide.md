@@ -1,6 +1,6 @@
 # A2osX User Guide
 
-### Updated February 9, 2020
+### Updated February 10, 2020
 
 This Guide provides information on getting started with A2osX.  This Guide helps you understand the basic features, capabilities and operation of A2osX.  This should be the first document you read before, or soon after, installing or running A2osX.
 
@@ -101,8 +101,6 @@ Some notes on the above:
 - When the KERNEL first starts, if the user presses Control-R a special maintenance mode is enabled.  This is discussed in detail below.
 - The *./etc/init* file can be used to automatically start the *ssc.drv* and **getty** process for an external terminal.  It can also be used to load network drivers and processes at boot.
 - The ./${HOME}/profile file can be used to change a users default $PATH, run a Shell Script or load a particular program when a user logs in.
-
->**Need new section here on DEBUG.po and how to use it to solve hardware conflict issues**
 
 If you decide to install/copy A2osX to your own existing Hard Drive or volume, you just need to be sure to keep the A2osX file system structure in tact.  To start A2osX "manually" as it were, you change your PREFIX to the appropriate sub-directory and then load *A2OSX.SYSTEM*.  So for example, if you had a CFFA card that booted to a volume called /HD1, you could make a subdirectory on this disk called A2OSX.  You would then set your PREFIX to */HD1/A2OSX* and launch *A2OSX.SYSTEM* and the rest of the boot process outlined above would be followed.  Please see the section on Installation for more information on putting A2OSX on your own media.
 
@@ -247,13 +245,6 @@ The Virtual Serial Over IP emulation uses port 1977.  If you are not using *km.v
 
 If you use AppleWin and want to enable support for networking (AW supports the UtherNet I network card protocol) you must install a network shim that enables AppleWin to talk to the Internet.  You can search with Google how to do this, but basically you need to install WinPcap 4.1.3.
 
-VSDrive, Localhostmode ADTPro and setting this up...  
-make a bat file called adtlocal.bat and put in it
-@call "%~dp0adtpro.bat" localhost
-
-
-
-
 ### Installing on Your Apple
 
 First check that your system meets the minimum hardware requirements.  Download one of the available images from GitHub.  Images are available in 140K (5 1/4 floppy), 800K (3.5 floppy) and 32MB (suitable for use with hard drive emulators).  You will need to use ADTPro to convert an image to physical media or a device such as a FloppyEMU or CFFA to load/boot one of these images on a real Apple.  If you are using a device such as the FloppyEMU or CFFA, you should use either the 800K or 32MB images (ProDOS volume name: FULLBOOT) as the smaller 140K image (ProDOS volume: MINIBOOT) is a pared down copy of A2osX that omits several utilities to fit in 140K.
@@ -282,7 +273,7 @@ All of the commands above are documented in the A2osX Command Guide or the Shell
 
 ### Configuring A2osX
 
-There are several ways you can configure A2osX to suit your needs.  Some of these 
+There are several ways you can configure A2osX to suit your needs.  The two must common are 1) via the *kconfig* utility and 2) by modifying the */etc/init* file.
 
 ## Exploring A2osX
 
@@ -293,63 +284,6 @@ In A2osX, using a command like *telnet* involves loading a driver for your hardw
 >A note on memory management:  While the architecture of A2osX saves considerably on memory usage through shared libaries, the network stack still consumes approximately 10K.  There may be times when you no longer need the network but do need more free memory to execute an application or script.  In these cases, it is possible to unload portions of the network stack (specifically the library) but not others (the driver).  If you have no network applications running (this is important!) like *telnetd*, *httpd*, *ping*, *telnet*, etc. and you use *kill* on the **PID** of the *networkd* process this will unload the network library returning about 8K to the memory pool.
 
 >A more technical note: When you start networking, you load a driver and then you execute *networkd* passing it the names of the network libraries you want loaded (typically *libtcpip*).  After loading the library, *networkd* reads *etc/tcpip.conf* to configure TCP/IP and if not present requests settings via DHCP.  If for some reason the DHCP lease did not work you can use the command *ipconfig* to repeat the network config stage.  As stated above you can unload networking, this note explains what actually occurs under the covers (the internals).  When *networkd* starts and loads *libtcpip* a lock is placed on *libtcpip* to indicate a process is using it (in this case *networkd*).  Then when you load other network programs such as *telnetd*, the telnet server daemon, another lock is placed on *libtcpip*.  If you then run *ping* or *telnet* another lock is added, but then when they finish and exit, that lock is removed.  When all locks have been removed the library automatically unloads (this is how you recover the memory the library uses).  It is VERY important that you stop all the applications using *libtcpip* before stopping *networkd*.  This is because if you stop *networkd* first, then *telnetd* will be left in an unknown state (it is waiting on pulses from *networkd* which you just stopped) **and** it is holding a lock *libtcpip* so it never gets unloaded. 
-
-install the drivers for the hardware (uther, lances, ssc, etc.)
-then NETWORKD lib lib  (and the libs are tcpip or etalk maybe) libs are protocalls here
-  in the LIB directory now are LIBTCPIP and LIBETALK
-NETWORKD will read ETC/NETWORK will load network programs
-  right now it contains IPCONFIG, you can also add to it HTTPD TELNETD etc, they are loaded in order and each needs to complete its full load before next one happens (assuring IPCONFIG happends before TELNETD tries to load)
-IPCONFIG will then look for ETC/TCPIP.CONF, if found uses those settings, if not does dhcp.  in addition ipconfig uses ETC/HOSTNAME and ETC/HOSTS for setting hostname and doing DNSloopups
-
-Hardware Drivers
-	MAC Address
-TCPIPD
-Fixed IP
-	TCPIP.CONF file
-	Internet Addresses
-DHCP
-HOSTS file
-HOSTNAME file
-Configuring Network at Boot Time
-	ETC/INIT
-Configuring Network on Demand
-	NET script
-Telnet Server
-Telnet Client
-PING
-ARP
-NETSTAT
-HTTPGET
-dhcpclnt
-Telnetd
-httpd
-
-
-### Utilities
-
-#### Using Text Editors
-EDIT
-
-#### Commands for navigating the file system
-CD
-CD ..
-PWD
-PATH
-PUSHD
-POPD
-LS
-LS -L or L
-
-#### Commands for working with files
-
-MV
-CP
-RM
-
-#### Commands for working with directories
-
-MD
-RD
 
 ## Error Messages
 

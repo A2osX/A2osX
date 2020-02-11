@@ -1,6 +1,6 @@
 # A2osX Shell Developers Guide
 
-### Updated February 9, 2020
+### Updated February 10, 2020
 
 One of the most significant parts of A2osX is its shell which can perform both interactive and scripted tasks.  Using the interactive part of the shell, you can perform many common and complex tasks using both built-in (native or internal to shell) and external (BIN or executable) commands.  Internal commands include CD (change directory), MD (make directory), PWD, DATE, etc.  External commands include CP (copy), RM (remove), CAT (display file contents), TELNET, etc.  It is even possible to create and execute short scripts right on the interactive command line (these are run once and not saved like true scripts) such as:
 
@@ -410,7 +410,6 @@ In addition to the special codes above that can used to manage all displays (bot
 	#	This example displays HELLO COLOR WORLD with the word COLOR in Bright Yellow on a Dark Blue Background.
 	echo "HELLO \e[7mINVERSE\e[0m WORLD"
 
-
 As you can see \e[0m turns off all character attributes.  It is like a reset.  The following table shows color codes that can be used with VT-100 emulators like PuTTY.
 
 ![image](https://user-images.githubusercontent.com/180313/70875571-5fb40980-1f84-11ea-8b2a-f537fce6c07c.png)
@@ -476,11 +475,12 @@ The **fi** command is used at the end of an **if** script block. See the **if** 
 
 ### FOR
 
-	for
+	for <var> = "constant string of space separated words"
+	for <var> = <string var>
+	for <var> in (file)
+	for <var> in `command`
 
 The **FOR** command is used 
-
-
 
     #!/bin/sh
 	#
