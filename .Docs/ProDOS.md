@@ -1,6 +1,6 @@
 # A2osX and ProDOS
 
-### Updated February 10, 2020
+### Updated February 11, 2020
 
 As discussed in the **[Users Guide](.Docs/User%20Guide.md)**, A2osX runs on top of ProDOS, leveraging its support for block devices such as floppy drives, hard drives, SmartPort drives, etc.; it is limited in its ability to implement certain features based on the capabilities of the underlying operating system, in this case ProDOS.  This document will provide an overview of those features and their availability or absence from several versions of ProDOS including two new versions of ProDOS created by the makers of A2osX.
 
@@ -16,12 +16,11 @@ The A2osX team is proud to announce the availability of two new versions of ProD
 
 ## Tested Versions
 
-
 ok, back on Prodos….  I am going to close saying, we test both 2.03 and 2.42.  people can use what they like (look at User Guide on installing a2osx on your own HD/booting your own prodos).  Have nice day.  Nothing to be said of FX.  I think one question to answer in future is when you do ProDos FX, will a2osx stop working on standard prodos?
 
 For 0.93, the current project milestone, we have decided to include on the A2osX media a very slightly modified version of 2.0.3 which you will notice during boot of ProDOS is labeled as 2.0.3tc.  This stands for ThunderClock and basically this version is an exact copy of 2.0.3 with 7 bytes changed to update the ProDOS year table to be current (it is the same work to correct the year that is done in 2.4.2/2.5 by John Brooks).  Note, we do test A2osX regularly with other versions of ProDOS (the author of this note regularly runs 2.4.2).  For consistency and support we will standardize on 2.03tc for this release and readdress which version of ProDOS should be included when we start creating 0.94 builds.
-Also note, users can replace ProDOS with another version, or as is expected for many with hard drives/emulators, they can install A2osX onto a subdirectory of their HD/Drive which boots their preferred version of ProDOS.  In fact, we are planning for an upcoming release an “INSTALL” method that will create this subdirectory, copy the necessary files and make any changes to A2osX config files needed so people can run A2osX in this manner.
 
+Also note, users can replace ProDOS with another version, or as is expected for many with hard drives/emulators, they can install A2osX onto a subdirectory of their HD/Drive which boots their preferred version of ProDOS.  In fact, we are planning for an upcoming release an “INSTALL” method that will create this subdirectory, copy the necessary files and make any changes to A2osX config files needed so people can run A2osX in this manner.
 
 ## Version Overview Chart
 
@@ -50,7 +49,7 @@ The following chart lists all the known (to the author) versions of ProDOS and
 | 2.4 | Not Tested | No | TC 1999|Enhanced |17128 | |
 | 2.4.1 | Not Tested | No | TC 1999| Enhanced| 17128| |
 | 2.4.2 |Working | No | TC 2023| Enhanced|17128 | |
-| 2.5.0a8 |Working w/ Issues | No | TC 2924|Advanced | 16616| |
+| 2.5.0a8 |Working w/ Issues | Yes | TC 2924|Advanced | 16616| |
 | FX || Yes | TC 2023<br>NSC<br>GS/Cortland | Advanced| 15244| |
 | FX Paked || Yes | TC 2023<br>NSC<br>GS/Cortland | Advanced|13295 | |
 
@@ -60,20 +59,13 @@ With the release of ProDOS 8 (Version 1.2) Apple Modified the ProDOS 8 loader co
 
 ### Clock Support
 
-
-WHile you are on that....  I am working on an updated readme to go with next RC....  I am going to talk about new FX and how it supports LC (I think we need to talk more about FILE file File fILe...) and more info about FX.PAK on 140K media.  Is there anything else in FX to note [oh SP drive mapping stuff from produs enhancement channel).  Also in readme new PAK/UNPAK, TERM, ask for more devs, testers, especially with HW, and some doc readers would be nice.  Further on Pdos, say we have tested on 2.5a8 and works, unsupported at this time (you can file issue but may not be addresses).  known that date display in LS no work becasue 2.5 breaks standard and we may not adapt.  8 drive per slot "?works" but a2 reports multiple drives as D1/2 and again non-standard we may not change/adapt to.  so basically use 2.5 at own risk at moment.   What else should be talked about?
+While you are on that....  I am working on an updated readme to go with next RC....  I am going to talk about new FX and how it supports LC (I think we need to talk more about FILE file File fILe...) and more info about FX.PAK on 140K media.  Is there anything else in FX to note [oh SP drive mapping stuff from produs enhancement channel).  Also in readme new PAK/UNPAK, TERM, ask for more devs, testers, especially with HW, and some doc readers would be nice.  Further on Pdos, say we have tested on 2.5a8 and works, unsupported at this time (you can file issue but may not be addresses).  known that date display in LS no work becasue 2.5 breaks standard and we may not adapt.  8 drive per slot "?works" but a2 reports multiple drives as D1/2 and again non-standard we may not change/adapt to.  so basically use 2.5 at own risk at moment.   What else should be talked about?
 
 I am thinking that on 800k and 32mg images i will make a dir called /opt/prodos and place in it all 3 current versions prodos.203tc, .fx .fx.paked and put in User Guide that people can try them all and we will put in readme announcing Fx, announce tc at same time and say they should test all
 
-
 ## Overview
 
-
 I am going to put some big warning in doc that says "any new Version of ProDOS, be it FX or 2.5" needs to be thoroughly tested and should not be used on volumes that have not been backed up or contains valuable data" or something."  and further I think we need some BOLD warning that making FILE file (even by accident) in a dir can make a vol permanately unavailable for access under GSOS  (unless we change this, which of course I am pushing for)
-
-
-you should do a comparative table between 203/FX/2.5
-	list file sizes of various prodos and paked version
 
 Technical documentation for ProDOS can be found **[HERE](/https://prodos8.com/docs/)**.
 
