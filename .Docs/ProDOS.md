@@ -90,82 +90,16 @@ ProDOS FX is a branch new version of ProDOS built by the A2osX team from a signi
 >### **Repeating this note because it is important: As with any new critical piece of software such as an operating system that handles writing to disks, you should test this software extensively before using it with any disks, volumes, images, data containing valuable information!** #
 
 
-FX supports extended syntax for filenames
-1st char in  . _ a-z A-Z
-char 2-15 in . _ a-z A-Z 0-9
+- Added lowercase support
+- Extended syntax for filenames with the 1st char in  . _ a-z A-Z and char 2-15 in . _ a-z A-Z 0-9
+- Enhanced IRQ manager (does NOT support //e OLD roms)
+- Adds support for No Slot Clock and //gs internal clock to existing ThunderClock driver
+- ThunderClock supports years through 2023
+- Smaller on Disk, loads faster
+- PAKed version available (even smaller on disk) for use with 140K floppies
+- Added SmartPort remap from any slot to any slot, up to 14 devices, if 14 devices mounted, /RAM wont install
 
-"Faster, eXtended"
-
-How is it faster?
-redundant read removed at boot.....
-optimized XRW planned
-size is lower...so helps fast booting
-
-if you want to keep your ProDOS volume still readable from 203.....no DUP files....and no extended syntax files (.profile...etc...)
-and no /lowercasevol
-2.5 has same limitation but only because they do /lowercasevol
-they dont do case sensitivity nor extended syntax
-because they implemented case sensitivity differently and they hit many imcompatibilites
-
-removed support for machine < //e Enh ROM
-remove support for machine < 128k
-remove 40col Quit code
-removed relocator and added UNPAK code
-Enhanced IRQ manager (does NOT support //e OLD roms)
-
-a lot of old code in loader was removed
-before prodos ran on 48k ok 64k systerms
-so there were a relocator, i removed it
-
-FX supported clocks  : NSC, TClock ->2023 & Cotland Clock
-
-FX remap more devs......once i fix bugs for your SCSI board
-*more than 203
-but different way than 2.5
-better support for legacy apps
-old IRQ manager also
-
-add a note about FX smaller on disk...only 13k
---->even smaller if paked  (what size)
-
-Added NSC clock support
-TCLOCK year -> 2023
-
-Added SmartPort remap from any slot to any slot, up to 14 devices
-
-i'm changing lot of thing everywhere so that everything works the same with or without lowercase
-so basically, everything in now internally lowercased....if run under 203, prodos make it uppercase
-if run under FX, it is now natively case sensitive
-so the ruse is:
-type everything in your script in lowervcase, including #!/bin/sh
-internal SH commads are still CI
-so ECHO & echo works
-but ls in now lowercase
-if under 203
-LS works
-ls works to
-if FX, only ls works
-LS = file not found
-
-and in your BUILD scripts:
-if 14 dev mounted, /RAM wont install
-
-Added support for "." and "_" in filenames
-only restriction is filename 1st char != 0..9
-
-Added lowercase support
-
-Patrick Kloepfer  8:46 AM
-On the SP remap… lets say you have a Ramworks III with 512K, an Apple Slinky 1meg in S4, a CFFA in S5 with 8 devices and a MDT with 4 block mode devices in Slot 7.  What happens?  (that totals 14, but how do you deal with /RAM3 and /RAM4.  What happens if same cards but CFFA set to 12 devices?  Also, what if 5.25 controller in S6 when cffa set either to 8 or 16.
-
-it remaps where there is room for
-if you have 4 devs is S7 and 2 in S6....it will remap 2 extra in slot 7 trying to find room starting at S5, then S4...3...2..1....
-if 14 devs already mapped....it wont try to install /RAM3
-and you wont be able to install Ramworks' /RAM3
-
-so in the above….4 devs from card in 7, it takes the 2 for 7, now finds room for other 2, looks at 6 sees floppies taking both, moves to 5 (does it take 2 here and force card to fend for itself next or see that 5 is a SP card itself and move on).  when either card sees slinky in 4 (as /RAM4 as S4D1) does it take the S4D2 spot that can be mapped?  if the numbers would work such that RWIII gets an S3D2, will anything ever get mapped to S3D1 (I think you are saying yes)
-
-if S4D2 is free it will be used by remap....so S3D1....
+**VERY IMPORTANT**: ProDOS FX allows for the files **File**, **file**, **fiLE** and **FILE** all to exist in the same directory.  They are unique to ProDOS FX.  This may (**IS LIKELY**) incompatible with other operating systems accessing the same volumes, most notably GSOS.  This is also true of files that start with . (dot or period) and _ (underscore).  Testing and care should be taken when using these features on volumes that you plan to share with other operating systems.
 
 The ProDOS FX version is included on the 32MB media images which are designed to be standalone bootable images.  In addition, there is a very special ProDOS FX PAKED version, that is the same as the standard FX image once running, but the file has been compressed and contains a special loader to uncompress ProDOS as it initializes.  This version uses less disk space and is used on 140K media where space is at a premium. 
 

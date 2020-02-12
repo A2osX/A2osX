@@ -674,15 +674,13 @@ The **SET** command is used to set or clear the value of variables as well as to
 
 #### Variables
 
-The most simplistic form of set is **SET var = value** such as SET myVar = 6, where the shell will create a new variable called MyVar and in this case make it an Interger (32-bit) and set its value to 6.
+The most simplistic form of set is **SET var = value** such as SET myVar = 6, where the shell will create a new variable called MyVar and in this case make it an Integer (32-bit) and set its value to 6.
 
 As seen throughout this guide, scripts are very useful for automating many repetitive tasks.  To get the most out of scripts, you are likely going to want input from the user or gather existing data stored in your file system and then use this to control program flow.  To do this, you are likely going to want to use variables to store and process the data your script relies on.  This section will provide
  you with the information you need to get the most out of your own, as well as system provided, variables.
 
 All variables have names, starting with xxx, can be any length, but longer is not better.  They are case sensitive so AVAR, Avar, aVar, and avar are actually 4 different variables.  There are only two kinds of variables internally, strings and integers.  
  
-
-
 Variable overflow strings and ints
 Ints only no real num it just ignore
 
@@ -794,9 +792,7 @@ The **SLEEP** command is used to pause the execution of a script for 1/10th of a
 
 The **CASE** command is used at the start of a block of statements to be optionally executed based on the evaluation of \<expression\> as part of a **SWITCH** script block. See the **CASE** command below for more information and example of using **BREAK**.
 
-
 The **SWITCH** statement is used at the start of a multiway program flow control block statement.  The **SWITCH** statement is really a different form of the **IF** statement that is a significant improvement over using **IF** with many nested **ELSE ; IF** blocks.  **SWITCH** provides an easy way to dispatch execution to different parts of code based on the value of the expression. Switch is a control statement that allows a value to change control of execution.
-
 
 ### WHILE
 
@@ -815,15 +811,25 @@ The shell
 
 ## Piping
 
-| \|     | Working | pipe |
+A pipe is a mechanism for inter-process communication using message passing. A pipeline is a set of processes chained together by their standard streams, so that the output text of each process (stdout) is passed directly as input (stdin) to the next one. The second process is started as the first process is still executing, and they are executed concurrently.  The A2osX shell fully supports piping with the use of the pipe character \| (the vertical bar).
+
+	# pipe the output of cmd1 to cmd2
+	$ cmd1 | cmd2
+	# list all files in the current directory recursively and pipe the output to more so output can be paged. 
+	ls -R | more
 
 ## Environment
 
-| .      | Working | use same env |
+The shell maintains an environment that includes a set of variables defined by the login program, your user initialization files (profile) and your programs or scripts.  When a new script is run the shell with make a copy of the current environment and then run that script.  When the script finishes executing the shell deletes that environment (freeing the  memory it uses).  This means any variables it creates, or existing ones that are changed are removed and the previous values are returned (as you put back to the original enviroment from which the copy was made.  If instead, you call your script by preceding it with a . (dot or period), the shell will run that new script in the *current* environment.  This means any changes to vars or new vars created are *retained* when the script exits.
+
+	# call myscript using the current environment
+	. myscript 
 
 ## Processes
 
-| &      | Working | start proc |
+A2osX allows you to start a program and run it in the background by adding a space and ampersand ( &) to the end of the command line.
+	# execute a program or script in the background
+	myprogram &
 
 ## Writing Scripts
 
@@ -868,16 +874,6 @@ The following example demonstrates the complete validation concept outlined abov
 			FI
 		FI
 	FI
-
-### Shell Environment
-
-Copy Vars????, Different Context, own vars get lost, own funcs, when called with dot, is using the same env. 
-
-
-
-
-
-
 
 ### Line Separator
 
