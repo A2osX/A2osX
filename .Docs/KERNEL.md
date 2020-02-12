@@ -30,8 +30,8 @@ Expand String and convert to StrV List
 short int arg2argv(char* args, char* argv[])  
 
 ## ASM  
-`>PUSHW args`  
 `>PUSHW argv`  
+`>LDYA args`  
 `>SYSCALL Arg2ArgV`  
 
 ## RETURN VALUE  
@@ -111,7 +111,7 @@ Create a hDEV
 `int hDIR opendir (const char * dirpath);`  
 
 ## ASM  
-`>PUSHW dirpath`  
+`>LDYA dirpath`  
 `>SYSCALL opendir`   
 
 ## RETURN VALUE   
@@ -150,10 +150,25 @@ Create a hDEV
 ## RETURN VALUE  
  none, always succeed.   
 
+# Expand  
+
+## C  
+`char *expand(const char *str, char *expanded);`  
+
+## ASM  
+**In:**  
+`>PUSHW str`  
+`>PUSHW expanded`  
+`>SYSCALL expand`  
+
+## RETURN VALUE  
+ Y,A = PTR to Expanded String   
+ X = hMem to Expanded String (C-String)  
+
 # SetEnv  
 Change or add an environment variable  
 
-## C / CSH  
+## C  
 `int setenv(const char *name, const char *value);`  
 
 ## ASM  
@@ -168,7 +183,7 @@ Change or add an environment variable
 searches the environment list to find the environment variable name,   
 and returns a pointer to the corresponding value string.  
 
-## C / CSH  
+## C  
 `char *getenv(const char *name, char *value);`  
 
 ## ASM  
@@ -184,7 +199,7 @@ and returns a pointer to the corresponding value string.
 # PutEnv  
 Change or add an environment variable, string is 'NAME=VALUE'  
 
-## C / CSH  
+## C  
 `int putenv(char *string);`  
 
 ## ASM  
@@ -197,7 +212,7 @@ Change or add an environment variable, string is 'NAME=VALUE'
 # UnsetEnv  
 Remove an environment variable  
 
-## C / CSH  
+## C  
 `int unsetenv(const char *name);`  
 
 ## ASM  
@@ -215,8 +230,8 @@ Change The type of a ProDOS File
 
 ## ASM  
 **In:**  
-`>PUSHW filepath`  
-`>PUSHB filetype`  
+`>PUSHBI filetype`  
+`>LDYA filepath`  
 `>SYSCALL chtyp`  
 
 ## RETURN VALUE  
@@ -424,10 +439,10 @@ Y,A = PTR to MemBlock
 
 # LoadStkObj  
 Load a file in AUX memory (Stock Objects)  
- PUSHW = PATH (Handled by....  
- PUSHB = MODE  ...  
+ PUSHW = AUXTYPE (Handled by....  
  PUSHB = TYPE  ...  
- PUSHW = AUXTYPE ...FOpen)  
+ PUSHB = MODE  ...  
+ LDYA = PATH ...FOpen)  
 
 ## RETURN VALUE  
  Y,A = File Length  
@@ -450,8 +465,8 @@ Load a file in AUX memory (Stock Objects)
 
 # ExecL  
 
-## C / CSH  
-`int execl(const char *cmdline, short int flags);`  
+## C  
+`int execl(const char* cmdline, short int flags);`  
 
 ## ASM  
 `>PUSHW cmdline`  
@@ -463,12 +478,12 @@ A = Child PSID
 
 # ExecV  
 
-## C / CSH  
+## C  
 `int execv(const char* argv[], short int flags);`  
 
 ## ASM  
-`>PUSHW argv`  
 `>PUSHB flags`  
+`>LDYA argv`  
 `>SYSCALL execv`  
 
 ## RETURN VALUE  
@@ -477,7 +492,7 @@ A = Child PSID
 # Fork  
 
 ## C  
-`short int fork();`  
+`short nt fork();`  
 
 ## ASM  
 `>SYSCALL fork`  
@@ -689,8 +704,8 @@ Return information about a file
 
 ## ASM  
 **In:**  
-`>PUSHW pathname`  
 `>PUSHW statbuf`  
+`>LDYA pathname`  
 `>SYSCALL stat`  
 
 ## RETURN VALUE  
@@ -703,8 +718,8 @@ create a directory
 
 ## ASM  
 **In:**   
-`>PUSHW pathname`  
 `>PUSHW mode`  
+`>LDYA pathname`  
 `>SYSCALL mkdir`  
 
 ## RETURN VALUE  
@@ -975,10 +990,9 @@ Open a file
 **In:**  
 
 ## ASM  
-`>PUSHW filename`  
-`>PUSHB flags`  
-`>PUSHB ftype`  
-`>PUSHW auxtype`  
+`>PUSHWI auxtype`  
+`>PUSHBI ftype`  
+`>PUSHBI flags`  
  + O.RDONLY : if R and exists -> ERROR  
  + O.WRONLY : if W and exists -> CREATE  
  + O.TRUNC : Reset Size To 0  
@@ -994,6 +1008,7 @@ TODO: replace flags/ftype/auxtype with mode="w+,t=TYP,x=AUXTYPE"
  + a+ = O_RDWR | O_CREAT | O_APPEND  
  + ,t=123 or t=$ff or t=TXT  
  + ,x=12345 or x=$ffff  
+`>LDYAI filename`  
 
 ## RETURN VALUE   
  CC : A = hFILE  
@@ -1106,7 +1121,7 @@ int remove(const char *pathname);
 
 ## ASM  
 **In:**  
-`>PUSHW pathname`  
+`>LDYA pathname`  
 `>SYSCALL remove`  
 
 ## RETURN VALUE  
@@ -1119,8 +1134,8 @@ Rename a file
 
 ## ASM  
 **In:**  
-`>PUSHW oldpath`  
 `>PUSHW newpath`  
+`>LDYA oldpath`  
 `>SYSCALL rename`  
 
 ## RETURN VALUE  
@@ -1203,12 +1218,12 @@ Convert String to 16 bits int
 Return the canonicalized absolute pathname  
 
 ## C  
-`char *realpath(const char *path, char *resolvedpath);`  
+`unsigned short int realpath (const char* str, char *resolvedpath);`  
 
 ## ASM  
 **In:**  
-`>PUSHW path`  
-`>PUSHW resolvedpath`  
+`>PUSHWI resolvedpath`  
+`>LDYA str`  
 `>SYSCALL realpath`  
 
 ## RETURN VALUE  
@@ -1216,20 +1231,6 @@ CC : success
  Y,A = Ptr to Full Path (C-String Buffer, MLI.MAXPATH+1)  
  X = hMem of Full Path  
 CS : A = Error Code  
-
-# Expand  
-
-## C  
-`char *expand(const char *str, char *expanded);`  
-
-## ASM  
-`>PUSHW str`  
-`>PUSHW expanded`  
-`>SYSCALL expand`  
-
-## RETURN VALUE  
- Y,A = PTR to Expanded String   
- X = hMem to Expanded String (C-String)  
 
 # StrLen  
 Returns Length of C-String  
