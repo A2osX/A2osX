@@ -1,10 +1,10 @@
 # A2osX Shell Developers Guide
 
-### Updated February 10, 2020
+### Updated February 12, 2020
 
 One of the most significant parts of A2osX is its shell which can perform both interactive and scripted tasks.  Using the interactive part of the shell, you can perform many common and complex tasks using both built-in (native or internal to shell) and external (BIN or executable) commands.  Internal commands include CD (change directory), MD (make directory), PWD, DATE, etc.  External commands include CP (copy), RM (remove), CAT (display file contents), TELNET, etc.  It is even possible to create and execute short scripts right on the interactive command line (these are run once and not saved like true scripts) such as:
 
-	FOR FILE IN `LS -C CT*`; CAT ${FILE}; NEXT
+	for file in `ls -c CT*`; cat ${file}; next
 
 In this example, the system will generate a list of files found in the current directory which match the CT* wild card and perform the CAT operation on each.  The semicolons act as line separators allowing you to type in multiple commands, or short scripts on a single line.
 
@@ -54,18 +54,17 @@ Whether in scripts or typed in at the interactive Shell prompt ($), most command
 	command <switch> <value> <switch> argument argument   or
 	command [ <condition> ]
 
-where in the first nomenclature a **command** performs an action with or on the objects passed as *\<arguments\>*, modifying its behavior (the action it performs) based on *\<switches\>* if present.  For example in the case of **ls -l /myvol** the command is **ls**, the option or switch is **-l** and the argument (target of the operation) is **/myvol**, which in this case the command would print a long listing of the root directory fo the ProDOS volume named /myvol.  The second nomenclature is used with the logic/control commands **if** and **while** where a *\<condition\>* is evaluated and the result is processed by the command to effect program flow.
+where in the first nomenclature a **command** performs an action with or on the objects passed as *\<arguments\>*, modifying its behavior (the action it performs) based on *\<switches\>* if present.  For example in the case of `ls -l /myvol` the command is *ls*, the option or switch is *-l* and the argument (target of the operation) is /myvol, which in this case the command would print a long listing of the root directory for the ProDOS volume named /myvol.  The second nomenclature is used with the logic/control commands *if* and *while* where a *\<condition\>* is evaluated and the result is processed by the command to effect program flow.
 
-> A note on command line structure for internal and external commands: When passing a command a series of arguments, you must include a space between each argument.  In addition, if a command has an option that requires an argument, there must also be a space between the option and its argument.  For example, when using the READ command which has the -S -P and -N options, the -P and -N options both require an argument so the full use of the command would be **read -s -n 3 -p "My Prompt" avar**.  Do not use -n3 as you might in Linux or DOS as you will generate a Syntax Error and the command will fail to execute.  Also note, for many commands the order of the arguments is important (i.e. **cp** sourcefile destfile, the order is critical), however the order of options is not.  **read -s -n 3 -p "MyPrompt" avar** is the same as **read -p "MyPrompt" avar -s -n 3 ** as well as **read -s avar -n 3 -p "MyPrompt"**.  What is critical here is that you **must** have a number immediately after **-n** and a string after **-p** which will be the prompt.
+> A note on command line structure for internal and external commands: When passing a command a series of arguments, you must include a space between each argument.  In addition, if a command has an option that requires an argument, there must also be a space between the option and its argument.  For example, when using the READ command which has the -S -P and -N options, the -P and -N options both require an argument so the full use of the command would be `read -s -n 3 -p "My Prompt" avar`.  Do not use *-n3* as you might in Linux or DOS as you will generate a Syntax Error and the command will fail to execute.  Also note, for many commands the order of the arguments is important (i.e. `cp sourcefile destfile`, the order is critical), however the order of options is not.  `read -s -n 3 -p "MyPrompt" avar` is the same as `read -p "MyPrompt" avar -s -n 3` as well as `read -s avar -n 3 -p "MyPrompt"`.  What is critical here is that you **must** have a number immediately after *-n* and a string after *-p* which will be the prompt.
 
 ### Arguments
 
-As briefly discussed above, almost all commands take and most even require an argument which affects the command's behavior.  For example the **sleep** command requires that you pass it an argument that indicates the amount of time to SLEEP.  Arguments come in many forms; each of these is discussed here.  
+As briefly discussed above, almost all commands take and most even require an argument which affects the command's behavior.  For example the *sleep* command requires that you pass it an argument that indicates the amount of time to SLEEP.  Arguments come in many forms; each of these is discussed here.  
 
 #### \<conditions\>
 
-The shell features a lot of built-in checks and comparisons called \<conditions\> throughout this guide.  This particular form of an argument is used exclusively by the **if** and **while** commands where the \<condition\> is evaluated and result is used to control program flow with in the defined **if-else-fi** or **while-loop** block.  All conditions must be enclosed with in brackets **[]**.  In addition to the capabilities found in the extensive list of checks and comparisons listed below, conditional execution can be enhanced by negating with an ! in front of a condition and/or compounding with AND and OR between two or more conditions.  The following scripts show examples of the possible conditions 
- can use while writing your own scripts.
+The shell features a lot of built-in checks and comparisons called \<conditions\> throughout this guide.  This particular form of an argument is used exclusively by the *if* and *while* commands where the \<condition\> is evaluated and result is used to control program flow with in the defined **if-else-fi** or **while-loop** block.  All conditions must be enclosed with in brackets **[]**.  In addition to the capabilities found in the extensive list of checks and comparisons listed below, conditional execution can be enhanced by negating with an ! in front of a condition and/or compounding with AND and OR between two or more conditions.  The following scripts show examples of the possible conditions you can use while writing your own scripts.
 
 > Note: 	The examples below make use of the **;** directive which allows you to put multiple statements on one line.  So for example
 
@@ -147,7 +146,7 @@ This script demonstrates the usage of the various Integer evaluation Conditions.
 
 > Note if you set A = 123 and B = "Hello" and do those tests you will get an error since one of the variables is string and both variables must be integers.  
 
-To help simplify scripts in some cases, you can modify any of the above \<conditions\> by preceding it with an exclamation (**!**) or NOT symbol.  For instance you might have a script that creates a temporary file that normally would be stored in **${ROOT}tmp/**.  Before attempting to create a file in this directory you might check to see if it exists and if not create it.  This script would do that:
+To help simplify scripts in some cases, you can modify any of the above \<conditions\> by preceding it with an exclamation (**!**) or NOT symbol.  For instance you might have a script that creates a temporary file that normally would be stored in *${ROOT}tmp/*.  Before attempting to create a file in this directory you might check to see if it exists and if not create it.  This script would do that:
 
     #!/bin/sh
 	#
@@ -158,7 +157,7 @@ To help simplify scripts in some cases, you can modify any of the above \<condit
 		md ${ROOT}/tmp
 	fi
 
-Notice that the work being done here is in the **else** block, or when the check fails.  You may find it better to use the NOT (**!**) modifier and write the script this way:
+Notice that the work being done here is in the *else* block, or when the check fails.  You may find it better to use the NOT (**!**) modifier and write the script this way:
 
     #!/bin/sh
 	#
@@ -168,7 +167,7 @@ Notice that the work being done here is in the **else** block, or when the check
 		md ${ROOT}/tmp
 	fi
 
-You can further extend \<conditions\> by building complex evaluations that consist of multiple check or comparison \<conditions\> joined by **and** and/or **or**.  The following are examples using **and** and **or**.
+You can further extend \<conditions\> by building complex evaluations that consist of multiple check or comparison \<conditions\> joined by *and* and/or *or*.  The following are examples using *and* and *or*.
 
     #!/bin/sh
 	#
@@ -200,11 +199,11 @@ You can further extend \<conditions\> by building complex evaluations that consi
 		echo bye
 	fi	 ;		# true  - hi	(2nd condition is met)
 
-When using multiple of these joiners with a single command such as **if**, care should be made in the structuring of your \<condition\> statements.  The shell processes command lines linearly from left to right and is very binary in nature.  Consider first a math example of **set A = 1 + 2 * 3 - 4 * 8 + 2 / 2**, the result placed into **A** is 42 (process the calculations like a calculator would, one at a time, there is no precedence).  When evaluating a set of \<conditions\>, the shell processes them one at a time the same way and when it encounters an **and** or an **or** it evaluates the current "state" to determine if it should return a result or continue to evaluate the conditions on the line.  Let us say you have 4 conditions, A, B, C and D (each one represents something like [ -d adir ]), and you are doing something like IF A AND B OR C AND D.  The Shell will determine a result for A (for example that [ -d adir]) and then it sees "AND", at that moment if A is false all processing ends there because it does not matter what else is on the command line (The **if** fails).  Now assume A and B are both true and it gets to that OR, again processing stops be cause there is already a true case on one side of the OR (The IF succeeds).  As you can see, its easy to predict the behavior of constructs like IF A and B and C and D (all must be true) as well as IF A or B or C (any one need be true), but complex IF A or B and C or D and E need to be tested that they perform as you imagined.  Once mastered though, you will see that when structured correctly you can perform very complex \<condition\> sets.  Say you wanted to do IF ( A and B ) or C, realizing there is no actual groupings (parens) in conditions, if you simply structure your if as IF C OR A AND B, it will have the effect you wanted.  There is an example of complex compound conditions that you can run and even modify to test different patterns/structures of complex conditions.  It can be found at **[ANDORTESTS](../EXAMPLES/ANDORTESTS.txt)**.
+When using multiple of these joiners with a single command such as *if*, care should be made in the structuring of your \<condition\> statements.  The shell processes command lines linearly from left to right and is very binary in nature.  Consider first a math example of `set A = 1 + 2 * 3 - 4 * 8 + 2 / 2`, the result placed into **A** is 42 (process the calculations like a calculator would, one at a time, there is no precedence).  When evaluating a set of \<conditions\>, the shell processes them one at a time the same way and when it encounters an *and* or an *or* it evaluates the current "state" to determine if it should return a result or continue to evaluate the conditions on the line.  Let us say you have 4 conditions, A, B, C and D (each one represents something like [ -d adir ]), and you are doing something like `if A and B or B and D`.  The Shell will determine a result for A (for example that [ -d adir]) and then it sees "AND", at that moment if A is false all processing ends there because it does not matter what else is on the command line (The **if** fails).  Now assume A and B are both true and it gets to that OR, again processing stops be cause there is already a true case on one side of the OR (The IF succeeds).  As you can see, its easy to predict the behavior of constructs like IF A and B and C and D (all must be true) as well as IF A or B or C (any one need be true), but complex IF A or B and C or D and E need to be tested that they perform as you imagined.  Once mastered though, you will see that when structured correctly you can perform very complex \<condition\> sets.  Say you wanted to do IF ( A and B ) or C, realizing there is no actual groupings (parens) in conditions, if you simply structure your if as IF C OR A AND B, it will have the effect you wanted.  There is an example of complex compound conditions that you can run and even modify to test different patterns/structures of complex conditions.  It can be found at **[ANDORTESTS](../EXAMPLES/ANDORTESTS.txt)**.
 
 #### \<expression\>
 
-The A2osX shell contains an expression evaluator that can perform simple integer math operations using the **\+ \- \* \/** and **mod** operators.  Expressions are a form of an argument used by only a handful of commands, most notably **set** (to store the result of the expression into a variable) and **case/switch**.
+The A2osX shell contains an expression evaluator that can perform simple integer math operations using the **\+ \- \* \/** and **mod** operators.  Expressions are a form of an argument used by only a handful of commands, most notably *set* (to store the result of the expression into a variable) and **case/switch**.
 
     #!/bin/sh
 	#
@@ -225,7 +224,7 @@ The A2osX shell contains an expression evaluator that can perform simple integer
 
 #### \<switch\>
 
-A switch is a special type of argument to internal and external commands that changes the behavior of that command.  For instance, the standard **echo** command ends its output with a carriage return (ASCII 13), adding the **-n** switch to **echo** (i.e. **echo -n "hello"**) will cause **echo** to omit the *CR*.  All switches begin with hyphen (-) and are immediately followed by a valid single character (in the case of **echo** **-n** is the only valid switch) and then a space (or carriage return if the end of the line). There should be no space between the hyphen (-) and the switch character, and if the switch itself requires an argument, then the switch must be followed by a space and then the argument for that switch (see the **read** command for an example). Please make sure you read the note at the start of this section regarding command line structure and the ordering of arguments, in particular with switches that themselves require arguments. 
+A switch (not to be confused with the shell command *switch*, see below) is a special type of argument to internal and external commands that changes the behavior of that command.  For instance, the standard **echo** command ends its output with a carriage return (ASCII 13), adding the **-n** switch to **echo** (i.e. **echo -n "hello"**) will cause **echo** to omit the *CR*.  All switches begin with hyphen (-) and are immediately followed by a valid single character (in the case of **echo** **-n** is the only valid switch) and then a space (or carriage return if the end of the line). There should be no space between the hyphen (-) and the switch character, and if the switch itself requires an argument, then the switch must be followed by a space and then the argument for that switch (see the **read** command for an example). Please make sure you read the note at the start of this section regarding command line structure and the ordering of arguments, in particular with switches that themselves require arguments. 
 
 #### \<value\>
 
@@ -430,7 +429,7 @@ The **end** command is used at the end of a **switch** script block. See the **s
 
 	exit [int32]
 
-The **exit** command is used to immediately end the processing of a script or function.  **exit** accepts an optional argument that sets the return code (**$?**) which may be checked by a calling script.  If no argument is provided the return code is set to 0 (No Error).  The following script demonstrating the use of the **exit** command can be found in the [EXAMPLES](../EXAMPLES) folder.
+The **exit** command is used to immediately end the processing of a script or function.  **exit** accepts an optional argument that sets the return code (**$?**) which may be checked by a calling script.  If no argument is provided the return code is set to 0 (No Error).  The following script demonstrating the use of the **exit** command used with a *function* and can be found at [EXAMPLES](../EXAMPLES/EXITDEMO.txt).
 
     #!/bin/sh
 	#
@@ -465,7 +464,7 @@ The **exit** command is used to immediately end the processing of a script or fu
 			break
 	end
 
->Besides the **exit** command, the example above also demonstrates how to check that input is a number rather then a string (***-i***), using newlines (**\n**) to properly format the screen (the **read** command leaves the cursor on the line of input), and passing a variable name to a function (this is a clever way to get return values from commands).
+>Besides the **exit** command, the example above also demonstrates how to check that input is a number rather then a string (***-i***), using newlines (**\n**) to properly format the screen (the **read** command leaves the cursor on the line of input), and passing a variable name to a function (this is a clever way to get return values from commands).  This example also demonstrates the use of the **switch**, **case**, **break** and **end** commands.
 
 ### FI
 
@@ -480,7 +479,7 @@ The **fi** command is used at the end of an **if** script block. See the **if** 
 	for <var> in (file)
 	for <var> in `command`
 
-The **FOR** command is used 
+The **for** command is used as a special kind of loop, where a set of instructions is repeated and the variable <var> is set from a supplied list.  This list can be a constant string of space separated words or numbers like "ABC DEF ghi jkl" or "1 2 345 545" or it can be a string variable itself made up of space separated words. In addition there are two special versions of *for* where *<var>* is set by reading lines from a file using the *(filename)* notation and where* <var>* is set by the output of a command using back ticks to enclose the command such as \` ls -c F* \` notice here that the *-c* option is used with *ls* to force one returned file name per line (see *ls*).
 
     #!/bin/sh
 	#
@@ -523,49 +522,77 @@ The **FOR** command is used
 
 ### FUNCTION
 
-	FUNCTION function_name
+	function function_name
 	{ 
 		<body>
 	}
 
-The **FUNCTION** command is used to define a function that can be called one or more times in your scripts.  
+The **FUNCTION** command is used to define a function that can be called one or more times by your scripts.  Functions can reduce the overall amount of code in a script, can make scripts more readable, and in some cases reduce main memory usage.  You can even have functions call themselves providing for a level of recursion, but note that each call takes room on the stack, about 7 bytes and there is only 128 bytes, so do so with care.
 
->A note about the shell, memory usage and functions.  
+>A note about the shell, memory usage and functions.  When you execute a script, it gets loaded into main memory.  If this script gets contains functions, when the shell encounters the definition for the functions it copies them to aux memory.  This might seem redundant/wasteful, but there is a key optimization you can make here that will both reduce main memory use and aide in script development.  Instead of putting your function definitions at the top of your script (lets call it myscript), put them in a separate file (lets call it myfuncs) and then in myscript you dot call myfuncs (. myfuncs).  With this construct, myscript will be smaller, taking less main memory, then when it runs, it will temporarily load myfuncs which loads the functions into aux and then it will free the main memory the script myfuncs was using but the functions will still be available.  Using this method you can actually load a great deal of program logic into aux memory with little impact on main memory.  And yes you can load multiple function files by simply calling them one after another in your script, and myfuncs could even call other scripts of functions to load.  If at some point in your program you no longer need the functions that have been loaded you can use the *set -f* command to clear aux mem of **ALL** functions that have been loaded.  Also note, that if your script calls other scripts, any function already defined is **NOT** available to the called scripted unless it is called with a dot (.) to run the new script in the current environment.
 
-if you SET -F, it will discard ALL previously learned FUNC in the current SH context
-if . FUNCS1 file add 3
-then . FUNCS2 file add 2
-all 5 are available until an set -X is met
-if you launch . MYFILE1, the code within MYFILE1 can CALL all 5 functions
-but MYFILE1 (wthout dot) will run in a separate SH process, so no access to the 5 functions known by parent SH
-functions bodies are stored in AUX ram
-so you can put around 30k of code in AUX ram then do a short MYFILE1 that calls a lot of FUNC 
-in AUX
-FUNCs recursion is allowed (until you explode the stack!)
+The following script demonstrating the use of the *function* command can be found at [EXAMPLES](../EXAMPLES/EXITDEMO.txt).
 
-CORE.STACK.MAX = 128....so each CALL consumes about 7 bytes of stack (return Ctx/Ptr, ArgVC,hArgV and CALL keywordID)
+    #!/bin/sh
+	#
+	#   exit Command Examples
+	#
+	# This example shows the use of EXIT from a function with a return code
+	#
+	function divide
+	{
+		if ![ -i $1 ] and ![ -i $2 ]
+			# Error vars not integers
+			exit 3
+		fi
+		if [ $2 -eq 0 ]
+			# Error Zero Divisor
+			exit 7
+		fi 
+		set $3 = $1 / $2
+	}
+	read -p "\nEnter a number: " $A
+	read -p "\nAnother number: " $B
+	call divide $A $B C
+	switch $?
+		case 0
+			echo "\n$A divided by $B is $C\n"
+			break
+		case 3
+			echo "\nError: Input not Integers\n"
+			break
+		case 7
+			echo "\nError: Divide by Zero Prohibitied\n"
+			break
+	end
 
 ### IF
 
-	IF [ <expression> ]...
+	if [ <expression> ]...
+		<body>
+	else
+		<body>
+	fi
+
+The **IF** command is used to control execution in your scripts by optionally processing blocks of code represented by *<body>*.  The *if* command processes *<expression>*s and if true will process the *<body>* of commands following *if* and if not, will process the *<body>* following the *else* statement.  See the many examples above (and throughout this document) on the section about *<expressions>* for how you can use *if*. 
 
 ### LOOP
 
-	LOOP
+	loop
 
 The **LOOP** command is used at the end of a **WHILE** script block. See the **WHILE** command below for more information and example of using **LOOP** as part of **WHILE**.
 
 ### MD
 
-	MD <value>
+	md <value>
 
-MD path or relative path <br> Create a directory |
+The *MD* command is used to create directories on volumes.  It will take either a full or relative path.  It does not create multiple path levels, so all intermediate paths in <value> must exist.  For example if you execute the command *md /myvol/adir/notherdir/newdir* then the volume /myvol must exist and it must already contain a directory called adir with a subdirectory called noherdir into which the command will place the new subdirectory newdir.  If adir or notherdir do not already exist then an error will be thrown.
 
 ### NOHUP
 
-	NOHUP <value> [&]
+	nohup <value> [&]
 
-| NOHUP     | Working | Start a process with PPID=PS0 (Daemon) |
+The *NOHUP* shell command is a special directive that tells the shell to launch the command or script provided in <value> as if it was requested by the system itself, with a parent process ID of 0.  This command is largely used to launch daemon processes such as the telnet server (telnetd) or web server (httpd).  When combined with the background flag (&) this allows you to launch these daemons and then if you log off they stay running and "owned" by the system. 
 
 ### OR
 
@@ -575,138 +602,132 @@ The **OR** reserved word is used to join 2 or more conditions together to create
 
 ### PAUSE
 
-	PAUSE
+	pause
 
 The **PAUSE** commands halts the execution of a script until the user presses the return key. 
 
 ### POPD
 
-	POPD [ <value> ]
+	popd
 
-| POPD      | Working | Restore previously saved working directory |
+The **POPD** command is used to restore previously saved working directory.  Multiple *popd* commands may be used until all saved working directories have been restored.
 
 ### PUSHD
 
-	PUSHD [ <value> ]
+	pushd [ <value> ]
 
-Save actual working directory <br> PUSHD \<dir\> do also a CD to \<dir\>
+The **PUSHD** command is used to temporarily switch to another directory, saving a copy of the current working directory, allowing you to return easily with the *popd* command.  When execute *pushd* for example `pushd /vol2/datadir/files` and your current working directory is /vol1/home/user1, the shell will save /vol1/home/user1 and then perform a *cd* to /vol2/datadir/files.  When you are done working in that new directly, you simply execute *popd* and you are returned back to /vol1/home/user1.
 
 ### PWD
 
-	PWD
+	pwd
 
-the **PWD** command prints the current working directory.  You can change the working directory with the **CD** command or with the **POPD** command is a working directory has been previously **PUSHD**.
+The **PWD** command prints the current working directory.  You can change the working directory with the *cd* or *popd* commands.
 
 ### RD
 
-	RD <value>
+	rd <value>
 
-Remove the empty directory specified by \<value> which may be either a relative directory name such as ThisDir or ../SomeDir/ThisDir or it can be a full path name such as /MyVol/SomeDir/ThisDir.  The directory specified must be empty or an error will be thrown. To remove a non-empty directory (and all the files and subdirectories contained within) you can use the **RM** command with the **-R** switch.  See the **RM** for more information.
+Remove the empty directory specified by \<value> which may be either a relative directory name such as ThisDir or ../SomeDir/ThisDir or it can be a full path name such as /MyVol/SomeDir/ThisDir.  The directory specified must be empty or an error will be thrown. To remove a non-empty directory (and all the files and sub directories contained within) you can use the *rm* command with the *-r* switch.  See the *rm* command for more information.
 
 ### READ
 
-	READ [ -S ] [ -P <value> ] [ -N int32 ] <variable>
+	read [ -s ] [ -p <value> ] [ -n int32 ] <variable>
 
 The READ command allows you to accept input from the user which can be used or evaluated in other commands.  For instance you can use the READ command to get the name of a file to copy, ask the user for confirmation (Proceed?) and evaluate their response with an IF command, etc.  READ has several powerful options including: Prompt, Suppress and NumChars. In all cases you must specify a variable in which to place the results of the READ command.
 
     #!/bin/sh
 	#READ Command Examples
 	#    Get Input from User and Store in Variable $A
-	READ A
+	read A
 	#    Display a prompt, Get Input and Store in $A
-	READ -P "Enter your name: " A
+	read -p "Enter your name: " A
 	#    Display a prompt, Get Suppressed Input and Store in $A
     #    The suppress option will keep any input from appearing but you can
 	#    edit normally and $A will be correct.
-	READ -S -P "Enter your name: " A
+	read -s -p "Enter your name: " A
 	#    Display a prompt, Get Input limited to 8 characters and Store in $A
-	READ -N 1 -P "Enter your name: " A
+	read -n 1 -p "Enter your name: " A
 	#    Display a prompt, Get Input limited to 1 characters and Store in $A
     #	 Special case of -N option.  As soon as the user types any character
     #    input will be ended and the single character will be stored in $A.
     #	 The user does NOT need to press return to accept the input.
-	READ -N 1 -P "Proceed (Y/N): " A
+	read -n 1 -p "Proceed (Y/N): " A
 	#    Get Input limited to 1 key press and Store the ASCII value of the key in $A
     #	 Special case of -N option.  As soon as the user types any key, input will
     #    be ended and the single key code will be stored in $A as an Integer.
     #	 This can be used to capture/process special keys like TAB, Arrows and DEL.
 	#	 In this special case of READ, the character pressed is NOT echoed.
-	READ -N 0 A
+	read -n 0 A
  
 ### REN
 
-	REN <value> <value>
+	ren <value> <value>
 
-The REN command allows you to Rename a single file, directory or Volume.  It does not support wild cards.  While REN and MV may seem similar, they are very different commands and you should use each for its intended purpose.  In the case of REN, it changes the name of an item (Vol, Dir, File) in place; the item itself is not changed.  For those familiar with ProDOS file systems, REN changes the entry of an item in the CATALOG.  MV on the other hand actually copies files (and removes the original) to move them.  Obviously REN is more efficient at RENaming an item in its current location, whereas MV could be used to change the location of a file (MV it from one directory or even volume to another).  Yes you can use MV MYFILE NEWFILE to do the same thing as REN MYFILE NEWFILE, but since a copy must occur, it will be slower and you will have to have sufficient disk space free to make this copy.
+The **REN** command allows you to rename a single file, directory or Volume.  It does not support wild cards.  While *ren* and *mv* may seem similar, they are very different commands and you should use each for its intended purpose.  In the case of *ren*, it changes the name of an item (Vol, Dir, File) in place; the item itself is not changed.  For those familiar with ProDOS file systems, *ren* changes the entry of an item in the CATALOG.  *mv* on the other hand actually copies files (and removes the original) to move them.  Obviously *ren* is more efficient at renaming an item in its current location, whereas *mv* could be used to change the location of a file (move it from one directory or even volume to another).  Yes you can use `mv myfile newfile` to do the same thing as `ren myfile newfile`, but since a copy must occur, it will be slower and you will have to have sufficient disk space free to make this copy.
 
     #!/bin/sh
-	#REN Command Examples
-	#    REName a Volume
+	#ren Command Examples
+	#    rename a Volume
 	#	 Note How you need to use a full volume name as the Original Name and
 	#	 the new name must not be proceeded by a slash (/).  The following
 	#	 will rename the volume /MYVOL to NEWVOL.
-	REN /MYVOL NEWVOL
-	#    REName a Directory in the current working directory ($PWD)
-	REN ADIR NEWDIR
-	#    REName a Directory in another relative directory
+	ren /MYVOL NEWVOL
+	#    rename a Directory in the current working directory ($PWD)
+	ren ADIR NEWDIR
+	#    rename a Directory in another relative directory
 	#	 In this example, the directory ADIR in SUBDIR will be renamed.
 	#	 Notice that the new name does not contain a path.
-	REN SUBDIR/ADIR NEWDIR
-	#    REName a Directory using a full path
+	ren SUBDIR/ADIR NEWDIR
+	#    rename a Directory using a full path
 	#	 This example renames the dir MYDIR found in /FULLBOOT/TMP to YOURDIR.
-	REN /FULLBOOT/TMP/MYDIR YOURDIR
-	#	 REName File Examples
-	#	 REName a file in the current directory
-	REN MYFILE NEWFILENAME
+	ren /FULLBOOT/TMP/MYDIR YOURDIR
+	#	 rename File Examples
+	#	 rename a file in the current directory
+	ren MYFILE NEWFILENAME
 	#	 REName a file in a relative (the parent) directory
-	REN ../MYFILE NEWFILENAME
-	#	 REName a file using a full path
-	REN /FULLBOOT/TMP/MYFILE NEWFILENAME
+	ren ../MYFILE NEWFILENAME
+	#	 rename a file using a full path
+	ren /FULLBOOT/TMP/MYFILE NEWFILENAME
 
 ### SET
 
-	SET <switch>
-	SET Variable = <value>
-	SET Variable = <expression>
-	SET Variable =
+	set <switch>
+	set variable = <value>
+	set variable = <expression>
+	set variable =
 
 The **SET** command is used to set or clear the value of variables as well as to set or clear flags that change the behavior of the shell (**SH**) especially when running scripts.
 
 #### Variables
 
-The most simplistic form of set is **SET var = value** such as SET myVar = 6, where the shell will create a new variable called MyVar and in this case make it an Integer (32-bit) and set its value to 6.
+The most simplistic form of set is **SET var = value** such as `set myVar = 6`, where the shell will create a new variable called myVar and in this case make it an Integer (32-bit) and set its value to 6.
 
-As seen throughout this guide, scripts are very useful for automating many repetitive tasks.  To get the most out of scripts, you are likely going to want input from the user or gather existing data stored in your file system and then use this to control program flow.  To do this, you are likely going to want to use variables to store and process the data your script relies on.  This section will provide
- you with the information you need to get the most out of your own, as well as system provided, variables.
+As seen throughout this guide, scripts are very useful for automating many repetitive tasks.  To get the most out of scripts, you are likely going to want input from the user or gather existing data stored in your file system and then use this to control program flow.  To do this, you are likely going to want to use variables to store and process the data your script relies on.  This section will provide you with the information you need to get the most out of your own, as well as system provided, variables.
 
-All variables have names, starting with xxx, can be any length, but longer is not better.  They are case sensitive so AVAR, Avar, aVar, and avar are actually 4 different variables.  There are only two kinds of variables internally, strings and integers.  
- 
-Variable overflow strings and ints
-Ints only no real num it just ignore
+All variables have names can be any length, but longer is not better as longer names consume additional memory.  They are case sensitive so AVAR, Avar, aVar, and avar are actually 4 different variables.  There are only two kinds of variables internally, strings and integers.  A string can be up to 255 characters long and an integer can hold a value in the range of −2,147,483,648 to 2,147,483,647.  If you add to or subtract from integers that eceed this range your result wraps around the range, so if you add 1 to 2,147,483,647 you will get −2,147,483,648.  Similarly if you form a string with more then 255 characters, then the first 255 characters are lost and the remainder placed in the variable.  For example, if you concatenate 3 strings of 100 chars the resulting string will be the last 45 chars of the 3rd original string. 
 
-The 32-bit int data type can hold integer values in the range of −2,147,483,648 to 2,147,483,647.  If you add to or subtract from INTs that would cause a RANGE error, you actually get a result that wraps around the range, so if you add 1 to 2,147,483,647 you will get −2,147,483,648.
-
-Strings can be up to 255 characters in length.  Note, like INTs, if you try to store more then 255 chars in a string, you get the same wraparound affect where the first 255 chars are tossed out the string is set to the remaining chars, so if you concatenate 3 strings of 100 chars the resulting string will be the last 45 chars of the 3rd original string. 
+When working on strings, the proper way to concatenate two strings, say Var1 and Var2 into Var3 is with the syntax `set Var3 = $Var1$Var2` . Notice the lack of space here.  If you use the addition <op> (+) with these vars you will get an error because they are not integers.
 
 #### Special Variables
 
 In addition to the variables you create, there are a number of predefined variables that you can use in scripts.  Several of these are set by **LOGIN** when a user logs on to A2osX.  These include $BOOT, $DRV, $LIB, $PATH, $ROOT and $TERM.
 
-The **$BOOT** variable holds the full path of the ProDOS PREFIX when you started A2osX (**-A2OSX.SYSTEM).  The **$ROOT** variable contains the same full path.
+The **$BOOT** variable holds the full path of the ProDOS PREFIX when you started A2osX (**-A2OSX.SYSTEM**).  The **$ROOT** variable contains the same full path.
 
 >Note, while your PREFIX could be set to /MyVol/Adir and you can launch A2OSX.SYSTEM from another directory (i.e. -/MyVol/OtherDir/A2OSX.SYSTEM), A2osX will not fully load because it will look for support files in sub directories of PREFIX.  See the A2osX User Guide for more information on starting A2osX.
 
 The **$DRV** variable holds the full path A2osX can find hardware driver files for A2osX such as the driver for a Super Serial Card (SSC).  **LOGIN** automatically sets this variable to ${BOOT}DRV/, which means it will look for drivers in the DRV sub directory found in the full path $BOOT is set to.  If you have made your own drivers and store them in a different location, you could change or add to this variable.  It is used like the standard $PATH variable where multiple directories can be listed (and searched) by separating them with a colon (:).  So for example you could **SET $DRV = ${BOOT}DRV/:/MYVOL/DRIVERS/** and when INSDRV attempts to install a driver name you specify it will first look for the driver file in the DRV sub directory of $BOOT and then look in the /MYVOL/DRIVERS/ directory.  Note that these paths must end with a slash (/) as shell looks for files by appending a file name to these search paths.
 
-The **$GECOS** variable holds the Full Name (string) of the current user.  This variable is set by **LOGIN** and cannot be changed by the user.  Its value is taken from the ./etc/passwd file as set by the **USERADD** command.
+The **$GECOS** variable holds the Full Name (string) of the current user.  This variable is set by **LOGIN** and cannot be changed by the user.  Its value is taken from the ./etc/passwd file as set by the *useradd* command.
 
-The **$GID** variable holds the group id (integer) of the current user.  This variable is set by **LOGIN** and cannot be changed by the user.  Its value is taken from the ./etc/passwd file as set by the **USERADD** command.
+The **$GID** variable holds the group id (integer) of the current user.  This variable is set by **LOGIN** and cannot be changed by the user.  Its value is taken from the ./etc/passwd file as set by the *useradd* command.
 
-The **$HOME** variable holds the full path of the logged in users HOME directory, the place where their personal files are stored.  This variable is set by **LOGIN** and its value is taken from the ./etc/passwd file as set by **USERADD**.
+The **$HOME** variable holds the full path of the logged in users HOME directory, the place where their personal files are stored.  This variable is set by **LOGIN** and its value is taken from the ./etc/passwd file as set by *useradd*.
 
 The **$LIB** variable holds the full path A2osX can find Library files for A2osX such as LIBCRYPT.  **LOGIN** automatically sets this variable to ${BOOT}LIB/, which means it will look for libraries in the LIB sub directory found in the full path $BOOT is set to.  If you have made your own libraries and store them in a different location, you could change or add to this variable.  It is used like the standard $PATH variable where multiple directories can be listed (and searched) by separating them with a colon (:).  So for example you could **SET $LIB = ${BOOT}LIB/:/MYVOL/LIBRARY/** and when your program attempts to load a library you specify it will first look for the library file in the LIB sub directory of $BOOT and then look in the /MYVOL/LIBRARY/ directory.  Note that these paths must end with a slash (/) as shell looks for files by appending a file name to these search paths.
 
-The **$LOGNAME** variable holds the login id (string) of the current user.  This variable is set by **LOGIN** and cannot be changed by the user.  Its value is taken from the ./etc/passwd file as set by the **USERADD** command.
+The **$LOGNAME** variable holds the login id (string) of the current user.  This variable is set by **LOGIN** and cannot be changed by the user.  Its value is taken from the ./etc/passwd file as set by the *useradd* command.
 
 The **$PATH** variable holds the full paths the shell used to find external command or script files such as **LS** or **TELNET**.  **LOGIN** automatically sets this variable to ${BOOT}SBIN/:${BOOT}BIN/, which means it will look for commands/scripts in the SBIN and BIN sub directories found in the full path $BOOT is set to.  Shell will also look in the current working directory ($PWD) after looking at the directories listed in $PATH.  If you have a directory with your your own commands and scripts, you can change or add to this variable.  Just like the standard $PATH variable in linux, multiple directories can be listed (and searched) by separating them with a colon (:).  Note that these paths must end with a slash (/) as shell looks for files by appending a file name to these search paths.
 
@@ -716,11 +737,11 @@ The **$PS1** variable holds optional text to display as part of the interactive 
 
 The **$PWD** variable holds the current working directory used by shell.  This variable is maintained by the shell and cannot be changed directory by the user (**SET $PWD = anything** will be ignored).  It is updated through the use of **CD** and **PUSHD**.  You can **ECHO $PWD**, however the internal shell command **PWD** does the same thing and is shorter to type.
 
-The **$SHELL** variable holds the full path for the Shell process of the logged in user, the shell being run currently.  This variable is set by **LOGIN** and its value is taken from the ./etc/passwd file as set by **USERADD**.
+The **$SHELL** variable holds the full path for the Shell process of the logged in user, the shell being run currently.  This variable is set by **LOGIN** and its value is taken from the ./etc/passwd file as set by *useradd*.
 
 The **$TERM** variable holds the name of the type of terminal codes used for screen handling and programming.  This is **always** set to **vt100** as that is the only terminal type A2osX supports. 
 
-The **$UID** variable holds the user id (integer) of the current user.  This variable is set by **LOGIN** and cannot be changed by the user.  Its value is taken from the ./etc/passwd file as set by the **USERADD** command.
+The **$UID** variable holds the user id (integer) of the current user.  This variable is set by **LOGIN** and cannot be changed by the user.  Its value is taken from the ./etc/passwd file as set by the *useradd* command.
 
 In addition to the variables defined above, there are a set of special variables updated by the shell that are particularly useful with scripts.  These variables are all a single character following the dollar sign (**$**).
 
@@ -766,48 +787,94 @@ This mode, set by the **-X** flag option of **SET**, allows you to change the sh
 
 ### SHIFT
 
-	SHIFT [int32]
+	shift [int32]
 
 The **SHIFT** command is used to remove the first argument ($1) and reorder the remaining arguments in the command line.  The **SHIFT** command is most useful when a script is passed more then nine (9) arguments and you need to process each one individually.  Since there are only special variables (see Variables above) for the first nine ($1 through $9), to process the data in arguments past nine, you first save off the early arguments then use **SHIFT** to be able to process the later arguments.  The **SHIFT** commands takes an optional argument which determines which arguments gets removed, so for examples **SHIFT 2** would remove the 2nd argument, moving arguments 3 and greater to the left.
 
 The following script accesses and displays every argument passed to it, regardless of the number.
 
 	#!/bin/sh
-	SET numArgs = $#
-	WHILE [ $numArgs -GT 0 ]
-		ECHO $1
-		SHIFT
-		SET numArgs = $numArgs - 1
-	LOOP 
+	set numArgs = $#
+	while [ $numArgs -GT 0 ]
+		echo $1
+		shift
+		set numArgs = $numArgs - 1
+	loop 
 
 ### SLEEP
 
-	SLEEP int32
+	sleep int32
 
 The **SLEEP** command is used to pause the execution of a script for 1/10th of a second.  A2osX does a reasonably good job of determining processor speed (in Mhz) at start up so that **SLEEP 100** is a consistent 10 seconds across systems, however note, that with emulators running at artificial speeds these calculations can be affected.  Plan accordingly.
 
 ### SWITCH
 
-	SWITCH <expression>
+	switch <expression>
+		case <expression>
+			<body>
+			[break]
+		...
+		[default
+			<body>]
+	end
 
-The **CASE** command is used at the start of a block of statements to be optionally executed based on the evaluation of \<expression\> as part of a **SWITCH** script block. See the **CASE** command below for more information and example of using **BREAK**.
+The **SWITCH** statement is used at the start of a multiway program flow control block statement.  The *switch* statement is really a different form of the *if* statement that is a significant improvement over using *if* with many nested *else ; if* blocks.  *switch* provides an easy way to dispatch execution to different parts of code based on the value of the expression. Switch is a control statement that allows a value to change control of execution.
 
-The **SWITCH** statement is used at the start of a multiway program flow control block statement.  The **SWITCH** statement is really a different form of the **IF** statement that is a significant improvement over using **IF** with many nested **ELSE ; IF** blocks.  **SWITCH** provides an easy way to dispatch execution to different parts of code based on the value of the expression. Switch is a control statement that allows a value to change control of execution.
+A full *switch* control block begins with *switch* and concludes with an *end*.  In between, it contains one or more *case* blocks and may contain an optional *default* block.  When the shell encounters a switch statement, it firsts evaluates the <expression> passed on the *switch* command line and then uses that result to pass to any *case* statements that are evaluated.  When the shell encounters a *case* statement it will then evaluate the <expression> found there and compare it to the result it had from *switch* and if they match, it will execute the code block following that case statement.  If the two values do not match, the shell will skip to the next *case* statement, a *default* statement if one exists, or the *end* statement.  When a *case* block is executed, the shell will run all the commands until encounters a *break* or the *end* statement.  On a break, the shell immediately skips all other commands until it finds the terminating *end* command.  If a *case* block does not end with a *break*, then the shell will continue executing command lines, including those found in other *case* blocks.  When the shell reaches the *default* block, either because no *case* block was executed, or one was but no *break* was found, then the code in the *default* block is executed.
+
+    #!/bin/sh
+	#
+	#   switch Command Example
+	#
+	# This example shows the use of SWITCH, CASE, BREAK, DEFAULT and END
+	#
+	read -p "\nEnter a number: " A
+	read -p "\nAnother number: " B
+	set val = $A + $B
+	switch $val
+		echo "\nStart of Switch"
+		case 0
+			echo "Your Total is ZERO"
+			break
+		case $A
+			echo "Input B was Zero"
+			break
+		case $B
+			echo "Input A was Zero"
+			break
+		default
+			echo "Both Inputs were Non Zero"
+	end
 
 ### WHILE
 
-	WHILE <condition>
+	while <condition>
+		<body>
+	loop
+
+The **WHILE-LOOP** command block is used to repeat a set of commands while a condition is true.  For example, the following script accesses and displays every argument passed to it, regardless of the number.  Note, that if no arguments are passed to the script then the <condition> would be false on even the first pass so the *while* loop would not run even once.
+
+	#!/bin/sh
+	set numArgs = $#
+	while [ $numArgs -GT 0 ]
+		echo $1
+		shift
+		set numArgs = $numArgs - 1
+	loop 
 
 ## Redirection
 
-The shell 
-| <      | Working | StdIn redirection |
-| >      | Working | StdOut redirection |
-| >>     | Working | Append StdOut  |
-| 1>>    | Working |  |
-| 1>     | Working |  |
-| 2>>    | Working | StdErr redirection |
-| 2>     | Working |  |
+Redirection describes the process of sending a data or other information to an alternate location. In A2osX, redirection allows sending data intended for one location such as standard output (the screen) to another (a file).  The following redirection directives are available in the A2osX shell.
+
+|Directive|Use|Example| Explanation|
+|---|---|---| ---|
+| <      | StdIn | `MyScript < MyFile` | Runs script MyScript and any read commands would take input from the file MyFile|
+| >      | StdOut |  `MyScript > MyFile` | Runs script MyScript and any output of MyScript is placed in the file MyFile|
+| >>     | Append StdOut  | `MyScript >> MyFile` | Runs script MyScript and any output of MyScript is appended to the file MyFile|
+| 1>   |  | `MyScript 1> MyFile` | Runs script MyScript and any output of MyScript is placed in the file MyFile|
+| 1>>     | Working |  | `MyScript 1>> MyFile` | Runs script MyScript and any output of MyScript is appended to the file MyFile|
+| 2>   | Working | StdErr | `MyScript 2> MyFile` | Runs script MyScript and errors generated by MyScript would be written to the file MyFile|
+| 2>>     | StdErr with Append | `MyScript 2>> MyFile` | Runs script MyScript and errors generated by MyScript would be appended to the file MyFile|
 
 ## Piping
 
@@ -820,60 +887,54 @@ A pipe is a mechanism for inter-process communication using message passing. A p
 
 ## Environment
 
-The shell maintains an environment that includes a set of variables defined by the login program, your user initialization files (profile) and your programs or scripts.  When a new script is run the shell with make a copy of the current environment and then run that script.  When the script finishes executing the shell deletes that environment (freeing the  memory it uses).  This means any variables it creates, or existing ones that are changed are removed and the previous values are returned (as you put back to the original enviroment from which the copy was made.  If instead, you call your script by preceding it with a . (dot or period), the shell will run that new script in the *current* environment.  This means any changes to vars or new vars created are *retained* when the script exits.
+The shell maintains an environment that includes a set of variables defined by the login program, your user initialization files (profile) and your programs or scripts.  When a new script is run the shell with make a copy of the current environment and then run that script.  When the script finishes executing the shell deletes that environment (freeing the  memory it uses).  This means any variables it creates, or existing ones that are changed are removed and the previous values are returned (as you put back to the original environment from which the copy was made.  If instead, you call your script by preceding it with a . (dot or period), the shell will run that new script in the *current* environment.  This means any changes to vars or new vars created are *retained* when the script exits.
 
 	# call myscript using the current environment
 	. myscript 
 
 ## Processes
 
-A2osX allows you to start a program and run it in the background by adding a space and ampersand ( &) to the end of the command line.
+A2osX allows you to start a program and run it in the background by adding a space and ampersand ( &) to the end of the command line.  Often this option is used in conjunction with the *nohup* command, see *nohup* for more information.
+
 	# execute a program or script in the background
 	myprogram &
 
 ## Writing Scripts
 
-Calling other scripts
-calling scripts with . (dot space) before script name from within a script
-
-talk about duplicating env (no dot) and using current env (dot) and how vars are treated.  and that . calling script is treated as an INCLUDE, dont even need the bin/sh at top
-
-if using . you are using same ENV, like typing every line at the $, if not using . you start a new SH process with its own ENV (which gets tossed on exit).
-
-note that if you call a script normally, and it is in its own ENV it only can access functions it loads/defines.  but if called by dot  . script then it can use any function that already exists in the current ENV.
-
-loading functions this way
-
->A note on memory.  All scripts get loaded into and run from Main Memory.  
+Some quick tips on writing scripts:
+- Be careful with variable names as names are case sensitive.  MyVar and myvar are not the same variable.
+- Add comments to explain important script behaviors and variable usage, but not comments do consume memory when a script is running.
+- Put functions in libraries and load them using the dot (.) calling convention, this frees main memory. 
+- If you have a complex application built on script that calls many other scripts with dot (.), make sure to release unneeded variables from memory by using `set myvar = ` which will null the variable, removing it from the working environment.
 
 ### Getting and Validating Input
 
-One of the challenges when writing scripts is gathering input from the user and validating that input before performing a series of operations that would be affected by missing or invalid data.  For example, suppose you wrote a script that prompted a user to enter in an IP address which will be passed to the ping command.  You might want to gather the input as the 4 separate octets that make up an IP address and make sure each is a valid integer in the range of 1 to 255.  The A2osX shell provides a robust set of commands you can use to craft such a script with extensive error checking.  For instance the **READ** command (see above) has options to limit input to just 3 characters (the max an IP octet can be), in this case **READ -N 3 IP1** would accomplish this.  Next you might want to validate that the user did not press return without typing anything (a null) by using either the **IF [ -Z var ]** (is null) or **IF [ -N var ]** (not null) checks.  Then using the **IF [ -I var ]** check you could make sure the user entered an integer.  Once you know you have **an** integer, you can check to see if it is in an acceptable range by using the compound **IF [ $IP1 -gt 0 ] AND [ $IP1 -LT 256 ]**.
+One of the challenges when writing scripts is gathering input from the user and validating that input before performing a series of operations that would be affected by missing or invalid data.  For example, suppose you wrote a script that prompted a user to enter in an IP address which will be passed to the ping command.  You might want to gather the input as the 4 separate octets that make up an IP address and make sure each is a valid integer in the range of 1 to 255.  The A2osX shell provides a robust set of commands you can use to craft such a script with extensive error checking.  For instance the *read* command (see above) has options to limit input to just 3 characters (the max an IP octet can be), in this case `read -n 3 IP1` would accomplish this.  Next you might want to validate that the user did not press return without typing anything (a null) by using either the *if [ -z var ]* (is null) or *if [ -n var ]* (not null) checks.  Then using the *if [ -i var ]* check you could make sure the user entered an integer.  Once you know you have **an** integer, you can check to see if it is in an acceptable range by using the compound `if [ $IP1 -gt 0 ] and [ $IP1 -lt 256 ]`.
 
->Note, it may seem expedient to just do that last compound **IF** to check the range of the input.  If you do that, should the user enter nothing (just press return) or enter a string (i.e. ABC) then when the script executes this **IF** command the shell will throw and error and stop execution of your script.  This is because **IF** checks like **-gt** can only handle integers and the integer check **-I** cannot handle nulls.
+>Note, it may seem expedient to just do that last compound *if* to check the range of the input.  If you do that, should the user enter nothing (just press return) or enter a string (i.e. ABC) then when the script executes this *if* command the shell will throw and error and stop execution of your script.  This is because *if* checks like *-gt* can only handle integers and the integer check *-i* cannot handle nulls.
 
-The following example demonstrates the complete validation concept outlined above.  You could enhance this example further by putting the input and error checking in a **WHILE** loop to continue prompting the user for a valid octet until one was entered in the proper range.  In addition, you could put such a routine in a function so that you could have the same set of code executed for all 4 octets.
+The following example demonstrates the complete validation concept outlined above.  You could enhance this example further by putting the input and error checking in a *while* loop to continue prompting the user for a valid octet until one was entered in the proper range.  In addition, you could put such a routine in a function so that you could have the same set of code executed for all 4 octets.
 
 	#!/bin/sh
 	#
 	#	Demo of Getting and Validating Input
 	#
-	ECHO \f 				; # Clear screen
-	ECHO "\n\n Enter Octet: "
-	READ -N 3 IP1
-	IF [ -Z $IP1 ]
-		ECHO "\n\nNothing entered"
-	ELSE
-		IF ![ -I $IP1 ]		; # Note the use of ! to negate IF
-			ECHO "\n\nNon-numeric characters entered"
-		ELSE
-			IF [ $IP1 -gt 0 ] AND [ $IP1 -lt 256 ]
-				ECHO "\n\nValid Octet Entered"
-			ELSE
-				ECHO "\n\nNumber out of range"
-			FI
-		FI
-	FI
+	echo \f 				; # Clear screen
+	echo "\n\n Enter Octet: "
+	read -n 3 IP1
+	if [ -z $IP1 ]
+		echo "\n\nNothing entered"
+	else
+		if ![ -i $IP1 ]		; # Note the use of ! to negate IF
+			echo "\n\nNon-numeric characters entered"
+		else
+			if [ $IP1 -gt 0 ] AND [ $IP1 -lt 256 ]
+				echo "\n\nValid Octet Entered"
+			else
+				echo "\n\nNumber out of range"
+			fi
+		fi
+	fi
 
 ### Line Separator
 
@@ -881,15 +942,15 @@ The following example demonstrates the complete validation concept outlined abov
 
 The shell supports a line separator, the semicolon (;), that can be used to concatenate one or more lines on to a single line.  Many of the examples in this guide make use of this **;** directive which allows you to put multiple statements on one line.  For example
 
-	IF [ condition ] ; ECHO result ; ELSE ; ECHO message ; FI
+	if [ condition ] ; echo result ; else ; echo message ; fi
  
 > Is the same as 
 
-	IF [ condition ]
-		ECHO result
-	ELSE
-		ECHO message
-	FI
+	if [ condition ]
+		echo result
+	else
+		echo message
+	fi
 
 As far as the shell is concerned, it processes both syntax as a series of individual command lines.  For this guide, the **;** is used to make these sample scripts shorter to display.  In writing your own scripts, it may be easier to read and understand scripts that use the longer syntax.  The real benefit of the **;** line separator is on the interactive command line ($ prompt) where you can type in a mini-script at the prompt.  This is especially useful with command loops using **FOR** or **WHILE**.
 
@@ -900,7 +961,7 @@ As far as the shell is concerned, it processes both syntax as a series of indivi
 	#  This is a comment.
 	    #  This is a another comment.
 	#LastComment
-	ECHO Hello ; # Comment after command using semi-colon
+	echo Hello ; # Comment after command using semi-colon
 
 You add comments to your scripts by placing a pound sign (**#**) at the start of the line of your script.  The **#** must be the first non-space character on the line, for the entire line to be treated as a comment.  As shown in the sample scripts throughout this guide, you can add a comment to a line containing a command (i.e.  ECHO "Hello") by using the semicolon to concatenate multiple lines (i.e. ECHO "Hello" ; # A Comment).
 
