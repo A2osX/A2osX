@@ -4,9 +4,9 @@
 
 ## A2osX 0.93 has been Released!  RELEASE Media are now available
 
-- [RELEASE.140.po](./.Floppies/RELEASE.140.po)   An 140K 5.25" disk image containing the main BOOT and support files for running A2osX.
-- [RELEASE.800.po](./.Floppies/RELEASE.800.po)  An 800K 3.5" disk image containing the main BOOT and support files for running A2osX.
-- [RELEASE.32MB.po](./.Floppies/RELEASE.32MB.po)  A formatted ProDOS 32MB HD disk image, suitable for use with emulators such as AppleWin
+- [RELEASE.140.po](./.Floppies/RELEASE.140.po?raw=true)   An 140K 5.25" disk image containing the main BOOT and support files for running A2osX.
+- [RELEASE.800.po](./.Floppies/RELEASE.800.po?raw=true)  An 800K 3.5" disk image containing the main BOOT and support files for running A2osX.
+- [RELEASE.32MB.po](./.Floppies/RELEASE.32MB.po?raw=true)  A formatted ProDOS 32MB HD disk image, suitable for use with emulators such as AppleWin
 
 See the **[news](#news)** section below for more information.
 
