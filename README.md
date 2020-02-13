@@ -1,8 +1,8 @@
 # A2osX Multi-Tasking OS for Apple II  
 
-### Updated February 11, 2020
+### Updated February 13, 2020
 
-## A2osX Final Release Candidate for 0.93 now available
+## A2osX 0.93 has been Released!  RELEASE Media are now available
 
 See the **[news](#news)** section below for more information.
 
@@ -24,7 +24,9 @@ Consult the **[documentation](#documentation)** section below to find other reso
 
 ## News
 
-A2osX Version 0.93 Release Candidate has been finalized.  Media for this release, based on Build 1942 are now available.  Both RC and STABLE media are built on this build, however, future STABLE and BLEED builds will be based on work to complete 0.94, so please use the RC media unless you are working on developing for 0.94.  As for 0.94, the next major edition, work has already started to make the A2osX API fully C compliant.  This will allow a new CSH shell and CC compiler to be added to A2osX as well as an enhanced web server (*httpd*) that can serve active server pages formed by user created CSH scripts.  In addition, Double High Graphics Resolution (DHGR) and Mouse drivers are being finalized which will allow developers to create games and new user interfaces for their A2osX applications.
+A2osX Version 0.93 has been released.  This RELEASE has been finalized and will be archived into a separate branch on GitHub.  Media for this release, based on Build 1951 are now available.  RELEASE, RC and STABLE media are built on this build, however, future STABLE and BLEED builds will be based on work to complete 0.94, so please use the RELEASE media unless you are working on developing for 0.94.  As for 0.94, the next major edition, work has already started to make the A2osX API fully C compliant.  This will allow a new CSH shell and CC compiler to be added to A2osX as well as an enhanced web server (*httpd*) that can serve active server pages formed by user created CSH scripts.  In addition, Double High Graphics Resolution (DHGR) and Mouse drivers are being finalized which will allow developers to create games and new user interfaces for their A2osX applications.
+
+We have created a new forum for discussing A2osX, features, examples, use cases, etc.  It can be found on **[Google Groups](https://groups.google.com/forum/#!forum/a2osx)**.
 
 >Note, there is one open (and will not be fixed) issue for 0.93 that affects the *mv* and *cp* commands in a specific use case.  This is documented on GitHub as **[Issue #53](https://github.com/A2osX/A2osX/issues/53)**.  Briefly, if you use *mc* or *cp* recursively and use as the destination a non-existent directory, the command will fail to perform the operation in the expected manner.  For this use case, use the *md* (make directory) command to first make the target destination directory before issuing the *mv* or *cp* command.  A previous note posted here regarding **[Issue #148](https://github.com/A2osX/A2osX/issues/148)** (about an issue with *useradd* has been resolved.
 
@@ -32,7 +34,7 @@ If you would like to read all the past news articles for A2osX, you can read the
 
 ## **Visit us at [A2osX](http://www.a2osx.com)**
 
-This is just a place holder and plug for our [A2osX](http://www.a2osx.com) internet site.  Stay tuned here for news about this site.  We have created a Page to discuss A2osX on **[Facebook](https://www.facebook.com/A2osx-372512896625840/)** and have a new **[Twitter](https://twitter.com/A2Osx)** handle to test new A2osX features which will soon be used as a messaging channel, so please follow.
+This is just a place holder and plug for our [A2osX](http://www.a2osx.com) internet site.  Stay tuned here for news about this site.  We have created a Page to discuss A2osX on **[Facebook](https://www.facebook.com/A2osx-372512896625840/)** and have a new **[Twitter](https://twitter.com/A2Osx)** handle to test new A2osX features which will soon be used as a messaging channel, so please follow.  We have created a new forum for discussing A2osX, features, examples, use cases, etc.  It can be found on **[Google Groups](https://groups.google.com/forum/#!forum/a2osx)**.
 
 ## Disk images
 
