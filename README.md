@@ -2,13 +2,7 @@
 
 ### Updated February 13, 2020
 
-## A2osX 0.93 has been Released!  RELEASE Media are now available
-
-- [RELEASE.140.po](./.Floppies/RELEASE.140.po?raw=true)   An 140K 5.25" disk image containing the main BOOT and support files for running A2osX.
-- [RELEASE.800.po](./.Floppies/RELEASE.800.po?raw=true)  An 800K 3.5" disk image containing the main BOOT and support files for running A2osX.
-- [RELEASE.32MB.po](./.Floppies/RELEASE.32MB.po?raw=true)  A formatted ProDOS 32MB HD disk image, suitable for use with emulators such as AppleWin
-
-See the **[news](#news)** section below for more information.
+## A2osX 0.94
 
 ![](./.screen-shots/ScreenShot.Logo.png)
 
@@ -28,11 +22,7 @@ Consult the **[documentation](#documentation)** section below to find other reso
 
 ## News
 
-A2osX Version 0.93 has been released.  This RELEASE has been finalized and will be archived into a separate branch on GitHub.  Media for this release, based on Build 1951 are now available.  RELEASE, RC and STABLE media are built on this build, however, future STABLE and BLEED builds will be based on work to complete 0.94, so please use the RELEASE media unless you are working on developing for 0.94.  As for 0.94, the next major edition, work has already started to make the A2osX API fully C compliant.  This will allow a new CSH shell and CC compiler to be added to A2osX as well as an enhanced web server (*httpd*) that can serve active server pages formed by user created CSH scripts.  In addition, Double High Graphics Resolution (DHGR) and Mouse drivers are being finalized which will allow developers to create games and new user interfaces for their A2osX applications.
-
-We have created a new forum for discussing A2osX, features, examples, use cases, etc.  It can be found on **[Google Groups](https://groups.google.com/forum/#!forum/a2osx)**.
-
->Note, there is one open (and will not be fixed) issue for 0.93 that affects the *mv* and *cp* commands in a specific use case.  This is documented on GitHub as **[Issue #53](https://github.com/A2osX/A2osX/issues/53)**.  Briefly, if you use *mc* or *cp* recursively and use as the destination a non-existent directory, the command will fail to perform the operation in the expected manner.  For this use case, use the *md* (make directory) command to first make the target destination directory before issuing the *mv* or *cp* command.  A previous note posted here regarding **[Issue #148](https://github.com/A2osX/A2osX/issues/148)** (about an issue with *useradd* has been resolved.
+A2osX Version 0.94 ....
 
 If you would like to read all the past news articles for A2osX, you can read the news article found **[here](.Docs/News.md)**.
 
