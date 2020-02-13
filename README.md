@@ -4,6 +4,10 @@
 
 ## A2osX 0.93 has been Released!  RELEASE Media are now available
 
+- [RELEASE.140.po](../.Floppies/RELEASE.140.po)   An 140K 5.25" disk image containing the main BOOT and support files for running A2osX.
+- [RELEASE.800.po](../.Floppies/RELEASE.800.po)  An 800K 3.5" disk image containing the main BOOT and support files for running A2osX.
+- [RELEASE.32MB.po](../.Floppies/RELEASE.32MB.po)  A formatted empty ProDOS 32MB HD disk image, suitable for use with emulators such as AppleWin
+
 See the **[news](#news)** section below for more information.
 
 ![](./.screen-shots/ScreenShot.Logo.png)
@@ -39,12 +43,6 @@ This is just a place holder and plug for our [A2osX](http://www.a2osx.com) inter
 ## Disk images
 
 You can use and/or install A2osX from the media in our Media directory found **[here](.Floppies)**.  Provided media includes **Release**, **RC** (Release Candidate), **Stable** and **Bleed** (Cutting Edge) editions in 140K, 800K and 32MB images.  Please consult our **[Media Guide](.Docs/Media%20Guide.md)** for more information.
-
-With the release of A2osX 0.93, the following convienent links are for the disk images most users should download:
-
-- [RELEASE.140.po](../.Floppies/RELEASE.140.po)   An 140K 5.25" disk image containing the main BOOT and support files for running A2osX.
-- [RELEASE.800.po](../.Floppies/RELEASE.800.po)  An 800K 3.5" disk image containing the main BOOT and support files for running A2osX.
-- [RELEASE.32MB.po](../.Floppies/RELEASE.32MB.po)  A formatted empty ProDOS 32MB HD disk image, suitable for use with emulators such as AppleWin
 
 ## Documentation
 
