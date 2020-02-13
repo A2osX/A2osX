@@ -6,7 +6,7 @@
 
 - [RELEASE.140.po](../.Floppies/RELEASE.140.po)   An 140K 5.25" disk image containing the main BOOT and support files for running A2osX.
 - [RELEASE.800.po](../.Floppies/RELEASE.800.po)  An 800K 3.5" disk image containing the main BOOT and support files for running A2osX.
-- [RELEASE.32MB.po](../.Floppies/RELEASE.32MB.po)  A formatted empty ProDOS 32MB HD disk image, suitable for use with emulators such as AppleWin
+- [RELEASE.32MB.po](../.Floppies/RELEASE.32MB.po)  A formatted ProDOS 32MB HD disk image, suitable for use with emulators such as AppleWin
 
 See the **[news](#news)** section below for more information.
 
