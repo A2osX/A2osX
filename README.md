@@ -40,6 +40,12 @@ This is just a place holder and plug for our [A2osX](http://www.a2osx.com) inter
 
 You can use and/or install A2osX from the media in our Media directory found **[here](.Floppies)**.  Provided media includes **Release**, **RC** (Release Candidate), **Stable** and **Bleed** (Cutting Edge) editions in 140K, 800K and 32MB images.  Please consult our **[Media Guide](.Docs/Media%20Guide.md)** for more information.
 
+With the release of A2osX 0.93, the following convienent links are for the disk images most users should download:
+
+- [RELEASE.140.po](../.Floppies/RELEASE.140.po)   An 140K 5.25" disk image containing the main BOOT and support files for running A2osX.
+- [RELEASE.800.po](../.Floppies/RELEASE.800.po)  An 800K 3.5" disk image containing the main BOOT and support files for running A2osX.
+- [RELEASE.32MB.po](../.Floppies/RELEASE.32MB.po)  A formatted empty ProDOS 32MB HD disk image, suitable for use with emulators such as AppleWin
+
 ## Documentation
 
 The A2osX team is pleased to report that great strides have been made in terms of documentation.  While much of it is in draft form, there is a new **[Users Guide](.Docs/User%20Guide.md)**, **[Developers Guide](.Docs/Developers%20Guide.md)**, **[Shell Developers Guide](.Docs/Shell%20Developers%20Guide.md)**, **[Technical Spec](.Docs/Technical%20Spec.md)** and **[Command Guide](.Docs/Command%20Guide.md)**.   Work continues to expand and enhance the documentation for A2osX.  While still under construction, it is provided to you to bring you as much information about A2osX as quickly as possible.  We happily welcome any help and contributions from others to this or any area of the A2osX project.  The repository all A2osX documentation can be found **[here](.Docs)**.  This directory includes the system generated specifications for all the A2osX APIs as well as all our other documentation. 
