@@ -123,17 +123,17 @@ K.atoi			>STYA ZPPtr2
 				jsr MATH.Dec2ACC32
 				bcs .9
 				>LDYA ACC32
-.9
-K.atoi.RTS		rts
+
+.9				rts
 */--------------------------------------
 * # RealPath
 * Return the canonicalized absolute pathname
-* ## C
-* `unsigned short int realpath (const char* str, char *resolvedpath);`
+* ## C / CSH
+* `char *realpath(const char *path, char *resolvedpath);`
 * ## ASM
 * **In:**
-* `>PUSHWI resolvedpath`
-* `>LDYA str`
+* `>PUSHW path`
+* `>PUSHW resolvedpath`
 * `>SYSCALL realpath`
 * ## RETURN VALUE
 * CC : success
@@ -141,17 +141,26 @@ K.atoi.RTS		rts
 *  X = hMem of Full Path
 * CS : A = Error Code
 *\--------------------------------------
-K.realpath		sec
-				.HS 90					BCC
-STDLIB.realpath.I
-				clc
-				ror .82+1
+K.realpath.DST	.BS 2
 
-				>SYSCALL2 expand
-				bcs K.atoi.RTS
+K.realpath.RET4	>RET 4
+
+K.realpath		ldy #3
+				lda (pStack),y
+				>PUSHA
+				lda (pStack),y
+				>PUSHA
+				>PUSHWI 0
+				jsr K.expand
+				bcs K.realpath.RET4
 
 				>STYA ZPPtr1
 				stx .99+1				save expanded buffer hMem
+
+				>PULLW K.realpath.DST	resolvedpath
+				
+				inc pStack				discard path
+				inc pStack
 
 				ldx #$ff
 
@@ -163,13 +172,13 @@ STDLIB.realpath.I
 .1				ldy #S.PS.hCWD
 				lda (pPs),y
 				jsr K.GetMemPtr
-				>STYA ZPPtr2
+				>STYA .20+1
 
 				ldy #$ff
 
 .2				iny
 				inx
-				lda (ZPPtr2),y
+.20				lda $ffff,y
 				sta K.Buf256,x
 				bne .2
 
@@ -239,14 +248,15 @@ STDLIB.realpath.I
 *--------------------------------------
 .81				jsr .99
 
-.82				lda #$ff				SELF MODIFIED
-				bpl .88
+.82				ldy K.realpath.DST
+				lda K.realpath.DST+1
+				bne .85
 
 				>LDYAI MLI.MAXPATH+1
 				jsr K.getmem
 				bcs .90
 				
-				>STYA ZPPtr1
+.85				>STYA ZPPtr1
 				
 				ldy #$ff
 				
@@ -254,9 +264,10 @@ STDLIB.realpath.I
 				lda K.Buf256,y
 				sta (ZPPtr1),y
 				bne .83
+
 				>LDYA ZPPtr1
 
-.88				clc
+				clc
 				rts
 
 .99				lda #$ff				SELF MODIFIED
@@ -292,6 +303,334 @@ K.RealPath.RemoveAtX
 				stz K.Buf256+1
 
 .8				plx						restore X
+				rts
+*/--------------------------------------
+* # Expand
+* ## C
+* `char *expand(const char *str, char *expanded);`
+* ## ASM
+* `>PUSHW str`
+* `>PUSHW expanded`
+* `>SYSCALL expand`
+* ## RETURN VALUE
+*  Y,A = PTR to Expanded String 
+*  X = hMem to Expanded String (C-String)
+*\--------------------------------------
+				.DUMMY
+				.OR ZPDRV
+ENV.BufLen		.BS 1
+ENV.VarEndChar	.BS 1
+ENV.bNoExp		.BS 1
+ENV.bExp		.BS 1
+				.ED
+*--------------------------------------
+K.Expand		ldy #2
+				lda (pStack),y
+				pha
+				iny
+				lda (pStack),y
+				ply
+				
+				jsr K.strdup
+				bcc .1
+				
+				>RET 4
+				
+.1				phx						Save temp string...
+				>STYA TXTPTR
+
+				stz	ENV.BufLen			init Expanded String len=0
+				stz ENV.bExp			No var found yet
+				stz ENV.bNoExp			Reset no expand flag
+
+.10				lda (TXTPTR)			End of CSTR?
+				beq .80
+
+				jsr SHARED.TXTPTR.Next
+				
+.11				cmp #'''
+				bne .21
+
+				lda ENV.bNoExp
+				eor #$ff
+				sta ENV.bNoExp			toggle flag
+				bra	.10
+
+.21				bit ENV.bNoExp
+				bpl .23
+
+.22				jsr ENV.AddAToBuf
+				bra .10
+
+.23				cmp #'$'				no, found one ?
+				bne .22					no, store...
+
+				lda (TXTPTR)
+				bne .24
+
+				lda #'$'				End of string, output $
+				bra .22
+				
+.24				
+*				sec
+				ror ENV.bExp			Toggle Expanded flag
+				stz ENV.VarEndChar
+				cmp #'{'				 "${VAR]"?
+				bne .31
+
+				dec ENV.VarEndChar		"}" expected
+
+				jsr SHARED.TXTPTR.Next	skip "{"
+				bra .40
+
+.31				jsr ENV.SysVar			0-9 *#?@$!
+				bcs .40
+
+.35				jsr SHARED.TXTPTR.Next	skip $x
+				bra .10
+				
+.40				jsr ENV.ExpandStrVar
+				bcc .70
+
+.50				ldy ENV.BufLen
+				lda /K.Buf256
+				>STYA FORPNT
+
+				ldy #S.PS.hENV
+				lda (pPs),y
+				
+				ldx #SYS.GetEnv
+				jsr K.SYSCALL.JMPX
+				bcs .70
+
+				ldx ENV.BufLen
+				
+.51				lda K.Buf256,x
+				beq .52
+				inx
+				bra .51
+				
+.52				stx	ENV.BufLen
+				
+.70				lda (TXTPTR)
+				beq .72
+
+				jsr SHARED.IsIDValid
+				bcs .72
+				jsr SHARED.TXTPTR.Next
+				bra .70
+
+.72				lda ENV.VarEndChar			
+				bne .35					skip "}" and loop
+
+				bra .10
+
+.80				ldx ENV.BufLen
+				stz K.Buf256,x
+
+				pla						discard temp string
+				jsr K.FreeMem
+
+				>LDYAI K.Buf256			dup in case of '' processing
+				jsr K.strdup
+				bcs .9
+				
+				bit ENV.bExp			Did we expand something ?
+				bpl .9
+				jmp .1
+				
+.9				>RET 4
+*--------------------------------------
+ENV.SysVar		jsr ZP.IsDigit			$0 ... $9 ?
+				bcs .1
+
+				and #$0f
+
+				jsr K.ArgV
+				bcs .8					Arg# is undefined, do not append anything
+
+				jsr ENV.AddYAToBuf
+
+.8				clc
+				rts
+
+.1				ldx #ENV.SysVars.Cnt-1
+
+.2				cmp ENV.SysVars,x
+				beq .3
+				dex
+				bpl .2
+				
+				sec
+				rts
+
+.3				txa
+				beq ENV.SysVarsAllArgs
+
+				ldy ENV.SysVars.PS-1,x
+				lda (pPS),y
+*--------------------------------------
+ENV.SysVarsNum	jsr MATH.A2STR10NP
+				ldy #0
+.1				lda A2osX.NumStrBuf,y
+				beq ENV.SysVarsNum.8
+				iny
+				jsr ENV.AddAToBuf
+				bra .1
+ENV.SysVarsNum.8
+				clc
+				rts
+*--------------------------------------
+ENV.SysVarsAllArgs
+				lda #1
+				jsr K.ArgV
+				bcs ENV.SysVarsNum.8
+				>STYA ZPPtr3
+
+.1				lda (ZPPtr3)
+				beq ENV.SysVarsNum.8
+
+.2				jsr ENV.AddP3ToBuf
+				jsr ENV.NextEnvP3
+				lda (ZPPtr3)
+				beq ENV.SysVarsNum.8
+				lda #C.SPACE
+				jsr ENV.AddAToBuf
+				bra .2
+*--------------------------------------
+ENV.SysVars		.AS "*#?@$!"
+ENV.SysVars.Cnt	.EQ *-ENV.SysVars
+ENV.SysVars.PS	.DA #S.PS.ARGC,#S.PS.RC,#S.PS.PPID,#S.PS.PID,#S.PS.CPID
+*--------------------------------------
+ENV.ExpandStrVar
+				>LDYAI ENV.StrVars
+				>STYA ZPPtr3
+				ldx #0
+
+.1				lda (ZPPtr3)
+				beq .9
+
+				ldy #$ff
+.2				iny
+				lda (TXTPTR),y
+				beq .3
+
+				jsr SHARED.IsIDValid
+				bcs .3
+
+				cmp (ZPPtr3),y
+				beq .2
+
+				bra .4
+
+.3				lda (ZPPtr3),y
+				bne .4
+
+				jmp (ENV.StrVarsJmp,x)
+
+.4				inx
+				inx
+				jsr ENV.NextEnvP3
+				bra .1
+
+.9				sec
+				rts
+*--------------------------------------
+ENV.StrVars		.AZ "LOGNAME"
+				.AZ "GECOS"
+				.AZ "HOME"
+				.AZ "SHELL"
+				.AZ "UID"
+				.AZ "GID"
+				.AZ "PWD"
+				.DA #0
+*--------------------------------------
+ENV.StrVarsJmp	.DA ENV.StrVarsSession
+				.DA ENV.StrVarsSession
+				.DA ENV.StrVarsSession
+				.DA ENV.StrVarsSession
+				.DA ENV.StrVarsUID
+				.DA ENV.StrVarsGID
+				.DA ENV.StrVarsPWD
+*--------------------------------------
+ENV.StrVarsSession
+				jsr ENV.GetSession
+				
+				lda ZPPtr3
+				clc
+				adc #S.SESSION.NAME
+				sta ZPPtr3
+				lda ZPPtr3+1
+				adc /S.SESSION.NAME
+				sta ZPPtr3+1
+
+.1				dex
+				dex
+				bmi ENV.AddP3ToBuf
+
+				ldy #$ff
+.2				iny
+				lda (ZPPtr3),y
+				bne .2
+
+				jsr ENV.NextEnvP3Y
+				bra .1
+*--------------------------------------
+ENV.StrVarsUID	ldx #S.SESSION.UID
+				.HS 2C
+ENV.StrVarsGID	ldx #S.SESSION.GID
+				
+				jsr ENV.GetSession
+				txa
+				tay
+				lda (ZPPtr3),y
+				jmp ENV.SysVarsNum
+*--------------------------------------
+ENV.StrVarsPWD	ldy #S.PS.hCWD
+				lda (pPS),y
+				jsr K.GetMemPtr
+				jmp ENV.AddYAToBuf
+*--------------------------------------
+ENV.GetSession	ldy #S.PS.hSID
+				lda (pPS),y
+				tay
+				lda S.Table.hSession-1,y
+				jsr K.GetMemPtr
+				>STYA ZPPtr3
+				rts
+*--------------------------------------
+ENV.AddYAToBuf	>STYA ZPPtr3
+*--------------------------------------
+ENV.AddP3ToBuf	ldx ENV.BufLen
+				ldy #$ff
+				dex
+.1				iny
+				inx
+				lda (ZPPtr3),y
+				sta K.Buf256,x
+				bne .1
+				stx ENV.BufLen
+				rts
+*--------------------------------------
+ENV.AddAToBuf	ldx ENV.BufLen
+				sta K.Buf256,x
+				inc ENV.BufLen
+				rts
+*--------------------------------------
+ENV.NextEnvP3	jsr ENV.GetP3LenY
+*--------------------------------------
+ENV.NextEnvP3Y	tya
+				sec
+				adc ZPPtr3
+				sta ZPPtr3
+				bcc .8
+				inc ZPPtr3+1
+.8				rts
+*--------------------------------------
+ENV.GetP3LenY	ldy #$ff
+.1				iny
+				lda (ZPPtr3),y
+				bne .1
 				rts
 *--------------------------------------
 MAN
