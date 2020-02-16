@@ -80,41 +80,24 @@ K.ReadDir.ROOT
 				ldy #S.FD.DIR.FC		did we already returned something ?
 				lda (pFD),y
 				bne K.ReadDir.NoMore
+
 				stz K.MLI.PARAMS+1		All Volumes
 				>LDYAI K.Buf256
 				>STYA K.MLI.PARAMS+2
 				>STYA ZPPtr2
 				>MLICALL MLIONLINE
 				bcs K.ReadDir.RTS
-* pass #1 compute BufSize.....
-				lda #1					+1 for Ending 0
-				sta	K.ReadDir.BufSize
-				stz K.ReadDir.BufSize+1
-				stz K.ReadDir.EC
-				ldy #0
 
-.1				lda (ZPPtr2),y
-				and #$0F
-				beq .2
-				inc K.ReadDir.EC		increase entry count
-				sec						Add Filelen +1
-				adc #S.STAT				will ends with CC
-				adc K.ReadDir.BufSize
-				sta K.ReadDir.BufSize
-				bcc .2
-				inc K.ReadDir.BufSize+1
-
-.2				tya
-				clc
-				adc #16
-				tay
-				bcc .1					loop until 256 bytes scanned
-* pass #2 Fill Buffer...
-				jsr K.ReadDir.GetBuf
+				>LDYAI 16*16+16*S.STAT+1	16 (Vols+Stat) + \0
+				jsr K.ReadDir.GetBufYA
 				bcs K.ReadDir.RTS
-.3				lda (ZPPtr2)
+				
+				lda #16
+				sta K.ReadDir.EC
+				
+.1				lda (ZPPtr2)
 				and #$0F
-				beq .88
+				beq .6
 
 				tax
 				inc
@@ -122,19 +105,21 @@ K.ReadDir.ROOT
 				lda #'/'
 				sta K.MLI.PATH+1
 				ldy #1
-.4				lda (ZPPtr2),y
+				
+.2				lda (ZPPtr2),y
 				sta K.MLI.PATH+1,y
 				jsr K.ReadDir.AddToBuf
 				iny
 				dex
-				bne .4
+				bne .2
+				
 				txa						Add ending 0 for C String 
 				jsr K.ReadDir.AddToBuf
 				
 				jsr SHARED.ClrStat
 				lda (ZPPtr2)
 
-				asl					DRIVE in Carry
+				asl						DRIVE in Carry
 				pha
 				lda #0
 				rol
@@ -153,25 +138,29 @@ K.ReadDir.ROOT
 				>MLICALL MLIGETFILEINFO
 				sta K.S.STAT+S.STAT.P.DEVSTATUS
 
-				bcs .80
+				bcs .3
+
 				>LDYA K.MLI.PARAMS+5		AUXTYPE=TOTAL BLOCKS
 				>STYA K.S.STAT+S.STAT.P.DEVBLOCKS
 				>LDYA K.MLI.PARAMS+8
 				>STYA K.S.STAT+S.STAT.BLOCKS
-.80				jsr K.ReadDir.ADDSTAT
 
-				dec K.ReadDir.EC
-				beq .5
-.88				lda ZPPtr2
+.3				jsr K.ReadDir.AddStat
+
+.6				lda ZPPtr2
 				clc
 				adc #16
 				sta ZPPtr2
-				bcc .3
+				bcc .7
 				inc ZPPtr2+1
-				bra .3
+				
+.7				dec K.ReadDir.EC
+				bne .1				
+				
 *				lda #0					done by S.MEM.F.INIT0
 *				sta (ZPPtr4)			Ending 0
-.5				ldy #S.FD.DIR.FC
+
+				ldy #S.FD.DIR.FC
 				lda #16
 				sta (pFD),y				Flag that we returned somthing for next time 
 				jmp K.ReadDir.EXIT
@@ -309,29 +298,23 @@ K.ReadDir.DIR2	jsr K.ReadDir.GetBuf
 				bne .2
 
 				jsr K.ReadDir.ADD.
-				bra .6
+				bra .4
 
 .2				cmp #$E0				Dir Header ?
 				bne .3
 
 				jsr K.ReadDir.ADD.
+				jsr SHARED.DirEnt2Stat
+				jsr K.ReadDir.AddStat
 				jsr K.ReadDir.ADD..
-				bra .6
+				bra .4
 
 .3				jsr K.ReadDir.AddFNToBuf
-				jsr SHARED.ClrStat
+				
+.4				jsr SHARED.DirEnt2Stat
+				jsr K.ReadDir.AddStat
 
-				lda (ZPPtr3)
-				and #$F0
-				cmp #$D0					Directory ?
-				bne .5
-
-				jsr K.ReadDir.ADDD
-				bra .6
-
-.5				jsr K.ReadDir.ADDF
-
-.6				lda K.ReadDir.EC			decrease global counter...
+				lda K.ReadDir.EC			decrease global counter...
 				sec
 				sbc #1
 				sta K.ReadDir.EC
@@ -380,6 +363,7 @@ K.ReadDir.CLN	pha
 *--------------------------------------
 K.ReadDir.GetBuf
 				>LDYA K.ReadDir.BufSize			Get a BufSize bytes buffer for storing results
+K.ReadDir.GetBufYA
 				jsr K.GetMem0			make sure 0 filled
 				bcs .9
 				stx K.ReadDir.EXIT+1
@@ -397,80 +381,7 @@ K.ReadDir.ADD..
 				bne .1
 
 				txa
-				jsr K.ReadDir.AddToBuf		Add Ending 0
-				jsr SHARED.ClrStat
-*				ldy #$25				total_blocks
-*				lda (ZPPtr3),y
-*				sta K.S.STAT+S.STAT.BLOCKS
-*				iny
-*				lda (ZPPtr3),y
-*				sta K.S.STAT+S.STAT.BLOCKS+1
-*--------------------------------------
-K.ReadDir.ADDD	lda #$0F
-				sta K.S.STAT+S.STAT.P.TYPE
-
-				lda /S.STAT.MODE.DIR
-				sta K.S.STAT+S.STAT.MODE+1
-				bra K.ReadDir.AddAccess
-*--------------------------------------
-K.ReadDir.ADDF
-*				lda /S.STAT.MODE.REG		0
-*				sta K.S.STAT+S.STAT.MODE+1
-				ldx #ADDF.DST-ADDF.SRC
-
-.1				ldy ADDF.SRC-1,x
-				lda (ZPPtr3),y
-				ldy ADDF.DST-1,x
-				sta K.S.STAT,y
-				dex
-				bne .1
-*--------------------------------------
-K.ReadDir.AddAccess
-				lda CORE.FSID
-				sta K.S.STAT+S.STAT.FSID
-
-				ldy #$1E				ProDOS Access
-				lda (ZPPtr3),y
-
-				jsr SHARED.Stat.Access2Mode
-*--------------------------------------
-K.ReadDir.AddTime
-				lda #$18				creation Date/time
-				clc
-				adc ZPPtr3
-				tay
-				lda ZPPtr3+1
-				adc #0
-				>PUSHYA
-				>PUSHWI K.S.STAT+S.STAT.CTIME
-				>SYSCALL2 PTime2Time
-				
-				lda #$21				mod Date/time
-				clc
-				adc ZPPtr3
-				tay
-				lda ZPPtr3+1
-				adc #0
-				>PUSHYA
-				>PUSHWI K.S.STAT+S.STAT.MTIME
-				>SYSCALL2 PTime2Time
-*--------------------------------------
-K.ReadDir.AddStat
-				ldy #0
-
-.1				lda K.S.STAT,y
-				jsr K.ReadDir.AddToBuf
-				iny
-				cpy #S.STAT
-				bne .1
-
-				rts
-*--------------------------------------
-ADDF.SRC		.HS 1013141516171f20
-ADDF.DST		.DA #S.STAT.P.TYPE
-				.DA #S.STAT.BLOCKS,#S.STAT.BLOCKS+1
-				.DA #S.STAT.SIZE,#S.STAT.SIZE+1,#S.STAT.SIZE+2
-				.DA #S.STAT.P.AUXTYPE,#S.STAT.P.AUXTYPE+1
+				jmp K.ReadDir.AddToBuf		Add Ending 0
 *--------------------------------------
 K.ReadDir.AddFNToBuf
 				ldy #$1C				version/min_version for lowercase bitmap
@@ -528,6 +439,17 @@ K.ReadDir.AddToBuf
 				bne .8
 				inc ZPPtr4+1
 .8				rts
+*--------------------------------------
+K.ReadDir.AddStat
+				ldy #0
+
+.1				lda K.S.STAT,y
+				jsr K.ReadDir.AddToBuf
+				iny
+				cpy #S.STAT
+				bne .1
+
+				rts
 */-------------------------------------
 * # CloseDir
 * ## C

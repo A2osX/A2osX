@@ -30,8 +30,8 @@ Expand String and convert to StrV List
 short int arg2argv(char* args, char* argv[])  
 
 ## ASM  
+`>PUSHW args`  
 `>PUSHW argv`  
-`>LDYA args`  
 `>SYSCALL Arg2ArgV`  
 
 ## RETURN VALUE  
@@ -82,11 +82,11 @@ X = hDev
 # GetDevStatus  
 
 ## C   
-`int getdevstatus(short int DevID, S.DIB* dstat);`  
+`int getdevstatus(short int DevID, S.DIB *dstat);`  
 
 ## ASM  
-`>PUSHWI S.DIB`  
-`lda DevID`  
+`PUSHB DevID`  
+`>PUSHW S.DIB`  
 `>SYSCALL GetDevStatus`  
 
 ## RETURN VALUE  
@@ -95,15 +95,29 @@ X = hDev
 Create a hDEV  
 
 ## C  
-`hDEV mkdev (S.FD * fd, const char *devname)`  
+`hDEV mkdev (S.FD *fd, const char *devname)`  
 
 ## ASM  
+`>PUSHW fd`  
 `>PUSHW devname`  
-`>LDYA fd`  
 `>SYSCALL mkdev  
 
 ## RETURN VALUE  
  A = hDEV  
+
+# IOCTL  
+
+## C  
+`int ioctl(short int DevID, int request, void * param );`  
+
+## ASM  
+`>PUSHB hDEV`  
+`>PUSHB request`  
+`>PUSHW param`  
+`>SYSCALL IOCTL`  
+
+## RETURN VALUE  
+ Y,A = ...  
 
 # OpenDir  
 
@@ -111,7 +125,7 @@ Create a hDEV
 `int hDIR opendir (const char * dirpath);`  
 
 ## ASM  
-`>LDYA dirpath`  
+`>PUSHW dirpath`  
 `>SYSCALL opendir`   
 
 ## RETURN VALUE   
@@ -150,25 +164,10 @@ Create a hDEV
 ## RETURN VALUE  
  none, always succeed.   
 
-# Expand  
-
-## C  
-`char *expand(const char *str, char *expanded);`  
-
-## ASM  
-**In:**  
-`>PUSHW str`  
-`>PUSHW expanded`  
-`>SYSCALL expand`  
-
-## RETURN VALUE  
- Y,A = PTR to Expanded String   
- X = hMem to Expanded String (C-String)  
-
 # SetEnv  
 Change or add an environment variable  
 
-## C  
+## C / CSH  
 `int setenv(const char *name, const char *value);`  
 
 ## ASM  
@@ -183,7 +182,7 @@ Change or add an environment variable
 searches the environment list to find the environment variable name,   
 and returns a pointer to the corresponding value string.  
 
-## C  
+## C / CSH  
 `char *getenv(const char *name, char *value);`  
 
 ## ASM  
@@ -199,7 +198,7 @@ and returns a pointer to the corresponding value string.
 # PutEnv  
 Change or add an environment variable, string is 'NAME=VALUE'  
 
-## C  
+## C / CSH  
 `int putenv(char *string);`  
 
 ## ASM  
@@ -212,7 +211,7 @@ Change or add an environment variable, string is 'NAME=VALUE'
 # UnsetEnv  
 Remove an environment variable  
 
-## C  
+## C / CSH  
 `int unsetenv(const char *name);`  
 
 ## ASM  
@@ -222,37 +221,13 @@ Remove an environment variable
 
 ## RETURN VALUE  
 
-# ChTyp  
-Change The type of a ProDOS File  
-
-## C  
-`int chtyp(const char *filepath, const char filetype);`  
-
-## ASM  
-**In:**  
-`>PUSHBI filetype`  
-`>LDYA filepath`  
-`>SYSCALL chtyp`  
-
-## RETURN VALUE  
-
-# ChOwn  
-**In:**  
- PUSHW = mod  
- PUSHW = PATH  
-
-# ChGrp  
-**In:**  
- PUSHW = GID  
- PUSHW = PATH  
-
 # Add32,Sub32,Mul32,IMul32,Div32,IDiv32,Mod32,IMod32,Cmp32,ICmp32  
 Return X+Y, X-Y, X*Y, X/Y, X mod Y....  
 
 ## ASM  
 **In:**  
-`>PUSHF X (long)`  
-`>PUSHF Y (long)`  
+`>PUSHL X (long)`  
+`>PUSHL Y (long)`  
 `>FPU add32`  
 `...`  
 
@@ -322,20 +297,6 @@ Return float rounded into a long
 
 ## RETURN VALUE  
  On stack (long)  
-
-# IOCTL  
-
-## C  
-`int ioctl(short int DevID, int request, void * param );`  
-
-## ASM  
-`PUSHWI param`  
-`PUSHBI request`  
-`lda hDEV`  
-`>SYSCALL IOCTL`  
-
-## RETURN VALUE  
- Y,A = ...  
 
 ## MD5  
 Return MD5 Hash for input String  
@@ -439,10 +400,10 @@ Y,A = PTR to MemBlock
 
 # LoadStkObj  
 Load a file in AUX memory (Stock Objects)  
- PUSHW = AUXTYPE (Handled by....  
- PUSHB = TYPE  ...  
+ PUSHW = PATH (Handled by....  
  PUSHB = MODE  ...  
- LDYA = PATH ...FOpen)  
+ PUSHB = TYPE  ...  
+ PUSHW = AUXTYPE ...FOpen)  
 
 ## RETURN VALUE  
  Y,A = File Length  
@@ -465,8 +426,8 @@ Load a file in AUX memory (Stock Objects)
 
 # ExecL  
 
-## C  
-`int execl(const char* cmdline, short int flags);`  
+## C / CSH  
+`int execl(const char *cmdline, short int flags);`  
 
 ## ASM  
 `>PUSHW cmdline`  
@@ -478,12 +439,12 @@ A = Child PSID
 
 # ExecV  
 
-## C  
+## C / CSH  
 `int execv(const char* argv[], short int flags);`  
 
 ## ASM  
+`>PUSHW argv`  
 `>PUSHB flags`  
-`>LDYA argv`  
 `>SYSCALL execv`  
 
 ## RETURN VALUE  
@@ -492,7 +453,7 @@ A = Child PSID
 # Fork  
 
 ## C  
-`short nt fork();`  
+`short int fork();`  
 
 ## ASM  
 `>SYSCALL fork`  
@@ -696,6 +657,20 @@ A=hSList
 
 ## RETURN VALUE  
 
+# ChTyp  
+Change The type of a ProDOS File  
+
+## C  
+`int chtyp(const char *filepath, short int filetype);`  
+
+## ASM  
+**In:**  
+`>PUSHW filepath`  
+`>PUSHB filetype`  
+`>SYSCALL chtyp`  
+
+## RETURN VALUE  
+
 # Stat  
 Return information about a file  
 
@@ -704,8 +679,8 @@ Return information about a file
 
 ## ASM  
 **In:**  
+`>PUSHW pathname`  
 `>PUSHW statbuf`  
-`>LDYA pathname`  
 `>SYSCALL stat`  
 
 ## RETURN VALUE  
@@ -718,8 +693,8 @@ create a directory
 
 ## ASM  
 **In:**   
+`>PUSHW pathname`  
 `>PUSHW mode`  
-`>LDYA pathname`  
 `>SYSCALL mkdir`  
 
 ## RETURN VALUE  
@@ -832,78 +807,6 @@ Write Str to hFILE
 ## RETURN VALUE   
 CC = success  
 
-# PrintF (BLOCKING)  
-
-# FPrintF (BLOCKING)  
-
-# SPrintF  
-Prints C-Style String  
-
-## C  
-`int printf ( const char * format, ... );`  
-`int fprintf ( hFILE stream, const char * format, ... );`  
-`int sprintf ( char * str, const char * format, ... );`  
-
-## ASM  
-**In:**  
-PrintF : (example is for printing Y,A as integer : format="%I", 2 bytes)    
-`>PUSHYA`		#I  
-`>PUSHBI 2`	#bytecount  
-`...`  
-`>LDYAI format`  
-`>SYSCALL printf`  
-FPrintF :   
-`>PUSHYA`		#I  
-`>PUSHBI 2`	#bytecount  
-`...`  
-`>PUSHWI format`  
-`lda hFILE`  
-`>SYSCALL fprintf`  
-SPrintF :   
-`>PUSHYA`		#I  
-`>PUSHBI 2`	#bytecount  
-`...`  
-`>PUSHWI format`  
-`>LDYAI str`  
-`>SYSCALL sprintf`  
-
-## RETURN VALUE  
-CC : success, Y,A = bytes sent  
-CS : error, A = code from Output  
-Specifiers :  
-+ %b : pull 1 byte to Print BIN   
-+ %d : pull 1 byte unsigned DEC 0..255  
-+ %D : pull 2 bytes unsigned DEC 0..65535  
-+ %u : pull 4 bytes long unsigned DEC 0..4294967295  
-+ %e : pull 5 Bytes float (-)1.23456789e+12  
-+ %f : pull 5 Bytes float (-)3.1415  
-+ %h : pull 1 byte to Print HEX  
-+ %H : pull 2 bytes to Print HEX  
-+ %i : pull 1 byte to Print signed DEC -128..127  
-+ %I : pull 2 bytes to Print signed DEC -32768..32767  
-+ %L : pull 4 bytes signed DEC -2147483648..2147483647  
-+ %s : pull 2 bytes ptr to C-Style String  
-+ %S : pull 2 bytes ptr to P-Style String  
-+ \b : Print 'BS' (08)  
-+ \e : Print 'ESC' ($1B,27)  
-+ \f : Print 'FF' ($0C,12)  
-+ \n : Print 'LF' ($0A,10)  
-+ \r : Print 'CR' ($0D,13)  
-+ \t : Print 'TAB' ($09,09)  
-+ \v : Print 'VT' ($0B,11)  
-+ \xHH : Print byte with hexadecimal value HH (1 to 2 digits)  
-+ \\\\ : Print \  
-+ \\% : Print %  
-
-Modifiers for len and padding :   
-+ %d	  : '9'  '12'  
-+ %2d	  : ' 9' '12'  
-+ %02d  : '09' '12'  
-+ %11s  : 'ABCDEFGH   '	  
-+ %011s : 'ABCDEFGH000'  
-+ %2f	  :	'3.14'  
-
-
 # fgets (BLOCKING)  
 read bytes from stream into the array  
 pointed to by s, until n-1 bytes are read, or a <newline> is read and  
@@ -953,52 +856,24 @@ Get char from Node
  CC = success  
   A = char  
 
-# SScanF  
-Read formatted data from string  
-
-## C  
-`int sscanf ( const char * s, const char * format, ... );`  
-
-## ASM  
-**In:**  
-`>PUSHW ptr`  
-`...`  
-`>PUSHBI bytecount`  
-`>PUSHWI format`  
-+ %i : short int  
-+ %d : byte  
-+ %I : int  
-+ %D : word  
-+ %L : long int  
-+ %U : dword  
-+ %h : HEX byte  
-+ %H : HEX word  
-+ %s : string  
-
-TODO : %10s  
-`>LDYA s`  
-`>SYSCALL sscanf`  
-
-## RETURN VALUE  
-A = Number of arguments filled.  
-
 # FOpen  
 Open a file  
 
 ## C  
-`hFILE fopen ( const char * filename, short int flags, short int ftype, int auxtype );`  
+`short int fopen ( const char *filename, short int flags, short int ftype, int auxtype );`  
 **In:**  
 
 ## ASM  
-`>PUSHWI auxtype`  
-`>PUSHBI ftype`  
-`>PUSHBI flags`  
+`>PUSHW filename`  
+`>PUSHB flags`  
  + O.RDONLY : if R and exists -> ERROR  
  + O.WRONLY : if W and exists -> CREATE  
  + O.TRUNC : Reset Size To 0  
  + O.APPEND : Append  
  + O.TEXT   : Open/Append in Text mode  
  + O.CREATE : Create if not exists  
+`>PUSHB ftype`  
+`>PUSHW auxtype`  
 TODO: replace flags/ftype/auxtype with mode="w+,t=TYP,x=AUXTYPE"  
  + r  = O_RDONLY  
  + r+ = O_RDWR  
@@ -1008,7 +883,6 @@ TODO: replace flags/ftype/auxtype with mode="w+,t=TYP,x=AUXTYPE"
  + a+ = O_RDWR | O_CREAT | O_APPEND  
  + ,t=123 or t=$ff or t=TXT  
  + ,x=12345 or x=$ffff  
-`>LDYAI filename`  
 
 ## RETURN VALUE   
  CC : A = hFILE  
@@ -1121,7 +995,7 @@ int remove(const char *pathname);
 
 ## ASM  
 **In:**  
-`>LDYA pathname`  
+`>PUSHW pathname`  
 `>SYSCALL remove`  
 
 ## RETURN VALUE  
@@ -1134,11 +1008,133 @@ Rename a file
 
 ## ASM  
 **In:**  
+`>PUSHW oldpath`  
 `>PUSHW newpath`  
-`>LDYA oldpath`  
 `>SYSCALL rename`  
 
 ## RETURN VALUE  
+
+# PrintF (BLOCKING)  
+
+# FPrintF (BLOCKING)  
+
+# SPrintF  
+Prints C-Style String  
+
+## C  
+`int printf ( const char *format, ... );`  
+`int fprintf ( short int stream, const char *format, ... );`  
+`int sprintf ( char *str, const char *format, ... );`  
+
+## ASM  
+**In:**  
+PrintF : (example is for printing Y,A as integer : format="%I", 2 bytes)    
+`>PUSHW format`  
+`>PUSHW i`  
+`...`  
+`>PUSHBI 2`	#bytecount  
+`>SYSCALL printf`  
+FPrintF :   
+`>PUSHB hFILE`  
+`>PUSHW format`  
+`>PUSHW i`  
+`...`  
+`>PUSHBI 2`	#bytecount  
+`>SYSCALL fprintf`  
+SPrintF :   
+`>PUSHW str`  
+`>PUSHW format`  
+`>PUSHW i`  
+`...`  
+`>PUSHBI 2`	#bytecount  
+`>SYSCALL sprintf`  
+
+## RETURN VALUE  
+CC : success, Y,A = bytes sent  
+CS : error, A = code from Output  
+Specifiers :  
++ %b : pull 1 byte to Print BIN   
++ %d : pull 1 byte unsigned DEC 0..255  
++ %D : pull 2 bytes unsigned DEC 0..65535  
++ %u : pull 4 bytes long unsigned DEC 0..4294967295  
++ %e : pull 5 Bytes float (-)1.23456789e+12  
++ %f : pull 5 Bytes float (-)3.1415  
++ %h : pull 1 byte to Print HEX  
++ %H : pull 2 bytes to Print HEX  
++ %i : pull 1 byte to Print signed DEC -128..127  
++ %I : pull 2 bytes to Print signed DEC -32768..32767  
++ %L : pull 4 bytes signed DEC -2147483648..2147483647  
++ %s : pull 2 bytes ptr to C-Style String  
++ %S : pull 2 bytes ptr to P-Style String  
++ \b : Print 'BS' (08)  
++ \e : Print 'ESC' ($1B,27)  
++ \f : Print 'FF' ($0C,12)  
++ \n : Print 'LF' ($0A,10)  
++ \r : Print 'CR' ($0D,13)  
++ \t : Print 'TAB' ($09,09)  
++ \v : Print 'VT' ($0B,11)  
++ \xHH : Print byte with hexadecimal value HH (1 to 2 digits)  
++ \\\\ : Print \  
++ \\% : Print %  
+
+Modifiers for len and padding :   
++ %d	  : '9'  '12'  
++ %2d	  : ' 9' '12'  
++ %02d  : '09' '12'  
++ %11s  : 'ABCDEFGH   '	  
++ %011s : 'ABCDEFGH000'  
++ %2f	  :	'3.14'  
+
+
+# ScanF (BLOCKING)  
+
+# FScanF (BLOCKING)  
+
+# SScanF  
+Read formatted data from string  
+
+## C  
+`int scanf(const char *format, ...);`  
+`int fscanf(short int stream, const char *format, ...);`  
+`int sscanf ( const char *s, const char *format, ... );`  
+
+## ASM  
+**In:**  
+ScanF :  
+`>PUSHW format`  
+`>PUSHW ptr`  
+`...`  
+`>PUSHB bytecount`  
+`>SYSCALL scanf`  
+FScanF :  
+`>PUSHB stream`  
+`>PUSHW format`  
+`>PUSHW ptr`  
+`...`  
+`>PUSHB bytecount`  
+`>SYSCALL fscanf`  
+SScanF :  
+`>PUSHW s`  
+`>PUSHW format`  
+`>PUSHW ptr`  
+`...`  
+`>PUSHB bytecount`  
+`>SYSCALL sscanf`  
+Specifiers :  
++ %i : short int  
++ %d : byte  
++ %I : int  
++ %D : word  
++ %L : long int  
++ %U : dword  
++ %h : HEX byte  
++ %H : HEX word  
++ %s : string  
+
+TODO : %10s  
+
+## RETURN VALUE  
+A = Number of arguments filled.  
 
 # strtof  
 Convert String to 40 bits Float  
@@ -1178,9 +1174,9 @@ Convert String to 32 bits (unsigned) int
 
 ## ASM  
 **In:**  
+`>PUSHW str`  
+`>PUSHW EndPtr`  
 `>PUSHB Base`  
-`>PUSHWI EndPtr`  
-`>LDYAI str`  
 `>SYSCALL strtol`  
 
 ## RETURN VALUE  
@@ -1217,13 +1213,13 @@ Convert String to 16 bits int
 # RealPath  
 Return the canonicalized absolute pathname  
 
-## C  
-`unsigned short int realpath (const char* str, char *resolvedpath);`  
+## C / CSH  
+`char *realpath(const char *path, char *resolvedpath);`  
 
 ## ASM  
 **In:**  
-`>PUSHWI resolvedpath`  
-`>LDYA str`  
+`>PUSHW path`  
+`>PUSHW resolvedpath`  
 `>SYSCALL realpath`  
 
 ## RETURN VALUE  
@@ -1231,6 +1227,20 @@ CC : success
  Y,A = Ptr to Full Path (C-String Buffer, MLI.MAXPATH+1)  
  X = hMem of Full Path  
 CS : A = Error Code  
+
+# Expand  
+
+## C  
+`char *expand(const char *str, char *expanded);`  
+
+## ASM  
+`>PUSHW str`  
+`>PUSHW expanded`  
+`>SYSCALL expand`  
+
+## RETURN VALUE  
+ Y,A = PTR to Expanded String   
+ X = hMem to Expanded String (C-String)  
 
 # StrLen  
 Returns Length of C-String  
@@ -1437,6 +1447,20 @@ Convert S.TIME struct to CSTR
 `>PUSHW ctime`  
 `>PUSHW timer`  
 `>SYSCALL CTime2Time`  
+
+## RETURN VALUE  
+
+# ChOwn  
+
+## C  
+ `short int chown(const char *pathname, short int owner, short int group);`  
+
+## ASM  
+**In:**  
+`>PUSHW pathname`  
+`>PUSHB owner`  
+`>PUSHB group`  
+`>SYSCALL chown`  
 
 ## RETURN VALUE  
 
