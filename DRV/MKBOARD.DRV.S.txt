@@ -1,0 +1,339 @@
+NEW
+  AUTO 3,1
+				.LIST OFF
+				.OP	65C02
+				.OR $2000
+				.TF drv/mkboard.drv
+*--------------------------------------
+S.DCB.SND		.EQ 16
+*--------------------------------------
+				.INB INC/MACROS.I
+				.INB INC/A2OSX.I
+				.INB INC/MLI.E.I
+*--------------------------------------
+ZPArgPtr		.EQ ZPBIN
+*--------------------------------------
+*			File Header (16 Bytes)
+*--------------------------------------
+CS.START		cld
+				jmp Dev.Detect			cld,jmp abs=DRV
+				.DA #$61				6502,Level 1 (65c02)
+				.DA #1					DRV Layout Version 1
+				.DA 0
+				.DA CS.END-CS.START		Code Length
+				.DA 0
+				.DA 0
+				.DA 0
+*--------------------------------------
+* Relocation Table
+*--------------------------------------
+L.MSG.DETECT.OK	.DA MSG.DETECT.OK
+L.MSG.DETECT.KO	.DA MSG.DETECT.KO
+L.DRV.CS.START	.DA DRV.CS.START
+L.FD.DEV		.DA FD.DEV
+L.FD.DEV.NAME	.DA FD.DEV.NAME
+				.DA 0					End Of Reloc Table
+*--------------------------------------
+Dev.Detect		>STYA ARGS
+
+				stz ZPArgPtr
+				lda #$C1
+				sta ZPArgPtr+1
+
+.1				and #$0f
+				tay
+				lda A2osX.S,y
+				bne .3
+
+				ldy #4
+				
+				sec
+				lda (ZPArgPtr),y
+				sbc (ZPArgPtr),y
+				cmp #5
+				beq .4
+
+.3				inc FD.DEV.NAME+3
+				inc ZPArgPtr+1			no match, try next slot....
+				lda ZPArgPtr+1
+				cmp #$C8
+				bne .1
+
+				>LDYA L.MSG.DETECT.KO
+				>SYSCALL puts
+
+				lda #MLI.E.NODEV		Not Found in any slot, exiting
+				sec
+				rts	
+
+.4				lda ZPArgPtr+1
+				and #$0F
+				pha
+				tay
+				lda #A2osX.S.SND
+				sta A2osX.S,y
+				pla
+				asl
+				asl
+				asl
+				asl
+				clc
+				adc #$8F
+				sta DEVSLOTn08F
+				jsr Dev.ParseArgs
+				bcs .9
+				
+.8				>PUSHW L.MSG.DETECT.OK
+				>PUSHW L.FD.DEV.NAME
+				>PUSHBI 2
+				>SYSCALL printf
+
+				>PUSHWI DRV.END
+				>PUSHWI DRV.CS.END-DRV.CS.START
+				>PUSHWI DRV.CS.START
+				>LDYA L.DRV.CS.START
+				>SYSCALL InsDrv
+				bcs .9
+
+				>STYA FD.DEV+S.FD.DEV.DRVPTR
+				>PUSHW L.FD.DEV.NAME
+				>LDYA L.FD.DEV
+				>SYSCALL MKDEV
+
+.9				rts
+*--------------------------------------
+Dev.ParseArgs	>LDYA ARGS
+				>STYA ZPArgPTR
+				lda (ZPArgPTR)
+				bne .1
+				clc
+				rts
+				
+.1				
+
+.92				lda #E.SYN
+				sec
+				rts
+*--------------------------------------
+CS.END
+MSG.DETECT.OK	.AZ "MockingBoard Installed As Device : %s\r\n"
+MSG.DETECT.KO	.AZ "HW Not Found."
+ARGS			.BS 2
+*--------------------------------------
+FD.DEV			.DA #S.FD.T.CDEV
+				.DA #0					HANDLER
+				.DA #0					BUSID
+				.DA #0					DEVID
+				.DA 0					BUSPTR
+				.BS 2					DRVPTR
+				.DA 0					DCBPTR
+				.DA 0					BUFPTR
+FD.DEV.NAME		.AZ "snd1"
+*--------------------------------------
+*			Driver Code
+*--------------------------------------
+ZPIOCTL			.EQ ZPDRV
+ZPBufPtr		.EQ ZPDRV+2
+ZPCount			.EQ ZPDRV+4
+*--------------------------------------
+DRV.CS.START	cld
+				jmp (.1,x)
+.1				.DA STATUS
+				.DA A2osX.BADCALL
+				.DA A2osX.BADCALL
+				.DA A2osX.BADCALL
+				.DA CONTROL
+				.DA A2osX.BADCALL
+				.DA OPEN
+				.DA CLOSE
+				.DA READ
+				.DA WRITE
+				.DA IRQ
+				.DA 0					end or relocation
+*--------------------------------------
+STATUS			jsr STATUS.CONTROL.Init
+				ldy #S.IOCTL.STATCODE
+				lda (ZPIOCTL),y
+				beq .1
+				cmp #S.IOCTL.STATCODE.GETDIB
+				bne STATUS.DCB
+				ldy #S.DIB-1
+				.HS 2C					bit abs
+.1				ldy #3
+
+.2				lda DIB,y
+				sta (ZPBufPtr),y
+				dey
+				bpl .2
+				clc
+				rts
+
+STATUS.DCB		cmp #S.IOCTL.STATCODE.GETDCB
+				bne .3
+
+				ldy #S.DCB.SND-1
+.2				lda DCB,y
+				sta (ZPBufPtr),y
+				dey
+				bpl .2
+
+				clc
+				rts
+.3				cmp #S.IOCTL.STATCODE.EOF
+				bne STATUS.9
+
+				lda DIB+S.DIB.S
+				and #S.DIB.S.OPENED
+				beq OPEN.E
+.8				clc
+				rts
+
+STATUS.9		lda #MLI.E.BADCTL
+				sec
+				rts
+*--------------------------------------
+CONTROL			jsr STATUS.CONTROL.Init
+
+				ldy #S.IOCTL.CTRLCODE
+				lda (ZPIOCTL),y
+				cmp #S.IOCTL.CTRLCODE.SETDCB
+				bne STATUS.9
+				ldy #S.DCB.SND-1
+.2				lda (ZPBufPtr),y
+				sta DCB,y
+				dey
+				bpl .2
+*--------------------------------------
+OPEN			lda DIB+S.DIB.S
+				bit #S.DIB.S.OPENED
+				beq OPEN.1
+
+OPEN.E			lda #MLI.E.OPEN
+				sec
+				rts
+
+OPEN.1			php
+				sei
+				ldx DEVSLOTn08F
+
+				
+				
+				
+
+				lda #S.DIB.S.OPENED
+				tsb DIB+S.DIB.S
+
+				plp
+				clc
+				rts
+*--------------------------------------
+CLOSE			php
+				sei
+				ldx DEVSLOTn08F
+
+				
+				
+				
+
+				lda #S.DIB.S.OPENED
+				trb DIB+S.DIB.S
+
+				plp
+				clc
+				rts
+*--------------------------------------
+READ			php
+				sei
+
+.8				plp
+				clc
+				rts
+
+.9				lda #MLI.E.IO
+				.HS 2C					BIT ABS
+
+.99				lda	#E.NODATA
+				plp
+				sec
+				rts
+*--------------------------------------
+WRITE			php
+				sei
+
+.8				plp
+				clc
+				rts
+
+.9				lda	#MLI.E.IO
+				.HS 2C					BIT ABS
+
+.99				lda #E.NODATA
+				plp
+				sec
+				rts
+*--------------------------------------
+READ.WRITE.Init	ldx DEVSLOTn08F
+
+STATUS.CONTROL.Init
+				>STYA ZPIOCTL
+
+				ldy #S.IOCTL.BUFPTR
+				lda (ZPIOCTL),y
+				sta ZPBufPtr
+
+				iny 
+
+				lda (ZPIOCTL),y
+				sta ZPBufPtr+1
+				iny 					#S.IOCTL.BYTECNT
+
+				lda (ZPIOCTL),y
+				eor #$ff
+				sta ZPCount
+
+				iny
+
+				lda (ZPIOCTL),y
+				eor #$ff
+				sta ZPCount+1
+				rts
+*--------------------------------------
+* IRQ Handler
+* on exit, CC if handled
+*--------------------------------------
+IRQ				ldx DEVSLOTn08F
+
+
+				bra .9
+
+.8				clc
+				rts
+
+.9				sec
+				rts
+*--------------------------------------
+DRV.CS.END
+DEVSLOTn08F		.BS 1
+*--------------------------------------
+DIB				.DA #S.DIB.S.WRITE+S.DIB.S.READ+S.DIB.S.IRQ
+				.DA #0,#0,#0
+				>PSTR "MockingBoard    "
+				.DA #S.DIB.T.CHAR
+				.DA #0
+				.DA K.VER
+*--------------------------------------
+DCB				.DA #S.DCB.T.SND
+				.DA #0					FLAGS
+				.DA #0
+				.DA #0
+				.DA #0
+				.DA #0
+				.DA #0
+				.DA #0
+				.DA #0
+				.DA #0
+*--------------------------------------
+DRV.END
+MAN
+SAVE USR/SRC/DRV/MKBOARD.DRV.S
+ASM

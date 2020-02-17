@@ -540,11 +540,11 @@ CS : not found
 # GetPWUID  
 
 ## C  
-`int getpwuid(short int uid, S.PW* passwd );`  
+`int getpwuid(short int uid, S.PW *passwd);`  
 
 ## ASM  
+`PUSHB uid`  
 `>PUSHW passwd`  
-`lda uid`  
 `>SYSCALL getpwuid`  
 
 ## RETURN VALUE  
@@ -552,11 +552,11 @@ CS : not found
 # GetPWName  
 
 ## C  
-`int getpwname(const char* name, S.PW* passwd );`  
+`int getpwname(const char* name, S.PW *passwd);`  
 
 ## ASM  
+`>PUSHW name`  
 `>PUSHW passwd`  
-`>LDYA name`  
 `>SYSCALL getpwname`  
 
 ## RETURN VALUE  
@@ -567,8 +567,43 @@ CS : not found
 `int putpw( S.PW* passwd );`  
 
 ## ASM  
-`>LDYA passwd`  
+`>PUSHW passwd`  
 `>SYSCALL putpw`  
+
+## RETURN VALUE  
+
+# GetGRGID  
+
+## C  
+`int getgrgid(short int gid, S.GRP *group);`  
+
+## ASM  
+`>PUSHB gid`  
+`>PUSHW group`  
+`>SYSCALL getpwname`  
+
+## RETURN VALUE  
+
+# GetGRName  
+
+## C  
+`int getgrgid(const char* name, S.GRP *group);`  
+
+## ASM  
+`>PUSHW name`  
+`>PUSHW group`  
+`>SYSCALL getpwname`  
+
+## RETURN VALUE  
+
+# PutGR  
+
+## C  
+`int putgr(S.GRP *group);`  
+
+## ASM  
+`>PUSHW group`  
+`>SYSCALL putgr`  
 
 ## RETURN VALUE  
 
