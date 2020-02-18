@@ -482,10 +482,10 @@ Load TXT a file in memory (with ending 0)
 
 ## ASM  
 **In:**  
-`>PUSHW auxtype`  
-`>PUSHB ftype`  
+`>PUSHW filename`  
 `>PUSHB flags`  
-`>LDYA filename`  
+`>PUSHB ftype`  
+`>PUSHW auxtype`  
 `>SYSCALL loadtxtfile`  
 
 ## RETURN VALUE  
@@ -500,10 +500,10 @@ Load a file in memory
 
 ## ASM  
 **In:**  
-`>PUSHW auxtype`  
-`>PUSHB ftype`  
+`>PUSHW filename`  
 `>PUSHB flags`  
-`>LDYA filename`  
+`>PUSHB ftype`  
+`>PUSHW auxtype`  
 `>SYSCALL loadfile`  
 
 ## RETURN VALUE  
@@ -515,14 +515,15 @@ Search a file in the provided PATH list
 And return, if found, the full path to it.  
 
 ## C  
-`int filesearch ( char * filename, char * searchpath, char * fullpath, stat * filestat);`  
+`int filesearch( char *filename, char *searchpath, char *fullpath, stat *filestat);`  
 
 ## ASM  
 **In:**  
-`>PUSHWI filename`  
-`>PUSHWI fullpath`  
-`>PUSHWI searchpath`  
-`>PUSHWI filestat`  
+`>PUSHW filename`  
+`>PUSHW fullpath`  
+`>PUSHW searchpath`  
+`>PUSHW filestat`  
+`>SYSCALL filesearch`  
 
 ## RETURN VALUE  
 CC : success  
@@ -610,11 +611,11 @@ CS : not found
 # SListGetData  
 
 ## ASM  
-`PUSHW DataOfs` (Start offset in Data)  
-`PUSHW DataLen` (Data bytes to return, 0 if String mode)  
-`PUSHW DataPtr` (0 if KERNEL should allocate a buffer)  
-`PUSHW KeyID`  
-`lda hSList`  
+`>PUSHB hSList`  
+`>PUSHW KeyID`  
+`>PUSHW DataPtr` (0 if KERNEL should allocate a buffer)  
+`>PUSHW DataLen` (Data bytes to return, 0 if String mode)  
+`>PUSHW DataOfs` (Start offset in Data)  
 `>SYSCALL SListGetData`  
 
 ## RETURN VALUE  
@@ -624,10 +625,10 @@ CS : not found
 # SListAddData  
 
 ## ASM  
-`PUSHW DataLen`  
-`PUSHW DataPtr`  
-`PUSHW KeyID`  
-`lda hSList`  
+`>PUSHB hSList`  
+`>PUSHW KeyID`  
+`>PUSHW DataPtr`  
+`>PUSHW DataLen`  
 `>SYSCALL SListAddData`  
 
 ## RETURN VALUE  
@@ -635,10 +636,10 @@ CS : not found
 # SListSetData  
 
 ## ASM  
-`PUSHW DataLen`  
-`PUSHW DataPtr`  
-`PUSHW KeyID`  
-`lda hSList`  
+`>PUSHB hSList`  
+`>PUSHW KeyID`  
+`>PUSHW DataPtr`  
+`>PUSHW DataLen`  
 `>SYSCALL SListSetData`  
 
 ## RETURN VALUE  
@@ -646,9 +647,9 @@ CS : not found
 # SListGetByID  
 
 ## ASM  
-`PUSHW KeyPtr`  
-`PUSHW KeyID`  
-`lda hSList`  
+`>PUSHB hSList`  
+`>PUSHW KeyID`  
+`>PUSHW DataPtr`  
 `>SYSCALL SListGetByID`  
 
 ## RETURN VALUE  
@@ -657,8 +658,8 @@ CS : not found
 # SListNewKey  
 
 ## ASM  
-`PUSHW KeyPtr`  
-`lda hSList`  
+`>PUSHB hSList`  
+`>PUSHW KeyPtr`  
 `>SYSCALL SListNewKey`  
 
 ## RETURN VALUE  
@@ -668,13 +669,21 @@ CS : not found
 # SListLookup  
 
 ## ASM  
-`PUSHW KeyPtr`  
-`lda hSList`  
+`>PUSHB hSList`  
+`>PUSHW KeyPtr`  
 `>SYSCALL SListLookup`  
 
 ## RETURN VALUE  
  Y,A = KeyID  
  X = Key Length  
+
+# SListFree  
+
+## ASM  
+`>PUSHB hSList`  
+`>SYSCALL SListFree`  
+
+## RETURN VALUE  
 
 # SListNew  
 
@@ -683,14 +692,6 @@ CS : not found
 
 ## RETURN VALUE  
 A=hSList  
-
-# SListFree  
-
-## ASM  
-`lda hSList`  
-`>SYSCALL SListFree`  
-
-## RETURN VALUE  
 
 # ChTyp  
 Change The type of a ProDOS File  
