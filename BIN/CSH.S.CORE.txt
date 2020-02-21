@@ -41,9 +41,9 @@ CSH.Init		>SYSCALL SListNew
 				>STA.G CSH.StackPtr
 				sta (ZPCSHConst)
 				sta (ZPCSHStack)
-			>DEBUG	
-				>DEC.G bTrace
-				>DEC.G bDebug
+
+*				>DEC.G bTrace
+*				>DEC.G bDebug
 *				clc
 .9				rts
 *--------------------------------------
@@ -126,6 +126,9 @@ CSH.Run.1		cmp #C.CR				empty line....
 				bcs .7
 
 				>STYA ZPVarID
+				jsr CSH.GetVarDef		Get Type & ptr...
+				bcs .9
+				
 				jsr CSH.GetCharNB
 				bcs .9
 
@@ -135,7 +138,7 @@ CSH.Run.1		cmp #C.CR				empty line....
 				jsr CSH.GetNextChar		Skip =
 				bcs .99
 
-				lda #0					Any Type
+				lda ZPVarType
 				jsr CSH.ExpEval
 				bcs .9
 
@@ -585,11 +588,11 @@ CSH.ExpEval		ldx ZPPtr1
 
 				lda #$ff
 				pha
-
+*--------------------------------------
 .10				jsr CSH.GetCharNB
 				bcs .19
 
-				cmp #'('
+.11				cmp #'('
 				bne .20
 				
 				jsr CSH.GetNextCharNB	skip (
@@ -607,113 +610,109 @@ CSH.ExpEval		ldx ZPPtr1
 				bne .19
 				
 				jsr CSH.GetNextCharNB	skip )
-
-				bcs .19
-				jmp .12
+				bcc .31
 .19				jmp .90
 *--------------------------------------
 .20				jsr CSH.IsLetter		define, Fnc or Var ?
-				bcs .2
+				bcs .22
 
 				jsr CSH.GetDefine
 				bcc .10
 	
 				jsr CSH.GetVar
-				bcs .1
+				bcs .21
 
-				ldx ZPPtr2			YA=VarID, X=expected var type (or 0=any)
+				ldx ZPPtr2				YA=VarID, X=expected var type (or 0=any)
 
 				jsr CSH.GetVarValueOnStack		Y,A = VarID, Get value on stack
 				bcs .29
 
 				stx ZPPtr2				store real var type
-				bra .11
+				bra .30
 
-.1				lda ZPPtr2				var type
+.21				lda ZPPtr2				var type
 				jsr CSH.fCall			X = function index
 				bcs .29
 
 				stx ZPPtr2				store real var type
-				bra .11
+				bra .30
 
-.2				jsr CSH.IsDigit10		number ?
-				bcs .3
+.22				jsr CSH.IsDigit10		number ?
+				bcs .24
 
 				ldx ZPPtr2
-				bne .22
+				bne .23
 
 				ldx #CSH.T.INT
 				stx ZPPtr2
 
-.22				jsr CSH.GetNumOnStack
+.23				jsr CSH.GetNumOnStack
+				bcs .29
+				bra .30
+				
+.24				cmp #'"'				String literal
+				bne .90
+				jsr CSH.AddContCharP
 .29				bcs .99
 *--------------------------------------
-.11				jsr CSH.GetCharNB
+.30				jsr CSH.GetCharNB
 				bcs .90
 
-.12				cmp #','
-				beq .8
+.31				cmp #','
+				beq .80
 				cmp #')'
-				beq .8
+				beq .80
 				cmp #';'
-				beq .8
+				beq .80
 
 				jsr CSH.IsOPChar
 				bcs .90
 
-				>LDYA L.CSH.BOPS
+				>LDYA L.CSH.BOPS		we are at V1 op1 V2 op2...
 				jsr CSH.LookupOP
 				bcs .90
 				
-				stx ZPPtr2+1			save new OP
-				
-				pla						get previous OP	
-				pha
-				bmi .13					$ff.... push OP
+				stx ZPPtr2+1			save OP(n)
+
+.32				pla						get OP(n-1)
+				bmi .33					$ff....
 
 				cmp ZPPtr2+1			
-				bcs .13					new OP has precedence, on stack : V1,V2
+				bcc .33					OP(n) has precedence, on stack : V1,V2
 
-				tax						Old OP has precedence...
+				tax						OP(n-1) has precedence...
 				
 				lda ZPPtr2				Var Type
-				jsr CSH.BOP.EXEC		compute STK=V1 <OP> V2
+				jsr CSH.BOP.EXEC		compute V(n-1) <OP(n-1)> V(n)
+				bcc .32
+
 				bcs .99
 				
-				ldx ZPPtr2+1
-
-.13				phx						push OP on stack
+.33				pha						push back OP(n-1)
+				lda ZPPtr2+1			get OP(n)
+				pha						push OP(n) on stack
 
 				jsr CSH.GetCharNB
-				bcc .20					go check for an ARG		
-				bra .90
-
-.3				cmp #'"'				String literal
-				bne .90
-				jsr CSH.AddContCharP
-				bcs	.99
-
-				jmp .11
+				bcs .90
+				jmp .11					go check for next token		
 *--------------------------------------
-.8				plx					any BOP on stack ?
-				bmi .80
+.80				plx						any OP on stack ?
+				bmi .88
 
 				lda ZPPtr2				Var Type
 				jsr CSH.BOP.EXEC
-				bcc .8
+				bcc .80
 				
 				bcs .99
 				
 .90				lda #CSH.E.SYNTAX
 
-.99				tax
-.98				pla
-				bpl .98
+.99				plx
+				bpl .99
 				
-				txa
 				sec
 				.HS 90					BCC
-.80				clc
+.88				clc
 
 				ldx ZPPtr2				X = Var Type
 
@@ -1039,6 +1038,21 @@ CSH.Get			>PUSHW ZPFileBufPtr
 				clc
 .1				pla						Y,A = VarID
 .9				rts
+*--------------------------------------
+CSH.GetVarDef	phy
+				pha
+				>PUSHB.G CSH.hSymbols
+				
+				pla
+				>PUSHA
+				pla
+				>PUSHA					KeyID
+
+				>PUSHWI ZPVarDef
+				>PUSHWI 6				6 bytes
+				>PUSHWI 0				From Start
+				>SYSCALL SListGetData
+				rts
 *--------------------------------------
 * Input :
 * X=Var Type (or 0)
