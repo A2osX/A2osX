@@ -1,10 +1,9 @@
 NEW
   AUTO 3,1
-*---------------------------------------
 				.LIST OFF
 				.OP	65C02
 				.OR $2000
-				.TF	BIN/ASM
+				.TF	bin/asm
 *---------------------------------------
 PAGE.LEN		.EQ 23
 DO.MAXDEPTH		.EQ 8
@@ -13,26 +12,28 @@ MA.MAXDEPTH		.EQ 8
 *---------------------------------------
 				.INB INC/MACROS.I
 				.INB INC/A2OSX.I
+				.INB INC/MLI.I
 				.INB INC/MLI.E.I
 *---------------------------------------
 				.DUMMY
 				.OR ZPBIN
 ZS.START
-ZPPtr1			.BS 2
-ZPPtr2			.BS 2
-
 ZPTmpBuf		.BS 2
 ZPLineBuf		.BS 2
 ZPLinePtr		.BS 2
 ZPSymbolBuf		.BS 2
 
-ZPMacroBuf		.BS 2
-ZPMacroStk		.BS 2
-
 ZPAMPtr			.BS 2
 ZPRPtr			.BS 2
 ZPOpsPtr		.BS 2
 ZPOpDefPtr		.BS 2
+
+ZPMacroStk		.BS 2
+ZPMacroBuf		.BS 2					
+ZPMacroArgBuf	.BS 2
+
+ZPPtr1			.BS 2
+ZPPtr2			.BS 2
 
 ZS.END			.ED
 *---------------------------------------
@@ -92,12 +93,12 @@ CS.START		cld
 				jmp (.1,x)
 				.DA #$61			6502,Level 1 (65c02)
 				.DA #1				BIN Layout Version 1
-				.DA #S.PS.F.EVENT		S.PS.F
+				.DA #0				S.PS.F.EVENT
 				.DA #0
 				.DA CS.END-CS.START		CS
 				.DA DS.END-DS.START		DS
-				.DA #ZS.END-ZS.START	Zero Page Size
-				.DA #64					ZP
+				.DA #64					SS
+				.DA #ZS.END-ZS.START	ZP
 				.DA 0
 *--------------------------------------
 * Relocation Table
@@ -133,7 +134,7 @@ L.MSG.OBJ.FILE	.DA MSG.OBJ.FILE
 L.MSG.T.FILE	.DA MSG.T.FILE
 L.SRC.AM.StrBuf	.DA SRC.AM.StrBuf
 L.ASM.6502		.DA ASM.6502
-L.ASM.T.FILENAME	.DA ASM.T.FILENAME
+L.ASM.CPU.FILE	.DA ASM.CPU.FILE
 L.FIO.Stat		.DA FIO.Stat
 L.SRC.ACC.F		.DA SRC.ACC.F
 L.T.DIRECTIVES	.DA T.DIRECTIVES
@@ -207,14 +208,15 @@ J.EXP.OP		.DA EXP.OP.EOR 		^!|&<=>+-*/
 CS.INIT			ldy #S.PS.ARGC
 				lda (pPs),y
 				beq .99
+
 				lda #1
 				>SYSCALL ArgV
 				>PUSHYA
 				>PUSHWI 0				Allocate
 				>SYSCALL RealPath
 				txa
-				ldy #SRC.hFILENAME
-				sta (pData),y
+				>STA.G SRC.hFILENAME
+
 				jsr FIO.Init
 				bcs .9
 
@@ -223,6 +225,7 @@ CS.INIT			ldy #S.PS.ARGC
 
 				jsr MAC.Init
 				bcs .9
+
 				jsr OUT.Init
 
 				>LDYAI 256
@@ -238,10 +241,12 @@ CS.INIT			ldy #S.PS.ARGC
 				>STYA ZPTmpBuf
 				txa
 				>STA.G SRC.hTmpBuf
+				
 				clc
 				rts
-.99				>PUSHBI 0
-				>LDYA L.MSG.HELP
+				
+.99				>PUSHW L.MSG.HELP
+				>PUSHBI 0
 				>SYSCALL printf
 				lda #E.INV.ARGS
 				sec
@@ -259,6 +264,7 @@ CS.RUN			ldy #S.PS.hStdIn
 			
 				cmp #$03				Ctrl-C
 				beq .99					Abort....beq=CS
+
 				cmp #$13				Ctrl-S
 				bne .11
 
@@ -267,44 +273,58 @@ CS.RUN			ldy #S.PS.hStdIn
 				sta (pData),y
 			
 				bpl .12
+				
 				clc
 				rts
+
 .13				>LDA.G bPause
 				bpl .11
+
 				clc
 .99				rts
+
 .11				>STZ.G bPause
 
 .12				>LDA.G SRC.COUNT		root file is already opened?
 				bne .10 
+				
+				>PUSHW L.MSG.PASS
 				>LDA.G ASM.PASS
 				inc
 				>PUSHA
 				>PUSHBI 1
-				>LDYA L.MSG.PASS
 				jsr OUT.Print
-
-				ldy #SRC.hFILENAME
-				lda (pData),y
+				
+				>LDA.G SRC.hFILENAME
 				>SYSCALL GetMemPtr
 				jsr FIO.OpenFile
 				bcs .99
+
 				jsr DIR.Reset
 				jsr SYM.Reset
 				jsr MAC.Reset
+				
 .10				>LDYA ZPLineBuf
 				>STYA ZPLinePtr
+				
 				>LDA.G MAC.StkPtr
 				beq .20
-				jsr MAC.ReadLine
+				
+.15				jsr MAC.ReadLine
 				bcc .2
+
 				cmp #E.EMPTYKEY
 				bne .9
-				>DEC.G MAC.Depth
+				
+				jsr MAC.Pop
+				bne .15
+				
 .20				jsr FIO.ReadLine
 				bcc .2
+
 				cmp #MLI.E.EOF			End Of File?
 				bne .9
+				
 				jsr FIO.FileClose
 				>LDA.G SRC.COUNT		end of root file ?
 				bne .8					no continue back to previous file
@@ -317,6 +337,7 @@ CS.RUN			ldy #S.PS.hStdIn
 				sta (pData),y
 				clc
 				rts
+
 .1				jsr SYM.Dump
 
 				>LDYA L.MSG.END
@@ -324,8 +345,10 @@ CS.RUN			ldy #S.PS.hStdIn
 				lda #0					End of assembly, exit with no error
 				sec		
 				rts
+				
 .2				jsr SRC.ParseLine
 				bcs .9
+				
 				jsr OUT.PrintLine
 .8				clc
 				rts
@@ -346,17 +369,21 @@ CS.QUIT			jsr FIO.FileClose
 				bne CS.QUIT 
 
 				jsr MAC.Quit
+
 				jsr SYM.Quit
-				>LDA.G ASM.T.hMem
-				beq .1
-				>SYSCALL FreeMem
-.1				>LDA.G SRC.hFILENAME
-				beq .2
-				>SYSCALL FreeMem
-.2				>LDA.G SRC.hLineBuf
-				beq .3
-				>SYSCALL FreeMem
-.3				>LDA.G SRC.hTmpBuf
+				
+				ldy #ASM.T.hMem
+				jsr .7
+
+				ldy #SRC.hFILENAME
+				jsr .7
+				
+				ldy #SRC.hLineBuf
+				jsr .7
+				
+				ldy #SRC.hTmpBuf
+				
+.7				lda (pData),y
 				beq .8
 				>SYSCALL FreeMem
 			
@@ -424,9 +451,15 @@ T.LI			>PSTR "ON"
 				>PSTR "XOFF"
 				.HS 00
 *---------------------------------------
-ASM..T.			.AZ ".T."
+SRC.MOD.RESERVED	>PSTR "#/^<>"
+SRC.EXP.RESERVED	>PSTR "^!|&<=>+-*/"
+SRC.AM.RESERVED		>PSTR "[](),"
+*---------------------------------------
 ASM.6502		.AZ "6502"
-MSG.HELP		.AZ "A2osX-Macro Assembler (S-C MASM 3.0 Based)\r\nUsage : ASM <src file> [type TXT ($04) or S-C/BAS ($FA)]\r\n"
+MSG.HELP		.AS "A2osX-Macro Assembler (S-C MASM 3.0 Based)\r\n"
+				.AS "Usage : ASM <src file> [type TXT ($04) or S-C/BAS ($FA)]\r\n"
+				.AS "   -L : Override .LIST (C,M,X)OFF\r\n"
+				.AZ "   -T <target file> : Override .TF directive\r\n"
 MSG.PASS		.AZ "**** Pass:#%d ****"
 MSG.SRC.FILE	.AZ "**** Reading SRC File:%s"
 MSG.OBJ.FILE	.AZ "**** Writing OBJ File:%s, Type=%02x"
@@ -451,11 +484,8 @@ MSG.PSTR		.AS "{%S}"
 MSG.CRLF		.AZ "\r\n"
 MSG.WORD		.AZ ">$%H"
 MSG.ACC			.AZ "%b,%d,%h%h%h%h\r\n"
-SRC.MOD.RESERVED	>PSTR "#/^<>"
-SRC.EXP.RESERVED	>PSTR "^!|&<=>+-*/"
-SRC.AM.RESERVED		>PSTR "[](),"
 *---------------------------------------
-ASM.T.FILENAME	.BS 65
+ASM.CPU.FILE	.BS 65
 
 FIO.Stat		.BS S.STAT
 
@@ -532,6 +562,7 @@ MAC.hBuf		.BS 1
 MAC.BufPtr		.BS 1
 MAC.hStk		.BS 1
 MAC.StkPtr		.BS 1
+MAC.hArgBuf		.BS 1
 MAC.CtxID		.BS 1
 MAC.ID			.BS 2
 MAC.Depth		.BS 1
