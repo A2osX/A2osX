@@ -31,29 +31,329 @@ SYM.Reset		>STZ.G SYM.bInGlobal
 				rts
 *---------------------------------------
 SYM.Quit		>LDA.G SYM.hGlobalBuf
-				beq .3
+				beq .1
 				
 				>SYSCALL FreeMem
 				
-.3				>LDA.G SYM.hList
-				beq SYM.Quit.8
+.1				>LDA.G SYM.hList
+				beq .8
 				
 				>PUSHA
 				>SYSCALL SListFree
 				
-SYM.Quit.8		clc
+.8				rts
+*---------------------------------------
+SYM.NewOrGetGlobal
+				>LDA.G ASM.PASS
+				bne SYM.GetGlobal
+
+SYM.NewGlobal	jsr SYM.StoreGlobal
+				bcs .99
+
+				>PUSHB.G SYM.hList
+				>PUSHW ZPLinePtr		Pass #1: try to add global...
+				>SYSCALL SListNewKey
+				bcs .9					Already Defined
+				
+				>STYA.G SYM.GlobalID
+				txa
+				adc ZPLinePtr
+				sta ZPLinePtr
+				bcc .1
+				inc ZPLinePtr+1
+				
+.1				jsr SYM.PC2Acc
+				jsr SYM.Acc2Global
+
+				lda #SYMG
+				>STA.G SYM.GlobalPtr
+				tay
+				lda #0
+				sta (ZPSymbolBuf),y
+				
+				lda #$ff
+				>STA.G SYM.bInGlobal
+
+				clc
+				rts
+				
+.9				lda #E.SYMBOL.REDEF
+				sec
+.99				rts
+*---------------------------------------
+SYM.GetGlobal	>PUSHB.G SYM.hList
+				>PUSHW ZPLinePtr		Pass #2: should be already defined...
+				>SYSCALL SListLookup
+				bcs .9
+				>STYA.G SYM.GlobalID
+
+				txa
+				adc ZPLinePtr
+				sta ZPLinePtr
+				bcc .1
+				inc ZPLinePtr+1
+				
+.1				>PUSHB.G SYM.hList
+				>PUSHW.G SYM.GlobalID
+				>PUSHW ZPSymbolBuf
+				>PUSHWI $ffff			all
+				>PUSHWZ					from Start
+				>SYSCALL SListGetData
+				bcs .99
+				
+				lda #$ff
+				>STA.G SYM.bInGlobal
+*				clc
+				rts
+
+.9				lda #E.UNDEF.SYMBOL
+				sec
+.99				rts
+*---------------------------------------
+SYM.LookupGlobal
+				>PUSHB.G SYM.hList
+				>PUSHW ZPLinePtr
+				>SYSCALL SListLookup
+				bcs .9
+				
+				>STYA ZPPtr1
+				txa
+				adc ZPLinePtr
+				sta ZPLinePtr
+				bcc .1
+				inc ZPLinePtr+1
+
+.1				>LDA.G SYM.GlobalID
+				cmp ZPPtr1
+				bne .3
+				
+				iny						SYM.GlobalID+1
+				lda (pData),y
+				cmp ZPPtr1+1
+				bne .3
+				
+				ldy #SYMG-1
+.2				lda (ZPSymbolBuf),y
+				sta SRC.ACC.F,y
+				dey
+				bpl .2
+
+				clc
+				rts
+
+.3				>PUSHB.G SYM.hList
+				>PUSHW ZPPtr1
+				>PUSHW L.SRC.ACC.F
+				>PUSHWI SYMG		Get only Global value
+				>PUSHWZ				Start
+				>SYSCALL SListGetData
+				rts
+				
+.9				lda #E.UNDEF.SYMBOL
+				sec
+				rts
+*---------------------------------------
+SYM.StoreGlobal	>LDA.G ASM.PASS
+				bne .8
+
+				>LDA.G SYM.bInGlobal
+				bpl .8
+	
+				>PUSHB.G SYM.hList
+				>PUSHW.G SYM.GlobalID
+				>PUSHW ZPSymbolBuf
+				
+				>LDA.G SYM.GlobalPtr
+				tay
+				lda #0
+				cpy #SYMG
+				beq .1
+				
+				iny						Add 1 for \0 after locals/privates
+				bne .1
+				inc
+				
+.1				>PUSHYA
+
+				>SYSCALL SListAddData
+				bcs .9
+
+				>STZ.G SYM.bInGlobal
+				>STA.G MAC.CtxID
+
+.8				clc
+.9				rts
+*---------------------------------------
+SYM.UpdateGlobal
+				>PUSHB.G SYM.hList
+				>PUSHW.G SYM.GlobalID
+				>PUSHW ZPSymbolBuf
+				
+				>LDA.G SYM.GlobalPtr
+				tay
+				lda #0
+				cpy #SYMG
+				beq .1
+				
+				iny						Add 1 for \0 after locals/privates
+				bne .1
+				inc
+				
+.1				>PUSHYA
+
+				>SYSCALL SListSetData
+				rts
+*---------------------------------------
+SYM.PC2Acc		ldy #ASM.PC+3
+				ldx #3
+				
+.1				lda (pData),y
+				sta SRC.ACC,x
+				dey
+				dex
+				bpl .1
+
+				lda #2
+				sta SRC.ACC.SIZE
+				stz SRC.ACC.F
+				rts
+*---------------------------------------
+SYM.Acc2Global	ldy #SYMG-1
+
+.2				lda SRC.ACC.F,y
+				sta (ZPSymbolBuf),y
+				dey
+				bpl .2
+
+				rts
+*---------------------------------------
+SYM.NewLocalA	tax						Save Local ID
+			
+				>LDA.G SYM.bInGlobal	not in a global label
+				bpl .91
+
+				>LDA.G ASM.PASS			Pass #2: should be already defined...
+				bne .8
+
+				jsr SYM.GetLocalX		Pass #1; try to add
+				bcc .9					Already Defined
+
+				>LDA.G SYM.GlobalPtr
+				cmp #252				6*42
+				beq .90
+
+				ldy #ASM.PC+4
+				
+.1				dey
+				lda (pData),y
+				pha
+				cpy #ASM.PC
+				bne .1
+				
+				>LDA.G MAC.CtxID		Get Macro Context ID
+
+				pha
+
+				>LDA.G SYM.GlobalPtr
+				tay
+				txa						Get Back ID
+				sta (ZPSymbolBuf),y
+
+				ldx #5					MAC ID + PC (4)
+
+.2				pla
+				iny
+				sta (ZPSymbolBuf),y
+				dex
+				bne .2
+
+				iny
+				lda #0
+				sta (ZPSymbolBuf),y		ending \0
+				tya
+
+				>STA.G SYM.GlobalPtr
+
+				lda (ZPSymbolBuf)
+				ora #SYMG.F.LOCALS
+				sta (ZPSymbolBuf)
+
+.8				clc
+				rts
+
+.91				lda #E.INV.LABEL
+				sec
+				rts
+				
+.90				lda #E.TOO.MANY.LOCAL
+				sec
+				rts
+
+.9				lda #E.SYMBOL.REDEF
+				sec
+				rts		
+*---------------------------------------
+SYM.GetLocalX	lda (ZPSymbolBuf)
+				and #SYMG.F.LOCALS
+				beq .9
+	
+				ldy #SYMG
+
+.1				lda (ZPSymbolBuf),y
+				beq .9
+				
+				txa
+				cmp (ZPSymbolBuf),y
+				bne .4
+
+				phy
+				>LDA.G MAC.CtxID
+				ply
+				iny
+				cmp (ZPSymbolBuf),y
+				bne .3
+
+				ldx #0
+				
+.2				iny
+				lda (ZPSymbolBuf),y
+				sta SRC.ACC,x
+				inx
+				cpx #4
+				
+				bne .2
+
+				lda #2
+				sta SRC.ACC.SIZE
+				clc
+				rts
+	
+.3				dey	
+.4				tya
+				clc
+				adc #SYML
+				tay
+				bra .1
+				
+.9				lda #E.UNDEF.SYMBOL
+				sec
 				rts	
 *---------------------------------------
 SYM.Dump.End	>PUSHW L.MSG.SUMMARY
 				>PUSHW ZPPtr2
 				>PUSHBI 2
 				jmp OUT.Print
+				
+SYM.Dump.8		clc
 				rts
 *---------------------------------------
-SYM.Dump		>LDA.G ASM.LI.ON
-				bpl SYM.Quit.8
+SYM.Dump		>LDA.G bListAll
+				bmi .10
 				
-				>LDYA L.MSG.SYMBOLS
+				>LDA.G ASM.LI.ON
+				bpl SYM.Dump.8
+				
+.10				>LDYA L.MSG.SYMBOLS
 				>SYSCALL puts
 
 				stz ZPPtr2
@@ -183,296 +483,6 @@ SYM.Dump.PushValueY
 				bne .1
 
 				rts
-*---------------------------------------
-SYM.NewOrGetGlobal
-				>LDA.G ASM.PASS
-				bne SYM.GetGlobal
-
-SYM.NewGlobal	jsr SYM.StoreGlobal
-				bcs .99
-
-				>PUSHB.G SYM.hList
-				>PUSHW ZPLinePtr		Pass #1: try to add global...
-				>SYSCALL SListNewKey
-				bcs .9					Already Defined
-				
-				>STYA.G SYM.GlobalID
-				txa
-				adc ZPLinePtr
-				sta ZPLinePtr
-				bcc .1
-				inc ZPLinePtr+1
-				
-.1				jsr SYM.PC2Acc
-				jsr SYM.Acc2Global
-
-				lda #SYMG
-				>STA.G SYM.GlobalPtr
-				tay
-				lda #0
-				sta (ZPSymbolBuf),y
-				
-				lda #$ff
-				>STA.G SYM.bInGlobal
-
-				clc
-				rts
-				
-.9				lda #E.SYMBOL.REDEF
-				sec
-.99				rts
-*---------------------------------------
-SYM.GetGlobal	>PUSHB.G SYM.hList
-				>PUSHW ZPLinePtr		Pass #2: should be already defined...
-				>SYSCALL SListLookup
-				bcs .9
-				>STYA.G SYM.GlobalID
-
-				txa
-				adc ZPLinePtr
-				sta ZPLinePtr
-				bcc .1
-				inc ZPLinePtr+1
-				
-.1				>PUSHB.G SYM.hList
-				>PUSHW.G SYM.GlobalID
-				>PUSHW ZPSymbolBuf
-				>PUSHWI $ffff			all
-				>PUSHWZ					from Start
-				>SYSCALL SListGetData
-				bcs .99
-				
-				lda #$ff
-				>STA.G SYM.bInGlobal
-*				clc
-				rts
-
-.9				lda #E.UNDEF.SYMBOL
-				sec
-.99				rts
-*---------------------------------------
-SYM.LookupGlobal
-				>PUSHB.G SYM.hList
-				>PUSHW ZPLinePtr
-				>SYSCALL SListLookup
-				bcs .9
-				
-				>STYA ZPPtr1
-				txa
-				adc ZPLinePtr
-				sta ZPLinePtr
-				bcc .1
-				inc ZPLinePtr+1
-
-.1				>LDA.G SYM.GlobalID
-				cmp ZPPtr1
-				bne .3
-				
-				iny						SYM.GlobalID+1
-				lda (pData),y
-				cmp ZPPtr1+1
-				bne .3
-				
-				ldy #SYMG-1
-.2				lda (ZPSymbolBuf),y
-				sta SRC.ACC.F,y
-				dey
-				bpl .2
-
-				clc
-				rts
-
-.3				>PUSHB.G SYM.hList
-				>PUSHW ZPPtr1
-				>PUSHW L.SRC.ACC.F
-				>PUSHWI SYMG		Get only Global value
-				>PUSHWZ				Start
-				>SYSCALL SListGetData
-				rts
-				
-.9				lda #E.UNDEF.SYMBOL
-				sec
-				rts
-*---------------------------------------
-SYM.StoreGlobal	>LDA.G ASM.PASS
-				bne .8
-
-				>LDA.G SYM.bInGlobal
-				bpl .8
-	
-				>PUSHB.G SYM.hList
-				>PUSHW.G SYM.GlobalID
-				>PUSHW ZPSymbolBuf
-				
-				>LDA.G SYM.GlobalPtr
-				tay
-				lda #0
-				cpy #SYMG
-				beq .1
-				
-				lda (ZPSymbolBuf)
-				ora #SYMG.F.LOCALS
-				sta (ZPSymbolBuf)
-				
-				lda #0
-				sta (ZPSymbolBuf),y
-				iny
-				bne .1
-				inc
-				
-.1				>PUSHYA
-
-				>SYSCALL SListAddData
-				bcs .9
-
-				>STZ.G SYM.bInGlobal
-				>STA.G MAC.CtxID
-
-.8				clc
-.9				rts
-*---------------------------------------
-SYM.UpdateGlobal
-				>PUSHB.G SYM.hList
-				>PUSHW.G SYM.GlobalID
-				>PUSHW L.SRC.ACC.F
-				>PUSHWI SYMG
-				>SYSCALL SListSetData
-				rts
-*---------------------------------------
-SYM.PC2Acc		ldy #ASM.PC+3
-				ldx #3
-				
-.1				lda (pData),y
-				sta SRC.ACC,x
-				dey
-				dex
-				bpl .1
-
-				lda #2
-				sta SRC.ACC.SIZE
-				stz SRC.ACC.F
-				rts
-*---------------------------------------
-SYM.Acc2Global	ldy #SYMG-1
-
-.2				lda SRC.ACC.F,y
-				sta (ZPSymbolBuf),y
-				dey
-				bpl .2
-
-				rts
-*---------------------------------------
-SYM.NewLocalA	tax						Save Local ID
-			
-				>LDA.G SYM.bInGlobal	not in a global label
-				bpl .91
-
-				>LDA.G ASM.PASS			Pass #2: should be already defined...
-				bne .8
-
-				jsr SYM.GetLocalX		Pass #1; try to add
-				bcc .9					Already Defined
-
-				>LDA.G SYM.GlobalPtr
-				cmp #252				6*42
-				beq .90
-
-				ldy #ASM.PC+4
-				
-.1				dey
-				lda (pData),y
-				pha
-				cpy #ASM.PC
-				bne .1
-				
-				>LDA.G MAC.CtxID		Get Macro Context ID
-
-.11				pha
-
-				>LDA.G SYM.GlobalPtr
-				tay
-				txa						Get Back ID
-				sta (ZPSymbolBuf),y
-
-				ldx #5					MAC ID + PC (4)
-
-.2				pla
-				iny
-				sta (ZPSymbolBuf),y
-				dex
-				bne .2
-
-				iny
-				lda #0
-				sta (ZPSymbolBuf),y
-				tya
-
-				>STA.G SYM.GlobalPtr
-
-				lda (ZPSymbolBuf)
-				ora #SYMG.F.LOCALS
-				sta (ZPSymbolBuf)
-
-.8				clc
-				rts
-
-.91				lda #E.INV.LABEL
-				sec
-				rts
-				
-.90				lda #E.TOO.MANY.LOCAL
-				sec
-				rts
-
-.9				lda #E.SYMBOL.REDEF
-				sec
-				rts		
-*---------------------------------------
-SYM.GetLocalX	lda (ZPSymbolBuf)
-				and #SYMG.F.LOCALS
-				beq .9
-	
-				ldy #SYMG
-
-.1				lda (ZPSymbolBuf),y
-				beq .9
-				
-				txa
-				cmp (ZPSymbolBuf),y
-				bne .4
-
-				phy
-				>LDA.G MAC.CtxID
-				ply
-				iny
-				cmp (ZPSymbolBuf),y
-				bne .3
-
-				ldx #0
-				
-.2				iny
-				lda (ZPSymbolBuf),y
-				sta SRC.ACC,x
-				inx
-				cpx #4
-				
-				bne .2
-
-				lda #2
-				sta SRC.ACC.SIZE
-				clc
-				rts
-	
-.3				dey	
-.4				tya
-				clc
-				adc #SYML
-				tay
-				bra .1
-				
-.9				lda #E.UNDEF.SYMBOL
-				sec
-				rts	
 *---------------------------------------
 MAN
 SAVE USR/SRC/BIN/ASM.S.SYM
