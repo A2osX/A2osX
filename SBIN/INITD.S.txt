@@ -7,12 +7,16 @@ NEW
 *--------------------------------------
 				.INB INC/MACROS.I
 				.INB INC/A2OSX.I
+				.INB INC/MLI.I
 *--------------------------------------
 * Zero Page Segment, up to 32 bytes
 *--------------------------------------
 				.DUMMY
 				.OR ZPBIN
 ZS.START
+BufPtr			.BS 2
+hBuf			.BS 1
+hFile			.BS 1
 ZS.END
 				.ED
 *--------------------------------------
@@ -36,86 +40,137 @@ CS.START		cld
 				.DA CS.RUN
 				.DA CS.DOEVENT		
 				.DA	CS.QUIT
-L.MSG.CTRLR		.DA MSG.CTRLR
-L.MSG.ETCINIT	.DA MSG.ETCINIT
-L.BINSHELL		.DA BINSHELL
-L.ETCINIT		.DA ETCINIT		
-L.MSG.RUNNING	.DA MSG.RUNNING		
+L.MSG.CTRLR		.DA MSG.CTRLR				
+L.BINSH			.DA BINSH
+L.ETCINIT		.DA ETCINIT
+L.BINMEM		.DA BINMEM
+L.BINPS			.DA BINPS
+L.BINSHUTDOWN	.DA BINSHUTDOWN
 				.DA 0
-*--------------------------------------
-* Called once at process creation
-* Put code for loading LIB here
 *--------------------------------------
 CS.INIT			clc
 				rts
-*--------------------------------------
-* Called until exit with CS
-* if RUN exits with CC, RN entered again
 *--------------------------------------
 CS.RUN			ldy #S.PS.PID
 				lda (pPS),y
 				cmp #1
 				bne .9
 
+				ldy #S.PS.hStdIn
+				lda (pPS),y
+				>SYSCALL feof
+				bcs .99
+				tay
+				bne .1
+				
 				>SYSCALL getchar
-				bcs .1
+				bcs .99
 
-				cmp #$12					CTRL-R for Root mode
+				cmp #18					CTRL-R for Root mode
 				bne .1
 
 				>LDYA L.MSG.CTRLR
 				>SYSCALL puts
-				>PUSHW L.BINSHELL
-				>PUSHBI S.PS.F.HOLD
-				>SYSCALL ExecL
-				>SLEEP
-
-.1				>LDYA L.MSG.ETCINIT
-				>SYSCALL puts
-				>PUSHW L.ETCINIT
-				>PUSHBI S.PS.F.HOLD
-				>SYSCALL ExecL
-				>SLEEP
-				>LDYA L.MSG.RUNNING
-				>SYSCALL puts
-
-				ldy #S.PS.F.HOLD
-				ora (pPS),y
-				sta (pPS),y
-				>SLEEP
-
-				lda #0
+				
+				>LDYA L.BINSH
+				jsr CS.RUN.EXEC.YA
+				
+.1				jsr CS.RUN.ETCINIT
+				bcs .99
+				
+.2				>SYSCALL getchar
+				bcs .99
+				
+				cmp #C.CR				Ctrl.M
+				bne .3
+				
+				>LDYA L.BINMEM
+				jsr CS.RUN.EXEC.YA
+				bra .2
+				
+.3				cmp #16					Ctrl.P
+				bne .4
+				>LDYA L.BINPS
+				jsr CS.RUN.EXEC.YA
+				bra .2
+								
+.4				cmp #4					Ctrl.D
+				bne .2
+				
+				>LDYA L.BINSHUTDOWN
+				jsr CS.RUN.EXEC.YA
+				bcs .2
+				
 				sec
 				rts
-
+				
 .9				lda #E.SYN
 				sec
+.99				rts
+*--------------------------------------
+CS.RUN.ETCINIT	>LDYAI 256
+				>SYSCALL getmem
+				>STYA BufPtr
+				stx hBuf
+				
+				>PUSHW L.ETCINIT
+				>PUSHBI	O.RDONLY+O.TEXT
+				>PUSHBI S.FI.T.TXT
+				>PUSHWZ
+				>SYSCALL fopen
+				bcs .90
+				
+				sta hFile
+				
+.1				>PUSHWI 256
+				>PUSHW BufPtr
+				lda hFile
+				>SYSCALL fgets
+				bcs .80
+				
+				lda (BufPtr)
+				cmp #'#'
+				beq .1
+				
+				>LDYA BufPtr
+				>SYSCALL puts
+				>LDYA BufPtr
+				jsr CS.RUN.EXEC.YA
+				bra .1
+				
+.90				pha
+				jsr .81
+				pla
+				sec
+				rts	
+				
+.80				lda hFile
+				>SYSCALL fclose
+				
+.81				lda hBuf
+				>SYSCALL freemem
+				
 				rts
 *--------------------------------------
-* Called if option S.PS.F.EVENT enabled in Header
-* Timer Event : every 10th seconds
+CS.RUN.EXEC.YA	>PUSHYA
+				>PUSHBI S.PS.F.HOLD+S.PS.F.SLEEP+S.PS.F.NOHUP
+				>SYSCALL ExecL
+				rts				
 *--------------------------------------
 CS.DOEVENT		sec
 				rts
-*--------------------------------------
-* Called once, when RUN exited with CS
-* Put code for unloading LIB here
 *--------------------------------------
 CS.QUIT			clc
 				rts
 *--------------------------------------
 CS.END
 *--------------------------------------
-* Initialized DATA
-*--------------------------------------
 MSG.CTRLR		.AZ "INITD:Ctrl-R Pressed, entering ROOT mode..."
-MSG.ETCINIT		.AS "INITD:Executing ETC/INIT Script:"
-BINSHELL		.AZ "${ROOT}bin/sh"
+BINSH			.AZ "${ROOT}bin/sh"
 ETCINIT			.AZ "${ROOT}etc/init"
-MSG.RUNNING		.AZ "INITD:Running..."
-MSH.SHUTDOWN	.AZ "INITD:Shutting down..."
-*--------------------------------------
-* Per Process DATA segement (0 filled before INIT)
+BINMEM			.AZ "${ROOT}bin/mem"
+BINPS			.AZ "${ROOT}bin/ps"
+BINSHUTDOWN		.AZ "${ROOT}bin/shutdown"
 *--------------------------------------
 				.DUMMY
 				.OR 0
