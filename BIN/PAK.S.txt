@@ -3,7 +3,7 @@ NEW
 				.LIST OFF
 				.OP	65C02
 				.OR	$2000
-				.TF BIN/PAK
+				.TF bin/pak
 *--------------------------------------
 				.INB INC/MACROS.I
 				.INB INC/A2OSX.I
@@ -83,10 +83,22 @@ CS.RUN			>INC.G ArgIndex
 				bne .4
 				
 				jsr CS.RUN.CheckOpt
-				bcc CS.RUN
+				bcs .9
+				bne CS.RUN
 				
-.9				>PUSHBI 0
-				>LDYA L.MSG.USAGE
+				>INC.G ArgIndex			-X
+				>SYSCALL ArgV
+				bcs .9
+				
+				>SYSCALL StrDup
+				bcs .9
+				
+				txa
+				>STA.G hExclude
+				bra CS.RUN
+				
+.9				>PUSHW L.MSG.USAGE
+				>PUSHBI 0
 				>SYSCALL PrintF
 				lda #E.SYN
 				sec
@@ -112,7 +124,7 @@ CS.RUN			>INC.G ArgIndex
 				
 				>LDA.G hSrcBasePath
 				beq .9
-
+*--------------------------------------
 				>LDYAI 256
 				>SYSCALL GetMem
 				bcs .99
@@ -186,6 +198,9 @@ CS.RUN.LOOP		ldy #S.PS.hStdIn
 				jsr FilterMatch
 				bcs .8					no match, skip....
 
+				jsr ExcludeMatch
+				bcc .8					match, skip
+				
 				ldy #S.STAT.P.DRIVE
 				lda (ZPFileStat),y		ProDOS Device ?
 				beq .5
@@ -232,10 +247,10 @@ CS.RUN.DIR		lda bRecurse
 				
 				jsr CS.RUN.BuildFilePath
 				
+				>PUSHW L.MSG.DIR
 				>PUSHW ZPRelPath
 				
 				>PUSHBI 2
-				>LDYA L.MSG.DIR
 				>SYSCALL PrintF
 				bcs .9
 				
@@ -260,10 +275,10 @@ CS.RUN.FILE		jsr CS.RUN.BuildFilePath
 				>SYSCALL strcmp
 				bcc .8
 
+				>PUSHW L.MSG.FILE
 				>PUSHW ZPRelPath
 				
 				>PUSHBI 2
-				>LDYA L.MSG.FILE
 				>SYSCALL PrintF
 				bcs .9
 				
@@ -313,9 +328,11 @@ CS.RUN.CheckErr	bcs .1
 				rts
 				
 .1				pha
+				>PUSHW L.MSG.ERR
+				pla
+				pha
 				>PUSHA
 				>PUSHBI 1
-				>LDYA L.MSG.ERR
 				
 				>SYSCALL PrintF
 
@@ -338,11 +355,10 @@ CS.RUN.BuildFilePath
 
 				rts
 *--------------------------------------
-CS.RUN.OpenFile	>PUSHWZ					Aux type
-				>PUSHBI 0				Type
+CS.RUN.OpenFile	>PUSHW ZPFullPath
 				>PUSHBI	O.RDONLY
-				>LDYA ZPFullPath
-
+				>PUSHBI 0				Type
+				>PUSHWZ					Aux type
 				>SYSCALL FOpen
 				bcs .9
 				
@@ -377,16 +393,17 @@ CS.RUN.Pak		>PUSHEA.G PAKSTAT
 				>STYA.G Shunk.DstSize
 .9				rts
 *--------------------------------------
-CS.RUN.OpenArc	>PUSHWZ					Aux type
-				>PUSHBI $CF				PAK
+CS.RUN.OpenArc	>LDA.G ArcName
+				>SYSCALL Argv
+				>PUSHYA
 				
 				bit bAppend
 				bmi CS.RUN.AppendArc
 				
 				>PUSHBI	O.CREATE+O.WRONLY
-				>LDA.G ArcName
-				>SYSCALL Argv
-
+				>PUSHBI $CF				PAK
+				>PUSHWZ					Aux type
+				
 				>SYSCALL FOpen
 				bcs .9
 				
@@ -401,14 +418,15 @@ CS.RUN.OpenArc.RTS
 *--------------------------------------
 CS.RUN.AppendArc
 				>PUSHBI	O.RDWR+O.APPEND
-				>LDA.G ArcName
-				>SYSCALL Argv
+				>PUSHBI $CF				PAK
+				>PUSHWZ					Aux type
 				
 				>SYSCALL FOpen
 				bcs CS.RUN.OpenArc.RTS
 				>STA.G hArcFile
 				rts
-			>DEBUG
+				
+				
 				>PUSHBI SEEK.SET
 				>PUSHWI 0
 				>PUSHWI 0
@@ -565,63 +583,67 @@ CS.DOEVENT		sec
 CS.QUIT			jsr LeaveSubDir
 				bcc CS.QUIT
 				
-				>LDA.G hFilter
+				ldy #hExclude
+				jsr .7
+				ldy #hFilter
+				jsr .7
+				ldy #hSrcFullPath
+				jsr .7
+				ldy #hDstBuf
+				jsr .7
+				ldy #hSrcBuf
+				jsr .7
+
+				>LDA.G hArcFile
 				beq .1
-				>SYSCALL FreeMem
-				
-.1				>LDA.G hSrcFullPath
-				beq .2
-				>SYSCALL FreeMem
-				
-.2				>LDA.G hArcFile
-				beq .3
 				>SYSCALL FClose
-				
-.3				>LDA.G hDstBuf
-				beq .4
-				>SYSCALL FreeMem
 
-.4				>LDA.G hSrcBuf
-				beq .5
-				>SYSCALL FreeMem
-
-.5				lda hLIB
-				beq .8
+.1				lda hLIB
+				beq .2
 				
 				>SYSCALL UnloadLib
 				
-.8				clc
+.2				clc
 				rts
+				
+.7				lda (pData),y
+				beq .8
+				>SYSCALL FreeMem
+.8				rts				
 *--------------------------------------
 CS.RUN.CheckOpt	ldy #1 
 				lda (ZPPtr1),y
 
 				ldx #OptionVars-OptionList-1
 
-.2				cmp OptionList,x
-				beq .3
+.1				cmp OptionList,x
+				beq .2
 				dex
-				bpl .2
+				bpl .1
 
 				sec
 				rts
 				
-.3				ldy OptionVars,x
+.2				ldy OptionVars,x
+				beq .8
+				
 				lda #$ff
 				sta 0,y
-				clc
+
+.8				clc
 				rts
 *--------------------------------------
 				.INB USR/SRC/BIN/X.FILEENUM.S
 *--------------------------------------
 CS.END
 *--------------------------------------
-OptionList		.AS "AaRr"
-OptionVars		.DA #bAppend,#bAppend,#bRecurse,#bRecurse
+OptionList		.AS "AaRrXx"
+OptionVars		.DA #bAppend,#bAppend,#bRecurse,#bRecurse,#0,#0
 *--------------------------------------
 MSG.USAGE		.AS "Usage : PAK Archive [File *,? wildcards allowed]\r\n"
 				.AS "   -A : Append to archive\r\n"
-				.AZ "   -R : Recurse subdirectories\r\n"
+				.AS "   -R : Recurse subdirectories\r\n"
+				.AZ "   -X <*,? wildcards allowed> : exclude files \r\n"
 MSG.OK			.AZ "[OK]"
 MSG.ERR			.AZ "[%h]\r\n"
 MSG.E.IARC		.AZ "Invalid/corrupt archive"

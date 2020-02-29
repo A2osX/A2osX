@@ -23,6 +23,7 @@ ZPPtr1			.BS 2
 ZPPtr2			.BS 2
 ZPFileName		.BS 2
 ZPFileStat		.BS 2
+
 ZPPW			.BS 2
 ZS.END
 				.ED
@@ -47,12 +48,13 @@ CS.START		cld
 				.DA CS.RUN
 				.DA CS.DOEVENT		
 				.DA	CS.QUIT
-L.MSG.DEVEXT	.DA MSG.DEVEXT
+L.MSG.REG		.DA MSG.REG
+L.MSG.REGEXT	.DA MSG.REGEXT
 L.MSG.DIR		.DA MSG.DIR
-L.MSG.ENTER		.DA MSG.ENTER
 L.MSG.DIREXT	.DA MSG.DIREXT
-L.MSG.FILE		.DA MSG.FILE
-L.MSG.FILEEXT	.DA MSG.FILEEXT
+L.MSG.BDEV		.DA MSG.BDEV
+L.MSG.BDEVEXT	.DA MSG.BDEVEXT
+L.MSG.ENTER		.DA MSG.ENTER
 L.MSG.CRLF		.DA MSG.CRLF
 L.PRODOS.FT.TXT	.DA PRODOS.FT.TXT
 L.FMT.Date		.DA FMT.Date
@@ -60,6 +62,14 @@ L.FMT.Time		.DA FMT.Time
 L.FMT.int16		.DA FMT.int16
 L.MSG.Users		.DA MSG.Users
 L.MSG.Root		.DA MSG.Root
+J.CS.RUN.PRINT	.DA CS.RUN.PRINT.REG
+				.DA CS.RUN.PRINT.DIR
+				.DA CS.RUN.PRINT.CDEV
+				.DA CS.RUN.PRINT.BDEV
+				.DA CS.RUN.PRINT.CDEV
+				.DA CS.RUN.PRINT.CDEV
+				.DA CS.RUN.PRINT.CDEV
+				.DA CS.RUN.PRINT.CDEV
 				.DA 0
 *--------------------------------------
 CS.INIT			clc
@@ -139,22 +149,21 @@ CS.RUN.LOOP		ldy #S.PS.hStdIn
 				bcs .9
 				jsr FilterMatch
 				bcs .8					no match, skip....
-.4				ldy #S.STAT.P.DRIVE
-				lda (ZPFileStat),y		ProDOS Device ?
-				bne .5
-				ldy #S.STAT.P.TYPE
+
+				>LDA.G bAllmostAll
+				bmi .4
+				lda (ZPFileName)
+				cmp #'.'
+				beq .8
+
+.4				ldy #S.STAT.MODE+1
 				lda (ZPFileStat),y
-				cmp #$0F				Directory ?
-				bne .6
-
-				jsr CS.RUN.PRINT.DIR
-				bcs .99
-				bra .8
-.5				jsr CS.RUN.PRINT.DEV
-				bcs .99
-				bra .8
-
-.6				jsr CS.RUN.PRINT.FILE
+				and #$70
+				lsr
+				lsr
+				lsr
+				tax
+				jsr CS.RUN.PRINT.JMP
 				bcs .99
 
 .8				jsr GetNextEntry
@@ -178,53 +187,72 @@ CS.RUN.LOOP		ldy #S.PS.hStdIn
 				sec
 .99				rts
 *--------------------------------------
-CS.RUN.PRINT.DEV
-				>LDA.G bLong
-				bpl CS.RUN.PRINT.DIR
+CS.RUN.PRINT.JMP
+				jmp (J.CS.RUN.PRINT,x)
+*--------------------------------------
+CS.RUN.PRINT.REG
+				ldy #bLong
+				lda (pData),y
+				bmi .1
+				
+				>LDA.G bColumn
+				bmi .23
 
-				>PUSHW L.MSG.DEVEXT
+				>LDA.G bFullPath
+				bpl .22
+				
+				jsr CS.RUN.PRINT.SRCPATH
+				
+.23				>LDYA ZPFileName
+				>SYSCALL PutS
+				rts
+
+.22				>PUSHW L.MSG.REG
 				>PUSHW ZPFileName
-				
-				ldy #S.STAT.P.SLOT
-				>PUSHB (ZPFileStat),y
-				iny						DRIVE
-				>PUSHB (ZPFileStat),y
-
-				ldy #S.STAT.BLOCKS+1
-				>PUSHB (ZPFileStat),y
-				dey
-				>PUSHB (ZPFileStat),y
-
-				ldy #S.STAT.P.DEVBLOCKS+1
-				>PUSHB (ZPFileStat),y
-				dey
-				>PUSHB (ZPFileStat),y
-				
-				>PUSHBI 8
-
+				>PUSHBI 2
 				>SYSCALL PrintF
 				bcs .9
+				jmp CS.RUN.UpdateColCnt
+*--------------------------------------
+.1				>PUSHW L.MSG.REGEXT
+				
+				jsr Mod2CSTR
+				>PUSHEA.G MOD			File Mod
 
-				ldy #bRecurse
-				lda (pData),y
-				bpl .8
-				>LDYA ZPFileName
-				jsr EnterSubDirYA
-				bcs .9
-				jmp CS.RUN.ENTER.MSG
+				jsr CS.RUN.PushGidUid
 
-.8				clc
+				ldy #S.STAT.SIZE+3
+				ldx #4
+
+.2				lda (ZPFileStat),y
+				>PUSHA
+				dey
+				dex
+				bne .2
+
+				jsr CS.RUN.PUSHDATES
+
+				ldy #S.STAT.P.TYPE
+				lda (ZPFileStat),y
+				jsr FileType2PSTR
+				>PUSHYA
+
+				ldy #S.STAT.P.AUXTYPE+1
+				lda (ZPFileStat),y
+				>PUSHA
+				dey
+				lda (ZPFileStat),y
+				>PUSHA
+
+				>PUSHW ZPFileName
+
+				>PUSHBI 20
+				>SYSCALL PrintF
+
 .9				rts
 *--------------------------------------
 CS.RUN.PRINT.DIR
-				>LDA.G bAllmostAll
-				bmi .10
-				lda (ZPFileName)
-				cmp #'.'
-				bne .10
-				jmp .5
-
-.10				>LDA.G bLong
+				>LDA.G bLong
 				bmi .4
 
 				>LDA.G bColumn
@@ -297,68 +325,97 @@ CS.RUN.PRINT.DIR
 				jsr EnterSubDirYA
 				bcs .90
 				jmp CS.RUN.ENTER.MSG
+
 .80				clc
 .90				rts
 *--------------------------------------
-CS.RUN.PRINT.FILE
-				ldy #bLong
-				lda (pData),y
-				bmi .1
+CS.RUN.PRINT.CDEV
+				clc
+				rts
+*--------------------------------------
+CS.RUN.PRINT.BDEV
+				>LDA.G bLong
+				bmi .20
+
 				>LDA.G bColumn
 				bmi .23
-
 				>LDA.G bFullPath
 				bpl .22
-				
+
 				jsr CS.RUN.PRINT.SRCPATH
-				
+
 .23				>LDYA ZPFileName
 				>SYSCALL PutS
-				rts
+				bcs .9
+				>LDA.G bRecurse
+				bpl .8
+				lda (ZPFileName)
+				cmp #'.'
+				beq .8
+				>LDYA ZPFileName
+				jmp EnterSubDirYA
+.8				clc
+.9				rts				
 
-.22				>PUSHW L.MSG.FILE
+.22				>PUSHW L.MSG.BDEV
 				>PUSHW ZPFileName
 				>PUSHBI 2
 				>SYSCALL PrintF
 				bcs .9
-				jmp CS.RUN.UpdateColCnt
+
+				ldy #0
+
+.1				iny
+				lda (ZPFileName),y
+				bne .1
+
+.11				iny
+				cpy #19
+				bcs .2
+
+				lda #C.SPACE
+				phy
+				>SYSCALL PutChar
+				ply
+				bcc .11
+				rts
+
+.2				jsr CS.RUN.UpdateColCnt
+*				bcc .5
+				rts
 *--------------------------------------
-.1				>PUSHW L.MSG.FILEEXT
-				
-				jsr Mod2CSTR
-				>PUSHEA.G MOD			File Mod
-
-				jsr CS.RUN.PushGidUid
-
-				ldy #S.STAT.SIZE+3
-				ldx #4
-
-.2				lda (ZPFileStat),y
-				>PUSHA
-				dey
-				dex
-				bne .2
-
-				jsr CS.RUN.PUSHDATES
-
-				ldy #S.STAT.P.TYPE
-				lda (ZPFileStat),y
-				jsr FileType2PSTR
-				>PUSHYA
-
-				ldy #S.STAT.P.AUXTYPE+1
-				lda (ZPFileStat),y
-				>PUSHA
-				dey
-				lda (ZPFileStat),y
-				>PUSHA
-
+.20				>PUSHW L.MSG.BDEVEXT
 				>PUSHW ZPFileName
+				
+				ldy #S.STAT.P.SLOT
+				>PUSHB (ZPFileStat),y
+				iny						DRIVE
+				>PUSHB (ZPFileStat),y
 
-				>PUSHBI 20
+				ldy #S.STAT.BLOCKS+1
+				>PUSHB (ZPFileStat),y
+				dey
+				>PUSHB (ZPFileStat),y
+
+				ldy #S.STAT.P.DEVBLOCKS+1
+				>PUSHB (ZPFileStat),y
+				dey
+				>PUSHB (ZPFileStat),y
+				
+				>PUSHBI 8
+
 				>SYSCALL PrintF
+				bcs .90
 
-.9				rts
+				ldy #bRecurse
+				lda (pData),y
+				bpl .80
+				>LDYA ZPFileName
+				jsr EnterSubDirYA
+				bcs .90
+				jmp CS.RUN.ENTER.MSG
+.80				clc
+.90				rts
 *--------------------------------------
 CS.RUN.PRINT.SRCPATH
 				ldy #hSrcBasePath
@@ -618,12 +675,13 @@ CS.END
 OptionList		.AS "ACFLRacflr"
 OptionVars		.DA #bAllmostAll,#bColumn,#bFullPath,#bLong,#bRecurse,#bAllmostAll,#bColumn,#bFullPath,#bLong,#bRecurse
 *--------------------------------------
-MSG.DEVEXT		.AZ "/%15s S%dD%d Blocks Used:%5D Total:%5D\r\n"
+MSG.REG			.AZ "%19s"
+MSG.REGEXT		.AZ "%s %6s %6s %10u %s %s %S %H %s\r\n"
 MSG.DIR			.AZ "\e[32m%s/\e[0m"
-MSG.ENTER		.AZ "Directory:%s\r\n"
 MSG.DIREXT		.AZ "%s %6s %6s            %s %s  <dir>   \e[32m%s/\e[0m\r\n"
-MSG.FILE		.AZ "%19s"
-MSG.FILEEXT		.AS "%s %6s %6s %10u %s %s %S %H %s"
+MSG.BDEV		.AZ "\e[32m%s/\e[0m"
+MSG.BDEVEXT		.AZ "/%15s S%dD%d Blocks Used:%5D Total:%5D\r\n"
+MSG.ENTER		.AS "Directory:%s"
 MSG.CRLF		.AZ "\r\n"
 *--------------------------------------
 PRODOS.FT.HEX	.HS 0406FAFCFDE2CBCCCFFF
