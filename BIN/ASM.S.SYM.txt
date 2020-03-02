@@ -40,20 +40,24 @@ SYM.Quit		>LDA.G SYM.hGlobalBuf
 				
 .8				rts
 *---------------------------------------
-SYM.NewOrGetGlobal
-				>LDA.G ASM.PASS
-				bne SYM.GetGlobal
+SYM.NewGlobal	>LDA.G ASM.PASS
+				bne SYM.NewGlobal2
 
-SYM.NewGlobal	jsr SYM.StoreGlobal
+				jsr SYM.StoreGlobal		Store previous if any
 				bcs .99
 
+				>STZ.G MAC.CtxID
+				>STA.G MAC.CtxNextID
+				
 				>PUSHB.G SYM.hList
 				>PUSHW ZPLinePtr		Pass #1: try to add global...
 				>SYSCALL SListNewKey
 				bcs .9					Already Defined
-				
+
 				>STYA.G SYM.GlobalID
+
 				txa
+*				clc	
 				adc ZPLinePtr
 				sta ZPLinePtr
 				bcc .1
@@ -78,19 +82,21 @@ SYM.NewGlobal	jsr SYM.StoreGlobal
 				sec
 .99				rts
 *---------------------------------------
-SYM.GetGlobal	>PUSHB.G SYM.hList
-				>PUSHW ZPLinePtr		Pass #2: should be already defined...
+SYM.NewGlobal2	>PUSHB.G SYM.hList		Pass #2: should be already defined...
+				>PUSHW ZPLinePtr		
 				>SYSCALL SListLookup
 				bcs .9
+
 				>STYA.G SYM.GlobalID
 
 				txa
+*				clc	
 				adc ZPLinePtr
 				sta ZPLinePtr
 				bcc .1
 				inc ZPLinePtr+1
 				
-.1				>PUSHB.G SYM.hList
+.1				>PUSHB.G SYM.hList		Pass #2: Retore full context
 				>PUSHW.G SYM.GlobalID
 				>PUSHW ZPSymbolBuf
 				>PUSHWI $ffff			all
@@ -100,6 +106,10 @@ SYM.GetGlobal	>PUSHB.G SYM.hList
 				
 				lda #$ff
 				>STA.G SYM.bInGlobal
+				
+				>STZ.G MAC.CtxID
+				>STA.G MAC.CtxNextID
+				
 *				clc
 				rts
 
@@ -111,42 +121,45 @@ SYM.LookupGlobal
 				>PUSHB.G SYM.hList
 				>PUSHW ZPLinePtr
 				>SYSCALL SListLookup
-				bcs .9
+				bcs .4
 				
 				>STYA ZPPtr1
+
 				txa
+*				clc			
 				adc ZPLinePtr
 				sta ZPLinePtr
 				bcc .1
 				inc ZPLinePtr+1
 
-.1				>LDA.G SYM.GlobalID
-				cmp ZPPtr1
-				bne .3
-				
-				iny						SYM.GlobalID+1
-				lda (pData),y
-				cmp ZPPtr1+1
-				bne .3
-				
-				ldy #SYMG-1
-				
-.2				lda (ZPSymbolBuf),y
-				sta SRC.ACC.F,y
-				dey
-				bpl .2
-
-				clc
-				rts
-
-.3				>PUSHB.G SYM.hList
+.1				>PUSHB.G SYM.hList
 				>PUSHW ZPPtr1
 				>PUSHW L.SRC.ACC.F
 				>PUSHWI SYMG		Get only Global value
 				>PUSHWZ				Start
 				>SYSCALL SListGetData
 				rts
+
+.4				>LDA.G ASM.PASS			pass#2?
+				bne .9					yes, undefined symbol
+
+				stz SRC.ACC.SIZE		Mark ACC as undefined
+
+.5				jsr SRC.GetNextChar
+				bcs .8
+
+				jsr SRC.IsLetterOrDigit
+				bcc .5
 				
+				cmp #'.'
+				beq .5
+				
+				cmp #'_'
+				beq .5
+				
+.8				clc
+				rts
+			
 .9				lda #E.UNDEF.SYMBOL
 				sec
 				rts
@@ -177,7 +190,6 @@ SYM.StoreGlobal	>LDA.G ASM.PASS
 				bcs .9
 
 				>STZ.G SYM.bInGlobal
-				>STA.G MAC.CtxID
 
 .8				clc
 .9				rts
@@ -231,9 +243,9 @@ SYM.NewLocalA	tax						Save Local ID
 				bpl .91
 
 				>LDA.G ASM.PASS
-				bne SYM.LookupLocalX	Pass #2: check if defined
+				bne .20
 *---------------------------------------
-				jsr SYM.LookupLocalX	Pass #1; try to add
+				jsr SYM.LookupLocalX	Pass #1: try to add
 				bcc .9					Already Defined
 
 				>LDA.G SYM.GlobalPtr
@@ -291,6 +303,12 @@ SYM.NewLocalA	tax						Save Local ID
 				sec
 				rts		
 *---------------------------------------
+.20				jsr SYM.LookupLocalX	Pass #2: check if defined
+				bcs .9
+				
+				>STA.G SYM.GlobalPtr
+				rts
+*---------------------------------------
 SYM.LookupLocalX
 				lda (ZPSymbolBuf)
 				and #SYMG.F.LOCALS
@@ -328,7 +346,11 @@ SYM.LookupLocalX
 				lda #2
 				sta SRC.ACC.SIZE
 
-				ply
+				pla
+
+				iny					point to 0 after local
+				tya
+			
 				clc
 				rts
 	
@@ -352,18 +374,21 @@ SYM.Dump.8		clc
 				rts
 *---------------------------------------
 SYM.Dump		>LDA.G bListAll
-				bmi .10
+				bmi SYM.Dump.1
 				
 				>LDA.G ASM.LI.ON
 				bpl SYM.Dump.8
 				
-.10				>LDYA L.MSG.SYMBOLS
+SYM.Dump.1		>LDYA L.MSG.SYMBOLS
 				>SYSCALL PutS
 
 				stz ZPPtr2
 				stz ZPPtr2+1
 
-.1				>LDYA ZPPtr2
+.1			
+*			jsr SYM.Dump.DBG
+
+				>LDYA ZPPtr2
 				>STYA ZPPtr1
 
 				>PUSHB.G SYM.hList
@@ -382,7 +407,34 @@ SYM.Dump		>LDA.G bListAll
 				>SYSCALL SListGetData
 				bcs .9
 
-				ldy #SYMG.SIZE			Get Symbol Size
+				jsr SYM.Dump.G
+				bcs .9
+
+				ldx #5
+				lda (ZPSymbolBuf)
+
+				bit #SYMG.F.LOCALS
+				beq .2
+
+				jsr SYM.Dump.LP
+				bcs .9
+				
+.2				cpx #5					already CR printed ?
+				beq .8
+				
+				jsr OUT.PrintCR
+.8				jmp .1
+
+.9				rts				
+*---------------------------------------
+SYM.Dump.DBG	>PUSHW L.MSG.WORD
+
+			>PUSHW ZPPtr2
+			>PUSHBI 2
+			>SYSCALL printf
+			rts
+*---------------------------------------
+SYM.Dump.G		ldy #SYMG.SIZE			Get Symbol Size
 				lda (ZPSymbolBuf),y
 
 				pha
@@ -413,19 +465,9 @@ SYM.Dump		>LDA.G bListAll
 				
 				>SYSCALL PrintF
 
-				>PUSHW ZPTmpBuf			Label
-				>PUSHBI 0
-				>SYSCALL PrintF
-
-				lda (ZPSymbolBuf)
-
-				bit #SYMG.F.LOCALS
-				beq .7
-
-				jsr SYM.Dump.LP
-.7				jsr OUT.PrintCR
-				jmp .1
-.9				rts				
+				>LDYA ZPTmpBuf			Label
+				>SYSCALL PutS
+				rts
 *---------------------------------------
 SYM.Dump.LP		ldy #SYMG
 
