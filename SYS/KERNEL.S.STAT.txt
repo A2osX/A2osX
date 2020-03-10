@@ -12,22 +12,17 @@ NEW
 * `>SYSCALL chtyp`
 * ## RETURN VALUE
 *\--------------------------------------
-K.ChTyp			jsr PFT.CheckPath2
-				bcs .99
-				>PULLB .1+1
-
-				inc pStack
-				inc pStack
+K.ChTyp			jsr PFT.CheckPath1
+				bcs .9
 
 				>MLICALL MLIGETFILEINFO
 				bcs .9
 
-.1				lda #$ff
+				lda (pStack)
 				sta K.MLI.PARAMS+S.FI.T
 				>MLICALL MLISETFILEINFO
-.9				rts
 
-.99				>RET 1					discard filetype
+.9				>RET 3
 *--------------------------------------
 * # ChMod
 * change permissions of a file
@@ -45,20 +40,20 @@ K.ChTyp			jsr PFT.CheckPath2
 K.ChMod			jsr PFT.CheckPath2
 				bcs K.ChMod.RET4
 
-				>PULLW K.S.STAT+S.STAT.MODE
-
-				inc pStack
-				inc pStack
+				jsr STAT.PullPathAndMode
 
 				lda K.S.STAT+S.STAT.MODE+1
 				and /S.STAT.MODE.RU
 				beq .9
+				
 				lda K.S.STAT+S.STAT.MODE
 				and #S.STAT.MODE.XO+S.STAT.MODE.RO+S.STAT.MODE.XG+S.STAT.MODE.RG+S.STAT.MODE.XU+S.STAT.MODE.RU
 				cmp #S.STAT.MODE.XO+S.STAT.MODE.RO+S.STAT.MODE.XG+S.STAT.MODE.RG+S.STAT.MODE.XU+S.STAT.MODE.RU
 				bne .9
+
 				>MLICALL MLIGETFILEINFO
 				bcs .90
+
 				lda K.MLI.PARAMS+S.FI.A
 				and #$3D					not S.FI.A.RN+S.FI.A.D+S.FI.A.W
 				ora #S.FI.A.R
@@ -72,14 +67,18 @@ K.ChMod			jsr PFT.CheckPath2
 				ora #S.FI.A.RN
 				tax
 				tya
+				
 .1				bit #S.STAT.MODE.WU
 				beq .2
+				
 				txa
 				ora #S.FI.A.D
 				tax
 				tya
+				
 .2				bit #S.STAT.MODE.WO
 				beq .3
+				
 				txa
 				ora #S.FI.A.W
 				tax
@@ -87,9 +86,11 @@ K.ChMod			jsr PFT.CheckPath2
 
 				>MLICALL MLISETFILEINFO
 				rts
+				
 .9				lda #E.SYN
 				sec
 .90				rts
+
 K.ChMod.RET4	>RET 4					discard statbuf
 *--------------------------------------
 * # FStat
@@ -183,34 +184,32 @@ K.Stat			jsr PFT.CheckPath2
 * A = EC
 *\-------------------------------------
 K.MKDir			jsr PFT.CheckPath2
-				bcs .9
+				bcs K.ChMod.RET4
 
-*				lda (pStack)			TODO : mode
+				jsr STAT.PullPathAndMode
 				
 				lda #S.FI.T.DIR
 				sta K.MLI.PARAMS+4
 				stz K.MLI.PARAMS+5
 				stz K.MLI.PARAMS+6
 				lda #S.FI.ST.DIR
-				jsr IO.MLI.CREATE
-				
-.9				>RET 4
+				jmp IO.MLI.CREATE
 */--------------------------------------
 * # MKFIFO
 * return a pathname to a new FIFO
 * ## C
-* `int mkfifo( char *pathname, int mode );`
+* `int mkfifo( char *pathname, int mode);`
 * ## ASM
 * **In:** 
+* `>PUSHW pathname`
 * `>PUSHW mode`
-* `>LDYA pathname`
 * `>SYSCALL mkfifo`
 * ## RETURN VALUE
 * CC = OK, CS = ERROR
 * A = hFD
 *\--------------------------------------
-K.MKFIFO		>STYA ZPPtr1			pathname buffer
-				>PULLW K.S.STAT+S.STAT.MODE
+K.MKFIFO		jsr STAT.PullPathAndMode
+
 				>LDYAI 512
 				jsr K.pipe
 				bcs K.Stat.Store.RTS
@@ -240,18 +239,18 @@ K.MKFIFO		>STYA ZPPtr1			pathname buffer
 * `hFILE mknod(const char *pathname, int mode, hFD fd);`
 * ## ASM
 * **In:** 
-* `>PUSHB fd`
+* `>PUSHW pathname`
 * `>PUSHW mode`
-* `>LDYA pathname`
+* `>PUSHB fd`
 * `>SYSCALL mknod`
 * ## RETURN VALUE
 * CC = OK, CS = ERROR
 * A = hFILE
 *\--------------------------------------
-K.MkNod 		>STYA ZPPtr1			pathname
-				>PULLW K.S.STAT+S.STAT.MODE
-				>PULLB IO.hFD
-			
+K.MkNod 		>PULLB IO.hFD
+
+				jsr STAT.PullPathAndMode
+				
 K.MkNod.I		ldx #2
 .1				lda Nod.Table.hPath-2,x
 				beq .2
@@ -318,13 +317,18 @@ K.Pipe			sta .1+1				SIZE HI
 .99				
 K.Pipe.RTS		rts
 *--------------------------------------
-SHARED.Stat.I	jsr SHARED.ClrStat
-				
-				>MLICALL MLIGETFILEINFO
+STAT.PullPathAndMode
+				>PULLW K.S.STAT+S.STAT.MODE
+				>PULLW ZPPtr1			pathname
+				rts
+*--------------------------------------
+SHARED.Stat.I	>MLICALL MLIGETFILEINFO
 				bcs K.Pipe.RTS
 
+SHARED.GFI2Stat	jsr SHARED.ClrStat
+				
 				lda K.MLI.PARAMS+S.FI.A
-				jsr SHARED.Stat.Access2Mode
+				jsr SHARED.Access2Mode
 
 				ldx #SHARED.GFI.Cnt
 
@@ -336,17 +340,12 @@ SHARED.Stat.I	jsr SHARED.ClrStat
 				bne .3
 				
 				>LDYAI K.MLI.PARAMS+S.FI.CDATE
-				ldx #S.STAT.CTIME
+				ldx #K.S.STAT+S.STAT.CTIME
 				jsr SHARED.PTime2StatYAX
 
 				>LDYAI K.MLI.PARAMS+S.FI.MDATE
-				ldx #S.STAT.MTIME
+				ldx #K.S.STAT+S.STAT.MTIME
 				jmp SHARED.PTime2StatYAX
-*--------------------------------------
-SHARED.GFI2Stat
-
-				clc
-				rts
 *--------------------------------------
 SHARED.DirEnt2Stat
 				jsr SHARED.ClrStat
@@ -371,14 +370,14 @@ SHARED.DirEnt2Stat
 				ldy #$1E				ProDOS Access
 				lda (ZPPtr3),y
 
-				jsr SHARED.Stat.Access2Mode
+				jsr SHARED.Access2Mode
 
 				lda #$18				creation Date/time
-				ldx #S.STAT.CTIME
+				ldx #K.S.STAT+S.STAT.CTIME
 				jsr SHARED.PTime2StatAX
 
 				lda #$21				mod Date/time
-				ldx #S.STAT.MTIME
+				ldx #K.S.STAT+S.STAT.MTIME
 				jmp SHARED.PTime2StatAX
 *--------------------------------------
 SHARED.ClrStat	ldx #S.STAT-1
@@ -392,7 +391,11 @@ SHARED.ClrStat	ldx #S.STAT-1
 
 				rts
 *--------------------------------------
-SHARED.Stat.Access2Mode
+SHARED.Mode2Access
+				clc
+				rts
+*--------------------------------------
+SHARED.Access2Mode
 				and #S.FI.A.FULL
 				cmp #S.FI.A.FULL
 				beq .7
@@ -434,13 +437,9 @@ SHARED.PTime2StatAX
 SHARED.PTime2StatYAX
 				>PUSHYA
 
+				>PUSHB /K.S.STAT
 				txa
-				clc
-				adc #K.S.STAT
-				tay
-				lda /K.S.STAT
-				adc #0
-				>PUSHYA
+				>PUSHA
 				>SYSCALL2 PTime2Time
 				rts
 *--------------------------------------
