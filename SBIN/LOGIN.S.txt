@@ -27,12 +27,11 @@ ZPbEsc			.BS 1
 ZPGetLineLen	.BS 1
 ZPGetLineMax	.BS 1
 
-ZPhPW			.BS 1
-ZPPWPtr			.BS 2
-
-hSession		.BS 1
 ZPNewSID		.BS 1
 ZPOldSID		.BS 1
+
+ZPNewSession	.BS 1
+ZPOldSession	.BS 1
 
 ZPhFile			.BS 1
 ZPStrPtr		.BS 2
@@ -85,20 +84,21 @@ CS.RUN			>LDYAI 33				Enough for HASH
 
 				lda #0
 				>PUSHA					ROOT user
-				>PUSHWZ					Dry Run, no output
+				>PUSHA
+				>PUSHA					Dry Run, no output
 				>SYSCALL GetPWUID
 				bcc CS.RUN.AUTH			
-
+*--------------------------------------
 				>LDYA L.MSG.NOAUTH
 				jsr CS.RUN.StrOut
 				bcs .9
 				
-				ldy #S.PS.hSID
+				ldy #S.PS.hSession
 				lda (pPS),y
 				tax
 				
-				lda S.Table.hSession-1,x
-				sta hSession
+				lda S.Table.hSID-1,x
+				sta ZPNewSID
 
 				jmp CS.RUN.EXEC
 .9				rts
@@ -115,12 +115,6 @@ CS.RUN.AUTH		lda #3
 				jsr CS.RUN.GetLine
 				bcs .9
 
-				>PUSHWZ					Dry Run
-				>LDYA ZPGetLinePtr
-				>SYSCALL GetPWName
-				ror ZPbValidUser
-				sta ZPUID
-
 				>LDYA L.MSG.PASSWORD
 				jsr CS.RUN.StrOut
 				bcs .9
@@ -133,10 +127,7 @@ CS.RUN.AUTH		lda #3
 				jsr CS.RUN.StrOut
 				bcs .9
 
-				jsr CS.RUN.CHECKPWD
-				bcs .8
-				jsr CS.RUN.SetUserSession
-				bcs .9
+				bra *
 
 				jmp CS.RUN.EXEC
 
@@ -153,104 +144,9 @@ CS.RUN.AUTH		lda #3
 				sec
 .9				rts
 *--------------------------------------
-CS.RUN.SetUserSession
-				ldx #S.SESSION.NAME		P+UID+GID
-				ldy #S.PW.NAME-1
-				jsr CS.RUN.AddStrLen	NAME len
-				inx
-				ldy #S.PW.GECOS-1
-				jsr CS.RUN.AddStrLen	GECOS len
-				inx
-				ldy #S.PW.DIR-1
-				jsr CS.RUN.AddStrLen	DIR len
-				inx
-
-				ldy #S.PW.SHELL-1
-				jsr CS.RUN.AddStrLen	SHELL len
-
-				txa
-				tay
-				lda #0
-				>SYSCALL GetMem
-				bcs .9
-
-				>STYA ZPStrPtr
-				stx hSession
-
-*				clc
-
-				ldy #S.PW.GID
-				lda (ZPPWPtr),y
-				tax
-				bne .5
-				sec
-.5				ldy #S.PW.UID
-				lda (ZPPWPtr),y
-				bne .6
-				sec
-.6				lda #0
-				ror
-				jsr CS.RUN.AddByte			PRIV
-				lda (ZPPWPtr),y
-				jsr CS.RUN.AddByte			UID
-				txa
-				jsr CS.RUN.AddByte			GID
-				ldy #S.PW.NAME
-				jsr CS.RUN.AddStr
-				ldy #S.PW.GECOS
-				jsr CS.RUN.AddStr
-				ldy #S.PW.DIR
-				jsr CS.RUN.AddStr
-				ldy #S.PW.SHELL
-				jsr CS.RUN.AddStr
-				lda #0
-				jsr CS.RUN.AddByte
-
-				clc
-.9				rts
-*--------------------------------------
-CS.RUN.CHECKPWD	rol ZPbValidUser
-				bcs CS.RUN.CHECK.9
-
-				>LDYAI S.PW
-				>SYSCALL GetMem
-				bcs CS.RUN.CHECK.9
-
-				>STYA ZPPWPtr
-				stx ZPhPW
-
-				pha
-				>PUSHB ZPUID
-				pla
-				>PUSHYA
-				>SYSCALL GetPWUID
-				bcs CS.RUN.CHECK.9
-
-				>PUSHW ZPGetlinePtr
-				>PUSHW ZPGetlinePtr
-				>SYSCALL MD5
-				
-				lda ZPPWPtr
-				clc
-				adc #S.PW.PASSWD
-				tay
-				lda ZPPWPtr+1
-				adc /S.PW.PASSWD
-				
-				>PUSHYA
-				>LDYA ZPGetlinePtr
-				>SYSCALL strcmp
-				bcc CS.RUN.CHECK.9
-				
-				jsr CS.CLEANUP.hPW
-				
-				sec
-
-CS.RUN.CHECK.9	rts
-*--------------------------------------
 CS.RUN.EXEC		ldx #1
 
-.1				lda S.Table.hSession-1,x
+.1				lda S.Table.hSID-1,x
 				beq .2
 
 				inx
@@ -261,16 +157,16 @@ CS.RUN.EXEC		ldx #1
 *				sec
 				rts	
 
-.2				stx ZPNewSID
-				ldy #S.PS.hSID
+.2				stx ZPNewSession
+				ldy #S.PS.hSession
 				lda (pPS),y
-				sta ZPOldSID
+				sta ZPOldSession
 				
 				txa
 				sta (pPS),y
 
-				lda hSession
-				sta S.Table.hSession-1,x
+				lda ZPNewSID
+				sta S.Table.hSID-1,x
 
 				ldy #S.PS.hStdIn
 				lda (pPS),y
@@ -286,38 +182,26 @@ CS.RUN.EXEC		ldx #1
 				bcs .9
 
 				>SLEEP
-				ldx ZPNewSID
-				lda S.Table.hSession-1,x
-				stz S.Table.hSession-1,x
-				stz S.Table.hFILE-1,x
-				>SYSCALL FreeMem
 				
-				ldy #S.PS.hSID
 				lda ZPOldSID
+				beq .8
+				
+				>SYSCALL CloseSession
+				
+				stz ZPOldSID
+				
+.8				ldx ZPNewSession
+				lda S.Table.hSID-1,x
+				stz S.Table.hSID-1,x
+				stz S.Table.hFILE-1,x
+*				>SYSCALL FreeMem
+				
+				ldy #S.PS.hSession
+				lda ZPOldSession
 				sta (pPS),y
 				
 				sec
 .9				rts
-*--------------------------------------
-CS.RUN.AddStrLen
-.1				inx
-				iny
-				lda (ZPPWPtr),y
-				bne .1
-				rts
-*--------------------------------------
-CS.RUN.AddStr	lda (ZPPWPtr),y
-				jsr CS.RUN.AddByte
-				iny
-				tax
-				bne CS.RUN.AddStr
-				rts
-*--------------------------------------
-CS.RUN.AddByte	sta (ZPStrPtr)
-				inc ZPStrPtr
-				bne .8
-				inc ZPStrPtr+1
-.8				rts
 *--------------------------------------
 CS.RUN.GetLine	sta ZPGetLineMax
 				ror ZPbGetLineSecret
@@ -442,15 +326,9 @@ CS.DOEVENT
 *--------------------------------------
 CS.QUIT			
 CS.CLEANUP		lda ZPhGetLine
-				beq CS.CLEANUP.hPW
+				beq .8
 
 				stz ZPhGetLine
-				>SYSCALL FreeMem
-
-CS.CLEANUP.hPW	lda ZPhPW
-				beq .8
-				
-				stz ZPhPW
 				>SYSCALL FreeMem
 
 .8				clc
