@@ -2,33 +2,43 @@ NEW
   AUTO 3,1
 *--------------------------------------
 XRW.START		cld						$D8 to flag language card bank 1 (main)
-				jsr rsetphse
+
+				lda unitnum				get unit number.
+				and #$7F	  			mask off high bit.
+				tax
+
+				lda phaseoff+0,x		make sure all motor phases are off.
+				lda phaseoff+2,x
+				lda phaseoff+4,x
+				lda phaseoff+6,x
+
 				lda q7l,x				turn off write enable
 				nop
 				nop
 				jsr docheck
-				bcs L5334				branch if block # is out of range
+				bcs .9				branch if block # is out of range
 
 				ldy #$05
 
-L5310 			asl
+.1	 			asl
 				rol	ibtrk
 				dey
-				bne L5310
+				bne .1
 
 				asl
-				bcc L531C
+				bcc .2
 
 				ora #$10				adjust for upper 4 bits of track
 
-L531C 			lsr
+.2	 			lsr
 				lsr
 				lsr
 				lsr
+
 				pha						save sector # across call
 				jsr regrwts
 				pla
-				bcs L5330				if error
+				bcs .3					if error
 
 				inc buf+1
 				adc #$02
@@ -36,13 +46,13 @@ L531C 			lsr
 
 				dec buf+1
 
-L5330  			lda ibstat
+.3  			lda ibstat
 				rts	
 
-L5334 			lda #MLI.E.IO
+.9	 			lda #MLI.E.IO
 				sec
 				rts
-
+*--------------------------------------
 * read/write a track/sector
 
 regrwts			ldy #$01				retry count
@@ -59,6 +69,7 @@ regrwts			ldy #$01				retry count
 * now check if the motor is on, then start it
 
 				jsr chkdrv
+
 				php						save test results
 				lda #$E8
 				sta montimeh
@@ -74,14 +85,20 @@ regrwts			ldy #$01				retry count
 L5362 			lda drv0en,x
 				plp		  				was it the same drive ?
 				beq L5372				yes.
+
 				plp		  				indicate drive off by setting z-flag.
+
 				ldy #$07	   			150ms delay before stepping.
+
 L536B  			jsr mswait
 				dey
 				bne L536B
+
 				php						now zero flag set.
+
 L5372  			lda A4L					make sure this command needs seeking.
 				beq L537C				branch if status check.
+
 				lda ibtrk				get destination track
 				jsr myseek	   			and go to it.
 
@@ -108,9 +125,12 @@ L537F  			lda #$01				wait 100us for each count in montime
 
 L538E  			lda A4L					get command #
 				beq L53FD				if 0 then status command
+
 				lsr						set carry = 1 for read, 0 for write.
 				bcs L5398				must prenibblize for write
+
 				jsr prenib16
+
 L5398  			ldy #$40				64 retries
 				sty retrycnt
 L539D  			ldx A2L					get slot #.
@@ -141,8 +161,11 @@ L53BE  			ldy track				check track
 				lda curtrk				preserve destination track
 				pha
 				tya
-				asl 
-L53CC  			jsr settrk
+				asl
+				
+L53CC			jsr drvindx				get index to drive #
+				sta iobpdn,x			set the slot dependent track location
+
 				pla
 				jsr myseek
 				bcc L539D				always taken, go recalibrate
@@ -155,8 +178,10 @@ L53D5  			lda sect				is this the right sector ?
 				lda A4L	 				read or write ?
 				lsr	   					the carry will tell.
 				bcc L53F4				branch if write
+
 				jsr read16
 				bcs L53A4				if bad read
+
 L53E7  			lda #$00
 				.HS	D0					bne branch never taken (skip 1 byte)
 hndlerr			sec
@@ -164,6 +189,7 @@ hndlerr			sec
 				ldx A2L					slot offset
 				lda motoroff,x	 		turn off
 				rts
+*--------------------------------------
 L53F4  			jsr write16				write nibbles
 statdne			bcc L53E7				if no errors.
 				lda #$2B	   			disk write protected.
@@ -174,11 +200,13 @@ L53FD  			ldx A2L
 				rol		 				write protect-->carry-->bit 0=1
 				lda q6l,x				keep in read mode
 				jmp statdne
-				
+*--------------------------------------
 myseek			asl						assume two phase stepper
 				sta track				save destination track * 2
+
 				jsr alloff				turn all phases off to be sure.
 				jsr drvindx				get index to previous track
+
 				lda iobpdn,x	   		for current drive.
 				sta curtrk	   			current position.
 				lda track				where to go next.
@@ -187,10 +215,12 @@ myseek			asl						assume two phase stepper
 				jsr seek				move head there
 
 alloff			ldy #$03	   			turn off all phases before returning.
-L5427  			tya		  				(send phase in acc)
-				jsr clrphase			carry clear, phases should be turned off
+
+.1  			tya		  				(send phase in acc)
+				jsr XRW.NewSeek.TrOnOff	carry clear, phases should be turned off
 				dey
-				bpl L5427
+				bpl .1
+
 				lsr curtrk				divide back down
 				clc
 				rts
@@ -210,7 +240,7 @@ L5427  			tya		  				(send phase in acc)
 *  montimel,h are incremented by the # of 100us quantums required by
 *	   seek for motor on time overlap.
 *
-* variables used: curtrk, trkn, countn, prior, A2L, montimel, montimeh
+* variables used: curtrk, trkn, trkcnt, prior, A2L, montimel, montimeh
 *--------------------------------------
 				.DO FASTSEEK=0
 seek			sta trkn				save target track.
@@ -251,7 +281,7 @@ L5468  			jsr setphase
 
 				lda prior
 				clc		  				for phaseoff
-				jsr clrphase	  		turn off prior phase
+				jsr XRW.NewSeek.TrOnOff	turn off prior phase
 
 				lda offtable,y	 		then wait 'offtime'
 				jsr mswait	   			(100us intervals)
@@ -264,57 +294,58 @@ L5483  			jsr mswait	   			settle 25 msec
 				clc		  				set for phase off
 
 setphase 		lda curtrk	  			get current track
+				.FIN
+*--------------------------------------
+				.DO FASTSEEK=1
+seek			sta trkn
 
-clrphase 		and #$03	   			mask for 1 of 4 phases
+XRW.NewSeek.1  	lda	curtrk
+				sta	prior
+				cmp	trkn
+				beq	XRW.NewSeek.TrOff
+
+				bcs	.2					curtrk > trkn : must move out
+
+				inc	curtrk
+				bra	.3
+				
+.2		    	dec curtrk
+
+.3			    lda prior
+				clc						OFF
+				jsr XRW.NewSeek.TrOnOff
+				
+				lda	curtrk
+				sec						ON
+				jsr XRW.NewSeek.TrOnOff
+
+				lda #40
+*				jsr mswait
+
+				sec
+
+.4				pha
+				
+.5				sbc #1
+				bne .5
+				
+				pla
+				sbc #1
+				bne .4
+				
+				bra XRW.NewSeek.1
+
+XRW.NewSeek.TrOff
+				clc
+				.FIN
+XRW.NewSeek.TrOnOff
+				and #$03	   			mask for 1 of 4 phases
 				rol						double for phase on(CS)/off(CC) index
 				ora A2L					Slot $n0
 				tax
 				lda phaseoff,x			turn on/off one phase
-				ldx A2L					restore x reg
+*				ldx A2L					restore x reg
 				rts		  				and return
-				.FIN
-*--------------------------------------
-				.DO FASTSEEK=1
-XRW.NewSeek		STA   $26
-
-.1		       	LDA   $FF
-				STA   $27
-				SEC
-				SBC   $26
-				BEQ   XRW.NewSeek.rts
-
-				BCS   .2
-
-				INC   $FF
-				BCC   .3
-				
-.2		    	DEC   $FF
-
-.3			    JSR   XRW.NewSeek.TrOff
-
-				JSR   XRW.NewSeek.Wait
-XRW.NewSeek.TrOn
-				LDA   $27
-				AND   #$03
-				ASL
-				TAY
-				LDA   $C0E0,Y
-				JSR   XRW.NewSeek.Wait
-				BEQ   .1
-
-XRW.NewSeek.TrOff
-				LDA   $FF
-				AND   #$03
-				ASL
-				TAY
-				LDA   $C0E1,Y
-XRW.NewSeek.rts
-				rts
-
-XRW.NewSeek.Wait
-				LDA   #$25
-				JMP   $FCA8    F8ROM:WAIT
-				.FIN
 *--------------------------------------
 * 7-bit to 6-bit 'deniblize' table (16-sector format)
 *
@@ -618,12 +649,6 @@ L57CC  			sec
 L57CD  			pla		 				place last byte into user buffer
 				ldy #$55
 				sta (buf),y
-				rts
-
-* set the slot dependent track location
-
-settrk			jsr drvindx				get index to drive #
-				sta iobpdn,x
 				rts
 
 * determine if motor is stopped
@@ -930,19 +955,7 @@ L59A6  			lda iobpdn
 				lda montimeh
 				bne L59A6
 L59BD  			rts
-
-rsetphse 		lda unitnum				get unit number.
-				and #$7F	  			mask off high bit.
-				tax
-
-* clear all the phases and force read mode
-
-				lda phaseoff+0,x		make sure all motor phases are off.
-				lda phaseoff+2,x
-				lda phaseoff+4,x
-				lda phaseoff+6,x
-				rts
-
+*--------------------------------------
 docheck			lda A4L					command #.
 				cmp #$04	   			is the command allowed ?
 				bcs .9					if not.

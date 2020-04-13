@@ -67,9 +67,11 @@ NEW
 * + %2f	  :	'3.14'
 *\--------------------------------------
 				.DUMMY
-				.OR ZPTMP+5				3 Bytes
+				.OR ZPTMP+5				5 Bytes
 PrintF.Cnt		.BS 2
 PrintF.hFILE	.BS 1
+STDIO.StackBytePtr	.BS 1
+STDIO.ExitPopCnt	.BS 1
 				.ED
 *--------------------------------------
 K.PrintF.PadL	.EQ FAC+5
@@ -87,8 +89,13 @@ K.FPrintf		ldx #2
 *--------------------------------------
 K.SPrintf		ldx #3
 *--------------------------------------
-K.PrintF.1		jsr PrintF.GetParams
-				sty STDIO.Exit.Cnt+1	Total bytes to POP
+K.PrintF.1		sec						format string->ptr2
+				jsr STDIO.GetParams
+
+				stx pIOBuf
+				sta pIOBuf+1			Output buffer->pIOBuf
+
+				sty STDIO.ExitPopCnt	Total bytes to POP
 
 .1				jsr SHARED.GetCharPtr2
 				bne .22
@@ -392,57 +399,6 @@ PrintF.PutC		phy
 .9				lda #E.BUF
 				sec
 PrintF.PutC.RTS	rts		
-*--------------------------------------
-* Y = Bytecount
-* X = 3 : get format & buffer
-* X = 2 : get format & hFile
-* X = 1 : get format only
-*--------------------------------------
-PrintF.GetParams
-				stz PrintF.Cnt
-				stz PrintF.Cnt+1
-
-				lda (pStack)			Bytecount
-				
-				tay
-				sty STDIO.GetStackByte.ptr+1
-
-				iny
-				lda (pStack),y			format LO
-				sta ZPPtr2
-
-				iny
-				lda (pStack),y			format HI
-				sta ZPPtr2+1
-
-				dex
-				beq .1
-				
-				dex
-				beq .2
-				
-.3				stz PrintF.hFILE
-				
-				iny
-				lda (pStack),y			str LO
-				sta pIOBuf
-
-				iny
-				lda (pStack),y			str HI
-				sta pIOBuf+1
-
-				rts
-
-.2				iny
-				lda (pStack),y			hFILE
-				sta PrintF.hFILE
-
-.1				lda #K.IOBuf
-				sta pIOBuf
-				lda /K.IOBuf
-				sta pIOBuf+1
-
-				rts
 */--------------------------------------
 * # ScanF (BLOCKING)
 * # FScanF (BLOCKING)
@@ -500,8 +456,13 @@ K.FScanF		ldx #2
 *--------------------------------------
 K.SScanF		ldx #3
 *--------------------------------------
-K.SScanF.1		jsr ScanF.GetParams		Ptr1=format, ptr2=buffer
-				sty STDIO.Exit.Cnt+1	Total bytes to POP
+K.SScanF.1		clc						format string->ptr1
+				jsr STDIO.GetParams
+
+				stx ZPPtr2
+				sta ZPPtr2+1			Output buffer->ZPPtr2
+
+				sty STDIO.ExitPopCnt	Total bytes to POP
 			
 				ldx PrintF.hFILE
 				beq .1
@@ -637,28 +598,44 @@ K.SScanF.S		ldy #$ff
 
 K.SScanF.Fwd	jmp SHARED.AddYToPtr2		Y=char count parsed
 *--------------------------------------
-* Y = Bytecount
+* IN:
+* CC : format in ZPPtr1
+* CS : format in ZPPtr2
 * X = 3 : get format & buffer
 * X = 2 : get format & hFile
 * X = 1 : get format only
+* OUT:
+* X = Buf LO
+* A = Buf HI
+* format on stack
+* Y = BytePtr
 *--------------------------------------
-ScanF.GetParams	stz PrintF.Cnt
+STDIO.GetParams	stz PrintF.Cnt
 				stz PrintF.Cnt+1
 
 				lda (pStack)			Bytecount
 				
 				tay
-				sty STDIO.GetStackByte.ptr+1
+				sty STDIO.StackBytePtr
 
 				iny
 				lda (pStack),y			format LO
-				sta ZPPtr1
+				pha
 
 				iny
 				lda (pStack),y			format HI
+				bcs .10
+				
 				sta ZPPtr1+1
+				pla
+				sta ZPPtr1
+				bra .11
 
-				dex
+.10				sta ZPPtr2+1
+				pla
+				sta ZPPtr2
+				
+.11				dex
 				beq .1
 				
 				dex
@@ -668,34 +645,36 @@ ScanF.GetParams	stz PrintF.Cnt
 				
 				iny
 				lda (pStack),y			str LO
-				sta ZPPtr2
+				tax
 
 				iny
 				lda (pStack),y			str HI
-				sta ZPPtr2+1
-
+				
 				rts
 
 .2				iny
 				lda (pStack),y			hFILE
 				sta PrintF.hFILE
 
-.1				lda #K.IOBuf
-				sta ZPPtr2
+.1				ldx #K.IOBuf
 				lda /K.IOBuf
-				sta ZPPtr2+1
-
+				
+STDIO.GetParams.RTS
 				rts
 *--------------------------------------
-STDIO.GetStackByte	
+STDIO.GetStackPtr
+				jsr STDIO.GetStackByte
+				bcs STDIO.GetParams.RTS
+				tax
+*--------------------------------------
+STDIO.GetStackByte
 				phy
-STDIO.GetStackByte.ptr
-				ldy #$ff				SELF MODIFIED
+
+				ldy STDIO.StackBytePtr
 				beq .9
 
 				lda (pStack),y
-				dey
-				sty STDIO.GetStackByte.ptr+1
+				dec STDIO.StackBytePtr
 
 				ply
 				clc
@@ -712,7 +691,7 @@ STDIO.Exit		php
 				
 				lda pStack
 				sec
-STDIO.Exit.Cnt	adc #$ff				SELF MODIFIED
+				adc STDIO.ExitPopCnt
 				sta pStack
 				
 				pla
