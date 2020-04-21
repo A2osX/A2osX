@@ -10,11 +10,21 @@ NEW
 				.INB INC/MLI.I
 				.INB INC/IO.D2.I
 *--------------------------------------
-* NIBBLE track len = $1A00 (6656) bytes
+TRACK16.LEN		.EQ $19F8				(6648) bytes
 *--------------------------------------
-GAP1			.EQ 48
-GAP2			.EQ 6
-GAP3			.EQ 27
+TRACK16.GAP1	.EQ 64+8
+*Address field = D5AA96 + 4x2 + DEAAEB	 = 14
+TRACK16.GAP2	.EQ 6
+*Data field = D5AAAD + 342 + CS + DEAAEB = 349
+TRACK16.GAP3	.EQ 42
+*--------------------------------------
+TRACK9.LEN		.EQ $19F8				(6648) bytes
+*--------------------------------------
+TRACK9.GAP1		.EQ 51
+*Address field = D5AA96 + 4x2 + DEAAEB	 = 14
+TRACK9.GAP2		.EQ 6
+*Data field = D5AAAD + 342 + 342 + CS + DEAAEB = 691
+TRACK9.GAP3		.EQ 42
 *--------------------------------------
 Status.PrvDrvOff	.EQ $80				Waiting old drive stop spinning
 Status.DrvOn		.EQ $81				Waiting target drive spin
@@ -42,10 +52,10 @@ CS.START		cld
 				.DA LIB.UNLOAD
 				.DA	GetProDOSCatSize
 				.DA	BuildProDOSCat
-				.DA D2TrkR16s
-				.DA D2TrkRNIB
-				.DA D2TrkW16s
-				.DA D2TrkWNIB
+				.DA D2TrkRead16s
+				.DA D2TrkWrite16s
+				.DA D2TrkRreadNIB
+				.DA D2TrkWriteNIB
 L.TrkWriter		.DA TrkWriter
 L.ProDOS.Boot	.DA ProDOS.Boot
 				.DA 0
@@ -277,30 +287,68 @@ BuildProDOSCat	>PULLW ZPPtr1			DstBuf
 				bra .7
 */--------------------------------------
 *\--------------------------------------
-D2TrkRNIB
+D2TrkRead16s
 */--------------------------------------
-*\--------------------------------------
-D2TrkR16s
-*/--------------------------------------
-* # D2TrkW16s
+* # D2TrkWrite16s
 * Write a track (16 sectors)
 * **In:**
-*  PUSHW = Ptr to 16*256 buffer
-*  PUSHB = TrackNum * 4	: 0->140+	
 *  PUSHB = DSSS0000
+*  PUSHB = TrackNum * 4	: 0->136+	
+*  PUSHW = Ptr to 16*256 buffer
 * ## RETURN VALUE
 *  CC : success
 *  CS : A = Error
 *       A=0, currently starting/seeking...
 *\--------------------------------------
-D2TrkW16s		>PULLB DrvSlt
+D2TrkWrite16s	>PULLW ZPPtr1
 				>PULLB TrkNum
-				>PULLW ZPPtr1
+				>PULLB DrvSlt
+				
+				>LDYAI TRACK16LEN+1
+				>SYSCALL getmem
+				bcs .9
+	
+				>STYA ZPPtr2
+				stx TrkBuf
+				
+				lda #254
+				sta VolNum
 
+				stz SectNum
+
+				ldy #TRACK16.GAP1
+
+				lda #$7f
+				
+.1				jsr PutBytePtr2
+				dey
+				bne .1
+				
+				lda #$D5
+				jsr PutBytePtr2
+				
+				lda #$AA
+				jsr PutBytePtr2
+				
+				lda #$96
+				jsr PutBytePtr2
+				
+				jsr HeaderCheckSum
+				
+				ldy #3
+				
+.2				lda Checksum,y
+				jsr PutByte44Ptr2
+				dey
+				bpl .2
+	
 				clc
-				rts
+.9				rts
 */--------------------------------------
-* # D2TrkWNIB
+*\--------------------------------------
+D2TrkReadNIB
+*/--------------------------------------
+* # D2TrkWriteNIB
 * Write a track (NIBBLE)
 * **In:**
 *  PUSHW = Ptr to NIBBLE buffer (0 ended)
@@ -311,7 +359,7 @@ D2TrkW16s		>PULLB DrvSlt
 *  CS : A = Error
 *       A=0, currently starting/seeking...
 *\--------------------------------------
-D2TrkWNIB		>PULLB DrvSlt
+D2TrkWriteNIB	>PULLB DrvSlt
 				>PULLB TrkNum
 				>PULLW ZPPtr1
 
@@ -400,6 +448,13 @@ DrvSpinCheck	jsr DrvSelect
 *--------------------------------------
 * A=DSSS0000
 *--------------------------------------
+HeaderCheckSum	lda VolNum
+				eor TrkNum
+				eor SectNum
+
+				sta Checksum
+				rts
+*--------------------------------------
 DrvSelect		pha
 				and #$70
 				tax
@@ -412,6 +467,20 @@ DrvSelect		pha
 
 				lda IO.D2.ReadMode,x	Make sure readmode
 				rts
+*--------------------------------------
+PutByte44Ptr2	pha
+				rol
+				jsr .1
+
+				pla
+				
+.1				ora #$AA
+*--------------------------------------
+PutBytePtr2		sta ZPPtr2
+				inc ZPPtr2
+				bne .8
+				inc ZPPtr2+1
+.8				rts				
 *--------------------------------------
 CS.END
 *--------------------------------------
@@ -432,7 +501,8 @@ TrkWriter.Start	lda IO.D2.ReadMode,x
 			
 .1				lda (ZPPtr1),y			(5) as NibbleBuf is page aligned, no page crossing
 				beq	.8					(2)(3 if Z) END OF TRACK
-*				nobody will never try to write 00000000, right?
+* nobody will never try to write 00000000, right?
+
 				cmp	#$80				(2) if CC, it is a sync byte
 				ora #$80				(2) make sure Bit7 high
 				sta IO.D2.WriteMode,x	(5)
@@ -535,9 +605,15 @@ VolDirHdr.CatSize	.BS 1
 *--------------------------------------
 DiskII.OFS		.HS 010305FF
 DiskII.SIG		.HS 20000300
-
+*--------------------------------------
 DrvSlt			.BS 1
+TrkBuf			.BS 1
+
+Checksum		.BS 1
+SectNum			.BS 1
 TrkNum			.BS 1
+VolNum			.BS 1
+
 *--------------------------------------
 Status			.BS 1
 DrvSltInUse		.BS 1
