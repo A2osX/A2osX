@@ -33,6 +33,7 @@ Status.seek			.EQ $82				target drive seeking
 ZPPtr1			.EQ ZPLIB
 ZPPtr2			.EQ ZPLIB+2
 ZPPtr3			.EQ ZPLIB+4
+ZPPtr4			.EQ ZPLIB+6
 *--------------------------------------
 *			File Header (16 Bytes)
 *--------------------------------------
@@ -52,9 +53,10 @@ CS.START		cld
 				.DA LIB.UNLOAD
 				.DA	GetProDOSCatSize
 				.DA	BuildProDOSCat
+				.DA D2Recalibrate
 				.DA D2TrkRead16s
 				.DA D2TrkWrite16s
-				.DA D2TrkRreadNIB
+				.DA D2TrkReadNIB
 				.DA D2TrkWriteNIB
 L.TrkWriter		.DA TrkWriter
 L.ProDOS.Boot	.DA ProDOS.Boot
@@ -287,6 +289,14 @@ BuildProDOSCat	>PULLW ZPPtr1			DstBuf
 				bra .7
 */--------------------------------------
 *\--------------------------------------
+D2Recalibrate	>PULLB DrvSlt
+				jsr CheckDiskII
+				bcs .9
+
+
+.9				rts
+*/--------------------------------------
+*\--------------------------------------
 D2TrkRead16s
 */--------------------------------------
 * # D2TrkWrite16s
@@ -304,34 +314,22 @@ D2TrkWrite16s	>PULLW ZPPtr1
 				>PULLB TrkNum
 				>PULLB DrvSlt
 				
-				>LDYAI TRACK16LEN+1
-				>SYSCALL getmem
+				>LDYAI TRACK16.LEN+1
+				>SYSCALL2 getmem
 				bcs .9
 	
 				>STYA ZPPtr2
 				stx TrkBuf
-				
+
 				lda #254
 				sta VolNum
 
 				stz SectNum
 
 				ldy #TRACK16.GAP1
-
-				lda #$7f
+				jsr PutSyncBytePtr2
 				
-.1				jsr PutBytePtr2
-				dey
-				bne .1
-				
-				lda #$D5
-				jsr PutBytePtr2
-				
-				lda #$AA
-				jsr PutBytePtr2
-				
-				lda #$96
-				jsr PutBytePtr2
+.1				jsr PutAddrHeadPtr2
 				
 				jsr HeaderCheckSum
 				
@@ -342,6 +340,29 @@ D2TrkWrite16s	>PULLW ZPPtr1
 				dey
 				bpl .2
 	
+				jsr PutTailPtr2
+				
+				ldy #TRACK16.GAP2
+				jsr PutSyncBytePtr2
+	
+				jsr PutDataHeadPtr2
+				
+				jsr PutData
+								
+				jsr PutTailPtr2
+				ldy #TRACK16.GAP3
+				jsr PutSyncBytePtr2
+				
+				inc ZPPtr1+1
+				
+				inc SectNum
+				lda SectNum
+				cmp #16
+				bne .1
+				
+				lda TrkBuf
+				>SYSCALL2 FreeMem
+				
 				clc
 .9				rts
 */--------------------------------------
@@ -391,9 +412,10 @@ D2TrkWriteNIB	>PULLB DrvSlt
 				lda DrvSlt
 				jsr DrvTrkSelect
 				bcs .9
+
 				ldy #TrkWriter.Size
 
-				clc
+*				clc
 .9				rts
 *--------------------------------------
 SetStatusAndExit	
@@ -420,15 +442,21 @@ CheckDiskII		and #$70				only 0SSS
 				ora #$C0				make Cn
 				sta .2+2
 				ldx #3					4 bytes to check
+
 .1				ldy DiskII.OFS,x
+
 .2				lda $C000,y				Self Modified
 				cmp DiskII.SIG,x
 				bne .9
+
 				dex
 				bpl .1
+
 				clc						all bytes match, Disk II
 				rts
-.9				sec
+
+.9				lda #MLI.E.NODEV
+				sec
 				rts
 *--------------------------------------
 * A=DSSS0000
@@ -441,19 +469,14 @@ DrvSpinCheck	jsr DrvSelect
 				bne .8					spinning
 				dey
 				bne .1
+
 				clc						CC:not spinning
 				rts
+
 .8				sec
 				rts
 *--------------------------------------
 * A=DSSS0000
-*--------------------------------------
-HeaderCheckSum	lda VolNum
-				eor TrkNum
-				eor SectNum
-
-				sta Checksum
-				rts
 *--------------------------------------
 DrvSelect		pha
 				and #$70
@@ -468,6 +491,117 @@ DrvSelect		pha
 				lda IO.D2.ReadMode,x	Make sure readmode
 				rts
 *--------------------------------------
+PutSyncBytePtr2	lda #$7f
+
+.1				jsr PutBytePtr2
+				dey
+				bne .1
+				rts
+*--------------------------------------
+PutAddrHeadPtr2	ldy #2
+
+.1				lda ADDR.Head,y
+				jsr PutBytePtr2
+				dey
+				bpl .1
+				rts
+*--------------------------------------
+PutDataHeadPtr2	ldy #2
+
+.1				lda DATA.Head,y
+				jsr PutBytePtr2
+				dey
+				bpl .1
+				rts
+*--------------------------------------
+PutTailPtr2		ldy #2
+
+.1				lda TAIL,y
+				jsr PutBytePtr2
+				dey
+				bpl .1
+				rts
+*--------------------------------------
+HeaderCheckSum	lda VolNum
+				eor TrkNum
+				eor SectNum
+
+				sta Checksum
+				rts
+*--------------------------------------
+PutData			stz Checksum
+
+				lda ZPPtr1
+				ldy ZPPtr1+1
+
+				clc
+				adc #86
+				bcc .1
+				
+				iny
+				clc
+				
+.1				sta ZPPtr3
+				sty ZPPtr3+1
+				
+				adc #86
+				bcc .2
+				
+				iny
+				
+.2				sta ZPPtr4
+				sty ZPPtr4+1
+				
+				ldy #85
+				
+.3				lda (ZPPtr1),y
+				and #3
+				tax
+				lda XRW.XX000000,x
+				pha
+				
+				lda (ZPPtr3),y
+				and #3
+				tax
+				pla
+				ora XRW.00XX0000,x
+				pha
+				
+				lda (ZPPtr4),y
+				and #3
+				tax
+				pla
+				ora XRW.0000XX00,x
+
+				eor Checksum
+				sta Checksum
+				
+				tax
+				lda FC2Nib,x
+				
+				jsr PutBytePtr2
+				dey
+				bpl .3
+				
+				ldy #0
+				
+.4				lda (ZPPtr3),y
+				and #$FC
+				eor Checksum
+				sta Checksum
+				tax
+				lda FC2Nib,x
+				jsr PutBytePtr2
+				
+				iny
+				bne .4
+				
+				ldx Checksum
+				lda FC2Nib,x
+				jsr PutBytePtr2
+				
+				rts
+*--------------------------------------
 PutByte44Ptr2	pha
 				rol
 				jsr .1
@@ -476,11 +610,13 @@ PutByte44Ptr2	pha
 				
 .1				ora #$AA
 *--------------------------------------
-PutBytePtr2		sta ZPPtr2
+PutBytePtr2		sta (ZPPtr2)
 				inc ZPPtr2
 				bne .8
 				inc ZPPtr2+1
 .8				rts				
+*--------------------------------------
+
 *--------------------------------------
 CS.END
 *--------------------------------------
@@ -548,6 +684,113 @@ TrkWriter.Start	lda IO.D2.ReadMode,x
 
 TrkWriter.Size	.EQ *-TrkWriter.Start
 				.EP
+*--------------------------------------
+ADDR.Head		.HS 96AAD5
+DATA.Head		.HS ADAAD5
+TAIL			.HS EBAADE
+*--------------------------------------
+Nib2FC			.HS 0004
+				.HS FFFF
+				.HS 080C
+				.HS FF
+				.HS 101418
+XRW.XX000000	.HS 008040C0FFFF		used in fast prenib as lookup for 2-bit quantities.
+				.HS 1C20
+				.HS FFFFFF
+				.HS 24282C3034
+				.HS FFFF
+				.HS 383C4044484C
+				.HS FF
+				.HS 5054585C606468
+XRW.00XX0000	.HS 00201030			used in fast prenib.
+endmrks			.HS DEAAEB		  		table using 'unused' nibbles ($C4,$C5,$C6,$C7)
+				.HS FFFFFFFF
+				.HS 6C
+				.HS FF
+				.HS 707478
+				.HS FFFFFF
+				.HS 7C
+				.HS FFFF
+				.HS 8084
+				.HS FF
+				.HS 888C9094989CA0
+XRW.0000XX00	.HS 0008040C			used in fast prenib.
+				.HS FF
+				.HS A4A8AC
+				.HS FF
+				.HS B0B4B8BCC0C4C8
+				.HS FFFF
+				.HS CCD0D4D8DCE0
+				.HS FF
+				.HS E4E8ECF0F4F8FC
+*--------------------------------------
+dnibl2			.HS 00
+dnibl3			.HS 00
+dnibl4			.HS 00
+FC2Nib			.HS 96
+				.HS 02000097
+				.HS 0100009A
+				.HS 0300009B
+				.HS 0002009D
+				.HS 0202009E
+				.HS 0102009F
+				.HS 030200A6
+				.HS 000100A7
+				.HS 020100AB
+				.HS 010100AC
+				.HS 030100AD
+				.HS 000300AE
+				.HS 020300AF
+				.HS 010300B2
+				.HS 030300B3
+				.HS 000002B4
+				.HS 020002B5
+				.HS 010002B6
+				.HS 030002B7
+				.HS 000202B9
+				.HS 020202BA
+				.HS 010202BB
+				.HS 030202BC
+				.HS 000102BD
+				.HS 020102BE
+				.HS 010102BF
+				.HS 030102CB
+				.HS 000302CD
+				.HS 020302CE
+				.HS 010302CF
+				.HS 030302D3
+				.HS 000001D6
+				.HS 020001D7
+				.HS 010001D9
+				.HS 030001DA
+				.HS 000201DB
+				.HS 020201DC
+				.HS 010201DD
+				.HS 030201DE
+				.HS 000101DF
+				.HS 020101E5
+				.HS 010101E6
+				.HS 030101E7
+				.HS 000301E9
+				.HS 020301EA
+				.HS 010301EB
+				.HS 030301EC
+				.HS 000003ED
+				.HS 020003EE
+				.HS 010003EF
+				.HS 030003F2
+				.HS 000203F3
+				.HS 020203F4
+				.HS 010203F5
+				.HS 030203F6
+				.HS 000103F7
+				.HS 020103F9
+				.HS 010103FA
+				.HS 030103FB
+				.HS 000303FC
+				.HS 020303FD
+				.HS 010303FE
+				.HS 030303FF
 *--------------------------------------
 LC.BitMap		.HS 80402010080402018040201008040201
 *--------------------------------------

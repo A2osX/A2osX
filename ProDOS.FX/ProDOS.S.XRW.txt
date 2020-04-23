@@ -4,6 +4,17 @@ NEW
 XRW.START		cld						$D8 to flag language card bank 1 (main)
 
 				lda unitnum				get unit number.
+				
+				pha
+				
+				lsr
+				lsr
+				lsr
+				lsr
+				sta XRW.UnitIndex
+				
+				pla
+				
 				and #$7F	  			mask off high bit.
 				sta A2L					0SSS0000 for IO indexing
 
@@ -88,7 +99,7 @@ L59BD  			jsr XRW.AllPhaseOff		make sure all motor phases are off.
 * read/write a track/sector
 
 regrwts			ldy #$01				retry count
-				sty seekcnt				only one recalibrate per call
+				sty XRW.Recalibrate		only one recalibrate per call
 				sta XRW.ReqSector
 
 * now check if the motor is on, then start it
@@ -156,46 +167,46 @@ L538E  			lda A4L					get command #
 
 				jsr XRW.PreNibble
 
-L5398  			ldy #$40				64 retries
-				sty retrycnt
+L5398  			ldy #64
+				sty XRW.RetryCnt
 				
 L539D  			jsr XRW.ReadAddr		read next address field.
 				bcc L53BE				branch if read ok.
 
-L53A4  			dec retrycnt	   		one less chance.
+L53A4  			dec XRW.RetryCnt	 	one less chance.
 				bpl L539D				branch to retry.
 
 				lda #MLI.E.IO  			anticipate a bad drive error.
-				dec seekcnt	  			can only recalibrate once.
+				dec XRW.Recalibrate		can only recalibrate once.
 				bne hndlerr
 
-				lda curtrk
+				lda XRW.CurrentTrack
 				pha		  				save track
 				asl
 				asl
 				adc #32		   			pretend track is 8 > curtrk
 
-				ldy #$40
-				sty retrycnt	   		reset retries to 64 max.
+				ldy #64
+				sty XRW.RetryCnt	  	reset retries to 64 max.
 				bra L53CC				always.
 
 * have now read an address field. make sure this is
 * the correct track, sector and volume.
 
 L53BE  			ldy XRW.AddrField.T
-				cpy curtrk
+				cpy XRW.CurrentTrack
 				beq L53D5				ok
 
 * recalibrating from this track
 
-				lda curtrk				preserve destination track
+				lda XRW.CurrentTrack	preserve destination track
 				pha
 				tya
 				asl
 				asl
 				
-L53CC			jsr XRW.GetUnitIdx		get index to drive #
-				sta XRW.LastTrackPos,y	set the slot dependent track location
+L53CC			ldy XRW.UnitIndex		get index to drive #
+				sta XDOS.SPUnit-1,y		set the slot dependent track location
 
 				pla
 				jsr XRW.Seek
@@ -234,16 +245,6 @@ L53FD  			ldx A2L
 				rol		 				write protect-->carry-->bit 0=1
 				lda IO.D2.RData,x		keep in read mode
 				bra statdne
-*--------------------------------------
-XRW.GetUnitIdx	pha		  				preserve acc across call
-				lda unitnum				DSSS0000
-				lsr
-				lsr
-				lsr
-				lsr
-				tay		  				0000DSSS index to table.
-				pla		  				restore acc
-				rts
 *--------------------------------------
 * determine if motor is stopped
 *
@@ -315,21 +316,21 @@ L5912  			sta prn1+1				self mod 1
 prn1			lda $1000,y				warning: self modified. get byte from lowest group.
 				and #$03	   			strip high 6 bits.
 				tax		  				index to 2 bit equivalent.
-				lda twobit1,x
+				lda XRW.0000XX00,x
 				pha		  				save pattern
 
 prn2			lda $1056,y				warning: self modified. get byte from middle group.
 				and #$03
 				tax
 				pla		  				restore pattern.
-				ora twobit2,x	  		combine 2nd group with 1st.
+				ora XRW.00XX0000,x  	combine 2nd group with 1st.
 				pha		  				save new pattern.
 
 prn3			lda $10AC,y				warning: self modified. get byte from highest group.
 				and #$03
 				tax
 				pla		  				restore new pattern
-				ora twobit3,x	  		and form final nibl.
+				ora XRW.XX000000,x 		and form final nibl.
 				pha
 
 				tya
@@ -533,7 +534,7 @@ wrefd5			ldx #$60   				(2) restore slot. warning: modified by prenib
 				nop	 					(2)
 				nop	  					(2)
 
-L58D3  			lda endmrks,y  			(4) dm4, dm5, dm6 and turn off byte.
+L58D3  			lda XRW.EndDataMark,y 	(4) dm4, dm5, dm6 and turn off byte.
 				jsr wnibl				(15,6) write it
 				iny	  					(2)
 				cpy #$04   				(2) have all end marks been written ?
@@ -739,15 +740,15 @@ L57CD  			pla		 				place last byte into user buffer
 * observe 'no page cross' warnings on some branches !!!
 *--------------------------------------
 XRW.ReadAddr	ldy #$FC
-				sty countn				'must find' count
+				sty XRW.CheckSum		init nibble counter to $FCFC
 				
 				ldx A2L					get slot #
 
 L569D  			iny
-				bne L56A5				low order of count.
+				bne L56A5				counter LO
 				
-				inc countn	   			(2k nibles to find address mark
-				beq rderr	  			 else error)
+				inc XRW.CheckSum		counter HI
+				beq rderr
 				
 L56A5  			lda IO.D2.RData,x		read nibl
 				bpl L56A5				*** no page cross ***
@@ -771,23 +772,23 @@ L56BA  			lda IO.D2.RData,x
 				cmp #$96	   			address mark 3 ?
 				bne L56AA				if not, is it address mark 1
 
-				sei		  				no interrupts until address is tested.
+				sei		  				???ALREADY DONE by XDOS.devmgr??? no interrupts until address is tested.
 				lda #$00	   			init checksum
 				
-L56C6  			sta csum
+L56C6  			sta XRW.CheckSum
 
 L56C9  			lda IO.D2.RData,x		read 'odd bit' nibl
 				bpl L56C9				*** no page cross ***
 
 				rol		 				align odd bits, '1' into lsb.
-				sta last	   			save them.
+				sta XRW.Temp4x4			save them.
 				
 L56D2  			lda IO.D2.RData,x		read 'even bit' nibl
 				bpl L56D2				*** no page cross ***
 				
-				and last	   			merge odd and even bits.
-				sta XRW.AddrField,y		store data byte.
-				eor csum
+				and XRW.Temp4x4			merge odd and even bits.
+				sta XRW.AddrField.C,y	store data byte.
+				eor XRW.CheckSum
 				dey
 				bpl L56C6				loop on 4 data bytes.
 				
@@ -819,43 +820,43 @@ XRW.FREE1		.EQ $D4AA-*				(2.0.3 = $02)
 				.LIST OFF
 				.BS $D4AA-*
 *--------------------------------------
-* nibl buffer 'nbuf2' must be at $xxAA
+* nibl buffer 'nbuf2' must fit in a  page
 *--------------------------------------
 nbuf2			.BS $56		 			nibl buffer for read/write of low 2-bits of each byte.
 *--------------------------------------
 * fast seek subroutine
 * A = desired track
-* curtrk = current 1/4 track
+* XRW.CurrentTrack = current 1/4 track
 *
 * montimel,h are incremented by the # of 100us quantums required by seek for motor on time overlap.
-* variables used: curtrk, A2L, montimel, montimeh
+* variables used: XRW.CurrentTrack, A2L, montimel, montimeh
 *--------------------------------------
 XRW.Seek		asl						transform into 1/4 tracks
 				asl
 
 				pha
 
-				jsr XRW.GetUnitIdx		get index to previous track
-				lda XRW.LastTrackPos,y	for current drive.
+				ldy XRW.UnitIndex		get index to previous track
+				lda XDOS.SPUnit-1,y		for current drive.
 
-				sta curtrk	   			current position.
+				sta XRW.CurrentTrack	current position.
 				
 				pla
 				
-				sta XRW.LastTrackPos,y
+				sta XDOS.SPUnit-1,y
 
-.1			  	lda XRW.LastTrackPos,y
+.1			  	lda XDOS.SPUnit-1,y
 				
 				sec
-				sbc	curtrk
+				sbc	XRW.CurrentTrack
 				beq	.8
 
 				bcc	.2
 
-				cmp #3					A>curtrk, must move in
+				cmp #2					A>curtrk, must move in
 				bcc .3
 
-				lda #3
+				lda #2
 				bra .3
 				
 .2				cmp #$fe				A<curtrk, must move out
@@ -868,8 +869,8 @@ XRW.Seek		asl						transform into 1/4 tracks
 .3			    tax						save move direction
 
 				clc
-				adc curtrk
- 				sta curtrk
+				adc XRW.CurrentTrack
+ 				sta XRW.CurrentTrack
 
 				jsr XRW.PhaseOn
 
@@ -880,8 +881,8 @@ XRW.Seek		asl						transform into 1/4 tracks
 				
 				bra .1
 
-.8				lsr curtrk				convert back to track#
-				lsr curtrk
+.8				lsr XRW.CurrentTrack	convert back to track#
+				lsr XRW.CurrentTrack
 				rts
 
 XRW.PhaseOn		dex
@@ -918,28 +919,6 @@ XRW.AllPhaseOff	ldx A2L
 				lda IO.D2.Ph3Off,x
 				rts
 *--------------------------------------
-XRW.LastTrackPos	.EQ *
-curtrk			.HS 00					(D0S0)
-				.HS 00000000000000		for slots 1 thru 7 drive 1
-csum			.HS 00					(D1S0) used for address header cksum
-				.HS 00000000000000		for slots 1 thru 7 drive 2
-*--------------------------------------
-XRW.ReqTrack	.HS 00
-XRW.ReqSector	.HS 00
-ibstat			.HS 00
-XRW.LastUnitUsed	.HS 00
-retrycnt 		.HS 00
-seekcnt			.HS 00
-countn			.EQ	*					'must find' count.
-last			.HS 00		   			'odd bit' nibls.
-
-XRW.AddrField	.HS 00					AddrField Checksum
-XRW.AddrField.S	.HS 00					AddrField Sector
-XRW.AddrField.T	.EQ	*					AddrField Track
-montimel 		.HS 00
-XRW.AddrField.V	.EQ *					AddrField Volume
-montimeh 		.HS 00
-*--------------------------------------
 				.LIST ON
 XRW.FREE2		.EQ $D596-*
 				.LIST OFF
@@ -955,31 +934,48 @@ XRW.FREE2		.EQ $D596-*
 * aligned to page boundary + $96 
 *--------------------------------------
 XRW.Nib2FC		.HS 0004
-				.HS FFFF
+*				.HS FFFF
+XRW.UnitIndex		.HS 00
+XRW.LastUnitUsed	.HS 00
 				.HS 080C
-				.HS FF
+*				.HS FF
+XRW.Recalibrate		.HS 00
 				.HS 101418
-twobit3			.HS 008040C0FFFF		used in fast prenib as lookup for 2-bit quantities.
+XRW.XX000000	.HS 008040C0			used in fast prenib as lookup for 2-bit quantities.
+*				.HS FFFF
+montimel 			.HS 00
+montimeh 			.HS 00
 				.HS 1C20
 				.HS FFFFFF
 				.HS 24282C3034
-				.HS FFFF
+*				.HS FFFF
+XRW.ReqTrack		.HS 00
+XRW.ReqSector		.HS 00
 				.HS 383C4044484C
-				.HS FF
+*				.HS FF
+XRW.CurrentTrack	.HS 00
 				.HS 5054585C606468
-twobit2			.HS 00201030			used in fast prenib.
-endmrks			.HS DEAAEB		  		table using 'unused' nibbles ($C4,$C5,$C6,$C7)
-				.HS FFFFFFFF
+XRW.00XX0000	.HS 00201030			used in fast prenib.
+XRW.EndDataMark	.HS DEAAEB		  		table using 'unused' nibbles ($C4,$C5,$C6,$C7)
+*				.HS FFFFFFFF
+XRW.AddrField.C		.HS 00				AddrField Checksum
+XRW.AddrField.S		.HS 00				AddrField Sector
+XRW.AddrField.T		.HS 00				AddrField Track
+XRW.AddrField.V		.HS 00				AddrField Volume
 				.HS 6C
-				.HS FF
+*				.HS FF
+ibstat				.HS 00
 				.HS 707478
 				.HS FFFFFF
 				.HS 7C
-				.HS FFFF
+*				.HS FFFF
+XRW.Temp4x4			.HS 00
+XRW.CheckSum		.HS 00 				used for address header cksum
 				.HS 8084
-				.HS FF
+*				.HS FF
+XRW.RetryCnt		.HS 00
 				.HS 888C9094989CA0
-twobit1			.HS 0008040C			used in fast prenib.
+XRW.0000XX00	.HS 0008040C			used in fast prenib.
 				.HS FF
 				.HS A4A8AC
 				.HS FF
