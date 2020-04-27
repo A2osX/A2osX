@@ -22,9 +22,11 @@ ZPPtrDevName	.BS 2
 
 Index			.BS 1
 hDevID			.BS 1
-DrvSlt0 		.BS 1
 hCatBuf			.BS 1
-hMem			.BS 1
+hTrackBuf		.BS 1
+DSSS0000 		.BS 1
+CurTrack		.BS 1
+CurQTrack		.BS 1
 
 bLL				.BS 1
 bCustomBlkSize 	.BS 1
@@ -229,23 +231,8 @@ CS.RUN.GetDevStatus
 *--------------------------------------
 CS.RUN.LL		>LDA.G DIB+S.DIB.T
 				cmp #S.DIB.T.DISKII
-				beq CS.RUN.LL.DISKII
-				
-				>PUSHW L.MSG.LL
-				>PUSHBI 0
-				>SYSCALL PrintF
-				bcs .9
-				
-				>PUSHB hDevID
-				>PUSHBI IOCTL.FORMAT
-				>PUSHEA.G IOCTL
-				
-				>SYSCALL IOCTL
-				
-.9
-CS.RUN.LL.RTS	rts
-*--------------------------------------
-CS.RUN.LL.DISKII
+				bne .1
+
 				ldy #S.FD.DEV.BUSID
 				lda (ZPPtrFD),y			00000SSS
 				
@@ -262,24 +249,109 @@ CS.RUN.LL.DISKII
 				ror						in C
 				pla
 				ror 
-				sta DrvSlt0				DSSS0000
+				sta DSSS0000
+
+				bra CS.RUN.LL.DISKII
 				
+.1				>PUSHW L.MSG.LL
+				>PUSHBI 0
+				>SYSCALL PrintF
+				bcs .9
+				
+				>PUSHB hDevID
+				>PUSHBI IOCTL.FORMAT
+				>PUSHEA.G IOCTL
+				
+				>SYSCALL IOCTL
+				
+.9
+CS.RUN.LL.RTS	rts
+*--------------------------------------
+CS.RUN.LL.DISKII
 				>LDYAI 4096
 				>SYSCALL GetMem
 				bcs CS.RUN.LL.RTS
 
-				stx hMem
+				stx hTrackBuf
 				>STYA ZPPtr1
-				>STYA ZPPtr2
-				>STYA.G IOCTL+S.IOCTL.BUFPTR
 				
-				>PUSHB hDevID
-				>PUSHBI IOCTL.READBLOCK
-				>PUSHEA.G IOCTL
+				jsr CS.RUN.MotorOn
+				bcs .9
 				
-				>SYSCALL IOCTL			Read Block 0 to recalibrate
+				>SLEEP
 				
 				ldx #16
+				jsr CS.RUN.ZeroPtr1		16 sectors filled with 0, give some time to spin up
+				
+				stz CurTrack
+				
+				lda #160
+				sta CurQTrack
+				
+				ldx #0
+				jsr CS.RUN.SeekToX
+				
+.1				>SLEEP
+
+				>PUSHW L.MSG.LLDISK2
+				>PUSHB CurTrack
+				>PUSHBI 1
+				>SYSCALL PrintF
+				bcs .9
+
+				>PUSHB DSSS0000
+				>PUSHBI 254				VOL
+				>PUSHB CurTrack
+				>PUSHW ZPPtr1
+				>LIBCALL hLIBBLKDEV,LIBBLKDEV.D2TrkWrite16s
+				bcs .9
+
+				inc CurTrack
+				
+				lda CurQTrack
+*				clc
+				adc #4
+				cmp #140
+				beq .8
+
+				tax
+				
+				jsr CS.RUN.SeekToX
+				bcc .1
+
+.9				rts
+				
+.8				ldx #0
+				jsr CS.RUN.SeekToX
+				
+				jsr CS.RUN.MotorOff
+
+				>PUSHW L.MSG.CRLF
+				>PUSHBI 0
+				>SYSCALL PrintF
+				
+				rts				
+*--------------------------------------
+CS.RUN.MotorOn	sec
+				.HS 90					BCC
+CS.RUN.MotorOff	clc
+				>PUSHB DSSS0000
+				ror
+				>PUSHA
+				>LIBCALL hLIBBLKDEV,LIBBLKDEV.D2MotorControl
+				rts
+*--------------------------------------
+CS.RUN.SeekToX	>PUSHB DSSS0000
+				>PUSHB CurQTrack
+				txa
+				sta CurQTrack
+				>PUSHA
+				>LIBCALL hLIBBLKDEV,LIBBLKDEV.D2MoveHead
+				rts
+*--------------------------------------
+CS.RUN.ZeroPtr1	>LDYA ZPPtr1
+				>STYA ZPPtr2
+				
 				lda #0
 				tay
 				
@@ -291,36 +363,7 @@ CS.RUN.LL.DISKII
 				dex
 				bne .10
 				
-				stz Index
-				
-.1				>PUSHW L.MSG.LLDISK2
-				>PUSHB Index
-				>PUSHBI 1
-				>SYSCALL PrintF
-				bcs .9
-
-				>PUSHB DrvSlt0
-				>PUSHB Index
-				>PUSHW ZPPtr1
-				>LIBCALL hLIBBLKDEV,LIBBLKDEV.D2TrkWrite16s
-				bcs .9
-
-				inc Index
-				lda Index
-				cmp #35
-				bne .1
-				
-				>PUSHW L.MSG.CRLF
-				>PUSHBI 0
-				>SYSCALL PrintF
-				
-.9				php
-				pha
-				lda hMem
-				>SYSCALL freemem
-				pla
-				plp
-				rts				
+				rts
 *--------------------------------------
 CS.RUN.InitCat	lda CatSize
 				bne .1
@@ -418,7 +461,7 @@ CS.QUIT			lda hCatBuf
 				
 				>SYSCALL FreeMem
 				
-.1				lda hMem
+.1				lda hTrackBuf
 				beq .2
 				
 				>SYSCALL FreeMem
@@ -463,7 +506,7 @@ MSG.ERR			.AS "[%h]"
 MSG.CRLF		.AZ "\r\n"
 MSG.NOSIZE		.AZ "Unable to get media size."
 MSG.INIT		.AZ "Formatting %s (%D Blks), Volname:%s\r\n"
-MSG.LLDISK2		.AZ "\rTrack %02d..."
+MSG.LLDISK2		.AZ "\rWriting Track %02d..."
 MSG.LL			.AZ "\rLow Level Format..."
 MSG.WRITECAT	.AZ "Writing Catalog..."
 FMT.BLANK		.AZ "BLANK%H%H"

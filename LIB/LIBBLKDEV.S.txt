@@ -8,27 +8,32 @@ NEW
 				.INB INC/MACROS.I
 				.INB INC/A2OSX.I
 				.INB INC/MLI.I
+				.INB INC/MLI.E.I
 				.INB INC/IO.D2.I
 *--------------------------------------
-TRACK16.LEN		.EQ $19F8				(6648) bytes
+TRACK16.LEN		.EQ 6400
 *--------------------------------------
-TRACK16.GAP1	.EQ 64+8
-*Address field = D5AA96 + 4x2 + DEAAEB	 = 14
-TRACK16.GAP2	.EQ 6
-*Data field = D5AAAD + 342 + CS + DEAAEB = 349
-TRACK16.GAP3	.EQ 42
+TRACK16.GAP1	.EQ 64								640 bits
+* 16 * (
+*Address field = D5AA96 + 4x2 + DEAAEB = 14			112 bits
+TRACK16.GAP2	.EQ 6								60 bits
+*Data field = D5AAAD + 342 + CS + DEAAEB = 349		2792 bits
+*TRACK16.GAP3	.EQ 27								270 bits
+TRACK16.GAP3	.EQ 26								270 bits
+* )
+* 64 + 16 * (14 + 6 + 349 + 27) = 6400				52384 bits (6548)
 *--------------------------------------
-TRACK9.LEN		.EQ $19F8				(6648) bytes
+TRACK9.LEN		.EQ 6511
 *--------------------------------------
-TRACK9.GAP1		.EQ 51
-*Address field = D5AA96 + 4x2 + DEAAEB	 = 14
-TRACK9.GAP2		.EQ 6
-*Data field = D5AAAD + 342 + 342 + CS + DEAAEB = 691
-TRACK9.GAP3		.EQ 42
-*--------------------------------------
-Status.PrvDrvOff	.EQ $80				Waiting old drive stop spinning
-Status.DrvOn		.EQ $81				Waiting target drive spin
-Status.seek			.EQ $82				target drive seeking
+TRACK9.GAP1		.EQ 8+14							220 bits
+* 9 * (
+*Address field = D5AA96 + 4x2 + DEAAEB = 14			112 bits
+TRACK9.GAP2		.EQ 5								50 bits
+*Data field = D5AAAD + 342 + 342 + CS  = 688		5504 bits
+TRACK9.GAP3		.EQ 14								140 bits
+* )
+* 9 * (14 + 5 + 688) = 6363							50904 bits (1480 free = 148 sync bytes)
+* 22 + 9 * (14 + 5 + 688 + 14) = 6511				52384 bits (6548)
 *--------------------------------------
 ZPPtr1			.EQ ZPLIB
 ZPPtr2			.EQ ZPLIB+2
@@ -53,6 +58,7 @@ CS.START		cld
 				.DA LIB.UNLOAD
 				.DA	GetProDOSCatSize
 				.DA	BuildProDOSCat
+				.DA D2MotorControl
 				.DA D2MoveHead
 				.DA D2TrkRead16s
 				.DA D2TrkWrite16s
@@ -289,14 +295,111 @@ BuildProDOSCat	>PULLW ZPPtr1			DstBuf
 				bra .7
 */--------------------------------------
 *\--------------------------------------
+D2MotorControl	>PULLB MotorOn
+				>PULLB DrvSlt
+				jsr CheckDiskII
+				bcs .9
+				
+				lda MotorOn
+				asl
+				
+				lda #0
+				adc #IO.D2.DrvOff
+				adc Slotn0
+				tax
+				lda $C000,x
+				
+*				clc
+				
+.9				rts				
+*/--------------------------------------
+*\--------------------------------------
 D2MoveHead		>PULLB MoveTo
 				>PULLB MoveFrom
 				>PULLB DrvSlt
 				jsr CheckDiskII
 				bcs .9
 
+.1			  	lda MoveTo
+				
+				sec
+				sbc	MoveFrom
+				beq	.8
 
+				bcc	.2
+
+				cmp #2					A>curtrk, must move in
+				bcc .3
+
+				lda #2
+				bra .3
+				
+.2				cmp #$fe				A<curtrk, must move out
+				bcs .3
+
+				lda #$fe
+
+.3			    bit #1					remember 1/4 or 2/4
+				php
+				clc
+				adc MoveFrom
+ 				sta MoveFrom
+
+				jsr XRW.PhaseOn
+
+				lda #28
+				plp
+				beq .4
+				
+				lsr						only 1/4
+				
+.4				jsr XRW.Wait100msA		Trash X
+
+				jsr XRW.AllPhaseOff
+				
+				bra .1
+
+.8				clc
 .9				rts
+*--------------------------------------
+XRW.PhaseOn		pha
+				jsr .7
+				pla
+
+				bit #1					1,3,5,7 ?
+				beq .8
+				
+				inc
+				
+.7				and #6					mask for 0,2,4,6
+				ora Slotn0
+				tax
+				lda IO.D2.Ph0On,x		turn on one phase
+.8				rts
+*--------------------------------------
+XRW.AllPhaseOff	ldx Slotn0
+				lda IO.D2.Ph0Off,x		make sure all motor phases are off.
+				lda IO.D2.Ph1Off,x
+				lda IO.D2.Ph2Off,x
+				lda IO.D2.Ph3Off,x
+				rts
+*--------------------------------------
+XRW.Wait100msA
+.1				ldx #$11				delay 86 usec
+
+.2  			dex
+				bne .2
+
+				inc montimel
+				bne .3
+
+				inc montimeh
+
+.3  			sec
+				sbc #$01
+				bne .1
+				
+				rts
 */--------------------------------------
 *\--------------------------------------
 D2TrkRead16s
@@ -314,17 +417,18 @@ D2TrkRead16s
 *\--------------------------------------
 D2TrkWrite16s	>PULLW ZPPtr1
 				>PULLB TrkNum
+				>PULLB VolNum
 				>PULLB DrvSlt
+
+				jsr CheckDiskII
+				bcs .9
 				
 				>LDYAI TRACK16.LEN+1
 				>SYSCALL2 getmem
 				bcs .9
 	
 				>STYA ZPPtr2
-				stx TrkBuf
-
-				lda #254
-				sta VolNum
+				stx hTrkBuf
 
 				stz SectNum
 
@@ -336,7 +440,7 @@ D2TrkWrite16s	>PULLW ZPPtr1
 				jsr HeaderCheckSum
 				
 				ldy #3
-				
+
 .2				lda Checksum,y
 				jsr PutByte44Ptr2
 				dey
@@ -362,10 +466,17 @@ D2TrkWrite16s	>PULLW ZPPtr1
 				cmp #16
 				bne .1
 				
-				lda TrkBuf
-				>SYSCALL2 FreeMem
+				lda #0
+				sta (ZPPtr2)
 				
-				clc
+				jsr D2WriteTrackPtr2
+				php
+				pha
+				lda hTrkBuf
+				>SYSCALL2 FreeMem
+				pla
+				plp
+
 .9				rts
 */--------------------------------------
 *\--------------------------------------
@@ -374,97 +485,64 @@ D2TrkReadNIB
 * # D2TrkWriteNIB
 * Write a track (NIBBLE)
 * **In:**
-*  PUSHW = Ptr to NIBBLE buffer (0 ended)
-*  PUSHB = TrackNum * 4	: 0->140+	
 *  PUSHB = DSSS0000
+*  PUSHW = Ptr to NIBBLE buffer (0 ended)
 * ## RETURN VALUE
 *  CC : success
 *  CS : A = Error
 *       A=0, currently starting/seeking...
 *\--------------------------------------
-D2TrkWriteNIB	>PULLB DrvSlt
-				>PULLB TrkNum
-				>PULLW ZPPtr1
-
-				lda Status				Lib is busy....?
-				beq .10
-
-				lda DrvSlt
-				cmp DrvSltInUse			resume previous access ?
-
-.10				lda DEVNUM				last drive accessed by ProDOS
-				and #$F0				only DSSS
-				pha
+D2TrkWriteNIB	>PULLW ZPPtr1
+				>PULLB DrvSlt
+				
 				jsr CheckDiskII			was it a DISK II ?
-				bcs .1					no, no need to check if spinning
-
-				pla
-				pha
-				jsr DrvSpinCheck
-				bcc .1					not spinning....continue
-
-				pla
-				sta IO.D2.DrvOff,x
-				lda #Status.PrvDrvOff
-				jmp SetStatusAndExit
-
-.1				pla
-				cmp DrvSlt
-*				beq
-				lda DrvSlt
-				jsr DrvTrkSelect
 				bcs .9
 
-				ldy #TrkWriter.Size
-
-*				clc
 .9				rts
 *--------------------------------------
-SetStatusAndExit	
-				sta Status
-				ldy DrvSlt
-				sty DrvSltInUse
-				clc
-				rts
-*--------------------------------------
-* A=DSSS0000
-* Y=target Track Number * 4
-*--------------------------------------
-DrvTrkSelect	jsr DrvSelect
-
-				clc
-				rts
-*--------------------------------------
 * A=DSSS0000
 *--------------------------------------
-CheckDiskII		and #$70				only 0SSS
+CheckDiskII		pha
+				and #$70				only 0SSS
+				sta Slotn0
+				lsr
 				lsr
 				lsr
 				lsr
 				ora #$C0				make Cn
-				sta .2+2
+				sta ZPPtr3+1
+				stz ZPPtr3
+				
 				ldx #3					4 bytes to check
 
 .1				ldy DiskII.OFS,x
 
-.2				lda $C000,y				Self Modified
+.2				lda (ZPPtr3),y
 				cmp DiskII.SIG,x
 				bne .9
 
 				dex
 				bpl .1
-
-				clc						all bytes match, Disk II
+				
+				pla						all bytes match, Disk II
+				asl
+				lda #0
+				adc #IO.D2.DrvSel1
+				adc Slotn0
+				tax
+				lda $C000,x
+				
+*				clc
 				rts
 
-.9				lda #MLI.E.NODEV
+.9				pla
+				lda #MLI.E.NODEV
 				sec
 				rts
 *--------------------------------------
 * A=DSSS0000
 *--------------------------------------
-DrvSpinCheck	jsr DrvSelect
-				ldy #0
+DrvSpinCheck	ldy #0
 
 				lda IO.D2.RData,x
 .1				cmp IO.D2.RData,x
@@ -476,21 +554,6 @@ DrvSpinCheck	jsr DrvSelect
 				rts
 
 .8				sec
-				rts
-*--------------------------------------
-* A=DSSS0000
-*--------------------------------------
-DrvSelect		pha
-				and #$70
-				tax
-				pla
-				asl
-				adc #IO.D2.DrvSel1
-				sta .1+1
-				
-.1				lda IO.D2.DrvSel1,x		Drv 1/2 select
-
-				lda IO.D2.ReadMode,x	Make sure readmode
 				rts
 *--------------------------------------
 PutSyncBytePtr2	lda #$7f
@@ -605,7 +668,7 @@ PutData			stz Checksum
 				rts
 *--------------------------------------
 PutByte44Ptr2	pha
-				rol
+				ror
 				jsr .1
 
 				pla
@@ -618,7 +681,25 @@ PutBytePtr2		sta (ZPPtr2)
 				inc ZPPtr2+1
 .8				rts				
 *--------------------------------------
+D2WriteTrackPtr2
+				sei
 
+				ldy #TrkWriter.Size
+				
+.1				lda TrkWriter-1,y
+				sta $1ff,y
+				dey
+				bne .1
+				
+				lda hTrkBuf
+				>SYSCALL2 GetMemPtr
+				>STYA ZPPtr1
+				ldx Slotn0
+
+				jsr $200
+				
+				cli
+				rts
 *--------------------------------------
 CS.END
 *--------------------------------------
@@ -628,14 +709,29 @@ CS.END
 *--------------------------------------
 TrkWriter		.PH $200
 
-TrkWriter.Start	lda IO.D2.ReadMode,x
-				lda IO.D2.ReadProt,x
+TrkWriter.Start	lda IO.D2.ReadProt,x
+				lda IO.D2.ReadMode,x
 				bmi .9					Write protected
 
-				php
-				sei
+				ldy ZPPtr1
+				stz ZPPtr1
+				
+				lda (ZPPtr1),y
+				
+				iny
+				bne .10					no chance this happens because mem blocks are $FFF0 aligned....
+				
+				inc ZPPtr1+1
+				
+.10				cmp	#$80				if CC, it is a sync byte
+				ora #$80				make sure Bit7 high
+				
+				sta IO.D2.WriteMode,x	(5) goto write mode
+				ora IO.D2.WShift,x		(4)
 
-				ldy #0
+				nop						(2)
+
+				bra .2					(3)
 			
 .1				lda (ZPPtr1),y			(5) as NibbleBuf is page aligned, no page crossing
 				beq	.8					(2)(3 if Z) END OF TRACK
@@ -643,44 +739,43 @@ TrkWriter.Start	lda IO.D2.ReadMode,x
 
 				cmp	#$80				(2) if CC, it is a sync byte
 				ora #$80				(2) make sure Bit7 high
-				sta IO.D2.WriteMode,x	(5)
+				sta IO.D2.WLoad,x		(5)
 				ora IO.D2.WShift,x		(4) keep C unmodified
 				iny						(2)
 				bne .2					(2)(3 if nz)
+
+* 32us Byte,next page :	2 (beq failed)+5 +2+2+5+4+2+2 (bne failed) + 5 + 3 (bcs succeeded) = 32
 				inc ZPPtr1+1			(5)
 		
 				bcs .1					(2)(3 if cs) regular 32us byte
 
-* 32us Byte,next page :	5+2 (beq failed) +2+2+5+4+2+2 (bne failed) + 5 + 3 (bcs succeeded) = 32
+* 40us Byte,next page :	2 (beq failed) +2+2+5+4+2+2 (bne failed) + 5 + 2 (bcs failed) +2+2+2+3 = 40
 				nop						(2) Sync 40us byte : add 8 cycles
 				nop						(2)
 				nop						(2)
 				bra .1					(3)
 
-* 40us Byte,next page :	5+2 (beq failed) +2+2+5+4+2+2 (bne failed) + 5 + 2 (bcs failed) +2+2+2+3 = 40
+* 32us Byte,same page :	5+2 (beq failed) +2+2+5+4+2+3 (bne succeeded) + 2 +2 + 3 (bcs succeeded) = 32
 .2				nop						(2)
 				nop						(2)
 
 				bcs .1					(2)(3 if cs) regular 32us byte
-	
-* 32us Byte,same page :	5+2 (beq failed) +2+2+5+4+2+3 (bne succeeded) + 2 +2 + 3 (bcs succeeded) = 32
 
+* 40us Byte,same page :	5+2 (beq failed) +2+2+5+4+2+2 (bne failed) + 5 + 2 (bcs failed) +2+2+2+3 = 40
 				nop						(2) Sync 40us byte : add 8 cycles
 				nop						(2)
 				nop						(2)
 				bra .1					(3)
-
-* 40us Byte,same page :	5+2 (beq failed) +2+2+5+4+2+2 (bne failed) + 5 + 2 (bcs failed) +2+2+2+3 = 40
 
 .8				pha						(3) make sure 32us elapsed before switching to read mode (beq(3)+pha(3)=beq(2)+cmp(2)+ora(2))
 				lda IO.D2.ReadMode,x	close write mode
 				lda IO.D2.RData,x
 				pla						from pha (3) 
-				plp
+
 				clc
 				rts
 
-.9				lda #$2B				Write Protected
+.9				lda #MLI.E.WRTPROT
 				sec
 				rts
 
@@ -852,7 +947,8 @@ DiskII.OFS		.HS 010305FF
 DiskII.SIG		.HS 20000300
 *--------------------------------------
 DrvSlt			.BS 1
-TrkBuf			.BS 1
+Slotn0			.BS 1
+hTrkBuf			.BS 1
 
 MoveFrom		.BS 1
 MoveTo			.BS 1
@@ -862,9 +958,10 @@ SectNum			.BS 1
 TrkNum			.BS 1
 VolNum			.BS 1
 
-*--------------------------------------
-Status			.BS 1
-DrvSltInUse		.BS 1
+MotorOn			.BS 1
+montimel		.BS 1
+montimeh		.BS 1
+
 Count			.BS 2
 *--------------------------------------
 MAN
