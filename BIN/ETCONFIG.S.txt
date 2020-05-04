@@ -3,7 +3,7 @@ NEW
 				.LIST OFF
 				.OP	65C02
 				.OR	$2000
-				.TF BIN/ETCONFIG
+				.TF bin/etconfig
 *--------------------------------------
 				.INB INC/MACROS.I
 				.INB INC/A2OSX.I
@@ -24,9 +24,8 @@ ZS.START
 pETKCFG			.BS 2
 ZPFrameBase		.BS 2
 ZPFramePtr		.BS 2
-ZPTmpPtr1		.BS 2
-ZPTmpPtr2		.BS 2
-ZPTmpPtr3		.BS 2
+BufPtr			.BS 2
+
 ZS.END			.ED
 *--------------------------------------
 *			File Header (16 Bytes)
@@ -106,11 +105,21 @@ CS.RUN			>LIBCALL hLIBETALK,LIBETALK.GETCFG
 				sec
 				rts
 				
-CS.RUN.SETUP	jsr CFG.EtcFiles
+CS.RUN.SETUP	lda ETKCFG+S.NETCFG.STATUS
+				bne .7
+				
+				jsr CFG.EtcFiles
 
 				jsr CS.RUN.PROBE
+				
+				jsr CS.RUN.GETNETINFO
 
-				jsr CS.RUN.DUMP
+				lda #$80
+				sta ETKCFG+S.NETCFG.STATUS
+				>PUSHW L.ETKCFG
+				>LIBCALL hLIBETALK,LIBETALK.SETCFG
+
+.7				jsr CS.RUN.DUMP
 
 .8				lda #0
 				sec
@@ -261,34 +270,31 @@ CS.RUN.PROBE	>LDYA L.MSG.PROBE
 				sta AARP.PRB.SHA,x
 				dex
 				bpl .20
-				lda #0
-*				lda #$58
+				
+				lda A2osX.RANDOM16
 				sta AARP.PRB.SPA+2
 				sta AARP.PRB.TPA+2
-				sta ETKCFG+S.ETKCFG.NetID
 
-*				lda A2osX.RANDOM16+1
-*				lda #$06
+				lda A2osX.RANDOM16+1
 				sta AARP.PRB.SPA+1
 				sta AARP.PRB.TPA+1
-				sta ETKCFG+S.ETKCFG.NetID+1
 
-				lda A2osX.RANDOM16
-				eor A2osX.RANDOM16+1
-*				lda #$3A
+				lda A2osX.TIMER16
+				eor A2osX.TIMER16+1
 				bne .1
+
 				inc
 .1				cmp #$FE
 				bcc .2
 	
 				eor #$80
-				bne .2
-				inc
+
 .2				sta AARP.PRB.SPA+3
 				sta AARP.PRB.TPA+3
-				sta ETKCFG+S.ETKCFG.NodID
+
 				lda #PROBE.MAX
 				>STA.G PROBE.CNT
+
 .3				>LDYA L.AARP.PRB
 				>STYA IOCTL+S.IOCTL.BUFPTR
 				>LDYAI AARP.PRB.LEN
@@ -302,6 +308,24 @@ CS.RUN.PROBE	>LDYA L.MSG.PROBE
 				>SLEEP
 				>DEC.G PROBE.CNT
 				bne .3
+				
+				lda AARP.PRB.SPA+2
+				sta ETKCFG+S.ETKCFG.NetID
+				sta DDP.GetNetInfo+S.DDP2.SRC.NET
+				
+				lda AARP.PRB.SPA+1
+				sta ETKCFG+S.ETKCFG.NetID+1
+				sta DDP.GetNetInfo+S.DDP2.SRC.NET+1
+				
+				lda AARP.PRB.SPA+3
+				sta ETKCFG+S.ETKCFG.NodID
+				sta DDP.GetNetInfo+S.DDP2.SRC.NOD
+				
+*				clc
+
+				rts
+*--------------------------------------
+CS.RUN.GETNETINFO
 				>LDYA L.DDP.GetNetInfo
 				>STYA IOCTL+S.IOCTL.BUFPTR
 				>LDYAI DDP.GetNetInfo.LEN
@@ -314,15 +338,14 @@ CS.RUN.PROBE	>LDYA L.MSG.PROBE
 				
 				>LDYA L.MSG.PROBE.OK
 				>SYSCALL PutS
-*				clc
-CS.RUN.PROBE.RTS
+CS.RUN.GETNETINFO.RTS
 				rts
 *--------------------------------------
 CFG.EtcFiles	>LDYAI 256
 				>SYSCALL GetMem
-				bcs CS.RUN.PROBE.RTS
+				bcs CS.RUN.GETNETINFO.RTS
 
-				>STYA ZPTmpPtr1
+				>STYA BufPtr
 				stx CFG.hBuf1
 				>LDYA L.HOSTNAME
 				jsr CFG.Read.PrintF
@@ -331,21 +354,23 @@ CFG.EtcFiles	>LDYAI 256
 				lda ETKCFG+S.ETKCFG.OBJECT
 				bne .4
 
-				>PUSHW L.ETKCFG.OBJECT
+				>LDYA L.ETKCFG.OBJECT
+				iny
+				bne .1
+				inc
+				
+.1				>PUSHYA				
 				>PUSHW L.CFG.DefaultHost
 				>PUSHW A2osX.TIMER16
 				>PUSHBI 2
 				>SYSCALL sprintf
 				
-				lda #11
+				lda #10
 				sta ETKCFG+S.ETKCFG.OBJECT
 				
-.4				>PUSHW L.ETKCFG
-				>LIBCALL hLIBETALK,LIBETALK.SETCFG
-
-				lda CFG.hBuf1
+.4				lda CFG.hBuf1
 				>SYSCALL FreeMem
-.9				rts
+				rts
 *--------------------------------------
 CFG.Read.PrintF pha
 				>PUSHW L.MSG.CFG
@@ -359,28 +384,30 @@ CFG.Read.HOSTNAME
 				>LDYA L.HOSTNAME
 				jsr CFG.Read.Open
 				bcs .9
+
 				jsr CFG.Read.Result
 				bcs .9
 				
 .1				jsr CFG.Read.GetS
 				bcs .8
 				
-				lda (ZPTmpPtr1)
+				lda (BufPtr)
 				beq .1					empty line...
 				cmp #'#
 				beq .1					comment...
 				
 				ldy #0
 
-.2				lda (ZPTmpPtr1),y
+.2				lda (BufPtr),y
 				beq .8					end of name
 
+				sta ETKCFG+S.ETKCFG.OBJECT+1,y
 				iny
-				sta ETKCFG+S.ETKCFG.OBJECT,y
 				cpy #32
 				bne .2
 				
 .8				sty ETKCFG+S.ETKCFG.OBJECT
+
 				clc
 				.HS B0					BCS
 .9				sec
@@ -423,7 +450,7 @@ CFG.Read.Close2	lda CFG.hCfgFile
 				rts
 *--------------------------------------
 CFG.Read.GetS	>PUSHWI 255
-				>PUSHW ZPTmpPtr1
+				>PUSHW BufPtr
 				lda CFG.hCfgFile
 				>SYSCALL fgets
 				rts
@@ -515,24 +542,30 @@ AARP.PRB.LEN	.EQ 60
 *--------------------------------------
 DDP.GetNetInfo	.HS 090007FFFFFF		S.ETH.DSTMAC
 				.BS 6
-				.DA #0,#36
+				.DA #0,#DDP.GetNetInfo.DEND-DDP.GetNetInfo.LLC
+*--------------------------------------
+DDP.GetNetInfo.LLC
 				.HS AA
 				.HS AA
 				.HS 03
 				.HS 08.00.07.80.9B
-				.DA #0,#6				S.DDP2.DATALEN
+*--------------------------------------
+DDP.GetNetInfo.DDP
+				.DA #0,#DDP.GetNetInfo.DEND-DDP.GetNetInfo.DDP
 				.DA	0					S.DDP2.CHECKSUM
-				.DA $FF00
-				.DA $1234
-				.DA #$FF
-				.DA #$FF
+				.DA 0					S.DDP2.DST.NET
+				.DA 0					S.DDP2.SRC.NET
+				.DA #$FF				S.DDP2.DST.NOD
+				.DA #0					S.DDP2.SRC.NOD
 				.DA #6					S.DDP2.DST.SKT
-				.DA #0
+				.DA #6					S.DDP2.SRC.SKT
 				.DA #6					S.DDP2.TYPE
 *--------------------------------------
-				.DA #5					ZIP.GetNetInfoReg
+				.DA #5					ZIP.GetNetInfoReq
+				.HS 00
 				.HS 00.00.00.00
 				.HS 00					Zone Len
+DDP.GetNetInfo.DEND	.EQ *
 				.BS DDP.GetNetInfo+60-*
 DDP.GetNetInfo.LEN	.EQ 60
 *--------------------------------------

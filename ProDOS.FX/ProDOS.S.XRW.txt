@@ -53,13 +53,14 @@ L59BD  			jsr XRW.AllPhaseOff		make sure all motor phases are off.
 				lda bloknml
 				ldx bloknml+1
 				stx XRW.ReqTrack		calculate block's track and sector.
-				beq .10					branch if block # is in range,
 
-				dex		  				else test further.
-				bne .9					taken if bad range.
+*				beq .10					branch if block # is in range,
 
-				cmp #$18	   			must be < $118
-				bcs .9					branch if block # is out of range
+*				dex		  				else test further.
+*				bne .9					taken if bad range.
+
+*				cmp #$18	   			must be < $118
+*				bcs .9					branch if block # is out of range
 
 .10				ldy #$05
 
@@ -180,9 +181,9 @@ L53A4  			dec XRW.RetryCnt	 	one less chance.
 
 				lda XRW.CurrentTrack
 				pha		  				save track
-				asl
-				asl
-				adc #32		   			pretend track is 8 > curtrk
+
+				clc
+				adc #8		   			pretend track is 8 > curtrk
 
 				ldy #64
 				sty XRW.RetryCnt	  	reset retries to 64 max.
@@ -200,11 +201,9 @@ L53BE  			ldy XRW.AddrField.T
 				lda XRW.CurrentTrack	preserve destination track
 				pha
 				tya
-				asl
-				asl
 				
 L53CC			ldy XRW.UnitIndex		get index to drive #
-				sta XDOS.SPUnit-1,y		set the slot dependent track location
+				sta XRW.D2Trk-1,y		set the slot dependent track location
 
 				pla
 				jsr XRW.Seek
@@ -799,13 +798,21 @@ L56E6  			lda IO.D2.RData,x		first bit-slip nibl
 				cmp #$DE
 				bne rderr
 				
-				nop		  				delay
+				ldx XRW.AddrField.V
 
-L56F0  			lda IO.D2.RData,x		second bit-slip nible
-				bpl L56F0				*** no page cross ***
+				cpx #254
+				bne .8
 
-				cmp #$AA
-				bne rderr
+				inx
+				inx
+				
+.8				ldy XRW.UnitIndex
+				lda XRW.Vol2TrkCnt,x
+				sta XRW.D2TrkCnt-1,y
+				lda XRW.Vol2Stepping,x
+				sta XRW.D2Stepping-1,y
+				
+				ldx A2L					restore X=0SSS0000
 				
 				clc						normal read ok
 				rts
@@ -824,29 +831,31 @@ nbuf2			.BS $56		 			nibl buffer for read/write of low 2-bits of each byte.
 *--------------------------------------
 * fast seek subroutine
 * A = desired track
-* XRW.CurrentTrack = current 1/4 track
+* XRW.CurrentTrack = current rack
 *
 * montimel,h are incremented by the # of 100us quantums required by seek for motor on time overlap.
 * variables used: XRW.CurrentTrack, A2L, montimel, montimeh
 *--------------------------------------
-XRW.Seek		asl						transform into 1/4 tracks
-				asl
+XRW.Seek		pha						save target track
 
-				pha
-
-				ldy XRW.UnitIndex		get index to previous track
-				lda XDOS.SPUnit-1,y		for current drive.
-
-				sta XRW.CurrentTrack	current position.
+				ldx XRW.UnitIndex
 				
+				jsr XRW.Trk2Qtrk
+				sta XRW.TargetQTrack
+				
+				lda XRW.D2Trk-1,x
+
+				jsr XRW.Trk2Qtrk
+				sta XRW.CurrentQTrack
+
 				pla
-				
-				sta XDOS.SPUnit-1,y
+				sta XRW.CurrentTrack	will be current track at the end
+				sta XRW.D2Trk-1,x
 
-.1			  	lda XDOS.SPUnit-1,y
+.1			  	lda XRW.TargetQTrack
 				
 				sec
-				sbc	XRW.CurrentTrack
+				sbc	XRW.CurrentQTrack
 				beq	.8
 
 				bcc	.2
@@ -865,8 +874,8 @@ XRW.Seek		asl						transform into 1/4 tracks
 .3			    bit #1					remember 1/4 or 2/4
 				php
 				clc
-				adc XRW.CurrentTrack
- 				sta XRW.CurrentTrack
+				adc XRW.CurrentQTrack
+ 				sta XRW.CurrentQTrack
 
 				jsr XRW.PhaseOn
 
@@ -880,11 +889,12 @@ XRW.Seek		asl						transform into 1/4 tracks
 
 				jsr XRW.AllPhaseOff
 				
+				lda #28
+				jsr XRW.Wait100msA		Trash X
+				
 				bra .1
 
-.8				lsr XRW.CurrentTrack	convert back to track#
-				lsr XRW.CurrentTrack
-				rts
+.8				rts
 
 XRW.PhaseOn		pha
 				jsr .7
@@ -912,6 +922,20 @@ XRW.AllPhaseOff	ldx A2L
 				bne .1
 
 				rts
+*--------------------------------------
+XRW.Trk2Qtrk	asl						x2
+				sta .1+1
+
+				bit XRW.D2Stepping-1,x
+				bpl .1					x4
+				
+				lsr						x3
+				
+.1				adc #$ff				SELF MODIFIED
+				rts
+*--------------------------------------
+XRW.Vol2TrkCnt		.DA #35,#40,#48,#54
+XRW.Vol2Stepping	.DA #0,#0,#$ff,#$ff		4,4,3,3
 *--------------------------------------
 				.LIST ON
 XRW.FREE2		.EQ $D596-*
@@ -970,9 +994,11 @@ XRW.CheckSum		.HS 00 				used for address header cksum
 XRW.RetryCnt		.HS 00
 				.HS 888C9094989CA0
 XRW.0000XX00	.HS 0008040C			used in fast prenib.
-				.HS FF
+*				.HS FF
+XRW.CurrentQTrack	.HS 00
 				.HS A4A8AC
-				.HS FF
+*				.HS FF
+XRW.TargetQTrack	.HS 00
 				.HS B0B4B8BCC0C4C8
 				.HS FFFF
 				.HS CCD0D4D8DCE0
