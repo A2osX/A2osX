@@ -1,0 +1,490 @@
+NEW
+  AUTO 3,1
+				.LIST OFF	
+*--------------------------------------
+* prodos universal boot loader. this is the second stage boot	
+* for all apple manufactured apple ii disk drives.	
+* it is located at block zero (0) of a prodos or sos formatted	
+* disk(ette). if booted in apple /// native mode, the regular	
+* sos boot will be attempted.	
+*--------------------------------------
+dcmd 			.EQ $42 				disk command (=1 for read)	
+unit 			.EQ $43 				(16*slot)+(128*(drive-1))	
+buff 			.EQ $44 				ram address	
+blok 			.EQ $46 				disk address	
+dent 			.EQ $48 				device call entry address.	
+idxl 			.EQ $4a 				pointer to low page of index block	
+idxh 			.EQ $4c 				pointer to high page of index block	
+idxp 			.EQ $4e 				index byte pointer.	
+iobuff 			.EQ $60	
+* the following are for disk ii only:	
+dbuf 			.EQ $26	
+slotz 			.EQ $2b	
+oddbits 		.EQ $3c	
+sector 			.EQ $3d	
+trktmp 			.EQ $40	
+track 			.EQ $41	
+prior 			.EQ $50	
+trkn 			.EQ $51	
+rtrycnt 		.EQ $52	
+curtrk 			.EQ $53	
+trkcnt 			.EQ $54	
+*	
+q6l 			.EQ $c08c	
+motoron 		.EQ $c089	
+motoroff 		.EQ $c088	
+phaseoff 		.EQ $c080	
+nbuf1 			.EQ $300	
+dnib 			.EQ $2d6	
+* directory dependent stuff...	
+clrscrn 		.EQ $fc58	
+scrn 			.EQ $5ae	
+dostyp 			.EQ $ff	
+sosid 			.EQ $c00	
+entlen 			.EQ sosid+$23	
+kernel 			.EQ $2000	
+*--------------------------------------
+				.PH $800
+xboot 			.DA #1
+entry 			sec 					apple iii enters xboot 'ora $38'
+				bcs entry1 				branch if not apple iii native mode.	
+				jmp goapl3 				go do apple iii boot!	
+
+entry1 			stx unit 				save unit number.	
+				cmp #$03 				for disk ii.	
+				php 					save result, it may be irrelevent.	
+				txa 					find out if disk ii.	
+				and #$70 				strip drive # if any.	
+				lsr
+				lsr						get slot address.	
+				lsr	
+				lsr	
+				ora #$c0
+				sta dent+1	
+				ldy #$ff 				look at last byte.	
+				sty dent
+				
+				plp 					restore carry (if disk ii & sect 0&2 read).	
+
+				iny 					make y=0	
+				lda (dent),y 			get device entry addr.	
+				bne ndsk2 				branch if not disk ii (16 sector).
+				
+				bcs isdsk2 				branch if it is disk ii, but block 0 read.	
+				
+				lda #3 					make rom read only sector 2	
+				sta xboot 				to complete block 0	
+				inc sector 				was = 1
+				lda dent+1 				do rts to re-enter rom.	
+				pha	
+				lda #$5b
+				pha
+				rts 					go read sector 2 into $900
+*--------------------------------------
+isdsk2 			sta trktmp 				make sure previous track =0	
+				sta dent 				and dent points at beginning of slot	
+				ldy #$63 				move code from card to ram	
+
+mvboot 			lda (dent),y	
+				sta zzstart-$5e,y
+				iny	
+				cpy #$eb 				have we moved enough?	
+				bne mvboot
+				
+				ldx #6 					now modify code to handle errors.
+				
+modboot 		ldy mods,x	
+				lda chgs,x	
+				sta zzstart,y	
+				lda endcode,x	
+				sta zzzend,x	
+				dex	
+				bpl modboot
+				
+				lda #<d2io 				reset device entry	
+				sta dent+1 				to point at disk ii routines.	
+				lda #>d2io 				get low addr (must be <$80)	
+
+ndsk2 			ldy #0 					make sure y=0 again.	
+				cmp #$f9	
+				bcs bterr1 				branch if not bootable device.	
+
+				sta dent 				save low adr of device call entry.	
+				sty iobuff	
+				sty idxl	
+				sty idxh 				y=0
+				sty idxp	
+				sty blok+1	
+				iny	
+				sty dcmd ;set read command.	
+				iny	
+				sty blok 				to read directory blocks	
+				lda #$c 				2-5 at $c00	
+				sta iobuff+1	
+				sta idxl+1	
+
+rddir 			jsr goread 				call read block routine.	
+				bcs bterr2 				give up on error.	
+
+				inc iobuff+1	
+				inc iobuff+1	
+				inc blok	
+				lda blok 				have all directory blocks been read?	
+				cmp #6	
+				bcc rddir 				loop if not.	
+
+				lda sosid 				is it a prodos (sos) directory?	
+				ora sosid+1	
+bterr1 			bne booterr 			branch if not.	
+
+				lda #4 					begin look-up with first entry past header.	
+				bne nxdent1 			branch always	
+
+nxdent 			lda idxl	
+nxdent1 		clc	
+				adc entlen 				bump to next directory entry.	
+				tay 					save in y for now.	
+				bcc nxdent2 			branch if not a page cross.	
+
+				inc idxl+1	
+				lda idxl+1 				check for new block.	
+				lsr 					if even then new block.	
+				bcs nxdent2	
+				
+				cmp #$a 				have all file names been compared?	
+				beq nopro 				branch if no pro.kernel.
+				
+				ldy #4 					else, begin at block beginning.	
+				
+nxdent2 		sty idxl 				note: this method treats garbage at	
+				lda sysname 			the end of the dir block as an entry.	
+
+				and #$f 				get target name length.	
+				tay	
+				
+lookpro 		lda (idxl),y 			look for matching name.	
+				cmp sysname,y 			last to first method.	
+				bne nxdent 				branch if no match.	
+				
+				dey 					else check all characters.	
+				bpl lookpro 			including length/storage type.	
+
+				and #$f0 				make sure storage type is a tree!	
+				cmp #$20	
+				bne booterr 			branch if not.	
+				
+				ldy #$10 				get file type & index block addr.	
+				lda (idxl),y	
+				cmp #dostyp 			is it a system file?	
+				bne booterr	
+				
+				iny	
+				lda (idxl),y	
+				sta blok	
+				iny	
+				lda (idxl),y	
+
+				sta blok+1	
+				lda #0 					now set up to read kernel.	
+				sta idxl	
+				ldy #$1e 				read index block at $1e00 and	
+				sty idxl+1 				kernel at $2000	
+				sty iobuff+1	
+				iny	
+				sty idxh+1	
+
+rdkernl 		jsr goread 				read index block.	
+bterr2 			bcs booterr	
+
+				inc iobuff+1	
+				inc iobuff+1	
+				ldy idxp 				get index pointer	
+				inc idxp 				bump for next time.	
+				lda (idxl),y	
+				sta blok	
+				lda (idxh),y 			high disk addr.	
+				sta blok+1	
+				ora (idxl),y 			if both=0 then done.	
+				bne rdkernl 			branch if more to read.	
+
+				jmp kernel 				go execute kernel code.	
+
+nopro 			.EQ *	
+booterr 		.EQ *	
+				jmp quitmes	
+
+sysname 		.DA #$26	
+				.AS "prodos "
+
+goread 			lda iobuff	
+				sta buff	
+				lda iobuff+1	
+				sta buff+1	
+				jmp (dent)	
+*	
+mods 			.DA mod1,mod2,mod3,mod4,mod5,mod6,mod7	
+chgs 			.DA chg1,chg2,chg3,chg4,chg5,chg6,chg7
+
+endcode 		.EQ *	
+*--------------------------------------
+				ldx slotz	
+				clc	
+				rts	
+
+				jmp seek	
+*--------------------------------------
+goapl3 			.EQ *+$9800	
+
+				lda #$9f 				make apple iii boot using block 1.	
+				pha 					the return address is $a000
+				lda #$ff	
+				pha	
+
+				lda #1 					read block 1.	
+				ldx #0	
+				jmp $f479	
+*--------------------------------------
+quitmes 		jsr clrscrn 			clear video.	
+				ldy #meslen 			print message centered on screen.	
+
+prmess 			lda errmess,y
+				sta scrn,y	
+				dey	
+				bpl prmess
+				
+hang 			jmp hang	
+
+meslen 			.EQ 28	
+errmess 		.AS -"*** unable to load prodos ***"
+
+setphase 		lda curtrk 				get current track	
+clrphase 		and #3 					mask for 1 of 4 phases	
+				rol 					double for phaseon/off index	
+				ora slotz	
+				tax	
+				lda phaseoff,x 			turn on/off one phase	
+				lda #$2c	
+*--------------------------------------
+mswait 			ldx #$11	
+
+msw1 			dex 					delay 86 usec.	
+				bne msw1
+				
+				sbc #$1 				done 'n' intervals?	
+				bne mswait 				a-reg counts
+				ldx slotz 				restore x-reg	
+				rts	
+*--------------------------------------
+d2io 			lda blok 				figure out track & sector.	
+				and #7 					strip track for now.	
+				cmp #4	
+				and #3	
+				php	
+				asl
+				plp	
+				rol						now we have the first sector of block.	
+				sta sector	
+				lda blok+1 				get high block #	
+				lsr 					shift hi addr to carry.	
+				lda blok 				now figure track #	
+				ror 	
+				lsr 	
+				lsr 	
+				sta track	
+				asl 	
+				sta trkn	
+				lda buff+1	
+				sta dbuf+1	
+				ldx slotz	
+				lda motoron,x	
+				jsr rdsector 			go read sector.	
+				inc dbuf+1 				bump address	
+				inc sector	
+				inc sector 				and sector #	
+				bcs quitrd 				branch if error.	
+				jsr rdsector
+				
+quitrd 			ldy motoroff,x	
+erretrn 		rts 					return error status in carry.	
+*	
+rdsector 		.EQ * 					do seek then read sector.	
+*	
+seek 			lda trktmp 				get track we're on.	
+
+				asl 	
+				sta curtrk	
+				lda #$0	
+				sta trkcnt 				halftrack count.	
+				
+seek2 			lda curtrk 				save curtrk for	
+
+				sta prior 				delayed turnoff.	
+				sec	
+				sbc trkn 				delta-tracks.	
+				beq seekend 			br if curtrk=destination	
+				
+				bcs out 				move out, not in
+
+				inc curtrk 				incr current track (in).	
+				bcc skin 				(always taken)	
+				
+out 			dec curtrk 				decr current track (out).	
+skin 			sec	
+step2 			jsr setphase	
+				lda prior	
+				clc 					for phaseoff	
+				jsr clrphase 			de-energize previous phase.	
+				bne seek2 				(always taken)	
+
+seekend 		.EQ *	
+
+rdsect1 		ldy #$7f 				allow 127 mistakes.	
+				sty rtrycnt	
+				php	
+
+tryread 		plp 					fix stack.	
+
+rdhead 			sec 					anticipate error.	
+				dec rtrycnt 			if = 0 then give up!	
+				beq erretrn 			branch if can't fine/read sector.	
+				clc 					indicate reading header.	
+rddata 			php 					carry set if reading sector.	
+
+rd0 			dey 					every time y=0 decrement find count.	
+				beq tryread	
+
+zzstart 		.EQ *	
+
+* from zzstart to zzend code is moved from rom and modified to match this code...	
+
+rd1 			lda q6l,x				read a byet from the state machine.	
+				bpl rd1 				loop until ready.	
+dsect	
+
+				org zzstart+5 			equivalent to org *	
+
+rd1a 			eor #$d5 				mark 1?	
+mod1 			.EQ *-zzstart+1	
+				bne rd0 				branch if not.	
+
+chg1 			.EQ rd0-*	
+rd2 			lda q6l,x	
+				bpl rd2	
+				
+				cmp #$aa 				mark 2?	
+				bne rd1a	
+				nop 					waste a little time.	
+
+rd3 			lda q6l,x	
+				bpl rd3	
+				
+				cmp #$96 				header mark 3?	
+				beq rdhd1 				branch if it is.	
+				
+				plp 					were we looking for data mark 3?	
+mod2 			.EQ *-zzstart+1	
+				bcc rdhead 				branch if not.	
+
+chg2 			.EQ rdhead-*	
+				eor #$ad 				data mark 3?	
+				beq rddt1 				go read data field if true...	
+				
+mod3 			.EQ *-zzstart+1	
+rdhd0 			bne rdhead 				otherwise, start over.	
+
+chg3 			.EQ rdhead-*	
+rdhd1 			ldy #3 					read in trk,sect,&volume #.	
+rdhd2 			sta trktmp 				save last result in temp	
+
+rdhd3 			lda q6l,x	
+				bpl rdhd3	
+
+				rol
+				sta oddbits 			save odd bits (7,5,3,1)	
+
+rdhd4 			lda q6l,x	
+				bpl rdhd4	
+
+				and oddbits 			combine even and odd to form value.	
+				dey	
+				bne rdhd2 				read in next pair.	
+
+				plp	
+				cmp sector 				last byte formed is sector#	
+
+mod4 			.EQ *-zzstart+1	
+				bne rdhead 				branch if target sector not found.	
+
+chg4 			.EQ rdhead-*	
+
+				lda trktmp 				previous result is track #	
+				cmp track 				is desired track found?	
+
+mod5 			.EQ *-zzstart+1	
+				bne goseek 				re-seek if mismatch.	
+chg5a 			.EQ *	
+mod6 			.EQ *-zzstart+1	
+				bcs rddata 				branch if proper track always.	
+chg6 			.EQ rddata-*	
+
+rddt1 			ldy #$56 				read 2 bit groupings first.	
+rddt1a 			sty oddbits	
+
+rddt2 			ldy q6l,x	
+				bpl rddt2	
+
+				eor dnib,y 				denibblize using table left from boot rom.	
+				ldy oddbits 			save in nbuf1	
+				dey	
+				sta nbuf1,y	
+				bne rddt1a 				loop until all 86 groups are read.	
+
+rddt3 			sty oddbits 			now count up for 6-bit groups.	
+
+rddt4 			ldy q6l,x	
+				bpl rddt4	
+
+				eor dnib,y	
+				ldy oddbits 			save result to specified buffer.	
+				sta (dbuf),y	
+				iny	
+				bne rddt3 				loop for 256 bytes.	
+
+rdchk 			ldy q6l,x 				now verify checksum...	
+				bpl rdchk	
+
+				eor dnib,y 				must be equal...	
+mod7 			.EQ *-zzstart+1	
+				bne rdhd0 				branch if error.	
+
+chg7 			.EQ rdhd0-*	
+				ldy #0 					make y=0	
+
+nxttwo 			ldx #$56 				now combine 2-bit group with 6 bit group	
+
+twobit 			dex 					all done with this group?	
+				bmi nxttwo 				branch if so.	
+
+				lda (dbuf),y	
+				lsr nbuf1,x	
+				rol 	
+				lsr nbuf1,x	
+				rol 	
+				sta (dbuf),y	
+				iny	
+				bne twobit	
+
+zzzend 			.EQ *	
+				ldx slotz	
+				clc 					indicate good read.	
+				rts	
+
+chg5 			.EQ *-chg5a	
+goseek 			jmp seek	
+dend			.BS $a00-zzstart-5,0	
+				.EP
+*--------------------------------------
+MAN
+SAVE USR/SRC/LIB/LIBBLKDEV.S.BB
+LOAD USR/SRC/LIB/LIBBLKDEV.S
+ASM

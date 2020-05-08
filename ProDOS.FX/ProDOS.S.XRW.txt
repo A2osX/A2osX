@@ -54,15 +54,7 @@ L59BD  			jsr XRW.AllPhaseOff		make sure all motor phases are off.
 				ldx bloknml+1
 				stx XRW.ReqTrack		calculate block's track and sector.
 
-*				beq .10					branch if block # is in range,
-
-*				dex		  				else test further.
-*				bne .9					taken if bad range.
-
-*				cmp #$18	   			must be < $118
-*				bcs .9					branch if block # is out of range
-
-.10				ldy #$05
+				ldy #$05
 
 .11	 			asl
 				rol	XRW.ReqTrack
@@ -401,14 +393,14 @@ L596F  			ldy #$FF	   			index to last byte of data to write.
 XRW.Write		sec						anticipate write protect error
 				lda IO.D2.ReadProt,x
 				lda IO.D2.ReadMode,x	sense write protect flag
-				bpl L580C
+				bpl .1
 
 				jmp wexit				exit if write protected
 
 * timing is critical. a one micro-second cycle time is assumed.
 * number in () is how many micro-seconds per instruction or subroutine
 
-L580C  			lda nbuf2
+.1				lda nbuf2
 				sta pcl
 
 				lda #$FF   				sync data.
@@ -725,6 +717,94 @@ L57CD  			pla		 				place last byte into user buffer
 				sta (buf),y
 				rts
 *--------------------------------------
+* fast seek subroutine
+* A = desired track
+* XRW.CurrentTrack = current rack
+*
+* montimel,h are incremented by the # of 100us quantums required by seek for motor on time overlap.
+* variables used: XRW.CurrentTrack, A2L, montimel, montimeh
+*--------------------------------------
+XRW.Seek		ldx XRW.UnitIndex
+				
+				pha						save target track
+
+				jsr XRW.Trk2Qtrk
+				sta XRW.TargetQTrack
+				
+				lda XRW.D2Trk-1,x
+
+				jsr XRW.Trk2Qtrk
+				sta XRW.CurrentQTrack
+
+				pla
+				sta XRW.CurrentTrack	will be current track at the end
+				sta XRW.D2Trk-1,x
+
+.1			  	lda XRW.TargetQTrack
+				cmp	XRW.CurrentQTrack
+				beq	.8
+
+				bcc	.2
+
+				lda #1					A>curtrk, must move in
+				bra .3
+				
+.2				lda #$ff				A<curtrk, must move out
+
+.3			    clc
+				adc XRW.CurrentQTrack
+ 				sta XRW.CurrentQTrack
+				jsr XRW.PhaseOn
+				
+				lda #$30
+				jsr XRW.Wait100msA		Trash X
+
+				jsr XRW.AllPhaseOff
+				
+				lda #$70
+				jsr XRW.Wait100msA		Trash X
+				bra .1
+
+.8				rts
+*--------------------------------------
+XRW.PhaseOn		pha
+				jsr .7
+				pla
+
+				bit #1					1,3,5,7 ?
+				beq .8
+				
+				inc
+				
+.7				and #6					mask for 0,2,4,6
+				ora A2L					Slot $n0
+				tax
+				lda IO.D2.Ph0On,x		turn on one phase
+.8				rts
+*--------------------------------------			
+XRW.AllPhaseOff	ldx A2L
+
+				lda #4
+				
+.1				bit IO.D2.Ph0Off,x
+				inx
+				inx
+				dec
+				bne .1
+
+				rts
+*--------------------------------------
+XRW.Trk2Qtrk	asl						x2
+				sta .1+1
+
+				bit XRW.D2VolNum-1,x
+				bmi .1					x4
+				
+				lsr						x3
+				
+.1				adc #$ff				SELF MODIFIED
+				rts
+*--------------------------------------
 * read address field subroutine (16-sector format)
 *
 * reads volume, track and sector.
@@ -798,22 +878,11 @@ L56E6  			lda IO.D2.RData,x		first bit-slip nibl
 				cmp #$DE
 				bne rderr
 				
-				ldx XRW.AddrField.V
+				lda XRW.AddrField.V
 
-				cpx #254
-				bne .8
+				ldy XRW.UnitIndex
+				sta XRW.D2VolNum-1,y
 
-				inx
-				inx
-				
-.8				ldy XRW.UnitIndex
-				lda XRW.Vol2TrkCnt,x
-				sta XRW.D2TrkCnt-1,y
-				lda XRW.Vol2Stepping,x
-				sta XRW.D2Stepping-1,y
-				
-				ldx A2L					restore X=0SSS0000
-				
 				clc						normal read ok
 				rts
 
@@ -821,124 +890,13 @@ rderr  			sec
 				rts
 *--------------------------------------
 				.LIST ON
-XRW.FREE1		.EQ $D4AA-*				(2.0.3 = $02)
+XRW.FREE		.EQ $D540-*
 				.LIST OFF
-				.BS $D4AA-*
+				.BS $D540-*
 *--------------------------------------
-* nibl buffer 'nbuf2' must fit in a  page
+* nibl buffer 'nbuf2' must fit in a page
 *--------------------------------------
 nbuf2			.BS $56		 			nibl buffer for read/write of low 2-bits of each byte.
-*--------------------------------------
-* fast seek subroutine
-* A = desired track
-* XRW.CurrentTrack = current rack
-*
-* montimel,h are incremented by the # of 100us quantums required by seek for motor on time overlap.
-* variables used: XRW.CurrentTrack, A2L, montimel, montimeh
-*--------------------------------------
-XRW.Seek		ldx XRW.UnitIndex
-				
-				pha						save target track
-
-				jsr XRW.Trk2Qtrk
-				sta XRW.TargetQTrack
-				
-				lda XRW.D2Trk-1,x
-
-				jsr XRW.Trk2Qtrk
-				sta XRW.CurrentQTrack
-
-				pla
-				sta XRW.CurrentTrack	will be current track at the end
-				sta XRW.D2Trk-1,x
-
-.1			  	lda XRW.TargetQTrack
-				
-				sec
-				sbc	XRW.CurrentQTrack
-				beq	.8
-
-				bcc	.2
-
-				cmp #2					A>curtrk, must move in
-				bcc .3
-
-				lda #2
-				bra .3
-				
-.2				cmp #$fe				A<curtrk, must move out
-				bcs .3
-
-				lda #$fe
-
-.3			    bit #1					remember 1/4 or 2/4
-				php
-				clc
-				adc XRW.CurrentQTrack
- 				sta XRW.CurrentQTrack
-
-				jsr XRW.PhaseOn
-
-				lda #$30
-				plp
-				beq .4
-				
-*				lsr						only 1/4
-				
-.4				jsr XRW.Wait100msA		Trash X
-
-				jsr XRW.AllPhaseOff
-				lda #$70
-				jsr XRW.Wait100msA		Trash X
-				bra .1
-
-.8				rts
-*--------------------------------------
-XRW.PhaseOn		pha
-				jsr .7
-				pla
-
-				bit #1					1,3,5,7 ?
-				beq .8
-				
-				inc
-				
-.7				and #6					mask for 0,2,4,6
-				ora A2L					Slot $n0
-				tax
-				lda IO.D2.Ph0On,x		turn on one phase
-.8				rts
-*--------------------------------------			
-XRW.AllPhaseOff	ldx A2L
-
-				lda #4
-				
-.1				bit IO.D2.Ph0Off,x
-				inx
-				inx
-				dec
-				bne .1
-
-				rts
-*--------------------------------------
-XRW.Trk2Qtrk	asl						x2
-				sta .1+1
-
-				bit XRW.D2Stepping-1,x
-				bpl .1					x4
-				
-				lsr						x3
-				
-.1				adc #$ff				SELF MODIFIED
-				rts
-*--------------------------------------
-XRW.Vol2TrkCnt		.DA #35,#40,#48,#54
-XRW.Vol2Stepping	.DA #0,#0,#$ff,#$ff		4,4,3,3
-*--------------------------------------
-				.LIST ON
-XRW.FREE2		.EQ $D596-*
-				.LIST OFF
-				.BS $D596-*
 *--------------------------------------
 * 7-bit to 6-bit 'deniblize' table (16-sector format)
 *
