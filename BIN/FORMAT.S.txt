@@ -31,7 +31,6 @@ Counter			.BS 1
 BlkCnt			.BS 2
 TrkCnt			.BS 1
 Stepping		.BS 1
-QTrkCnt			.BS 1
 VolNum			.BS 1
 
 CatSize			.BS 1
@@ -43,6 +42,7 @@ bLL				.BS 1
 bCustomBlkSize 	.BS 1
 bHighDensity	.BS 1
 bExtraTrack		.BS 1
+bVerify			.BS 1
 ZS.END
 				.ED
 *--------------------------------------
@@ -73,8 +73,9 @@ L.MSG.ERR		.DA MSG.ERR
 L.MSG.CRLF		.DA MSG.CRLF
 L.MSG.NOSIZE	.DA MSG.NOSIZE
 L.MSG.INIT		.DA MSG.INIT
-L.MSG.LLDISK2	.DA MSG.LLDISK2
 L.MSG.LL		.DA MSG.LL
+L.MSG.LLDISK2	.DA MSG.LLDISK2
+L.MSG.VERIFY	.DA MSG.VERIFY
 L.MSG.WRITECAT	.DA MSG.WRITECAT
 L.FMT.BLANK		.DA FMT.BLANK
 				.DA 0
@@ -169,10 +170,8 @@ CS.RUN.Format	jsr CS.RUN.GetDevStatus
 
 				>PUSHW L.MSG.INIT
 				>PUSHW ZPPtrDevName
-				>PUSHW BlkCnt
 				>PUSHEA.G VolName
-				
-				>PUSHBI 6
+				>PUSHBI 4
 				>SYSCALL PrintF
 				bcs .9
 
@@ -227,6 +226,7 @@ CS.RUN.GetDevStatus
 				lda (pData),y
 				sta BlkCnt+1
 				stx BlkCnt
+
 .8				clc
 				rts
 
@@ -258,23 +258,6 @@ CS.RUN.LL		>LDA.G DIB+S.DIB.T
 				ror 
 				sta DSSS0000
 
-				bra CS.RUN.LL.DISKII
-				
-.1				>PUSHW L.MSG.LL
-				>PUSHBI 0
-				>SYSCALL PrintF
-				bcs .9
-				
-				>PUSHB hDevID
-				>PUSHBI IOCTL.FORMAT
-				>PUSHEA.G IOCTL
-				
-				>SYSCALL IOCTL
-				
-.9
-CS.RUN.LL.RTS	rts
-*--------------------------------------
-CS.RUN.LL.DISKII
 				lda #0
 				bit bExtraTrack
 				bpl .10
@@ -293,9 +276,29 @@ CS.RUN.LL.DISKII
 				sta BlkCnt,x
 				iny
 				inx
-				cpx #6
+				cpx #5
 				bne .12
-
+				
+.1				>PUSHW L.MSG.LL
+				>PUSHW BlkCnt
+				>PUSHBI 2
+				>SYSCALL PrintF
+				bcs .9
+				
+				>LDA.G DIB+S.DIB.T
+				cmp #S.DIB.T.DISKII
+				beq CS.RUN.LL.DISKII
+				
+				>PUSHB hDevID
+				>PUSHBI IOCTL.FORMAT
+				>PUSHEA.G IOCTL
+				
+				>SYSCALL IOCTL
+				
+.9
+CS.RUN.LL.RTS	rts
+*--------------------------------------
+CS.RUN.LL.DISKII
 				>LDYAI 4096
 				>SYSCALL GetMem
 				bcs CS.RUN.LL.RTS
@@ -363,8 +366,66 @@ CS.RUN.LL.DISKII
 				>PUSHW L.MSG.CRLF
 				>PUSHBI 0
 				>SYSCALL PrintF
+				bcs .9
+				
+				bit bVerify
+				bmi CS.RUN.LL.DISKII.V
 				
 				rts				
+*--------------------------------------
+CS.RUN.LL.DISKII.V
+				>PUSHW L.MSG.VERIFY
+				>PUSHBI 0
+				>SYSCALL PrintF
+				
+				lda hTrackBuf
+				>SYSCALL GetMemPtr
+				>STYA.G IOCTL+S.IOCTL.BUFPTR
+
+				>STZ.G IOCTL+S.IOCTL.BLKNUM
+				iny
+				sta (pData),y
+				
+				stz CurTrack
+				
+				lda TrkCnt
+				sta Counter
+
+.1				ldx #8
+
+.2				phx
+				
+				>PUSHW L.MSG.VERIFY
+				>PUSHB CurTrack
+				>PUSHW.G IOCTL+S.IOCTL.BLKNUM
+				>PUSHBI 3
+				>SYSCALL PrintF
+				plx
+				bcs .9
+				
+				phx
+
+				>PUSHB hDevID
+				>PUSHBI IOCTL.READBLOCK
+				>PUSHEA.G IOCTL
+				>SYSCALL IOCTL
+				
+				plx
+				bcs .9
+
+				>INCW.G IOCTL+S.IOCTL.BLKNUM
+				dex
+				bne .2
+				
+				inc CurTrack
+				dec Counter
+				bne .1
+				
+				>PUSHW L.MSG.CRLF
+				>PUSHBI 0
+				>SYSCALL PrintF
+				
+.9				rts
 *--------------------------------------
 CS.RUN.MotorOn	sec
 				.HS 90					BCC
@@ -463,6 +524,10 @@ CS.RUN.BuildCat	jsr .7
 CS.RUN.WriteCat	>PUSHW L.MSG.WRITECAT
 				>PUSHBI 0
 				>SYSCALL PrintF
+				
+				>STZ.G IOCTL+S.IOCTL.BLKNUM
+				iny
+				sta (pData),y
 
 .1				>PUSHB hDevID
 				>PUSHBI IOCTL.WRITEBLOCK
@@ -539,42 +604,45 @@ MSG.OK			.AZ "[OK]"
 MSG.ERR			.AS "[%h]"
 MSG.CRLF		.AZ "\r\n"
 MSG.NOSIZE		.AZ "Unable to get media size."
-MSG.INIT		.AZ "Formatting %s (%D Blks), Volname:%s\r\n"
+MSG.INIT		.AZ "Formatting %s, Volname:%s\r\n"
+MSG.LL			.AZ "Low Level Format %D Blks\r\n"
 MSG.LLDISK2		.AZ "\rWriting Track %02d (%02d/%02d)..."
-MSG.LL			.AZ "\rLow Level Format..."
+MSG.VERIFY		.AZ "\rVerifying Track %02d, Block:%05D..."
 MSG.WRITECAT	.AZ "Writing Catalog..."
 FMT.BLANK		.AZ "BLANK%H%H"
 *--------------------------------------
-OptionList		.AS "LlBbHhXx"
-OptionVars		.DA #bLL,#bLL,#bCustomBlkSize,#bCustomBlkSize,bHighDensity,bHighDensity,bExtraTrack,bExtraTrack
+OptionList		.AS "LlBbHhXxVv"
+OptionVars		.DA #bLL,#bLL,#bCustomBlkSize,#bCustomBlkSize
+				.DA #bHighDensity,#bHighDensity,#bExtraTrack,#bExtraTrack
+				.DA #bVerify,#bVerify
 *--------------------------------------
 Disk2.Default	.DA 280					BlkCnt
 				.DA #35					TrkCnt
 				.DA #4					Stepping
-				.DA #140				QTrkCnt
 				.DA #254				VolNum
-				.BS 2
+*				.DA #140				QTrkCnt
+				.BS 3
 *--------------------------------------
 Disk2.X			.DA 320					BlkCnt
 				.DA #40					TrkCnt
 				.DA #4					Stepping
-				.DA #160				QTrkCnt
 				.DA #253				VolNum
-				.BS 2
+*				.DA #160				QTrkCnt
+				.BS 3
 *--------------------------------------
 Disk2.H			.DA 384					BlkCnt
 				.DA #48					TrkCnt
 				.DA #3					Stepping
-				.DA #192				QTrkCnt
 				.DA #126				VolNum
-				.BS 2
+*				.DA #144				QTrkCnt
+				.BS 3
 *--------------------------------------
 Disk2.HX		.DA 432					BlkCnt
 				.DA #54					TrkCnt
 				.DA #3					Stepping
-				.DA #216				QTrkCnt
 				.DA #125				VolNum
-				.BS 2
+*				.DA #162				QTrkCnt
+				.BS 3
 *--------------------------------------
 				.DUMMY
 				.OR 0
