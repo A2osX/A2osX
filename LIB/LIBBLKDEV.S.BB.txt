@@ -16,6 +16,7 @@ dent 			.EQ $48 				device call entry address
 idxl 			.EQ $4a 				pointer to low page of index block
 idxh 			.EQ $4c 				pointer to high page of index block
 idxp 			.EQ $4e 				index byte pointer
+
 iobuff 			.EQ $60
 * the following are for disk ii only
 dbuf 			.EQ $26
@@ -23,12 +24,13 @@ slotz 			.EQ $2b
 oddbits 		.EQ $3c
 sector 			.EQ $3d
 
-BB.HdrPtr		.EQ $3f
+BB.RetryCnt		.EQ $40
 BB.TargetTrk	.EQ $41
 
+BB.CurQTrk		.EQ $50
 BB.TargetQTrk	.EQ $51
-rtrycnt 		.EQ $52
-BB.CurQTrk		.EQ $53
+
+BB.HdrPtr		.EQ $52
 
 BB.Hdr			.EQ $54
 BB.HdrTrk		.EQ $55
@@ -46,19 +48,22 @@ kernel 			.EQ $2000
 *--------------------------------------
 				.PH $800
 xboot 			.DA #1
-entry 			sec 					apple iii enters xboot 'ora $38'
-				bcs entry1 				branch if not apple iii native mode
+				sec 					apple iii enters xboot 'ora $38'
+				bcs BB.AppleII			branch if not apple iii native mode
 *--------------------------------------
-				lda #$9f 				make apple iii boot using block 1
+BB.AppleIII		lda #$9f 				make apple iii boot using block 1
 				pha 					the return address is $a000
 				lda #$ff
 				pha
 
-				lda #1 					read block 1
-				ldx #0
+				inc
+				tax						ldx #0
+				
+				inc 					lda #1 (read block 1)
+				
 				jmp $f479
 *--------------------------------------
-entry1 			stx unit 				save unit number
+BB.AppleII		stx unit 				save unit number
 				cmp #$03 				for disk ii
 				php 					save result, it may be irrelevant
 				txa 					find out if disk ii
@@ -83,6 +88,7 @@ entry1 			stx unit 				save unit number
 				lda #3 					make rom read only sector 2
 				sta xboot 				to complete block 0
 				inc sector 				was = 1
+
 				lda dent+1 				do rts to re-enter rom
 				pha
 				lda #$5b
@@ -100,7 +106,7 @@ mvboot 			lda (dent),y
 				cpy #$eb 				have we moved enough?	
 				bne mvboot
 				
-				ldx #9 					now modify code to handle errors.
+				ldx #mods.cnt-1			now modify code to handle errors.
 				
 modboot 		ldy mods,x	
 				lda chgs,x	
@@ -115,14 +121,14 @@ modboot2		lda endcode-1,x
 				dex
 				bne modboot2
 				
-				stx BB.HdrPtr+1
 				lda #BB.Hdr
 				sta BB.HdrPtr
+				stx BB.HdrPtr+1			X=0
 				
 				lda /d2io 				reset device entry	
 				sta dent+1 				to point at disk ii routines.	
 				lda #d2io 				get low addr (must be <$80)	
-
+*--------------------------------------
 ndsk2 			ldy #0 					make sure y=0 again.	
 				cmp #$f9	
 				bcs bterr1 				branch if not bootable device.	
@@ -175,18 +181,15 @@ nxdent1 		clc
 				ldy #4 					else, begin at block beginning.	
 				
 nxdent2 		sty idxl 				note: this method treats garbage at	
+
 				ldy #0
-				lda (idxl),y
-				cmp #$26				$20 = storage type + 6 = "PRODOS" len
-				bne nxdent 				branch if no match.	
-				
-				ldy #6
 				
 lookpro 		lda (idxl),y 			look for matching name.	
-				cmp BB.ProDOS-1,y 		last to first method.	
+				cmp BB.ProDOS,y 		
 				bne nxdent 				branch if no match.	
 				
-				dey 					else check all characters.	
+				iny
+				cpy #7
 				bne lookpro
 				
 				ldy #$10 				get file type & index block addr.	
@@ -228,9 +231,9 @@ bterr2 			bcs booterr
 				jmp kernel 				go execute kernel code.	
 *--------------------------------------
 booterr 		jsr clrscrn 			clear video
-				ldy #BB.MSG.NoProDOS.Len-1
+				ldy #BB.MSG.ERR.Len-1
 
-.1	 			lda BB.MSG.NoProDOS,y
+.1	 			lda BB.MSG.ERR,y
 				sta scrn,y	
 				dey	
 				bpl .1
@@ -244,6 +247,7 @@ goread 			lda iobuff
 				jmp (dent)	
 *--------------------------------------
 mods 			.DA #mod1,#mod2,#mod3,#mod4,#mod5,#mod6,#mod7,#mod8,#mod8+1,#mod9
+mods.cnt		.EQ *-mods
 chgs 			.DA #chg1,#chg2,#chg3,#chg4,#chg5,#chg6,#chg7,#$91,#BB.HdrPtr,#BB.HdrTrk
 
 endcode 		ldx slotz	
@@ -252,9 +256,10 @@ endcode 		ldx slotz
 
 				jmp seek	
 *--------------------------------------
-BB.MSG.NoProDOS	.AS -"ERROR"
-BB.MSG.NoProDOS.Len	.EQ *-BB.MSG.NoProDOS
-BB.ProDOS 		.AS "PRODOS"
+BB.MSG.ERR		.AS -"BOOT ERROR"
+BB.MSG.ERR.Len	.EQ *-BB.MSG.ERR
+BB.ProDOS 		.DA	#$26				$20 = storage type + 6 = "PRODOS" len
+				.AS "PRODOS"
 *--------------------------------------
 d2io 			lda blok 				figure out track & sector.	
 				and #7 					strip track for now.	
@@ -318,7 +323,7 @@ seek 			lda BB.HdrTrk			get track we're on
 				
 				jsr BB.PhaseOn
 
-				lda #30
+				lda #40
 				jsr BB.MSWait			Trash X
 
 				ldx slotz
@@ -327,7 +332,7 @@ seek 			lda BB.HdrTrk			get track we're on
 				lda IO.D2.Ph2Off,x
 				lda IO.D2.Ph3Off,x
 
-				lda #10
+				lda #20
 				jsr BB.MSWait			Trash X
 				
 				beq .1	 				(always taken)	
@@ -349,12 +354,12 @@ BB.PhaseOn		pha
 *--------------------------------------
 BB.MSWait 		sec						(6) JSR (2)
 				
-.1				ldx #15					(2)
+.1				ldx #17					(2)
 
-.2 				dex 					(2) 	delay 81 usec.	
-				bne .2					(2+)	5x15 + 4 + 2
+.2 				dex 					(2) 	delay 86 usec.	
+				bne .2					(2+)	2 + 5x16 + 2 + 2
 				
-				sbc #$1 				(2) 	done 'n' intervals?	
+				sbc #1	 				(2) 	done 'n' intervals?	
 				bne .1					(2+) 	a-reg counts
 
 				rts						(6)
@@ -373,13 +378,13 @@ BB.Trk2Qtrk		asl						x2
 seekend 		ldx slotz
 
 				ldy #$7f 				allow 127 mistakes.	
-				sty rtrycnt	
+				sty BB.RetryCnt	
 				php	
 
 tryread 		plp 					fix stack.	
 
 rdhead 			sec 					anticipate error.	
-				dec rtrycnt 			if = 0 then give up!	
+				dec BB.RetryCnt			if = 0 then give up!	
 				beq erretrn 			branch if can't fine/read sector.	
 				clc 					indicate reading header.	
 rddata 			php 					carry set if reading sector.	

@@ -484,6 +484,7 @@ L3A4E  			lda vcbbuf,x			is this a free vcb?
 
 				iny
 				stx vcbptr
+				
 L3A57  			txa
 				clc						inc index to next vcb
 				adc #$20
@@ -507,8 +508,10 @@ L3A70  			stx vcbptr			 	save entry index.
 				stz vcbbuf,x			free this entry
 				stz vcbbuf+16,x
 L3A79  			clc		 				no error.
-
-L3A7A  			lda #$55			 	# vcb full error
+				rts
+				
+L3A7A  			lda #MLI.E.VCBFULL	 	vcb full error
+*				sec
 				rts
 *--------------------------------------
 XDOS.CheckVolName
@@ -574,8 +577,14 @@ L3AB2  			stz vcbbuf,x
 				dey
 				bpl L3AB2
 	
-				jsr tstsos				make sure it's an xdos disk
-				bcs XDOS.CheckVolName.RTS				if not, return carry set.
+				lda gbuf			 	pointer to previous dir block
+				ora gbuf+1			 	must be null
+				bne tsterr
+
+				lda gbuf+4			 	test for header
+				and #$E0
+				cmp #$E0
+				bne tsterr
 
 				jsr tstdupvol			does a duplicate with open files
 				bcs L3B04			 	already exist? branch if yes.
@@ -602,14 +611,17 @@ L3ACE  			.DO LOWERCASE=1
 
 				lda devnum			 	last device used.
 				sta vcbbuf+16,x			save device # and
+
 				lda gbuf+41				total # of blocks on this unit.
 				sta vcbbuf+18,x
 				lda gbuf+42
 				sta vcbbuf+19,x
+
 				lda bloknml				save address of root directory.
 				sta vcbbuf+22,x
 				lda bloknml+1
 				sta vcbbuf+23,x
+
 				lda gbuf+39				save address of the 1st bitmap.
 				sta vcbbuf+26,x
 				lda gbuf+40
@@ -617,6 +629,10 @@ L3ACE  			.DO LOWERCASE=1
 
 L3B04  			clc		 				indicate logged if possible
 				rts
+				
+tsterr 			lda #MLI.E.NOTPRODOS	not tree or dir, unrecognized type
+				sec
+				rts				
 *--------------------------------------
 cmpvcb			lda gbuf+4			 	with name in directory.
 				and #$0F
@@ -649,20 +665,26 @@ L3B26  			ldx xvcbptr				offset to start of vcb (rev note #23)
 				rts
 *--------------------------------------
 tstdupvol 		lda #$00			 	check for other logged in volumes with the same name.
+
 L3B2C  			tax
 				jsr cmpvcb
 				bcs L3B41			  	if no match.
+
 				lda vcbbuf+17,x			test for any open files.
 				bmi L3B4B			  	cannot look at this volume.
-				lda #$00			 	take duplicate offline if no open files
-				sta vcbbuf,x
-				sta vcbbuf+16,x
-				beq L3B49			  	ok to log in new volume.
+
+				stz vcbbuf,x			 take duplicate offline if no open files
+				stz vcbbuf+16,x
+*				clc					  	ok to log in new volume.
+				rts
+
 L3B41  			txa		 				index to next vcb
-				clc
 				and #$E0				strip odd stuff.
-				adc #$20			 	inc to next entry.
+
+*				sec
+				adc #$1F			 	inc to next entry.
 				bcc L3B2C			  	branch if more to check
+
 L3B49  			clc
 				rts
 
@@ -684,34 +706,44 @@ tkfrecnt 		jsr cntbms				get # of bitmaps
 				sta nofree
 				jsr upbmap			 	update volume bitmap.
 				bcs L3BC1			  	if error.
+
 				ldx vcbptr			 	get address of 1st bitmap
+
 				lda vcbbuf+26,x
 				sta bloknml
 				lda vcbbuf+27,x
 				sta bloknml+1
+
 L3B81  			jsr rdgbuf			 	use general buffer for temp space to
 				bcs L3BC1			  	count free blocks (bits).
+
 				jsr count
 				dec bmcnt			  	was that the last bitmap?
 				bmi L3B96			  	if so, go change fcb so not done again.
+
 				inc bloknml
 				bne L3B81
+
 				inc bloknml+1
 				bra L3B81
+
 L3B96  			ldx vcbptr			 	mark which block had 1st free space
 				lda nofree
 				bmi L3BBE			 	if no free space was found.
+
 				sta vcbbuf+28,x			update the free count.
 				lda scrtch+1
 				sta vcbbuf+21,x			update volume control byte.
 				lda scrtch
 				sta vcbbuf+20,x
+				
 L3BAD  			lda vcbbuf+20,x			compare total available free blocks
 				sec		 				on this volume.
 				sbc reql
 				lda vcbbuf+21,x
 				sbc reqh
 				bcc L3BBE
+
 				clc
 				rts
 
@@ -723,37 +755,52 @@ count			ldy #$00
 
 L3BC4  			lda gbuf,y				bit pattern.
 				beq L3BCC			  	don't count
+
 				jsr cntfree
+
 L3BCC  			lda gbuf+$100,y			do both pages with same loop
 				beq L3BD4
+
 				jsr cntfree
+				
 L3BD4  			iny
 				bne L3BC4			  	loop until all 512 bytes counted.
+
 				bit nofree			 	has 1st block w/free space been found?
 				bpl L3BEE			  	if yes.
+
 				lda scrtch			 	test to see if any blocks were counted
 				ora scrtch+1
 				beq L3BEE			  	branch if none counted.
+
 				jsr cntbms			 	get total # of maps.
 				sec		 				subtract countdown from total bitmaps
 				sbc bmcnt
 				sta nofree
+
 L3BEE  			rts
 
 cntfree			asl			  			count the # of bits in this byte
 				bcc L3BFA
+
 				inc scrtch
 				bne L3BFA
+
 				inc scrtch+1
+
 L3BFA  			ora #$00
 				bne cntfree				loop until all bits counted
 				rts
+
 cntbms			ldx vcbptr
 				ldy vcbbuf+19,x			return the # of bitmaps
 				lda vcbbuf+18,x			possible with the total count
 				bne L3C0B			  	found in the vcb.
+
 				dey						adj for bitmap block boundary
+
 L3C0B  			tya
+
 				lsr			  			divide by 16. the result is
 				lsr			  			the # of bitmaps.
 				lsr
