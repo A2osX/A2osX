@@ -5,10 +5,10 @@ NEW
 				.OR	$2000
 				.TF bin/chtyp
 *--------------------------------------
-				.INB INC/MACROS.I
-				.INB INC/A2OSX.I
-				.INB INC/MLI.I
-				.INB INC/MLI.E.I
+				.INB inc/macros.i
+				.INB inc/a2osx.i
+				.INB inc/mli.i
+				.INB inc/mli.e.i
 *--------------------------------------
 X.ENTER.SUBDIR	.EQ 0
 X.COPY.TO.DEST	.EQ 0
@@ -46,8 +46,10 @@ L.MSG.ERR		.DA MSG.ERR
 L.PRODOS.FT.TXT	.DA PRODOS.FT.TXT			
 				.DA 0
 *--------------------------------------
-CS.INIT			
-.1				>INC.G ArgCount
+CS.INIT			clc
+				rts
+*--------------------------------------
+CS.RUN			>INC.G ArgCount
 				>SYSCALL ArgV
 				bcs .7
 
@@ -74,14 +76,14 @@ CS.INIT
 .3				ldy OptionVars,x
 				lda #$80
 				sta (pData),y
-				bra .1
+				bra CS.RUN
 *--------------------------------------
 .4				>LDA.G HexFileType
 				bne .5
 				
 				jsr GetHexFileType
 				bcs .99
-				bra .1
+				bra CS.RUN
 
 .5				>LDA.G hSrcBasePath
 				bne .99
@@ -89,7 +91,7 @@ CS.INIT
 				>LDYA ZPPtr1
 				jsr InitSrcDirYA
 				bcs .99
-				bra .1
+				bra CS.RUN
 *--------------------------------------
 .7				>LDA.G hSrcBasePath
 				beq .99					no src ? ERROR
@@ -103,59 +105,103 @@ CS.INIT
 				>STYA ZPFullPath
 				txa
 				>STA.G hSrcFullPath
-				clc
-				rts
 *--------------------------------------
-CS.RUN			ldy #S.PS.hStdIn
+CS.RUN.LOOP		ldy #S.PS.hStdIn
 				lda (pPS),y
 				>SYSCALL feof
 				bcs .99
+
 				tay
-				bne .10
+				bne .1
+
 				>SYSCALL GetChar
 				bcs .99
+
 				cmp #$03				Ctrl-C
-				beq .92					Abort....
+				beq .99					Abort....
+
 				cmp #$13				Ctrl-S
-				bne .10
+				bne .1
 
 				>LDA.G bPause
 				eor	#$ff
 				sta (pData),y
-				bne .80
-.10				>LDA.G bPause
-				bne .80					Pause...
+				bne CS.RUN.LOOP
+
+.1				>LDA.G bPause
+				bne CS.RUN.LOOP			Pause...
+*--------------------------------------
 				jsr GetEntry
-				bcs .9
+				bcs CS.RUN.LEAVE
+
 				jsr FilterMatch
-				bcs .8					no match, skip....
-				ldy #S.STAT.P.DRIVE
-				lda (ZPFileStat),y		ProDOS Device ?
-				bne CS.RUN.DEV
-				ldy #S.STAT.P.TYPE
+				bcs CS.RUN.NEXT			no match, skip....
+
+				ldy #S.STAT.MODE+1
 				lda (ZPFileStat),y
-				cmp #$0F				Directory ?
-				bne CS.RUN.FILE
+				and #$70
+				bne .5					REG file ?
 
-				jmp CS.RUN.DIR
-.9				jsr LeaveSubDir
-				bcs .92
-
-				jsr BasePath..
-.8				jsr GetNextEntry
-.80				clc
+				jsr CS.RUN.FILE
+				bcc CS.RUN.NEXT
 				rts
-.92				lda #0
+
+.5				cmp /S.STAT.MODE.DIR	DIR ?
+				bne .6
+
+				jsr CS.RUN.DIR
+				bcc CS.RUN.NEXT
+				rts
+
+.6				lda #MLI.E.UNSUPST
 				sec
 .99				rts
 *--------------------------------------
-CS.RUN.DIR
-CS.RUN.DEV
-.8				jsr GetNextEntry
-				clc
+CS.RUN.NEXT		jsr GetNextEntry
+				bcc CS.RUN.LOOP
+				
+CS.RUN.LEAVE	jsr LeaveSubDir
+				bcs .90
+
+				jsr BasePath..
+				
+				jmp CS.RUN.NEXT
+
+.90				lda #0
+				sec
+.99				rts
+*--------------------------------------
+CS.RUN.DIR		>LDA.G bRecurse
+				bpl .8
+
+				lda (ZPFileName)
+				cmp #'.'
+				bne .1
+				
+				ldy #1
+				lda (ZPFileName),y
+				beq .8
+				
+				cmp #'.'
+				bne .1
+				
+				iny
+				lda (ZPFileName),y
+				beq .8
+				
+.1				jsr CS.RUN.GetFilePath
+				
+				>LDYA ZPFileName
+				jmp EnterSubDirYA
+
+.8				clc
 				rts
 *--------------------------------------
-CS.RUN.FILE		jsr CS.RUN.GetFilePath
+CS.RUN.FILE		jsr FilterMatch
+				bcs .8					no match, skip....
+				
+				jsr CS.RUN.GetFilePath
+				
 				>PUSHW L.MSG.FILE
 				>PUSHW ZPFullPath
 				>PUSHBI 2
@@ -169,22 +215,15 @@ CS.RUN.FILE		jsr CS.RUN.GetFilePath
 
 				>SYSCALL ChTyp
 				jsr CS.RUN.CheckErr
-				>LDA.G bRecurse
-				bpl .8
-				lda (ZPFileName)
-				cmp #'.'
-				beq .8
-				>LDYA ZPFileName
-				jsr EnterSubDirYA
-				rts
-.8				jsr GetNextEntry
-				clc
+
+.8				clc
 .9				rts
 *--------------------------------------
 CS.RUN.CheckErr	bcs .1
 				>LDYA L.MSG.OK
 				>SYSCALL PutS
 				rts
+
 .1				pha
 				>PUSHW L.MSG.ERR
 				pla
@@ -307,7 +346,7 @@ IsDigit16		cmp #'0'
 .9				sec
 				rts
 *--------------------------------------
-				.INB USR/SRC/BIN/X.FILEENUM.S
+				.INB usr/src/bin/x.fileenum.s
 *--------------------------------------
 CS.END
 *--------------------------------------
@@ -342,11 +381,11 @@ bContinue		.BS 1
 bRecurse		.BS 1
 HexFileType		.BS 1
 
-				.INB USR/SRC/BIN/X.FILEENUM.G
+				.INB usr/src/bin/x.fileenum.g
 
 DS.END
 				.ED
 *--------------------------------------
 MAN
-SAVE USR/SRC/BIN/CHTYP.S
+SAVE usr/src/bin/chtyp.s
 ASM
