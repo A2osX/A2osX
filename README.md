@@ -1,6 +1,6 @@
 # A2osX Multi-Tasking OS for Apple II  
 
-### Updated February 13, 2020
+### Updated May 24, 2020
 
 ## A2osX 0.94
 
@@ -22,7 +22,7 @@ Consult the **[documentation](#documentation)** section below to find other reso
 
 ## News
 
-A2osX Version 0.94 ....
+The A2osX Team is preparing to issue the first Stable Alpha of A2osX Version 0.94.  This new version will include an updated version of ProDOS FX, further kernel enhancements to improve memory usage and for the first time an included Assembler so developers can edit, assemble and test problems all from with A2osX.  We are inviting interested developers and testers to please join our A2osX Slack channel to get release announcements, learn more about new features, get support and provide feedback.  An invite to our Slack channel can be found **[here](https://join.slack.com/t/a2osx/shared_invite/zt-ens62cl0-xeAFLjlRfUSMtzdc6o~Xew)**.
 
 If you would like to read all the past news articles for A2osX, you can read the news article found **[here](.Docs/News.md)**.
 
