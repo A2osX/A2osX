@@ -4,7 +4,7 @@ NEW
 dealloc			stx bmcnt				high address of block.
 				pha						save low address.
 				ldx vcbptr			 	check that bitmap block address is
-				lda VCBs+VCB.TBLK+1,x			valid given the total # of blocks
+				lda VCBs+VCB.TBLK+1,x	valid given the total # of blocks
 				cmp bmcnt			  	on the volume.
 				pla
 				bcc L3C8C			 	branch if invalid
@@ -64,7 +64,7 @@ L3C7D  			lda #$80				mark bitmap as modified
 L3C8A  			clc
 L3C8B  			rts
 
-L3C8C  			lda #$5A			 	bitmap block # impossible.
+L3C8C  			lda #MLI.E.BADFS	 	bitmap block # impossible.
 				sec		 				bitmap disk address wrong
 				rts		 				(maybe data masquerading as indx block)
 *--------------------------------------
@@ -146,18 +146,16 @@ L3CF7  			lda #$80			 	indicate map is modified.
 				clc		 				no errors.
 				rts
 *--------------------------------------
-nxtbmap			ldy vcbptr			 	inc to next bitmap, but 1st make sure there is another one.
-				lda VCBs+VCB.TBLK+1,y
+nxtbmap			ldx vcbptr			 	inc to next bitmap, but 1st make sure there is another one.
+				lda VCBs+VCB.TBLK+1,x
 				lsr
 				lsr
 				lsr
 				lsr
-				cmp VCBs+VCB.BMAPIDX,y			are there more maps ?
+				cmp VCBs+VCB.BMAPIDX,x			are there more maps ?
 				beq L3D60			  	if no more to look at.
 
-				lda VCBs+VCB.BMAPIDX,y			add 1 to current map
-				inc
-				sta VCBs+VCB.BMAPIDX,y
+				inc VCBs+VCB.BMAPIDX,x			add 1 to current map
 				jsr upbmap
 
 fndbmap			ldy vcbptr
@@ -202,18 +200,24 @@ upbmap			clc
 				rts
 *--------------------------------------
 gtbmap			sta bmadev			 	read bitmap specified by dev and vcb.
+
 				ldy vcbptr			 	get lowest map # with free blocks in it
 				lda VCBs+VCB.BMAPIDX,y
 				sta bmacmap				associate offset with bitmap ctrl block.
 				clc						add this # to the base address of
 				adc VCBs+VCB.BMAP,y			1st bitmap and save in bmadadr which
 				sta bmadadr				is address of bitmap to be used.
+
 				lda VCBs+VCB.BMAP+1,y
 				adc #$00
 				sta bmadadr+1
-				lda #$01			 	read device command
 
-L3D92  			sta A4L
+				lda #$01			 	read device command
+				.HS 2C					BIT ABS
+wrtbmap			lda #$02			 	write command.
+				
+				sta A4L
+
 				lda devnum			 	save current dev #
 				pha
 				lda bmadev			 	get bitmap's dev #
@@ -222,8 +226,10 @@ L3D92  			sta A4L
 				sta bloknml
 				lda bmadadr+1
 				sta bloknml+1
-				lda bmbufhi+2			address of the buffer (low = 0)
-				jsr dobitmap
+
+				lda /bmbuf
+*				lda bmbufhi+2			address of the buffer (low = 0)
+				jsr XDOS.RWBlock
 				tax						error code (if any).
 				pla		 				restore current dev #
 				sta devnum
@@ -231,39 +237,39 @@ L3D92  			sta A4L
 
 				txa		 				error code
 L3DB6  			rts
-
-rdblk			sta bloknml
+*--------------------------------------
+rdblk
+XDOS.ReadGBufAX	sta bloknml
 				stx bloknml+1
-				jsr rdgbuf
-				rts
-
-wrtbmap			lda #$02			 	write command.
-				bne L3D92			  	always.
-
-wrtgbuf			lda #$02				write command
+rdgbuf
+XDOS.ReadGBuf	lda #$01			 	read command.
 				.HS 2C					BIT ABS
+wrtgbuf
+XDOS.WriteGBuf	lda #$02				write command
 
-rdgbuf			lda #$01			 	read command.
 				sta A4L			  		pass to device handler.
 				lda /gbuf			 	general buffer.
-
-dobitmap 		php		 				no interrupts
+dobitmap				
+XDOS.RWBlock	php		 				no interrupts
 				sei
 				sta buf+1				buffer high.
 				stz buf			  		buffer low (always on page boundary)
+
 				stz p8error				clear global error code.
+
 				lda #$FF			 	indicates reg call made to dev handler
 				sta ioaccess
+
 				lda devnum			 	transfer dev # for dispatcher to
 				sta unitnum				convert to unit #.
 				jsr dmgr			 	call the driver.
-				bcs L3DE8			  	if error.
+				bcs .9				  	if error.
 
 				plp		 				restore interrupts.
 				clc
 				rts
 
-L3DE8  			plp						file i/o error. restore interrupts.
+.9  			plp						file i/o error. restore interrupts.
 				sec
 				rts
 *--------------------------------------
@@ -281,7 +287,7 @@ XDOS.GetMark	ldx fcbptr				index to open fcb.
 				clc
 				rts
 
-L3DFD  			lda #$4D				invalid position
+L3DFD  			lda #MLI.E.BEYEOF		invalid position
 				sec
 				rts
 *--------------------------------------
@@ -555,10 +561,13 @@ rfcbidx			lda #$01			 	prepare to read index block : read command
 				clc
 L400C  			rts
 
-L400D  			lda #$02				write command
+wfcbfst			jsr upbmap				update the bitmap and write file's 1st block.
+
+				lda #$02				write command
 				.HS 2C					skip next instruction
 
 rfcbfst			lda	#$01				read command.
+
 				pha		 				save the command
 				lda #$0C
 				ora fcbptr			 	add offset to fcbptr
@@ -573,8 +582,10 @@ dofileio 		sta A4L			  		command
 				bne L4031
 				cmp #$00			 	are both bytes 0 ?
 				bne L4031			  	no, continue request
+
 				lda #$0C			 	otherwise, allocation error.
 				jsr sysdeath			doesn't return...
+
 L4031  			lda fcbbuf+1,y			high address of disk block
 				sta bloknml+1
 
@@ -602,9 +613,6 @@ fileio1			php						no interrupts
 L405E  			plp		 				restore interrupts
 				sec
 				rts
-
-wfcbfst			jsr upbmap				update the bitmap
-				bra L400D			  	and write file's 1st block.
 
 wfcbdat			ldx #datptr				point at memory address with x and
 				lda #$10			 	disk address with y.

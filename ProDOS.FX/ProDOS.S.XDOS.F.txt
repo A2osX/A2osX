@@ -19,6 +19,7 @@ XDOS.Destroy	jsr findfile			look for file to be destroyed.
 L4B39  			lda d_attr			 	make sure ok to destroy file.
 				and #$80
 				bne L4B45			  	branch if ok to destroy.
+
 				lda #MLI.E.LOCKED	 	access error
 				jsr GP.P8errv
 
@@ -92,6 +93,9 @@ dvcbrev			ldx vcbptr			 	update block free count in vcb. point to vcb of correct
 				sta VCBs+VCB.FBLK+1,x
 
 				stz VCBs+VCB.BMAPIDX,x			force re-scan from 1st bitmap
+			
+*			lda #0						?????
+
 				rts
 
 L4BCD  			bcc L4B85			  	branch widened (always taken)
@@ -103,23 +107,16 @@ L4BCF  			cmp #$D0			 	is this a directory file ?
 				bcs L4C1A			  	if error.
 
 				lda d_frst			 	read 1st block of directory into gbuf
-				sta bloknml
-				lda d_frst+1
-				sta bloknml+1
-				jsr rdgbuf
+				ldx d_frst+1
+				jsr XDOS.ReadGBufAX
 				bcs L4C1A
 
 				lda gbuf+37				do any files exist in this directory ?
-				bne L4BF1			  	if so, access error.
-
-				lda gbuf+38
-				beq L4BF6
-
-L4BF1  			lda #MLI.E.LOCKED	 	access error.
-				jsr GP.P8errv
+				ora gbuf+38
+				bne L4C1Abis			if so, access error.
 
 L4BF6  			sta gbuf+4			 	make it an invalid subdirectory
-				jsr wrtgbuf
+				jsr XDOS.WriteGBuf
 				bcs L4C1A
 
 L4BFE  			lda gbuf+2			 	get forward link.
@@ -133,11 +130,13 @@ L4C0A  			jsr dealloc				free this block.
 
 				lda gbuf+2
 				ldx gbuf+3
-				jsr rdblk
+				jsr XDOS.ReadGBufAX
 				bcc L4BFE			  	loop until all freed
 
 L4C1A  			rts
 
+L4C1Abis		lda #MLI.E.LOCKED	 	access error.
+				.HS 2C					BIT ABS
 L4C1B  			lda #MLI.E.INCFF	 	file incompatible
 				jsr GP.P8errv
 
@@ -152,7 +151,7 @@ fcbused			pha		 				mark fcb as dirty so the directory will be flushed on 'flush
 				tay
 				pla
 				rts
-
+*--------------------------------------
 * 'detree' deallocates blocks from tree files. it is assumed that the device has
 * been pre-selected and the 'gbuf' may be used.
 *
@@ -172,7 +171,7 @@ fcbused			pha		 				mark fcb as dirty so the directory will be flushed on 'flush
 *
 * to trim a tree to a seed file, both dtree and dsap must be zero.
 * to go from tree to sapling, dtree alone must be zero.
-
+*--------------------------------------
 detree			lda stortyp				which kind of tree ?
 				cmp #$20			 	is it a 'seed' ?
 				bcc L4C46			  	if yes.
@@ -186,7 +185,7 @@ detree			lda stortyp				which kind of tree ?
 				lda #$0C			 	block allocation error.
 				jsr sysdeath			P8 system death vector
 
-* seedling file type - make sure first desireable block is the only
+* seedling file type - make sure first desirable block is the only
 * block available in a seedling file.
 
 L4C46  			lda dsap
@@ -195,7 +194,7 @@ L4C46  			lda dsap
 
 				jmp seedel0
 
-* sapling file type - make sure first desireable block is within the range of
+* sapling file type - make sure first desirable block is within the range of
 * blocks available in a sapling file
 
 L4C51  			lda dtree				can't have any blocks in this range
@@ -238,7 +237,9 @@ L4C8A  			stz dealbufl,x		 	fill rest of dealc buffer with null addresses.
 
 L4C93  			dey		 				decrement to prepare for next time.
 				sty topdest				save index.
+
 				ldx #$07
+
 L4C99  			stx dtmpx			  	save index to dealc buf.
 				lda dealbufl,x
 				sta bloknml
@@ -247,13 +248,13 @@ L4C99  			stx dtmpx			  	save index to dealc buf.
 
 				lda dealbufh,x			complete address with high byte,
 				sta bloknml+1
-				jsr rdgbuf			 	read sapling level into gbuf.
+				jsr XDOS.ReadGBuf		read sapling level into gbuf.
 				bcs L4CC2			  	return errors.
 
 				jsr dealblk				go free all data indexes in this block
 				bcs L4CC2
 
-				jsr wrtgbuf				write the flipped index block
+				jsr XDOS.WriteGBuf		write the flipped index block
 				bcs L4CC2
 
 				ldx dtmpx			  	restore index to dealc buff.
@@ -269,20 +270,20 @@ L4CC3  			ldy dtree			  	deallocate all sapling blocks greater
 				jsr dalblk1				(master index in gbuf)
 				bcs L4CC2			  	if errors.
 
-				jsr wrtgbuf				write updated master index back to disk.
+				jsr XDOS.WriteGBuf		write updated master index back to disk.
 				bcs L4CC2
 
 				ldy dtree				figure out if tree can become sapling.
 				beq L4CEB			  	branch if it can.
 
-				lda gbuf,y			 	otherwise, continue with partial.
-				sta bloknml				deallocation of last sapling index.
+				lda gbuf,y			 	otherwise, continue with partial, deallocation of last sapling index.
 				ora gbuf+$100,y			is there such a sapling index block ?
 				beq L4CC2			  	all done if not.
 
-				lda gbuf+$100,y			read in sapling level to be modified.
-				sta bloknml+1
-				jsr rdgbuf			 	read highest sapling index into gbuf.
+				lda gbuf,y
+				ldx gbuf+$100,y			read in sapling level to be modified.
+
+				jsr XDOS.ReadGBufAX	 	read highest sapling index into gbuf.
 				bcc L4CF5
 
 				rts
@@ -300,38 +301,38 @@ L4CF5  			ldy dsap				pointer to last of desirable indexes.
 				jsr dalblk1				deallocate all indexes above specified.
 				bcs L4CC2
 
-				jsr wrtgbuf				write out the index block
+				jsr XDOS.WriteGBuf		write out the index block
 				bcs L4CC2
 
 L4D05  			ldy dsap			 	prepare to clean up last data block.
 				beq L4D1F			  	branch if possibility of making a seed.
 
 L4D0A  			lda gbuf,y			 	fetch low order data block address.
-				sta bloknml
 				ora gbuf+$100,y			is it a real block ?
 				beq L4CC2			  	if not, then done.
 
-				lda gbuf+$100,y
-				sta bloknml+1
-				jsr rdgbuf			 	go read data block into gbuf.
+				lda gbuf,y
+				ldx gbuf+$100,y
+
+				jsr XDOS.ReadGBufAX	 	go read data block into gbuf.
 				bcc L4D2E			  	branch if good read
 
-				rts		 				or return error.
+L4D1E			rts		 				or return error.
 
 L4D1F  			lda dtree			  	are both tree and sap levels zero ?
 				bne L4D0A			  	if not.
 
 				jsr shrink				reduce this sap to a seed.
-				bcs L4D52			  	if error.
+				bcs L4D1E			  	if error.
 
 seedel0			jsr drdfrst				go read data block.
-				bcs L4D52			  	if error.
+				bcs L4D1E			  	if error.
 
 L4D2E  			ldy dseed+1				check high byte for no deletion.
 				beq L4D39			  	branch if all of 2nd page to be deleted.
 
 				dey						if dseed > $200 then all were done.
-				bne L4D52			  	branch if that is the case.
+				bne L4D1E			  	branch if that is the case.
 
 				ldy dseed			  	clear only bytes >= dseed.
 
@@ -350,13 +351,13 @@ L4D49  			sta gbuf,y
 				iny
 				bne L4D49
 
-L4D4F  			jmp wrtgbuf				update data block to disk.
+L4D4F  			jmp XDOS.WriteGBuf		update data block to disk.
 
 L4D52  			rts		 				return error status.
 
 drdfrst			lda firstbl				read specified 1st block into gbuf
 				ldx firstbh
-				jmp rdblk			  	go read it
+				jmp XDOS.ReadGBufAX		go read it
 
 * beware that dealloc may bring in a new bitmap block and may destroy
 * locations 46 and 47 which are used to point to the current index block.
@@ -371,7 +372,7 @@ shrink			ldx firstbh				first deallocate top index block
 				sta bloknml				set master of sapling
 				pla						index block address.
 				sta bloknml+1
-				bcs L4D8D			  	report errors.
+				bcs L4D1E			  	report errors.
 
 				lda gbuf			 	get # of new 1st block from old index.
 				sta firstbl
@@ -383,9 +384,7 @@ shrink			ldx firstbh				first deallocate top index block
 				lda stortyp				from tree to sapling,
 				sbc #$10			 	or from sapling to seed.
 				sta stortyp
-				jsr wrtgbuf				write the (deallocated) old top index.
-
-L4D8D  			rts		 				return error status.
+				jmp XDOS.WriteGBuf		write the (deallocated) old top index.
 
 dealblk			ldy #$00			 	start at beginning.
 dalblk1			lda bloknml				save disk address of gbuf's data.
@@ -1031,7 +1030,7 @@ XDOS.FREE	.EQ $FEFD-*-XDOS.DATA.LEN	(2.0.3 = $0C)
 cortdisp		.EQ $FEFD				
 cortflag 		.EQ $FEFF			  		cortland flag. 1 = Cortland system (must stay within page boundary)			
 *--------------------------------------
-XDOS.LEN		.EQ *-XDOS.START
+XDOS.LEN		.EQ *-XDOS
 MAN
 SAVE USR/SRC/PRODOS.FX/PRODOS.S.XDOS.F
 LOAD USR/SRC/PRODOS.FX/PRODOS.S
