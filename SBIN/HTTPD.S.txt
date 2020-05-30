@@ -5,11 +5,12 @@ NEW
 				.OR	$2000
 				.TF sbin/httpd
 *--------------------------------------
-				.INB INC/MACROS.I
-				.INB INC/A2OSX.I
-				.INB INC/ETH.I
-				.INB INC/LIBTCPIP.I
-				.INB INC/NET.HTTP.I
+				.INB inc/macros.i
+				.INB inc/a2osx.i
+				.INB inc/mli.i
+				.INB inc/eth.i
+				.INB inc/libtcpip.i
+				.INB inc/net.http.i
 *--------------------------------------
 TIMEOUT.MAX		.EQ 30					30 sec.
 CONN.MAX		.EQ 16
@@ -17,23 +18,28 @@ CONN.MAX		.EQ 16
 				.DUMMY
 				.OR ZPBIN
 ZS.START
-ZPIPCfgPtr		.BS 2
+ZPPtr1			.BS 2
 ZPSktPtr		.BS 2
-ZPMsgPtr		.BS 2
-ZPMsgDataPtr	.BS 2
-ZPMsgDataLen	.BS 2
-ZPMsgDataCnt	.BS 2
-
-ArgIndex		.BS 1
-hRootdir		.BS 1
-ZPRootDirPtr	.BS 2
+hFile			.BS 1
+hStr			.BS 1
 ZPStrPtr		.BS 2
 
 hSrvSocket		.BS 1
-hClntSocket		.BS 1
-hMsg			.BS 1
-hStr			.BS 1
 TimeOut			.BS 1
+
+hSrvName		.BS 1
+ZPSrvNamePtr	.BS 2
+hRootdir		.BS 1
+ZPRootDirPtr	.BS 2
+
+hClntSocket		.BS 1
+
+hRequest		.BS 1
+ZPRequestPtr	.BS 2
+ZPnRequestLen	.BS 2
+
+hReply			.BS 1
+ZPReplyPtr		.BS 2
 
 ZS.END			.ED
 *--------------------------------------
@@ -58,9 +64,16 @@ CS.START		cld
 				.DA CS.DOEVENT
 				.DA	CS.QUIT
 L.LIBTCPIP		.DA LIBTCPIP
+L.ETCHTTPDCONF	.DA ETCHTTPDCONF
+L.KEYWORDS		.DA KEYWORDS
+J.KEYWORDS		.DA CS.RUN.CONF.SERVERNAME
+				.DA CS.RUN.CONF.LISTEN
+				.DA CS.RUN.CONF.DOCUMENTROOT
+				.DA CS.RUN.CONF.ADDTYPE
 L.SA.Local		.DA SA.Local
 L.MSG.TCPWAIT	.DA MSG.TCPWAIT
 L.MSG.TCPIPERR	.DA MSG.TCPIPERR
+L.MSG.INITCONF	.DA MSG.INITCONF
 L.MSG.INITOK	.DA MSG.INITOK
 L.MSG.SKTERR	.DA MSG.SKTERR
 L.MSG.INCOMING	.DA MSG.INCOMING
@@ -84,8 +97,8 @@ CS.RUN			>LDYA L.MSG.TCPWAIT
 				>LIBCALL hLIBTCPIP,LIBTCPIP.GETCFG	is TCPIP loaded ?
 				bcs .99
 
-				>STYA ZPIPCfgPtr
-				lda (ZPIPCfgPtr)		Configured ?
+				>STYA ZPPtr1
+				lda (ZPPtr1)			Configured ?
 				bmi CS.RUN.INIT
 
 				lda Timeout
@@ -101,7 +114,7 @@ CS.RUN			>LDYA L.MSG.TCPWAIT
 				>SYSCALL GetChar
 				bcs CS.RUN.RTS
 
-				cmp #$03
+				cmp #3					Ctrl-C
 				bne .1
 
 				sec
@@ -117,35 +130,30 @@ CS.RUN.RTS		rts
 CS.RUN.INIT		ldx #3
 				ldy #S.IPCFG.IP+3
 
-.1				lda (ZPIPCfgPtr),y
+.1				lda (ZPPtr1),y
 				sta SA.LOCAL+S.SOCKADDR.ADDR,x
 				dey
 				dex
 				bpl .1
 
-				lda #1
-				sta ArgIndex
-				
-				>SYSCALL ArgV
-				bcs CS.RUN.SYN
-				>SYSCALL atoi
-				bcs .2
-
-				>STYA SA.LOCAL+S.SOCKADDR.PORT
-				inc ArgIndex
-
-.2				lda ArgIndex
-				>SYSCALL ArgV
-				bcs CS.RUN.SYN
-
-				>PUSHYA
-				>PUSHWI 0				Allocate
-				>SYSCALL RealPath
+				>LDYAI 256
+				>SYSCALL GetMem
 				bcs CS.RUN.RTS
 				
-				>STYA ZPRootDirPtr
-
-CS.RUN.ARGSOK	>PUSHBI 0				no protocol
+				>STYA ZPStrPtr
+				stx hStr
+				
+				>PUSHW L.MSG.INITCONF
+				>PUSHW L.ETCHTTPDCONF
+				>PUSHBI 2
+				
+				>SYSCALL PrintF
+				bcs CS.RUN.RTS
+				
+				jsr CS.RUN.CONF
+				bcs CS.RUN.RTS
+				
+				>PUSHBI 0				no protocol
 				lda #S.SOCKET.T.SEQPACKET
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Socket
 				bcs CS.RUN.RTS
@@ -161,13 +169,6 @@ CS.RUN.ARGSOK	>PUSHBI 0				no protocol
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Listen
 				bcs CS.RUN.ERR
 
-				>LDYAI 256
-				>SYSCALL GetMem
-				bcs CS.RUN.ERR
-				
-				>STYA ZPStrPtr
-				stx hStr
-				
 				>PUSHW L.MSG.INITOK
 				>PUSHW SA.LOCAL+S.SOCKADDR.PORT
 				>PUSHW ZPRootDirPtr
@@ -185,6 +186,120 @@ CS.RUN.LOOP		>SLEEP
 				lda #E.SYN
 				sec	
 CS.RUN.ERR		rts
+*--------------------------------------
+CS.RUN.CONF		>PUSHW L.ETCHTTPDCONF
+				>PUSHBI	O.RDONLY+O.TEXT
+				>PUSHBI S.FI.T.TXT
+				>PUSHWZ
+				>SYSCALL FOpen
+				bcs .99
+
+				sta hFile
+
+.1				>PUSHWI 256
+				>PUSHW ZPStrPtr
+				lda hFile
+				>SYSCALL fgets
+				bcs .8
+
+				tya
+				beq .1
+			
+				lda (ZPStrPtr)
+				cmp #'#'
+				beq .1
+				
+				>LDYA L.KEYWORDS
+				>STYA ZPPtr1
+				
+				ldx #0
+
+.2				ldy #0
+				
+.3				lda (ZPPtr1),y
+				cmp	(ZPStrPtr),y
+				bne .4
+				
+				iny
+				cmp #C.SPACE
+				bne .3
+				
+				jsr CS.RUN.CONF.JMP
+				bcc .1
+				
+				bra .97
+				
+.4				inx
+				inx
+				
+				ldy #0
+				
+.5				iny
+				lda (ZPPtr1),y
+				cmp #C.SPACE
+				bne .5
+				
+				tya
+				sec
+				adc ZPPtr1
+				sta ZPPtr1
+				bcc .6
+				inc ZPPtr1+1
+				
+.6				lda	(ZPPtr1)
+				bne .2
+
+.97				lda #E.SYN
+				
+.98				pha
+				jsr .8
+				pla
+				sec
+.99				rts
+
+.8				lda hFile
+				>SYSCALL FClose
+				rts
+*--------------------------------------
+CS.RUN.CONF.JMP	tya
+				clc
+				adc ZPStrPtr
+				sta ZPPtr1
+				tay
+				lda #0
+				adc ZPStrPtr+1
+				sta ZPPtr1+1
+				
+				jmp (J.KEYWORDS,x)		
+
+CS.RUN.CONF.SERVERNAME
+				>SYSCALL StrDup
+				bcs .9
+				
+				>STYA ZPSrvNamePtr
+				stx hSrvName
+
+.9				rts
+CS.RUN.CONF.LISTEN
+				>SYSCALL atoi
+				bcs .9
+
+				>STYA SA.LOCAL+S.SOCKADDR.PORT
+
+.9				rts
+CS.RUN.CONF.DOCUMENTROOT
+				>PUSHYA
+				>PUSHWI 0				Allocate
+				>SYSCALL RealPath
+				bcs .9
+				
+				>STYA ZPRootDirPtr
+				stx hRootdir
+
+.9				rts
+CS.RUN.CONF.ADDTYPE
+				clc
+				rts
 *--------------------------------------
 CS.RUN.SERVER	lda hSrvSocket
 				>LIBCALL hLIBTCPIP,LIBTCPIP.accept
@@ -216,6 +331,7 @@ CS.RUN.SERVER	lda hSrvSocket
 CS.RUN.CLIENT	
 .1				>SLEEP
 
+				lda hClntSocket
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Recv
 				bcc .2
 
@@ -223,21 +339,43 @@ CS.RUN.CLIENT
 				beq .1
 				bra .8
 
-.2				jsr CS.RUN.MSG.INIT
+.2				sta hRequest
+				>SYSCALL GetMemPtr
+				>STYA ZPRequestPtr
+	
+				ldy #S.IP.TOTAL.LENGTH+1
+				lda (ZPRequestPtr),y
+				sec
+				sbc #S.TCP-S.IP
+				eor #$ff
+				sta ZPnRequestLen
+				
+				dey
+				
+				lda (ZPRequestPtr),y
+				sbc /S.TCP-S.IP
+				eor #$ff
+				sta ZPnRequestLen+1
+				
+				lda ZPRequestPtr
+				clc
+				adc #S.TCP
+				sta ZPRequestPtr
+				bcc .3
+				
+				inc ZPRequestPtr+1
 
-.3				jsr CS.RUN.MSG.GetStr
+.3				jsr CS.RUN.REQUEST.GetStr
 				bcs .7
 
-				>PUSHYA
-				>PUSHW ZPStrPtr
-				ldy #S.PS.hStdOut
-				lda (pPS),y
-
-				>SYSCALL fwrite
+				>LDYA ZPStrPtr
+				>SYSCALL puts
 				bra .3
 
-				lda hMsg
-				>SYSCALL FreeMem
+*				jsr CS.RUN.REPLY.INIT
+
+*				lda hReply
+*				>SYSCALL FreeMem
 
 .7				>PUSHWI HTTP.200OK.len
 				>PUSHW L.HTTP.200OK
@@ -250,61 +388,31 @@ CS.RUN.CLIENT
 				clc
 				rts
 *--------------------------------------
-CS.RUN.MSG.INIT	sta hMsg
-				>SYSCALL GetMemptr
-				>STYA ZPMsgPtr
-				pha
-				tya
-*				clc
-				adc #S.TCP
-				sta ZPMsgDataPtr
-				
-				pla
-				adc /S.TCP
-				sta ZPMsgDataPtr+1
-				
-				ldy #S.IP.TOTAL.LENGTH+1
-				lda (ZPMsgPtr),y
-				sec
-				sbc #S.IP
-				sta ZPMsgDataLen
-				eor #$ff
-				sta ZPMsgDataCnt
-				
-				dey
-				lda (ZPMsgPtr),y
-				sbc /S.IP
-				sta ZPMsgDataLen+1
-				eor #$ff
-				sta ZPMsgDataCnt+1
-
-				rts
-*--------------------------------------
-CS.RUN.MSG.GetStr
+CS.RUN.REQUEST.GetStr
 				ldy #0
 
-.1				inc ZPMsgDataCnt
+.1				inc ZPnRequestLen
 				bne .2
-				inc ZPMsgDataCnt+1
+				inc ZPnRequestLen+1
 				beq .9
 
-.2				lda (ZPMsgDataPtr)
-				inc ZPMsgDataPtr
+.2				lda (ZPRequestPtr)
+				inc ZPRequestPtr
 				bne .21
-				inc ZPMsgDataPtr+1
+				inc ZPRequestPtr+1
 				
 .21				cmp #C.CR
 				bne .4
 				
-				inc ZPMsgDataCnt
+				inc ZPnRequestLen
 				bne .3
-				inc ZPMsgDataCnt+1
+				inc ZPnRequestLen+1
 				beq .9
 				
-.3				lda (ZPMsgDataPtr)
-				inc ZPMsgDataPtr
+.3				lda (ZPRequestPtr)
+				inc ZPRequestPtr
 				bne .31
-				inc ZPMsgDataPtr+1
+				inc ZPRequestPtr+1
 
 .31				eor #C.LF
 				bne .9
@@ -320,6 +428,10 @@ CS.RUN.MSG.GetStr
 .9				sec
 				rts
 *--------------------------------------
+CS.RUN.REPLY.INIT
+
+				rts
+*--------------------------------------
 CS.DOEVENT		lda (pEvent)
 				bpl .9					is it a TIMER event?
 				lda TimeOut
@@ -330,11 +442,18 @@ CS.DOEVENT		lda (pEvent)
 				rts
 *--------------------------------------
 CS.QUIT			lda hSrvSocket
-				beq .3
+				beq .1
 				
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Shutdown
 
-.3				lda hLIBTCPIP
+.1				lda hStr
+				beq .2
+				
+				>SYSCALL FreeMem
+
+
+.2
+				lda hLIBTCPIP
 				beq .8
 
 				>SYSCALL UnloadLib
@@ -346,15 +465,24 @@ CS.END
 *--------------------------------------
 hLIBTCPIP		.BS 1
 LIBTCPIP		.AZ "libtcpip"
+ETCHTTPDCONF	.AZ "${BOOT}etc/httpd.conf"
+*--------------------------------------
+KEYWORDS		.AS "ServerName "
+				.AS "Listen "
+				.AS "DocumentRoot "
+				.AS "AddType "
+				.DA #0
+*--------------------------------------
 MSG.TCPWAIT		.AZ "HTTPD:Waiting for TCP/IP initializing..."
 MSG.TCPIPERR	.AZ "HTTPD:TCP/IP Not initialized properly."
+MSG.INITCONF	.AZ "HTTPD:Reading %s file...\r\n"
 MSG.INITOK		.AZ "HTTPD:Listening on port %D, root dir: %s.\r\n"
 MSG.SKTERR		.AZ "HTTPD:Listen Error."
 MSG.INCOMING	.AZ "HTTPD:Incoming Connection [SKT=%h] From : %d.%d.%d.%d\r\n"
 *--------------------------------------
 HTTP.200OK		.AS "HTTP/1.1 200 OK"
 				.DA #C.CR,#C.LF
-				.AS "Server: A2osX-HTTPD 0.93"
+				.AS "Server: A2osX-HTTPD 0.94"
 				.DA #C.CR,#C.LF
 				.AS "Content-Type: text/html"
 				.DA #C.CR,#C.LF
@@ -363,7 +491,7 @@ HTTP.200OK		.AS "HTTP/1.1 200 OK"
 				.AS "Connection: Close"
 				.DA #C.CR,#C.LF
 				.DA #C.CR,#C.LF
-				.AS "<HTML><BODY>Hello From A2osX-HTTPD 0.93 !</BODY></HTML>"
+				.AS "<HTML><BODY>Hello From A2osX-HTTPD 0.94 !</BODY></HTML>"
 				.DA #C.CR,#C.LF
 HTTP.200OK.len	.EQ *-HTTP.200OK
 *--------------------------------------
@@ -379,5 +507,5 @@ DS.END
 				.ED
 *--------------------------------------
 MAN
-SAVE USR/SRC/SBIN/HTTPD.S
+SAVE usr/src/sbin/httpd.s
 ASM
