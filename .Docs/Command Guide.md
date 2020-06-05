@@ -227,9 +227,20 @@ The **edit** command allows the user to interactively read and edit standard tex
 
 ### FORMAT
 
-	format -b blocks [-L] [-1|-2|-3|-4|-5|-6|-7|-8|-9] <blockdev> <volname>
+	format -b blocks [-H] [-L] [-V] [-X] [-1|-2|-3|-4|-5|-6|-7|-8|-9] <blockdev> <volname>
 
-The **format** command will erase an existing volume and update its name to the VOLUME.NAME supplied.  **format** does not currently support low level formatting.  The Volume/Device to be formatted must already be formatted.  Specifically this means that **format** cannot format a new (never been formatted) floppy disc.  Use the -B option to force a block count to format.  This is useful in AppleWin because of its non-standard implementation of SmartPort on Slot 7.
+The **format** command will erase an existing volume and update its name to the VOLUME.NAME supplied.    As of 0.94, **format** supports low level formatting with the -L option on  In fact several new options...The Volume/Device to be formatted must already be formatted.  Specifically this means that **format** cannot format a new (never been formatted) floppy disc.  Use the -B option to force a block count to format.  This is useful in AppleWin because of its non-standard implementation of SmartPort on Slot 7.
+
+|Drive | Base|Switches|Extended| Tested |
+|-|-|-|-|-|
+|Disk ][ | 140K| -H |188K|Yes|
+|AM104| 140K|-H|188K|Yes|
+|AM107| 140K|-H|188K|Yes|
+|DuoDisk |140K|-H|188K|Yes|
+|FD-100| 140K|-H<br> -X<br>-H -X |188K<br>160K<br>216K| No |
+|Disk //c internal | 140K| -H |No|
+|Disk //c external | 140K| -H |No|
+ 
 
 ### GREP
 
