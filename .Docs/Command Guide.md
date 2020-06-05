@@ -227,20 +227,32 @@ The **edit** command allows the user to interactively read and edit standard tex
 
 ### FORMAT
 
-	format -b blocks [-H] [-L] [-V] [-X] [-1|-2|-3|-4|-5|-6|-7|-8|-9] <blockdev> <volname>
+	format [-b blocks] [-h] [-l] [-v] [-x] [-1|-2|-3|-4|-5|-6|-7|-8|-9] <blockdev> <volname>
 
-The **format** command will erase an existing volume and update its name to the VOLUME.NAME supplied.    As of 0.94, **format** supports low level formatting with the -L option on  In fact several new options...The Volume/Device to be formatted must already be formatted.  Specifically this means that **format** cannot format a new (never been formatted) floppy disc.  Use the -B option to force a block count to format.  This is useful in AppleWin because of its non-standard implementation of SmartPort on Slot 7.
+The **format** command will erase an existing volume and update its name to the VOLUME.NAME supplied.    As of 0.94, **format** supports low level formatting with the **-l** option.  Low level formatting works only on 5.25 floppy disk drives and is ignored for other media such as SmartPort (both hard drives/3.5" floppy drives) and block devices. If you omit the **-l** option for 5.25" floppies, the disc inserted must have been previously formatted.  The **-v** can used in conjunction with **-l** to preform a verify read of the entire disk after the format has completed.
 
-|Drive | Base|Switches|Extended| Tested |
-|-|-|-|-|-|
-|Disk ][ | 140K| -H |188K|Yes|
-|AM104| 140K|-H|188K|Yes|
-|AM107| 140K|-H|188K|Yes|
-|DuoDisk |140K|-H|188K|Yes|
-|FD-100| 140K|-H<br> -X<br>-H -X |188K<br>160K<br>216K| No |
-|Disk //c internal | 140K| -H |No|
-|Disk //c external | 140K| -H |No|
- 
+The **-b** option is provided to force a particular block count for the format.  This was provided for users of AppleWin because of its non-standard implementation of SmartPort on Slot 7 (AppleWin does not correctly report the size of the raw volume).  Use of the **-b** option on physical media such as a hard drive or emulator (i.e. CFFA) may not produce the desired results (it will **NOT** enlarge or shrink a partition).
+
+The numeric options **-1** through **-9** are used to set the number of ProDOS catalog blocks that should be created for the root directory of the new volume.  By default, ProDOS will create a root catalog on floppy discs and hard drives with 4 blocks giving you room to store 51 files (4 blocks at 13 entries per block minus 1 used for the volume label).  For /RAM drives, ProDOS will use the default of 1 or 2.  You can format a volume and set your own root catalog size to either save disk space on space constrained floppy discs or to expand the root catalog to hold more files.
+>ProDOS FX has been optimized for quicker load times by utilizing the first 4 catalog blocks that the boot sector code has already loaded, therefor you need to make sure that there is valid (and hopefully the desired!) SYSTEM file in the first 51 files on a volume you wish to boot from.
+
+#### Special Format Options under ProDOS FX
+
+As part of the 0.94 release, ProDOS FX has been enhanced with a completely new 5.25 read/write driver (FX-XRW) that is not only faster, but capable of extended disc formats on Apple and third party drives.  For instance, with a Laser FD-100 drive which supports 40-trk discs, you can use 160K formatted discs.  FX will read a properly formatted disc to determine it's existing format to properly read and write to the disc.  In addition, the format command contains additional options (switches) to format new or reformat old discs with more capacity.  The table below shows the a sample of drives and switch combinations that can be used when formatting discs.  Basically, the -h (High density) option causes format to place tracks every third quarter track and -x (eXtended) tells format that the drive natively supports 40-tracks.
+
+|Drive | Base|Switches|Extended| Format<br>Test |Read/Write<br>Test|Boot<br>Test|
+|-|-|-|-|-|-|-|
+|Disk ][ | 140K| -H |188K| - |-|-|
+|AM104| 140K|-H|188K| - |-|-|
+|AM107| 140K|-H|188K| - |-|-|
+|DuoDisk |140K|-H|188K| - |-|-|
+|FD-100| 140K|-H<br> -X<br>-H -X |188K<br>160K<br>216K|  -  |-|-|
+|Disk //c internal | 140K| -H |188K| - |-|-|
+|Disk //c external | 140K| -H |188K| - |-|-|
+|Rana I | 140K| -H |188K| - |-|-|
+|Rana II| 140K|-H<br> -X<br>-H -X |188K<br>160K<br>216K|  -  |-|-|
+|Rana III| 140K|-H<br> -X<br>-H -X |188K<br>160K<br>216K|  -  |-|-|
+|AE 5.25| 140K|-H<br> -X<br>-H -X |188K<br>160K<br>216K|  -  |-|-|
 
 ### GREP
 
