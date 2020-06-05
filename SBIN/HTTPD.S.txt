@@ -8,6 +8,7 @@ NEW
 				.INB inc/macros.i
 				.INB inc/a2osx.i
 				.INB inc/mli.i
+				.INB inc/mli.e.i
 				.INB inc/eth.i
 				.INB inc/libtcpip.i
 				.INB inc/net.http.i
@@ -19,10 +20,10 @@ CONN.MAX		.EQ 16
 				.OR ZPBIN
 ZS.START
 ZPPtr1			.BS 2
+ZPPtr2			.BS 2
 ZPSktPtr		.BS 2
 hFile			.BS 1
 hStr			.BS 1
-ZPStrPtr		.BS 2
 
 hSrvSocket		.BS 1
 TimeOut			.BS 1
@@ -34,12 +35,11 @@ ZPRootDirPtr	.BS 2
 
 hClntSocket		.BS 1
 
-hRequest		.BS 1
 ZPRequestPtr	.BS 2
 ZPnRequestLen	.BS 2
+ZPLinePtr		.BS 2
 
-hReply			.BS 1
-ZPReplyPtr		.BS 2
+ZPRepPtr		.BS 2
 
 ZS.END			.ED
 *--------------------------------------
@@ -65,11 +65,10 @@ CS.START		cld
 				.DA	CS.QUIT
 L.LIBTCPIP		.DA LIBTCPIP
 L.ETCHTTPDCONF	.DA ETCHTTPDCONF
-L.KEYWORDS		.DA KEYWORDS
-J.KEYWORDS		.DA CS.RUN.CONF.SERVERNAME
+L.KEYWORDS.CONF	.DA KEYWORDS.CONF
+J.KEYWORDS.CONF	.DA CS.RUN.CONF.SERVERNAME
 				.DA CS.RUN.CONF.LISTEN
 				.DA CS.RUN.CONF.DOCUMENTROOT
-				.DA CS.RUN.CONF.ADDTYPE
 L.SA.Local		.DA SA.Local
 L.MSG.TCPWAIT	.DA MSG.TCPWAIT
 L.MSG.TCPIPERR	.DA MSG.TCPIPERR
@@ -77,7 +76,18 @@ L.MSG.INITCONF	.DA MSG.INITCONF
 L.MSG.INITOK	.DA MSG.INITOK
 L.MSG.SKTERR	.DA MSG.SKTERR
 L.MSG.INCOMING	.DA MSG.INCOMING
-L.HTTP.200OK	.DA HTTP.200OK
+L.KEYWORDS.REQ	.DA KEYWORDS.REQ
+J.KEYWORDS.REQ	.DA CS.RUN.REQ.GET
+L.INDEX.HTML	.DA INDEX.HTML
+L.MIME.TYPES	.DA MIME.TYPES
+T.MIME			.DA MIME.HTML
+				.DA MIME.TXT
+				.DA MIME.ICO
+				.DA MIME.PNG
+				.DA MIME.JPG
+L.MIME.DEFAULT	.DA MIME.DEFAULT
+L.HTTP.200		.DA HTTP.200
+L.HTTP.404		.DA HTTP.404
 				.DA 0
 *--------------------------------------
 CS.INIT			>LDYA L.LIBTCPIP
@@ -140,7 +150,7 @@ CS.RUN.INIT		ldx #3
 				>SYSCALL GetMem
 				bcs CS.RUN.RTS
 				
-				>STYA ZPStrPtr
+				>STYA ZPLinePtr
 				stx hStr
 				
 				>PUSHW L.MSG.INITCONF
@@ -197,7 +207,7 @@ CS.RUN.CONF		>PUSHW L.ETCHTTPDCONF
 				sta hFile
 
 .1				>PUSHWI 256
-				>PUSHW ZPStrPtr
+				>PUSHW ZPLinePtr
 				lda hFile
 				>SYSCALL fgets
 				bcs .8
@@ -205,11 +215,11 @@ CS.RUN.CONF		>PUSHW L.ETCHTTPDCONF
 				tya
 				beq .1
 			
-				lda (ZPStrPtr)
+				lda (ZPLinePtr)
 				cmp #'#'
 				beq .1
 				
-				>LDYA L.KEYWORDS
+				>LDYA L.KEYWORDS.CONF
 				>STYA ZPPtr1
 				
 				ldx #0
@@ -217,7 +227,7 @@ CS.RUN.CONF		>PUSHW L.ETCHTTPDCONF
 .2				ldy #0
 				
 .3				lda (ZPPtr1),y
-				cmp	(ZPStrPtr),y
+				cmp	(ZPLinePtr),y
 				bne .4
 				
 				iny
@@ -263,14 +273,14 @@ CS.RUN.CONF		>PUSHW L.ETCHTTPDCONF
 *--------------------------------------
 CS.RUN.CONF.JMP	tya
 				clc
-				adc ZPStrPtr
+				adc ZPLinePtr
 				sta ZPPtr1
 				tay
 				lda #0
-				adc ZPStrPtr+1
+				adc ZPLinePtr+1
 				sta ZPPtr1+1
 				
-				jmp (J.KEYWORDS,x)		
+				jmp (J.KEYWORDS.CONF,x)		
 
 CS.RUN.CONF.SERVERNAME
 				>SYSCALL StrDup
@@ -297,9 +307,6 @@ CS.RUN.CONF.DOCUMENTROOT
 				stx hRootdir
 
 .9				rts
-CS.RUN.CONF.ADDTYPE
-				clc
-				rts
 *--------------------------------------
 CS.RUN.SERVER	lda hSrvSocket
 				>LIBCALL hLIBTCPIP,LIBTCPIP.accept
@@ -325,10 +332,15 @@ CS.RUN.SERVER	lda hSrvSocket
 				>SYSCALL PrintF
 
 				jsr CS.RUN.CLIENT
+				
 .8				clc
 .9				rts
 *--------------------------------------
-CS.RUN.CLIENT	
+CS.RUN.CLIENT	>STZ.G REQ.KeepAlive
+				>STA.G REQ.FullPath
+				>STA.G REQ.hFile
+				>STA.G REQ.hBuf
+
 .1				>SLEEP
 
 				lda hClntSocket
@@ -337,9 +349,78 @@ CS.RUN.CLIENT
 
 				tay
 				beq .1
-				bra .8
+				jmp .80
 
-.2				sta hRequest
+.2				jsr CS.RUN.REQ.GetFrame
+
+.3				jsr CS.RUN.REQ.GetLine
+				bcs .4
+	
+				>LDYA ZPLinePtr
+				>STYA ZPPtr2
+
+				>LDYA L.KEYWORDS.REQ
+				jsr CS.RUN.GET.KW
+				bcs .3
+				
+				jsr CS.RUN.REQ.JMP
+				bcc .3
+				bcs .9
+				
+.4				>LDA.G REQ.FullPath
+				beq .9
+				
+				>LDYAI 1024
+				>SYSCALL GetMem
+				bcs .9
+				
+				>STYA ZPRepPtr
+				txa
+				>STA.G REQ.hBuf
+				
+				jsr CS.RUN.OpenFile
+				bcs .9
+				
+				jsr CS.RUN.GetMime
+				bcs .9
+				
+				jsr CS.RUN.SendFile
+				bcc .5
+
+.9				>PUSHWI HTTP.404.len
+				>PUSHW L.HTTP.404
+				lda hClntSocket
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Send
+				bcs .80
+
+*				>STZ.G REQ.KeepAlive
+				
+.5				>LDA.G REQ.hFile
+				beq .6
+				
+				>SYSCALL FClose
+				
+.6				>LDA.G REQ.hBuf
+				beq .7
+				
+				>SYSCALL freemem
+				
+.7				>LDA.G REQ.hFrame
+				beq .8
+				
+				>SYSCALL FreeMem
+
+.8				>LDA.G REQ.KeepAlive
+				beq .80
+				jmp CS.RUN.CLIENT
+
+.80				lda hClntSocket
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Shutdown
+
+.99				rts
+*--------------------------------------
+CS.RUN.REQ.GetFrame
+				>STA.G REQ.hFrame
 				>SYSCALL GetMemPtr
 				>STYA ZPRequestPtr
 	
@@ -361,34 +442,12 @@ CS.RUN.CLIENT
 				clc
 				adc #S.TCP
 				sta ZPRequestPtr
-				bcc .3
+				bcc .8
 				
 				inc ZPRequestPtr+1
-
-.3				jsr CS.RUN.REQUEST.GetStr
-				bcs .7
-
-				>LDYA ZPStrPtr
-				>SYSCALL puts
-				bra .3
-
-*				jsr CS.RUN.REPLY.INIT
-
-*				lda hReply
-*				>SYSCALL FreeMem
-
-.7				>PUSHWI HTTP.200OK.len
-				>PUSHW L.HTTP.200OK
-				lda hClntSocket
-				>LIBCALL hLIBTCPIP,LIBTCPIP.Send
-				
-.8				lda hClntSocket
-				>LIBCALL hLIBTCPIP,LIBTCPIP.Shutdown
-
-				clc
-				rts
+.8				rts
 *--------------------------------------
-CS.RUN.REQUEST.GetStr
+CS.RUN.REQ.GetLine
 				ldy #0
 
 .1				inc ZPnRequestLen
@@ -417,19 +476,213 @@ CS.RUN.REQUEST.GetStr
 .31				eor #C.LF
 				bne .9
 
-				sta (ZPStrPtr),y		Y,A = StrLen
+				sta (ZPLinePtr),y		Y,A = StrLen
 				clc
 				rts
 				
-.4				sta (ZPStrPtr),y
+.4				sta (ZPLinePtr),y
 				iny
 				bra .1
 				
 .9				sec
 				rts
 *--------------------------------------
-CS.RUN.REPLY.INIT
+CS.RUN.OpenFile	>LEA.G REQ.FullPath
+				>SYSCALL puts
 
+				>PUSHEA.G REQ.FullPath
+				>PUSHBI	O.RDONLY
+				>PUSHBI 0				type
+				>PUSHWZ					Aux type
+				>SYSCALL FOpen
+				bcs .9
+				
+				txa
+				>STA.G REQ.hFile
+				
+				>PUSHA
+				>PUSHEA.G REQ.Stat
+				>SYSCALL FStat
+				
+.9				rts				
+*--------------------------------------
+CS.RUN.GetMime	>LEA.G REQ.FullPath
+				>STYA ZPPtr2
+
+				ldx #$ff
+				ldy #$ff
+	
+.1				iny
+				lda (ZPPtr2),y
+				beq .2
+				
+				cmp #'.'
+				bne .1
+				
+				tya
+				tax
+				bra .1
+
+.2				txa
+				bpl .3
+				
+				lda #MIME.DEFAULT.ID
+				bra .8
+				
+.3				sec
+
+				adc ZPPtr2
+				sta ZPPtr2
+				bcc .4
+				
+				inc ZPPtr2+1
+				
+.4				>LDYA L.MIME.TYPES
+				jsr CS.RUN.GET.KW
+				
+				txa
+				
+.8				>STA.G REQ.MimeType
+				
+				clc
+				rts
+*--------------------------------------
+CS.RUN.SendFile	>PUSHW ZPRepPtr
+				>PUSHW L.HTTP.200
+				>LDA.G REQ.MimeType
+				tax
+				>PUSHW T.MIME,x
+				>PUSHL.G REQ.Stat+S.STAT.SIZE
+				>PUSHBI 6
+				
+				>SYSCALL SPrintf
+				bcs .9
+				
+				jsr CS.RUN.SendBuf		Y,A = car count
+				
+.1				>PUSHWI 1024
+				>PUSHW ZPRepPtr
+				>LDA.G REQ.hFile
+				>SYSCALL fread
+				bcs .8
+				
+				jsr CS.RUN.SendBuf
+				bcc .1
+
+				rts
+				
+.8				cmp #MLI.E.EOF
+				bne .9
+
+				clc
+.9				rts
+*--------------------------------------
+CS.RUN.SendBuf	>PUSHYA
+				>PUSHW ZPRepPtr
+				lda hClntSocket
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Send
+				rts
+*--------------------------------------
+CS.RUN.REQ.JMP	jmp (J.KEYWORDS.REQ,x)
+*--------------------------------------
+CS.RUN.REQ.GET	ldy #0
+
+.1				iny
+				lda (ZPPtr2),y
+				
+				eor #C.SPACE
+				bne .1
+				
+				sta (ZPPtr2),y
+
+				lda (ZPPtr2)
+
+				cmp #'/'
+				bne .4
+				
+				>PUSHW ZPRootDirPtr
+				>LEA.G REQ.FullPath
+				>SYSCALL StrCpy
+
+				ldy #1
+				lda (ZPPtr2),y
+				bne .2
+				
+				>LDYA L.INDEX.HTML
+				bra .3
+				
+.2				>LDYA ZPPtr2
+				
+.3				>PUSHYA
+				>LEA.G REQ.FullPath
+				>SYSCALL StrCat
+				rts
+
+.4				>PUSHW ZPPtr2
+				>PUSHEA.G REQ.FullPath
+				>SYSCALL realpath
+.9				rts
+*--------------------------------------
+CS.RUN.REQ.Connection
+				lda (ZPPtr2)
+				eor #'k'
+				beq .1
+				
+				
+				lda #$ff
+				
+.1				>STA.G REQ.KeepAlive	
+
+				clc
+				rts
+*--------------------------------------
+CS.RUN.GET.KW	>STYA ZPPtr1
+
+				ldx #0
+
+.2				ldy #$ff
+				
+.3				iny
+				lda (ZPPtr1),y
+				cmp	(ZPPtr2),y
+				bne .4
+				
+				cmp #0
+				beq .33
+				
+				cmp #C.SPACE
+				bne .3
+				
+.33				tya
+				sec
+				adc ZPPtr2
+				sta ZPPtr2
+				bcc .8
+				inc ZPPtr2+1
+
+.8				clc
+				rts
+				
+.4				inx
+				inx
+				
+				ldy #0
+				
+.5				iny
+				lda (ZPPtr1),y
+				bne .5
+				
+				tya
+				sec
+				adc ZPPtr1
+				sta ZPPtr1
+				bcc .6
+				inc ZPPtr1+1
+				
+.6				lda	(ZPPtr1)
+				bne .2
+
+				sec
 				rts
 *--------------------------------------
 CS.DOEVENT		lda (pEvent)
@@ -467,10 +720,9 @@ hLIBTCPIP		.BS 1
 LIBTCPIP		.AZ "libtcpip"
 ETCHTTPDCONF	.AZ "${BOOT}etc/httpd.conf"
 *--------------------------------------
-KEYWORDS		.AS "ServerName "
+KEYWORDS.CONF	.AS "ServerName "
 				.AS "Listen "
 				.AS "DocumentRoot "
-				.AS "AddType "
 				.DA #0
 *--------------------------------------
 MSG.TCPWAIT		.AZ "HTTPD:Waiting for TCP/IP initializing..."
@@ -480,20 +732,53 @@ MSG.INITOK		.AZ "HTTPD:Listening on port %D, root dir: %s.\r\n"
 MSG.SKTERR		.AZ "HTTPD:Listen Error."
 MSG.INCOMING	.AZ "HTTPD:Incoming Connection [SKT=%h] From : %d.%d.%d.%d\r\n"
 *--------------------------------------
-HTTP.200OK		.AS "HTTP/1.1 200 OK"
+KEYWORDS.REQ	.AS "GET "
+				.AS "Connection: "
+				.DA #0
+*--------------------------------------
+INDEX.HTML		.AS "/index."			html
+*--------------------------------------
+MIME.TYPES		.AZ "html"
+				.AZ "txt"
+				.AZ "ttf"
+				.AZ "ico"
+				.AZ "png"
+				.AZ "jpg"
+				.DA #0
+MIME.HTML		.AZ "text/html"
+MIME.TXT		.AZ "text/plain"
+MIME.TTF		.AZ "font/truetype"
+MIME.ICO 		.AZ "image/vnd.microsoft.icon"			"image/x-icon"
+MIME.PNG		.AZ "image/png"
+MIME.JPG		.AZ "image/jpeg"
+MIME.DEFAULT	.AZ "application/octet-stream"
+MIME.DEFAULT.ID	.EQ 12
+*--------------------------------------
+HTTP.200		.AS "HTTP/1.1 200 OK"
+				.DA #C.CR,#C.LF
+				.AS "Server: A2osX-HTTPD 0.94"
+				.DA #C.CR,#C.LF
+				.AS "Content-Type: %s"
+				.DA #C.CR,#C.LF
+				.AS "Content-Length: %u"
+				.DA #C.CR,#C.LF
+				.DA #C.CR,#C.LF
+				.DA #0
+*--------------------------------------
+HTTP.404		.AS "HTTP/1.1 404 Not Found"
 				.DA #C.CR,#C.LF
 				.AS "Server: A2osX-HTTPD 0.94"
 				.DA #C.CR,#C.LF
 				.AS "Content-Type: text/html"
 				.DA #C.CR,#C.LF
-				.AS "Content-Length: 34"
+				.AS "Content-Length: 47"
 				.DA #C.CR,#C.LF
 				.AS "Connection: Close"
 				.DA #C.CR,#C.LF
 				.DA #C.CR,#C.LF
-				.AS "<HTML><BODY>Hello From A2osX-HTTPD 0.94 !</BODY></HTML>"
+				.AS "<HTML><BODY><B>404:NOT FOUND<B></BODY></HTML>"
 				.DA #C.CR,#C.LF
-HTTP.200OK.len	.EQ *-HTTP.200OK
+HTTP.404.len	.EQ *-HTTP.404
 *--------------------------------------
 SA.LOCAL		.DA #AF.INET			S.SOCKADDR.AF
 				.BS 1
@@ -503,6 +788,13 @@ SA.LOCAL		.DA #AF.INET			S.SOCKADDR.AF
 				.DUMMY
 				.OR 0
 DS.START
+REQ.FullPath	.BS MLI.MAXPATH+1
+REQ.Stat		.BS S.STAT
+REQ.hFrame		.BS 1
+REQ.hFile		.BS 1
+REQ.hBuf		.BS 1
+REQ.MimeType	.BS 1
+REQ.KeepAlive	.BS 1
 DS.END
 				.ED
 *--------------------------------------
