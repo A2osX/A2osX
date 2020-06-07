@@ -27,8 +27,8 @@ sector 			.EQ $3d
 BB.RetryCnt		.EQ $40
 BB.TargetTrk	.EQ $41
 
-BB.CurQTrk		.EQ $50
-BB.TargetQTrk	.EQ $51
+BB.CurrentQTrack	.EQ $50
+BB.TargetQTrack	.EQ $51
 
 BB.HdrPtr		.EQ $52
 
@@ -49,10 +49,10 @@ kernel 			.EQ $2000
 				.PH $800
 xboot 			.DA #1
 				sec 					apple iii enters xboot 'ora $38'
-				bcs BB.AppleII			branch if not apple iii native mode
+*				bcs BB.AppleII			branch if not apple iii native mode
+				bcc *
 *--------------------------------------
-BB.AppleIII		bcc *
-*				lda #$9f 				make apple iii boot using block 1
+*BB.AppleIII	lda #$9f 				make apple iii boot using block 1
 *				pha 					the return address is $a000
 *				lda #$ff
 *				pha
@@ -161,11 +161,12 @@ rddir 			jsr goread 				call read block routine.
 				lda sosid 				is it a prodos (sos) directory?	
 				ora sosid+1	
 bterr1 			bne booterr 			branch if not.	
-
+*--------------------------------------
 				lda #4 					begin look-up with first entry past header.	
-				bne nxdent1 			branch always	
-
+*				bne nxdent1 			branch always	
+				.HS 2C					BIT ABS
 nxdent 			lda idxl	
+
 nxdent1 		clc	
 				adc entlen 				bump to next directory entry.	
 				tay 					save in y for now.	
@@ -181,7 +182,7 @@ nxdent1 		clc
 				
 				ldy #4 					else, begin at block beginning.	
 				
-nxdent2 		sty idxl 				note: this method treats garbage at	
+nxdent2 		sty idxl
 
 				ldy #0
 				
@@ -194,9 +195,9 @@ lookpro 		lda (idxl),y 			look for matching name.
 				bne lookpro
 				
 				ldy #$10 				get file type & index block addr.	
-				lda (idxl),y	
-				cmp #S.FI.T.SYS			is it a system file?	
-				bne booterr	
+*				lda (idxl),y	
+*				cmp #S.FI.T.SYS			is it a system file?	
+*				bne booterr	
 				
 				iny	
 				lda (idxl),y	
@@ -231,7 +232,8 @@ bterr2 			bcs booterr
 
 				jmp kernel 				go execute kernel code.	
 *--------------------------------------
-booterr 		jsr clrscrn 			clear video
+booterr 		
+*				jsr clrscrn 			clear video
 *				ldy #BB.MSG.ERR.Len-1
 
 *.1	 			lda BB.MSG.ERR,y
@@ -255,7 +257,7 @@ endcode 		ldx slotz
 				clc	
 				rts	
 
-				jmp BB.Read	
+				jmp BB.Seek	
 *--------------------------------------
 *BB.MSG.ERR		.AS -"ERR"
 *BB.MSG.ERR.Len	.EQ *-BB.MSG.ERR
@@ -280,106 +282,123 @@ d2io 			lda blok 				figure out track & sector.
 				lsr 	
 				sta BB.TargetTrk
 
-				jsr BB.Trk2Qtrk
-				sta BB.TargetQTrk
-
 				lda buff+1	
 				sta dbuf+1
 				
 				ldx slotz	
 				lda IO.D2.DrvOn,x	
 
-				jsr BB.Read 			go read sector.	
+				jsr BB.Seek 			go read sector.	
 
 				inc dbuf+1 				bump address	
 				inc sector	
 				inc sector 				and sector #	
 				bcs quitrd 				branch if error.	
 
-				jsr BB.Read
+				jsr BB.Seek
 				
 quitrd 			ldy IO.D2.DrvOff,x	
 				rts 					return error status in carry.	
 *--------------------------------------
-BB.Read			lda BB.HdrTrk			get track we're on
+BB.Seek			lda BB.HdrTrk			get track we're on
 				jsr BB.Trk2Qtrk
-
-				sta BB.CurQTrk	
+				sta BB.CurrentQTrack	
 				
+				lda BB.TargetTrk
+				jsr BB.Trk2Qtrk
+				sta BB.TargetQTrack
+
 				ldy #0
-
-				beq .2
 				
-.1	 			lda BB.CurQTrk
-				jsr BB.PhaseOff
-				
-.2				ldx	BB.CurQTrk
-				cpx BB.TargetQTrk
+.1				lda	BB.TargetQTrack
+				sec
+				sbc BB.CurrentQTrack
 				beq .8
 				
-				bcs .3
+				bcc .2
 
-				inx
+* Current < Target, must move in
+
+				cmp #2
+				bcc .6				one QT remaining
+
+				lda BB.CurrentQTrack
+				and #$FE			from QT1 or QT3
+				inc
+				inc
+				bra .4
+
+* Current > Target, must move out
+
+.2				cmp #$FF
+				beq .6				one QT remaining
 				
-				.HS B0					BCS
+				lda BB.CurrentQTrack
+				bit #1				from QT1 or QT3
+				bne .3
 				
-.3	 			dex
+				dec
+.3				dec
 
-				stx BB.CurQTrk
+.4				sta BB.CurrentQTrack
+
+				and #6
+				ora slotz
+				tax
+				pha
+				tya
+				beq .5
 				
-				txa
-				jsr BB.PhaseOn
+				lda IO.D2.Ph0Off,y
 
-				lda #114
-				jsr BB.Wait100usecA		Trash X
+.5				lda IO.D2.Ph0On,x
+				ply
+			
+				lda #164
+				jsr BB.Wait100usecA
+				bra .1
 
-				iny
+* Last QTrack
 
-				bcs .1					CS from BB.MSWait
+.6				lda BB.TargetQTrack
+				and #6
+				ora slotz
+				tax
+				inc
+				inc
+				and #$F7
+				tay
+				lda IO.D2.Ph0On,x
+				lda IO.D2.Ph0On,y
+				
+.7				phx
+				jsr BB.Wait25600usec
+				plx
+				
+				lda IO.D2.Ph0Off,x
+				lda IO.D2.Ph0Off,y
+				bra BB.Read
 				
 .8				tya
-				beq seekend
-
-				lda #0					wait 25.6 ms
-				jsr BB.Wait100usecA		Trash X
+				beq BB.Read
 				
-				lda BB.TargetQTrk
-				jsr BB.PhaseOff
-				bcs seekend				CS from BB.MSWait
-*--------------------------------------
-BB.PhaseOff		clc
-				.HS B0					BCS
-*--------------------------------------
-BB.PhaseOn		sec
-
-				bit #1
-				beq .1
-				
-				php
-				pha
-				jsr .1
-				pla
-				inc
-				plp
-				
-.1				and #6					mask for 0,2,4,6
-
-				adc slotz				Slot $n0
 				tax
-				sta IO.D2.Ph0Off,x
-				nop
-
-				rts
+				bra .7
 *--------------------------------------
+BB.Wait25600usec
+				lda #0
 BB.Wait100usecA	sec						(6) JSR (2)
 				
-.1				ldx #19					(2)
+.1				ldx #18					(2)
 
 .2 				dex 					(2) 	delay 86 usec.	
 				bne .2					(2+)	2 + 5x16 + 2 + 2
 				
-				sbc #1	 				(2) 	done 'n' intervals?	
-				bne .1					(2+) 	a-reg counts
+*				ldx slotz				(3)
+*				bit IO.D2.RData,x		(4) Slow down ACC boards
+
+				sbc #1	 				(2)
+				bne .1					(2+)
 
 				rts						(6)
 *--------------------------------------
@@ -394,7 +413,7 @@ BB.Trk2Qtrk		asl						x2
 .1				adc #$ff				SELF MODIFIED
 BB.Trk2Qtrk.RTS	rts
 *--------------------------------------
-seekend 		ldx slotz
+BB.Read 		ldx slotz
 
 				ldy #$7f 				allow 127 mistakes.	
 				sty BB.RetryCnt	
@@ -541,7 +560,7 @@ zzzend 			ldx slotz
 				rts	
 
 chg5 			.EQ *-chg5a
-goseek 			jmp BB.Read
+goseek 			jmp BB.Seek
 				.ED
 *--------------------------------------
 				.LIST ON

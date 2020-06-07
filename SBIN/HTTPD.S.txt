@@ -23,7 +23,7 @@ ZPPtr1			.BS 2
 ZPPtr2			.BS 2
 ZPSktPtr		.BS 2
 hFile			.BS 1
-hStr			.BS 1
+hLineBuf		.BS 1
 
 hSrvSocket		.BS 1
 TimeOut			.BS 1
@@ -32,8 +32,6 @@ hSrvName		.BS 1
 ZPSrvNamePtr	.BS 2
 hRootdir		.BS 1
 ZPRootDirPtr	.BS 2
-
-hClntSocket		.BS 1
 
 ZPRequestPtr	.BS 2
 ZPnRequestLen	.BS 2
@@ -76,6 +74,8 @@ L.MSG.INITCONF	.DA MSG.INITCONF
 L.MSG.INITOK	.DA MSG.INITOK
 L.MSG.SKTERR	.DA MSG.SKTERR
 L.MSG.INCOMING	.DA MSG.INCOMING
+L.MSG.REQ		.DA MSG.REQ
+L.MSG.SKTCLOSE	.DA MSG.SKTCLOSE
 L.KEYWORDS.REQ	.DA KEYWORDS.REQ
 J.KEYWORDS.REQ	.DA CS.RUN.REQ.GET
 L.INDEX.HTML	.DA INDEX.HTML
@@ -137,7 +137,7 @@ CS.RUN.SYN
 				lda #E.SYN
 				sec	
 CS.RUN.RTS		rts
-
+*--------------------------------------
 CS.RUN.INIT		ldx #3
 				ldy #S.IPCFG.IP+3
 
@@ -152,7 +152,7 @@ CS.RUN.INIT		ldx #3
 				bcs CS.RUN.RTS
 				
 				>STYA ZPLinePtr
-				stx hStr
+				stx hLineBuf
 				
 				>PUSHW L.MSG.INITCONF
 				>PUSHW L.ETCHTTPDCONF
@@ -186,17 +186,17 @@ CS.RUN.INIT		ldx #3
 				>PUSHBI 4 
 				
 				>SYSCALL PrintF
-
+*--------------------------------------
 CS.RUN.LOOP		>SLEEP
 				jsr CS.RUN.SERVER
 				bcs CS.RUN.ERR
 				bra CS.RUN.LOOP
 
-.9				>LDYA L.MSG.SKTERR
+CS.RUN.ERR		>LDYA L.MSG.SKTERR
 				>SYSCALL PutS
 				lda #E.SYN
 				sec	
-CS.RUN.ERR		rts
+				rts
 *--------------------------------------
 CS.RUN.CONF		>PUSHW L.ETCHTTPDCONF
 				>PUSHBI	O.RDONLY+O.TEXT
@@ -313,16 +313,16 @@ CS.RUN.SERVER	lda hSrvSocket
 				>LIBCALL hLIBTCPIP,LIBTCPIP.accept
 				bcs .8
 				
-				sta hClntSocket
+				>STA.G CLN.hSocket
 				>SYSCALL GetMemPtr
 				>STYA ZPSktPtr
 
 				>PUSHW L.MSG.INCOMING
 
+				>PUSHB.G CLN.hSocket
+
 				ldx #3
 				ldy #S.SOCKET.REM.ADDR
-
-				>PUSHB hClntSocket
 
 .1				>PUSHB (ZPSktPtr),y
 				iny
@@ -335,24 +335,35 @@ CS.RUN.SERVER	lda hSrvSocket
 				jsr CS.RUN.CLIENT
 				
 .8				clc
-.9				rts
+.9
+CS.RUN.SERVER.RTS
+				rts
 *--------------------------------------
-CS.RUN.CLIENT	>STZ.G REQ.KeepAlive
-				>STA.G REQ.FullPath
+CS.RUN.CLIENT	>LDYAI 1024
+				>SYSCALL GetMem
+				bcs CS.RUN.SERVER.RTS
+				
+				>STYA ZPRepPtr
+				txa
+				>STA.G REQ.hBuf
+				
+.10				>STZ.G REQ.FullPath
+				>STA.G REQ.hReq
+				>STA.G REQ.KeepAlive
 				>STA.G REQ.hFile
 				>STA.G REQ.hBuf
 
 .1				>SLEEP
 
-				lda hClntSocket
+				>LDA.G CLN.hSocket
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Recv
 				bcc .2
 
 				tay
 				beq .1
-				jmp .80
+				jmp .90
 
-.2				jsr CS.RUN.REQ.GetFrame
+.2				jsr CS.RUN.REQ.GetReq
 
 .3				jsr CS.RUN.REQ.GetLine
 				bcs .4
@@ -371,28 +382,17 @@ CS.RUN.CLIENT	>STZ.G REQ.KeepAlive
 .4				>LDA.G REQ.FullPath
 				beq .9
 				
-				>LDYAI 1024
-				>SYSCALL GetMem
-				bcs .9
-				
-				>STYA ZPRepPtr
-				txa
-				>STA.G REQ.hBuf
-				
 				jsr CS.RUN.OpenFile
-				bcs .9
-				
-				jsr CS.RUN.GetMime
 				bcs .9
 				
 				jsr CS.RUN.SendFile
 				bcc .5
+				bra .90
 
 .9				>PUSHWI HTTP.404.len
 				>PUSHW L.HTTP.404
-				lda hClntSocket
+				>LDA.G CLN.hSocket
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Send
-				bcc .5
 
 				>STZ.G REQ.KeepAlive
 				
@@ -401,29 +401,40 @@ CS.RUN.CLIENT	>STZ.G REQ.KeepAlive
 				
 				>SYSCALL FClose
 				
-.6				>LDA.G REQ.hBuf
-				beq .7
-				
-				>SYSCALL freemem
-				
-.7				>LDA.G REQ.hFrame
+.6				>LDA.G REQ.hReq
 				beq .8
 				
 				>SYSCALL FreeMem
 
 .8				>LDA.G REQ.KeepAlive
-				beq .80
-				jmp CS.RUN.CLIENT
+				beq .90
+				jmp .10
 
-.80				lda hClntSocket
+.90				>LDA.G REQ.hBuf
+				beq .91
+				
+				>SYSCALL freemem
+				
+.91				>PUSHW L.MSG.SKTCLOSE
+				>PUSHB.G CLN.hSocket
+				>PUSHBI 1
+				>SYSCALL printf
+				
+				>LDA.G CLN.hSocket
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Shutdown
 
 .99				rts
 *--------------------------------------
-CS.RUN.REQ.GetFrame
-				>STA.G REQ.hFrame
+CS.RUN.REQ.GetReq
+				>STA.G REQ.hReq
 				>SYSCALL GetMemPtr
 				>STYA ZPRequestPtr
+	
+				>PUSHW L.MSG.REQ
+				>PUSHB.G REQ.hReq
+				>PUSHB.G CLN.hSocket
+				>PUSHBI 2
+				>SYSCALL printf
 	
 				ldy #S.IP.TOTAL.LENGTH+1
 				lda (ZPRequestPtr),y
@@ -505,9 +516,7 @@ CS.RUN.OpenFile	>LEA.G REQ.FullPath
 				>PUSHEA.G REQ.Stat
 				>SYSCALL FStat
 				
-.9				rts				
-*--------------------------------------
-CS.RUN.GetMime	>LEA.G REQ.FullPath
+				>LEA.G REQ.FullPath
 				>STYA ZPPtr2
 
 				ldx #$ff
@@ -546,7 +555,7 @@ CS.RUN.GetMime	>LEA.G REQ.FullPath
 .8				>STA.G REQ.MimeType
 				
 				clc
-				rts
+.9				rts
 *--------------------------------------
 CS.RUN.SendFile	>PUSHW ZPRepPtr
 				>PUSHW L.HTTP.200
@@ -580,7 +589,7 @@ CS.RUN.SendFile	>PUSHW ZPRepPtr
 *--------------------------------------
 CS.RUN.SendBuf	>PUSHYA
 				>PUSHW ZPRepPtr
-				lda hClntSocket
+				>LDA.G CLN.hSocket
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Send
 				rts
 *--------------------------------------
@@ -700,7 +709,7 @@ CS.QUIT			lda hSrvSocket
 				
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Shutdown
 
-.1				lda hStr
+.1				lda hLineBuf
 				beq .2
 				
 				>SYSCALL FreeMem
@@ -730,8 +739,10 @@ MSG.TCPWAIT		.AZ "HTTPD:Waiting for TCP/IP initializing..."
 MSG.TCPIPERR	.AZ "HTTPD:TCP/IP Not initialized properly."
 MSG.INITCONF	.AZ "HTTPD:Reading %s file...\r\n"
 MSG.INITOK		.AZ "HTTPD:Listening on port %D, root dir: %s.\r\n"
-MSG.SKTERR		.AZ "HTTPD:Listen Error."
-MSG.INCOMING	.AZ "HTTPD:Incoming Connection [SKT=%h] From : %d.%d.%d.%d\r\n"
+MSG.SKTERR		.AZ "HTTPD:Skt Bind Error."
+MSG.INCOMING	.AZ "HTTPD:Skt $%h Opened From %d.%d.%d.%d\r\n"
+MSG.REQ			.AZ "HTTPD:Req $%h From Skt $%h\r\n"
+MSG.SKTCLOSE	.AZ "HTTPD:Skt $%h Close\r\n"
 *--------------------------------------
 KEYWORDS.REQ	.AS "GET "
 				.AS "Connection: "
@@ -791,11 +802,12 @@ SA.LOCAL		.DA #AF.INET			S.SOCKADDR.AF
 DS.START
 REQ.FullPath	.BS MLI.MAXPATH+1
 REQ.Stat		.BS S.STAT
-REQ.hFrame		.BS 1
+REQ.hReq		.BS 1
 REQ.hFile		.BS 1
 REQ.hBuf		.BS 1
 REQ.MimeType	.BS 1
 REQ.KeepAlive	.BS 1
+CLN.hSocket		.BS 1
 DS.END
 				.ED
 *--------------------------------------

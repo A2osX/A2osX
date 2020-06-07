@@ -182,9 +182,9 @@ CS: A = EC
 CC: Y,A = bytes written  
 CS: A = EC  
 
-# Recv (RAW,DGRAM,SEQPACKET)  
+# Recv (RAW,DGRAM,SEQPKT)  
 
-# RecvFrom (RAW,DGRAM,SEQPACKET)  
+# RecvFrom (RAW,DGRAM,SEQPKT)  
 
 ## C  
 `hMem recv(hFD fd);`  
@@ -200,9 +200,9 @@ CS: A = EC
 CC: A = hMem  
 CS: A = EC  
 
-# Send (RAW,DGRAM,SEQPACKET)  
+# Send (RAW,DGRAM,SEQPKT)  
 
-# SendTo (RAW,DGRAM,SEQPACKET)  
+# SendTo (RAW,DGRAM,SEQPKT)  
 
 ## C  
 `int skt.send(hFD fd, const void *buf, int count);`  

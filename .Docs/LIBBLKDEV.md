@@ -3,6 +3,29 @@
 ## Copyright 
 Copyright 2015 - 2020, Remy Gibert and the A2osX contributors. 
 
+# D2TrkWrite16s  
+Write a track (16 sectors)  
+**In:**  
+ PUSHB = DSSS0000  
+ PUSHB = TrackNum * 4	: 0->136+	  
+ PUSHW = Ptr to 16*256 buffer  
+
+## RETURN VALUE  
+ CC : success  
+ CS : A = Error  
+      A=0, currently starting/seeking...  
+
+# D2TrkWriteNIB  
+Write a track (NIBBLE)  
+**In:**  
+ PUSHB = DSSS0000  
+ PUSHW = Ptr to NIBBLE buffer (0 ended)  
+
+## RETURN VALUE  
+ CC : success  
+ CS : A = Error  
+      A=0, currently starting/seeking...  
+
 # GetProDOSCatSize  
  Compute space needed for ProDOS Catalog  
 
@@ -34,30 +57,6 @@ int getprodoscatsize (short int options, short int catsize, int devsize );
   absolute MAX DstBuf size=  
   7 for Disk II(280blk),3.5(1600),3.5HD(2880)  
   22 for 32mb Hardisk...  
-
-# D2TrkW16s  
-Write a track (16 sectors)  
-**In:**  
- PUSHW = Ptr to 16*256 buffer  
- PUSHB = TrackNum * 4	: 0->140+	  
- PUSHB = DSSS0000  
-
-## RETURN VALUE  
- CC : success  
- CS : A = Error  
-      A=0, currently starting/seeking...  
-
-# D2TrkWNIB  
-Write a track (NIBBLE)  
-**In:**  
- PUSHW = Ptr to NIBBLE buffer (0 ended)  
- PUSHB = TrackNum * 4	: 0->140+	  
- PUSHB = DSSS0000  
-
-## RETURN VALUE  
- CC : success  
- CS : A = Error  
-      A=0, currently starting/seeking...  
 
 ## License
 A2osX is licensed under the GNU General Public License.

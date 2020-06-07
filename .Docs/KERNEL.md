@@ -85,7 +85,7 @@ X = hDev
 `int getdevstatus(short int DevID, S.DIB *dstat);`  
 
 ## ASM  
-`PUSHB DevID`  
+`>PUSHB DevID`  
 `>PUSHW S.DIB`  
 `>SYSCALL GetDevStatus`  
 
@@ -100,7 +100,7 @@ Create a hDEV
 ## ASM  
 `>PUSHW fd`  
 `>PUSHW devname`  
-`>SYSCALL mkdev  
+`>SYSCALL mkdev`  
 
 ## RETURN VALUE  
  A = hDEV  
@@ -108,7 +108,7 @@ Create a hDEV
 # IOCTL  
 
 ## C  
-`int ioctl(short int DevID, int request, void * param );`  
+`int ioctl(short int DevID, short int request, void *param);`  
 
 ## ASM  
 `>PUSHB hDEV`  
@@ -125,7 +125,7 @@ Create a hDEV
 `int hDIR opendir (const char * dirpath);`  
 
 ## ASM  
-`>PUSHW dirpath`  
+`>LDYA dirpath`  
 `>SYSCALL opendir`   
 
 ## RETURN VALUE   
@@ -171,7 +171,6 @@ Change or add an environment variable
 `int setenv(const char *name, const char *value);`  
 
 ## ASM  
-**In:**  
 `>PUSHW name`  
 `>PUSHW value`  
 `>SYSCALL setenv`  
@@ -186,7 +185,6 @@ and returns a pointer to the corresponding value string.
 `char *getenv(const char *name, char *value);`  
 
 ## ASM  
-**In:**  
 `>PUSHW name`  
 `>PUSHW value`  
 `>SYSCALL getenv`  
@@ -215,7 +213,6 @@ Remove an environment variable
 `int unsetenv(const char *name);`  
 
 ## ASM  
-**In:**  
 `>PUSHW name`  
 `>SYSCALL unsetenv`  
 
@@ -550,29 +547,6 @@ CS : not found
 
 ## RETURN VALUE  
 
-# GetPWName  
-
-## C  
-`int getpwname(const char* name, S.PW *passwd);`  
-
-## ASM  
-`>PUSHW name`  
-`>PUSHW passwd`  
-`>SYSCALL getpwname`  
-
-## RETURN VALUE  
-
-# PutPW  
-
-## C  
-`int putpw( S.PW* passwd );`  
-
-## ASM  
-`>PUSHW passwd`  
-`>SYSCALL putpw`  
-
-## RETURN VALUE  
-
 # GetGRGID  
 
 ## C  
@@ -581,6 +555,18 @@ CS : not found
 ## ASM  
 `>PUSHB gid`  
 `>PUSHW group`  
+`>SYSCALL getpwname`  
+
+## RETURN VALUE  
+
+# GetPWName  
+
+## C  
+`int getpwname(const char* name, S.PW *passwd);`  
+
+## ASM  
+`>PUSHW name`  
+`>PUSHW passwd`  
 `>SYSCALL getpwname`  
 
 ## RETURN VALUE  
@@ -597,6 +583,17 @@ CS : not found
 
 ## RETURN VALUE  
 
+# PutPW  
+
+## C  
+`int putpw( S.PW* passwd );`  
+
+## ASM  
+`>PUSHW passwd`  
+`>SYSCALL putpw`  
+
+## RETURN VALUE  
+
 # PutGR  
 
 ## C  
@@ -605,6 +602,29 @@ CS : not found
 ## ASM  
 `>PUSHW group`  
 `>SYSCALL putgr`  
+
+## RETURN VALUE  
+
+# OpenSession  
+
+## C  
+`short int hSID opensession(const char *name, const char *passwd);`  
+
+## ASM  
+`>PUSHW name`  
+`>PUSHW passwd`  
+`>SYSCALL OpenSession`  
+
+## RETURN VALUE  
+
+# CloseSession  
+
+## C  
+`int closesession(short int hSID);`  
+
+## ASM  
+`>PUSHB hSID`  
+`>SYSCALL CloseSession`  
 
 ## RETURN VALUE  
 
@@ -649,7 +669,7 @@ CS : not found
 ## ASM  
 `>PUSHB hSList`  
 `>PUSHW KeyID`  
-`>PUSHW DataPtr`  
+`>PUSHW KeyPtr`  
 `>SYSCALL SListGetByID`  
 
 ## RETURN VALUE  
@@ -700,7 +720,6 @@ Change The type of a ProDOS File
 `int chtyp(const char *filepath, short int filetype);`  
 
 ## ASM  
-**In:**  
 `>PUSHW filepath`  
 `>PUSHB filetype`  
 `>SYSCALL chtyp`  
@@ -714,7 +733,6 @@ Return information about a file
 `int stat(const char *pathname, struct stat *statbuf);`  
 
 ## ASM  
-**In:**  
 `>PUSHW pathname`  
 `>PUSHW statbuf`  
 `>SYSCALL stat`  
@@ -728,7 +746,6 @@ create a directory
 `int mkdir(const char *pathname, int mode);`  
 
 ## ASM  
-**In:**   
 `>PUSHW pathname`  
 `>PUSHW mode`  
 `>SYSCALL mkdir`  
@@ -742,17 +759,16 @@ A = EC
 return a pathname to a new FIFO  
 
 ## C  
-`int mkfifo( char *pathname, int mode );`  
+`hFILE mkfifo(const char *pathname, int mode);`  
 
 ## ASM  
-**In:**   
+`>PUSHW pathname`  
 `>PUSHW mode`  
-`>LDYA pathname`  
 `>SYSCALL mkfifo`  
 
 ## RETURN VALUE  
 CC = OK, CS = ERROR  
-A = hFD  
+A = hFILE  
 
 # MkNod  
 Create a special or ordinary file.  
@@ -762,10 +778,9 @@ Create a special or ordinary file.
 `hFILE mknod(const char *pathname, int mode, hFD fd);`  
 
 ## ASM  
-**In:**   
-`>PUSHB fd`  
+`>PUSHW pathname`  
 `>PUSHW mode`  
-`>LDYA pathname`  
+`>PUSHB fd`  
 `>SYSCALL mknod`  
 
 ## RETURN VALUE  
@@ -789,7 +804,7 @@ A = hFD
 Print A (char) to StdOut  
 
 ## C  
-`int putchar ( int character );`  
+`int putchar ( short int character );`  
 
 ## ASM  
 **In:**  
@@ -803,7 +818,7 @@ CC = success
 Print A (char) to hFILE  
 
 ## C  
-`int fputc ( hFILE stream , int character );`  
+`int fputc ( hFILE stream , short int character );`  
 
 ## ASM  
 **In:**  
@@ -823,7 +838,7 @@ Write Str to StdOut, appends '\r\n'
 
 ## ASM  
 `>LDYAI str`  
-`>SYSCALL puts`  
+`>SYSCALL PutS`  
 
 ## RETURN VALUE   
 CC = success  
@@ -933,7 +948,7 @@ int fclose ( hFILE stream );
 ## ASM  
 **In:**  
 `lda stream`  
-`>SYSCALL fclose`  
+`>SYSCALL FClose`  
 
 ## RETURN VALUE  
 
@@ -1031,7 +1046,7 @@ int remove(const char *pathname);
 
 ## ASM  
 **In:**  
-`>PUSHW pathname`  
+`>LDYA pathname`  
 `>SYSCALL remove`  
 
 ## RETURN VALUE  
@@ -1069,7 +1084,7 @@ PrintF : (example is for printing Y,A as integer : format="%I", 2 bytes)
 `>PUSHW i`  
 `...`  
 `>PUSHBI 2`	#bytecount  
-`>SYSCALL printf`  
+`>SYSCALL PrintF`  
 FPrintF :   
 `>PUSHB hFILE`  
 `>PUSHW format`  
@@ -1172,7 +1187,7 @@ TODO : %10s
 ## RETURN VALUE  
 A = Number of arguments filled.  
 
-# strtof  
+# StrToF  
 Convert String to 40 bits Float  
 
 ## C  
@@ -1180,9 +1195,9 @@ Convert String to 40 bits Float
 
 ## ASM  
 **In:**  
+`>PUSHW str`  
 `>PUSHWI EndPtr`  
-`>LDYA str`  
-`>SYSCALL strtof`  
+`>SYSCALL StrToF`  
 
 ## RETURN VALUE  
 On stack (float)  
@@ -1213,7 +1228,7 @@ Convert String to 32 bits (unsigned) int
 `>PUSHW str`  
 `>PUSHW EndPtr`  
 `>PUSHB Base`  
-`>SYSCALL strtol`  
+`>SYSCALL StrToL`  
 
 ## RETURN VALUE  
 On stack (long)  
@@ -1385,15 +1400,6 @@ CS : no match
  CC, Y,A=0  
  CS, Y,A > 0 or < 0  
 
-# StrVShift  
-
-## ASM  
-`>PUSHB hSTRV`  
-`>PUSHB index`  
-`>SYSCALL StrVShift`  
-
-## RETURN VALUE  
-
 # StrVGet  
 
 ## ASM  
@@ -1405,6 +1411,15 @@ CS : no match
 ## RETURN VALUE  
  CC: Y,A = Ptr  
  CS: Y,A = NULL  
+
+# StrVShift  
+
+## ASM  
+`>PUSHB hSTRV`  
+`>PUSHB index`  
+`>SYSCALL StrVShift`  
+
+## RETURN VALUE  
 
 # StrVAdd  
 
@@ -1486,20 +1501,6 @@ Convert S.TIME struct to CSTR
 
 ## RETURN VALUE  
 
-# ChOwn  
-
-## C  
- `short int chown(const char *pathname, short int owner, short int group);`  
-
-## ASM  
-**In:**  
-`>PUSHW pathname`  
-`>PUSHB owner`  
-`>PUSHB group`  
-`>SYSCALL chown`  
-
-## RETURN VALUE  
-
 # open  
 
 ## C  
@@ -1556,6 +1557,20 @@ CS: A = EC
 ## RETURN VALUE  
 CC: Y,A = bytes written  
 CS: A = EC  
+
+# ChOwn  
+
+## C  
+ `short int chown(const char *pathname, short int owner, short int group);`  
+
+## ASM  
+**In:**  
+`>PUSHW pathname`  
+`>PUSHB owner`  
+`>PUSHB group`  
+`>SYSCALL chown`  
+
+## RETURN VALUE  
 
 ## License
 A2osX is licensed under the GNU General Public License.
