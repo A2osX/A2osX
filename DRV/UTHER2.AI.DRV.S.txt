@@ -279,20 +279,6 @@ OPEN.I			jsr CLOSE
 				lda #W5100.MR.PB+W5100.MR.AI+W5100.MR.IND
 				sta W5100.MR,x
 
-				>AR.SELECT SHAR
-				ldy	#0
-
-.1				lda DCB+S.DCB.NIC.MAC,y
-				sta W5100.DR,x
-				iny
-				cpy #6
-				bne .1
-
-				>AR.SELECT RMSR
-				lda #%00100101		ICMP=2k,UDP=2k,TCP=4k,0k
-				sta W5100.DR,x		...for Socket RX Buffers
-				sta W5100.DR,x		...for Socket TX Buffers
-
 				>AR.SELECT GAR
 
 				ldy #0
@@ -313,7 +299,16 @@ OPEN.I			jsr CLOSE
 				cpy #4
 				bne .3
 
-				>AR.SELECT SIPR
+*				>AR.SELECT SHAR
+				ldy	#0
+
+.1				lda DCB+S.DCB.NIC.MAC,y
+				sta W5100.DR,x
+				iny
+				cpy #6
+				bne .1
+
+*				>AR.SELECT SIPR
 
 				ldy #0
 
@@ -323,15 +318,20 @@ OPEN.I			jsr CLOSE
 				cpy #4
 				bne .4
 				
+				>AR.SELECT RMSR
+				lda #%00100101		ICMP=2k,UDP=2k,TCP=4k,0k
+				sta W5100.DR,x		...for Socket RX Buffers
+				sta W5100.DR,x		...for Socket TX Buffers
+
 				lda /W5100.AR.S0.MR
 				sta Sn.IO
 				
-				ldy #S.IP.PROTOCOL.ICMP
+				ldy #S.IP.PROTOCOL.UDP
 				jsr OPEN.SnY
 				
 				inc Sn.IO
 				
-				ldy #S.IP.PROTOCOL.UDP
+				ldy #S.IP.PROTOCOL.ICMP
 				jsr OPEN.SnY
 				
 				inc Sn.IO
@@ -412,7 +412,7 @@ READ			php
 				jmp READWRITE.NODATA
 
 .1				lda Sn.IP.PROTOCOL,y
-				sta .15+1
+				sta FRM.HDR.PROTO
 				lda Sn.RX.BASE,y
 				sta Sn.BASE
 				lda Sn.RXTX.MASK,y
@@ -469,7 +469,16 @@ READ			php
 				bcc .11
 				inc RXTX.Size+1
 
-.11				>LDYA BUF.Size
+.11				lda RXTX.Size
+				clc
+				adc #S.IP-S.ETH.EII
+				sta FRM.HDR.IPLEN+1
+				
+				lda RXTX.Size+1
+				adc /S.IP-S.ETH.EII
+				sta FRM.HDR.IPLEN
+
+				>LDYA BUF.Size
 				>SYSCALL2 getmem
 				bcc .14
 
@@ -484,28 +493,32 @@ READ			php
 				dey
 				pla
 				sta (ZPIOCTL),y
+				
+				ldy #S.ETH.EII.TYPE
+				
+.15				lda FRM.HDR-S.ETH.EII.TYPE,y
+				sta (ZPBufPtr),y
+				iny
+				cpy #S.ETH.EII.TYPE+FRM.HDR.LEN
+				bne .15
 
-.15				lda #$ff				SELF MODIFIED
-*				ldy #S.IP.PROTOCOL
-*				sta (ZPBufPtr),y
+				ldx #3
+				ldy #S.IP.SRC+3
 
-*				ldx #3
-*				ldy #S.IP.SRC+3
+.12				lda RX.IP,x
+				sta (ZPBufPtr),y
+				dey
+				dex
+				bpl .12
 
-*.12				lda RX.IP,x
-*				sta (ZPBufPtr),y
-*				dey
-*				dex
-*				bpl .12
+				ldx #3
+				ldy #S.IP.DST+3
 
-*				ldx #3
-*				ldy #S.IP.DST+3
-
-*.13				lda DCB+S.DCB.NIC.IP,x
-*				sta (ZPBufPtr),y
-*				dey
-*				dex
-*				bpl .13
+.13				lda DCB+S.DCB.NIC.IP,x
+				sta (ZPBufPtr),y
+				dey
+				dex
+				bpl .13
 
 				ldy #S.IP
 
@@ -677,11 +690,13 @@ GET.IOCTLBUFPTR	>STYA ZPIOCTL
 *--------------------------------------
 DRV.CS.END
 Sn.cnt			.EQ 3
-Sn.IP.PROTOCOL	.DA #S.IP.PROTOCOL.ICMP,#S.IP.PROTOCOL.UDP,#S.IP.PROTOCOL.TCP
+				.LIST ON
+Sn.IP.PROTOCOL	.DA #S.IP.PROTOCOL.UDP,#S.IP.PROTOCOL.ICMP,#S.IP.PROTOCOL.TCP
 Sn.IO.BASE		.DA /W5100.AR.S0.MR,/W5100.AR.S1.MR,/W5100.AR.S2.MR
 Sn.TX.BASE		.DA /TX.BASE,/TX.BASE+$800,/TX.BASE+$1000
 Sn.RX.BASE		.DA /RX.BASE,/RX.BASE+$800,/RX.BASE+$1000
-Sn.RXTX.MASK	.DA /$7FF,/$FFF,/$1FFF	2k,2k,4k
+Sn.RXTX.MASK	.DA /$7FF,/$7FF,/$FFF	2k-1,2k-1,4k-1
+				.LIST OFF
 DEVSLOTx0		.BS 1
 *--------------------------------------
 DIB				.DA #0
@@ -699,6 +714,18 @@ DCB				.DA #S.DCB.T.NIC
 				.DA #0,#0,#0,#0			IP
 				.DA #255,#255,#255,#255	MASK
 				.DA #0,#0,#0,#0			GW
+*--------------------------------------
+FRM.HDR			.HS 0800				S.ETH.EII.TYPE
+				.HS 4500
+FRM.HDR.IPLEN	.BS 2					TOTAL LEN
+				.DA 0					ID
+				.DA 0					FLAGS
+				.DA #64					TTL
+FRM.HDR.PROTO	.BS 1					IP.PROTO
+				.DA 0					CHECKSUM
+FRM.HDR.LEN		.EQ *-FRM.HDR
+*FRM.HDR.SRC	.BS 4					IP.SRC
+*				.BS 4					IP.DST
 *--------------------------------------
 DRV.END
 MAN

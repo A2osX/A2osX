@@ -97,8 +97,8 @@ L59BD  			ldx A2L
 *--------------------------------------
 * read/write a track/sector
 
-regrwts			ldy #$01				retry count
-				sty XRW.Recalibrate		only one recalibrate per call
+regrwts			ldy #3
+				sty XRW.RecalibrateCnt
 				sta XRW.ReqSector
 
 * now check if the motor is on, then start it
@@ -167,7 +167,7 @@ L538E  			lda A4L					get command #
 				bcs L5398				must prenibblize for write
 
 				jsr XRW.PreNibble
-
+*--------------------------------------
 L5398  			ldy #64
 				sty XRW.RetryCnt
 				
@@ -177,66 +177,44 @@ L539D  			jsr XRW.ReadAddr		read next address field.
 L53A4  			dec XRW.RetryCnt	 	one less chance.
 				bpl L539D				branch to retry.
 
-				lda #MLI.E.IO  			anticipate a bad drive error.
-				dec XRW.Recalibrate		can only recalibrate once.
-				bne hndlerr
+XRW.Recalibrate	lda #MLI.E.IO  			anticipate a bad drive error.
+				dec XRW.RecalibrateCnt	can only recalibrate once.
+				bmi hndlerr
 
-				lda XRW.CurrentTrack
-				pha		  				save track
-
-				clc
-				adc #8		   			pretend track is 12 > curtrk
-
-				ldy #64
-				sty XRW.RetryCnt	  	reset retries to 64 max.
-				bra L53CC				always.
+				lda #54
+				ldy XRW.UnitIndex
+				sta XRW.D2Trk-1,y
+				lda #0
+				jsr XRW.Seek
+				bra L5398
 
 * have now read an address field. make sure this is
 * the correct track, sector and volume.
 
-L53BE  			ldy XRW.AddrField.T
-				cpy XRW.CurrentTrack
+L53BE  			jsr XRW.DEBUG
+
+				lda XRW.AddrField.T
+				cmp XRW.ReqTrack
 				beq L53D5				ok
 
-			tya
-			pha
-			lsr
-			lsr
-			lsr
-			lsr
-			ora #$30	
-			sta $724
-			pla
-			ora #$30	
-			sta $725
-			lda XRW.CurrentTrack
-			pha
-			lsr
-			lsr
-			lsr
-			lsr
-			ora #$B0	
-			sta $726
-			pla
-			ora #$B0	
-			sta $727
+				lda XRW.AddrField.V
+				ldy XRW.UnitIndex
+				cmp XRW.D2VolNum-1,y
+				bne XRW.Recalibrate
 
-* recalibrating from this track
-
-				lda XRW.CurrentTrack	preserve destination track
-				pha
-				tya
-				
-L53CC			ldy XRW.UnitIndex		get index to drive #
+				lda XRW.AddrField.T
 				sta XRW.D2Trk-1,y		set the slot dependent track location
 
-				pla
+				lda XRW.ReqTrack
+				
 				jsr XRW.Seek
-				bra L539D
+				bra L5398
 
-* drive is on right track, check sector
+L53D5  			lda XRW.AddrField.V
+				ldy XRW.UnitIndex
+				sta XRW.D2VolNum-1,y
 
-L53D5  			lda XRW.AddrField.S		is this the right sector ?
+				lda XRW.AddrField.S		is this the right sector ?
 				cmp XRW.ReqSector
 				bne L53A4	 			no, try another sector.
 
@@ -754,17 +732,12 @@ L57CD  			pla		 				place last byte into user buffer
 				sta (buf),y
 				rts
 *--------------------------------------
-* fast seek subroutine
-* A = desired track
-* XRW.CurrentTrack = current rack
-*
-* montimel,h are incremented by the # of 100us quantums required by seek for motor on time overlap.
-* variables used: XRW.CurrentTrack, A2L, montimel, montimeh
+* A = target track
 *--------------------------------------
-XRW.Seek		ldx XRW.UnitIndex
-				
-				pha						save target track
+XRW.Seek		pha						save target track
 
+				ldx XRW.UnitIndex
+				
 				jsr XRW.Trk2Qtrk
 				sta XRW.TargetQTrack
 				
@@ -774,7 +747,6 @@ XRW.Seek		ldx XRW.UnitIndex
 				sta XRW.CurrentQTrack
 
 				pla
-				sta XRW.CurrentTrack
 				sta XRW.D2Trk-1,x		will be current track at the end
 
 				ldy #0
@@ -951,16 +923,57 @@ L56E6  			lda IO.D2.RData,x		first bit-slip nibl
 				cmp #$DE
 				bne rderr
 				
-				lda XRW.AddrField.V
-
-				ldy XRW.UnitIndex
-				sta XRW.D2VolNum-1,y
-
 				clc						normal read ok
 				rts
 
 rderr  			sec
 				rts
+*--------------------------------------
+XRW.DEBUG	lda XRW.AddrField.T
+			
+			pha
+			lsr
+			lsr
+			lsr
+			lsr
+			jsr .7
+			sta $724
+			
+			pla
+			jsr .7
+			sta $725
+			
+			lda XRW.ReqTrack
+			pha
+			lsr
+			lsr
+			lsr
+			lsr
+			jsr .7
+			sta $726
+			
+			pla
+			jsr .7
+			sta $727
+			
+			lda XRW.AddrField.T
+			cmp XRW.ReqTrack
+			bne .6
+			
+			lda #$A0
+			sta $723
+			rts
+			
+.6			lda #'!'
+			sta $723
+			rts
+			
+.7			and #$0F
+			ora #$B0	
+			cmp #"9"+1
+			bcc .9
+			adc #6
+.9			rts
 *--------------------------------------
 				.LIST ON
 XRW.FREE		.EQ $D540-*
@@ -986,7 +999,7 @@ XRW.UnitIndex		.HS 00
 XRW.LastUnitUsed	.HS 00
 				.HS 080C
 *				.HS FF
-XRW.Recalibrate		.HS 00
+XRW.RecalibrateCnt	.HS 00
 				.HS 101418
 XRW.XX000000	.HS 008040C0			used in fast prenib as lookup for 2-bit quantities.
 *				.HS FFFF
@@ -999,8 +1012,7 @@ XRW.montimeh 		.HS 00
 XRW.ReqTrack		.HS 00
 XRW.ReqSector		.HS 00
 				.HS 383C4044484C
-*				.HS FF
-XRW.CurrentTrack	.HS 00
+				.HS FF
 				.HS 5054585C606468
 XRW.00XX0000	.HS 00201030			used in fast prenib.
 XRW.EndDataMark	.HS DEAAEB		  		table using 'unused' nibbles ($C4,$C5,$C6,$C7)
