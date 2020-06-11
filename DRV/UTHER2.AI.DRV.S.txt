@@ -189,11 +189,10 @@ Counter			.EQ ZPDRV+4
 Offset			.EQ ZPDRV+6
 RXTX.Size		.EQ ZPDRV+8
 BUF.Size		.EQ ZPDRV+10
-RX.IP			.EQ ZPDRV+12
-*Sn				.EQ ZPDRV+16
-Sn.IO			.EQ ZPDRV+17
-Sn.BASE			.EQ ZPDRV+18
-Sn.MASK			.EQ ZPDRV+19
+RX.IP			.EQ ZPDRV+12			(4)
+Sn.IO			.EQ ZPDRV+16
+Sn.BASE			.EQ ZPDRV+17
+Sn.MASK			.EQ ZPDRV+18
 *--------------------------------------
 DRV.CS.START	cld
 				jmp (.1,x)
@@ -319,19 +318,27 @@ OPEN.I			jsr CLOSE
 				bne .4
 				
 				>AR.SELECT RMSR
-				lda #%00100101		ICMP=2k,UDP=2k,TCP=4k,0k
+				lda #%01010101		RAW=2k,ICMP=2k,UDP=2k,TCP=2k
 				sta W5100.DR,x		...for Socket RX Buffers
 				sta W5100.DR,x		...for Socket TX Buffers
 
-				lda /W5100.AR.S0.MR
+				>AR.SELECT S0.MR
+				lda #W5100.AR.Sn.MR.MACRAW+W5100.AR.Sn.MR.MF
+				sta W5100.DR,x
+
+				>AR.SELECT S0.CR
+				lda #W5100.AR.Sn.CR.OPEN
+				sta W5100.DR,x
+
+				lda /W5100.AR.S1.MR
 				sta Sn.IO
 				
-				ldy #S.IP.PROTOCOL.UDP
+				ldy #S.IP.PROTOCOL.ICMP
 				jsr OPEN.SnY
 				
 				inc Sn.IO
 				
-				ldy #S.IP.PROTOCOL.ICMP
+				ldy #S.IP.PROTOCOL.UDP
 				jsr OPEN.SnY
 				
 				inc Sn.IO
@@ -393,29 +400,35 @@ READ			php
 
 				ldx DEVSLOTx0
 
-				ldy #Sn.cnt-1
-				
-.20				lda Sn.IO.BASE,y
+				lda /W5100.AR.S1.MR
 				sta Sn.IO
-
 				sta W5100.AR,x
 				lda #W5100.AR.S0.RX.RSR
 				sta W5100.AR+1,x
 				
 				lda W5100.DR,x			get the received size HI
 				ora W5100.DR,x      	LO
-				bne .1
+				bne READ.ICMP
 				
-				dey
-				bpl .20
+				lda /W5100.AR.S0.RX.RSR
+				sta Sn.IO
+				sta W5100.AR,x
+				lda #W5100.AR.S0.RX.RSR
+				sta W5100.AR+1,x
 				
-				jmp READWRITE.NODATA
+				lda W5100.DR,x			get the received size HI
+				ora W5100.DR,x      	LO
+				beq .9
+	
+				jmp READ.RAW
+				
+.9				jmp READWRITE.NODATA
 
-.1				lda Sn.IP.PROTOCOL,y
+READ.ICMP		lda #S.IP.PROTOCOL.ICMP
 				sta FRM.HDR.PROTO
-				lda Sn.RX.BASE,y
+				lda Sn.RX.BASE+1
 				sta Sn.BASE
-				lda Sn.RXTX.MASK,y
+				lda Sn.RXTX.MASK+1
 				sta Sn.MASK
 
 				>AR.Sn.SELECT S0.RX.RD
@@ -561,6 +574,96 @@ READ			php
 				clc
 				rts			
 *--------------------------------------
+READ.RAW		>AR.SELECT S0.RX.RD
+				lda W5100.DR,x			get the received ptr HI
+				sta offset+1
+				ldy W5100.DR,x			get the received ptr LO
+				sty offset
+
+				and /$7FF
+				ora /RX.BASE
+				sta W5100.AR,x
+				tya
+				sta W5100.AR+1,x
+
+				lda W5100.DR,x			get RX.Size HI (Frame size + 2)
+				sta RXTX.Size+1
+				lda W5100.DR,x			get RX.Size LO
+				sta RXTX.Size
+
+				ldy #S.IOCTL.BYTECNT
+				sec
+				sbc #2					MACRAW:strip 2 bytes Header from Size 
+				sta (ZPIOCTL),y
+				sta BUF.Size
+				eor #$ff
+				sta Counter
+
+				iny
+				lda RXTX.Size+1
+				sbc #0
+				sta (ZPIOCTL),y
+				sta BUF.Size+1
+				eor #$ff
+				sta Counter+1
+
+				>LDYA BUF.Size
+				>SYSCALL2 getmem
+				bcc .14
+
+				jmp READWRITE.9
+
+.14				>STYA ZPBufPtr
+				phx
+
+				phy
+				ldy #S.IOCTL.BUFPTR+1
+				sta (ZPIOCTL),y
+				dey
+				pla
+				sta (ZPIOCTL),y
+
+				ldy #0
+
+				ldx DEVSLOTx0
+			
+.2				inc Counter
+				bne .3
+
+				inc Counter+1
+				beq .4
+
+.3				lda W5100.DR,x
+				sta (ZPBufPtr),y
+				iny
+				bne .2
+
+				inc ZPBufPtr+1
+				bra .2
+
+.4				>AR.SELECT S0.RX.RD
+
+				lda Offset
+				clc
+				adc RXTX.Size
+				pha						save LO
+
+				lda Offset+1
+				adc RXTX.Size+1
+				sta W5100.DR,x			write HI
+				pla
+				sta W5100.DR,x			write LO
+
+				>AR.SELECT S0.CR
+				lda #W5100.AR.Sn.CR.RCVD
+				sta W5100.DR,x
+
+				pla						hMem
+
+				plp
+				clc
+				rts			
+*--------------------------------------
 READWRITE.NODATA
 				lda #E.NODATA
 
@@ -600,7 +703,7 @@ WRITE			php
 .10				cmp Sn.IP.PROTOCOL,x
 				beq .11
 				dex
-				bpl .10
+				bne .10
 				
 				plp
 				lda #MLI.E.IO
@@ -689,14 +792,12 @@ GET.IOCTLBUFPTR	>STYA ZPIOCTL
 				rts
 *--------------------------------------
 DRV.CS.END
-Sn.cnt			.EQ 3
-				.LIST ON
-Sn.IP.PROTOCOL	.DA #S.IP.PROTOCOL.UDP,#S.IP.PROTOCOL.ICMP,#S.IP.PROTOCOL.TCP
-Sn.IO.BASE		.DA /W5100.AR.S0.MR,/W5100.AR.S1.MR,/W5100.AR.S2.MR
-Sn.TX.BASE		.DA /TX.BASE,/TX.BASE+$800,/TX.BASE+$1000
-Sn.RX.BASE		.DA /RX.BASE,/RX.BASE+$800,/RX.BASE+$1000
-Sn.RXTX.MASK	.DA /$7FF,/$7FF,/$FFF	2k-1,2k-1,4k-1
-				.LIST OFF
+Sn.cnt			.EQ 4
+Sn.IP.PROTOCOL	.DA #0,#S.IP.PROTOCOL.ICMP,#S.IP.PROTOCOL.UDP,#S.IP.PROTOCOL.TCP
+Sn.IO.BASE		.DA /W5100.AR.S0.MR,/W5100.AR.S1.MR,/W5100.AR.S2.MR,/W5100.AR.S3.MR
+Sn.TX.BASE		.DA /TX.BASE,/TX.BASE+$800,/TX.BASE+$1000,/TX.BASE+$1800
+Sn.RX.BASE		.DA /RX.BASE,/RX.BASE+$800,/RX.BASE+$1000,/RX.BASE+$1800
+Sn.RXTX.MASK	.DA /$7FF,/$7FF,/$7FF,/$7FF
 DEVSLOTx0		.BS 1
 *--------------------------------------
 DIB				.DA #0
