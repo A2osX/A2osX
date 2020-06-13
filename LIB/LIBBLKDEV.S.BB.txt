@@ -2,12 +2,6 @@ NEW
   AUTO 3,1
 				.LIST OFF	
 *--------------------------------------
-* prodos universal boot loader. this is the second stage boot	
-* for all apple manufactured apple ii disk drives.	
-* it is located at block zero (0) of a prodos or sos formatted	
-* disk(ette). if booted in apple /// native mode, the regular	
-* sos boot will be attempted.	
-*--------------------------------------
 dcmd 			.EQ $42 				disk command (=1 for read)
 unit 			.EQ $43 				(16*slot)+(128*(drive-1))
 buff 			.EQ $44 				ram address
@@ -20,7 +14,7 @@ idxp 			.EQ $4e 				index byte pointer
 iobuff 			.EQ $60
 * the following are for disk ii only
 dbuf 			.EQ $26
-slotz 			.EQ $2b
+BB.Slotn0 		.EQ $2b
 oddbits 		.EQ $3c
 sector 			.EQ $3d
 
@@ -116,8 +110,9 @@ modboot 		ldy mods-1,x
 				cpx #8
 				bcs .1
 
-				lda endcode-1,x	
-				sta zzzend-1,x	
+				lda endcode-1,x
+				sta zzzend-1,x
+
 .1				dex
 				bne modboot
 				
@@ -125,9 +120,9 @@ modboot 		ldy mods-1,x
 				sta BB.HdrPtr
 				stx BB.HdrPtr+1			X=0
 				
-				lda /d2io 				reset device entry	
+				lda /BB.ReadBlock 		reset device entry	
 				sta dent+1 				to point at disk ii routines.	
-				lda #d2io 				get low addr (must be <$80)	
+				lda #BB.ReadBlock 		get low addr (must be <$80)	
 *--------------------------------------
 ndsk2 			ldy #0 					make sure y=0 again.	
 				cmp #$f9	
@@ -183,22 +178,23 @@ nxdent1 		clc
 				
 nxdent2 		sty idxl
 
-				ldy #0
+				ldy #6
 				
 lookpro 		lda (idxl),y 			look for matching name.	
 				cmp BB.ProDOS,y 		
 				bne nxdent 				branch if no match.	
 				
-				iny
-				cpy #7
-				bne lookpro
+				dey
+				bpl lookpro
 				
-				ldy #$10 				get file type & index block addr.	
+*				ldy #$10 				get file type & index block addr.	
 *				lda (idxl),y	
 *				cmp #S.FI.T.SYS			is it a system file?	
 *				bne booterr	
-				
-				iny	
+*				iny	
+
+				ldy #$11
+
 				lda (idxl),y	
 				sta blok	
 				iny	
@@ -252,7 +248,7 @@ mods 			.DA #mod1,#mod2,#mod3,#mod4,#mod5,#mod6,#mod7,#mod8,#mod8+1,#mod9
 mods.cnt		.EQ *-mods
 chgs 			.DA #chg1,#chg2,#chg3,#chg4,#chg5,#chg6,#chg7,#$91,#BB.HdrPtr,#BB.HdrTrk
 
-endcode 		ldx slotz	
+endcode 		ldx BB.Slotn0	
 				clc	
 				rts	
 
@@ -263,7 +259,7 @@ endcode 		ldx slotz
 BB.ProDOS 		.DA	#$26				$20 = storage type + 6 = "PRODOS" len
 				.AS "PRODOS"
 *--------------------------------------
-d2io 			lda blok 				figure out track & sector.	
+BB.ReadBlock	lda blok 				figure out track & sector.	
 				and #7 					strip track for now.	
 				cmp #4	
 				and #3	
@@ -284,19 +280,20 @@ d2io 			lda blok 				figure out track & sector.
 				lda buff+1	
 				sta dbuf+1
 				
-				ldx slotz	
+				ldx BB.Slotn0	
 				lda IO.D2.DrvOn,x	
+				lda IO.D2.Ph0Off,x
 
 				jsr BB.Seek 			go read sector.	
 
 				inc dbuf+1 				bump address	
 				inc sector	
 				inc sector 				and sector #	
-				bcs quitrd 				branch if error.	
+				bcs .9	 				branch if error.	
 
 				jsr BB.Seek
 				
-quitrd 			ldy IO.D2.DrvOff,x	
+.9	 			ldy IO.D2.DrvOff,x	
 				rts 					return error status in carry.	
 *--------------------------------------
 BB.Seek			lda BB.HdrTrk			get track we're on
@@ -342,7 +339,7 @@ BB.Seek			lda BB.HdrTrk			get track we're on
 .4				sta BB.CurrentQTrack
 
 				and #6
-				ora slotz
+				ora BB.Slotn0
 				tax
 				pha
 				tya
@@ -353,8 +350,7 @@ BB.Seek			lda BB.HdrTrk			get track we're on
 .5				lda IO.D2.Ph0On,x
 				ply
 			
-				lda #114
-				jsr BB.Wait100usecA
+				jsr BB.WaitPh
 				bra .1
 
 * Last QTrack
@@ -375,34 +371,36 @@ BB.Seek			lda BB.HdrTrk			get track we're on
 				lda IO.D2.Ph0On,x
 
 				phx
-				lda #104
-				jsr BB.Wait100usecA
+				jsr BB.WaitPh
 				
-				jsr BB.Wait25600usec
+.80				jsr BB.Wait25600usec
 				
 				plx
 				lda IO.D2.Ph0Off,x
-.80				lda IO.D2.Ph0Off,y
+				lda IO.D2.Ph0Off,y
 				bra BB.Read
 				
 .8				tya
 				beq BB.Read
 				
-				jsr D2.Wait25600usec
+				pha
 
 				bra .80
 *--------------------------------------
+BB.WaitPh		lda #204
+				.HS 2C					BIT ABS
 BB.Wait25600usec
 				lda #0
-BB.Wait100usecA	sec						(6) JSR (2)
+
+				sec						(6) JSR (2)
 				
 .1				ldx #19					(2)
 
 .2 				dex 					(2) 	delay 86 usec.	
 				bne .2					(2+)	2 + 5x16 + 2 + 2
 				
-*				ldx slotz				(3)
-*				bit IO.D2.RData,x		(4) Slow down ACC boards
+				ldx BB.Slotn0				(3)
+				bit IO.D2.RData,x		(4) Slow down ACC boards
 
 				sbc #1	 				(2)
 				bne .1					(2+)
@@ -420,7 +418,7 @@ BB.Trk2Qtrk		asl						x2
 .1				adc #$ff				SELF MODIFIED
 BB.Trk2Qtrk.RTS	rts
 *--------------------------------------
-BB.Read 		ldx slotz
+BB.Read 		ldx BB.Slotn0
 
 				ldy #$7f 				allow 127 mistakes.	
 				sty BB.RetryCnt	
@@ -431,6 +429,7 @@ tryread 		plp 					fix stack.
 rdhead 			sec 					anticipate error.	
 				dec BB.RetryCnt			if = 0 then give up!	
 				beq BB.Trk2Qtrk.RTS		branch if can't fine/read sector.	
+
 				clc 					indicate reading header.	
 rddata 			php 					carry set if reading sector.	
 
@@ -482,13 +481,13 @@ rdhd1 			ldy #3 					read in trk,sect,&volume #.
 mod8 			.EQ *-zzstart
 rdhd2 			sta (BB.HdrPtr),y		save last result in .. , BB.HdrTrk , BB.HdrVol , ..
 
-rdhd3 			lda IO.D2.RData,x	
+rdhd3 			lda IO.D2.RData,x
 				bpl rdhd3	
 
 				rol
 				sta oddbits 			save odd bits (7,5,3,1)	
 
-rdhd4 			lda IO.D2.RData,x	
+rdhd4 			lda IO.D2.RData,x
 				bpl rdhd4	
 
 				and oddbits 			combine even and odd to form value.	
@@ -562,7 +561,7 @@ twobit 			dex 					all done with this group?
 				iny	
 				bne twobit	
 *--------------------------------------
-zzzend 			ldx slotz
+zzzend 			ldx BB.Slotn0
 				clc 					indicate good read.	
 				rts	
 

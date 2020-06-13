@@ -3,15 +3,16 @@ NEW
 				.LIST OFF
 				.OP	65C02				Target CPU, must match CPU level in header
 				.OR	$2000				usualy $2000, but any value > $100 allowed
-				.TF SBIN/CIFSD
+				.TF sbin/cifsd
 *--------------------------------------
-				.INB INC/MACROS.I
-				.INB INC/A2OSX.I
-				.INB INC/ETH.I
-				.INB INC/LIBTCPIP.I	
-				.INB INC/NET.SMB.I
+				.INB inc/macros.i
+				.INB inc/a2osx.i
+				.INB inc/mli.e.i
+				.INB inc/eth.i
+				.INB inc/libtcpip.i
+				.INB inc/net.smb.i
 *--------------------------------------
-TIMEOUT.MAX		.EQ 100					10 sec.
+TIMEOUT.MAX		.EQ 100					20 sec.
 *--------------------------------------
 * Zero Page Segment, up to 32 bytes
 *--------------------------------------
@@ -19,6 +20,8 @@ TIMEOUT.MAX		.EQ 100					10 sec.
 				.OR ZPBIN
 ZS.START
 ZPIPCfgPtr		.BS 2
+hResp			.BS 1
+ZPRespPtr		.BS 2
 TimeOut			.BS 1
 ZS.END
 				.ED
@@ -44,9 +47,12 @@ CS.START		cld
 				.DA CS.DOEVENT		
 				.DA	CS.QUIT
 L.LIBTCPIP		.DA LIBTCPIP
+L.MSG.TCPIPERR	.DA MSG.TCPIPERR
 L.MSG.USAGE		.DA MSG.USAGE
 L.MSG.UNKNOWN	.DA MSG.UNKNOWN
-L.SMB.Negotiate	.DA SMB.Negotiate
+L.SMB.NegReq	.DA SMB.NegReq
+L.SMB.SessSetup	.DA SMB.SessSetup
+L.SMB.TreeConnReq	.DA SMB.TreeConnReq
 				.DA 0
 *--------------------------------------
 * Called once at process creation
@@ -56,31 +62,44 @@ CS.INIT			>LDYA L.LIBTCPIP
 				>SYSCALL LoadLib
 				bcs .9
 				sta hLIBTCPIP
-				>LIBCALL hLIBTCPIP,LIBTCPIP.GETCFG	is TCPIP loaded ?
-				bcs .9
-				>STYA ZPIPCfgPtr
-				lda (ZPIPCfgPtr)		Configured ?
-				bmi .8
-				lda #E.SYN
-				sec
-				rts
-
-.8				clc
+				
+				clc
 .9				rts
 *--------------------------------------
 * Called until exit with CS
 * if RUN exits with CC, RUN entered again
 *--------------------------------------
-CS.RUN			jsr CS.RUN.CheckArgs
+CS.RUN			>LIBCALL hLIBTCPIP,LIBTCPIP.GETCFG	is TCPIP loaded ?
+				bcs .9
+
+				>STYA ZPIPCfgPtr
+				lda (ZPIPCfgPtr)		Configured ?
+				bmi .1
+
+				>LDYA L.MSG.TCPIPERR
+				>SYSCALL PutS
+				
+				lda #E.SYN
+				sec
+				rts
+
+.1				jsr CS.RUN.CheckArgs
 				bcs .90
 
 				jsr CS.RUN.Connect
-				>DEBUG
-				bcs .9
+
+				>SLEEP
+
 				jsr CS.RUN.Negotiate
+				bcs .9
+				
+				jsr CS.RUN.SessSetup
+				bcs .9
+				
 				lda #0
-				sec
+				clc
 .9				rts
+
 .90				>LDYA L.MSG.USAGE
 				>SYSCALL PutS
 				lda #E.SYN
@@ -95,38 +114,45 @@ CS.RUN.CheckArgs
 
 				lda #TIMEOUT.MAX
 				sta TimeOut
+				
 .1				>PUSHEA.G SA.REMOTE+S.SOCKADDR.ADDR
 				lda #1
 				>SYSCALL ArgV
 				>PUSHYA
 				>LIBCALL hLIBTCPIP,LIBTCPIP.HST.GETBYNAME
 				bcc .2
+				
 				>SLEEP
 				lda TimeOut
 				bne .1
+				
+				>PUSHW L.MSG.UNKNOWN
 				lda #1
 				>SYSCALL ArgV
 				>PUSHYA
 				>PUSHBI 2
-				>LDYA L.MSG.UNKNOWN
 				>SYSCALL PrintF
 				sec
 .9				rts
+
 .2				lda #AF.INET
 				>STA.G SA.LOCAL
 				>STA.G SA.REMOTE
 				ldy #S.IPCFG.IP+3
+				
 .3				lda (ZPIPCfgPtr),y
 				pha
 				dey
 				cpy #S.IPCFG.IP-1
 				bne .3
+				
 				ldy #SA.REMOTE+S.SOCKADDR.PORT
 .4				pla
 				sta (pData),y
 				iny
 				cpy #SA.REMOTE+S.SOCKADDR.PORT+4
 				bne .4
+				
 				lda #TCP.PORT.CIFS
 				>STA.G SA.REMOTE+S.SOCKADDR.PORT
 				iny
@@ -138,7 +164,7 @@ CS.RUN.CheckArgs
 				rts
 *--------------------------------------
 CS.RUN.Connect	>PUSHBI 0				no protocol
-				lda #S.SOCKET.T.SEQPACKET
+				lda #S.SOCKET.T.SEQPKT
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Socket
 				bcs .9
 
@@ -148,20 +174,70 @@ CS.RUN.Connect	>PUSHBI 0				no protocol
 				>LDA.G hSocket
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Bind
 				bcs .9
+				
 				>PUSHEA.G SA.REMOTE
 				>LDA.G hSocket
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Connect
 .9				rts
 *--------------------------------------
 CS.RUN.Negotiate
-				>PUSHWI SMB.Negotiate.end-SMB.Negotiate
-				>PUSHW L.SMB.Negotiate
+				lda #TIMEOUT.MAX
+				sta TimeOut
+
+.1				>PUSHWI SMB.NegReq.end-SMB.NegReq
+				>PUSHW L.SMB.NegReq
 				>LDA.G hSocket
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Send
+				bcc .2
+				
+				>SLEEP
+				ldx TimeOut
+				bne .1
+				
+				bra .99
+		
+.2				>SLEEP
+
+				>LDA.G hSocket
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Recv
+				bcc .3
+
+				tay
+				beq .2
+
+				bra .99
+
+.3				stx hResp
+				>STYA ZPRespPtr
+				
+				ldy #$3f
+				lda (ZPRespPtr),y
+				iny
+				ora (ZPRespPtr),y
+				bne .9
+				
+				ldy #$5B
+				lda (ZPRespPtr),y
+				cmp #5
+				bne .9
+				
+				
+				lda hResp
+				>SYSCALL FreeMem
+*				clc
+				rts
+				
+.9				lda hResp
+				>SYSCALL FreeMem
+				
+.99				lda #MLI.E.INVPATH
+				sec
 				rts
 *--------------------------------------
-* Called if option S.PS.F.EVENT enabled in Header
-* Timer Event : every 10th seconds
+CS.RUN.SessSetup
+
+				clc
+				rts
 *--------------------------------------
 CS.DOEVENT		lda (pEvent)
 				bpl .9					is it a TIMER event?
@@ -174,7 +250,10 @@ CS.DOEVENT		lda (pEvent)
 * Called once, when RUN exited with CS
 * Put code for unloading LIB here
 *--------------------------------------
-CS.QUIT			lda hLIBTCPIP
+CS.QUIT			>LDA.G hSocket
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Shutdown
+				
+				lda hLIBTCPIP
 				beq .8
 				>SYSCALL UnloadLib
 
@@ -185,18 +264,22 @@ CS.END
 *--------------------------------------
 * Initialized DATA
 *--------------------------------------
-LIBTCPIP		.AZ "LIBTCPIP"
+LIBTCPIP		.AZ "libtcpip"
 hLIBTCPIP		.BS 1
+MSG.TCPIPERR	.AZ "HTTPD:TCP/IP Not initialized properly."
 MSG.USAGE		.AZ "Usage : CIFSD <ip|host> sharename mountpoint"
 MSG.UNKNOWN		.AZ "%s: Unknown host\r\n"
 *--------------------------------------
-SMB.Negotiate	.DA #$FF
+SMB.NegReq		.DA #0					DIRECT TCP TRANSPORT
+				.DA #0					24 BITS LENGTH
+				.DA /SMB.NegReq.end-1-*
+				.DA #SMB.NegReq.end-1-*
+				.DA #$FF
 				.AS "SMB"
 				.DA #S.SMB.HEADER.CMD.NEGOTIATE
 				.HS 00000000
 				.DA #0					S.SMB.HEADER.FLAGS
-				.DA /S.SMB.HEADER.FLAGS2.LONGNAMES
-				.DA #S.SMB.HEADER.FLAGS2.LONGNAMES
+				.DA S.SMB.HEADER.FLAGS2.LONGNAMES
 				.DA 0					PIDHI
 				.HS 0000000000000000	SECFEAT
 				.DA 0					RSVD
@@ -205,13 +288,45 @@ SMB.Negotiate	.DA #$FF
 				.DA 0					UID
 				.DA 0					MID
 				.DA #0					WORD COUNT
-				.DA /SMB.Negotiate.end-*
-				.DA #SMB.Negotiate.end-*
+				.DA #SMB.NegReq.end-2-*
+				.DA /SMB.NegReq.end-2-*
+				.DA #2
+				.AZ "PC NETWORK PROGRAM 1.0"
+				.DA #2
+				.AZ "LANMAN1.0"
+				.DA #2
+				.AZ "Windows for Workgroups 3.1a"
+				.DA #2
+				.AZ "LM1.2X002"
+				.DA #2
+				.AZ "LANMAN2.1"
 				.DA #2
 				.AZ "NT LM 0.12"
-SMB.Negotiate.end	.EQ *
+				.DA #2
+				.AZ "SMB 2.002"
+				.DA #2
+				.AZ "SMB 2.???"
+SMB.NegReq.end	.EQ *
 *--------------------------------------
-* Per Process DATA segement (0 filled before INIT)
+SMB.SessSetup	.DA #0					DIRECT TCP TRANSPORT
+				.DA #0					24 BITS LENGTH
+				.DA /SMB.SessSetup.end-1-*
+				.DA #SMB.SessSetup.end-1-*
+				.DA #$FF
+				.AS "SMB"
+				.DA #S.SMB.HEADER.CMD.SESSION.SETUP.ANDX
+				
+SMB.SessSetup.end	.EQ *
+*--------------------------------------
+SMB.TreeConnReq	.DA #0					DIRECT TCP TRANSPORT
+				.DA #0					24 BITS LENGTH
+				.DA /SMB.TreeConnReq.end-1-*
+				.DA #SMB.TreeConnReq.end-1-*
+				.DA #$FF
+				.AS "SMB"
+				.DA #S.SMB.HEADER.CMD.TREE.CONNECT.ANDX
+				
+SMB.TreeConnReq.end	.EQ *
 *--------------------------------------
 				.DUMMY
 				.OR 0
@@ -229,5 +344,5 @@ DS.END
 				.ED
 *--------------------------------------
 MAN
-SAVE USR/SRC/SBIN/CIFSD
+SAVE usr/src/sbin/cifsd
 ASM
