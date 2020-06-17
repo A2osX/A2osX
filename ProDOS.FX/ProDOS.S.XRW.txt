@@ -35,7 +35,8 @@ L59A6  			lda XRW.LastUnitUsed
 				jsr XRW.CheckMotorOnX	check if previous drive running.
 				beq L59BD				branch if stopped.
 
-				jsr XRW.Wait100usec
+				lda #1
+				jsr XRW.Wait100usecA
 				
 				lda XRW.montimeh
 				bne L59A6
@@ -95,9 +96,7 @@ L59BD  			ldx A2L
 				sec
 				rts
 *--------------------------------------
-* read/write a track/sector
-
-regrwts			ldy #3
+regrwts			ldy #1
 				sty XRW.RecalibrateCnt
 				sta XRW.ReqSector
 
@@ -146,7 +145,8 @@ L537C  			plp						was motor on ?
 
 * motor was off, wait for it to speed up
 
-L537F  			jsr XRW.Wait100usec		wait 100us for each count in montime
+L537F  			lda #1
+				jsr XRW.Wait100usecA	wait 100us for each count in montime
 				
 				lda XRW.montimeh
 				bmi L537F				count up to 0000
@@ -161,7 +161,7 @@ L537F  			jsr XRW.Wait100usec		wait 100us for each count in montime
 * locate the correct sector for this operation
 
 L538E  			lda A4L					get command #
-				beq L53FD				if 0 then status command
+				beq XRW.TestWP			if 0 then status command
 
 				lsr						set carry = 1 for read, 0 for write.
 				bcs L5398				must prenibblize for write
@@ -181,18 +181,21 @@ XRW.Recalibrate	lda #MLI.E.IO  			anticipate a bad drive error.
 				dec XRW.RecalibrateCnt
 				bmi hndlerr
 
-				lda #54
+				lda #41
 				ldy XRW.UnitIndex
 				sta XRW.D2Trk-1,y
+				
 				lda #0
+				sta XRW.D2VolNum-1,y
+
 				jsr XRW.Seek
 				bra L5398
 
 L53BE  			lda XRW.AddrField.T
 				cmp XRW.ReqTrack
-				beq L53D5				ok
+				beq L53D5
 
-				jsr XRW.DEBUG
+			jsr XRW.DEBUG
 
 				ldy XRW.UnitIndex
 				
@@ -229,18 +232,18 @@ hndlerr			sec
 				bit IO.D2.DrvOff,x	 	turn off
 				rts
 *--------------------------------------
-L53F4  			jsr XRW.Write
-
-statdne			bcc L53E7				if no errors.
-				lda #MLI.E.WRTPROT		disk write protected.
-				bne hndlerr	  			always
-
-L53FD  			ldx A2L
+XRW.TestWP		ldx A2L
 				lda IO.D2.ReadProt,x	test for write protected
 				lda IO.D2.ReadMode,x
 				rol		 				write protect-->carry-->bit 0=1
 				lda IO.D2.RData,x		keep in read mode
 				bra statdne
+
+L53F4  			jsr XRW.Write
+
+statdne			bcc L53E7				if no errors.
+				lda #MLI.E.WRTPROT		disk write protected.
+				bne hndlerr	  			always
 *--------------------------------------
 * determine if motor is stopped
 *
@@ -558,28 +561,28 @@ wnibl			sta IO.D2.WLoad,x		(5) nibl write
 * montimel, montimeh are incremented once per 100 usec interval
 * for motor on timing.
 *--------------------------------------
-XRW.Wait100usec	lda #1
-
 XRW.Wait100usecA
-				sec						(2)
+				phx						(3)
 				
-.1				ldx #17					(2)
+.1				ldx #16					(2)
 
 .2  			dex						(2)
 				bne .2					(3)
 
 				ldx A2L					(3)
-				bit IO.D2.RData,x		(4) Slow down ACC boards
+				bit IO.D2.DrvOn,x		(4) Slow down ACC boards
 
 				inc XRW.montimel		(6)
 				bne .3					(3)
 
 				inc XRW.montimeh		(6)
 
-.3  			sbc #1					(2)
+.3				sec						(2)
+				sbc #1					(2)
 				bne .1					(3)
 				
-				rts
+				plx						(4)
+				rts						(6)
 *--------------------------------------
 * read subroutine (16-sector format)
 *
@@ -732,11 +735,12 @@ L57CD  			pla		 				place last byte into user buffer
 * A = target track
 *--------------------------------------
 XRW.Seek		pha						save target track
-
 				ldx XRW.UnitIndex
 				
 				jsr XRW.Trk2Qtrk
 				sta XRW.TargetQTrack
+
+			jsr	XRW.DEBUG2
 				
 				lda XRW.D2Trk-1,x
 
@@ -758,69 +762,82 @@ XRW.Seek		pha						save target track
 * Current < Target, must move in
 
 				cmp #2
-				bcc .6				one QT remaining
-				
+				bcc .5				one QT remaining
+					
 				lda XRW.CurrentQTrack
-				and #$FE			from QT1 or QT3
 				inc
 				inc
-				bra .4
+				bra .3
 
 * Current > Target, must move out
 
 .2				cmp #$FF
-				beq .6				one QT remaining
-				
-				lda XRW.CurrentQTrack
-				bit #1				from QT1 or QT3
-				bne .3
-				
-				dec
-.3				dec
+				bcs .6				one QT remaining
 
-.4				sta XRW.CurrentQTrack
+				lda XRW.CurrentQTrack
+				dec
+
+.3				and	#$FE			from QT1 or QT3
+
+				sta XRW.CurrentQTrack
 
 				and #6
 				ora A2L
 				tax
 				pha
 				tya
-				beq .5
+				beq .4
 				
 				lda IO.D2.Ph0Off,y
+*				nop
+*				nop
 
-.5				lda IO.D2.Ph0On,x
+*				lda #1
+*				jsr XRW.Wait100usecA
+
+.4				lda IO.D2.Ph0On,x
 				ply
 				
-				lda #204
+*				lda #IO.D2.SeekTime
+				lda #0
 				jsr XRW.Wait100usecA
 				bra .1
 
-.6				bcs .60
-
-				tya
+.5				tya
 				inc
 				inc
-				bra .7
-				
-.60				tya
-				clc
-				adc #6
-				
-.7				and #$f6
+				and #$f6
 				tax
 				lda IO.D2.Ph0On,x
+				bra .7
+				
+.6				tya
+				tax
+*				sec
+				adc #5
+				
+				and #$f6
+				tay
+				lda IO.D2.Ph0On,y
 
-				phx
-				lda #204
+.7
+*				lda #IO.D2.SeekTime
+				lda #0
 				jsr XRW.Wait100usecA
 				
 				lda #0					wait 25.6 ms
 				jsr XRW.Wait100usecA
 
-				plx
-				lda IO.D2.Ph0Off,x
 				lda IO.D2.Ph0Off,y
+*				nop
+*				nop
+*				lda #1
+*				jsr XRW.Wait100usecA
+
+				lda IO.D2.Ph0Off,x
+
+				lda #0					wait 25.6 ms
+				jsr XRW.Wait100usecA
 				rts
 				
 .8				tya
@@ -830,6 +847,9 @@ XRW.Seek		pha						save target track
 				jsr XRW.Wait100usecA
 
 				lda IO.D2.Ph0Off,y
+
+				lda #0					wait 25.6 ms
+				jsr XRW.Wait100usecA
 .9				rts
 *--------------------------------------
 XRW.Trk2Qtrk	asl						x2
@@ -924,22 +944,32 @@ rderr  			sec
 *--------------------------------------
 XRW.DEBUG	phx
 
-			ldx #$20
+			ldx #$1c
 			lda XRW.AddrField.V
-			jsr .6
+			jsr XRW.DEBUG.PRINT
 
 			lda XRW.AddrField.T
-			jsr .6
+			jsr XRW.DEBUG.PRINT
 			
 			inx
 			
 			lda XRW.ReqTrack
-			jsr .6
-		
+			jsr XRW.DEBUG.PRINT
+
 			plx
 			rts
 			
-.6			pha
+XRW.DEBUG2	phx
+			pha
+			ldx #$26
+			jsr XRW.DEBUG.PRINT
+			pla
+			plx
+			rts
+
+XRW.DEBUG.PRINT
+
+			pha
 			lsr
 			lsr
 			lsr
