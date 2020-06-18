@@ -1,0 +1,439 @@
+NEW
+  AUTO 3,1
+				.LIST OFF
+				.OP	65C02
+				.OR	$2000
+				.TF bin/irc
+*--------------------------------------
+				.INB inc/macros.i
+				.INB inc/a2osx.i
+				.INB inc/eth.i
+				.INB inc/libtcpip.i
+*--------------------------------------
+TIMEOUT.MAX		.EQ 200					20 sec.
+BUFSIZE			.EQ 1024
+MSGSIZE			.EQ 240
+*--------------------------------------
+* https://tools.ietf.org/html/rfc2812#section-3.3
+* irc.be.webbnet.info 6667 burniouf #apple2 
+*--------------------------------------
+				.DUMMY
+				.OR ZPBIN
+ZS.START
+ZPIPCfgPtr		.BS 2
+ZPReqPtr		.BS 2
+ZPReqLen		.BS 2
+hReq			.BS 1
+hSocket			.BS 1
+
+ZPMsgBufPtr		.BS 2
+hMsgBuf			.BS 1
+MsgPtr			.BS 1
+
+ZPRepPtr		.BS 2
+hRep			.BS 1
+
+TimeOut			.BS 1
+ZS.END
+				.ED
+*--------------------------------------
+*			File Header (16 Bytes)
+*--------------------------------------
+CS.START		cld
+				jmp (.1,x)
+				.DA #$61				6502,Level 1 (65c02)
+				.DA #1					BIN Layout Version 1
+				.DA #S.PS.F.EVENT		S.PS.F
+				.DA #0
+				.DA CS.END-CS.START		Code Size (without Constants)
+				.DA DS.END-DS.START		Data Segment Size
+				.DA #64					Stack Size
+				.DA #ZS.END-ZS.START	Zero Page Size
+				.DA 0
+*--------------------------------------
+.1				.DA CS.INIT
+				.DA CS.RUN
+				.DA CS.DOEVENT		
+				.DA	CS.QUIT
+L.LIBTCPIP		.DA LIBTCPIP
+L.SA.LOCAL		.DA SA.LOCAL
+L.SA.REMOTE		.DA SA.REMOTE
+L.SA.REMOTE.AD	.DA SA.REMOTE+S.SOCKADDR.ADDR
+L.MSG.IPKO		.DA MSG.IPKO
+L.MSG.USAGE		.DA MSG.USAGE
+L.MSG.UNKNOWN	.DA MSG.UNKNOWN
+L.MSG.HOSTOK	.DA MSG.HOSTOK
+L.MSG.SKTKO		.DA MSG.SKTKO
+L.MSG.SKTOK		.DA MSG.SKTOK
+L.MSG.SKTERR	.DA MSG.SKTERR
+L.MSG.IOERR		.DA MSG.IOERR
+L.MSG.USER		.DA MSG.USER
+L.MSG.TOPBAR	.DA MSG.TOPBAR
+L.IRC.USER		.DA IRC.USER
+L.IRC.JOIN		.DA IRC.JOIN
+L.SEQ.INIT		.DA SEQ.INIT
+				.DA 0
+*--------------------------------------
+CS.INIT			>LDYA L.LIBTCPIP
+				>SYSCALL LoadLib
+				bcs .9
+				sta hLIBTCPIP
+
+.9				rts
+*--------------------------------------
+CS.RUN			>LIBCALL hLIBTCPIP,LIBTCPIP.GETCFG	is TCPIP loaded ?
+				>STYA ZPIPCfgPtr
+				lda (ZPIPCfgPtr)		Configured ?
+				bmi CS.RUN.IPOK
+				
+				>LDYA L.MSG.IPKO
+				>SYSCALL PutS
+				lda #E.SYN
+				sec
+				rts
+
+CS.RUN.IPOK		ldy #S.PS.ARGC
+				lda (pPS),y
+				cmp #3
+				bcc .9
+
+				ldy #S.IPCFG.IP+3
+				ldx #3
+
+.1				lda (ZPIPCfgPtr),y
+				sta SA.LOCAL+S.SOCKADDR.ADDR,x
+				dey
+				dex
+				bpl .1
+
+				lda #TIMEOUT.MAX
+				sta TimeOut
+
+.2				>SLEEP
+				
+				>PUSHW L.SA.REMOTE.AD
+				lda #1
+				>SYSCALL ArgV
+				>PUSHYA
+				>LIBCALL hLIBTCPIP,LIBTCPIP.HST.GETBYNAME
+				bcc CS.RUN.HOSTOK
+				lda  TimeOut
+				bne .2
+
+				>PUSHW L.MSG.UNKNOWN
+				lda #1
+				>SYSCALL ArgV
+				>PUSHYA
+				>PUSHBI 2
+				>SYSCALL PrintF
+				bra .99
+
+.9				>LDYA L.MSG.USAGE
+				>SYSCALL PutS
+
+.99				lda #E.SYN
+				sec
+				rts
+
+CS.RUN.HOSTOK	lda #2
+				>SYSCALL ArgV
+				>SYSCALL atoi
+				>STYA SA.REMOTE+S.SOCKADDR.PORT
+
+				>PUSHW L.MSG.HOSTOK
+				ldx #0
+
+.1				>PUSHB SA.REMOTE+S.SOCKADDR.ADDR,x
+				inx
+				cpx #4
+				bne .1
+
+				>PUSHW SA.REMOTE+S.SOCKADDR.PORT
+				lda #1
+				>SYSCALL ArgV
+				>PUSHYA
+				
+				>PUSHBI 8
+				>SYSCALL PrintF
+		
+CS.RUN.OPENSKT	>PUSHBI 0				no protocol
+				lda #S.SOCKET.T.SEQPKT
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Socket
+				bcs .9
+
+				sta hSocket
+
+				>PUSHW L.SA.LOCAL
+				lda hSocket
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Bind
+				bcc .2
+
+.9				pha
+				>LDYA L.MSG.SKTKO
+				>SYSCALL PutS
+				pla
+				sec
+.99				rts
+
+.2				lda #TIMEOUT.MAX
+				sta TimeOut
+
+.3				>SLEEP
+				
+				>PUSHW L.SA.REMOTE
+				lda hSocket
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Connect
+				bcc .4
+				
+				cmp #ERR.SKT.NOCONN
+				bne .9
+				
+				lda TimeOut
+				bne .3
+				
+				lda #ERR.SKT.NOCONN
+				bra .9
+				
+.4				>PUSHW L.MSG.SKTOK
+				>PUSHBI 0
+				>SYSCALL PrintF
+				
+				jsr CS.RUN.USER
+				bcs .99
+				
+				jsr CS.RUN.JOIN
+				bcs .99
+				
+				>LDYAI BUFSIZE
+				>SYSCALL GetMem
+				bcs .99
+				stx hRep
+				>STYA ZPRepPtr
+
+				>LDYAI MSGSIZE
+				>SYSCALL GetMem
+				bcs .99
+				stx hMsg
+				>STYA ZPMsgPtr
+
+CS.RUN.LOOP		>SLEEP
+
+				lda hSocket
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Rcvd
+				bcc .1
+				tay
+				beq .2					No Frame
+
+				bra .9
+
+.1				jsr CS.RUN.REQ
+				bcs .9
+
+.2				ldy #S.PS.hStdIn
+				lda (pPS),y
+
+				>SYSCALL feof
+				bcs .11					CS.RUN.IOERR
+				tay
+				bne CS.RUN.LOOP			EOF = true, no char from STDIN
+
+				>SYSCALL GetChar
+				bcs .9
+				
+				jsr CS.RUN.CHARIN
+				bcs .9
+
+				jmp CS.RUN.LOOP
+
+.9				
+CS.RUN.ERR		php
+				pha
+				>PUSHW L.SEQ.RESET
+				>PUSHBI 0
+				>SYSCALL PrintF
+				pla
+				plp
+				rts
+*--------------------------------------
+CS.RUN.SCRSETUP	>PUSHW L.SEQ.INIT
+				>PUSHBI 0
+				>SYSCALL PrintF
+				
+				>PUSHW ZPBufPtr
+				>PUSHW L.MSG.TOPBAR
+				
+				lda #1
+				>SYSCALL ArgV
+				>PUSHYA
+				
+				lda #2
+				>SYSCALL ArgV
+				>PUSHYA
+				
+				lda #3
+				>SYSCALL ArgV
+				>PUSHYA
+				
+				lda #4
+				>SYSCALL ArgV
+				>PUSHYA
+						
+				>PUSHBI 8
+				>SYSCALL SPrintF
+				
+.1				cpy #80
+				beq .2
+				
+				lda #C.SPACE
+				sta (ZPBufPtr),y
+				iny
+				bra .1
+				
+.2				lda #0
+				sta (ZPBufPtr),y
+				
+				>PUSHW ZPBufPtr
+				>PUSHBI 0
+				>SYSCALL PrintF
+				
+				rts
+*--------------------------------------
+CS.RUN.USER		>PUSHW ZPBufPtr
+				>PUSHW L.IRC.USER
+
+				lda #3					nickname
+				>SYSCALL ArgV
+				>PUSHYA
+				lda #3					nickname
+				>SYSCALL ArgV
+				>PUSHYA
+				>PUSHBI 4
+				>SYSCALL SPrintF
+				bcs .9
+				
+				jmp CS.RUN.SEND
+.9				rts				
+*--------------------------------------
+CS.RUN.JOIN		>PUSHW ZPBufPtr
+				
+				lda #5					key
+				>SYSCALL ArgV
+				bcs .1
+				
+				>PUSHW L.IRC.JOINKEY
+				
+				lda #4					channel
+				>SYSCALL ArgV
+				>PUSHYA
+
+				lda #5					key
+				>SYSCALL ArgV
+				>PUSHYA
+				>PUSHBI 4
+				bra .8
+
+.1				>PUSHW L.IRC.JOIN
+				
+				lda #4					channel
+				>SYSCALL ArgV
+				>PUSHYA
+
+.8				>SYSCALL SPrintF
+				bcs .9
+				
+				jmp CS.RUN.SEND
+.9				rts	
+*--------------------------------------
+CS.RUN.REQ		sta hReq
+				>SYSCALL GetMemPtr
+				>STYA ZPReqPtr
+				
+				
+
+				
+				clc
+				rts
+*--------------------------------------
+CS.RUN.SEND		>PUSHYA
+				>PUSHW ZPBufPtr
+				lda hSocket
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Send
+				rts
+*--------------------------------------
+CS.RUN.SCRSETUP	>LDYA L.SEQ.INIT
+
+				clc
+				rts
+*--------------------------------------
+CS.RUN.CHARIN
+				clc
+				rts
+*--------------------------------------
+CS.DOEVENT		lda (pEvent)
+				bpl .9					is it a TIMER event?
+				lda TimeOut
+				beq .9
+				dec TimeOut
+.9				sec						do not discard TIMER event
+				rts
+*--------------------------------------
+CS.QUIT			lda hSocket
+				beq .1
+
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Shutdown
+
+.1				lda hReq
+				beq .2
+
+				>SYSCALL FreeMem
+
+.2				lda hLIBTCPIP
+				beq .8
+
+				>SYSCALL UnloadLib
+
+.8				clc
+				rts
+*--------------------------------------
+CS.END
+LIBTCPIP		.AZ "libtcpip"
+hLIBTCPIP		.BS 1
+MSG.IPKO		.AZ "TCP/IP Not Loaded/Configured."
+MSG.USAGE		.AZ "Usage : IRC <ip|host> <port> <nickname> <#channel> [key]"
+MSG.UNKNOWN		.AZ "%s: Unknown host\r\n"
+MSG.HOSTOK		.AZ "Connecting to %d.%d.%d.%d:%D (%s)..."
+MSG.SKTKO		.AZ "Failed to Open Socket."
+MSG.SKTOK		.AZ "Connected\r\n(Exit key is Ctrl-T)\r\n"
+MSG.SKTERR		.AZ "Socket Error : $%h\r\n"
+MSG.USER		.AZ "User interrupt."
+MSG.TOPBAR		.AZ "A2osX IRC %d.%d: %s:%s %s@%s"
+*--------------------------------------
+IRC.MSG			.AZ "PING"
+*--------------------------------------
+IRC.USER		.AZ "USER %s 0 * :%s" 
+IRC.JOIN		.AZ "JOIN %s"
+IRC.JOINKEY		.AZ "JOIN %s %s"
+IRC.PRIVMSG		.AZ "PRIVMSG %s %s"
+*--------------------------------------
+SEQ.INIT		.AZ "\ec\e(B\e)0\e[?7l\e[2;19r"
+SEQ.BAR			.AZ "\e[7m\e[37;40m"
+*--------------------------------------
+SA.LOCAL		.DA #AF.INET			S.SOCKADDR.AF
+				.BS 1
+				.BS 4					S.SOCKADDR.ADDR
+				.BS 2					S.SOCKADDR.PORT
+*--------------------------------------
+SA.REMOTE		.DA #AF.INET			S.SOCKADDR.AF
+				.BS 1
+				.BS 4					S.SOCKADDR.ADDR
+				.DA TCP.PORT.TELNET
+*--------------------------------------
+				.DUMMY
+				.OR 0
+DS.START
+DS.END
+				.ED
+*--------------------------------------
+MAN
+SAVE usr/src/bin/irc.s
+ASM
