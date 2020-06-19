@@ -15,7 +15,6 @@ BUFSIZE			.EQ 1024
 MSGSIZE			.EQ 240
 *--------------------------------------
 * https://tools.ietf.org/html/rfc2812#section-3.3
-* irc.be.webbnet.info 6667 burniouf #apple2 
 *--------------------------------------
 				.DUMMY
 				.OR ZPBIN
@@ -66,12 +65,14 @@ L.MSG.HOSTOK	.DA MSG.HOSTOK
 L.MSG.SKTKO		.DA MSG.SKTKO
 L.MSG.SKTOK		.DA MSG.SKTOK
 L.MSG.SKTERR	.DA MSG.SKTERR
-L.MSG.IOERR		.DA MSG.IOERR
 L.MSG.USER		.DA MSG.USER
 L.MSG.TOPBAR	.DA MSG.TOPBAR
 L.IRC.USER		.DA IRC.USER
 L.IRC.JOIN		.DA IRC.JOIN
+L.IRC.JOINKEY	.DA IRC.JOINKEY
 L.SEQ.INIT		.DA SEQ.INIT
+L.SEQ.BAR		.DA SEQ.BAR
+L.SEQ.RESET		.DA SEQ.RESET
 				.DA 0
 *--------------------------------------
 CS.INIT			>LDYA L.LIBTCPIP
@@ -198,12 +199,6 @@ CS.RUN.OPENSKT	>PUSHBI 0				no protocol
 				>PUSHBI 0
 				>SYSCALL PrintF
 				
-				jsr CS.RUN.USER
-				bcs .99
-				
-				jsr CS.RUN.JOIN
-				bcs .99
-				
 				>LDYAI BUFSIZE
 				>SYSCALL GetMem
 				bcs .99
@@ -213,13 +208,23 @@ CS.RUN.OPENSKT	>PUSHBI 0				no protocol
 				>LDYAI MSGSIZE
 				>SYSCALL GetMem
 				bcs .99
-				stx hMsg
-				>STYA ZPMsgPtr
+				stx hMsgBuf
+				>STYA ZPMsgBufPtr
+
+				jsr	CS.RUN.SCRSETUP
+				bcs .99
+
+				jsr CS.RUN.USER
+				bcs .99
+				
+				jsr CS.RUN.JOIN
+				bcs .99
+				
 
 CS.RUN.LOOP		>SLEEP
 
 				lda hSocket
-				>LIBCALL hLIBTCPIP,LIBTCPIP.Rcvd
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Recv
 				bcc .1
 				tay
 				beq .2					No Frame
@@ -233,7 +238,7 @@ CS.RUN.LOOP		>SLEEP
 				lda (pPS),y
 
 				>SYSCALL feof
-				bcs .11					CS.RUN.IOERR
+				bcs CS.RUN.ERR
 				tay
 				bne CS.RUN.LOOP			EOF = true, no char from STDIN
 
@@ -259,8 +264,10 @@ CS.RUN.SCRSETUP	>PUSHW L.SEQ.INIT
 				>PUSHBI 0
 				>SYSCALL PrintF
 				
-				>PUSHW ZPBufPtr
+				>PUSHW ZPMsgBufPtr
 				>PUSHW L.MSG.TOPBAR
+				>PUSHB #K.VER
+				>PUSHB /K.VER
 				
 				lda #1
 				>SYSCALL ArgV
@@ -278,27 +285,17 @@ CS.RUN.SCRSETUP	>PUSHW L.SEQ.INIT
 				>SYSCALL ArgV
 				>PUSHYA
 						
-				>PUSHBI 8
+				>PUSHBI 10
 				>SYSCALL SPrintF
-				
-.1				cpy #80
-				beq .2
-				
-				lda #C.SPACE
-				sta (ZPBufPtr),y
-				iny
-				bra .1
-				
-.2				lda #0
-				sta (ZPBufPtr),y
-				
-				>PUSHW ZPBufPtr
-				>PUSHBI 0
+
+				>PUSHW L.SEQ.BAR		
+				>PUSHW ZPMsgBufPtr
+				>PUSHBI 2
 				>SYSCALL PrintF
-				
+			>DEBUG	
 				rts
 *--------------------------------------
-CS.RUN.USER		>PUSHW ZPBufPtr
+CS.RUN.USER		>PUSHW ZPRepPtr
 				>PUSHW L.IRC.USER
 
 				lda #3					nickname
@@ -311,10 +308,29 @@ CS.RUN.USER		>PUSHW ZPBufPtr
 				>SYSCALL SPrintF
 				bcs .9
 				
-				jmp CS.RUN.SEND
+				jsr CS.RUN.SEND
+				bcs .9
+				
+.1				>SLEEP
+
+				lda hSocket
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Recv
+				bcc .2
+				tay
+				beq .1					No Frame
+
+				bra .9
+
+.2				sta hReq
+				>SYSCALL GetMemPtr
+				>STYA ZPReqPtr				
+				
+
+				
+				clc
 .9				rts				
 *--------------------------------------
-CS.RUN.JOIN		>PUSHW ZPBufPtr
+CS.RUN.JOIN		>PUSHW ZPRepPtr
 				
 				lda #5					key
 				>SYSCALL ArgV
@@ -337,6 +353,7 @@ CS.RUN.JOIN		>PUSHW ZPBufPtr
 				lda #4					channel
 				>SYSCALL ArgV
 				>PUSHYA
+				>PUSHBI 2
 
 .8				>SYSCALL SPrintF
 				bcs .9
@@ -355,14 +372,9 @@ CS.RUN.REQ		sta hReq
 				rts
 *--------------------------------------
 CS.RUN.SEND		>PUSHYA
-				>PUSHW ZPBufPtr
+				>PUSHW ZPRepPtr
 				lda hSocket
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Send
-				rts
-*--------------------------------------
-CS.RUN.SCRSETUP	>LDYA L.SEQ.INIT
-
-				clc
 				rts
 *--------------------------------------
 CS.RUN.CHARIN
@@ -416,7 +428,8 @@ IRC.JOINKEY		.AZ "JOIN %s %s"
 IRC.PRIVMSG		.AZ "PRIVMSG %s %s"
 *--------------------------------------
 SEQ.INIT		.AZ "\ec\e(B\e)0\e[?7l\e[2;19r"
-SEQ.BAR			.AZ "\e[7m\e[37;40m"
+SEQ.BAR			.AZ "\e[7m\e[37;40m%80s\e[0m"
+SEQ.RESET		.AZ "\ec"
 *--------------------------------------
 SA.LOCAL		.DA #AF.INET			S.SOCKADDR.AF
 				.BS 1
@@ -426,7 +439,7 @@ SA.LOCAL		.DA #AF.INET			S.SOCKADDR.AF
 SA.REMOTE		.DA #AF.INET			S.SOCKADDR.AF
 				.BS 1
 				.BS 4					S.SOCKADDR.ADDR
-				.DA TCP.PORT.TELNET
+				.BS 2
 *--------------------------------------
 				.DUMMY
 				.OR 0
