@@ -13,6 +13,7 @@ NEW
 TIMEOUT.MAX		.EQ 200					20 sec.
 BUFSIZE			.EQ 1024
 MSGSIZE			.EQ 240
+USRSIZE			.EQ 128
 *--------------------------------------
 * https://tools.ietf.org/html/rfc2812#section-3.3
 *--------------------------------------
@@ -25,9 +26,15 @@ ZPReqLen		.BS 2
 hReq			.BS 1
 hSocket			.BS 1
 
+ZPUsrBufPtr		.BS 2
+hUsrBuf			.BS 1
+
 ZPMsgBufPtr		.BS 2
 hMsgBuf			.BS 1
-MsgPtr			.BS 1
+
+TextPtr			.BS 1
+TextLen			.BS 1
+bEscMode		.BS 1
 
 ZPRepPtr		.BS 2
 hRep			.BS 1
@@ -52,7 +59,7 @@ CS.START		cld
 *--------------------------------------
 .1				.DA CS.INIT
 				.DA CS.RUN
-				.DA CS.DOEVENT		
+				.DA CS.DOEVENT
 				.DA	CS.QUIT
 L.LIBTCPIP		.DA LIBTCPIP
 L.SA.LOCAL		.DA SA.LOCAL
@@ -67,12 +74,19 @@ L.MSG.SKTOK		.DA MSG.SKTOK
 L.MSG.SKTERR	.DA MSG.SKTERR
 L.MSG.USER		.DA MSG.USER
 L.MSG.TOPBAR	.DA MSG.TOPBAR
+L.MSG.STATUSBAR	.DA MSG.STATUSBAR
 L.IRC.USER		.DA IRC.USER
 L.IRC.JOIN		.DA IRC.JOIN
 L.IRC.JOINKEY	.DA IRC.JOINKEY
 L.SEQ.INIT		.DA SEQ.INIT
 L.SEQ.BAR		.DA SEQ.BAR
+L.SEQ.PRINTMSG	.DA SEQ.PRINTMSG
+L.SEQ.TXTCLR	.DA SEQ.TXTCLR
 L.SEQ.RESET		.DA SEQ.RESET
+J.ESC			.DA CS.RUN.CHARIN.LEFT
+				.DA CS.RUN.CHARIN.DOWN
+				.DA CS.RUN.CHARIN.UP
+				.DA CS.RUN.CHARIN.RIGHT
 				.DA 0
 *--------------------------------------
 CS.INIT			>LDYA L.LIBTCPIP
@@ -82,11 +96,24 @@ CS.INIT			>LDYA L.LIBTCPIP
 
 .9				rts
 *--------------------------------------
-CS.RUN			>LIBCALL hLIBTCPIP,LIBTCPIP.GETCFG	is TCPIP loaded ?
+CS.RUN			jsr CS.RUN.GETBUF
+				bcs .99
+
+				jsr	CS.RUN.SCRSETUP
+				bcs .99
+
+				jsr CS.RUN.PRINTMSG
+
+				lda #0
+				sec
+.99				rts
+
+
+				>LIBCALL hLIBTCPIP,LIBTCPIP.GETCFG	is TCPIP loaded ?
 				>STYA ZPIPCfgPtr
 				lda (ZPIPCfgPtr)		Configured ?
 				bmi CS.RUN.IPOK
-				
+
 				>LDYA L.MSG.IPKO
 				>SYSCALL PutS
 				lda #E.SYN
@@ -111,7 +138,7 @@ CS.RUN.IPOK		ldy #S.PS.ARGC
 				sta TimeOut
 
 .2				>SLEEP
-				
+
 				>PUSHW L.SA.REMOTE.AD
 				lda #1
 				>SYSCALL ArgV
@@ -153,10 +180,10 @@ CS.RUN.HOSTOK	lda #2
 				lda #1
 				>SYSCALL ArgV
 				>PUSHYA
-				
+
 				>PUSHBI 8
 				>SYSCALL PrintF
-		
+
 CS.RUN.OPENSKT	>PUSHBI 0				no protocol
 				lda #S.SOCKET.T.SEQPKT
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Socket
@@ -180,46 +207,30 @@ CS.RUN.OPENSKT	>PUSHBI 0				no protocol
 				sta TimeOut
 
 .3				>SLEEP
-				
+
 				>PUSHW L.SA.REMOTE
 				lda hSocket
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Connect
 				bcc .4
-				
+
 				cmp #ERR.SKT.NOCONN
 				bne .9
-				
+
 				lda TimeOut
 				bne .3
-				
+
 				lda #ERR.SKT.NOCONN
 				bra .9
-				
+
 .4				>PUSHW L.MSG.SKTOK
 				>PUSHBI 0
 				>SYSCALL PrintF
-				
-				>LDYAI BUFSIZE
-				>SYSCALL GetMem
-				bcs .99
-				stx hRep
-				>STYA ZPRepPtr
-
-				>LDYAI MSGSIZE
-				>SYSCALL GetMem
-				bcs .99
-				stx hMsgBuf
-				>STYA ZPMsgBufPtr
-
-				jsr	CS.RUN.SCRSETUP
-				bcs .99
 
 				jsr CS.RUN.USER
 				bcs .99
-				
+
 				jsr CS.RUN.JOIN
 				bcs .99
-				
 
 CS.RUN.LOOP		>SLEEP
 
@@ -244,13 +255,13 @@ CS.RUN.LOOP		>SLEEP
 
 				>SYSCALL GetChar
 				bcs .9
-				
+
 				jsr CS.RUN.CHARIN
 				bcs .9
 
 				jmp CS.RUN.LOOP
 
-.9				
+.9
 CS.RUN.ERR		php
 				pha
 				>PUSHW L.SEQ.RESET
@@ -260,39 +271,112 @@ CS.RUN.ERR		php
 				plp
 				rts
 *--------------------------------------
+CS.RUN.GETBUF 	>LDYAI BUFSIZE
+				>SYSCALL GetMem
+				bcs .9
+				stx hRep
+				>STYA ZPRepPtr
+
+				>LDYAI USRSIZE
+				>SYSCALL GetMem
+				bcs .9
+				stx hUsrBuf
+				>STYA ZPUsrBufPtr
+
+				lda #0
+				sta (ZPUsrBufPtr)
+
+				>LDYAI MSGSIZE
+				>SYSCALL GetMem
+				bcs .9
+
+				stx hMsgBuf
+				>STYA ZPMsgBufPtr
+.9				rts
+*--------------------------------------
 CS.RUN.SCRSETUP	>PUSHW L.SEQ.INIT
 				>PUSHBI 0
 				>SYSCALL PrintF
-				
+				bcs .9
+
+				jsr CS.RUN.TOPUPDATE
+				bcs .9
+			>DEBUG
+				jsr CS.RUN.STATUSPDATE
+				bcs .9
+			>DEBUG
+				jsr CS.RUN.TXTCLR
+			>DEBUG
+
+.9				rts
+*--------------------------------------
+CS.RUN.TOPUPDATE
 				>PUSHW ZPMsgBufPtr
 				>PUSHW L.MSG.TOPBAR
 				>PUSHB #K.VER
 				>PUSHB /K.VER
-				
+
 				lda #1
 				>SYSCALL ArgV
 				>PUSHYA
-				
+
 				lda #2
 				>SYSCALL ArgV
 				>PUSHYA
-				
+
 				lda #3
 				>SYSCALL ArgV
 				>PUSHYA
+
+				>PUSHBI 8
+				>SYSCALL SPrintF
+
+				>PUSHW L.SEQ.BAR
+				>PUSHW ZPMsgBufPtr
+				>PUSHBI 2
+				>SYSCALL PrintF
+
+				rts
+*--------------------------------------
+CS.RUN.PRINTMSG	>PUSHW L.SEQ.PRINTMSG
+				lda #3
+				>SYSCALL ArgV
+				>PUSHYA
+
+				lda #1
+				>SYSCALL ArgV
+				>PUSHYA
+
+				>PUSHBI 4
+				>SYSCALL PrintF
+				rts
+*--------------------------------------
+CS.RUN.STATUSPDATE
+				>PUSHW ZPMsgBufPtr
+				>PUSHW L.MSG.STATUSBAR
 				
 				lda #4
 				>SYSCALL ArgV
 				>PUSHYA
-						
-				>PUSHBI 10
+				>PUSHW ZPUsrBufPtr
+				>PUSHBI 4
 				>SYSCALL SPrintF
-
-				>PUSHW L.SEQ.BAR		
+				
+				>PUSHW L.SEQ.BAR
 				>PUSHW ZPMsgBufPtr
 				>PUSHBI 2
 				>SYSCALL PrintF
-			>DEBUG	
+				rts
+*--------------------------------------
+CS.RUN.TXTCLR	lda #0
+				sta (pData)
+				stz TextPtr
+				stz TextLen
+				stz bEscMode
+
+				>PUSHW L.SEQ.TXTCLR
+				>PUSHBI 0
+				>SYSCALL PrintF
 				rts
 *--------------------------------------
 CS.RUN.USER		>PUSHW ZPRepPtr
@@ -307,10 +391,10 @@ CS.RUN.USER		>PUSHW ZPRepPtr
 				>PUSHBI 4
 				>SYSCALL SPrintF
 				bcs .9
-				
+
 				jsr CS.RUN.SEND
 				bcs .9
-				
+
 .1				>SLEEP
 
 				lda hSocket
@@ -323,21 +407,21 @@ CS.RUN.USER		>PUSHW ZPRepPtr
 
 .2				sta hReq
 				>SYSCALL GetMemPtr
-				>STYA ZPReqPtr				
-				
+				>STYA ZPReqPtr
 
-				
+
+
 				clc
-.9				rts				
+.9				rts
 *--------------------------------------
 CS.RUN.JOIN		>PUSHW ZPRepPtr
-				
+
 				lda #5					key
 				>SYSCALL ArgV
 				bcs .1
-				
+
 				>PUSHW L.IRC.JOINKEY
-				
+
 				lda #4					channel
 				>SYSCALL ArgV
 				>PUSHYA
@@ -349,7 +433,7 @@ CS.RUN.JOIN		>PUSHW ZPRepPtr
 				bra .8
 
 .1				>PUSHW L.IRC.JOIN
-				
+
 				lda #4					channel
 				>SYSCALL ArgV
 				>PUSHYA
@@ -357,17 +441,17 @@ CS.RUN.JOIN		>PUSHW ZPRepPtr
 
 .8				>SYSCALL SPrintF
 				bcs .9
-				
+
 				jmp CS.RUN.SEND
-.9				rts	
+.9				rts
 *--------------------------------------
 CS.RUN.REQ		sta hReq
 				>SYSCALL GetMemPtr
 				>STYA ZPReqPtr
-				
-				
 
-				
+
+
+
 				clc
 				rts
 *--------------------------------------
@@ -377,7 +461,85 @@ CS.RUN.SEND		>PUSHYA
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Send
 				rts
 *--------------------------------------
-CS.RUN.CHARIN
+CS.RUN.CHARIN	bit bEscMode
+				bpl .4
+
+				cmp #'['
+				beq .9
+
+				stz bEscMode
+
+				ldx #EscChars.Cnt-1
+
+.1				cmp EscChars,x
+				beq .2
+
+				dex
+				bpl .1
+
+.9				rts
+
+.2				txa
+				asl
+				tax
+
+				jmp (J.ESC,x)
+
+.4				cmp #C.ESC
+				bne .5
+
+				sec
+				ror bEscMode
+				clc
+				rts
+
+.5				cmp #C.SPACE
+				bcc CS.RUN.CHARIN.CTRL
+
+				cmp #C.DEL
+				bne CS.RUN.CHARIN.INS
+				
+				lda TextLen
+				beq .9
+				
+				lda TextPtr
+				beq .9
+				
+				lda #C.BS
+				>SYSCALL PutChar
+				jmp CS.RUN.CHARIN.DEL
+*--------------------------------------
+CS.RUN.CHARIN.INS
+
+CS.RUN.CHARIN.CTRL
+
+				clc
+				rts
+
+CS.RUN.CHARIN.LEFT
+				lda TextPtr
+				beq .9
+				dec TextPtr
+				lda #C.BS
+				>SYSCALL PutChar
+.9				rts
+CS.RUN.CHARIN.DOWN
+CS.RUN.CHARIN.UP
+				clc
+				rts
+CS.RUN.CHARIN.RIGHT
+				lda TextPtr
+				cmp TextLen
+				beq .9
+				
+				inc
+				sta TextPtr
+				lda #C.FS
+				>SYSCALL PutChar		
+.9				rts
+*--------------------------------------
+CS.RUN.CHARIN.DEL
+
 				clc
 				rts
 *--------------------------------------
@@ -418,17 +580,25 @@ MSG.SKTKO		.AZ "Failed to Open Socket."
 MSG.SKTOK		.AZ "Connected\r\n(Exit key is Ctrl-T)\r\n"
 MSG.SKTERR		.AZ "Socket Error : $%h\r\n"
 MSG.USER		.AZ "User interrupt."
-MSG.TOPBAR		.AZ "A2osX IRC %d.%d: %s:%s %s@%s"
+MSG.TOPBAR		.AZ "A2osX IRC %d.%d   %s:%s   %s"
+MSG.STATUSBAR	.AZ "\e[19;1H%s:%s"
+*--------------------------------------
+EscChars		.AS 'DBAC'
+EscChars.Cnt	.EQ *-EscChars
+EscChars.Remap	.DA #C.BS,#C.VT,#C.LF,#C.FS
 *--------------------------------------
 IRC.MSG			.AZ "PING"
+IRC.NOIDENT		.AZ "No Ident response"
 *--------------------------------------
-IRC.USER		.AZ "USER %s 0 * :%s" 
+IRC.USER		.AZ "USER %s 0 * :%s"
 IRC.JOIN		.AZ "JOIN %s"
 IRC.JOINKEY		.AZ "JOIN %s %s"
-IRC.PRIVMSG		.AZ "PRIVMSG %s %s"
+IRC.PRIVMSG		.AZ "PRIVMSG %s :%s"
 *--------------------------------------
 SEQ.INIT		.AZ "\ec\e(B\e)0\e[?7l\e[2;19r"
-SEQ.BAR			.AZ "\e[7m\e[37;40m%80s\e[0m"
+SEQ.BAR			.AZ "\e7\e[7m\e[37;40m%80s\e[0m\e8"
+SEQ.PRINTMSG	.AZ "\e7\r\n\e[18;1H\e[7m%s:\e[0m%s\e8"
+SEQ.TXTCLR		.AZ "\e[20;1H\e[K\r\n\e[K\r\n\e[K\e[20;1H"
 SEQ.RESET		.AZ "\ec"
 *--------------------------------------
 SA.LOCAL		.DA #AF.INET			S.SOCKADDR.AF
@@ -444,6 +614,7 @@ SA.REMOTE		.DA #AF.INET			S.SOCKADDR.AF
 				.DUMMY
 				.OR 0
 DS.START
+TextBuf			.BS 240
 DS.END
 				.ED
 *--------------------------------------
