@@ -37,8 +37,10 @@ bEscMode		.BS 1
 
 TimeOut			.BS 1
 
+bJoin			.BS 1
 hMsgBuf			.BS 1
 ZPMsgPtr		.BS 2
+
 ZPMsgPfxPtr		.BS 2
 ZPMsgCmdPtr		.BS 2
 ZPMsgArgPtr		.BS 2
@@ -92,13 +94,18 @@ L.SEQ.INIT		.DA SEQ.INIT
 L.SEQ.BAR		.DA SEQ.BAR
 L.SEQ.TXTCLR	.DA SEQ.TXTCLR
 L.SEQ.PRIVMSG	.DA SEQ.PRIVMSG
+L.SEQ.INFOMSG	.DA SEQ.INFOMSG
 L.SEQ.DUMPMSG	.DA SEQ.DUMPMSG
 L.SEQ.RESET		.DA SEQ.RESET
 L.IRC.CMDS		.DA IRC.CMDS
-J.IRC.CMDS		.DA CS.RUN.CMD.PING
+J.IRC.CMDS		.DA CS.RUN.CMD.JOIN
+				.DA CS.RUN.CMD.PING
 				.DA CS.RUN.CMD.PRIVMSG
 				.DA CS.RUN.CMD.MODE
 				.DA CS.RUN.CMD.353
+				.DA CS.RUN.CMD.375
+				.DA CS.RUN.CMD.372
+				.DA CS.RUN.CMD.376
 J.ESC			.DA CS.RUN.CHARIN.LEFT
 				.DA CS.RUN.CHARIN.DOWN
 				.DA CS.RUN.CHARIN.UP
@@ -252,7 +259,7 @@ CS.RUN.OPENSKT	>PUSHBI 0				no protocol
 				jsr CS.RUN.JOIN
 				bcs .99
 
-				>LDYA pData
+				>LDYA pData				NULLSTRING
 				jsr CS.RUN.STATUSPDATE
 				bcs .99
 
@@ -262,15 +269,21 @@ CS.RUN.LOOP		>SLEEP
 				>SYSCALL feof
 				bcs .9
 				tay
-				bne .2
+*				bne .2
+				beq .77
+				
+				lda $427
+				eor #$80
+				sta $427
+				bra .2
 
-				>PUSHWI MSGSIZE
+.77				>PUSHWI MSGSIZE
 				>PUSHW ZPMsgPtr
 				lda hFile
 				>SYSCALL fgets
 				bcs .9
 
-.1				jsr CS.RUN.REQ
+				jsr CS.RUN.REQ
 				bcs .9
 
 .2				ldy #S.PS.hStdIn
@@ -536,31 +549,6 @@ CS.RUN.JOIN		>LDYA L.MSG.JOIN
 				>PUSHBI 2
 
 .2				>SYSCALL FPrintF
-				bcs .9
-
-.3				>SLEEP
-
-				>PUSHWI MSGSIZE
-				>PUSHW ZPMsgPtr
-				lda hFile
-				>SYSCALL fgets
-				bcs .9
-
-.4				jsr CS.RUN.SPLITMSG
-				jsr CS.RUN.DUMPMSG
-
-				ldy #$ff
-
-.5				iny
-				lda IRC.REP.JOIN,y
-				beq .8
-
-				cmp (ZPMsgCmdPtr),y
-				beq .5
-
-				bra .3
-
-.8				clc
 .9				rts
 *--------------------------------------
 CS.RUN.REQ		jsr CS.RUN.SPLITMSG
@@ -609,6 +597,13 @@ CS.RUN.REQ		jsr CS.RUN.SPLITMSG
 .8				clc
 .9				rts
 *--------------------------------------
+CS.RUN.CMD.JOIN	sec
+				ror bJoin
+				lda #'J'
+				sta $427
+				clc
+				rts
+*--------------------------------------
 CS.RUN.CMD.PING	>PUSHB hFile
 
 				>PUSHW L.IRC.PONG
@@ -618,7 +613,17 @@ CS.RUN.CMD.PING	>PUSHB hFile
 				rts
 *--------------------------------------
 CS.RUN.CMD.PRIVMSG
-				>PUSHW L.SEQ.PRIVMSG
+				ldy #0
+				
+.1				iny
+				lda	(ZPMsgPfxPtr),y
+				beq .2
+				eor #'!'
+				bne .1
+				
+				sta	(ZPMsgPfxPtr),y
+
+.2				>PUSHW L.SEQ.PRIVMSG
 
 				>PUSHW ZPMsgPfxPtr
 				>PUSHW ZPMsgExtPtr
@@ -633,6 +638,15 @@ CS.RUN.CMD.MODE
 *--------------------------------------
 CS.RUN.CMD.353	>LDYA ZPMsgExtPtr
 				jmp CS.RUN.STATUSPDATE
+				
+CS.RUN.CMD.375				
+CS.RUN.CMD.372
+CS.RUN.CMD.376
+				>PUSHW L.SEQ.INFOMSG
+				>PUSHW ZPMsgExtPtr
+				>PUSHBI 2
+				>SYSCALL PrintF
+				rts
 *--------------------------------------
 CS.RUN.SPLITMSG	>LDYA pData
 				>STYA ZPMsgPfxPtr
@@ -767,7 +781,7 @@ CS.RUN.CHARIN	bit bEscMode
 				bpl .4
 
 				cmp #'['
-				beq .9
+				beq .8
 
 				stz bEscMode
 
@@ -779,7 +793,8 @@ CS.RUN.CHARIN	bit bEscMode
 				dex
 				bpl .1
 
-.9				rts
+				clc
+				rts
 
 .2				txa
 				asl
@@ -792,7 +807,8 @@ CS.RUN.CHARIN	bit bEscMode
 
 				sec
 				ror bEscMode
-				clc
+
+.8				clc
 				rts
 
 .5				cmp #C.SPACE
@@ -802,10 +818,10 @@ CS.RUN.CHARIN	bit bEscMode
 				bne CS.RUN.CHARIN.INS
 
 				lda TextLen
-				beq .9
+				beq .8
 
 				lda TextPtr
-				beq .9
+				beq .8
 
 				lda #C.BS
 				>SYSCALL PutChar
@@ -831,10 +847,13 @@ CS.RUN.CHARIN.INS
 
 .8				clc
 				rts
-
+*--------------------------------------
 CS.RUN.CHARIN.CTRL
 				cmp #C.CR
-				bne .8
+				bne .1
+
+				bit bJoin
+				bpl .8
 
 				>PUSHW L.SEQ.PRIVMSG
 
@@ -848,10 +867,17 @@ CS.RUN.CHARIN.CTRL
 				bcs .9
 
 				jmp CS.RUN.TXTCLR
+				
+.1				cmp #$14				Ctrl-T
+				bne .8
+				
+				lda #3
+				sec
+				rts
 
 .8				clc
 .9				rts
-
+*--------------------------------------
 CS.RUN.CHARIN.LEFT
 				lda TextPtr
 				beq .9
@@ -923,7 +949,7 @@ MSG.SKTERR		.AZ "Socket Error : $%h\r\n"
 MSG.NICK		.AZ "Registering User..."
 MSG.USER		.AZ "Connecting User..."
 MSG.JOIN		.AZ "Joining Channel..."
-MSG.TOPBAR		.AZ "A2osX IRC %d.%d   %s:%s   %s"
+MSG.TOPBAR		.AZ "A2osX IRC %d.%d   Server:%s:%s   Nick:%s"
 MSG.STATUSBAR	.AZ "%s:%s"
 MSG.STATUSBARMSG	.AZ "STATUS:%s"
 *--------------------------------------
@@ -935,10 +961,14 @@ IRC.REP.NOIDENT	.AZ "*** No Ident response"
 IRC.REP.001		.AZ "001"
 IRC.REP.JOIN	.AZ "JOIN"
 *--------------------------------------
-IRC.CMDS		.AZ "PING"
+IRC.CMDS		.AZ "JOIN"
+				.AZ "PING"
 				.AZ	"PRIVMSG"
 				.AZ "MODE"
 				.AZ "353"
+				.AZ "375"
+				.AZ "372"
+				.AZ "376"
 				.DA #0
 *--------------------------------------
 IRC.NICK		.AZ "NICK %s\r\n"
@@ -951,8 +981,9 @@ IRC.PRIVMSG		.AZ "PRIVMSG %s :%s\r\n"
 SEQ.INIT		.AZ "\ec\e(B\e)0\e[?7l\e[2;20r\e[22;1H\e[?7h"
 SEQ.BAR			.AZ "\e7\e[%d;1H\e[7m\e[37;40m%80s\e[0m\e8"
 SEQ.TXTCLR		.AZ "\e[22;1H\e[K\r\n\e[K\r\n\e[K\e[22;1H"
-SEQ.PRIVMSG		.AZ "\e7\e[20;1H\r\n\e[7m%s:\e[0m%s\r\n\e8"
+SEQ.PRIVMSG		.AZ "\e7\e[20;1H\r\n\e[7m%s:\e[0m%s\e8"
 SEQ.DUMPMSG		.AZ "\e7\e[20;1H\r\n\e[7m%s \e[0m%s %s %s\e8"
+SEQ.INFOMSG		.AZ "\e7\e[20;1H%s\r\n\e8"
 SEQ.RESET		.AZ "\ec"
 *--------------------------------------
 SA.LOCAL		.DA #AF.INET			S.SOCKADDR.AF
