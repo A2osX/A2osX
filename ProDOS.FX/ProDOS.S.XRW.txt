@@ -47,10 +47,6 @@ L59BD  			jsr XRW.AllPhasesOff	make sure all motor phases are off
 				nop
 				nop
 
-				lda A4L					command #.
-				cmp #$04	   			is the command allowed ?
-				bcs XRW.E.IO			if not.
-
 				lda bloknml
 				ldx bloknml+1
 				stx XRW.ReqTrack		calculate block's track and sector.
@@ -100,21 +96,10 @@ L5362 			lda IO.D2.DrvSel1,x
 .1				jsr XRW.Wait100usecA
 				dey
 				bne .1
+				
+				php
 
-				php						now zero flag set.
-
-L5372  			
-*				lda A4L					make sure this command needs seeking.
-*				beq L537C				branch if status check.
-
-*				lda XRW.ReqTrack		get destination track
-*				jsr XRW.Seek   			and go to it.
-
-* now at desired track. was the motor already on ?
-
-*L537C
-				plp						was motor on ?
-				bne L538E				if so, don't wait.
+L5372  			plp
 
 * motor was off, wait for it to speed up
 
@@ -128,16 +113,32 @@ L537F  			lda #1
 * if it looks stopped then the drive is not present
 
 				jsr XRW.CheckMotorOn	is drive present ?
-				beq hndlerr	  			branch if no drive
+				beq XRW.E.ND
 
 * now check: if it is not the status disk command,
 * locate the correct sector for this operation
 
 L538E  			lda A4L					get command #
-				beq XRW.TestWP			if 0 then status command
+				bne .1
+				
+				jsr XRW.TestWP			0 = status
+				bcs XRW.E.WP
+
+				lda #0
+				bra XRW.E.OK
+
+.1				cmp #4		   			3 = format
+				bcs XRW.E.IO
+
+				cmp #2					Write ?
+				bne .2
+
+				jsr XRW.TestWP
+				bcs XRW.E.WP
 *--------------------------------------
+.2				lda A4L					get command #
 				jsr regrwts
-				bcs .3					if error
+				bcs XRW.E.IO
 
 				inc buf+1
 				
@@ -146,12 +147,22 @@ L538E  			lda A4L					get command #
 
 				lda A4L					get command #
 				jsr regrwts				get 2nd half of block
-
 				dec buf+1
 
-.3  			rts	
+				bcs XRW.E.IO
+
+XRW.E.OK		bit IO.D2.DrvOff,x	 	turn off
+				lda #0
+				rts	
 
 XRW.E.IO		lda #MLI.E.IO
+				.HS 2C					BIT ABS
+XRW.E.WP		lda #MLI.E.WRTPROT
+
+				.HS 2C					BIT ABS
+XRW.E.ND		lda #MLI.E.NODEV
+
+				bit IO.D2.DrvOff,x	 	turn off
 				sec
 				rts
 *--------------------------------------
@@ -159,22 +170,22 @@ regrwts			ldy #1
 				sty XRW.RecalibrateCnt
 
 				lsr						set carry = 1 for read, 0 for write.
-				bcs L5398				must prenibblize for write
+				bcs .1					must prenibblize for write
 
 				jsr XRW.PreNibble
-*--------------------------------------
-L5398  			ldy #64
+
+.1  			ldy #64
 				sty XRW.RetryCnt
 				
-L539D  			jsr XRW.ReadAddr		read next address field.
-				bcc L53BE				if CC A = current track
+.2  			jsr XRW.ReadAddr		read next address field.
+				bcc .4					if CC, A = current track
 
-L53A4  			dec XRW.RetryCnt	 	one less chance.
-				bne L539D				branch to retry.
+.3  			dec XRW.RetryCnt	 	one less chance.
+				bne .2					branch to retry.
 
-XRW.Recalibrate	lda #MLI.E.IO  			anticipate a bad drive error.
 				dec XRW.RecalibrateCnt
-				bmi hndlerr
+				sec
+				bmi .9
 
 			jsr XRW.DEBUG
 
@@ -187,46 +198,30 @@ XRW.Recalibrate	lda #MLI.E.IO  			anticipate a bad drive error.
 				sta XRW.D2VolNum-1,y
 
 				jsr XRW.Seek
-				bra L5398
+				bra .1
 
-L53BE  			cmp XRW.ReqTrack
-				beq L53D5
+.4  			cmp XRW.ReqTrack
+				beq .5
 
 				lda XRW.ReqTrack
 				
 				jsr XRW.Seek
-				bra L5398
-*--------------------------------------
-L53D5  			lda XRW.AddrField.S		is this the right sector ?
+				bra .1
+
+.5  			lda XRW.AddrField.S		is this the right sector ?
 				cmp XRW.ReqSector
-				bne L53A4	 			no, try another sector.
+				bne .3		 			no, try another sector.
 
 				lda A4L	 				read or write ?
 				lsr	   					the carry will tell.
 				bcc L53F4				branch if write
 
 				jsr XRW.Read
-				bcs L53A4				if bad read
+				bcs .3					if bad read
 
-L53E7  			lda #$00
-				.HS	D0					bne branch never taken (skip 1 byte)
-hndlerr			sec
-				ldx A2L					slot offset
-				bit IO.D2.DrvOff,x	 	turn off
-				rts
-*--------------------------------------
-XRW.TestWP		ldx A2L
-				lda IO.D2.ReadProt,x	test for write protected
-				lda IO.D2.ReadMode,x
-				rol		 				write protect-->carry-->bit 0=1
-				lda IO.D2.RData,x		keep in read mode
-				bra statdne
+.9				rts
 
-L53F4  			jsr XRW.Write
-
-statdne			bcc L53E7				if no errors.
-				lda #MLI.E.WRTPROT		disk write protected.
-				bne hndlerr	  			always
+L53F4  			jmp XRW.Write			
 *--------------------------------------
 * determine if motor is stopped
 *
@@ -252,6 +247,13 @@ XRW.CheckMotorOnX
 				bne .1					and try 256 times.
 
 .9				rts
+*--------------------------------------
+XRW.TestWP		ldx A2L
+				lda IO.D2.ReadProt,x	test for write protected
+				lda IO.D2.ReadMode,x
+				rol		 				write protect-->carry-->bit 0=1
+				lda IO.D2.RData,x		keep in read mode
+				rts
 *--------------------------------------
 * preniblize subroutine (16 sector format)
 *
@@ -384,17 +386,7 @@ L596F  			ldy #$FF	   			index to last byte of data to write.
 * on exit: carry set if error (write protect violation).
 *	if no error, acc=uncertain, x=unchanged, y=0, carry clear.
 *--------------------------------------
-XRW.Write		sec						anticipate write protect error
-				lda IO.D2.ReadProt,x
-				lda IO.D2.ReadMode,x	sense write protect flag
-				bpl .1
-
-				jmp wexit				exit if write protected
-
-* timing is critical. a one micro-second cycle time is assumed.
-* number in () is how many micro-seconds per instruction or subroutine
-
-.1				lda nbuf2
+XRW.Write		lda nbuf2
 				sta pcl
 
 				lda #$FF   				sync data.
@@ -807,17 +799,6 @@ XRW.Trk2Qtrk	asl						x2
 .1				adc #$ff				SELF MODIFIED
 				rts
 *--------------------------------------
-* read address field subroutine (16-sector format)
-*
-* reads volume, track and sector.
-* on entry: x = slot# times $10, read mode
-* on exit: carry set if error, else if no error:
-*	acc=$AA, y=0, x=unchanged, carry clear,
-*	ccstv contains chksum,sector,track & volume read.
-* uses temps: count,last,csum & 4 bytes at ccstv
-* expects: original 10-sector normal density nibls (4-bit) odd bits then even.
-* observe 'no page cross' warnings on some branches !!!
-*--------------------------------------
 XRW.ReadAddr	ldy #$FC
 				sty XRW.CheckSum		init nibble counter to $FCFC
 				
@@ -874,12 +855,6 @@ L56D2  			lda IO.D2.RData,x		read 'even bit' nibl
 				tay		  				if final checksum non-zero,
 				bne rderr				then error.
 				
-*L56E6  			lda IO.D2.RData,x		first bit-slip nibl
-*				bpl L56E6				*** no page cross ***
-				
-*				cmp #$DE
-*				bne rderr
-
 				ldy XRW.UnitIndex		Succesfull REad, update Drive table
 				
 				lda XRW.AddrField.V
