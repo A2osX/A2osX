@@ -1,41 +1,172 @@
 NEW
   AUTO 3,1
 *--------------------------------------
-SHARED.Stat.I	bit CORE.FSID
-				bpl .1
-	
-				>MLICALL MLIGETFILEINFOEX
-				bcs K.Pipe.RTS
-				
-				>LDYAI K.MLI.PARAMS+3
-				>STYA ZPPtr3
-				
-				bra SHARED.DirEnt2Stat
+IO.OPEN.REG		>MLICALL MLIGETFILEINFO
+				bcc IO.OPEN.REG.E		Already Exists
 
-.1				>MLICALL MLIGETFILEINFO
-				bcs K.Pipe.RTS
+				bit IO.Open.FLAGS		Create if not exists ?
+				bpl IO.OPEN.RTS			No, return MLI error
 
-SHARED.GFI2Stat	jsr SHARED.ClrStat
-				
-				lda K.MLI.PARAMS+S.FI.A
-				jsr SHARED.Access2Mode
+				ldx #2					Yes, Create...
 
-				ldx #SHARED.GFI.Cnt
-
-.3				ldy SHARED.GFI.Src-1,x
-				lda K.MLI.PARAMS,y
-				ldy SHARED.Stat.Dst-1,x
-				sta K.S.STAT,y
+.1				lda IO.Open.TYPE,x
+				sta K.MLI.PARAMS+4,x	File type,Aux type
 				dex
-				bne .3
-				
-				>LDYAI K.MLI.PARAMS+S.FI.CDATE
-				ldx #K.S.STAT+S.STAT.CTIME
-				jsr SHARED.PTime2StatYAX
+				bpl .1
 
-				>LDYAI K.MLI.PARAMS+S.FI.MDATE
-				ldx #K.S.STAT+S.STAT.MTIME
-				jmp SHARED.PTime2StatYAX
+				lda #S.FI.ST.STD
+				jsr IO.MLI.CREATE
+				bcs IO.OPEN.RTS
+
+IO.OPEN.REG.E	ldx #0
+				jsr IO.MkFD
+				bcs IO.OPEN.RTS
+
+				jsr IO.MLI.OPEN
+				bcs UNISTD.Open.ERR
+
+				lda IO.Open.FLAGS
+				bit #O.WRONLY
+				beq .20					Write mode ?
+
+				and #O.APPEND			Append ?
+				bne .11					yes, go to end of file
+
+				stz K.MLI.PARAMS+2
+				stz K.MLI.PARAMS+3
+				stz K.MLI.PARAMS+4
+				>MLICALL MLISETEOF		no, reset size to 0
+				bra .21
+
+.11				>MLICALL MLIGETEOF
+				bcs UNISTD.Open.ERR
+
+				>MLICALL MLISETMARK
+.21				bcs UNISTD.Open.ERR
+
+.20				lda IO.Open.FLAGS
+				and #O.TEXT				Text Mode ?
+				beq .8
+
+				lda #$FF
+				sta K.MLI.PARAMS+2
+				lda #C.CR
+				sta K.MLI.PARAMS+3
+				>MLICALL MLINEWLINE
+				bcs UNISTD.Open.ERR
+
+.8				lda IO.hFD
+IO.OPEN.RTS		rts
+
+UNISTD.Open.ERR	pha						Save Error Code
+				lda IO.hFD
+				jsr K.Close
+				pla
+				sec
+				rts
+*--------------------------------------
+IO.READ.REG		ldx #MLIREAD
+				.HS 2C					BIT ABS
+*--------------------------------------
+IO.WRITE.REG	ldx #MLIWRITE
+
+				ldy #S.FD.REG.REF
+				lda (pFD),y
+				sta K.MLI.PARAMS+1
+				>PULLW K.MLI.PARAMS+2
+				>PULLW K.MLI.PARAMS+4
+
+				lda #4					Param Count = 4 for MLIREAD & MLIWRITE
+				jsr GP.MLICall
+				bcs .9
+				>LDYA K.MLI.PARAMS+6
+.9
+IO.WRITE.REG.RTS
+				rts
+*--------------------------------------
+IO.CLOSE.REG
+IO.CLOSE.DIR	ldy #S.FD.REG.REF
+				lda (pFD),y
+				beq .1
+				sta K.MLI.PARAMS+1
+				>MLICALL MLICLOSE
+
+.1				ldy #S.FD.REG.IOBUF
+				lda (pFD),y
+				beq .2
+				jsr K.FreeMem
+.2				lda IO.hFD
+				jmp K.FreeMem
+*--------------------------------------
+IO.EOF.REG		>MLICALL MLIGETMARK
+				bcs .9
+				ldy #2
+.1				lda K.MLI.PARAMS+2,y
+				sta ACC32,y
+				dey
+				bpl .1
+
+				>MLICALL MLIGETEOF
+				bcs .9
+
+				ldy #2
+.2				lda K.MLI.PARAMS+2,y
+				eor ACC32,y
+				bne .8					FALSE
+				dey
+				bpl .2
+				lda #$ff				TRUE
+*				clc
+				rts
+
+.8				lda #0
+*				clc
+.9				rts
+*--------------------------------------
+IO.MLI.CREATE	sta K.MLI.PARAMS+7		Storage Type
+				ldx #3
+.1				lda DATELO,x
+				sta K.MLI.PARAMS+8,x	Create Date/Time
+				dex
+				bpl .1
+
+				lda #S.FI.A.FULL
+				sta K.MLI.PARAMS+3		Access
+				>MLICALL MLICREATE
+				rts
+*--------------------------------------
+IO.MLI.OPEN		>LDYAI 1024				get a ProDOS IOBUF
+				ldx #S.MEM.F.ALIGN
+				jsr MEM.GetMem.YAX
+				bcs .9
+
+				>STYA K.MLI.PARAMS+3	Save Ptr to IOBUF for MLIOPEN call
+				txa
+				ldy #S.FD.REG.IOBUF
+				sta (pFD),y
+
+				>MLICALL MLIOPEN
+				bcs .9
+				lda K.MLI.PARAMS+5		get ref_num
+				ldy #S.FD.REG.REF
+				sta (pFD),y
+
+				sta K.MLI.PARAMS+1		Next MLI Calls are REF_NUM based
+
+*				clc
+.9				rts
+*--------------------------------------
+SHARED.ClrStat	ldx #S.STAT-1
+
+.1				stz K.S.STAT,x
+				dex
+				bpl .1
+
+				lda CORE.FSID
+				sta K.S.STAT+S.STAT.FSID
+
+				rts
+SHARED.ClrStat.RTS
 *--------------------------------------
 SHARED.DirEnt2Stat
 				jsr SHARED.ClrStat
@@ -44,7 +175,7 @@ SHARED.DirEnt2Stat
 				and #$F0
 				cmp #$D0					Vol Hdr, Dir Hdr or Dir ?
 				bcc .1
-				
+
 				lda /S.STAT.MODE.DIR
 				sta K.S.STAT+S.STAT.MODE+1
 
@@ -56,7 +187,7 @@ SHARED.DirEnt2Stat
 				sta K.S.STAT,y
 				dex
 				bne .2
-				
+
 				ldy #$1E				ProDOS Access
 				lda (ZPPtr3),y
 
@@ -124,7 +255,7 @@ SHARED.PTime2StatYAX
 *--------------------------------------
 SHARED.GFI.Src	.DA #S.FI.T,#S.FI.AUXTYPE,#S.FI.AUXTYPE+1
 				.DA #S.FI.UBLKS,#S.FI.UBLKS+1
-SHARED.GFI.Cnt	.EQ *-SHARED.GFI.Src				
+SHARED.GFI.Cnt	.EQ *-SHARED.GFI.Src
 *--------------------------------------
 SHARED.DirEnt.Src
 				.HS 10.1f20.1314.151617
