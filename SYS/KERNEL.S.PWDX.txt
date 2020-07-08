@@ -81,7 +81,7 @@ PWDX.GetPWName	lda PWD.hUsrDB
 				jsr PWD.NextString		skip PASSWORD
 				jmp PWD.GetByte			get UID
 *--------------------------------------
-* FORPNT : pPW (Output)
+* TXTPTR : pPW (Input)
 * ZPPtr3 : pDB
 *--------------------------------------
 PWDX.PutPW		lda PWD.hUsrDB
@@ -98,26 +98,35 @@ PWDX.PutPW		lda PWD.hUsrDB
 
 				jsr K.getmem
 				bcs PWD.GetPW.RTS
-				>STYA ZPPtr3
-				>STYA PWD.UsrDBPtr
-				stx PWD.hUsrDB
-				jmp .8
 
+				>STYA ZPPtr3
+				stx PWD.hUsrDB
+				
+				lda #0
+				sta (ZPPtr3)
+				
+				jsr PWD.AppendRecord
+				
+				clc
+				rts
+*--------------------------------------
 .1				jsr K.GetmemPtr
-				>STYA PWD.UsrDBPtr
+				>STYA ZPPtr3
 
 				ldy #S.PW.PASSWD
 				jsr SHARED.TXTPTR.GetY
 				bne .12
 
-				jsr PWD.DeleteRecord
-				bcc .80
+				jmp PWD.DeleteRecord
+*--------------------------------------
+.12				jsr PWD.FindRecord
+				bcs .11
 
+				lda #E.DUPUSR			user already exits.
+				sec
 				rts
-
-.12				jsr PWD.DeleteRecord
-				bcc .11					user exits..
-				jsr PWD.GetUID			new user, get UID
+*--------------------------------------
+.11				jsr PWD.GetUID			new user, get UID
 				bcs .99
 
 				ldy #S.PW.UID
@@ -125,48 +134,33 @@ PWDX.PutPW		lda PWD.hUsrDB
 				sta (TXTPTR),y
 				sta SETWRITEAUX
 
-.11				jsr PWD.GetRecordLen
+				jsr PWD.GetRecordLen
 
 				clc
 				adc PWD.UsrDBSize
 				sta PWD.UsrDBSize
-				bcc .2
-				inc PWD.UsrDBSize+1
-.2				>LDYA PWD.UsrDBPtr
-				>STYA ZPPtr4
-				>LDYA PWD.UsrDBSize
-
-				jsr K.Getmem
+				sta MEM.NewSize
+				
+				lda #0
+				adc PWD.UsrDBSize+1
+				sta PWD.UsrDBSize+1
+				sta MEM.NewSize+1
+				
+				lda PWD.hUsrDB
+				jsr K.Realloc.I
 				bcs .99
+				
 				>STYA ZPPtr3
-				>STYA PWD.UsrDBPtr
-				ldy #0
-.3				lda (ZPPtr4),y
-				sta (ZPPtr3),y
-				beq .4
-				iny
-				bne .3
-				inc ZPPtr4
-				inc ZPPtr3
-				bra .3
-.4				tya
-				clc
-				adc ZPPtr3
-				sta ZPPtr3
-				bcc .5
-				inc ZPPtr3+1
-.5				lda PWD.hUsrDB
 				stx PWD.hUsrDB
-				jsr K.Freemem
 
-.8				jsr PWD.StoreRecord
-			
-.80				clc	
-.99				rts
+				jsr PWD.AppendRecord
+				
+				clc
+				rts
 
 .9				lda #E.IPWDDB
 				sec
-				rts	
+.99				rts	
 *--------------------------------------
 PWDX.GetGRGID
 
@@ -184,11 +178,11 @@ PWDX.OpenSession
 				beq .1
 				
 				lda TXTPTR+1			
-				bne .9
+				bne .3
 
 .1				>LDYAI PWDX.ROOT.Size
 				jsr K.GetMem
-				bcs .99
+				bcs .9
 
 				>STYA ZPPtr1
 				
@@ -202,9 +196,45 @@ PWDX.OpenSession
 				txa
 				clc
 				rts
+
+.3				jsr PWD.FindRecord
+				bcs .9
+
+				tya						Y = Name length +1
+		
+*				clc
+				adc ZPPtr3
+				sta ZPPtr4
 				
-.9				sec
-.99				rts
+				lda ZPPtr3+1
+				adc #0
+				sta ZPPtr4+1
+				
+				ldy #31
+
+.5				jsr SHARED.FORPNT.getY
+				cmp (ZPPtr4),y			Check MD5
+				bne .9
+				
+				dey
+				bpl .5
+
+				>LDYAI 256				TODO: compute S.SESSION size
+				jsr K.Getmem
+				bcs .9
+
+				>STYA ZPPtr2
+				stx .8+1
+				
+				jsr PWD.Record2Session
+				
+.8				lda #$ff				SELF MODIFIED
+
+				clc
+				rts
+				
+				sec
+.9				rts
 *--------------------------------------
 PWDX.CloseSession
 				sec
@@ -212,25 +242,34 @@ PWDX.CloseSession
 *--------------------------------------
 * PRIVATE
 *--------------------------------------
-PWD.GetUID		>LDYA PWD.UsrDBPtr
+PWD.GetUID		lda PWD.hUsrDB
+
+				jsr K.GetmemPtr
 				>STYA ZPPtr3
+
 				stz .8+1
 .1				lda (ZPPtr3)
 				beq .8					End of DB
+
 				ldy #0
 				jsr	PWD.NextString		skip name
 				jsr PWD.NextString		skip password
 				jsr PWD.GetByte
 				cmp .8+1
 				bcc .4
+
 				sta .8+1
+
 .4				jsr PWD.NextLine
 				bra .1
+
 .8				lda #$ff				SELF MODIFIED
 				inc
 				beq .9
+
 				clc
 				rts
+
 .9 				lda #E.IUSR
 				sec
 				rts
@@ -238,10 +277,12 @@ PWD.GetUID		>LDYA PWD.UsrDBPtr
 PWD.DeleteRecord
 				jsr PWD.FindRecord
 				bcs .9
+				
 .1				iny
 				lda (ZPPtr3),y
 				cmp #C.CR
 				bne .1
+
 				sty .3+1
 				tya
 				sec
@@ -250,7 +291,9 @@ PWD.DeleteRecord
 				lda ZPPtr3+1
 				adc #0
 				sta ZPPtr4+1
+
 				ldy #$ff
+
 .2				iny
 				lda (ZPPtr4),y
 				sta (ZPPtr3),y
@@ -261,31 +304,42 @@ PWD.DeleteRecord
 .3				sbc #$ff				SELF MODIFIED
 				sta PWD.UsrDBSize
 				bcs .8
+
 				dec PWD.UsrDBSize+1 
+
 .8				clc
 	
 .9				rts
 *--------------------------------------
-PWD.FindRecord	>LDYA PWD.UsrDBPtr
+PWD.FindRecord	lda PWD.hUsrDB
+				jsr K.GetmemPtr
+				
 				>STYA ZPPtr3
 
 .2				lda (ZPPtr3)
 				beq .9					End of DB
 
 				ldy #$ff
+
 .3				iny
 				jsr SHARED.TXTPTR.GetY
 				beq .4
+
 				cmp (ZPPtr3),y
 				beq .3
+
 .5				jsr PWD.NextLine
 				bra .2
+
 .4				lda (ZPPtr3),y
 				cmp #':'
 				bne .5
 
+				iny						skip ":"
+
 				clc
 				rts
+
 .9				lda #E.IUSR
 				sec
 				rts
@@ -307,6 +361,70 @@ PWD.NextLine	iny
 				bcc .8
 				inc ZPPtr3+1
 .8				rts
+*--------------------------------------
+* USERNAME:PASSWORD:UID:GID:GECOS:HOME:SHELL\CR
+*--------------------------------------
+PWD.Record2Session
+				ldy #0
+				
+				jsr PWD.NextString		skip USERNAME
+				jsr PWD.NextString		skip PASSWORD
+				jsr PWD.GetByte			get UID
+				sta ZPPtr1
+				jsr PWD.GetByte			get GID
+				sta ZPPtr1+1
+				
+				lda #0
+				ldx ZPPtr1
+				bne .1
+
+				ora #S.SESSION.P.ROOT
+
+.1				ldx ZPPtr1+1
+				bne .2
+				
+				ora #S.SESSION.P.SYSADMIN
+				
+.2				jsr SHARED.PutCharPtr2
+				
+				lda ZPPtr1
+				jsr SHARED.PutCharPtr2	UID
+
+				lda ZPPtr1+1
+				jsr SHARED.PutCharPtr2	GID
+				
+				phy
+				
+				ldy #$ff
+
+.3				iny
+				lda (ZPPtr3),y
+				cmp #':'
+				beq .4
+				
+				jsr SHARED.PutCharPtr2
+				bra .3
+				
+.4				lda #0				
+				jsr SHARED.PutCharPtr2
+				
+				ply
+
+.5				lda (ZPPtr3),y
+				cmp #C.CR
+				beq .8
+
+				cmp #':'
+				bne .6
+	
+				lda #0
+
+.6				jsr SHARED.PutCharPtr2
+				iny
+				bra .5
+				
+.8				lda #0				
+				jmp SHARED.PutCharPtr2
 *--------------------------------------
 PWD.Record2PW	ldy #0
 
@@ -387,31 +505,44 @@ PWD.Record2PW	ldy #0
 				clc
 				rts
 *--------------------------------------
-PWD.GetByte		stz ZPPtr4
+PWD.GetByte		stz .8+1
 
 .1				lda (ZPPtr3),y
 				iny
 				cmp #':'
 				beq .8
+
 				and #$f
 				pha
-				lda ZPPtr4
+				lda .8+1
 				asl
 				asl
 				clc
-				adc ZPPtr4
+				adc .8+1
 				asl
-				sta ZPPtr4
+				sta .8+1
 				pla
 				clc
-				adc ZPPtr4
-				sta ZPPtr4
+				adc .8+1
+				sta .8+1
 				bra .1
-.8				lda ZPPtr4
+
+.8				lda #$ff				SELF MODIFIED
+
 				clc
 				rts
 *--------------------------------------
-PWD.StoreRecord	sec
+PWD.AppendRecord
+			
+.1				lda (ZPPtr3)
+				beq .8
+				
+				inc ZPPtr3
+				bne .1
+				inc ZPPtr3+1
+				bra .1
+
+.8				sec
 				.HS 90					BCC
 *--------------------------------------
 PWD.GetRecordLen
