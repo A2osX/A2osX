@@ -6,8 +6,8 @@ NEW
 * `int hDIR opendir (const char * dirpath);`
 * ## ASM
 * `>LDYA dirpath`
-* `>SYSCALL opendir` 
-* ## RETURN VALUE 
+* `>SYSCALL opendir`
+* ## RETURN VALUE
 *  CC : success
 *   A = hDIR
 *  CS : error
@@ -23,21 +23,24 @@ K.OpenDir		jsr PFT.CheckPathYA
 				lda K.Buf256+1			One char ("/") ?
 				beq .8					No, Go open dir....
 
-				>MLICALL MLIGETFILEINFO
+				jsr FS.Stat
 				bcs .98					file/dir does not exists....quit
-				lda K.MLI.PARAMS+4
-				cmp #$0F				Directory ?
-				bne .98
+
+				lda K.S.STAT+S.STAT.MODE+1
+				and #$f0
+				cmp /S.STAT.MODE.DIR
+				bne .97
 
 				jsr IO.MLI.OPEN
-				bcs .98		
+				bcs .98
 
 .8				jsr STDIO.NewHFile
+				bcs .98
 
-				bcc K.ReadDir.RTS
+.9				rts
+
+.97				lda #MLI.E.UNSUPST
 .98				jmp UNISTD.Open.ERR
-
-.9				>RET 2
 */--------------------------------------
 * # ReadDir
 * ## C
@@ -46,7 +49,7 @@ K.OpenDir		jsr PFT.CheckPathYA
 * `>PUSHW dirent`
 * `lda hDIR`
 * `>SYSCALL readdir`
-* ## RETURN VALUE 
+* ## RETURN VALUE
 *  CC : success
 *   X = hDIRENT
 *   Y,A = PTR to S.DIRENT
@@ -54,13 +57,15 @@ K.OpenDir		jsr PFT.CheckPathYA
 *   A = EC
 *   note : A = 0 means no more entry
 *\--------------------------------------
-				.DUMMY 
-				.OR ZPTMP				8 Bytes
+				.DUMMY
+				.OR ZPTMP				9 Bytes
 K.ReadDir.hBlk	.BS 1
 K.ReadDir.ECIB	.BS 1
+
 K.ReadDir.EL	.BS 1
 K.ReadDir.EPB	.BS 1
 K.ReadDir.EC	.BS 2
+
 K.ReadDir.BufSize	.BS 2
 K.ReadDir.hBuf	.BS 1
 				.ED
@@ -71,9 +76,9 @@ K.ReadDir		jsr PFT.CheckNodeA
 				ldy #S.FD.REG.REF
 				lda (pFD),y
 				beq K.ReadDir.ROOT
-				
+
 				bpl .1
-				
+
 				jmp K.ReadDir.DEV
 
 .1				jmp K.ReadDir.DIR
@@ -97,10 +102,10 @@ K.ReadDir.ROOT	ldy #S.FD.DIR.FC		did we already returned something ?
 
 				jsr K.ReadDir.GetBufYA
 				bcs K.ReadDir.RTS
-				
+
 				lda #16
 				sta K.ReadDir.EC
-				
+
 .1				lda (ZPPtr2)
 				and #$0F
 				beq .6
@@ -111,22 +116,22 @@ K.ReadDir.ROOT	ldy #S.FD.DIR.FC		did we already returned something ?
 				lda #'/'
 				sta K.MLI.PATH+1
 				ldy #1
-				
+
 .2				lda (ZPPtr2),y
 				sta K.MLI.PATH+1,y
 				jsr K.ReadDir.AddToBuf
 				iny
 				dex
 				bne .2
-				
-				txa						Add ending 0 for C String 
+
+				txa						Add ending 0 for C String
 				jsr K.ReadDir.AddToBuf
-				
+
 				jsr SHARED.ClrStat
 
 				lda /S.STAT.MODE.BDEV
 				sta K.S.STAT+S.STAT.MODE+1
-				
+
 				lda (ZPPtr2)
 				asl						DRIVE in Carry
 				pha
@@ -162,19 +167,19 @@ K.ReadDir.ROOT	ldy #S.FD.DIR.FC		did we already returned something ?
 				sta ZPPtr2
 				bcc .7
 				inc ZPPtr2+1
-				
+
 .7				dec K.ReadDir.EC
-				bne .1				
-				
+				bne .1
+
 *				lda #0					done by S.MEM.F.INIT0
 *				sta (ZPPtr4)			Ending 0
 
 				ldy #S.FD.DIR.FC
 				lda #16
-				sta (pFD),y				Flag that we returned something for next time 
+				sta (pFD),y				Flag that we returned something for next time
 				jmp K.ReadDir.EXIT
 *--------------------------------------
-K.ReadDir.DEV		
+K.ReadDir.DEV
 				jmp K.ReadDir.NoMore
 *--------------------------------------
 K.ReadDir.DIR  	sta K.MLI.PARAMS+1		A=#S.DIR.PRODOS.REF
@@ -188,7 +193,7 @@ K.ReadDir.DIR  	sta K.MLI.PARAMS+1		A=#S.DIR.PRODOS.REF
 				pha
 				tya
 *				clc						CC from  K.GetMem
-				adc #4					Skip 4 bytes linked list		
+				adc #4					Skip 4 bytes linked list
 				sta ZPPtr2				PTR to Buffer for PASS #1
 				sta ZPPtr3				PTR to Buffer for PASS #2
 				pla
@@ -213,6 +218,31 @@ K.ReadDir.DIR  	sta K.MLI.PARAMS+1		A=#S.DIR.PRODOS.REF
 				dey
 				dex
 				bpl .1
+
+				ldx #8
+
+				ldy #16
+
+.10				lda (ZPPtr2),y
+				pha
+				iny
+				dex
+				bne .10
+
+				ldx #8
+				
+				ldy #S.FD.DIR.ACL+7
+
+.20				pla
+				cpy #S.FD.DIR.MODE+1
+				bne .30
+				
+				and #$0F
+				
+.30				sta (pFD),y
+				dey
+				dex
+				bne .20
 
 				inc K.ReadDir.EC		Add one to EC because we include VOL/DIR Header
 				bne .4
@@ -316,15 +346,14 @@ K.ReadDir.DIR2	jsr K.ReadDir.GetBuf
 				bne .3
 
 				jsr K.ReadDir.ADD.
-				jsr SHARED.DirEnt2Stat
-				jsr K.ReadDir.AddStat
+				jsr K.ReadDir.AddStatACL
+
 				jsr K.ReadDir.ADD..
 				bra .4
 
 .3				jsr K.ReadDir.AddFNToBuf
-				
-.4				jsr SHARED.DirEnt2Stat
-				jsr K.ReadDir.AddStat
+
+.4				jsr K.ReadDir.AddStatACL
 
 				lda K.ReadDir.EC			decrease global counter...
 				sec
@@ -345,7 +374,7 @@ K.ReadDir.DIR2	jsr K.ReadDir.GetBuf
 				sta ZPPtr3
 				bcc .1
 
-				inc ZPPtr3+1	
+				inc ZPPtr3+1
 				bra .1
 
 .8				ldx #3
@@ -414,7 +443,7 @@ K.ReadDir.AddFNToBuf
 				beq .3
 
 				lda (ZPPtr3),y
-				ora #$20				convert a-z to A-Z adding from $4x to $6x 
+				ora #$20				convert a-z to A-Z adding from $4x to $6x
 				sta (ZPPtr3),y
 
 .3				asl .2+1
@@ -432,7 +461,7 @@ K.ReadDir.AddFNToBuf
 				tax
 				ldy #1
 
-.8				lda (ZPPtr3),y			
+.8				lda (ZPPtr3),y
 				jsr K.ReadDir.AddToBuf
 				iny
 				dex
@@ -450,6 +479,29 @@ K.ReadDir.AddToBuf
 				inc ZPPtr4+1
 .8				rts
 *--------------------------------------
+K.ReadDir.AddStatACL
+				jsr FS.DirEnt2Stat
+
+				ldy #S.FD.DIR.UID
+				ldx #S.STAT.UID
+
+.1				lda (pFD),y
+				sta K.S.STAT,x
+				iny
+				inx
+				cpx #S.STAT.GID+2
+				bne .1
+
+				ldy #S.FD.DIR.MODE+1
+				ldx #1
+				
+.2				lda (pFD),y
+				ora K.S.STAT+S.STAT.MODE,x
+				sta K.S.STAT+S.STAT.MODE,x
+				dey
+				dex
+				bpl .2
+
 K.ReadDir.AddStat
 				ldy #0
 
@@ -468,7 +520,7 @@ K.ReadDir.AddStat
 * `lda hDIR`
 * `>SYSCALL closedir`
 * ## RETURN VALUE
-*  none, always succeed. 
+*  none, always succeed.
 *\-------------------------------------
 *K.CloseDir		.EQ K.FClose
 *--------------------------------------
