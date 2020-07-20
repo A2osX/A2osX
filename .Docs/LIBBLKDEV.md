@@ -3,9 +3,18 @@
 ## Copyright 
 Copyright 2015 - 2020, Remy Gibert and the A2osX contributors. 
 
+# D2TrkRead16s  
+Write a track (16 sectors)  
+ PUSHB = DSSS0000  
+ PUSHB = TrackNum * 4	: 0->136+	  
+ PUSHW = Ptr to 16*256 buffer  
+
+## RETURN VALUE  
+ CC : success, A = VolNum  
+ CS : A = Error  
+
 # D2TrkWrite16s  
 Write a track (16 sectors)  
-**In:**  
  PUSHB = DSSS0000  
  PUSHB = TrackNum * 4	: 0->136+	  
  PUSHW = Ptr to 16*256 buffer  
@@ -13,7 +22,6 @@ Write a track (16 sectors)
 ## RETURN VALUE  
  CC : success  
  CS : A = Error  
-      A=0, currently starting/seeking...  
 
 # D2TrkWriteNIB  
 Write a track (NIBBLE)  

@@ -126,9 +126,9 @@ Create a hDEV
 
 ## ASM  
 `>LDYA dirpath`  
-`>SYSCALL opendir`   
+`>SYSCALL opendir`  
 
-## RETURN VALUE   
+## RETURN VALUE  
  CC : success  
   A = hDIR  
  CS : error  
@@ -144,7 +144,7 @@ Create a hDEV
 `lda hDIR`  
 `>SYSCALL readdir`  
 
-## RETURN VALUE   
+## RETURN VALUE  
  CC : success  
   X = hDIRENT  
   Y,A = PTR to S.DIRENT  
@@ -162,7 +162,7 @@ Create a hDEV
 `>SYSCALL closedir`  
 
 ## RETURN VALUE  
- none, always succeed.   
+ none, always succeed.  
 
 # SetEnv  
 Change or add an environment variable  
@@ -559,6 +559,18 @@ CS : not found
 
 ## RETURN VALUE  
 
+# OpenSession  
+
+## C  
+`short int hSID opensession(const char *name, const char *passwd);`  
+
+## ASM  
+`>PUSHW name`  
+`>PUSHW passwd`  
+`>SYSCALL OpenSession`  
+
+## RETURN VALUE  
+
 # GetPWName  
 
 ## C  
@@ -586,7 +598,7 @@ CS : not found
 # PutPW  
 
 ## C  
-`int putpw( S.PW* passwd );`  
+`int putpw(S.PW* passwd);`  
 
 ## ASM  
 `>PUSHW passwd`  
@@ -602,18 +614,6 @@ CS : not found
 ## ASM  
 `>PUSHW group`  
 `>SYSCALL putgr`  
-
-## RETURN VALUE  
-
-# OpenSession  
-
-## C  
-`short int hSID opensession(const char *name, const char *passwd);`  
-
-## ASM  
-`>PUSHW name`  
-`>PUSHW passwd`  
-`>SYSCALL OpenSession`  
 
 ## RETURN VALUE  
 
@@ -902,6 +902,21 @@ Get char from Node
 **In:**  
 `lda stream`  
 `>SYSCALL getc`  
+
+## RETURN VALUE   
+ CC = success  
+  A = char  
+
+# ungetc  
+push byte back into input stream  
+
+## C  
+`int ungetc(short int c, hFILE stream);  
+
+## ASM  
+`>PUSHB c`  
+`>PUSHB stream`  
+`>SYSCALL ungetc`  
 
 ## RETURN VALUE   
  CC = success  
