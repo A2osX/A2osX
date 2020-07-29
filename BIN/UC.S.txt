@@ -1,0 +1,350 @@
+NEW
+  AUTO 3,1
+				.LIST OFF
+				.OP	65C02
+				.OR	$2000
+				.TF bin/uc
+*--------------------------------------
+				.INB inc/macros.i
+				.INB inc/a2osx.i
+				.INB inc/kernel.i
+				.INB inc/mli.i
+				.INB inc/mli.e.i
+*--------------------------------------
+X.ENTER.SUBDIR	.EQ 0
+X.COPY.TO.DEST	.EQ 0
+X.DELETE.SOURCE	.EQ 0
+*--------------------------------------
+				.DUMMY
+				.OR ZPBIN
+ZS.START
+ZPPtr1			.BS 2
+ZPPtr2			.BS 2
+ZPFileName		.BS 2
+ZPFileStat		.BS 2
+
+ZPFullPath		.BS 2
+ZPNewPath		.BS 2
+
+ZPLineBuf		.BS 2
+
+bPause			.BS 1
+
+bContinue		.BS 1
+bRecurse		.BS 1
+
+ZS.END			.ED
+*--------------------------------------
+*			File Header (16 Bytes)
+*--------------------------------------
+CS.START		cld
+				jmp (.1,x)
+				.DA #$61				6502,Level 1 (65c02)
+				.DA #1					BIN Layout Version 1
+				.DA 0
+				.DA CS.END-CS.START		Code Size (without Constants)
+				.DA DS.END-DS.START		Data SegmentSize
+				.DA #64					Stack Size
+				.DA #ZS.END-ZS.START	Zero Page Size
+				.DA 0
+*--------------------------------------
+* Relocation Table
+*--------------------------------------
+.1				.DA CS.INIT
+				.DA CS.RUN
+				.DA CS.DOEVENT		
+				.DA	CS.QUIT
+L.MSG.USAGE		.DA MSG.USAGE
+L.MSG.DIR		.DA MSG.DIR
+L.MSG.FILE		.DA MSG.FILE
+L.MSG.OK		.DA MSG.OK
+L.MSG.ERR		.DA MSG.ERR
+				.DA 0
+*--------------------------------------
+CS.INIT			clc
+				rts
+*--------------------------------------
+CS.RUN			>INC.G ArgIndex
+				>SYSCALL ArgV
+				bcs .5
+				>STYA ZPPtr1
+				lda (ZPPtr1)
+				cmp #'-'
+				bne .4
+				jsr CS.RUN.CheckOpt
+				bcc CS.RUN
+
+.9				>PUSHW L.MSG.USAGE
+				>PUSHBI 0
+				>SYSCALL PrintF
+				lda #E.SYN
+				sec
+				rts
+
+.4				>LDA.G hSrcBasePath
+				bne .9
+				>LDYA ZPPtr1
+				jsr InitSrcDirYA
+				bcc CS.RUN
+.99				rts
+*--------------------------------------
+.5				>LDYAI 256
+				>SYSCALL GetMem
+				bcs .99
+				>STYA ZPFullPath
+				txa
+				>STA.G hSrcFullPath
+
+				>LDYAI 256
+				>SYSCALL GetMem
+				bcs .99
+				>STYA ZPNewPath
+				txa
+				>STA.G hSrcNewPath
+*--------------------------------------
+CS.RUN.LOOP		ldy #S.PS.hStdIn
+				lda (pPS),y
+				>SYSCALL feof
+				bcs .99
+
+				tay
+				bne .1
+
+				>SYSCALL GetChar
+				bcs .99
+
+				cmp #$03				Ctrl-C
+				beq .99					Abort....
+
+				cmp #$13				Ctrl-S
+				bne .1
+
+				lda bPause
+				eor	#$ff
+				sta bPause
+				bne CS.RUN.LOOP
+
+.1				lda bPause
+				bne CS.RUN.LOOP			Pause...
+*--------------------------------------
+				jsr GetEntry
+				bcs CS.RUN.LEAVE
+
+				ldy #S.STAT.MODE+1
+				lda (ZPFileStat),y
+				and #$70
+				bne .5					REG file ?
+
+				jsr CS.RUN.FILE
+				bcc CS.RUN.NEXT
+				rts
+				
+.5				cmp /S.STAT.MODE.DIR	DIR ?
+				beq .6
+				
+				cmp /S.STAT.MODE.BDEV	VOL ?
+				bne .9
+
+.6				jsr CS.RUN.DIR
+				bcc CS.RUN.NEXT
+				rts
+				
+.9				lda #MLI.E.UNSUPST
+				sec
+.99				rts				
+*--------------------------------------
+CS.RUN.NEXT		jsr GetNextEntry
+				bcc CS.RUN.LOOP
+				
+CS.RUN.LEAVE	jsr LeaveSubDir
+				bcs .90
+
+				jsr BasePath..
+				
+				jmp CS.RUN.NEXT
+
+.90				lda #0
+				sec
+.99				rts
+*--------------------------------------
+CS.RUN.DIR		lda (ZPFileName)
+				cmp #'.'
+				bne .1
+				
+				ldy #1
+				lda (ZPFileName),y
+				beq .8
+				
+				cmp #'.'
+				bne .1
+				
+				iny
+				lda (ZPFileName),y
+				beq .8
+				
+.1				jsr FilterMatch
+				bcs .8
+
+				jsr CS.RUN.GetFilePath
+
+				>PUSHW L.MSG.DIR
+				>PUSHW ZPFullPath
+				>PUSHBI 2
+				>SYSCALL PrintF
+				bcs .9
+				
+				>PUSHW ZPFullPath
+				jsr CS.RUN.GetNewPath
+				>PUSHYA
+				>SYSCALL Rename
+				jsr CS.RUN.CheckErr
+				bcs .9
+
+				lda bRecurse
+				bpl .8
+
+				>LDYA ZPFileName	is now lowercase
+				jmp EnterSubDirYA
+
+.8				clc
+.9				rts
+*--------------------------------------
+CS.RUN.FILE		jsr FilterMatch
+				bcs .8					no match, skip....
+
+				jsr CS.RUN.GetFilePath
+				>PUSHW L.MSG.FILE
+				>PUSHW ZPFullPath
+				>PUSHBI 2
+				>SYSCALL PrintF
+				bcs .9
+
+				>PUSHW ZPFullPath
+				jsr CS.RUN.GetNewPath
+				>PUSHYA
+				>SYSCALL Rename
+				jsr CS.RUN.CheckErr
+				
+.8				clc
+.9				rts				
+*--------------------------------------
+CS.RUN.CheckErr	bcs .1
+				>LDYA L.MSG.OK
+				>SYSCALL PutS
+				rts
+
+.1				pha
+				>PUSHW L.MSG.ERR
+				pla
+				pha
+				>PUSHA
+				>PUSHBI 1
+				>SYSCALL PrintF
+				lda bContinue
+				eor #$80
+				asl
+				pla
+				rts
+*--------------------------------------
+CS.RUN.GetFilePath
+				>LDA.G hSrcBasePath
+				>SYSCALL GetMemPtr
+				>PUSHYA
+				>LDYA ZPFullPath
+				>SYSCALL StrCpy
+				>PUSHW ZPFileName
+				>LDYA ZPFullPath
+				>SYSCALL StrCat
+				rts
+*--------------------------------------
+CS.RUN.GetNewPath
+				>LDA.G hSrcBasePath
+				>SYSCALL GetMemPtr
+				>PUSHYA
+				>LDYA ZPNewPath
+				>SYSCALL StrCpy
+				
+				>LDYA ZPFileName
+				>SYSCALL strupr
+				
+				>PUSHW ZPFileName
+				>LDYA ZPNewPath
+				>SYSCALL StrCat
+				rts
+*--------------------------------------
+CS.DOEVENT		sec
+				rts
+*--------------------------------------
+CS.QUIT			jsr LeaveSubDir
+				bcc CS.QUIT
+
+				>LDA.G hFilter
+				beq .1
+
+				>SYSCALL FreeMem
+.1				>LDA.G hSrcFullPath
+				beq .2
+
+				>SYSCALL FreeMem
+
+.2				>LDA.G hSrcNewPath
+				beq .8
+
+				>SYSCALL FreeMem
+
+.8				clc
+				rts
+*--------------------------------------
+CS.RUN.CheckOpt	ldy #1 
+				lda (ZPPtr1),y
+
+				ldx #OptionVars-OptionList-1
+
+.2				cmp OptionList,x
+				beq .3
+				dex
+				bpl .2
+
+				sec
+				rts
+
+.3				ldy OptionVars,x
+				lda #$ff
+				sta 0,y
+				clc
+				rts
+*--------------------------------------
+				.INB usr/src/bin/x.fileenum.s
+*--------------------------------------
+CS.END
+*--------------------------------------
+OptionList		.AS "CRcr"
+OptionVars		.DA #bContinue,#bRecurse
+				.DA #bContinue,#bRecurse
+*--------------------------------------
+MSG.USAGE		.AS "Usage : UC File(s) (*,? wildcards allowed)\r\n"
+				.AS "   -C : Continue on error\r\n"
+				.AS "   -R : Recurse subdirectories\r\n"
+MSG.OK			.AZ "[OK]"
+MSG.ERR			.AZ "[%h]\r\n"
+MSG.DIR			.AZ "Dir :%s..."
+MSG.FILE		.AZ "File:%s..."
+*--------------------------------------
+				.DUMMY
+				.OR 0
+DS.START
+ArgIndex		.BS 1
+
+hSrcFullPath	.BS 1
+hSrcNewPath		.BS 1
+hFile			.BS 1
+hMem			.BS 1
+
+				.INB usr/src/bin/x.fileenum.g
+
+DS.END
+				.ED
+*--------------------------------------
+MAN
+SAVE usr/src/bin/uc.s
+ASM

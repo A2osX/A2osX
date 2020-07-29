@@ -1,0 +1,376 @@
+NEW
+  AUTO 3,1
+				.LIST OFF
+				.OP	65C02
+				.OR	$2000
+				.TF bin/attr
+*--------------------------------------
+				.INB inc/macros.i
+				.INB inc/a2osx.i
+				.INB inc/mli.i
+				.INB inc/mli.e.i
+*--------------------------------------
+X.ENTER.SUBDIR	.EQ 0
+X.COPY.TO.DEST	.EQ 0
+X.DELETE.SOURCE	.EQ 0
+*--------------------------------------
+				.DUMMY
+				.OR ZPBIN
+ZS.START
+ZPPtr1			.BS 2
+ZPPtr2			.BS 2
+ZPFileName		.BS 2
+ZPFileStat		.BS 2
+ZPFullPath		.BS 2
+ZPMode			.BS 2
+ArgIndex		.BS 1
+StrMode			.BS 1
+ZS.END			.ED
+*--------------------------------------
+*			File Header (16 Bytes)
+*--------------------------------------
+CS.START		cld
+				jmp (.1,x)
+				.DA #$61				6502,Level 1 (65c02)
+				.DA #1					BIN Layout Version 1
+				.DA 0
+				.DA CS.END-CS.START		Code Size (without Constants)
+				.DA DS.END-DS.START		Data SegmentSize
+				.DA #64					Stack Size
+				.DA #ZS.END-ZS.START	Zero Page Size
+				.DA 0
+*--------------------------------------
+* Relocation Table
+*--------------------------------------
+.1				.DA CS.INIT
+				.DA CS.RUN
+				.DA CS.DOEVENT		
+				.DA	CS.QUIT
+L.MSG.USAGE		.DA MSG.USAGE
+L.MSG.DIR		.DA MSG.DIR
+L.MSG.FILE		.DA MSG.FILE
+L.MSG.OK		.DA MSG.OK
+L.MSG.ERR		.DA MSG.ERR
+				.DA 0
+*--------------------------------------
+CS.INIT			clc
+				rts
+*--------------------------------------
+CS.RUN			inc ArgIndex
+				lda ArgIndex
+				>SYSCALL ArgV
+				bcs .8
+
+				>STYA ZPPtr1
+				lda (ZPPtr1)
+				cmp #'-'
+				bne .4
+
+				ldy #1 
+				lda (ZPPtr1),y
+
+				ldx #OptionVars-OptionList-1
+
+.2				cmp OptionList,x
+				beq .3
+				dex
+				bpl .2
+
+.9				>PUSHW L.MSG.USAGE
+				>PUSHBI 0
+				>SYSCALL PrintF
+				lda #E.SYN
+				sec
+.99				rts
+
+.3				ldy OptionVars,x
+				lda #$80
+				sta (pData),y
+				bra CS.RUN
+*--------------------------------------
+.4				lda StrMode
+				bne .5
+
+				lda ArgIndex
+				sta StrMode
+				bra CS.RUN
+
+.5				>LDA.G hSrcBasePath
+				bne .9
+
+				>LDYA ZPPtr1
+				jsr InitSrcDirYA
+				bcc CS.RUN
+				rts
+				
+.8				lda StrMode
+				beq .9
+				
+				jsr CS.RUN.Str2Mode
+				bcs .9
+				
+				>LDA.G hSrcBasePath
+				beq .9
+				
+				>LDYAI 256
+				>SYSCALL GetMem
+				bcs .99
+				
+				>STYA ZPFullPath
+				txa
+				>STA.G hSrcFullPath
+*--------------------------------------
+CS.RUN.LOOP		ldy #S.PS.hStdIn
+				lda (pPS),y
+				>SYSCALL feof
+				bcs .99
+
+				tay
+				bne .1
+
+				>SYSCALL GetChar
+				bcs .99
+
+				cmp #$03				Ctrl-C
+				beq .99					Abort....
+
+				cmp #$13				Ctrl-S
+				bne .1
+
+				>LDA.G bPause
+				eor	#$ff
+				sta (pData),y
+				bne CS.RUN.LOOP
+
+.1				>LDA.G bPause
+				bne CS.RUN.LOOP			Pause...
+*--------------------------------------
+				jsr GetEntry
+				bcs CS.RUN.LEAVE
+
+				ldy #S.STAT.MODE+1
+				lda (ZPFileStat),y
+				and #$70
+				bne .5					REG file ?
+
+				jsr CS.RUN.FILE
+				bcc CS.RUN.NEXT
+				rts
+				
+.5				cmp /S.STAT.MODE.DIR	DIR ?
+				beq .6
+				
+				cmp /S.STAT.MODE.BDEV	VOL ?
+				bne .9
+
+.6				jsr CS.RUN.DIR
+				bcc CS.RUN.NEXT
+				rts
+
+.9				lda #MLI.E.UNSUPST
+				sec
+.99				rts
+*--------------------------------------
+CS.RUN.NEXT		jsr GetNextEntry
+				bcc CS.RUN.LOOP
+				
+CS.RUN.LEAVE	jsr LeaveSubDir
+				bcs .90
+
+				jsr BasePath..
+				
+				jmp CS.RUN.NEXT
+
+.90				lda #0
+				sec
+.99				rts
+*--------------------------------------
+CS.RUN.DIR		lda (ZPFileName)
+				cmp #'.'
+				bne .1
+				
+				ldy #1
+				lda (ZPFileName),y
+				beq .8
+				
+				cmp #'.'
+				bne .1
+				
+				iny
+				lda (ZPFileName),y
+				beq .8
+				
+.1				jsr FilterMatch
+				bcs .8
+
+				jsr CS.RUN.GetFilePath
+				>PUSHW L.MSG.DIR
+				>PUSHW ZPFullPath
+				>PUSHBI 2
+				>SYSCALL PrintF
+				bcs .9
+				
+				>PUSHW ZPFullPath
+				>PUSHW ZPMode
+				>SYSCALL chmod
+
+				jsr CS.RUN.CheckErr
+				bcs .9
+				
+				>LDA.G bRecurse
+				bpl .8
+				
+				>LDYA ZPFileName
+				jmp EnterSubDirYA
+				
+.8				clc
+.9				rts
+*--------------------------------------
+CS.RUN.FILE		clc
+.9				rts
+*--------------------------------------
+CS.RUN.Str2Mode	>SYSCALL ArgV
+				>STYA ZPPtr1
+
+				ldy #$ff
+
+.1				iny
+				lda (ZPPtr1),y
+				bne .1
+
+				cpy #4					must be "765" max
+				bcs .9
+
+				stz ZPMode
+				stz ZPMode+1
+
+				ldy #0
+
+.2				lda (ZPPtr1),y
+				beq .8
+				cmp #'0'
+				bcc .9
+
+				cmp #'7'+1
+				bcs .9
+
+				asl ZPMode
+				rol ZPMode+1
+				asl ZPMode
+				rol ZPMode+1
+				asl ZPMode
+				rol ZPMode+1
+				and #7
+				clc
+				adc ZPMode
+				sta ZPMode
+				bcc .3
+
+				inc ZPMode+1
+
+.3				iny
+				bra .2
+
+.8				clc
+				rts
+
+.9				sec
+				rts
+*--------------------------------------
+CS.RUN.CheckErr	bcs .1
+				>LDYA L.MSG.OK
+				>SYSCALL PutS
+				rts
+
+.1				pha
+				>PUSHW L.MSG.ERR
+				pla
+				pha
+				>PUSHA
+				>PUSHBI 1
+				>SYSCALL PrintF
+				>LDA.G bContinue
+				eor #$80
+				asl
+				pla
+				rts
+*--------------------------------------
+CS.RUN.GetFilePath
+				>LDA.G hSrcBasePath
+				>SYSCALL GetMemPtr
+				>PUSHYA
+				>LDYA ZPFullPath
+				>SYSCALL StrCpy
+				>PUSHW ZPFileName
+				>LDYA ZPFullPath
+				>SYSCALL StrCat
+				rts
+*--------------------------------------
+CS.DOEVENT		sec
+				rts
+*--------------------------------------
+CS.QUIT			jsr LeaveSubDir
+				bcc CS.QUIT
+				>LDA.G hFilter
+				beq .1
+				>SYSCALL FreeMem
+.1				>LDA.G hSrcFullPath
+				beq .8
+				>SYSCALL FreeMem
+.8				clc
+				rts
+*--------------------------------------
+				.INB usr/src/bin/x.fileenum.s
+*--------------------------------------
+CS.END
+*--------------------------------------
+OptionList		.AS "CRcr"
+OptionVars		.DA #bContinue,#bRecurse,#bContinue,#bRecurse
+*--------------------------------------
+ATTRS			.AS "DeReBn----InWrRd"
+*--------------------------------------
+MSG.USAGE		.AS "Usage : ATTR File(s) (*,? wildcards allowed)\r\n"
+				.AS "   -C : Continue on error\r\n"
+				.AS "   -R : Recurse subdirectories\r\n"
+				.AZ "+|-De : Destroy enable\r\n"
+				.AS "+|-Re : Rename enable\r\n"
+				.AZ "+|-Bn : Backup needed\r\n"
+				.AZ "+|-In : Invisible\r\n"
+				.AZ "+|-Wr : Write enable\r\n"
+				.AS "+|-Rd : Read enable\r\n"
+*--------------------------------------
+*  7  6  5  4  3  2  1  0
+* +--+--+--+--+--+--+--+--+
+* |D |RN|B |Reserved|W |R |
+* +--+--+--+--+--+--+--+--+
+*
+* D:   Destroy enable bit
+* RN:  Rename enable bit
+* B:   Backup needed bit
+* W:   Write enable bit
+* R:   Read enable bit
+* 
+* Bit 2 = Invisible Bit
+*--------------------------------------
+MSG.OK			.AZ "[OK]"
+MSG.ERR			.AZ "[%h]\r\n"
+MSG.DIR			.AZ "Dir :%s..."
+MSG.FILE		.AZ "File:%s..."
+*--------------------------------------
+				.DUMMY
+				.OR 0
+DS.START
+bContinue		.BS 1
+bRecurse		.BS 1
+
+bPause			.BS 1
+hSrcFullPath	.BS 1
+
+				.INB usr/src/bin/x.fileenum.g
+
+DS.END
+				.ED
+*--------------------------------------
+MAN
+SAVE usr/src/bin/attr.s
+ASM
