@@ -421,6 +421,22 @@ Load a file in AUX memory (Stock Objects)
  none.  
  (X,Y unmodified)  
 
+# GetStkObj  
+
+## C  
+`int *ptr getstkobj (shoirt int hStkObj);`  
+
+## ASM  
+`lda hStkObj`  
+`>SYSCALL GetStkObj`  
+
+## RETURN VALUE  
+ CC : success  
+  X = hMem  
+  Y,A = ptr  
+ CS : error  
+  A = EC  
+
 # ExecL  
 
 ## C / CSH  
@@ -723,6 +739,19 @@ Change The type of a ProDOS File
 `>PUSHW filepath`  
 `>PUSHB filetype`  
 `>SYSCALL chtyp`  
+
+## RETURN VALUE  
+
+# SetAttr  
+Change Attributes of a ProDOS File  
+
+## C  
+`int setattr(const char *filepath, short int attributes);`  
+
+## ASM  
+`>PUSHW filepath`  
+`>PUSHB attributes`  
+`>SYSCALL setattr`  
 
 ## RETURN VALUE  
 
