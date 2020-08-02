@@ -21,6 +21,14 @@ CSH.Init		>SYSCALL SListNew
 				>SYSCALL GetMem
 				bcs .9
 
+				>STYA ZPCSHCode
+				txa
+				>STA.G CSH.hCode
+
+				>LDYAI 256
+				>SYSCALL GetMem
+				bcs .9
+
 				>STYA ZPCSHConst
 				txa
 				>STA.G CSH.hConst
@@ -83,6 +91,9 @@ CSH.Quit		>LDA.G CSH.hSymbols
 				jsr .7
 
 				>LDA.G CSH.hConst
+				jsr .7
+
+				>LDA.G CSH.hCode
 
 .7				beq CSH.Quit.RTS
 				>SYSCALL FreeMem
@@ -169,7 +180,7 @@ CSH.Run.1		cmp #C.CR				empty line....
 				bcs .9
 
 				jsr CSH.GetVarSize		X = returned value type
-				clc						A = Sizeof
+				clc						A = Sizeof CC to ignore Pointer hMem
 				adc pStack
 				sta pStack				Discard value on stack
 
@@ -260,31 +271,53 @@ CSH.DIR.DEFINE	jsr CSH.CheckSpace
 				sec
 .99				rts
 *--------------------------------------
-CSH.DIR.INCLUDE	jsr CSH.CheckSpace
+CSH.DIR.INCLUDE	>STZ.G PathBuf
+
+				jsr CSH.CheckSpace
 				bcs .99
 
 				cmp #'"'
 				beq .1
 
 				cmp #'<'
-				bne .80
+				bne .90
 
-
-
-
+				>PUSHW L.ENV.INCLUDE
+				>PUSHEA.G PathBuf
+				>SYSCALL getenv
+				
 				lda #'>'
+
 .1				sta ArgIndex
 
+				ldy #PathBuf
 
+.2				lda (pData),y
+				beq .3
+				
+				iny
+				bra .2
+				
+.3				jsr CSH.GetNextChar
+				beq .90
+				
+				cmp ArgIndex
+				beq .8
 
-
-
-
-				bra CSH.SkipLine
+				sta (pData),y
+				iny
+				cpy #64
+				bne .3
 
 .90				lda #CSH.E.SYNTAX
 				sec
 .99				rts
+
+.8				jsr CSH.GetNextChar		skip " or >
+
+				>LDYA pdata
+				>SYSCALL puts
+				rts
 *--------------------------------------
 CSH.SkipLine	jsr CSH.GetNextChar
 				bcs .9
@@ -293,535 +326,6 @@ CSH.SkipLine	jsr CSH.GetNextChar
 
 				clc
 .9				rts
-*--------------------------------------
-* Built in Keywords
-*--------------------------------------
-CSH.KW.JMP		txa
-				>STA.G CSH.CmdSave
-				jmp (J.CSH.KW,x)
-*--------------------------------------
-CSH.WHILE
-CSH.IF			jsr CSH.GetCharNB
-				bcs .9
-				cmp #'('
-				bne .9
-				jsr CSH.GetNextCharNB
-				bcs .9
-
-				lda #0					Any var type
-				jsr CSH.ExpEval
-				bcs .99
-				jsr CSH.GetCharNB
-				bcs .99
-				cmp #')'
-				bne .9
-				jsr CSH.GetNextCharNB	skip ')'
-				bcs .99
-				cmp #'{'
-				bne .9
-				jsr CSH.GetNextCharNB	Skip '{'
-				bcs .99
-
-				jsr CSH.IsValue0		X = var type from ExpEval
-				bcc .6					Value=0, skip {{....}}
-
-				>LDA.G CSH.CmdSave
-				beq .1					IF
-
-				pha
-				>LDA.G CSH.BufPtrSave+1	WHILE : push loop address...
-				jsr CSH.Push
-				>LDA.G CSH.BufPtrSave
-				jsr CSH.Push
-				pla
-.1				jsr CSH.Push
-				bcs .99
-				lda #'}'				Tell '}' is expected at the end of block
-				jsr CSH.Push
-				bcs .99
-
-				rts
-.6				jsr CSH.SkipBlock
-
-				bcc .99
-.9				lda #CSH.E.SYNTAX
-				sec
-.99				rts
-*--------------------------------------
-*CSH.Keyword.Start
-*				>LDA.G CSH.CmdSave		get back Token ("IF" or "WHILE")
-*				tax
-*				jmp (J.CSH.KW.START,x)
-*--------------------------------------
-*CSH.IF.START	jmp CSH.Push			Push "IF" Token
-*--------------------------------------
-*CSH.WHILE.START pha
-*				>LDA.G CSH.BufPtrSave+1	WHILE : push loop address...
-*				jsr CSH.Push
-*				>LDA.G CSH.BufPtrSave
-*				jsr CSH.Push
-*				pla
-*				jmp CSH.Push			Push "WHILE" Token
-*--------------------------------------
-CSH.IF.END		clc
-				rts
-*--------------------------------------
-CSH.WHILE.END	jsr CSH.Pop
-				sta ZPFileBufPtr
-				jsr CSH.Pop
-				sta ZPFileBufPtr+1
-				clc
-				rts
-*--------------------------------------
-CSH.ELSE
-*--------------------------------------
-CSH.DO
-CSH.FOR
-CSH.SWITCH
-CSH.CASE
-CSH.BREAK
-CSH.CONTINUE
-CSH.TYPEDEF
-CSH.SIZEOF
-				lda #CSH.E.SYNTAX
-				sec
-				rts
-*--------------------------------------
-CSH.STRUCT		>ENTER 4
-
-				jsr CSH.GetCharNB
-				bcs .99
-
-				>LDA.G CSH.hTags
-				jsr CSH.NewKey
-				bcs .99
-
-				sta (pStack)
-
-
-				jsr CSH.GetNextCharNB
-				bcs .99
-				cmp #'{'
-				bne .99
-
-.1				jsr CSH.GetNextCharNB
-				bcs .99
-				cmp #'}'
-				bne .1
-
-				jsr CSH.GetNextCharNB	skip }
-
-				clc
-.99				>LEAVE
-				rts
-*--------------------------------------
-* Built in Types
-*--------------------------------------
-CSH.SIGNED		sec
-				.HS 90					BCC
-*--------------------------------------
-CSH.UNSIGNED	clc
-				php
-
-				jsr CSH.CheckSpace
-				bcs .9
-
-				>LDYA L.CSH.STYPES
-				jsr CSH.LookupID
-
-				bcs .9
-
-				plp
-				bcs .8
-				jmp (J.CSH.UTYPES,x)
-
-.8				jmp (J.CSH.STYPES,x)
-
-.9				plp
-				lda #CSH.E.SYNTAX
-				sec
-				rts
-*--------------------------------------
-CSH.VOID		ldx #CSH.T.VOID
-				bra CSH.TYPE
-CSH.CHAR		ldx #CSH.T.CHAR
-				bra CSH.TYPE
-CSH.UCHAR		ldx #CSH.T.UCHAR
-				bra CSH.TYPE
-CSH.INT			ldx #CSH.T.INT
-				bra CSH.TYPE
-CSH.UINT		ldx #CSH.T.UINT
-				bra CSH.TYPE
-CSH.LONG		ldx #CSH.T.LONG
-				bra CSH.TYPE
-CSH.ULONG		ldx #CSH.T.ULONG
-				bra CSH.TYPE
-
-CSH.FLOAT		ldx #CSH.T.FLOAT
-
-CSH.TYPE		stx ZPVarType
-				jsr CSH.CheckSpace
-				bcs .9
-
-.11				cmp #'*'
-				bne .10
-
-				lda #CSH.Q.POINTER
-				tsb ZPVarType
-				jsr CSH.GetNextCharNB	Skip *
-				bra .11
-
-.10				jsr CSH.IsLetter
-				bcs .9
-
-				jsr CSH.AddVar			add with undef value...
-				bcs .99					OOM or DUP
-
-				jsr CSH.GetCharNB
-				bcs .9
-				cmp #';'
-				beq .8
-
-.2				cmp #'='
-				bne .9
-
-				jsr CSH.GetNextCharNB	Skip =
-				bcs .9
-
-				lda ZPVarType
-				jsr CSH.ExpEval
-				bcs .99
-
-.7				jsr CSH.SetVarValueFromStack	X= Type, Set value to this var
-				bcs .99
-
-				jsr CSH.GetChar
-				bcs .9
-
-				cmp #';'
-				bne .9
-
-.8				clc
-				rts
-
-.9				lda #CSH.E.SYNTAX
-				sec
-.99				rts
-*--------------------------------------
-* Input:
-*   ZPFileBufPtr, A = Expected type
-* Output:
-*   CS, A = EC
-*   CC, Result on Stack, X = Type
-*--------------------------------------
-CSH.fCall		ldx ZPPtr1
-				phx
-				ldx ZPPtr1+1			local : fdef
-				phx
-				ldx ZPPtr2				local : type
-				phx
-				ldx ZPPtr2+1			local : variadic size
-				phx
-
-				sta ZPPtr2				save Type
-				stz ZPPtr2+1			Reset VARIADIC byte count
-				>LDYA L.CSH.FN
-				jsr CSH.LookupFN
-				phx						X = function index
-				bcs .10
-
-				>STYA ZPPtr1			f() definition, starting at returned type
-
-				jsr CSH.GetCharNB
-				bcs .10
-
-				cmp #'('
-				bne .52
-				jsr CSH.GetNextCharNB	skip '('
-.10				bcs .90
-
-				lda ZPPtr2
-				bne .11
-
-				lda (ZPPtr1)
-				sta ZPPtr2
-				bra .1					expected type is 0, no check
-
-.11				cmp (ZPPtr1)			Get Return value Type
-				bne .91
-
-.1				jsr CSH.ZPPtr1Next		advance to arg list type
-
-				lda (ZPPtr1)			get type of first arg
-				beq .7					end of list, go check ending ')'
-*--------------------------------------
-.3				eor #CSH.T.VARIADIC		if VARIADIC, don't advance to next arg and assume type = 0
-				beq .4
-				eor #CSH.T.VARIADIC		restore type...
-.4				jsr CSH.ExpEval			A=0 if VARIADIC
-				bcs .9					X = Var Type
-
-				lda (ZPPtr1)			get current arg type
-				eor #CSH.T.VARIADIC
-				bne .5
-				jsr CSH.GetVarSize		X = Var Type
-*				clc
-
-				adc ZPPtr2+1
-				sta ZPPtr2+1			Add to byte count
-				bra .51
-
-.5				jsr CSH.ZPPtr1Next
-
-.51				jsr CSH.GetCharNB
-				bcs .90
-
-				cmp #','
-				bne .6
-
-				jsr CSH.GetNextCharNB	Skip ,
-				lda (ZPPtr1)
-				bne .3					Another ARG....
-
-.52				bra .90					extra args....error
-
-.6				cmp #')'
-				bne .90
-				lda (ZPPtr1)
-				beq .8					no more arg after ')', exit
-				eor #CSH.T.VARIADIC
-				bne .90					missing arg
-
-				>PUSHB ZPPtr2+1			push VARIADIC byte count
-				bra .8
-.7				jsr CSH.GetCharNB
-				bcs .90
-				cmp #')'
-				bne .90
-
-.8				jsr CSH.GetNextCharNB	Skip )
-
-				plx					restore X = function index
-				ldy ZPPtr2			get type in Y
-				pla
-				sta ZPPtr2+1
-				pla
-				sta ZPPtr2
-				pla
-				sta ZPPtr1+1
-				pla
-				sta ZPPtr1
-				phy
-				jsr CSH.fCall.Exec
-				plx						restore returned type
-				rts
-
-.90				lda #CSH.E.SYNTAX
-				.HS 2C					BIT ABS
-.91				lda #CSH.E.TMISMATCH
-				sec
-
-.9				plx						Discard function index
-
-				plx
-				stx ZPPtr2+1
-				plx
-				stx ZPPtr2
-				plx
-				stx ZPPtr1+1
-				plx
-				stx ZPPtr1
-
-.99				rts
-
-*--------------------------------------
-CSH.fCall.Exec	jmp (J.CSH.EXEC,x)
-*--------------------------------------
-* Input:
-*   ZPFileBufPtr, A = Expected type
-* Output:
-*   CS, A = EC
-*   CC, X = Var Type, Value on Stack
-*--------------------------------------
-CSH.ExpEval		ldx ZPPtr1
-				phx
-				ldx ZPPtr1+1			local : used by lookup
-				phx
-				ldx ZPPtr2				local : VarType
-				phx
-				ldx ZPPtr2+1			local : BOP
-				phx
-
-				sta ZPPtr2				local : expected type
-
-				lda #$ff
-				pha
-*--------------------------------------
-.10				jsr CSH.GetCharNB
-				bcs .19
-
-.11				cmp #'('
-				bne .20
-
-				jsr CSH.GetNextCharNB	skip (
-				bcs .19
-
-				lda ZPPtr2
-
-				jsr CSH.ExpEval
-				bcs .19
-				stx ZPPtr2
-
-				jsr CSH.GetCharNB
-				bcs .19
-				cmp #')'
-				bne .19
-
-				jsr CSH.GetNextCharNB	skip )
-				bcc .31
-.19				jmp .90
-*--------------------------------------
-.20				jsr CSH.IsLetter		define, Fnc or Var ?
-				bcs .22
-
-				jsr CSH.GetDefine
-				bcc .10
-
-				jsr CSH.GetVar
-				bcs .21
-
-				ldx ZPPtr2				YA=VarID, X=expected var type (or 0=any)
-
-				jsr CSH.GetVarValueOnStack		Y,A = VarID, Get value on stack
-				bcs .29
-
-				stx ZPPtr2				store real var type
-				bra .30
-
-.21				lda ZPPtr2				var type
-				jsr CSH.fCall			X = function index
-				bcs .29
-
-				stx ZPPtr2				store real var type
-				bra .30
-
-.22				jsr CSH.IsDigit10		number ?
-				bcs .24
-
-				ldx ZPPtr2
-				bne .23
-
-				ldx #CSH.T.INT
-				stx ZPPtr2
-
-.23				jsr CSH.GetNumOnStack
-				bcs .29
-				bra .30
-
-.24				cmp #'"'				String literal
-				bne .90
-				jsr CSH.AddContCharP
-.29				bcs .99
-*--------------------------------------
-.30				jsr CSH.GetCharNB
-				bcs .90
-
-.31				cmp #','
-				beq .80
-				cmp #')'
-				beq .80
-				cmp #';'
-				beq .80
-
-				jsr CSH.IsOPChar
-				bcs .90
-
-				>LDYA L.CSH.BOPS		we are at V1 op1 V2 op2...
-				jsr CSH.LookupOP
-				bcs .90
-
-				stx ZPPtr2+1			save OP(n)
-
-.32				pla						get OP(n-1)
-				bmi .33					$ff....
-
-				cmp ZPPtr2+1
-				bcc .33					OP(n) has precedence, on stack : V1,V2
-
-				tax						OP(n-1) has precedence...
-
-				lda ZPPtr2				Var Type
-				jsr CSH.BOP.EXEC		compute V(n-1) <OP(n-1)> V(n)
-				bcc .32
-
-				bcs .99
-
-.33				pha						push back OP(n-1)
-				lda ZPPtr2+1			get OP(n)
-				pha						push OP(n) on stack
-
-				jmp .10					go check for next token
-*--------------------------------------
-.80				plx						any OP on stack ?
-				bmi .88
-
-				lda ZPPtr2				Var Type
-				jsr CSH.BOP.EXEC
-				bcc .80
-
-				bcs .99
-
-.90				lda #CSH.E.SYNTAX
-
-.99				plx
-				bpl .99
-
-				sec
-				.HS 90					BCC
-.88				clc
-
-				ldx ZPPtr2				X = Var Type
-
-				ply
-				sty ZPPtr2+1
-				ply
-				sty ZPPtr2
-				ply
-				sty ZPPtr1+1
-				ply
-				sty ZPPtr1
-				rts
-*--------------------------------------
-CSH.AddContCharP
-				ldy #0
-
-.1				jsr CSH.GetNextChar
-				bcs .9
-				cmp #C.CR
-				beq .9
-				cmp #'"'
-				beq .2
-				sta (ZPCSHConst),y
-				iny
-				bra .1
-
-.2				lda #0
-				sta (ZPCSHConst),y
-				>PUSHW ZPCSHConst		Push PTR on stack
-
-				tya
-				sec
-				adc ZPCSHConst
-				sta ZPCSHConst
-				bcc .3
-				inc ZPCSHConst+1
-.3				jsr CSH.GetNextChar		Skip "
-
-				clc
-				rts
-.9				lda #CSH.E.SYNTAX
-				sec
-				rts
 *--------------------------------------
 CSH.SavePtr		>LDYA ZPFileBufPtr
 				>STYA.G CSH.BufPtrSave
@@ -907,74 +411,22 @@ CSH.ZPPtr1AddAp1
 				inc ZPPtr1+1
 .1				rts
 *--------------------------------------
-CSH.GetNumOnStack
-				txa
-				beq .99
-
-.10				cpx #CSH.T.FLOAT
-				bcc .1
-				bne .99
-
-				>PUSHW ZPFileBufPtr
-				>PUSHWI ZPFileBufPtr
-				>SYSCALL StrToF
-				clc
-				rts
-
-.1				>PUSHW ZPFileBufPtr
-				>PUSHWI ZPFileBufPtr
-				>PUSHBI 10
-				phx
-				cpx #CSH.T.UCHAR
-				bcc .2
-				>SYSCALL StrToUL
-				bra .3
-
-.2				>SYSCALL StrToL
-
-.3				plx
-				bcs .9
-
-				lda CSH.TYPESIZE,x
-				cmp #4
-				beq .8
-
-				cmp #2
-				bne .4
-				ldy #1
-				>PULLA
-				sta (pStack),y
-				>PULLA
-				sta (pStack),y
-				clc
-				rts
-
-.4				>PULLA
-				inc pStack
-				inc pStack
-				sta (pStack)
-.8				clc
-.9				rts
-
-.99				lda #CSH.E.TMISMATCH
-				sec
-				rts
-*--------------------------------------
 * Input : ZPFileBufPtr
 * Output : Y,A = VarID
 *--------------------------------------
-CSH.AddVar		>LDA.G CSH.hSymbols
+CSH.AddSymbol	>LDA.G CSH.hSymbols
 				jsr CSH.NewKey
 				bcs .9
 
 				>STYA ZPVarID
 				ldx ZPVarType
-				jsr CSH.GetVarSize
+				jsr CSH.GetVarSize		CS if pointer
 				sta ZPVarSizeOf
+				
+*				clc / sec 
 
 				lda ZPCSHData
 				sta ZPVarDataPtr
-				clc
 				adc ZPVarSizeOf
 				sta ZPCSHData
 
@@ -1007,6 +459,32 @@ CSH.AddVar		>LDA.G CSH.hSymbols
 CSH.TMISMATCH	lda #CSH.E.TMISMATCH
 				sec
 				rts
+*--------------------------------------
+CSH.AddFunction	lda #CSH.Q.FUNC
+				tsb ZPVarType
+				
+				jsr CSH.GetNextCharNB	Skip (
+				bcs .9
+				
+.1				cmp #')'
+				beq .5
+				
+				>LDYA L.CSH.TYPES
+				jsr CSH.LookupID
+				bcs .9
+				
+				
+				
+.5				jsr CSH.GetNextCharNB	Skip )			
+				
+				jsr CSH.SkipLine
+
+				clc
+				rts
+				
+.9				lda #CSH.E.SYNTAX
+				sec
+.99				rts				
 *--------------------------------------
 CSH.NewKey		>PUSHA
 				>PUSHW ZPFileBufPtr
@@ -1434,9 +912,12 @@ CSH.GetVarSize	txa
 				tax
 				lda CSH.TYPESIZE,x
 				plx
+
+				clc
 				rts
 
-.2				lda #2
+.2				sec						+1 for hMem Storage
+				lda #2
 				rts
 *--------------------------------------
 DEBUG.VAR		>SYSCALL PutChar

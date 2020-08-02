@@ -911,7 +911,7 @@ CC = success
 Get char from StdIn  
 
 ## C  
-`int getchar ();`  
+`short int getchar ( );`  
 
 ## ASM  
 **In:**  
@@ -925,7 +925,7 @@ Get char from StdIn
 Get char from Node  
 
 ## C  
-`int getc ( hFILE stream );`  
+`short int getc ( short int stream );`  
 
 ## ASM  
 **In:**  
@@ -940,7 +940,7 @@ Get char from Node
 push byte back into input stream  
 
 ## C  
-`int ungetc(short int c, hFILE stream);  
+`short int ungetc(short int c, short int stream);`  
 
 ## ASM  
 `>PUSHB c`  
@@ -987,7 +987,7 @@ TODO: replace flags/ftype/auxtype with mode="w+,t=TYP,x=AUXTYPE"
 Close a file  
 
 ## C  
-int fclose ( hFILE stream );  
+`int fclose ( short int stream );`  
 
 ## ASM  
 **In:**  
@@ -1000,7 +1000,7 @@ int fclose ( hFILE stream );
 Read bytes from file  
 
 ## C  
-int fread (hFILE stream, void * ptr, int count );  
+`int fread (short int stream, void * ptr, int count );`  
 
 ## ASM  
 **In:**  
@@ -1016,7 +1016,7 @@ int fread (hFILE stream, void * ptr, int count );
 Write bytes to file  
 
 ## C  
-`int fwrite (hFILE stream, const void * ptr, int count );`  
+`int fwrite (short int stream, const void * ptr, int count );`  
 
 ## ASM  
 **In:**  
@@ -1031,7 +1031,7 @@ Write bytes to file
 # FFlush  
 
 ## C  
-int fflush(hFILE stream);  
+`int fflush( short int stream );`  
 
 ## ASM  
 **In:**  
@@ -1042,7 +1042,7 @@ int fflush(hFILE stream);
 Set the file-position indicator for hFILE  
 
 ## C  
-`int fseek(hFILE stream, long offset, short int whence);`  
+`int fseek( short int stream, long offset, short int whence );`  
 
 ## ASM  
 **In:**  
@@ -1055,7 +1055,7 @@ Set the file-position indicator for hFILE
 Test the end-of-file indicator for hFILE  
 
 ## C  
-`int feof(hFILE stream);`  
+`int feof( short int stream );`  
 
 ## ASM  
 **In:**  
@@ -1072,7 +1072,7 @@ Test the end-of-file indicator for hFILE
 Return the current value of the file-position indicator  
 
 ## C  
-`long ftell(hFILE stream);`  
+`long ftell( short int stream );`  
 
 ## ASM  
 **In:**  
@@ -1086,7 +1086,7 @@ On stack (long)
 Remove a file or directory  
 
 ## C  
-int remove(const char *pathname);  
+`int remove ( const char *pathname );`  
 
 ## ASM  
 **In:**  
@@ -1099,7 +1099,7 @@ int remove(const char *pathname);
 Rename a file  
 
 ## C  
-`int rename(const char *oldpath, const char *newpath);`  
+`int rename ( const char * oldpath, const char * newpath );`  
 
 ## ASM  
 **In:**  
@@ -1189,8 +1189,8 @@ Modifiers for len and padding :
 Read formatted data from string  
 
 ## C  
-`int scanf(const char *format, ...);`  
-`int fscanf(short int stream, const char *format, ...);`  
+`int scanf( const char *format, ... );`  
+`int fscanf( short int stream, const char *format, ... );`  
 `int sscanf ( const char *s, const char *format, ... );`  
 
 ## ASM  
@@ -1235,7 +1235,7 @@ A = Number of arguments filled.
 Convert String to 40 bits Float  
 
 ## C  
-`float strtof (const char* str, char** endptr);`  
+`float strtof (const char* str, char** endptr );`  
 
 ## ASM  
 **In:**  
@@ -1250,7 +1250,7 @@ On stack (float)
 Convert String to 40 bits Float  
 
 ## C  
-`float atof (const char* str);`  
+`float atof ( const char* str );`  
 
 ## ASM  
 **In:**  
