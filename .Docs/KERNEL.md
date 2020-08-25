@@ -575,6 +575,17 @@ CS : not found
 
 ## RETURN VALUE  
 
+# CloseSession  
+
+## C  
+`int closesession(short int hSID);`  
+
+## ASM  
+`>PUSHB hSID`  
+`>SYSCALL CloseSession`  
+
+## RETURN VALUE  
+
 # OpenSession  
 
 ## C  
@@ -630,17 +641,6 @@ CS : not found
 ## ASM  
 `>PUSHW group`  
 `>SYSCALL putgr`  
-
-## RETURN VALUE  
-
-# CloseSession  
-
-## C  
-`int closesession(short int hSID);`  
-
-## ASM  
-`>PUSHB hSID`  
-`>SYSCALL CloseSession`  
 
 ## RETURN VALUE  
 
@@ -880,8 +880,8 @@ Write Str to hFILE
 
 ## ASM  
 **In:**  
+`>PUSHB stream`  
 `>PUSHW str`  
-`lda stream`  
 `>SYSCALL fputs`  
 
 ## RETURN VALUE   
@@ -1016,7 +1016,7 @@ Read bytes from file
 Write bytes to file  
 
 ## C  
-`int fwrite (short int stream, const void * ptr, int count );`  
+`int fwrite ( short int stream, const void * ptr, int count );`  
 
 ## ASM  
 **In:**  
@@ -1382,9 +1382,12 @@ Y,A = destination
 
 # StrDup  
 Create a new copy of this C-String  
-Y,A = Ptr to source C-String  
 
-## RETURN VALUE  
+## C  
+`char * strdup ( char * str);`  
+
+## ASM  
+Y,A = Ptr to source C-String  
 CC : success   
  Y,A = PTR to String  
  X = hMem (C-String)  
