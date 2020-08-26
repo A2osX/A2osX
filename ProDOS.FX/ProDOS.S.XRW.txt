@@ -14,8 +14,14 @@ XRW.START		cld						$D8 to flag language card bank 1 (main)
 				lsr
 				lsr
 				sta XRW.UnitIndex
+				tax
+				lda XRW.D2SeekTime-1,x
+				bne .10
+
+				lda #30
+				sta XRW.D2SeekTime-1,x
 				
-				pla
+.10				pla
 				
 				and #$7F	  			mask off high bit.
 				sta A2L					0SSS0000 for IO indexing
@@ -65,15 +71,7 @@ L59BD  			lda bloknml
 				lsr
 				sta XRW.ReqSector
 *--------------------------------------
-				ldx A2L
-				lda IO.D2.Ph0Off,x
-				lda IO.D2.Ph1Off,x
-				lda IO.D2.Ph2Off,x
-				lda IO.D2.Ph3Off,x
-
-				lda IO.D2.ReadMode,x	turn off write enable X = slot $S0
-				nop
-				nop
+				jsr XRW.Reset
 
 				jsr XRW.CheckMotorOn
 
@@ -101,10 +99,9 @@ L59BD  			lda bloknml
 
 				plp		  				NZ: indicate drive off by setting z-flag.
 
-				ldy #7
-				lda #0		   			150 ms delay before stepping.
+				ldy #6
 
-.4				jsr XRW.Wait100usecA
+.4				jsr XRW.Wait25600usec	150 ms delay before stepping.
 				dey
 				bne .4
 				
@@ -155,11 +152,7 @@ L538E  			lda A4L					get command #
 				jsr regrwts				get 2nd half of block
 				dec buf+1
 
-				bcs XRW.E.IO
-
-XRW.E.OK		bit IO.D2.DrvOff,x	 	turn off
-				lda #0
-				rts	
+				bcc XRW.E.OK
 
 XRW.E.IO		lda #MLI.E.IO
 				.HS 2C					BIT ABS
@@ -167,8 +160,12 @@ XRW.E.WP		lda #MLI.E.WRTPROT
 				.HS 2C					BIT ABS
 XRW.E.ND		lda #MLI.E.NODEV
 
-				bit IO.D2.DrvOff,x	 	turn off
 				sec
+
+				.HS 2C					BIT ABS
+XRW.E.OK		lda #0				
+
+				bit IO.D2.DrvOff,x	 	turn off
 				rts
 *--------------------------------------
 regrwts			ldy #1
@@ -183,6 +180,9 @@ regrwts			ldy #1
 
 .1  			ldy #64
 				sty XRW.RetryCnt
+				
+				lda #$fe
+				sta XRW.BadSeek
 				
 .2  			jsr XRW.ReadAddr		read next address field.
 				bcc .4					if CC, A = current track
@@ -210,7 +210,16 @@ regrwts			ldy #1
 .4  			cmp XRW.ReqTrack
 				beq .5
 
-				lda XRW.ReqTrack
+				inc XRW.BadSeek
+				bmi .41
+				
+				ldx XRW.UnitIndex
+				lda XRW.D2SeekTime-1,x
+				bmi .41
+				
+				asl XRW.D2SeekTime-1,x
+				
+.41				lda XRW.ReqTrack
 				
 				jsr XRW.Seek
 				bra .1
@@ -538,7 +547,7 @@ wnibl7			pha	  					(3) 7 cycles, then write.
 				pla	  					(4)
 wnibl			sta IO.D2.WLoad,x		(5) nibl write
 				ora IO.D2.WShift,x		(4) clobbers acc, not carry
-				rts	  					(6)
+XRW.Write.RTS	rts	  					(6)
 *--------------------------------------
 * delays a specified number of 100 usec intervals for motor timing.
 * on entry: acc holds number of 100 usec intervals to delay.
@@ -546,12 +555,15 @@ wnibl			sta IO.D2.WLoad,x		(5) nibl write
 * montimel, montimeh are incremented once per 100 usec interval
 * for motor on timing.
 *--------------------------------------
+XRW.WaitSeekTime
+*				lda #IO.D2.SeekTime
+				phy
+				ldy XRW.UnitIndex
+				lda XRW.D2SeekTime-1,y
+				ply
+				.HS 2C					BIT ABS
 XRW.Wait25600usec
 				lda #0
-				.HS 2C					BIT ABS
-XRW.WaitSeekTime
-				lda #IO.D2.SeekTime
-		
 XRW.Wait100usecA
 				phx						(3)
 				
@@ -723,6 +735,15 @@ L57CD  			pla		 				place last byte into user buffer
 				sta (buf),y
 XRW.Read.RTS	rts
 *--------------------------------------
+XRW.Reset		ldx A2L
+				lda IO.D2.Ph0Off,x
+				lda IO.D2.Ph1Off,x
+				lda IO.D2.Ph2Off,x
+				lda IO.D2.Ph3Off,x
+
+				lda IO.D2.ReadMode,x	turn off write enable X = slot $S0
+				rts
+*--------------------------------------
 * A = target track
 *--------------------------------------
 XRW.Seek		ldx XRW.UnitIndex
@@ -827,7 +848,7 @@ XRW.ReadAddr	ldy #$FC
 				bne .2					counter LO
 				
 				inc XRW.CheckSum		counter HI
-				beq rderr
+				beq .99
 				
 .2  			lda IO.D2.RData,x		read nibl
 				bpl .2
@@ -872,19 +893,19 @@ XRW.ReadAddr	ldy #$FC
 				bpl .6					loop on 4 data bytes.
 				
 				tay		  				if final checksum non-zero,
-				bne rderr				then error.
+				bne .99					then error.
 
 .9				lda IO.D2.RData,x
 				bpl .9
 				
 				cmp #$DE
-				bne rderr
+				bne .99
 				
 .10				lda IO.D2.RData,x
 				bpl .10
 				
 				cmp #$AA
-				bne rderr
+				bne .99
 
 				ldy XRW.UnitIndex		Successful Read, update Drive table
 				
@@ -897,7 +918,7 @@ XRW.ReadAddr	ldy #$FC
 				clc						normal read ok
 				rts
 
-rderr  			sec
+.99  			sec
 				rts
 *--------------------------------------
 			.DO XRWDBG=1
@@ -989,7 +1010,8 @@ XRW.montimeh 		.HS 00
 XRW.ReqTrack		.HS 00
 XRW.ReqSector		.HS 00
 				.HS 383C4044484C
-				.HS FF
+*				.HS FF
+XRW.BadSeek			.HS 00
 				.HS 5054585C606468
 XRW.00XX0000	.HS 00201030			used in fast prenib.
 XRW.EndDataMark	.HS DEAAEB		  		table using 'unused' nibbles ($C4,$C5,$C6,$C7)
