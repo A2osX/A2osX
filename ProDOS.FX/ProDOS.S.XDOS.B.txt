@@ -111,7 +111,11 @@ L37EB  			sta entcntl				keep a running count.
 				beq errdir			 	then not all entries were acct'd for.
 
 L37FC  			ldx gbuf+3			 	acc has value for block# (low).
-				jsr XDOS.ReadGBufAX			  	go read the next linked directory.
+				.DO LOWERCASE=1
+				jsr XDOS.ReadGBufAXDir
+				.ELSE
+				jsr XDOS.ReadGBufAX		go read the next linked directory.
+				.FIN
 				bcc L37C9			  	if no error.
 				rts		 				return error in acc.
 
@@ -148,16 +152,20 @@ namfound 		jsr nxtpname			adj index to next name in path.
 				cmp #$D0			 	is it a subdirectory?
 				bne errpath1			error if not.
 
-				ldy #$11			 	get address of 1st subdirectory block
+				ldy #$12			 	get address of 1st subdirectory block
 				lda (zpt),y
-				sta bloknml				(no checking done for a valid block#)
-				iny
-				sta d_head			 	save as file's header block too
+				sta d_head+1		 	save as file's header block too
+				tax
+				
+				dey
 				lda (zpt),y
-				sta bloknml+1
-				sta d_head+1
+				sta d_head
 
-				jsr XDOS.ReadGBuf			 	read subdirectory into gbuf.
+				.DO LOWERCASE=1
+				jsr XDOS.ReadGBufAXDir
+				.ELSE
+				jsr XDOS.ReadGBufAX		read subdirectory into gbuf.
+				.FIN
 				bcs lookfil0.RTS		if error.
 
 				lda gbuf+37				get the # of files contained in this
@@ -272,37 +280,8 @@ isname 			and #$0F			 	strip byte (is checked by 'filfound')
 cmpname  		inx		 				(first) next letter index
 				iny
 
-				.DO LOWERCASE=1
-				phy
-				cpy #8					CS if MIN_VERSION to use
-				
-				ldy #$1D				MIN_VERSION
-				lda (zpt),y
-				bpl .4					no lowercase information
-				
-				bcs .1					
-
-				ply
-				and whichbit,y
-				beq .5					UPPERCASE
-
-				bra .2
-				
-.1				dey						VERSION
-				lda (zpt),y
-				
-				ply
-				and whichbit-8,y
-				beq .5
-
-.2				lda (zpt),y
-				jsr XDOS.ToLower
-				bra .6
-				
-.4				ply
-				.FIN
-.5				lda (zpt),y				compare names letter by letter	
-.6				cmp pathbuf,x
+				lda (zpt),y				compare names letter by letter	
+				cmp pathbuf,x
 				bne L38F8
 
 				dec namcnt			 	all letters compared?
@@ -409,29 +388,43 @@ L398A  			cmp pathbuf,y			is it the same as requested vol name?
 
 				plx		 				restore pointer to matching vcb.
 				stx vcbptr			 	save it for future reference.
-				lda VCBs+VCB.DEV,x			get it's device #
+				lda VCBs+VCB.DEV,x		get it's device #
 				sta devnum			 	and save it.
-				stz bloknml+1			assume prefix is not used and
-				lda #$02			 	that root directory is to be used.
-				sta bloknml
+				
+				lda #$02				assume prefix is not used and
+				ldx #$00			 	that root directory is to be used.
+
+				pha
+				
 				lda vnptr			  	= 0 if no prefix.
 
 L39AC  			tay		 				if prefix then find ptr to prefixed
 				sta namptr			 	dir name. save path ptr.
 				beq L39C2			  	branch if no prefix.
+
 				sec
 				adc pathbuf,y			inc to next dir in prefix path.
 				bcc L39AC			  	branch if another dir in prefix.
 
+				pla
 				lda p_blok			 	volume verification will occur at
-				sta bloknml				subdirectory level.
-				lda p_blok+1
-				sta bloknml+1
+				pha
+				ldx p_blok+1			subdirectory level.
 
 * verify volume name
 
-L39C2  			jsr XDOS.ReadGBuf		read in directory (or prefix dir)
+L39C2  			pla
+
+				jsr XDOS.ReadGBufAX		read in directory (or prefix dir)
 				bcs L39CC			  	if error then look on other devices.
+
+				.DO LOWERCASE=1
+				lda gbuf+$23
+				sta h_entln
+				lda gbuf+$24
+				sta h_maxent
+				jsr XDOS.UnpackGBuf
+				.FIN
 
 				jsr XDOS.CheckVolName	compare dir name with path name.
 				bcc L39F0			  	if they match, stop looking.
@@ -478,7 +471,11 @@ L39FE  			sta devnum			 	preserve device to be checked next.
 
 L3A16  			lda #$02			 	go read root dir into gbuf
 				ldx #$00
+				.DO LOWERCASE=1
+				jsr XDOS.ReadGBufAXDir
+				.ELSE
 				jsr XDOS.ReadGBufAX
+				.FIN
 				bcs L39E2			  	ignore if unable to read.
 
 				jsr logvcb				go log in volume name.
@@ -561,27 +558,7 @@ XDOS.CheckVolName
 L3A90  			sec		 				indicate not found
 				rts
 
-L3A92  			.DO LOWERCASE=1
-				lda gbuf+$21			MIN_VERSION
-				bpl .8
-
-				cpx #8
-				bcs .1
-
-				and whichbit,x
-				beq .8
-				bra .2
-				
-.1				lda gbuf+$20			VERSION			
-				and whichbit-8,x
-				beq .8
-				
-.2				lda gbuf+4,x
-				jsr XDOS.ToLower
-				bra L3A95
-				
-.8				.FIN
-				lda gbuf+4,x			next char
+L3A92  			lda gbuf+4,x			next char
 				
 L3A95  			cmp pathbuf,y
 				bne L3A90			  	if not the same.
@@ -628,11 +605,7 @@ L3AB2  			stz VCBs,x
 				ora vcbptr
 				tax
 
-L3ACE  			.DO LOWERCASE=1
-				jsr XDOS.GetVolNameCharGBufY
-				.ELSE
-				lda gbuf+4,y
-				.FIN
+L3ACE  			lda gbuf+4,y
 				sta VCBs,x
 				dex
 				dey
@@ -685,12 +658,7 @@ cmpvcb			lda gbuf+4			 	with name in directory.
 				ora xvcbptr
 				tax
 
-L3B18  			.DO LOWERCASE=1
-				jsr XDOS.GetVolNameCharGBufY
-				.ELSE
-				lda gbuf+4,y
-				.FIN
-
+L3B18  			lda gbuf+4,y
 				cmp VCBs,x
 
 L3B1E  			sec		 				anticipate different names.
@@ -755,7 +723,7 @@ tkfrecnt 		jsr cntbms				get # of bitmaps
 				lda VCBs+VCB.BMAP+1,x
 				sta bloknml+1
 
-L3B81  			jsr XDOS.ReadGBuf			 	use general buffer for temp space to
+L3B81  			jsr XDOS.ReadGBuf		use general buffer for temp space to
 				bcs L3BC1			  	count free blocks (bits).
 
 				jsr count
@@ -835,8 +803,8 @@ L3BFA  			ora #$00
 				rts
 
 cntbms			ldx vcbptr
-				ldy VCBs+VCB.TBLK+1,x			return the # of bitmaps
-				lda VCBs+VCB.TBLK,x			possible with the total count
+				ldy VCBs+VCB.TBLK+1,x	return the # of bitmaps
+				lda VCBs+VCB.TBLK,x		possible with the total count
 				bne L3C0B			  	found in the vcb.
 
 				dey						adj for bitmap block boundary
