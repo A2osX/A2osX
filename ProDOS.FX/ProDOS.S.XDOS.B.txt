@@ -363,6 +363,8 @@ findvol	 		lda #$00
 L396F  			sty vnptr			  	and save.
 				sta devnum			 	zero out dev# until vcb located.
 
+				lda #VCB0
+
 L3975 			pha		 				acc now used as vcb lookup index.
 				tax		 				index pointer to x.
 				lda VCBs,x				get vcb volume name length.
@@ -373,6 +375,7 @@ L397C 			ldy vnptr			  	restore pointer to requested vol name.
 				clc
 				adc #VCB
 				bcc L3975			  	branch if more vcb's to check
+
 				bcs L39D4			  	otherwise go look for unlogged volumes.
 
 L3987  			sta namcnt			 	save length of vol name to be compared.
@@ -454,16 +457,18 @@ L39F1  			ldx DEVCNT				now remove the device from the list
 
 L39F4  			cmp loklst,x			of prospective devices.
 				beq L39FE			  	branch if match.
+
 				dex		 				look until found.
 				bpl L39F4			  	always taken (usually) unless
 				bmi L39ED			  	if dev was removed from devlst (/RAM).
 
 L39FE  			sta devnum			 	preserve device to be checked next.
 				stz loklst,x			mark this one as tested.
-				jsr fnddvcb				find vcb that claims this dev (if any).
+
+				jsr XDOS.FindVCBForDevNum	find vcb that claims this dev (if any).
 				bcs L3A29			  	branch if vcb full.
-				ldx vcbptr			 	did fndvcb find it or return free vcb?
-				lda VCBs,x
+
+				lda VCBs,x			 	did we find it or return free vcb?
 				beq L3A16				if free vcb.
 
 				lda VCBs+VCB.OFCNT,x	is this volume active?
@@ -496,51 +501,54 @@ L3A2D  			lda DEVLST,x		   	active device list.
 				ldx DEVCNT
 				rts
 *--------------------------------------
-fnddvcb			lda #$00				look for vcb with this device#
+XDOS.FindVCBForDevNum
+				lda #VCB0				look for vcb for devnum
 				ldy #$FF
 
-L3A40  			tax						new index to next vcb
+.1  			tax						new index to next vcb
 				lda VCBs+VCB.DEV,x		check all devnums
 				cmp devnum				is this the vcb?
-				bne L3A4E			  	if not
+				beq .7
 
-				stx vcbptr
-				clc		 				indicates found
-				rts
-
-L3A4E  			lda VCBs,x				is this a free vcb?
-				bne L3A57				if not
+				lda VCBs,x				is this a free vcb?
+				bne .3					if not
 
 				iny
-				stx vcbptr
+				bne .3					already found a free one
+
+				stx vcbptr				save first free VCB
 				
-L3A57  			txa
+.3  			txa
 				clc						inc index to next vcb
 				adc #VCB
-				bcc L3A40
+				bcc .1
+
+				ldx vcbptr				get found free if any
 
 				tya		 				any free vcb's available?
-				bpl L3A79			  	yes
+				bpl .8				  	yes, exit withX = vcbptr
 
-				lda #$00			 	look for an entry to kick out
+				lda #VCB0			 	look for an entry to kick out
 
-L3A62  			tax
+.4  			tax
 				lda VCBs+VCB.OFCNT,x	any open files?
-				beq L3A70			  	no, kick this one out.
+				beq .5				  	no, kick this one out.
 
 				txa		 				next vcb
 				clc
 				adc #VCB
-				bcc L3A62
+				bcc .4
 				
 				lda #MLI.E.VCBFULL		all vcb entries have open files
 *				sec
 				rts
 				
-L3A70  			stx vcbptr			 	save entry index.
-				stz VCBs,x				free this entry
+.5  			stz VCBs,x				free this entry
 				stz VCBs+VCB.DEV,x
-L3A79  			clc		 				no error.
+
+.7				stx vcbptr			 	save entry index.
+				
+.8  			clc		 				no error.
 				rts
 *--------------------------------------
 XDOS.CheckVolName
@@ -579,12 +587,12 @@ logvcb			ldx vcbptr			 	previously logged in volume?
 				jsr cmpvcb			 	does vcb match vol read?
 				bcc XDOS.CheckVolName.RTS			  	yes, do not disturb.
 
-logvcb1			ldy #VCB-1			 	zero out vcb entry
+logvcb1			ldy #VCB			 	zero out vcb entry
 
 L3AB2  			stz VCBs,x
 				inx
 				dey
-				bpl L3AB2
+				bne L3AB2
 	
 				lda gbuf			 	pointer to previous dir block
 				ora gbuf+1			 	must be null
@@ -602,7 +610,8 @@ L3AB2  			stz VCBs,x
 				and #$0F			 	strip root marker
 				tay
 				pha
-				ora vcbptr
+*				clc
+				adc vcbptr
 				tax
 
 L3ACE  			lda gbuf+4,y
@@ -616,21 +625,6 @@ L3ACE  			lda gbuf+4,y
 
 				lda devnum			 	last device used.
 				sta VCBs+VCB.DEV,x		save device # and
-
-*				lda bloknml				save address of root directory.
-*				sta VCBs+VCB.ROOT,x
-*				lda bloknml+1
-*				sta VCBs+VCB.ROOT+1,x
-
-*				lda gbuf+39				save address of the 1st bitmap.
-*				sta VCBs+VCB.BMAP,x
-*				lda gbuf+40
-*				sta VCBs+VCB.BMAP+1,x
-
-*				lda gbuf+41				total # of blocks on this unit.
-*				sta VCBs+VCB.TBLK,x
-*				lda gbuf+42
-*				sta VCBs+VCB.TBLK+1,x
 
 				ldy #0
 				
@@ -655,7 +649,8 @@ cmpvcb			lda gbuf+4			 	with name in directory.
 				bne L3B1E			  	if not the same.
 
 				tay
-				ora xvcbptr
+				clc
+				adc xvcbptr
 				tax
 
 L3B18  			lda gbuf+4,y
@@ -673,7 +668,7 @@ L3B1E  			sec		 				anticipate different names.
 L3B26  			ldx xvcbptr				offset to start of vcb (rev note #23)
 				rts
 *--------------------------------------
-tstdupvol 		lda #$00			 	check for other logged in volumes with the same name.
+tstdupvol 		lda #VCB0			 	check for other logged in volumes with the same name.
 
 L3B2C  			tax
 				jsr cmpvcb
