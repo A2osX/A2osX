@@ -9,13 +9,8 @@ ILDR.START		jsr MLI	  				check for file 'atinit'
 				cmp #MLI.E.FNOTFND
 				beq ILDR.SYSTEM			if so, continue loading interpreter
 
-ATINIT.KO		ldx #ATINIT.ERR.LEN-1
-.1  			lda ATINIT.ERR,x
-				sta vline16,x
-				dex
-				bne .1
-				beq *
-
+ATINIT.KO		jmp badatinit
+				
 gfi_ok 			lda gfi_type
 				cmp #$E2				is 'atinit' correct file type?
 				bne ATINIT.KO			error - wrong file type
@@ -68,113 +63,149 @@ H2453  			ldy #$10	   			check file type.
 				lda #$FF	   			must be a prodos sys file
 				eor (idxl),y
 				bne H2432				if not sys.
+
 				tay		  				see if active
 				lda (idxl),y
 				beq H2432				if deleted file.
+
 				and #$0F	   			strip file 'kind'.
 				sta pbuf	   			save length of name.
 				cmp #$08	   			must be at least 'x.system'
 				bcc H2432				else, ignore it.
+
 				tay		  				compare last 7 chars for '.system'
 				ldx #$06
+
 H246C  			lda (idxl),y
 				eor iterp,x
-				asl
+				asl						ignore bit 7
 				bne H2432				branch if something else
+
 				dey
 				dex
 				bpl H246C
+
 				ldy #$00
+
 H247A  			iny
 				lda (idxl),y
 				sta pbuf,y
-				ora #$80				msb on so can be displayed if error
-				sta iomess+$11,y
 				cpy pbuf
 				bne H247A
-				lda #$A0				space after name
-				sta iomess+$12,y
-				tya			 			error message length
-				adc #$13	   			(carry set)
-				sta ierlen
+
 				jsr MLI	  				open interpreter file
 				.DA #$C8
 				.DA opparm
 				bne badlod
+
 				jsr MLI	  				get eof (length of file)
 				.DA #$D1
 				.DA efparm
 				bne badlod
+
 				lda eof+2
 				bne toolong
+
 				lda eof+1
 				cmp #$9F				max size = 39.75k ($2000-$BF00)
 				bcs toolong
+
 				sta rdlen+1
 				lda eof
 				sta rdlen				(read entire file)
+
 				jsr MLI	  				read interpreter file
 				.DA #$CA
 				.DA rdparm
 				beq H24C8				go close if successfully read.
+
 				cmp #$56	   			memory conflict?
 				beq toolong	  			then too large
 				bne badlod	   			else, unable to load.
+
 H24C8  			jsr MLI	  				close interpreter file
 				.DA #$CC
 				.DA clparm
 				bne badlod	   			hopefully never taken
 
 				lda RROMBNK2			enable ROM
+				
+				sta CLR80DISP
+				sta	CLR80STORE
+
+				jsr init
+				jsr setvid
+				jsr setkbd
+				jsr home
+
 				jmp sysentry			go run interpreter
 
 nointrp			jsr MLI	  				no interpreter found,so quit.
 				.DA #$65
 				.DA quitparm
 
-badlod			ldy ierlen				center the error message
-				lda #$27
-				sec
-				sbc ierlen
-				lsr
-				adc ierlen
-				tax
-H24FA  			lda iomess,y
-				sta vline16,x
-				dex
-				dey
-				bpl H24FA
-				bra *
-				
-toolong  		ldy #lgmess.len
+badatinit		ldy #6
 
-H2508  			lda lgmess,y
-				sta vline16+5,y
+.1				lda atinitname,y
+				sta pbuf,y
 				dey
-				bpl H2508
+				bpl .1
+
+badlod			ldx #ILDR.MSG.SYSLOADERR-ILDR.MSG
+				.HS 2C					BIT ABS
+				
+toolong  		ldx #ILDR.MSG.SYSTOOLARG-ILDR.MSG
+				jsr ILDR.PrintX
+
+				ldy #0
+				
+.1				iny
+				lda pbuf,y
+				jsr COUT
+				cpy pbuf
+				bne .1
 
 				bra *
 *--------------------------------------
-ATINIT.ERR		.AS -"Unable to load ATInit file"
-ATINIT.ERR.LEN	.EQ *-ATINIT.ERR
+ILDR.PrintX		bit RROMBNK2
+				lda INVFLG
+				pha
+				jsr SETINV
+
+.1				lda ILDR.MSG,x
+				pha
+				ora #$80
+				jsr COUT
+				inx
+				pla
+				bpl .1
+				
+				lda #$A0
+				jsr COUT
+				
+				pla
+				sta INVFLG
+				rts
+*--------------------------------------
+ILDR.MSG		.EQ * 
+ILDR.MSG.SYSLOADERR	.AT "Unable to load"
+ILDR.MSG.SYSTOOLARG	.AT "Too Large"
+*--------------------------------------
 gfi_list 		.DA #$0A
 				.DA atinitname
 				.HS 00
 gfi_type 		.HS 00000000
 				.HS 0000000000000000
 				.HS 0000
+*--------------------------------------
 atopen			.HS 03
 				.DA atinitname
 				.DA iobuf				i/o buffer
 				.HS 01					ref# hard coded since no other files
-atinitname 		.DA #06					length of name
-				.AS -"atinit"	  		name of appletalk config file
 *--------------------------------------
-lgmess			.AS -"**  System program too large  **"
-lgmess.len		.EQ *-lgmess
-iomess			.AS -"** Unable to load"
-				.AS -" X.System *********"
-ierlen			.HS 00
+atinitname 		.DA #06					length of name
+				.AS "ATINIT"	  		name of appletalk config file
+*--------------------------------------
 opparm			.HS 03
 				.DA pbuf
 				.DA iobuf
@@ -194,10 +225,10 @@ quitparm		.HS 04
 				.HS 0000
 				.HS 00
 				.HS 0000
-iterp			.AS -".SYSTEM"			interpreter suffix that is required
+iterp			.AS ".SYSTEM"			interpreter suffix that is required
 *--------------------------------------
 ILDR.LEN		.EQ *-ILDR.START
 MAN
-SAVE USR/SRC/PRODOS.FX/PRODOS.S.ILDR
-LOAD USR/SRC/PRODOS.FX/PRODOS.S
+SAVE usr/src/prodos.fx/prodos.s.ildr
+LOAD usr/src/prodos.fx/prodos.s
 ASM
