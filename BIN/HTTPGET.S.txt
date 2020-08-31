@@ -3,7 +3,8 @@ NEW
 				.LIST OFF
 				.OP	65C02
 				.OR	$2000
-				.TF bin/httpget
+*				.TF bin/httpget
+				.TF root/httpget
 *--------------------------------------
 				.INB inc/macros.i
 				.INB inc/a2osx.i
@@ -13,8 +14,7 @@ NEW
 				.INB inc/libtcpip.i
 				.INB inc/net.http.i
 *--------------------------------------
-RESP.BUFSIZE	.EQ 1024
-TIMEOUT.MAX		.EQ 50					5 sec.
+TIMEOUT.MAX		.EQ 200					20 sec.
 *--------------------------------------
 				.DUMMY
 				.OR ZPBIN
@@ -29,7 +29,21 @@ ZPEncodedBufPtr	.BS 2
 ZPEncodedBufLen	.BS 2
 ZPRespBufPtr	.BS 2
 
+ArgIndex		.BS 1
 hSocket			.BS 1
+hReqBuf			.BS 1
+hEncodedBuf		.BS 1
+
+hSendBuf		.BS 1
+ZPSendBufPtr	.BS 2
+
+ZPFileName		.BS 2
+
+hRespBuf		.BS 1
+bResponse		.BS 1
+TimeOut			.BS 1
+bURI			.BS 1
+
 ZS.END			.ED
 *--------------------------------------
 *			File Header (16 Bytes)
@@ -62,9 +76,7 @@ L.MSG.SKTKO		.DA MSG.SKTKO
 L.MSG.CONNECTED	.DA MSG.CONNECTED
 L.MSG.SKTERR	.DA MSG.SKTERR
 L.MSG.IOERR		.DA MSG.IOERR
-L.HTTP.GET1		.DA HTTP.GET1
-L.HTTP.GET2		.DA HTTP.GET2
-L.HTTP.GET3		.DA HTTP.GET3
+L.HTTP.GET		.DA HTTP.GET
 				.DA 0
 *--------------------------------------
 CS.INIT			>LDYA L.LIBTCPIP
@@ -78,6 +90,7 @@ CS.RUN			>LIBCALL hLIBTCPIP,LIBTCPIP.GETCFG	is TCPIP loaded ?
 				>STYA ZPIPCfgPtr
 				lda (ZPIPCfgPtr)		Configured ?
 				bmi CS.RUN.IPOK
+
 				>LDYA L.MSG.IPKO
 				>SYSCALL PutS
 				lda #E.SYN
@@ -93,7 +106,8 @@ CS.RUN.IPOK		ldy #S.IPCFG.IP+3
 				dex
 				bpl .1
 
-				>INC.G ArgIndex
+				inc ArgIndex
+				lda ArgIndex
 				>SYSCALL ArgV
 				bcs .9
 
@@ -105,8 +119,9 @@ CS.RUN.IPOK		ldy #S.IPCFG.IP+3
 				>LIBCALL hLIBTCPIP,LIBTCPIP.HST.GetByName
 				bcc CS.RUN.HOSTOK
 				>SLEEP
-				jsr Wait.TimeOut
-				bcc .2
+
+				lda TimeOut
+				bne .2
 
 				>PUSHW L.MSG.UNKNOWN
 				>PUSHW ZPHostPtr
@@ -122,7 +137,8 @@ CS.RUN.ESYN		lda #E.SYN
 				sec
 CS.RUN.RTS		rts
 
-CS.RUN.HOSTOK	>INC.G ArgIndex
+CS.RUN.HOSTOK	inc ArgIndex
+				lda ArgIndex
 				>SYSCALL ArgV
 				bcc .10
 
@@ -138,7 +154,8 @@ CS.RUN.HOSTOK	>INC.G ArgIndex
 				bcs CS.RUN.RTS
 
 				>STYA SA.REMOTE+S.SOCKADDR.PORT
-				>INC.G ArgIndex
+				inc ArgIndex
+				lda ArgIndex
 				>SYSCALL ArgV
 				bcs .8
 
@@ -159,7 +176,8 @@ CS.RUN.HOSTOK	>INC.G ArgIndex
 .11				cmp #'U'
 				bne .2
 
-				>INC.G ArgIndex
+				inc ArgIndex
+				lda ArgIndex
 				>SYSCALL ArgV
 
 .9				bcs CS.RUN.ESYN
@@ -170,8 +188,10 @@ CS.RUN.HOSTOK	>INC.G ArgIndex
 .8				bra CS.RUN.PORTOK
 
 .2				cmp #'F'
-				bne CS.RUN.ESYN
-				>INC.G ArgIndex
+				bne .3
+				
+				inc ArgIndex
+				lda ArgIndex
 				>SYSCALL ArgV
 				bcs .9
 
@@ -183,11 +203,24 @@ CS.RUN.HOSTOK	>INC.G ArgIndex
 				bcs .9
 
 				>STYA ZPReqBufLen
-				txa
-				>STA.G hReqBuf
+				stx hReqBuf
 				>SYSCALL GetMemPtr
 				>STYA ZPReqBufPtr
+				
+				sec
+				ror bURI
+				bra CS.RUN.PORTOK
 
+.3 				cmp #'O'
+				bcs .9
+				
+				inc ArgIndex
+				lda ArgIndex
+				>SYSCALL ArgV
+				bcs .9
+				
+				>STYA ZPFileName
+				
 CS.RUN.PORTOK	>PUSHW L.MSG.CONNECT
 				ldx #0
 
@@ -203,7 +236,7 @@ CS.RUN.PORTOK	>PUSHW L.MSG.CONNECT
 				>SYSCALL PrintF
 
 CS.RUN.OPENSKT	>PUSHBI 0				no protocol
-				lda #S.SOCKET.T.STREAM
+				lda #S.SOCKET.T.SEQPKT
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Socket
 				bcs .9
 
@@ -233,37 +266,26 @@ CS.RUN.OPENSKT	>PUSHBI 0				no protocol
 				cmp #ERR.SKT.NOCONN
 				bne .9
 
-				jsr Wait.TimeOut
-				bcc .2
+				lda TimeOut
+				bne .2
+				
 				lda #ERR.SKT.NOCONN
 				bra .9
 
 .3				>LDYA L.MSG.CONNECTED
 				>SYSCALL PutS
 
-				>LDYAI RESP.BUFSIZE
-				>SYSCALL GetMem
-				bcs .99
-
-				>STYA ZPRespBufPtr
-				txa
-				>STA.G hRespBuf
-
 				>SLEEP
 				
 CS.RUN.GET		jsr CS.RUN.ENCODE
 				bcs .99
-*				>PUSHW ZPEncodedBufLen
-*				>PUSHW ZPEncodedBufPtr
-*				ldy #S.PS.hStdOut
-*				lda (pPS),y
-*				>SYSCALL FWrite
 
 				jsr CS.RUN.REQUEST
 				bcs .99
 
 				jsr CS.RUN.RESPONSE
 				bcs .99
+
 .9				lda #0
 				sec
 .99				rts
@@ -290,8 +312,6 @@ CS.RUN.IOERR	pha
 				sec
 				rts
 *--------------------------------------
-CS.RUN.CONNECT
-*--------------------------------------
 CS.RUN.ENCODE	>LDYA ZPReqBufPtr
 				>STYA ZPPtr
 
@@ -300,47 +320,62 @@ CS.RUN.ENCODE	>LDYA ZPReqBufPtr
 
 				inc ZPEncodedBufLen
 				bne .1
+
 				inc ZPEncodedBufLen+1
+
 .1	            inc ZPPtr
 				bne .11
+
 				inc ZPPtr+1
+
 .11				jsr CS.RUN.TOENCODE
 				bcc .10
+
 .3				lda ZPEncodedBufLen
 				clc
 				adc #2
 				sta ZPEncodedBufLen
 				bcc .10
+
 				inc ZPEncodedBufLen+1
 				bra .10
 
 .4				>LDYA ZPEncodedBufLen
 				>SYSCALL GetMem
 				bcs .9
+
 				>STYA ZPEncodedBufPtr
 				>STYA ZPPtr
-				txa
-				>STA.G hEncodedBuf
+				stx hEncodedBuf
 
 .5				lda (ZPReqBufPtr)
 				beq .8
+
 				inc ZPReqBufPtr
 				bne .6
+
 				inc ZPReqBufPtr+1
+
 .6				jsr CS.RUN.TOENCODE
 				bcc .7
+
 				jsr CS.RUN.ADDBYTETOBUF
 				bra .5
+
 .7				jsr CS.RUN.ADDTOBUF
 				bra .5
+
 .8				clc
 .9				rts
 *--------------------------------------
 CS.RUN.TOENCODE	ldx #URI.ToEncode.Cnt-1
+
 .1				cmp URI.ToEncode,x
 				beq .9					CS
+
 				dex
 				bpl .1
+
 				clc
 .9				rts
 *--------------------------------------
@@ -357,14 +392,18 @@ CS.RUN.ADDBYTETOBUF
 				ora #$30
 				cmp #$3A
 				bcc .1
+
 				adc #6
+
 .1				jsr CS.RUN.ADDTOBUF
 				pla
 				and #$0F
 				ora #$30
 				cmp #$3A
 				bcc CS.RUN.ADDTOBUF
+
 				adc #6
+
 *--------------------------------------
 CS.RUN.ADDTOBUF	sta (ZPPtr)
 				inc ZPPtr
@@ -374,69 +413,67 @@ CS.RUN.ADDTOBUF	sta (ZPPtr)
 *--------------------------------------
 CS.RUN.REQUEST	jsr Init.TimeOut
 
-				>PUSHWI HTTP.GET1.LEN
-				>PUSHW L.HTTP.GET1
-				jsr .8
-				bcs .99
-
-				>PUSHW ZPEncodedBufLen
-				>PUSHW ZPEncodedBufPtr
-				jsr .8
+				>LDYAI 1024
+				>SYSCALL GetMem
 				bcs .9
-
-				>PUSHWI HTTP.GET2.LEN
-				>PUSHW L.HTTP.GET2
-				jsr .8
-.99				bcs .9
-
-				>LDYA ZPHostPtr
-				>SYSCALL StrLen
+				>STYA ZPSendBufPtr
+				stx hSendBuf
+				
 				>PUSHYA
+				>PUSHW HTTP.GET
+				>PUSHW ZPEncodedBufPtr
 				>PUSHW ZPHostPtr
-				jsr .8
-				bcs .9
-
-				>PUSHWI HTTP.GET3.LEN
-				>PUSHW L.HTTP.GET3
-
-.8				lda #'!'
-				>SYSCALL PutChar
+				>PUSHBI 4
+				
+				>SYSCALL SPrintF
+				bcs .90
+				
+				>PUSHYA
+				>PUSHW ZPSendBufPtr
 				
 				lda hSocket
-				>LIBCALL hLIBTCPIP,LIBTCPIP.Write
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Send
+				
+.90				php
+				pha
+				lda hSendBuf
+				>SYSCALL FreeMem
+				pla
+				plp
+				
 .9				rts
 *--------------------------------------
 CS.RUN.RESPONSE jsr Init.TimeOut
 
 .1				>SLEEP
-				>PUSHWI RESP.BUFSIZE
-				>PUSHW ZPRespBufPtr
 
 				lda hSocket
-				>LIBCALL hLIBTCPIP,LIBTCPIP.Read
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Recv
 				bcc .2
 				
 				cmp #E.NODATA
 				bne .8
 				
-				jsr Wait.TimeOut
-				bcs .80
+				lda TimeOut
+				bne .80
 				bra .1
 
-.2				>PUSHYA					len
+.2				>SYSCALL GetMemPtr
+				>STYA ZPRespBufPtr
+				
 				>PUSHW ZPRespBufPtr
 				ldy #S.PS.hStdOut
 				lda (pPS),y
 				>SYSCALL FWrite
 				bcs .9
 
-				>INC.G bResponse
+				inc bResponse
 				bra .1
 
 .8				cmp #MLI.E.IO			SKT Close ?
 				bne .9
 
-.80				>LDA.G bResponse
+.80				lda bResponse
 				beq .99
 
 .81				clc
@@ -448,10 +485,12 @@ CS.RUN.RESPONSE jsr Init.TimeOut
 *--------------------------------------
 CS.DOEVENT		lda (pEvent)
 				bpl .9					is it a TIMER event?
-				>LDA.G TimeOut
+				
+				lda TimeOut
 				beq .9
-				dec
-				sta (pData),y
+				
+				dec TimeOut			
+				
 .9				sec						do not discard TIMER event
 				rts
 *--------------------------------------
@@ -459,31 +498,31 @@ CS.QUIT			lda hSocket
 				beq .1
 
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Shutdown
-.1				>LDA.G hReqBuf
+.1				lda hReqBuf
 				beq .2
+				
 				>SYSCALL FreeMem
-.2				>LDA.G hEncodedBuf
+
+.2				lda hEncodedBuf
 				beq .3
+				
 				>SYSCALL FreeMem
-.3				>LDA.G hRespBuf
+
+.3				lda hRespBuf
 				beq .4
+
 				>SYSCALL FreeMem
+
 .4				lda hLIBTCPIP
 				beq .8
+
 				>SYSCALL UnloadLib
 .8				clc
 				rts
 *--------------------------------------
 Init.TimeOut	lda #TIMEOUT.MAX
-				>STA.G TimeOut
+				sta TimeOut
 				rts
-*--------------------------------------
-Wait.TimeOut	sec
-				>LDA.G TimeOut
-				beq .9
-
-				clc
-.9				rts
 *--------------------------------------
 CS.END
 LIBTCPIP		.AZ "libtcpip"
@@ -491,7 +530,8 @@ hLIBTCPIP		.BS 1
 MSG.IPKO		.AZ "TCP/IP Not Loaded/Configured."
 MSG.USAGE		.AS "Usage : HTTPGET <ip|host> [port]\r\n"
 				.AS "        -U Url\r\n" 
-				.AZ "        -F UrlFile\r\n" 
+				.AS "        -F UrlFile\r\n"
+				.AZ "        -O OutputFile\r\n"
 MSG.UNKNOWN		.AZ "%s: Unknown host\r\n"
 MSG.CONNECT		.AZ "Connecting to %d.%d.%d.%d:%D (%s)..."
 MSG.SKTKO		.AZ "Failed to Open Socket."
@@ -513,31 +553,21 @@ URI.ToEncode	.DA #C.LF,#C.CR,#C.SPACE,#'"'
 				.AS "%-.\^_`{|}~"
 URI.ToEncode.Cnt	.EQ	*-URI.ToEncode
 *--------------------------------------
-HTTP.GET1		.AS "GET /"
-HTTP.GET1.LEN	.EQ *-HTTP.GET1
-HTTP.GET2		.AS " HTTP/1.1"
+HTTP.GET		.AS "GET /%s HTTP/1.1"
 				.DA #C.CR,#C.LF
 				.AS "User-Agent: A2osX.HTTPGET"
 				.DA #C.CR,#C.LF
-				.AS "Host: "
-HTTP.GET2.LEN	.EQ *-HTTP.GET2
-HTTP.GET3		.DA #C.CR,#C.LF
+				.AS "Host: %s"
+				.DA #C.CR,#C.LF
 				.AS "Connection: close"
 				.DA #C.CR,#C.LF
 				.DA #C.CR,#C.LF
-HTTP.GET3.LEN	.EQ *-HTTP.GET3
+HTTP.GET.LEN	.EQ *-HTTP.GET
 *--------------------------------------
 				.DUMMY
 				.OR 0
 DS.START
-ArgIndex		.BS 1
-hReqBuf			.BS 1
-hEncodedBuf		.BS 1
-hRespBuf		.BS 1
-bResponse		.BS 1
-TimeOut			.BS 1
-DS.END
-				.ED
+DS.END			.ED
 *--------------------------------------
 MAN
 SAVE usr/src/bin/httpget.s
