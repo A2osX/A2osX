@@ -21,17 +21,20 @@ ZS.START
 ZPIPCfgPtr		.BS 2
 ZPHostPtr		.BS 2
 ZPPtr			.BS 2
-ZPReqBufPtr		.BS 2
 
+hReqBuf			.BS 1
+ZPReqBufPtr		.BS 2
 ZPReqBufLen		.BS 2
+
+hEncodedBuf		.BS 1
 ZPEncodedBufPtr	.BS 2
 ZPEncodedBufLen	.BS 2
+
 ZPRespBufPtr	.BS 2
+ZPRespBufLen	.BS 2
 
 ArgIndex		.BS 1
 hSocket			.BS 1
-hReqBuf			.BS 1
-hEncodedBuf		.BS 1
 
 hSendBuf		.BS 1
 ZPSendBufPtr	.BS 2
@@ -136,13 +139,13 @@ CS.RUN.IPOK		ldy #S.IPCFG.IP+3
 CS.RUN.ESYN		lda #E.SYN
 				sec
 CS.RUN.RTS		rts
-
+*--------------------------------------
 CS.RUN.HOSTOK	inc ArgIndex
 				lda ArgIndex
 				>SYSCALL ArgV
 				bcc .10
 
-				jmp CS.RUN.PORTOK
+.8				jmp CS.RUN.ARGSOK
 
 .10				>STYA ZPPtr
 				lda (ZPPtr)
@@ -154,6 +157,7 @@ CS.RUN.HOSTOK	inc ArgIndex
 				bcs CS.RUN.RTS
 
 				>STYA SA.REMOTE+S.SOCKADDR.PORT
+
 				inc ArgIndex
 				lda ArgIndex
 				>SYSCALL ArgV
@@ -176,6 +180,9 @@ CS.RUN.HOSTOK	inc ArgIndex
 .11				cmp #'U'
 				bne .2
 
+				bit bURI
+				bmi CS.RUN.ESYN
+
 				inc ArgIndex
 				lda ArgIndex
 				>SYSCALL ArgV
@@ -185,10 +192,15 @@ CS.RUN.HOSTOK	inc ArgIndex
 				>STYA ZPReqBufPtr
 				>SYSCALL StrLen
 				>STYA ZPReqBufLen
-.8				bra CS.RUN.PORTOK
+				sec
+				ror bURI
+				bra CS.RUN.HOSTOK
 
 .2				cmp #'F'
 				bne .3
+				
+				bit bURI
+				bmi CS.RUN.ESYN
 				
 				inc ArgIndex
 				lda ArgIndex
@@ -209,7 +221,7 @@ CS.RUN.HOSTOK	inc ArgIndex
 				
 				sec
 				ror bURI
-				bra CS.RUN.PORTOK
+				jmp CS.RUN.HOSTOK
 
 .3 				cmp #'O'
 				bcs .9
@@ -220,8 +232,9 @@ CS.RUN.HOSTOK	inc ArgIndex
 				bcs .9
 				
 				>STYA ZPFileName
-				
-CS.RUN.PORTOK	>PUSHW L.MSG.CONNECT
+				jmp CS.RUN.HOSTOK
+*--------------------------------------
+CS.RUN.ARGSOK	>PUSHW L.MSG.CONNECT
 				ldx #0
 
 .1				>PUSHB SA.REMOTE+S.SOCKADDR.ADDR,x
@@ -459,9 +472,6 @@ CS.RUN.RESPONSE jsr Init.TimeOut
 
 .1				>SLEEP
 
-				lda #'?'
-				>SYSCALL putchar
-				
 				lda hSocket
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Recv
 				bcc .2
@@ -474,25 +484,74 @@ CS.RUN.RESPONSE jsr Init.TimeOut
 				
 				bra .80
 
-.2				lda #'!'
-				>SYSCALL putchar
-
-				>SYSCALL GetMemPtr
+.2				>SYSCALL GetMemPtr
 				>STYA ZPRespBufPtr
 				
+				ldy #S.IP.TOTAL.LENGTH+1
+				lda (ZPRespBufPtr),y
+				sec
+				sbc #S.TCP-S.IP
+				sta ZPRespBufLen
+				
+				dey
+				
+				lda (ZPRespBufPtr),y
+				sbc /S.TCP-S.IP
+				sta ZPRespBufLen+1
+				
+				lda ZPRespBufPtr
+				clc
+				adc #S.TCP
+				sta ZPRespBufPtr
+				bcc .3
+				
+				inc ZPRespBufPtr+1
+				
+.3				bit bResponse
+				bmi .6
+				
+.30				ldx #0
+				
+.4				dex
+
+				lda (ZPRespBufPtr)
+				inc ZPRespBufPtr
+				bne .5
+				
+				inc ZPRespBufPtr+1
+				
+.5				cmp #C.LF
+				bne .4
+				
+				txa
+*				sec
+				adc ZPRespBufLen
+				sta ZPRespBufLen
+				
+				lda ZPRespBufLen+1
+				adc #$ff
+				sta ZPRespBufLen+1
+				
+				inx
+				inx
+				bne .30
+				
+				sec
+				ror bResponse
+				
+.6				>PUSHW ZPRespBufLen
 				>PUSHW ZPRespBufPtr
 				
 				lda hFile
-				bne .3
+				bne .7
 				
 				ldy #S.PS.hStdOut
 				lda (pPS),y
-.3				>SYSCALL FWrite
+
+.7				>SYSCALL FWrite
 				bcs .9
 
-				sec
-				ror bResponse
-				bra CS.RUN.RESPONSE
+				jmp CS.RUN.RESPONSE
 
 .8				cmp #MLI.E.IO			SKT Close ?
 				bne .9
@@ -504,8 +563,8 @@ CS.RUN.RESPONSE jsr Init.TimeOut
 				rts
 
 .99				lda #MLI.E.IO
-.9				sec
-				rts
+				sec
+.9				rts
 *--------------------------------------
 CS.DOEVENT		lda (pEvent)
 				bpl .9					is it a TIMER event?
