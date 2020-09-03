@@ -27,15 +27,8 @@ SKT.Socket.DSOCK
 				stx FD.DSOCK+S.SOCKET.T		save type
 				sta FD.DSOCK+S.SOCKET.PROTO		ICMP,UDP,TCP
 
-				sty TmpDWord
-				
-				lda #0					Y = socket.size
-				>SYSCALL2 GetMem
-				bcs .9
-				>STYA ZPTmpPtr1
-
 				jsr SKT.Socket.FindFree
-				bcs .9
+				bcs SKT.Socket.RTS
 
 				ldy #0
 
@@ -44,17 +37,8 @@ SKT.Socket.DSOCK
 				iny
 				cpy #FD.DSOCK.SIZE
 				bne .1
-				
-				lda #0
-				
-.2				sta (ZPTmpPtr1),y
-				iny
-				cpy TmpDWord
-				bne .2
 
-				txa
-				clc
-.9				rts
+				bra SKT.Socket.ZERO
 
 SKT.Socket.SEQPKT
 SKT.Socket.STREAM
@@ -63,16 +47,9 @@ SKT.Socket.STREAM
 
 				stx FD.SSOCK+S.SOCKET.T		save type
 				sta FD.SSOCK+S.SOCKET.PROTO
-				
-				sty TmpDWord
-				
-				lda #0					Y = socket.size
-				>SYSCALL2 GetMem
-				bcs .9
-				>STYA ZPTmpPtr1
 
 				jsr SKT.Socket.FindFree
-				bcs .9
+				bcs SKT.Socket.RTS
 
 				ldy #0
 
@@ -82,32 +59,47 @@ SKT.Socket.STREAM
 				cpy #FD.SSOCK.SIZE
 				bne .1
 
-				lda #0
-				
-.2				sta (ZPTmpPtr1),y
+SKT.Socket.ZERO	lda #0
+
+.1				sta (ZPTmpPtr1),y
 				iny
 				cpy TmpDWord
-				bne .2
+				bne .1
 
 				txa
 				clc
-.9				rts
+SKT.Socket.RTS	rts
+*--------------------------------------
 SKT.Socket.FindFree
-				ldy #0
-.1				lda SKT.TABLE,y
+				sty TmpDWord			Y = socket.size
+
+				ldx #0
+
+.1				lda SKT.TABLE,x
 				beq .2
-				iny
-				cpy #K.SKTTABLE.SIZE
+
+				inx
+				cpx #K.SKTTABLE.SIZE
 				bne .1
-				txa
-				>SYSCALL2 freemem
+
 				lda #E.OOH
-				sec
+*				sec
 				rts
 
-.2				txa
+.2				stx .8+1
+
+*				lda #0					Y,A = socket.size
+				>SYSCALL2 GetMem
+				bcs SKT.Socket.RTS
+
+				>STYA ZPTmpPtr1
+
+				txa
+
+.8				ldy #$FF				SELF MODIFIED
 				sta SKT.TABLE,y
-				clc
+				
+*				clc
 				rts
 */--------------------------------------
 * # Bind
@@ -163,6 +155,7 @@ SKT.bind		>SYSCALL2 GetMemPtr
 				lda #ERR.SKT.BUSY
 *				sec
 				rts
+
 .7				inx
 				cpx #K.SKTTABLE.SIZE
 				bne .2
@@ -201,21 +194,21 @@ SKT.connect.SEQPKT
 				ldy #S.SOCKET.TCP.S
 				lda (ZPPtrSKT),y
 				beq .1
-				
+
 				cmp #S.SOCKET.TCP.S.ESTBLSH
 				beq SKT.listen.8
 				bcs .9
-				
+
 				cmp #S.SOCKET.TCP.S.OPENED
 				beq .2
-				
+
 				cmp #S.SOCKET.TCP.S.SYNSENT
 				beq .99
 
 .9				lda #ERR.SKT.BAD
 				sec
 				rts
-				
+
 .1				jsr SKT.SetRemAddr
 				jsr SKT.NewTCB
 				bcs SKT.listen.RTS
@@ -226,10 +219,10 @@ SKT.connect.SEQPKT
 .2				lda #S.TCP.OPTIONS.SYN
 				jsr TCP.OUT.SendOptA	Send SYN
 				bcs .99
-				
+
 				lda #S.SOCKET.TCP.S.SYNSENT
 				jsr SKT.StoreTCB.S
-				
+
 .99				lda #ERR.SKT.NOCONN
 				sec
 				rts
@@ -276,10 +269,10 @@ SKT.listen.RTS	rts
 * ## C
 * `hFD Accept(hFD fd);`
 * ## ASM
-* **In:** 
+* **In:**
 * `lda fd`
 * `>LIBCALL hLIBTCPIP,LIBTCPIP.accept`
-* ## RETURN VALUE 
+* ## RETURN VALUE
 * A = hSocket
 *\--------------------------------------
 SKT.Accept		>SYSCALL2 GetMemPtr
@@ -288,12 +281,33 @@ SKT.Accept		>SYSCALL2 GetMemPtr
 				ldy #S.SOCKET.O
 				lda (ZPPtrSKT),y
 				and #S.SOCKET.O.ACCEPTCONN
-				beq .99
+				beq SKT.listen.9
+*--------------------------------------
+SKT.GetFromQueue
+				ldy #S.SOCKET.HQ.TAIL
+				lda (ZPPtrSKT),y
+				iny						#S.SOCKET.HQ.HEAD
+				cmp (ZPPtrSKT),y
+				beq .9					CS
 
-				jmp SKT.GetFromQueue
+				pha
+				inc
+				cmp #S.SOCKET.HQ.MAX
+				bne .1
 
-.99				lda #ERR.SKT.BAD
-				sec
+				lda #0
+
+.1				dey						#S.SOCKET.HQ.TAIL
+				sta (ZPPtrSKT),y
+
+				pla
+				clc
+				adc #S.SOCKET.HQ
+				tay
+				lda (ZPPtrSKT),y
+
+*				clc
+
 .9				rts
 */--------------------------------------
 * # Shutdown
@@ -325,9 +339,9 @@ SKT.shutdown	pha
 
 				pla
 				pha
-				
+
 				jsr SKT.shutdown.TCP
-				
+
 *				bcs SKT.shutdown.RTS
 *--------------------------------------
 SKT.shutdown.LISTEN
@@ -336,7 +350,7 @@ SKT.shutdown.DGRAM
 SKT.shutdown.SEQPKT
 .1				jsr SKT.GetFromQueue
 				bcs .3
-				
+
 				>SYSCALL2 FreeMem
 				bra .1
 
@@ -359,7 +373,7 @@ SKT.shutdown.RTS
 *--------------------------------------
 SKT.shutdown.STREAM
 				pla
-				
+
 SKT.shutdown.TCP
 				jsr SKT.GetTCB
 				ldy #S.SOCKET.TCP.S
@@ -827,13 +841,13 @@ SKT.Recv		clc
 				cmp #S.SOCKET.T.SEQPKT
 				bcc .10
 				bne .99					STREAM
-				
+
 				jsr SKT.CheckTCP
 				bcs .91
 
 .10				jsr SKT.GetFromQueue
 				bcs .90
-				
+
 				plp						if CS, RecvFrom
 				bcc .9					Exit with CC and A=hFrame
 
@@ -951,7 +965,7 @@ SKT.Send.SEQPKT	jsr SKT.CheckTCP
 				jsr SKT.GetTCB
 
 				jsr SKT.CopyDataInToOut
-				
+
 				jmp TCP.OUT.SEQSEND
 *--------------------------------------
 SKT.Send.STREAM	lda #ERR.SKT.BAD
@@ -1027,7 +1041,7 @@ SKT.EOF.I		ldy #S.SOCKET.TCP.INUSED
 .9				rts
 *--------------------------------------
 SKT.CheckStream	lda #S.SOCKET.T.STREAM
-				
+
 				ldy #S.SOCKET.T
 				cmp (ZPPtrSKT),y
 				bne SKT.BAD
@@ -1037,13 +1051,13 @@ SKT.CheckTCP	ldy #S.SOCKET.O
 				and #S.SOCKET.O.ACCEPTCONN
 				bne .99
 
-				ldy #S.SOCKET.TCP.S	
+				ldy #S.SOCKET.TCP.S
 				lda (ZPPtrSKT),y
 				cmp #S.SOCKET.TCP.S.ESTBLSH
 				beq .8
 
 				bcc .90
-				
+
 				lda #MLI.E.IO
 *				sec
 				rts
@@ -1077,7 +1091,7 @@ SKT.GetTable	>LDYA L.SKT.Table
 SKT.PullhFDDataInPtrLen
 				>SYSCALL2 GetMemPtr
 				>STYA ZPPtrSKT
-				>PULLW ZPDataInPtr		!!!DataOut trashed when sending ACK in TCP.OUT	
+				>PULLW ZPDataInPtr		!!!DataOut trashed when sending ACK in TCP.OUT
 				>PULLW ZPDataInLen		!!!use DataInPtr/Len
 				rts
 *--------------------------------------
@@ -1120,8 +1134,8 @@ SKT.SetRemAddr	ldy #S.SOCKET.REM.PORT+1
 
 				rts
 *--------------------------------------
-*  SKT.REM.ADDR = Incoming Frame SRC 
-*  SKT.LOC.ADDR = Incoming Frame DST 
+*  SKT.REM.ADDR = Incoming Frame SRC
+*  SKT.LOC.ADDR = Incoming Frame DST
 *--------------------------------------
 SKT.FindMatchingLocRem
 				ldx #0
@@ -1191,7 +1205,7 @@ SKT.FindMatchingLocRem
 				bne .44
 
 .43				ldy #S.SOCKET.REM.PORT	Frame is Broadcast, or listening is 0.0.0.0 check port only
-		
+
 .42				lda (ZPPtrSKT),y
 
 .44				cmp SKT.REM.ADDR+S.SOCKADDR.ADDR-S.SOCKET.REM.ADDR,y
@@ -1212,38 +1226,11 @@ SKT.FindMatchingLocRem
 *				sec
 				rts
 *--------------------------------------
-SKT.GetFromQueue
-				ldy #S.SOCKET.HQ.TAIL
-				lda (ZPPtrSKT),y
-				iny						#S.SOCKET.HQ.HEAD
-				cmp (ZPPtrSKT),y
-				beq .9					CS
-
-				pha
-				inc
-				cmp #S.SOCKET.HQ.MAX
-				bne .1
-
-				lda #0
-
-.1				dey						#S.SOCKET.HQ.TAIL
-				sta (ZPPtrSKT),y
-
-				pla
-				clc
-				adc #S.SOCKET.HQ
-				tay
-				lda (ZPPtrSKT),y
-
-*				clc
-
-.9				rts
-*--------------------------------------
 SKT.AddToQueueA pha
 				ldy #S.SOCKET.HQ.HEAD
 				lda (ZPPtrSKT),y
 				tax
-				inc 
+				inc
 				cmp #S.SOCKET.HQ.MAX
 				bne .1
 
@@ -1282,20 +1269,20 @@ SKT.NewTCB		ldx #S.SOCKET.TCP.INSEQNUM
 				sta SKT.Cache+S.SOCKET.TCP.OUTNEXTSEQ,x
 				dex
 				bpl .2
-				
+
 				ldy #S.SOCKET.T
 				lda (ZPPtrSKT),y
 				cmp #S.SOCKET.T.SEQPKT
 				bcc .8
-				
+
 				tax
-				
+
 				>LDYAI K.TCP.WSIZE
 				>STYA SKT.Cache+S.SOCKET.TCP.INFREE
-				
+
 				cpx #S.SOCKET.T.STREAM
 				bcc .8
-				
+
 				.DO AUXPIPE=1
 				>SYSCALL2 NewStkObj
 				.ELSE
@@ -1398,7 +1385,7 @@ SKT.SetFrameOutTCPUDPPorts
 				bra .2
 .1				lda SKT.REM.ADDR+S.SOCKADDR.PORT+1
 				ldx SKT.REM.ADDR+S.SOCKADDR.PORT
-	
+
 .2 				ldy #S.TCPUDP.DSTPORT
 				sta (ZPFrameOutPtr),y
 				iny
