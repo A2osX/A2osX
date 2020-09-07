@@ -27,7 +27,7 @@ hSocket			.BS 1
 hReqBuf			.BS 1
 ZPReqBufPtr		.BS 2
 ZPReqBufLen		.BS 2
-bResponse		.BS 1
+bHeader			.BS 1
 TimeOut			.BS 1
 bURI			.BS 1
 
@@ -75,6 +75,8 @@ L.MSG.SKTKO		.DA MSG.SKTKO
 L.MSG.CONNECTED	.DA MSG.CONNECTED
 L.MSG.SKTERR	.DA MSG.SKTERR
 L.MSG.IOERR		.DA MSG.IOERR
+L.MSG.FileLength	.DA MSG.FileLength
+L.MSG.Progress	.DA MSG.Progress
 L.HTTP.GET		.DA HTTP.GET
 				.DA 0
 *--------------------------------------
@@ -470,49 +472,25 @@ CS.RUN.RESPONSE jsr Init.TimeOut
 				bcc .2
 				
 				cmp #E.NODATA
-				bne .8
+				bne .80
 				
 				lda TimeOut
 				bne .1
 				
-				bit bResponse
+				bit bHeader
 				bmi .1
 				
-				bra .8
+.80				jmp .8
 
 .2				jsr CS.RUN.GETRESPONSE
 				
-				bit bResponse
+				bit bHeader
 				bmi .6
 				
-.3				ldx #0
-				
-.4				dex
-
-				lda (ZPRespBufPtr)
-				inc ZPRespBufPtr
-				bne .5
-				
-				inc ZPRespBufPtr+1
-				
-.5				cmp #C.LF
-				bne .4
-				
-				txa
-*				sec
-				adc ZPRespBufLen
-				sta ZPRespBufLen
-				
-				lda ZPRespBufLen+1
-				adc #$ff
-				sta ZPRespBufLen+1
-				
-				inx
-				inx
-				bne .3
+				jsr CS.RUN.GETHEADER
 				
 				sec
-				ror bResponse
+				ror bHeader
 				
 .6				>PUSHW ZPRespBufLen
 				>PUSHW ZPRespBufPtr
@@ -530,9 +508,32 @@ CS.RUN.RESPONSE jsr Init.TimeOut
 				stz hRespBuf
 				>SYSCALL FreeMem
 
+				lda ZPRespBufLen
+				clc
+				adc Received
+				sta Received
+
+				lda ZPRespBufLen+1
+				adc Received+1
+				sta Received+1
+				
+				bcc .70
+
+				inc Received+2
+				bne .70
+
+				inc Received+3
+				
+.70				>PUSHW L.MSG.Progress
+				>PUSHL Received
+				>PUSHL Length
+				>PUSHBI 8
+				
+				>SYSCALL PrintF
+
 				jmp CS.RUN.RESPONSE
 
-.8				bit bResponse
+.8				bit bHeader
 				bpl .99
 
 				clc
@@ -568,6 +569,76 @@ CS.RUN.GETRESPONSE
 				inc ZPRespBufPtr+1
 				
 .8				rts				
+*--------------------------------------
+CS.RUN.GETHEADER
+.1				ldy #$ff
+				
+.2				iny
+
+				lda (ZPRespBufPtr),y
+				eor #C.CR
+				bne .2
+				
+				sta (ZPRespBufPtr),y
+				
+				iny						skip CR
+				iny						skip LF
+				
+				sty ArgIndex
+				
+				>LDYA ZPRespBufPtr
+				>STYA ZPPtr
+				
+				lda ZPRespBufLen
+				sec
+				sbc ArgIndex
+				sta ZPRespBufLen
+				bcs .3
+				
+				dec ZPRespBufLen+1
+				
+.3				lda ArgIndex
+				tay
+				clc
+				adc ZPRespBufPtr
+				sta ZPRespBufPtr
+				bcc .4
+				
+				inc ZPRespBufPtr+1
+				
+.4				dey
+				dey
+				beq .8
+
+				ldy #$ff
+
+.5				iny
+				lda (ZPPtr),y
+				cmp HEAD.ContentLength,y
+				bne .1
+				
+				cmp #C.SPACE
+				bne .5
+				
+				tya
+				sec						skip SPACE
+				adc ZPPtr
+				tay
+				lda ZPPtr+1
+				adc #0
+
+				>SYSCALL AToL
+				>PULLL Length
+
+				>PUSHW L.MSG.FileLength
+				>PUSHL Length
+				>PUSHBI 4
+				>SYSCALL PrintF
+				jmp .1
+
+.8				clc
+				
+.9				rts				
 *--------------------------------------
 CS.DOEVENT		lda (pEvent)
 				bpl .9					is it a TIMER event?
@@ -630,6 +701,8 @@ MSG.SKTKO		.AZ "Failed to Open Socket."
 MSG.CONNECTED	.AZ "Connected."
 MSG.SKTERR		.AZ "Socket Error : $%h\r\n"
 MSG.IOERR		.AZ "I/O Error : $%h\r\n"
+MSG.FileLength	.AZ "File Length : %u Bytes\r\n"
+MSG.Progress	.AZ "Received %u/%u\r\n"
 *--------------------------------------
 SA.LOCAL		.DA #AF.INET			S.SOCKADDR.AF
 				.BS 1
@@ -645,6 +718,8 @@ URI.ToEncode	.DA #C.LF,#C.CR,#C.SPACE,#'"'
 				.AS "%-.\^_`{|}~"
 URI.ToEncode.Cnt	.EQ	*-URI.ToEncode
 *--------------------------------------
+HEAD.ContentLength	.AZ "Content-Length: "
+*--------------------------------------
 HTTP.GET		.AS "GET /%s HTTP/1.1"
 				.DA #C.CR,#C.LF
 				.AS "User-Agent: A2osX.HTTPGET"
@@ -656,9 +731,12 @@ HTTP.GET		.AS "GET /%s HTTP/1.1"
 				.DA #C.CR,#C.LF
 				.DA #0
 *--------------------------------------
+Received		.BS 4
+Length			.BS 4
+*--------------------------------------
 				.DUMMY
 				.OR 0
-DS.START
+DS.START		
 DS.END			.ED
 *--------------------------------------
 MAN
