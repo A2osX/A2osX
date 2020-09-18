@@ -529,7 +529,7 @@ L3EA9  			ldx levels				be sure there is a top index
 				plp		 				restore z-flag.
 				bne L3F18			  	go mark all as dummy.
 
-				jsr clrstats			clr status bits 0,1,2 (index/data/alloc)
+				jsr XDOS.ClrFCBStatus	clr status bits 0,1,2 (index/data/alloc)
 
 				dex						check for seed
 				beq L3E89			  	if seed, check for position < 512.
@@ -546,7 +546,7 @@ L3EA9  			ldx levels				be sure there is a top index
 
 L3ED4  			rts
 
-posindex 		jsr clrstats			clr all alloc requirements for previous
+posindex 		jsr XDOS.ClrFCBStatus	clr all alloc requirements for previous
 				jsr rfcbfst				position. get highest level index block
 				bcs L3ED4
 
@@ -599,7 +599,7 @@ L3F18  			ldy fcbptr				set status to show what's missing
 
 				jsr zeroindex			zero index block in user's i/o buffer
 				bra svmark
-
+*--------------------------------------
 zeroindex 		lda #$00
 				tay
 L3F30  			sta (zpt),y				zero out the index half of the user's
@@ -614,7 +614,7 @@ L3F37  			sta (zpt),y
 
 				dec zpt+1				restore proper address
 				rts
-
+*--------------------------------------
 zipdata			lda #$00
 				tay
 L3F42  			sta (datptr),y			zero out data area
@@ -629,17 +629,17 @@ L3F49  			sta (datptr),y
 
 				dec datptr+1
 				rts
-
+*--------------------------------------
 L3F51  			sta bloknml				get data block of new position
 				lda (zpt),y				(high address)
 				dec zpt+1
 
 rnewpos			sta bloknml+1
-				jsr rfcbdat
+				jsr XDOS.ReadFCB.DBLK
 				bcs L3F86				if error.
 
-				jsr clrstats			show whole chain is allocated.
-
+				jsr XDOS.ClrFCBStatus	show whole chain is allocated.
+*--------------------------------------
 svmark			ldy fcbptr			 	update position in fcb
 				iny
 				iny
@@ -660,12 +660,6 @@ L3F68  			lda FCBs+FCB.MARK,y		save old mark in case calling routine
 				adc datptr+1
 				sta sos+1
 L3F86  			rts						carry set if error
-*--------------------------------------
-clrstats 		ldy fcbptr			 	clear allocation states for data block
-				lda FCBs+FCB.F,y		and both levels of indexes/
-				and #$F8
-				sta FCBs+FCB.F,y		indicates that either they exist now
-				rts						or unnecessary for current position.
 *--------------------------------------
 dirmark			cmp #$0D				is it a directory ?
 				beq L3F9C			  	yes...
@@ -712,12 +706,13 @@ L3FD6  			sec						error.
 				rts
 
 L3FD8  			sta bloknml+1
-
-* read file's data block
-
-rfcbdat			lda #$01				read command
+*--------------------------------------
+XDOS.ReadFCB.DBLK
+				lda #$01				read command
 				sta A4L
+
 				ldx #datptr				points at address  of data buffer.
+
 				jsr fileio1				go do file input.
 				bcs L3FF2			  	error.
 
@@ -726,11 +721,16 @@ rfcbdat			lda #$01				read command
 				sta FCBs+FCB.DBLK,y		save block # just read in fcb.
 				lda bloknml+1
 				sta FCBs+FCB.DBLK+1,y
-L3FF2  			rts
 
+*				clc
+
+L3FF2  			rts
+*--------------------------------------
 rfcbidx			lda #$01			 	prepare to read index block : read command
 				sta A4L
-				ldx #$48			 	address of current index buffer.
+
+				ldx #zpt			 	address of current index buffer.
+
 				jsr fileio1				go read index block.
 				bcs L400C			 	error
 
@@ -826,37 +826,33 @@ L40AB			lda #MLI.E.FCBFULL	 	fcb full error.
 				sec
 				rts
 
-L40AD  			ldy fcbptr				get address of 1st free fcb found.
-				lda fcbflg				if this byte <> 0 then free fcb found
+L40AD  			lda fcbflg				if this byte <> 0 then free fcb found
 				beq L40AB			 	and available for use.
 
-L40B9  			ldx #$1F			 	assign fcb,
+				ldx fcbptr				get address of 1st free fcb found.
 
-				lda #0
+L40B9  			ldy #FCB
 
-L40BD  			sta FCBs,y		 		but clean it first.
+L40BD  			stz FCBs,x		 		but clean it first.
+				inx
+				dey
+				bne L40BD
+
+				ldy #0
+				
+				ldx fcbptr
+				
+L40CB  			lda d_dev,y				move ownership info.
+				sta FCBs+FCB.DEVID,x	note: this code depends upon the defined
+				inx						order of both the fcb and directory entry buffer.
 				iny
-				dex
-				bpl L40BD
-
-				lda #$06			 	start claiming it by moving in file info
-				tax						using x as source index
-				ora fcbptr			 	and y as destination (fcb).
-				tay
-
-L40CB  			lda d_dev-1,x			move ownership info.
-				sta FCBs,y				note: this code depends upon the defined
-				dey						order of both the fcb and directory
-				dex						entry buffer.
+				cpy #6					
 				bne L40CB
 
 				lda d_stor			 	get storage type and
-				lsr			  			strip off file name length
-				lsr			  			by dividing by 16.
-				lsr
-				lsr
+				jsr XDOS.SetFCBSType
 				tax		 				save in x for later comparison
-				sta FCBs+FCB.STYPE,y	and in fcb for future access.
+
 				lda d_attr			 	get file's attributes and use it
 				and #$03				as a default access request.
 				cpx #$0D			 	if directory, don't allow write enable.
@@ -889,21 +885,23 @@ L4101  			sta bloknml+1			of file and current usage count.
 				bpl L4101				last loop stores hi address of 1st block
 
 				sta bloknml				and this is the low one.
-				ldy fcbptr
+				ldx fcbptr
 				lda cntent			 	this was set up by 'tstopen'.
-				sta FCBs,y				claim fcb for this file.
+				sta FCBs,x				claim fcb for this file.
 				jsr alcbuffr			go allocate buffer in memory tables.
 				bcs L4147			  	if errors.
 
-				jsr fndfcbuf			rtn addr of bufs in data & index ptrs.
+				ldx fcbptr
+				jsr XDOS.GetFCBBufX		rtn addr of bufs in data & index ptrs.
 				lda flevel			 	mark level at which
-				sta FCBs+FCB.FLEVEL,y	file was opened.
-				lda FCBs+FCB.STYPE,y	file must be positioned at beginning.
+				sta FCBs+FCB.FLEVEL,x	file was opened.
+
+				lda FCBs+FCB.STYPE,x	file must be positioned at beginning.
 				cmp #$04			 	is it a tree file ?
 				bcs L415E			  	no, assume a directory.
 
 				lda #$FF			 	fool the position routine into giving
-				sta FCBs+FCB.MARK+2,y	a valid position with preloaded data,
+				sta FCBs+FCB.MARK+2,x	a valid position with preloaded data,
 
 				ldy #$02			 	etc. set desired position to 0.
 				lda #$00
@@ -918,28 +916,24 @@ L413C  			sta tposll,y
 L4147  			pha		 				save error code.
 
 				ldx fcbptr			 	free buffer space.
+				stz FCBs,x				necessary to release fcb also.
 				lda FCBs+FCB.BUFID,x
 				beq L4156			  	if no bufnum, ok because never alloc'd.
 
 				jsr relbuffr			go release buffer.
-				ldx fcbptr
 
-L4156  			stz FCBs,x				necessary to release fcb also.
-				pla		 				error code.
+L4156  			pla		 				error code.
 				sec
 				rts
 
-L415E  			jsr rfcbdat				read in 1st block of directory file.
+L415E  			jsr XDOS.ReadFCB.DBLK	read in 1st block of directory file.
 				bcs L4147			  	return error after freeing buffer & fcb.
 
 L4163  			ldx vcbptr				index to vcb.
 				inc VCBs+VCB.OFCNT,x	add 1 to # of files currently open
 				
-*				sec						and indicate that this volume has at
-*				ror VCBs+VCB.OF,x		least 1 file active.
-
-				ldy fcbptr			 	index to fcb.
-				lda FCBs,y				return ref # to user.
+				ldx fcbptr			 	index to fcb.
+				lda FCBs,x				return ref # to user.
 				ldy #$05
 				sta (A3L),y
 *				clc		 				open is successful
@@ -956,7 +950,7 @@ L4188  			tay						index to next fcb.
 
 				inc cntent
 
-L4191  			lda FCBs,y			is this fcb in use ?
+L4191  			lda FCBs,y				is this fcb in use ?
 				bne L41A3			  	yes.
 
 				txa		 				if not, should we claim it ?
@@ -972,7 +966,7 @@ L41A3  			tya		 				add offset to index to ownership info
 				tay		 				and put it back in y.
 				ldx #$06			 	index to directory entry owner info.
 
-L41A9  			lda FCBs,y			all bytes must match to say that it's
+L41A9  			lda FCBs,y				all bytes must match to say that it's
 				cmp d_dev-1,x			the same file again.
 				bne L41C1			  	if not, then next fcb.
 
@@ -984,6 +978,7 @@ L41A9  			lda FCBs,y			all bytes must match to say that it's
 				lda FCBs+FCB.ACCESS,y	if it's already opened for write.				and #$02			 if so report file busy (with carry set).
 				and #$02			 	if so report file busy (with carry set).
 				beq L41C1				branch if this file is read access only.
+
 				sec
 				rts
 
