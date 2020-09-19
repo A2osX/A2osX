@@ -37,7 +37,7 @@ XDOS.DeallocAX	stx bmcnt				high address of block.
 				lda bmcnt			  	get map #
 				ldx vcbptr
 
-				sta VCBs+VCB.BMAPIDX,x			and make it current.
+				sta VCBs+VCB.BMAPIDX,x	and make it current.
 				lda bmadev
 				jsr gtbmap				read it into buffer
 				bcs L3C8B
@@ -56,6 +56,7 @@ bmbufhi			ora bmbuf,y				this address + 2 is used as an absolute reference to bm
 
 L3C7D  			lda #$80				mark bitmap as modified
 				tsb	bmastat
+
 				inc deblock				inc count of blocks deallocated
 				bne L3C8A
 
@@ -190,14 +191,14 @@ L3D60  			lda #MLI.E.VOLFULL	 	request can't be filled
 *--------------------------------------
 upbmap			clc		 
 				lda bmastat				is current map modified ?
-				bpl L3D5F			  	no.
+				bpl .9				  	no.
 
 				jsr wrtbmap				update device.
-				bcs L3D5F			  	if error on writing.
+				bcs .9				  	if error on writing.
 
 				stz bmastat				mark bitmap buffer as free
 			lda #0						MUST EXIT WITH A=0
-				rts
+.9				rts
 *--------------------------------------
 gtbmap			sta bmadev			 	read bitmap specified by dev and vcb.
 
@@ -230,12 +231,10 @@ wrtbmap			lda #$02			 	write command.
 				lda /bmbuf
 *				lda bmbufhi+2			address of the buffer (low = 0)
 				jsr XDOS.RWBlock
-				tax						error code (if any).
-				pla		 				restore current dev #
-				sta devnum
-				bcc L3DB6			  	and return it if no error.
 
-				txa		 				error code
+				plx						keep A=error code if CS
+				stx devnum
+
 L3DB6  			rts
 *--------------------------------------
 				.DO LOWERCASE=1
@@ -404,7 +403,7 @@ XDOS.PackGBuf.Bitmap .BS 2
 *--------------------------------------
 XDOS.GetMark	ldx fcbptr				index to open fcb.
 
-				ldy #$02				index to user's mark parmeter.
+				ldy #$02				index to user's mark parameter.
 
 .1				lda FCBs+FCB.MARK,x		transfer current position
 				sta (A3L),y				to user's parameter list
@@ -499,7 +498,7 @@ L3E6B  			ldy fcbptr				test to see if current index block
 
 				ldx levels				is it a seed file ?
 				dex
-				bne datlevel			no, use current indexes.
+				bne datlevel1			no, use current indexes.
 
 L3E89  			lda tposlh				is new position < 512 ?
 				lsr
@@ -542,7 +541,7 @@ L3EA9  			ldx levels				be sure there is a top index
 				sta FCBs+FCB.IBLK,y
 				lda bloknml+1
 				sta FCBs+FCB.IBLK+1,y
-				bcc datlevel			branch always
+datlevel1		bra datlevel			branch always
 
 L3ED4  			rts
 
@@ -570,8 +569,22 @@ saplevel 		sta bloknml				read in next lower index block.
 				lda (zpt),y				(high address)
 				sta bloknml+1
 				dec zpt+1
-				jsr rfcbidx				read in sapling level
-				bcs L3ED4
+				
+*				jsr rfcbidx				read in sapling level
+				
+				lda #$01			 	prepare to read index block : read command
+				sta A4L
+
+				ldx #zpt			 	address of current index buffer.
+
+				jsr fileio1				go read index block.
+				bcs L3ED4			 	error
+
+				ldy fcbptr
+				lda bloknml
+				sta FCBs+FCB.IBLK,y		save block address of this index in fcb
+				lda bloknml+1
+				sta FCBs+FCB.IBLK+1,y
 
 datlevel 		lda tposhi				get block address of data block
 				lsr
@@ -589,31 +602,15 @@ datlevel 		lda tposhi				get block address of data block
 				lda #$01				show data block as never been allocated
 				dec zpt+1
 
-L3F18  			ldy fcbptr				set status to show what's missing
-				ora FCBs+FCB.F,y
-				sta FCBs+FCB.F,y
+L3F18  			jsr XDOS.SetFCBStatus	set status to show what's missing
+
 				lsr			  			discard bit that says data block
 				lsr			  			unallocated because carry indicates if
-				jsr zipdata				index block is invalid and needs to be
-				bcc svmark			  	zeroed. branch if it doesn't need zeroed
+				jsr zipdata				index block is invalid and needs to be zeroed.
+				bcc svmark			  	branch if it doesn't need zeroed
 
 				jsr zeroindex			zero index block in user's i/o buffer
 				bra svmark
-*--------------------------------------
-zeroindex 		lda #$00
-				tay
-L3F30  			sta (zpt),y				zero out the index half of the user's
-				iny		 				i/o buffer
-				bne L3F30
-
-				inc zpt+1
-
-L3F37  			sta (zpt),y
-				iny
-				bne L3F37
-
-				dec zpt+1				restore proper address
-				rts
 *--------------------------------------
 zipdata			lda #$00
 				tay
@@ -644,6 +641,7 @@ svmark			ldy fcbptr			 	update position in fcb
 				iny
 				iny
 				ldx #$02
+
 L3F68  			lda FCBs+FCB.MARK,y		save old mark in case calling routine
 				sta oldmark,x			fails later.
 				lda tposll,x
@@ -670,8 +668,13 @@ dirmark			cmp #$0D				is it a directory ?
 L3F9C  			lda scrtch			 	recover results of previous subtraction.
 				lsr						use difference as counter for how many
 				sta cntent			 	blocks must be read to get to new pos'n.
+
 				lda FCBs+FCB.MARK+1,y	test for positive direction
 				cmp tposlh			 	indicated by carry.
+
+				lda FCBs+FCB.MARK+2,y
+				sbc tposhi
+
 				bcc L3FB9			  	if set, position forward. otherwise,
 
 L3FAB  			ldy #$00			 	read directory file in reverse order.
@@ -691,7 +694,7 @@ L3FB9  			ldy #$02			 	position is forward from current.
 				bne L3FB9			  	loop if position not found in this block
 
 				beq svmark			  	branch always.
-
+*--------------------------------------
 dirpos1			lda (datptr),y			get link address of previous or next
 				sta bloknml				directory block.
 				cmp #$01			 	test for null byte into carry
@@ -726,23 +729,23 @@ XDOS.ReadFCB.DBLK
 
 L3FF2  			rts
 *--------------------------------------
-rfcbidx			lda #$01			 	prepare to read index block : read command
-				sta A4L
+*rfcbidx			lda #$01			 	prepare to read index block : read command
+*				sta A4L
 
-				ldx #zpt			 	address of current index buffer.
+*				ldx #zpt			 	address of current index buffer.
 
-				jsr fileio1				go read index block.
-				bcs L400C			 	error
+*				jsr fileio1				go read index block.
+*				bcs L400C			 	error
 
-				ldy fcbptr
-				lda bloknml
-				sta FCBs+FCB.IBLK,y		save block address of this index in fcb
-				lda bloknml+1
-				sta FCBs+FCB.IBLK+1,y
+*				ldy fcbptr
+*				lda bloknml
+*				sta FCBs+FCB.IBLK,y		save block address of this index in fcb
+*				lda bloknml+1
+*				sta FCBs+FCB.IBLK+1,y
 
-*				clc
+**				clc
 
-L400C  			rts
+*L400C  			rts
 *--------------------------------------
 wfcbfst			jsr upbmap				update the bitmap and write file's 1st block.
 
@@ -752,33 +755,35 @@ wfcbfst			jsr upbmap				update the bitmap and write file's 1st block.
 rfcbfst			lda	#$01				read command.
 
 				pha		 				save the command
-				lda #$0C
+				lda #FCB.1stBLK
 				ora fcbptr			 	add offset to fcbptr
 				tay
 				pla
-				ldx #$48			 	rd block into index portion of file buf
 
+				ldx #zpt			 	rd block into index portion of file buf
+*--------------------------------------
 dofileio 		sta A4L			  		command
+
 				lda FCBs,y				get disk block address from fcb.
 				sta bloknml				block 0 not legal
-				cmp FCBs+FCB.DEVID,y
-				bne L4031
-				cmp #$00			 	are both bytes 0 ?
-				bne L4031			  	no, continue request
+				bne .1
+				
+				lda FCBs+1,y			high address of disk block
+				bne .2
 
-				lda #$0C			 	otherwise, allocation error.
-				jsr sysdeath			doesn't return...
+				lda #$0C			 	Block = $0000, allocation error.
+				jsr GP.SysDeath			doesn't return...
 
-L4031  			lda FCBs+FCB.DEVID,y	high address of disk block
-				sta bloknml+1
-
+.1  			lda FCBs+1,y	
+.2				sta bloknml+1
+*--------------------------------------
 fileio1			lda $00,x			  	get memory address of buffer from
 				sta buf			  		page zero pointed to by x register
 				lda $01,x
 				sta buf+1				and pass address to device handler
-				ldy fcbptr
-				lda FCBs+FCB.DEVID,y
-				sta devnum			 	along with device #.
+
+				jsr XDOS.FCBDevIDSelect
+
 				lda #$FF			 	also, set to indicate reg call made to
 				sta ioaccess			device handler.
 				lda devnum			 	transfer device # for dispatcher
@@ -787,18 +792,20 @@ fileio1			lda $00,x			  	get memory address of buffer from
 				jmp XDOS.DevCall	 	call the driver.
 *--------------------------------------
 wfcbdat			ldx #datptr				point at memory address with x and
-				lda #$10			 	disk address with y.
+				lda #FCB.DBLK		 	disk address with y.
 				ora fcbptr			 	add offset to fcbptr
 				tay		 				and put in y.
 				lda #$02			 	write data block.
 				jsr dofileio
 				bcs L4096			  	if errors.
+
 				lda #$BF			 	mark data status as current.
-				bra L408D
+				bra XDOS.ResetFCBStatus
 
 wfcbidx			jsr upbmap			 	update bitmap.
-				ldx #$48			 	point to address of index buffer
-				lda #$0E			 	and block address of that index block.
+
+				ldx #zpt			 	point to address of index buffer
+				lda #FCB.IBLK		 	and block address of that index block.
 				ora fcbptr
 				tay
 				lda #$02
@@ -806,10 +813,12 @@ wfcbidx			jsr upbmap			 	update bitmap.
 				bcs L4096			  	if errors.
 
 				lda #$7F			 	mark index status as current.
+*--------------------------------------
+XDOS.ResetFCBStatus
+				ldx fcbptr
+				and FCBs+FCB.F,x
+				sta FCBs+FCB.F,x
 
-L408D  			ldy fcbptr			 	change status byte to reflect
-				and FCBs+FCB.F,y		successful disk file update.
-				sta FCBs+FCB.F,y		(carry is unaffected)
 L4096  			rts
 *--------------------------------------
 XDOS.Open		jsr XDOS.FindFileOrVol	look up the file.
@@ -933,16 +942,17 @@ L4163  			ldx vcbptr				index to vcb.
 				inc VCBs+VCB.OFCNT,x	add 1 to # of files currently open
 				
 				ldx fcbptr			 	index to fcb.
-				lda FCBs,x				return ref # to user.
+				lda FCBs+FCB.ID,x		return ref # to user.
 				ldy #$05
 				sta (A3L),y
 *				clc		 				open is successful
 				rts
 *--------------------------------------
-tstopen			lda #$00
-				sta cntent				returns the ref # of a free fcb.
-				sta totent			 	flag to indicate file already open.
-				sta fcbflg			 	flag indicates a free fcb is available.
+tstopen			stz cntent				returns the ref # of a free fcb.
+				stz totent			 	flag to indicate file already open.
+				stz fcbflg			 	flag indicates a free fcb is available.
+
+				lda #$00
 
 L4188  			tay						index to next fcb.
 				ldx fcbflg			 	test for free fcb found.
