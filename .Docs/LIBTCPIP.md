@@ -130,11 +130,11 @@ Accept a connection on a socket
 `hFD Accept(hFD fd);`  
 
 ## ASM  
-**In:**   
+**In:**  
 `lda fd`  
 `>LIBCALL hLIBTCPIP,LIBTCPIP.accept`  
 
-## RETURN VALUE   
+## RETURN VALUE  
 A = hSocket  
 
 # Shutdown  

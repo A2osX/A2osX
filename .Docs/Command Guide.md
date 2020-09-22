@@ -243,17 +243,17 @@ As part of the 0.94 release, ProDOS FX has been enhanced with a completely new 5
 
 |Drive | Base|Switches|Extended| Format<br>Test |Read/Write<br>Test|Boot<br>Test|
 |-|-|-|-|-|-|-|
-|Disk ][ | 140K| -H |188K| - |-|-|
-|AM104| 140K|-H|188K| - |-|-|
-|AM107| 140K|-H|188K| - |-|-|
-|DuoDisk |140K|-H|188K| - |-|-|
-|FD-100| 140K|-H<br> -X<br>-H -X |188K<br>160K<br>216K|  -  |-|-|
-|Disk //c internal | 140K| -H |188K| - |-|-|
-|Disk //c external | 140K| -H |188K| - |-|-|
-|Rana I | 140K| -H |188K| - |-|-|
-|Rana II| 140K|-H<br> -X<br>-H -X |188K<br>160K<br>216K|  -  |-|-|
-|Rana III| 140K|-H<br> -X<br>-H -X |188K<br>160K<br>216K|  -  |-|-|
-|AE 5.25| 140K|-H<br> -X<br>-H -X |188K<br>160K<br>216K|  -  |-|-|
+|Disk ][ | 140K| -H |192K| - |-|-|
+|AM104| 140K|-H|192K| - |-|-|
+|AM107| 140K|-H|192K| - |-|-|
+|DuoDisk |140K|-H|192K| - |-|-|
+|FD-100| 140K|-H<br> -X<br>-H -X |192K<br>160K<br>216K|  -  |-|-|
+|Disk //c internal | 140K| -H |192K| - |-|-|
+|Disk //c external | 140K| -H |192K| - |-|-|
+|Rana I | 140K| -H |192K| - |-|-|
+|Rana II| 140K|-H<br> -X<br>-H -X |192K<br>160K<br>216K|  -  |-|-|
+|Rana III| 140K|-H<br> -X<br>-H -X |192K<br>160K<br>216K|  -  |-|-|
+|AE 5.25| 140K|-H<br> -X<br>-H -X |192K<br>160K<br>216K|  -  |-|-|
 
 ### GREP
 
