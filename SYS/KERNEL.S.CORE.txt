@@ -1,15 +1,9 @@
 NEW
   AUTO 3,1
 *--------------------------------------
-CORE.Quit		ldx #5
+CORE.Run		ldx #1
 
-.1				stz K.MLI.PARAMS,x
-				dex
-				bpl .1
-				
-				>MLICALL MLIQUIT
-*--------------------------------------
-CORE.Run		ldx #1					Skip PS0
+				bra .80					Skip PS0
 
 .1				stx CORE.PSIndex
 
@@ -64,8 +58,10 @@ CORE.Run		ldx #1					Skip PS0
 				>PUSHBI 2
 				ldy #S.PS.PID
 				lda (pPS),y
-*				cmp #1					INITD ?
-*				beq CORE.Quit
+				cmp #1					INITD ?
+				bne .6
+
+				jmp CORE.Quit
 				
 .6				>SYSCALL2 Kill
 				bra .8
@@ -74,7 +70,7 @@ CORE.Run		ldx #1					Skip PS0
 
 .8				ldx CORE.PSIndex
 				inx
-				cpx CORE.PSCount
+.80				cpx CORE.PSCount
 				bne .1
 *--------------------------------------
 CORE.Events		jsr CORE.GetEvents
@@ -131,6 +127,23 @@ CORE.Events		jsr CORE.GetEvents
 				>PUSHWZ					Param
 				>SYSCALL2 IOCTL
 .8				jmp CORE.Run
+*--------------------------------------
+CORE.Quit		jsr CORE.IRQ.None.Off
+
+				lda IRQ.INTNUM
+				sta K.MLI.PARAMS+1
+				
+				>MLICALL MLIDEALLOCIRQ
+
+				ldx #5
+
+.1				stz K.MLI.PARAMS+1,x
+				dex
+				bpl .1
+				
+				lda #4
+				ldx #MLIQUIT
+				jmp GP.MLICall
 *--------------------------------------
 CORE.UpdateParentPS
 				tax						save RC From INIT or RUN
@@ -243,7 +256,8 @@ CORE.GetEvents	lda #Evt.Table
 *	CC: Event Cleared 
 *--------------------------------------
 CORE.Dispatch	ldx #1					skip PS0
-
+				bra .80
+				
 .1				stx CORE.PSIndex
 
 				lda PS.Table.hPS,x
@@ -296,9 +310,11 @@ CORE.Dispatch	ldx #1					skip PS0
 				
 .5				ldx CORE.PSIndex
 				inx
-				cpx CORE.PSCount
+.80				cpx CORE.PSCount
 				bne .1
+				
 *				sec
+
 				rts
 *--------------------------------------
 * X unmodified
@@ -474,40 +490,43 @@ CORE.EvtIndex	.BS 1
 CORE.EvtCount	.BS 1
 *--------------------------------------
 * Called by :
-*  - Kernel K.IrqHAuxLC
+*  - Kernel IRQ Manager (AuxLC)
 *  - ProDOS IRQ Manager (GP)
 *--------------------------------------
-K.IrqH.IIGS		lda IO.IIGS.INTFLAG
+CORE.IRQ.IIGS	lda IO.IIGS.INTFLAG
 				and #$08
-				beq K.IrqH.DEV
+				beq CORE.IRQ.DEV
 				
 				stz IO.IIGS.CLRVBLINT
 				
-				bra K.IrqH.Switch
+				bra CORE.IRQ.Switch
 *--------------------------------------
-K.IrqH.TCLOCK	ldy IRQ.VBL.n0
+CORE.IRQ.TCLOCK	ldy IRQ.VBL.n0
 
 				lda $c080,y
 				and #$20
-				beq K.IrqH.DEV
+				beq CORE.IRQ.DEV
 
 				lda $c088,y
 				lda $c080,y
 
-				bra K.IrqH.Switch
+				bra CORE.IRQ.Switch
 *--------------------------------------
-K.IrqH.VBL
-K.IrqH.VBL.MSM	jsr $FFFF				SELF MODIFIED,SERVEMOUSE
-				bcs K.IrqH.DEV			Not From Mouse
+CORE.IRQ.MOUSE	jsr $FFFF				SELF MODIFIED,SERVEMOUSE
+				bcs CORE.IRQ.DEV		Not From Mouse
+
 				ldx IRQ.VBL.0n
 				lda MOUSESTSx,x
 				and #MOUSESTSx.INTVBL	IRQ was caused by VBL ?
-				beq K.IrqH.DEV
-				ldx K.IrqH.VBL.MRM+2	$Cn
+				beq CORE.IRQ.DEV
+
+				ldx CORE.IRQ.MOUSE.2+2	$Cn
 				ldy IRQ.VBL.n0
-K.IrqH.VBL.MRM	jsr $FFFF				SELF MODIFIED,READMOUSE
+
+CORE.IRQ.MOUSE.2
+				jsr $FFFF			SELF MODIFIED,READMOUSE
 *--------------------------------------
-K.IrqH.Switch	inc IRQ.Tick
+CORE.IRQ.Switch	inc IRQ.Tick
 
 				dec CORE.CPUStatCnt
 				bne .2
@@ -547,7 +566,7 @@ K.IrqH.Switch	inc IRQ.Tick
 .8				clc						exit with V flag set
 				rts
 *--------------------------------------	
-K.IrqH.DEV		ldx #0
+CORE.IRQ.DEV	ldx #0
 .1				lda IRQ.Vectors+1,x
 				beq .9
 				sta .10+2
@@ -563,6 +582,30 @@ K.IrqH.DEV		ldx #0
 				bne .1
 .9				sec
 .8				clv						clear V (no task switching)
+				rts
+*--------------------------------------
+CORE.IRQ.IIGS.Off
+				lda #$08
+				trb IO.IIGS.INTEN
+
+				rts
+CORE.IRQ.TCLOCK.Off
+				ldx IRQ.VBL.n0
+				stz $c080,x
+				
+				ldx IRQ.VBL.0n
+				sta CLRPAGE2
+				stz $478,x
+				stz $7f8,x				
+
+				rts
+CORE.IRQ.MOUSE.Off
+				ldy CORE.IRQ.MOUSE.Off.1+2	Cn
+				ldy IRQ.VBL.n0
+				lda #0
+CORE.IRQ.MOUSE.Off.1
+				jmp $ffff				SELF MODIFIED
+CORE.IRQ.None.Off
 				rts
 *--------------------------------------
 IRQ.InKernel	.BS 1

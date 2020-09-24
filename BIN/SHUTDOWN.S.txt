@@ -9,12 +9,19 @@ NEW
 				.INB inc/a2osx.i
 				.INB inc/kernel.i
 *--------------------------------------
+DEFAULT.TIMEOUT	.EQ 60
+*--------------------------------------
 				.DUMMY
 				.OR ZPBIN
 ZS.START
 ZPPtr1			.BS 2
+ArgPtr			.BS 2
 Count			.BS 1
 Index			.BS 1
+Timeout			.BS 4
+bSec			.BS 1
+bTimeout		.BS 1
+bRestart		.BS 1
 ZS.END			.ED
 *--------------------------------------
 *			File Header (16 Bytes)
@@ -23,7 +30,7 @@ CS.START		cld
 				jmp (.1,x)
 				.DA #$61				6502,Level 1 (65c02)
 				.DA #1					BIN Layout Version 1
-				.DA #0					S.PS.F.EVENT
+				.DA #S.PS.F.EVENT
 				.DA #0
 				.DA CS.END-CS.START		Code Size (without Constants)
 				.DA DS.END-DS.START		Data SegmentSize
@@ -35,9 +42,10 @@ CS.START		cld
 *--------------------------------------
 .1				.DA CS.INIT
 				.DA CS.RUN
-				.DA CS.DOEVENT		
+				.DA CS.DOEVENT
 				.DA	CS.QUIT
 L.MSG.USAGE		.DA MSG.USAGE
+L.MSG.CRLF		.DA MSG.CRLF
 L.MSG.SHUTDOWN	.DA MSG.SHUTDOWN
 L.MSG.PS		.DA MSG.PS
 L.MSG.DEV		.DA MSG.DEV
@@ -46,63 +54,151 @@ L.MSG.DEV		.DA MSG.DEV
 CS.INIT			clc
 				rts
 *--------------------------------------
-CS.RUN			>LDYA L.MSG.SHUTDOWN
-				>SYSCALL PutS
+CS.RUN			lda #DEFAULT.TIMEOUT
+				sta Timeout
+
+.1				inc Index
+				lda Index
+				>SYSCALL ArgV
+				bcs .8
+
+				>STYA ZPPtr1
+			>DEBUG
+				lda (ZPPtr1)
+				cmp #'-'
+				beq .2
+
+				lda ArgPtr+1
+				bne .9
+
+				>LDYA ZPPtr1
+				>STYA ArgPtr
+				bra .1
+
+.2				ldy #2
+				lda (ZPPtr1),y
+				bne .9
+
+				dey
+				lda (ZPPtr1),y
+
+				cmp #'a'
+				bcc .3
+
+				cmp #'z'+1
+				bcs .3
+
+				eor #$20
+
+.3				cmp #'T'
+				bne .4
+
+				inc Index
+				lda Index
+				>SYSCALL ArgV
+				bcs .9
+
+				>SYSCALL atol
+				bcs .9
+
+				>PULLL Timeout
+
+				bra .1
+
+.4				cmp #'R'
+				bne .9
+
+				sec
+				ror bRestart
+				bra .1
+
+.8				jsr CS.RUN.WAIT
+				bcs .99
 
 				jsr CS.RUN.PS
 
 				jsr CS.RUN.DEV
-				
+
 				>PUSHBI 1
-				
-				>PUSHBI 1				INITD
+
+*				lda #1						INITD
 				>SYSCALL Kill
 
 				lda #0
 				sec
+.99				rts
+*--------------------------------------
+.9				>PUSHW L.MSG.USAGE
+				>PUSHBI 0
+				>SYSCALL PrintF
+
+				lda #E.SYN
+				sec
+				rts
+*--------------------------------------
+CS.RUN.WAIT		>PUSHW L.MSG.SHUTDOWN
+				>PUSHL Timeout
+				>PUSHBI 4
+				>SYSCALL PrintF
+
+.1				>SLEEP
+
+				lda bSec
+				bpl .1
+
+				stz bSec
+
+				lda bTimeout
+				bpl CS.RUN.WAIT
+
+				>PUSHW L.MSG.CRLF
+				>PUSHBI 0
+				>SYSCALL PrintF
+
+				clc
 				rts
 *--------------------------------------
 CS.RUN.PS		stz Count
 
 				ldx #0
 				stx Index
-				
+
 .1				lda PS.Table.hPS,x
 				beq .7
 
 				>SYSCALL GetMemPtr
 				>STYA ZPPtr1
-				
+
 .2				lda (ZPPtr1)
 				bpl .4					HOLD ?
-				
+
 				ldy #S.PS.CPID
 				lda (ZPPtr1),y
 
 .3				jsr CS.GetPSByID
 				bra .2
-				
+
 .4				ldy #S.PS.S
 				lda (ZPPtr1),y
 				cmp #S.PS.S.QUIT
 				beq .6
-				
+
 				ldy #S.PS.PID
 				lda (ZPPtr1),y
 				beq .7					don't kill PS0
-				
+
 				cmp #1
 				beq .7					don't kill INITD
-				
+
 				cmp (pPS),y				don't kill myself
 				beq .7
-				
+
 				jsr CS.RUN.KILL
-				
+
 .5				ldy #S.PS.PPID
 				lda (ZPPtr1),y
 				bne .3					go kill parent if not 0
-				
+
 .6				inc Count
 
 .7				>SLEEP
@@ -111,10 +207,10 @@ CS.RUN.PS		stz Count
 				ldx Index
 				cpx #K.PS.MAX
 				bne .1
-				
+
 				lda Count
 				bne CS.RUN.PS
-				
+
 				sec
 				rts
 *--------------------------------------
@@ -122,17 +218,17 @@ CS.RUN.KILL		>PUSHW L.MSG.PS
 				ldy #S.PS.PID
 				lda (ZPPtr1),y
 				>PUSHA
-				
+
 				ldy #S.PS.hARGV
 				lda (ZPPtr1),y
 				>SYSCALL GetMemPtr
 				>PUSHYA
-				
+
 				>PUSHBI 3
 				>SYSCALL PrintF
-				
+
 				>PUSHBI 1
-				
+
 				ldy #S.PS.PID
 				lda (ZPPtr1),y
 				>SYSCALL Kill
@@ -140,7 +236,7 @@ CS.RUN.KILL		>PUSHW L.MSG.PS
 *--------------------------------------
 CS.RUN.DEV		ldx #1
 				stx Index
-				
+
 .1				lda Dev.Table-1,x
 				sta ZPPtr1
 				lda Dev.Table,x
@@ -149,7 +245,7 @@ CS.RUN.DEV		ldx #1
 
 				>PUSHW L.MSG.DEV
 				>PUSHB Index
-				
+
 				lda ZPPtr1
 				clc
 				adc #S.FD.DEV
@@ -157,18 +253,18 @@ CS.RUN.DEV		ldx #1
 				lda ZPPtr1+1
 				adc /S.FD.DEV
 				>PUSHYA
-				
+
 				>PUSHBI 3
 				>SYSCALL PrintF
-				
-				
+
+
 .7				inc Index
 				inc Index
 
 				ldx Index
 				cpx #K.DEV.MAX*2+1
-				bne .1				
-				
+				bne .1
+
 				rts
 *--------------------------------------
 CS.GetPSByID	ldx #0
@@ -183,34 +279,59 @@ CS.GetPSByID	ldx #0
 				>SYSCALL GetMemPtr
 				>STYA ZPPtr1
 				plx
-				
+
 				pla
-				
+
 				ldy #S.PS.PID
 				cmp (ZPPtr1),y
 				beq .8
-				
+
 .7				inx
 				cpx #K.PS.MAX
 				bne .1
 
-*				sec				
+*				sec
 
 				rts
-				
+
 .8				clc
 				rts
 *--------------------------------------
-CS.DOEVENT		sec
+CS.DOEVENT		lda (pEvent)
+				bpl .9
+				asl
+				bpl .9
+
+				sta bSec
+
+				ldx #4
+				ldy #0
+
+				clc
+
+.1				lda Timeout,y
+				sbc #0
+				sta Timeout,y
+				iny
+				dex
+				bne .1
+
+				ror
+				eor #$80
+				sta bTimeout
+
+.9				sec
 				rts
 *--------------------------------------
 CS.QUIT			clc
 				rts
 *--------------------------------------
-CS.END			
+CS.END
 MSG.USAGE		.AS "Usage : SHUTDOWN <NEXT.STSTEM>\r\n"
-				.AZ "   -T <seconds> : \r\n"
-MSG.SHUTDOWN	.AZ "SHUTDOWN:System..."
+				.AS "   -R : Restart System\r\n"
+				.AS "   -T <seconds> : default to 60"
+MSG.CRLF		.AZ "\r\n"
+MSG.SHUTDOWN	.AZ "\r\e[KSHUTDOWN:System will stop in %u seconds..."
 MSG.PS			.AZ "SHUTDOWN:Killing process %3d, %s\r\n"
 MSG.DEV			.AZ "SHUTDOWN:Closing device  %3d, %s\r\n"
 *--------------------------------------
