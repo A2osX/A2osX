@@ -8,6 +8,7 @@ NEW
 				.INB inc/macros.i
 				.INB inc/a2osx.i
 				.INB inc/mli.e.i
+				.INB inc/com.i
 *--------------------------------------
 ZPTmpPtr1		.EQ ZPDRV
 *--------------------------------------
@@ -110,8 +111,8 @@ CS.END
 DEVSIG.Offset	.HS 0507
 DEVSIG.Value	.HS 4848
 DEVSIG.Length	.EQ DEVSIG.Value-DEVSIG.Offset
-MSG.DETECT		.AZ "Apple PIC (Parallel Interface Card).\r\n"
-MSG.DETECT.OK	.AZ "PIC Installed As Device : %S\r\n"
+MSG.DETECT		.AZ "Apple PIC (Parallel Interface Card)"
+MSG.DETECT.OK	.AZ "PIC Installed As Device : %s\r\n"
 MSG.DETECT.KO	.AZ "No PIC Found.\r\n"
 ARGS			.BS 2
 *--------------------------------------
@@ -127,6 +128,18 @@ FD.DEV.NAME		.AZ "lpt1"
 *--------------------------------------
 *			Driver Code
 *--------------------------------------
+PIC.WDATA		.EQ $C080
+PIC.WSTROBE		.EQ $C082
+PIC.RCTRL		.EQ $C083
+PIC.RACK		.EQ $C084
+PIC.STROBE500	.EQ $C085				pin 13 ????
+PIC.IRQEN		.EQ $C086
+PIC.IRQDIS		.EQ $C087				Reset ACK, DIS AutoStrobe
+*--------------------------------------
+ZPIOCTL			.EQ ZPDRV
+ZPBufPtr		.EQ ZPDRV+2
+ZPCount			.EQ ZPDRV+4
+*--------------------------------------
 DRV.CS.START	cld
 				jmp (.1,x)
 .1				.DA STATUS
@@ -137,47 +150,146 @@ DRV.CS.START	cld
 				.DA A2osX.BADCALL
 				.DA OPEN
 				.DA CLOSE
-				.DA A2osX.BADCALL
+				.DA READ
 				.DA WRITE
-L.STAT			.DA STAT
 				.DA 0					end or relocation
 *--------------------------------------
-STATUS			>LDYA L.STAT
+STATUS			jsr STATUS.CONTROL.Init
+				ldy #S.IOCTL.STATCODE
+				lda (ZPIOCTL),y
+				beq .1
+				cmp #S.IOCTL.STATCODE.GETDIB
+				bne STATUS.DCB
+				ldy #S.DIB-1
+				.HS 2C					bit abs
+.1				ldy #3
+
+.2				lda DIB,y
+				sta (ZPBufPtr),y
+				dey
+				bpl .2
+				clc
+				rts
+
+STATUS.DCB		cmp #S.IOCTL.STATCODE.GETDCB
+				bne .3
+
+				ldy #S.DCB.COM-1
+.2				lda DCB,y
+				sta (ZPBufPtr),y
+				dey
+				bpl .2
+
+				clc
+				rts
+.3				cmp #S.IOCTL.STATCODE.EOF
+				bne STATUS.9
+
+				lda DIB+S.DIB.S
+				and #S.DIB.S.OPENED
+				beq OPEN.E
+				
+.8				clc
+				rts
+
+STATUS.9		lda #MLI.E.BADCTL
+				sec
+				rts
+*--------------------------------------
+CONTROL			jsr STATUS.CONTROL.Init
+
+				ldy #S.IOCTL.CTRLCODE
+				lda (ZPIOCTL),y
+				cmp #S.IOCTL.CTRLCODE.SETDCB
+				bne STATUS.9
+				ldy #S.DCB.COM-1
+.2				lda (ZPBufPtr),y
+				sta DCB,y
+				dey
+				bpl .2
+*--------------------------------------
+OPEN			lda DIB+S.DIB.S
+				bit #S.DIB.S.OPENED
+				beq OPEN.1
+				
+OPEN.E			lda #MLI.E.OPEN
+				sec
+				rts
+
+OPEN.1			ldx DEVSLOTn0
+				stz PIC.IRQDIS,x
+
+				lda #S.DIB.S.OPENED
+				tsb DIB+S.DIB.S
+
 				clc
 				rts
 *--------------------------------------
-CONTROL			
+CLOSE			lda #S.DIB.S.OPENED
+				trb DIB+S.DIB.S
+				
 				clc
 				rts
 *--------------------------------------
-OPEN
+READ			jsr READ.WRITE.Init
+
 				clc
 				rts
 *--------------------------------------
-CLOSE
-				clc
+WRITE			jsr READ.WRITE.Init
+
+.1				inc ZPCount
+				bne .2
+				inc ZPCount+1
+				beq .8
+
+.2				lda (ZPBufPtr)
+				inc ZPBufPtr
+				bne .3
+
+				inc ZPBufPtr+1
+
+.3				sta PIC.WDATA,x
+*				sta PIC.WSTROBE,x
+				bra .1
+
+.8				clc
 				rts
 *--------------------------------------
-WRITE
-				clc
+READ.WRITE.Init	ldx DEVSLOTn0
+
+STATUS.CONTROL.Init
+				>STYA ZPIOCTL
+
+				ldy #S.IOCTL.BUFPTR
+				lda (ZPIOCTL),y
+				sta ZPBufPtr
+
+				iny 
+
+				lda (ZPIOCTL),y
+				sta ZPBufPtr+1
+				iny 					#S.IOCTL.BYTECNT
+
+				lda (ZPIOCTL),y
+				eor #$ff
+				sta ZPCount
+
+				iny
+
+				lda (ZPIOCTL),y
+				eor #$ff
+				sta ZPCount+1
 				rts
 *--------------------------------------
 DRV.CS.END
-DEVSLOT0n		.BS 1
-DEVSLOTCn		.BS 1
+*DEVSLOT0n		.BS 1
+*DEVSLOTCn		.BS 1
 DEVSLOTn0		.BS 1
 *--------------------------------------
-STAT			.DA #S.DIB.S.WRITE
+DIB				.DA #S.DIB.S.WRITE+S.DIB.S.READ
 				.DA #0,#0,#0
-				>PSTR "Parallel Card"
-				.DA #0,#0,#0
-				.DA #S.DIB.T.CHAR
-				.DA #0
-				.DA $0900
-*--------------------------------------
-DIB				.DA #S.DIB.S.WRITE
-				.DA #0,#0,#0
-				>PSTR "Serial Card/Port"
+				>PSTR "Apple // Int Crd"
 				.DA #S.DIB.T.CHAR
 				.DA #0
 				.DA K.VER
