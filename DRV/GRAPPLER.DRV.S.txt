@@ -1,0 +1,310 @@
+NEW
+  AUTO 3,1
+				.LIST OFF	
+				.OP	65C02
+				.OR $2000
+				.TF drv/grappler.drv
+*--------------------------------------
+				.INB inc/macros.i
+				.INB inc/a2osx.i
+				.INB inc/mli.e.i
+				.INB inc/com.i
+*--------------------------------------
+ZPTmpPtr1		.EQ ZPDRV
+*--------------------------------------
+*			File Header (16 Bytes)
+*--------------------------------------
+CS.START		cld
+				jmp Dev.Detect			cld,jmp abs=DRV
+				.DA #$61				6502,Level 1 (65c02)
+				.DA #1					DRV Layout Version 1
+				.DA 0
+				.DA CS.END-CS.START			Code Length
+				.DA 0
+				.DA #32					SS
+				.DA #2					ZP
+				.DA 0
+*--------------------------------------
+* Relocation Table
+*--------------------------------------
+L.MSG.DETECT	.DA MSG.DETECT
+L.MSG.DETECT.OK	.DA MSG.DETECT.OK
+L.MSG.DETECT.KO	.DA MSG.DETECT.KO
+L.DRV.CS.START	.DA DRV.CS.START
+L.FD.DEV		.DA FD.DEV
+L.FD.DEV.NAME	.DA FD.DEV.NAME
+				.DA 0					End Of Reloc Table
+*--------------------------------------
+Dev.Detect		>STYA ARGS
+				
+				>LDYA L.MSG.DETECT
+				>SYSCALL PutS
+				
+				stz ZPTmpPtr1
+				lda #$C1
+				sta ZPTmpPtr1+1
+				
+.1				and #$0f
+				tay
+				lda A2osX.S,y
+				bne .3
+
+				ldx #DEVSIG.Length-1
+
+.2				ldy DEVSIG.Offset,x
+				lda (ZPTmpPtr1),y
+				cmp DEVSIG.Value,x
+				bne .3
+
+				dex
+				bpl .2
+
+				bra .4
+
+.3				inc FD.DEV.NAME+3
+				inc ZPTmpPtr1+1			no match, try next slot....
+				lda ZPTmpPtr1+1
+				cmp #$C8
+				bne .1	
+
+				>LDYA L.MSG.DETECT.KO
+				>SYSCALL PutS
+
+				lda #MLI.E.NODEV		Not Found in any slot, exiting
+				sec
+				rts	
+
+.4				lda ZPTmpPtr1+1
+				and #$0F
+				pha
+				tay
+				lda #A2osX.S.COM
+				sta A2osX.S,y
+				pla
+				asl
+				asl
+				asl
+				asl
+				sta DEVSLOTn0
+
+.8				>PUSHW L.MSG.DETECT.OK
+				>PUSHW L.FD.DEV.NAME
+				>PUSHBI 2
+				>SYSCALL PrintF
+
+				>PUSHWI DRV.END
+				>PUSHWI DRV.CS.END-DRV.CS.START
+				>PUSHWI DRV.CS.START
+				>LDYA L.DRV.CS.START
+				>SYSCALL InsDrv
+				bcs .9
+
+				>STYA FD.DEV+S.FD.DEV.DRVPTR
+
+				>PUSHW L.FD.DEV
+				>PUSHW L.FD.DEV.NAME
+				>SYSCALL MKDev
+
+.9				rts
+*--------------------------------------
+CS.END
+DEVSIG.Offset	.HS 05070B0C
+DEVSIG.Value	.HS 38180114
+DEVSIG.Length	.EQ DEVSIG.Value-DEVSIG.Offset
+MSG.DETECT		.AZ "Orange Grappler Series // Boards"
+MSG.DETECT.OK	.AZ "Installed As Device : %s\r\n"
+MSG.DETECT.KO	.AZ "No HW Found."
+ARGS			.BS 2
+*--------------------------------------
+FD.DEV			.DA #S.FD.T.CDEV
+				.DA #0					HANDLER
+				.DA #0					BUSID
+				.DA #0					DEVID
+				.DA 0					BUSPTR
+				.BS 2					DRVPTR
+				.DA 0					DCBPTR
+				.DA 0					BUFPTR
+FD.DEV.NAME		.AZ "lpt1"
+*--------------------------------------
+*			Driver Code
+*--------------------------------------
+GRAPPLER.STATUS	.EQ $C081
+GRAPPLER.STATUS.BUSY	.EQ %00001000
+GRAPPLER.STATUS.NOPAPER	.EQ %00000100
+GRAPPLER.STATUS.SELECT	.EQ %00000010
+
+GRAPPLER.WDATA	.EQ $C081
+GRAPPLER.STRBL	.EQ $C082
+GRAPPLER.STRBH	.EQ $C084
+*--------------------------------------
+ZPIOCTL			.EQ ZPDRV
+ZPBufPtr		.EQ ZPDRV+2
+ZPCount			.EQ ZPDRV+4
+*--------------------------------------
+DRV.CS.START	cld
+				jmp (.1,x)
+.1				.DA STATUS
+				.DA A2osX.BADCALL
+				.DA A2osX.BADCALL
+				.DA A2osX.BADCALL
+				.DA CONTROL
+				.DA A2osX.BADCALL
+				.DA OPEN
+				.DA CLOSE
+				.DA READ
+				.DA WRITE
+				.DA 0					end or relocation
+*--------------------------------------
+STATUS			jsr STATUS.CONTROL.Init
+				ldy #S.IOCTL.STATCODE
+				lda (ZPIOCTL),y
+				beq .1
+				cmp #S.IOCTL.STATCODE.GETDIB
+				bne STATUS.DCB
+				ldy #S.DIB-1
+				.HS 2C					bit abs
+.1				ldy #3
+
+.2				lda DIB,y
+				sta (ZPBufPtr),y
+				dey
+				bpl .2
+				clc
+				rts
+
+STATUS.DCB		cmp #S.IOCTL.STATCODE.GETDCB
+				bne .3
+
+				ldy #S.DCB.COM-1
+.2				lda DCB,y
+				sta (ZPBufPtr),y
+				dey
+				bpl .2
+
+				clc
+				rts
+.3				cmp #S.IOCTL.STATCODE.EOF
+				bne STATUS.9
+
+				lda DIB+S.DIB.S
+				and #S.DIB.S.OPENED
+				beq OPEN.E
+				
+.8				clc
+				rts
+
+STATUS.9		lda #MLI.E.BADCTL
+				sec
+				rts
+*--------------------------------------
+CONTROL			jsr STATUS.CONTROL.Init
+
+				ldy #S.IOCTL.CTRLCODE
+				lda (ZPIOCTL),y
+				cmp #S.IOCTL.CTRLCODE.SETDCB
+				bne STATUS.9
+				ldy #S.DCB.COM-1
+.2				lda (ZPBufPtr),y
+				sta DCB,y
+				dey
+				bpl .2
+*--------------------------------------
+OPEN			lda DIB+S.DIB.S
+				bit #S.DIB.S.OPENED
+				beq OPEN.1
+				
+OPEN.E			lda #MLI.E.OPEN
+				sec
+				rts
+
+OPEN.1			lda #S.DIB.S.OPENED
+				tsb DIB+S.DIB.S
+
+				clc
+				rts
+*--------------------------------------
+CLOSE			lda #S.DIB.S.OPENED
+				trb DIB+S.DIB.S
+				
+				clc
+				rts
+*--------------------------------------
+READ			jsr READ.WRITE.Init
+
+				clc
+				rts
+*--------------------------------------
+WRITE			jsr READ.WRITE.Init
+
+.1				inc ZPCount
+				bne .2
+				inc ZPCount+1
+				beq .8
+
+.2				lda (ZPBufPtr)
+				inc ZPBufPtr
+				bne .3
+
+				inc ZPBufPtr+1
+
+.3				sta GRAPPLER.WDATA,x
+				nop
+				sta GRAPPLER.STRBL,x
+				nop
+				nop
+				sta GRAPPLER.STRBH,x
+				bra .1
+
+.8				clc
+				rts
+*--------------------------------------
+READ.WRITE.Init	ldx DEVSLOTn0
+
+STATUS.CONTROL.Init
+				>STYA ZPIOCTL
+
+				ldy #S.IOCTL.BUFPTR
+				lda (ZPIOCTL),y
+				sta ZPBufPtr
+
+				iny 
+
+				lda (ZPIOCTL),y
+				sta ZPBufPtr+1
+				iny 					#S.IOCTL.BYTECNT
+
+				lda (ZPIOCTL),y
+				eor #$ff
+				sta ZPCount
+
+				iny
+
+				lda (ZPIOCTL),y
+				eor #$ff
+				sta ZPCount+1
+				rts
+*--------------------------------------
+DRV.CS.END
+*DEVSLOT0n		.BS 1
+*DEVSLOTCn		.BS 1
+DEVSLOTn0		.BS 1
+*--------------------------------------
+DIB				.DA #S.DIB.S.WRITE+S.DIB.S.READ
+				.DA #0,#0,#0
+				>PSTR "Grappler // Card"
+				.DA #S.DIB.T.CHAR
+				.DA #0
+				.DA K.VER
+*--------------------------------------
+DCB				.DA #S.DCB.T.COM
+				.DA #0					FLAGS
+				.DA 0
+				.DA #0
+				.DA #0
+				.DA #0
+				.DA #0
+*--------------------------------------
+DRV.END
+MAN
+SAVE usr/src/drv/grappler.drv.s
+ASM
