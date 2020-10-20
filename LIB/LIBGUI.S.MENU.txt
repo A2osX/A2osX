@@ -93,13 +93,18 @@ MENU.MBarInit	>STYA ZPMENUPtr
 *--------------------------------------
 MENU.New		ldy MENU.Stack.Top
 				cpy #MENU.MAX
-				bcs .90
+				bcc .10
+				jmp .90
 
-				>LDYAI S.MENU
+.10				>LDYAI S.MENU
 				>SYSCALL2 getmem
 				bcs .99
 
 				>STYA ZPMENUPtr
+				txa						hMenu
+
+				ldx MENU.Stack.Top
+				sta MENU.Stack,x
 
 				lda #S.OBJ.T.MENU
 				sta (ZPMENUPtr)			S.OBJ.T
@@ -119,7 +124,7 @@ MENU.New		ldy MENU.Stack.Top
 				iny
 				sta (ZPMENUPtr),y
 				
-				>PULLW ZPPtr1
+				>PULLW ZPRECTPtr		Parent RECT
 				
 				>PULLA
 				ldy #S.OBJ.Y1
@@ -138,22 +143,24 @@ MENU.New		ldy MENU.Stack.Top
 				lda ZPMENUPtr
 				clc
 				adc #S.MENU.pX1
-				sta ZPMENUPtr
-				bcc .2
+				sta ZPPtr1
 				
-				inc ZPMENUPtr+1
+				lda ZPMENUPtr+1
+				adc /S.MENU.pX1
+				sta ZPPtr1+1
 				
-.2				ldy #S.RECT-1
+				ldy #S.RECT-1
 
-.3				lda (ZPPtr1),y
-				sta (ZPMENUPtr),y
+.3				lda (ZPRECTPtr),y
+				sta (ZPPtr1),y
 				dey
 				bpl .3
 
-				txa						hMenu
+				jsr MENU.SetMenuSizePos
 
 				ldx MENU.Stack.Top
-				sta MENU.Stack,x
+				lda MENU.Stack,x
+
 				inc	MENU.Stack.Top
 
 				clc
@@ -163,25 +170,132 @@ MENU.New		ldy MENU.Stack.Top
 				sec
 .99				>POP 8
 MENU.New.RTS	rts
+*--------------------------------------
+* hMENU8, ItemID8, Prop8, Value16
+*--------------------------------------
+MENU.SetMItemProp
+				ldy #4
+				lda (pStack),y			hMENU
+				>SYSCALL2 GetMemPtr
+				>STYA ZPMENUPtr
+				
+				bra .7
+				
+				jsr MENU.GetMItems
+
+.1				lda (ZPPtr1)
+				beq .8
+				
+				ldy #S.MITEM.F
+				lda (ZPPtr1),y
+				cmp #S.MITEM.F.SEP
+				beq .2
+				
+				ldy #S.MITEM.ID
+				lda (ZPPtr1),y
+				
+				ldy #3					ID8
+				cmp (pStack),y
+				beq .7
+				
+.2				jsr MENU.NextMItem
+				bra .1
+
+.7				ldy #2					Prop8
+				lda (pStack),y
+
+				tay
+			
+				>PULLA					Value16
+				sta (ZPPtr1),y
+
+				iny
+				>PULLA
+				sta (ZPPtr1),y
+
+.8				>RET 3
 * ----------------------------------------------
 * |Icon ChkMrk "Menu Item" KEYMOD1-KEYMOD2-KEY>|
 * ----------------------------------------------
 MENU.Show		>SYSCALL2 GetMemPtr
 				>STYA ZPMENUPtr
-
+				
+				jsr MENU.Save
+				bcs .9
+				
 				jsr GetCBBuf
-				bcs MENU.New.RTS
-						
-				ldy #S.MENU.MITEMS
-				lda (ZPMENUPtr),y
-				sta ZPPtr1
-				iny
-				lda (ZPMENUPtr),y
-				sta ZPPtr1+1
+				bcs .9
 
-				stz DX
-				stz DX+1
+				jsr MENU.ShowBorders
+			
+				jsr MENU.GetMItems
+				jsr MENU.GetDYW
+				
+.6				lda (ZPPtr1)
+				beq .8
 
+				jsr MENU.GetDX
+
+				jsr MENU.ShowMItem
+				jsr MENU.NextMItem
+				bra .6
+				
+.8				>LDYA L.WND.Screen
+				jmp DrawCBPtrToYA1
+			
+.9				rts
+*--------------------------------------
+MENU.Enter		jsr MENU.GetDX
+				jsr MENU.GetDYW
+
+				lda Counter				W
+				clc
+				adc DX
+				sta IE					IE = X2
+
+				lda Counter+1
+				adc DX+1
+				sta IE+1
+				
+				jsr MENU.GetMItems
+				
+.1				lda (ZPPtr1)
+				beq .9
+
+				ldy #S.MITEM.F
+				lda (ZPPtr1),y
+				cmp #S.MITEM.F.SEP
+				beq .7
+				
+				lda DY
+				sec
+				adc SYSFON.H
+				sta INE					INE = Y2
+				lda DY+1
+				adc #0
+				sta INE+1
+
+				>LDYAI DX 
+				jsr MOU.InRectYA
+				bcs .7
+				
+				ldy #S.MITEM.ID
+				lda (ZPPtr1),y
+				
+				ldy #S.MENU.Selected
+				sta (ZPMENUPtr),y
+				
+				jsr GetCBBuf
+				jsr MENU.ShowMItem1
+				>LDYA L.WND.Screen
+				jmp DrawCBPtrToYA1
+				
+.7				jsr MENU.NextMItem
+				bra .1
+				
+.9				rts
+*--------------------------------------
+MENU.SetMenuSizePos
 				stz IY					Icon Margin W
 				
 				stz IE					Max Text W
@@ -192,37 +306,25 @@ MENU.Show		>SYSCALL2 GetMemPtr
 				lda #2					2px Borders
 				sta DY					Menu H
 				stz DY+1
+
+				jsr MENU.GetMItems
 				
 .1				lda (ZPPtr1)
 				beq .3
 
-				jsr MENU.Show.GetW
-
-				lda DY
-				clc
-				adc SYSFON.H
-				sta DY
-				bcc .2
-				inc DY+1
-
-.2				lda (ZPPtr1)
-				clc
-				adc ZPPtr1
-				sta ZPPtr1
-				bcc .1
-				inc ZPPtr1+1
+				jsr MENU.GetMItemW
+				jsr MENU.NextMItem
 				bra .1
 
-.3				lda	#2+MENU.LMargin+MENU.RMargin		2px Borders+5 LMARGIN (Checked) +5 RMARGIN (SubMenu)
+.3				lda	#2+MENU.LMargin+MENU.RMargin	2px Borders+5 LMARGIN (Checked) +5 RMARGIN (SubMenu)
 				clc
-				adc IY
+				adc IY					Icon W
 				sta DX
-				bcc .30
-				inc DX+1
+				stz DX+1
 
-.30				lda DX
+				lda DX
 				sec						1px sep
-				adc IE					Text W
+				adc IE					Max Text W
 				sta DX
 				
 				lda DX+1
@@ -231,7 +333,7 @@ MENU.Show		>SYSCALL2 GetMemPtr
 				
 				lda DX
 				sec						1px sep
-				adc INE					Mod-Key W
+				adc INE					Max Mod-Key W
 				sta DX
 				bcc .4
 				
@@ -247,18 +349,36 @@ MENU.Show		>SYSCALL2 GetMemPtr
 
 				lda DY
 				sta (ZPMENUPtr),y
-				tax
 				iny
 				lda	DY+1
 				sta (ZPMENUPtr),y
-				pha
-				txa
+				
+				ldy #S.MENU.tOffset
+				lda IY
+				sta (ZPMENUPtr),y
+				
+				iny						#S.MENU.kOffset
+				lda IE
+				sta (ZPMENUPtr),y
+				iny
+				lda IE+1
+				sta (ZPMENUPtr),y
+
+				iny						#S.MENU.rOffset
+				lda INE
+				sta (ZPMENUPtr),y
+				iny
+				lda INE+1
+				sta (ZPMENUPtr),y
+
 				ldy #S.OBJ.Y1
+				lda DY
 				clc
 				adc (ZPMENUPtr),y
 				tax
-				pla
+				
 				iny
+				lda DY+1
 				adc (ZPMENUPtr),y
 				
 				cpx WND.Screen+S.OBJ.H
@@ -280,59 +400,13 @@ MENU.Show		>SYSCALL2 GetMemPtr
 
 .5				>LDYA ZPMENUPtr
 				jsr OBJ.SetX2Y2
-				
-				jsr MENU.Save
-				bcs MENU.Show.RTS
-				
-				jsr MENU.Show.Borders
-				
-				ldy #S.MENU.MITEMS
-				lda (ZPMENUPtr),y
-				sta ZPPtr1
-				iny
-				lda (ZPMENUPtr),y
-				sta ZPPtr1+1
 
-				ldy #S.OBJ.Y1
-				lda (ZPMENUPtr),y
-				clc
-				adc #1
-				sta DY
-				iny
-				lda (ZPMENUPtr),y
-				adc #0
-				sta DY+1
-				
-.6				lda (ZPPtr1)
-				beq .8
-
-				jsr MENU.Show.Item
-				
-				lda DY
-				clc
-				adc SYSFON.H
-				sta DY
-				bcc .7
-				
-				inc DY+1
-				
-.7				lda (ZPPtr1)
-				clc
-				adc ZPPtr1
-				sta ZPPtr1
-				bcc .6
-				inc ZPPtr1+1
-				bra .6
-				
-.8				>LDYA L.WND.Screen
-				jmp DrawCBPtrToYA1
-				
-MENU.Show.RTS	rts
+				rts
 *--------------------------------------
-MENU.Show.GetW	ldy #S.MITEM.F
+MENU.GetMItemW	ldy #S.MITEM.F
 				lda (ZPPtr1),y
 				cmp #S.MITEM.F.SEP
-				beq MENU.Show.RTS
+				beq .8
 
 				ldy #S.MITEM.pICON
 				lda (ZPPtr1),y
@@ -371,151 +445,162 @@ MENU.Show.GetW	ldy #S.MITEM.F
 				
 .8				rts				
 *--------------------------------------
-MENU.Show.Borders
-				lda #S.CB.CMD.FILLRECT
-				jsr PutA2CBBuf
+MENU.ShowBorders
+				lda #S.CB.CMD.HLINE
+				jsr CB.InitCacheA
+
 				lda #S.CB.OP.SET
-				jsr PutA2CBBuf
+				sta CB.Cache+S.CB.OP
 				lda #S.CB.M.MONO
-				jsr PutA2CBBuf
-				lda PREFS.MENUCOLOR
-				jsr PutA2CBBuf
-				ldy #S.OBJ.X1
-				jsr MENU.Show.Borders.Y
-				ldy	#S.OBJ.Y1
-				jsr MENU.Show.Borders.Y
-				ldy #S.OBJ.X2
-				jsr MENU.Show.Borders.Y
-				ldy #S.OBJ.Y2
-				jsr MENU.Show.Borders.Y
-				
-				lda #S.CB.CMD.HLINE		TOP
-				jsr MENU.Show.Borders.H
-				ldy #S.OBJ.X1
-				jsr MENU.Show.Borders.Y
-				ldy	#S.OBJ.Y1
-				jsr MENU.Show.Borders.Y
-				ldy #S.OBJ.X2
-				jsr MENU.Show.Borders.Y
-				ldy #S.OBJ.Y1
-				jsr MENU.Show.Borders.Y
-			
-				lda #S.CB.CMD.VLINE		LEFT
-				jsr MENU.Show.Borders.H
-				ldy #S.OBJ.X1
-				jsr MENU.Show.Borders.Y
-				ldy	#S.OBJ.Y1
-				jsr MENU.Show.Borders.Y
-				ldy #S.OBJ.X1
-				jsr MENU.Show.Borders.Y
-				ldy #S.OBJ.Y2
-				jsr MENU.Show.Borders.Y
-
-				lda #S.CB.CMD.VLINE		RIGHT
-				jsr MENU.Show.Borders.H
-				ldy #S.OBJ.X2
-				jsr MENU.Show.Borders.Y
-				ldy	#S.OBJ.Y1
-				jsr MENU.Show.Borders.Y
-				ldy #S.OBJ.X2
-				jsr MENU.Show.Borders.Y
-				ldy #S.OBJ.Y2
-				jsr MENU.Show.Borders.Y
-
-				lda #S.CB.CMD.HLINE		BOTTOM
-				jsr MENU.Show.Borders.H
-				ldy #S.OBJ.X1
-				jsr MENU.Show.Borders.Y
-				ldy #S.OBJ.Y2
-				jsr MENU.Show.Borders.Y
-				ldy #S.OBJ.X2
-				jsr MENU.Show.Borders.Y
-				ldy #S.OBJ.Y2
-				jmp MENU.Show.Borders.Y
-
-MENU.Show.Borders.H
-				jsr PutA2CBBuf
-				lda #S.CB.OP.SET
-				jsr PutA2CBBuf
-				lda #S.CB.M.MONO
-				jsr PutA2CBBuf
+				sta CB.Cache+S.CB.M
 				lda PREFS.BORDERCOLOR
-				jmp PutA2CBBuf
+				sta CB.Cache+S.CB.COLOR
 				
-MENU.Show.Borders.Y				
+				ldy #S.OBJ.X2+1
+				ldx #5
+				
+.1				lda (ZPMENUPtr),y
+				sta CB.Cache+S.CB.X1,x
+				dey
+				dex
+				bpl .1
+				
+				lda CB.Cache+S.CB.Y1
+				sta CB.Cache+S.CB.Y2
+				lda CB.Cache+S.CB.Y1+1
+				sta CB.Cache+S.CB.Y2+1	top  X1,Y1,X2,Y1 
+				
+				jsr PutCBCache2CBBuf
+
+				ldy #S.OBJ.Y2
 				lda (ZPMENUPtr),y
-				jsr PutA2CBBuf
+				sta CB.Cache+S.CB.Y1
+				sta CB.Cache+S.CB.Y2
 				iny
 				lda (ZPMENUPtr),y
-				jmp PutA2CBBuf
+				sta CB.Cache+S.CB.Y1+1
+				sta CB.Cache+S.CB.Y2+1	bottom  X1,Y2,X2,Y2
+				
+				jmp PutCBCache2CBBuf
 *--------------------------------------
-MENU.Show.Item	ldy #S.MITEM.F
+MENU.ShowMItem	ldy #S.MITEM.F
 				lda (ZPPtr1),y
 				cmp #S.MITEM.F.SEP
-				bne .1
+				bne MENU.ShowMItem1
 				
 				lda #S.CB.CMD.HLINE	
-				jsr PutA2CBBuf
+				jsr CB.InitCacheA
+
 				lda #S.CB.OP.SET
-				jsr PutA2CBBuf
+				sta CB.Cache+S.CB.OP
 				lda #S.CB.M.MONO
-				jsr PutA2CBBuf
+				sta CB.Cache+S.CB.M
 				lda PREFS.BORDERCOLOR
-				jsr PutA2CBBuf
+				sta CB.Cache+S.CB.COLOR
 				
-				ldy #S.OBJ.X1
-				jsr MENU.Show.Borders.Y
-				lda SYSFON.H
-				lsr
+				ldx #3
+				
+.1				lda DX,x
+				sta CB.Cache+S.CB.X1,x
+				dex
+				bpl .1
+				
+				lda DX
 				clc
-				adc DY
-				jsr PutA2CBBuf
-				lda DY+1
-				adc #0
-				jsr PutA2CBBuf
-				
-				ldy #S.OBJ.X2
-				jsr MENU.Show.Borders.Y
-				ldy #S.OBJ.Y1
-				jmp MENU.Show.Borders.Y
+				adc Counter
+				sta CB.Cache+S.CB.X2
+				lda DX+1
+				adc Counter+1
+				sta CB.Cache+S.CB.X2+1
+				jmp PutCBCache2CBBuf
 *--------------------------------------
-.1				ldy #S.OBJ.X1
+MENU.ShowMItem1	lda #S.CB.CMD.FILLRECT
+				jsr CB.InitCacheA
+
+				lda #S.CB.OP.SET
+				sta CB.Cache+S.CB.OP
+				lda #S.CB.M.MONO
+				sta CB.Cache+S.CB.M
+				
+				ldy #S.MENU.Selected
 				lda (ZPMENUPtr),y
 
-				sec						+1px Border
+				ldx PREFS.MENUCOLOR
+				ldy #S.MITEM.ID
+				eor (ZPPtr1),y
+				bne .15
+				
+				txa
+				eor #C.WHITE
+				tax
+				
+.15				stx CB.Cache+S.CB.COLOR
+				
+				ldx #3
+				
+.10				lda DX,x
+				sta CB.Cache+S.CB.X1,x
+				dex
+				bpl .10
+				
+				lda DX
+				clc
+				adc Counter
+				sta CB.Cache+S.CB.X2
+				lda DX+1
+				adc Counter+1
+				sta CB.Cache+S.CB.X2+1
+				
+				lda DY
+				sec
+				adc SYSFON.H
+				sta CB.Cache+S.CB.Y2
+				lda DY+1
+				adc #0
+				sta CB.Cache+S.CB.Y2+1
+				jsr PutCBCache2CBBuf
+				
+				inc DY
+				bne .12
+				inc DY+1
+
+.12				lda DX
+
+				clc
 				
 				adc #MENU.LMargin		TODO : Checked
 				sta DX
-				iny
-				lda (ZPMENUPtr),y
-				adc #0
+				bcc .11
 				sta DX+1
 			
-				jsr MENU.GetIcon
+.11				jsr MENU.GetIcon
 				beq .2
 				
 				jsr DRAW.YABMAtDXDY
 			
 .2				lda DX
 				clc
-				adc IY					Icon reserved W
+				ldy #S.MENU.tOffset
+				adc (ZPPtr1),y
 				sta DX
 
-				lda DX+1
-				adc #0
-				sta DX+1
+				bcc .21
 
-				jsr MENU.GetText
+				inc DX+1
+				
+.21				jsr MENU.GetText
 
 				ldx hSYSFON
 				jsr DRAW.YATextAtDXDY
 
 				lda DX
 				sec
-				adc IE
+				ldy #S.MENU.tOffset
+				adc (ZPPtr1),y
 				sta DX
 				lda DX+1
-				adc IE+1
+				iny
+				adc (ZPPtr1),y
 				sta DX+1
 
 				jsr MENU.GetKeyString
@@ -531,17 +616,24 @@ MENU.Show.Item	ldy #S.MITEM.F
 
 				lda DX
 				sec
-				adc INE
+				ldy #S.MENU.rOffset
+				adc (ZPPtr1),y
 				sta DX
 				lda DX+1
-				adc IE+1
-				sta DX+1
+				iny
+				adc (ZPPtr1),y
+				sta DX+1				
 				
 				ldx #BM.ID.RIGHT
 				>LDYA L.BMs,x
 				jsr DRAW.YABMAtDXDY
 
-.8				clc
+.8				lda DY
+				bne .80
+				dec DY+1
+				
+.80				dec DY				
+				clc
 				rts
 *--------------------------------------
 MENU.GetIcon	ldy #S.MITEM.pICON+1
@@ -586,10 +678,8 @@ MENU.GetKeyString
 
 .8				rts				
 *--------------------------------------
-MENU.Save		jsr CB.ClearCache
-
-				lda #S.CB.CMD.GETRECTBUFSIZE
-				sta CB.Cache+S.CB.CMD
+MENU.Save		lda #S.CB.CMD.GETRECTBUFSIZE
+				jsr CB.InitCacheA
 
 				ldy #S.OBJ.X1
 				ldx #0
@@ -641,7 +731,12 @@ MENU.Destroy	ldx MENU.Stack.Top
 				>SYSCALL GetMemPtr
 				>STYA ZPMENUPtr
 				
-				jsr CB.ClearCache
+				bit CUR.bVisible
+				bpl .3
+				
+				jsr HideCursor.I
+				
+.3				jsr CB.ClearCache
 				
 				lda #S.CB.CMD.BITBLT
 				sta CB.Cache+S.CB.CMD
@@ -682,9 +777,99 @@ MENU.Destroy	ldx MENU.Stack.Top
 				lda MENU.Stack-1,x
 				>SYSCALL2 FreeMem
 				dec MENU.Stack.Top
+				
+				bit CUR.bVisible
+				bpl .8
+				
+				jsr ShowCursor.I
 
 .8				clc
 				rts
+*--------------------------------------
+MENU.GetDX		ldy #S.OBJ.X1
+				lda (ZPMENUPtr),y
+				clc
+				adc #1
+				sta DX
+				iny
+				lda (ZPMENUPtr),y
+				adc #0
+				sta DX+1
+				rts
+*--------------------------------------
+MENU.GetDYW		ldy #S.OBJ.Y1
+				lda (ZPMENUPtr),y
+				clc
+				adc #1
+				sta DY
+				iny
+				lda (ZPMENUPtr),y
+				adc #0
+				sta DY+1
+
+				ldy #S.OBJ.W
+				lda (ZPMENUPtr),y
+				sec
+				sbc #3					2Px border + correction from W
+				sta Counter
+				iny
+				lda (ZPMENUPtr),y
+				sbc #0
+				sta Counter+1
+
+				rts
+*--------------------------------------
+MENU.FindMItemByID
+				jsr MENU.GetMItems
+				
+.1				lda (ZPPtr1)
+				beq .9
+				
+				txa
+				ldy #S.MITEM.ID
+				cmp (ZPPtr1),y
+				beq .8
+				
+				jsr MENU.NextMItem
+				bra .1
+				
+.8				clc
+				rts
+				
+.9				sec
+				rts
+*--------------------------------------
+MENU.GetMItems	ldy #S.MENU.MITEMS
+				lda (ZPMENUPtr),y
+				sta ZPPtr1
+				iny
+				lda (ZPMENUPtr),y
+				sta ZPPtr1+1
+				rts
+*--------------------------------------
+MENU.NextMItem	ldy #S.MITEM.F
+				lda (ZPPtr1),y
+				sec
+				eor #S.MITEM.F.SEP
+				beq .1
+				
+				lda SYSFON.Hp2
+				clc
+				
+.1				adc DY
+				sta DY
+				bcc .2
+				
+				inc DY+1
+				
+.2				lda (ZPPtr1)
+				clc
+				adc ZPPtr1
+				sta ZPPtr1
+				bcc .8
+				inc ZPPtr1+1
+
+.8				rts
 *--------------------------------------
 MAN
 SAVE usr/src/lib/libgui.s.menu
