@@ -1,14 +1,15 @@
 NEW
   AUTO 3,1
 *--------------------------------------
-XRWDBG			.EQ 1
+* If Called by ProDOS : SEI
+* If Called directly from DEVPTRS vectors : ????
 *--------------------------------------
 XRW.START		cld						$D8 to flag language card bank 1 (main)
 
 				lda unitnum				get unit number.
-				
+
 				pha
-				
+
 				lsr
 				lsr
 				lsr
@@ -19,10 +20,11 @@ XRW.START		cld						$D8 to flag language card bank 1 (main)
 				bne .10
 
 				lda #IO.D2.SeekTimeP
-				sta XRW.D2SeekTime-1,x
-				
-.10				pla
-				
+
+.10				sta XRW.SeekTime
+
+				pla
+
 				and #$7F	  			mask off high bit.
 				sta A2L					0SSS0000 for IO indexing
 
@@ -45,7 +47,7 @@ XRW.START		cld						$D8 to flag language card bank 1 (main)
 
 				lda #1
 				jsr XRW.Wait100usecA
-				
+
 				lda XRW.montimeh
 				bne .1
 *--------------------------------------
@@ -75,6 +77,8 @@ L59BD  			lda bloknml
 
 				jsr XRW.CheckMotorOn
 
+				php						SAVE IRQ STATE
+
 				php						save motor on state : NZ if on
 
 				lda #$E8				24 up to 0
@@ -87,6 +91,7 @@ L59BD  			lda bloknml
 
 				asl 					get drive # into carry.
 				bcc .3					branch if drive 1 selected.
+
 				inx		  				select drive 2.
 
 .3				lda IO.D2.DrvSel1,x
@@ -104,7 +109,7 @@ L59BD  			lda bloknml
 .4				jsr XRW.Wait25600usec	150 ms delay before stepping.
 				dey
 				bne .4
-				
+
 				php						Z set
 
 .5  			plp						was motor on ?
@@ -114,9 +119,9 @@ L59BD  			lda bloknml
 
 .6  			lda #1
 				jsr XRW.Wait100usecA	wait 100us for each count in montime
-				
+
 				lda XRW.montimeh
-				bmi .6				count up to 0000
+				bmi .6					count up to 0000
 
 * motor should be up to speed,
 * if it looks stopped then the drive is not present
@@ -126,30 +131,34 @@ L59BD  			lda bloknml
 *--------------------------------------
 L538E  			lda A4L					get command #
 				bne .1
-				
+
 				jsr XRW.TestWP			0 = status
 				bcs XRW.E.WP
 
-				bra XRW.E.OK
+				bcc XRW.E.OK
 
 .1				cmp #4		   			3 = format
 				bcs XRW.E.IO
 
-				cmp #2					Write ?
-				bne .2
+				cmp #2					2 = Write, 1 = Read
+
+				ror XRW.bWrite			b7 = 1 if Write
+				bpl .2
 
 				jsr XRW.TestWP
 				bcs XRW.E.WP
 *--------------------------------------
-.2				jsr regrwts
+.2				sei						DISABLE IRQ
+
+				jsr XRW.SectorIO
 				bcs XRW.E.IO
 
 				inc buf+1
-				
+
 				inc XRW.ReqSector
 				inc XRW.ReqSector
 
-				jsr regrwts				get 2nd half of block
+				jsr XRW.SectorIO		get 2nd half of block
 				dec buf+1
 
 				bcc XRW.E.OK
@@ -160,49 +169,42 @@ XRW.E.WP		lda #MLI.E.WRTPROT
 				.HS 2C					BIT ABS
 XRW.E.ND		lda #MLI.E.NODEV
 
+				plp						RESTORE IRQ STATE
 				sec
+				bra XRW.E.EXIT
 
-				.HS 2C					BIT ABS
-XRW.E.OK		lda #0				
+XRW.E.OK		plp						RESTORE IRQ STATE
+				clc
+				lda #0
 
-				ldx A2L
+XRW.E.EXIT		ldx A2L
 				bit IO.D2.DrvOff,x	 	turn off
 				rts
 *--------------------------------------
-regrwts			lda #1
+XRW.SectorIO	lda #2
 				sta XRW.RecalibrateCnt
-
 				sta XRW.BadSeek
-				
-				lda A4L					get command #
-				
-				lsr						set carry = 1 for read, 0 for write.
-				bcs .1					must prenibblize for write
 
-				jsr XRW.PreNibble
+				bit XRW.bWrite
+				bpl .1
 
-.1  			ldy #64
-				sty XRW.RetryCnt
-				
+				jsr XRW.PreNibble		must prenibblize for write
+
+.1  			stz XRW.RetryCnt
+
 .2  			jsr XRW.ReadAddr		read next address field.
 				bcc .4					if CC, A = current track
 
-.3  			dec XRW.RetryCnt	 	one less chance.
-				bne .2					branch to retry.
+.3  			inc XRW.RetryCnt	 	one less chance.
+				bpl .2					branch if < 128
 
 				dec XRW.RecalibrateCnt
 				sec
-				bmi .9
-
-			.DO XRWDBG=1
-			jsr XRW.DEBUG
-			.FIN
+				beq .9
 
 				ldx XRW.UnitIndex
-
 				lda #41
 				sta XRW.D2Trk-1,x
-				
 				lda #0
 				sta XRW.D2VolNum-1,x
 
@@ -212,67 +214,39 @@ regrwts			lda #1
 .4  			cmp XRW.ReqTrack
 				beq .6
 
+				lda XRW.BadSeek
+				beq .40					2 bad seeks, already
+
 				dec XRW.BadSeek
-				bpl .5
-				
-				ldx XRW.UnitIndex
-				lda XRW.D2SeekTime-1,x
-				bmi .5
-				
+				bne .5
+
+.40				lda XRW.SeekTime
+				bmi .5					seektime = 140
+
 				clc
 				adc #IO.D2.SeekTimeI
+				sta XRW.SeekTime
+
+				ldx XRW.UnitIndex
 				sta XRW.D2SeekTime-1,x
-				
+
 .5				lda XRW.ReqTrack
 				jsr XRW.Seek
 				bra .3
 
-.6  			lda XRW.AddrField.S		is this the right sector ?
+.6				lda XRW.AddrField.S		is this the right sector ?
 				cmp XRW.ReqSector
 				bne .3		 			no, try another sector.
 
-				lda A4L	 				read or write ?
-				lsr	   					the carry will tell.
-				bcc .7					branch if write
+				bit XRW.bWrite
+				bpl .7					branch if write
 
-				jsr XRW.Read
+				jmp XRW.Write
+
+.7				jsr XRW.Read
 				bcs .3					if bad read
 
 .9				rts
-
-.7  			jmp XRW.Write			
-*--------------------------------------
-* determine if motor is stopped
-*
-* if stopped, controller's shift register will not be changing.
-* return y = 0 and zero flag set if it is stopped.
-*--------------------------------------
-XRW.CheckMotorOn
-				ldx A2L
-XRW.CheckMotorOnX
-				ldy #0					init loop counter.
-
-.1  			lda IO.D2.RData,x		read the shift register.
-				jsr .9					delay
-
-				pha
-				pla		  				more delay.
-
-				cmp IO.D2.RData,x		has shift reg changed ?
-				bne .9					yes, motor is moving.
-
-				lda #MLI.E.NODEV		anticipate error.
-				dey		  				no, dec retry counter
-				bne .1					and try 256 times.
-
-.9				rts
-*--------------------------------------
-XRW.TestWP		ldx A2L
-				lda IO.D2.ReadProt,x	test for write protected
-				lda IO.D2.ReadMode,x
-				rol		 				write protect-->carry-->bit 0=1
-				lda IO.D2.RData,x		keep in read mode
-				rts
 *--------------------------------------
 * preniblize subroutine (16 sector format)
 *
@@ -405,11 +379,13 @@ L596F  			ldy #$FF	   			index to last byte of data to write.
 * on exit: carry set if error (write protect violation).
 *	if no error, acc=uncertain, x=unchanged, y=0, carry clear.
 *--------------------------------------
-XRW.Write		lda nbuf2
-				sta pcl
+				.LIST ON
+XRW.Write		lda IO.D2.ReadProt,x	PREWRITE MODE
+				.LIST OFF
+				lda IO.D2.ReadMode,x
 
-				bit IO.D2.ReadProt,x	PREWRITE MODE
-				bit IO.D2.ReadMode,x
+				lda nbuf2
+				sta pcl
 
 				lda #$FF   				Self Sync Byte
 
@@ -449,7 +425,7 @@ L583D  			eor nbuf2-1,y  			(4) xor with current (NO MORE PAGE CROSS)
 
 *				ldx A2L					(3) restore slot index
 				ldx >A2L				(4) absolute reference to zero page
-				
+
 				sta IO.D2.WLoad,x		(5) store encoded byte
 				lda IO.D2.WShift,x		(4) handshake
 				dey	  					(2)
@@ -458,7 +434,7 @@ L583D  			eor nbuf2-1,y  			(4) xor with current (NO MORE PAGE CROSS)
 * end of write byte loop
 
 				lda pcl					(3) get prior nibl (from nbuf2)
-				
+
 wrefd1			ldy #$00   				(2) warning: load value modified by prenib.
 
 wrefa1			eor $1000,y 			(4) warning: address modified by prenib.
@@ -471,7 +447,7 @@ wrefd2			ldx #$60   				(2) warning: value modified by prenib.
 wrefa2			lda $1000,y  			(4) prior nibl. warning: address modified by prenib.
 				iny	  					(2) all done with this page ?
 				bne wrefa1				(3-) loop until page end.
-				
+
 				lda pch					(3) get next (precalculated & translated) nibl.
 				beq L58C0				(2+) branch if code written was page aligned.
 
@@ -526,32 +502,41 @@ wrefd5			ldx #$60   				(2) restore slot. warning: modified by prenib
 				sta IO.D2.WLoad,x		(5)
 				lda IO.D2.WShift,x		(4)
 
-				ldy #$00   				(2) set y = index end mark table.
+				ldy #2   				(2) set y = index end mark table.
 				pha	  					(3) waste another 11 micro-seconds
 				pla	  					(4)
 				nop	 					(2)
-				nop	  					(2)
 
-L58D3  			lda XRW.EndDataMark,y 	(4) dm4, dm5, dm6 and turn off byte.
+.1				nop	  					(2)
+
+				lda XRW.EndMark,y	 	(4) DE AA EB
 				jsr wnibl				(15,6) write it
-				iny	  					(2)
-				cpy #$04   				(2) have all end marks been written ?
-				bne L58D3				(3) if not.
+				dey	  					(2)
+				bpl .1					(3) if not.
 
-				clc	  					(2,9)
+				clc	  					(2)
 
-				lda IO.D2.ReadMode,x	out of write mode
+				lda #$FF				(2)
+				nop						(2)
+
+				jsr wnibl				(15,6) write turn off byte.
+
+XRW.ReadMode	lda IO.D2.ReadMode,x	out of write mode
 				lda IO.D2.WShift,x		to read mode.
 				rts	  					return from write.
 
 * 7-bit nibl write subroutines
 
 wnibl9			clc						(2) 9 cycles, then write.
+
 wnibl7			pha	  					(3) 7 cycles, then write.
 				pla	  					(4)
+
 wnibl			sta IO.D2.WLoad,x		(5) nibl write
 				ora IO.D2.WShift,x		(4) clobbers acc, not carry
+				.LIST ON
 XRW.Write.RTS	rts	  					(6)
+				.LIST OFF
 *--------------------------------------
 * delays a specified number of 100 usec intervals for motor timing.
 * on entry: acc holds number of 100 usec intervals to delay.
@@ -560,24 +545,15 @@ XRW.Write.RTS	rts	  					(6)
 * for motor on timing.
 *--------------------------------------
 XRW.WaitSeekTime
-*				lda #IO.D2.SeekTime
-				phy
-				ldy XRW.UnitIndex
-				lda XRW.D2SeekTime-1,y
-				ply
+				lda XRW.SeekTime
 				.HS 2C					BIT ABS
 XRW.Wait25600usec
 				lda #0
 XRW.Wait100usecA
-				phx						(3)
-				
-.1				ldx #16					(2)
+.1				ldx #18					(2)
 
 .2  			dex						(2)
 				bne .2					(3)
-
-				ldx A2L					(3)
-				bit IO.D2.DrvOn,x		(4) Slow down ACC boards
 
 				inc XRW.montimel		(6)
 				bne .3					(3)
@@ -586,8 +562,7 @@ XRW.Wait100usecA
 
 .3				dec						(2)
 				bne .1					(3)
-				
-				plx						(4)
+
 				rts						(6)
 *--------------------------------------
 * read subroutine (16-sector format)
@@ -599,7 +574,9 @@ XRW.Wait100usecA
 *	acc=$AA, x=unchanged, y=0, carry clear.
 * observe 'no page cross' on some branches !!
 *--------------------------------------
+				.LIST ON
 XRW.Read		txa						get slot #
+				.LIST OFF
 				ora #$8C	   			prepare mods to read routine.
 				sta rd4+1				warning: the read routine is
 				sta rd5+1				self modified !!
@@ -672,7 +649,7 @@ rd4				ldx IO.D2.RData+$60	  	warning: self modified
 				ldy #$AA	  			now read directly into user buffer.
 				bne rd5					always taken.
 
-L576D  			sec		  				error
+L576D			sec		  				error
 				rts
 
 ref1			sta $1000,y				warning: self modified
@@ -736,129 +713,118 @@ L57CC  			sec
 L57CD  			pla		 				place last byte into user buffer
 				ldy #$55
 				sta (buf),y
+				.LIST ON
 XRW.Read.RTS	rts
-*--------------------------------------
-XRW.Reset		ldx A2L
-
-				lda IO.D2.ReadMode,x	turn off write enable X = slot $S0
-
-				nop
-				nop
-
-				ldy #4
-
-.1				lda IO.D2.Ph0Off,x
-				inx
-				inx
-				dey
-				bne .1
-
-				rts
+				.LIST OFF
 *--------------------------------------
 * A = target track
 *--------------------------------------
 XRW.Seek		ldx XRW.UnitIndex
-				
+				cmp XRW.D2Trk-1,x
+				beq XRW.Read.RTS
+
 				pha						save target track
-				
+
 				jsr XRW.Trk2Qtrk
 				sta XRW.TargetQTrack
-
-			.DO XRWDBG=1
-			jsr	XRW.DEBUG3
-			.FIN
 
 				lda XRW.D2Trk-1,x
 
 				jsr XRW.Trk2Qtrk
 				sta XRW.CurrentQTrack
 
-			.DO XRWDBG=1
-			jsr	XRW.DEBUG2
-			.FIN
-
 				pla
 				sta XRW.D2Trk-1,x		will be current track at the end
 
-				ldx A2L
-				ldy A2L
-
-.1				lda XRW.CurrentQTrack
+				lda XRW.CurrentQTrack
 				cmp	XRW.TargetQTrack
-				beq	.7
-
-				jsr .8
-				
-				bcs	.2
-
-* Current < Target, must move in
-					
-				inc
-
-				.HS B0					BCS
-
-* Current > Target, must move out
-
-.2				dec
-
-				sta XRW.CurrentQTrack
 
 				pha
 
-				and #6
-				ora A2L
-				tax
+				bcs .10
 
-				pla
-
-				bcs	.3
-
-* Current < Target, must move in
-					
 				inc
 
-				.HS B0					BCS
-
-* Current > Target, must move out
-
-.3				dec
-
-				and #6
+.10				and #6
 				ora A2L
-
-				bcc .4
-				
-* move out : invert 2 phases
-
-				phx
 				tax
-				pla
-				
-.4				tay
-				
+
+				ora #$80
+				sta .7+1
+				stz .6+1
+
 				lda IO.D2.Ph0On,x
 				nop
 				nop
+*				jsr XRW.WaitSeekTime
 				
-				lda IO.D2.Ph0On,y
+				pla
+
+.1				bcc	.2
+
+* Current > Target, must move out
+
+				dec
+
+				.HS 90					BCC
+
+* Current < Target, must move in
+
+.2				inc
+
+				sta XRW.CurrentQTrack
+
+				and #7
+				tay
+
+				bcs .3
+
+				lda XRW.PhIn,y
+
+				bcc .4
+
+.3				lda XRW.PhOut,y
+
+.4				ora A2L
+				sta .5+1
+
+				lsr
+				bcc .5
+
+				asl
+
+				ldx .7+1
+				stx .6+1
+
+				sta .7+1
+
+.5				sta $C000				SELF MODIFIED
 				nop
 				nop
-				
 				jsr XRW.WaitSeekTime
-				
-				bra .1
 
-.7				jsr XRW.Wait25600usec
+				lda XRW.CurrentQTrack
+				cmp	XRW.TargetQTrack
+				bne .1
 
-.8				bit IO.D2.Ph0Off,x
+				jsr XRW.Wait25600usec
+
+.6				sta $C000				SELF MODIFIED
 				nop
 				nop
-
-				ldx IO.D2.Ph0Off,y
+.7				sta $C000				SELF MODIFIED
 				nop
 				nop
+.8				rts				
+*--------------------------------------
+XRW.Reset		ldx A2L
 
-				rts
+				lda IO.D2.Ph0Off,x
+				lda IO.D2.Ph1Off,x
+				lda IO.D2.Ph2Off,x
+				lda IO.D2.Ph3Off,x
+
+				jmp XRW.ReadMode
 *--------------------------------------
 XRW.Trk2Qtrk	asl						x2
 				sta .1+1
@@ -866,38 +832,40 @@ XRW.Trk2Qtrk	asl						x2
 				bit XRW.D2VolNum-1,x
 				bpl .1					x4
 				bvs .1					> $C0 ? (VOL=254)
-				
+
 				lsr						x3
-				
+
 .1				adc #$ff				SELF MODIFIED
 				rts
 *--------------------------------------
+				.LIST ON
 XRW.ReadAddr	ldy #$FC
+				.LIST OFF
 				sty XRW.CheckSum		init nibble counter to $FCFC
-				
+
 				ldx A2L					get slot #
 
 .1  			iny
 				bne .2					counter LO
-				
+
 				inc XRW.CheckSum		counter HI
 				beq .99
-				
+
 .2  			lda IO.D2.RData,x		read nibl
 				bpl .2
-				
+
 .3 				cmp #$D5	 			address mark 1 ?
 				bne .1
-				
-				nop		 				 nibl delay
-				
+
+				nop
+
 .4	 			lda IO.D2.RData,x
 				bpl .4
 
 				cmp #$AA	   			address mark 2 ?
 				bne .3					if not, is it address mark 1 ?
 
-				ldy #$03	   			index for 4 byte read
+				ldy #3		   			index for 4 byte read
 
 .5  			lda IO.D2.RData,x
 				bpl .5
@@ -905,105 +873,99 @@ XRW.ReadAddr	ldy #$FC
 				cmp #$96	   			address mark 3 ?
 				bne .3					if not, is it address mark 1
 
-				sei		  				???ALREADY DONE by XDOS.devmgr??? no interrupts until address is tested.
-				lda #$00	   			init checksum
-				
-.6  			sta XRW.CheckSum
+				lda #0					init Chksum
+
+.6	  			sta XRW.CheckSum
 
 .7  			lda IO.D2.RData,x		read 'odd bit' nibl
 				bpl .7
 
 				rol		 				align odd bits, '1' into lsb.
 				sta XRW.Temp4x4			save them.
-				
+
 .8  			lda IO.D2.RData,x		read 'even bit' nibl
 				bpl .8
-				
+
 				and XRW.Temp4x4			merge odd and even bits.
 				sta XRW.AddrField.C,y	store data byte.
 				eor XRW.CheckSum
 				dey
 				bpl .6					loop on 4 data bytes.
-				
+
 				tay		  				if final checksum non-zero,
 				bne .99					then error.
 
+				clc
+
 .9				lda IO.D2.RData,x
 				bpl .9
-				
+
 				eor #$DE
 				bne .99
-
-*.10				lda IO.D2.RData,x
-*				bpl .10
-				
-*				eor #$AA
-*				bne .99
-				
+			
 				ldy XRW.UnitIndex
-				lda XRW.AddrField.V		....save time doing it now
+				lda XRW.AddrField.V
 				sta XRW.D2VolNum-1,y
 
 				lda XRW.AddrField.T		Successful Read, update Drive table
 				sta XRW.D2Trk-1,y		and exit with A = Trk
-				
-				clc						normal read ok
+
 				rts
 
-.99  			sec
+.99				sec
+				.LIST ON
+XRW.ReadAddr.RTS
+				rts
+				.LIST OFF
+*--------------------------------------
+* determine if motor is stopped
+*
+* if stopped, controller's shift register will not be changing.
+* return y = 0 and zero flag set if it is stopped.
+*--------------------------------------
+XRW.CheckMotorOn
+				ldx A2L
+XRW.CheckMotorOnX
+				ldy #0					init loop counter.
+
+.1  			lda IO.D2.RData,x		read the shift register.
+				jsr .9					delay
+
+				pha
+				pla		  				more delay.
+
+				cmp IO.D2.RData,x		has shift reg changed ?
+				bne .9					yes, motor is moving.
+
+				dey		  				no, dec retry counter
+				bne .1					and try 256 times.
+
+.9				rts						Z if motor OFF
+*--------------------------------------
+XRW.TestWP		ldx A2L
+				lda IO.D2.ReadProt,x	test for write protected
+				lda IO.D2.ReadMode,x
+				rol		 				write protect-->carry-->bit 0=1
+				lda IO.D2.RData,x		keep in read mode
 				rts
 *--------------------------------------
-			.DO XRWDBG=1
-XRW.DEBUG	phx
+XRW.PhIn		.DA #IO.D2.Ph3Off		7->0
+				.DA #IO.D2.Ph1On		0->1
+				.DA #IO.D2.Ph0Off		1->2
+				.DA #IO.D2.Ph2On		2->3
+				.DA #IO.D2.Ph1Off		3->4
+				.DA #IO.D2.Ph3On		4->5
+				.DA #IO.D2.Ph2Off		5->6
+				.DA #IO.D2.Ph0On		6->7
 
-			ldx #26
-			lda XRW.AddrField.V
-			jsr XRW.DEBUG.PRINT
-
-			lda XRW.AddrField.T
-			jsr XRW.DEBUG.PRINT
-			
-			lda XRW.AddrField.S
-			jsr XRW.DEBUG.PRINT
-
-			inx
-			
-			lda XRW.ReqTrack
-			jsr XRW.DEBUG.PRINT
-
-			plx
-			rts
-			
-XRW.DEBUG2	phx
-			ldx #36
-			bra XRW.DEBUG31
-			
-XRW.DEBUG3	phx
-			ldx #38
-XRW.DEBUG31	jsr XRW.DEBUG.PRINT
-			plx
-			rts
-
-XRW.DEBUG.PRINT
-			sta CLRPAGE2
-			pha
-			lsr
-			lsr
-			lsr
-			lsr
-			jsr .7
-			
-			pla
-			and #$0F
-				
-.7			ora #$B0	
-			cmp #"9"+1
-			bcc .8
-			adc #6
-.8			sta $700,x
-			inx
-			rts
-			.FIN
+XRW.PhOut		.DA #IO.D2.Ph1Off		1->0
+				.DA #IO.D2.Ph0on		2->1
+				.DA #IO.D2.Ph2off		3->2
+				.DA #IO.D2.Ph1On		4->3
+				.DA #IO.D2.Ph3Off		5->4	
+				.DA #IO.D2.Ph2On		6->5
+				.DA #IO.D2.Ph0Off		7->6
+				.DA #IO.D2.Ph3On		0->7
 *--------------------------------------
 				.LIST ON
 XRW.FREE		.EQ $D540-*
@@ -1021,7 +983,7 @@ nbuf2			.BS $56		 			nibl buffer for read/write of low 2-bits of each byte.
 *
 * nibbles in the ranges of $A0-$A3, $C0-$C7, $E0-$E3 are used for
 * other tables since no valid nibbles are in these ranges.
-* aligned to page boundary + $96 
+* aligned to page boundary + $96
 *--------------------------------------
 XRW.Nib2FC		.HS 0004
 *				.HS FFFF
@@ -1046,14 +1008,14 @@ XRW.ReqSector		.HS 00
 XRW.BadSeek			.HS 00
 				.HS 5054585C606468
 XRW.00XX0000	.HS 00201030			used in fast prenib.
-XRW.EndDataMark	.HS DEAAEB		  		table using 'unused' nibbles ($C4,$C5,$C6,$C7)
+XRW.EndMark		.HS EBAADE		  		table using 'unused' nibbles ($C4,$C5,$C6,$C7)
 *				.HS FFFFFFFF
 XRW.AddrField.C		.HS 00				AddrField Checksum
 XRW.AddrField.S		.HS 00				AddrField Sector
 XRW.AddrField.T		.HS 00				AddrField Track
 XRW.AddrField.V		.HS 00				AddrField Volume
 				.HS 6C
-				.HS FF
+XRW.SeekTime		.HS 00
 *ibstat				.HS 00
 				.HS 707478
 				.HS FFFFFF
@@ -1074,7 +1036,7 @@ XRW.TargetQTrack	.HS 00
 				.HS B0B4B8BCC0C4C8
 				.HS FFFF
 				.HS CCD0D4D8DCE0
-				.HS FF
+XRW.bWrite			.HS 00
 				.HS E4E8ECF0F4F8FC
 *--------------------------------------
 * 6-bit to 2-bit conversion tables:
