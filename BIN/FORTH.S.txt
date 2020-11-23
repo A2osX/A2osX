@@ -10,30 +10,35 @@ NEW
 				.INB inc/mli.i
 				.INB inc/mli.e.i
 *--------------------------------------
-USERSPACE.SIZE	.EQ 4096
-SCRATCH.SIZE	.EQ 256
+CODE.SIZE		.EQ 2048
+DATA.SIZE		.EQ 2048
+INPUT.SIZE		.EQ 256
+OUTPUT.SIZE		.EQ 256
+CL.SIZE			.EQ 256
+*--------------------------------------
+SYM.T.CONST		.EQ 0
+SYM.T.VAR		.EQ 64
+SYM.T.CODE		.EQ 128
 *--------------------------------------
 				.DUMMY
 				.OR ZPBIN
 ZS.START
-ZPCLBuf			.BS 2
-ZPCLBufPtr		.BS 2
-ZPFileBuf		.BS 2
-ZPFileBufPtr	.BS 2
-
-ZPPadBuf		.BS 2
-ZPKeyID			.BS 2
-
-ZPUsrBufPtr		.BS 2
-ZPUsrCodePtr	.BS 2
-
-ZPAddrPtr		.BS 2
 ZPCodePtr		.BS 2
+ZPDataPtr		.BS 2
+ZPInputPtr		.BS 2
+ZPOutputPtr		.BS 2
+
+ZPKeyID			.BS 2
+ZPType			.BS 1
+				.BS 1
+ZPAddrPtr		.BS 2
 
 ZPPtr1			.BS 2
 ZPPtr2			.BS 2
-
 ZPPtr3			.BS 2
+
+ZPCLBuf			.BS 2
+ZPCLBufPtr		.BS 2
 
 CL.Ptr			.BS 1
 CL.Len			.BS 1
@@ -41,8 +46,9 @@ CL.bReady		.BS 1
 CL.bEscMode		.BS 1
 CL.MaxCnt		.BS 1
 
-bCompile		.EQ *
-ArgIndex		.BS 1
+ArgIndex		.EQ *
+bCompile		.BS 1
+RP				.BS 1
 
 ZS.END			.ED
 *--------------------------------------
@@ -81,7 +87,6 @@ J.ESC			.DA CL.BS			left arrow
 *				.DA HIS.GetNext			
 *				.DA HIS.GetPrev
 				.DA CL.NAK			right arrow
-L.PUSHADDR		.DA PUSHADDR			
 L.KEYWORDS		.DA KEYWORDS
 J.KEYWORDS		.DA KW.DUP
 				.DA KW.DROP
@@ -196,39 +201,58 @@ CS.RUN			>PUSHW L.MSG.GREETINGS
 				jsr CS.RUN.ARGS
 				bcs CS.INIT.RTS
 				
-				>LDYAI 256
+				>LDYAI CODE.SIZE
 				>SYSCALL GetMem
 				bcs CS.INIT.RTS
+
+				>STYA ZPCodePtr
+				>STYA.G CodeBuf
+				txa
+				>STA.G hCodeBuf
+				
+				>LDYAI DATA.SIZE
+				>SYSCALL GetMem
+.9				bcs CS.INIT.RTS
+
+				>STYA ZPDataPtr
+				>STYA.G DataBuf
+				txa
+				>STA.G hDataBuf
+
+				>LDYAI INPUT.SIZE
+				>SYSCALL GetMem
+				bcs .9
+
+				>STYA.G InputBuf
+				txa
+				>STA.G hInputBuf
+
+				>LDYAI OUTPUT.SIZE
+				>SYSCALL GetMem
+				bcs .9
+
+				>STYA.G OutputBuf
+				txa
+				>STA.G hOutputBuf
+
+				>LDYAI CL.SIZE
+				>SYSCALL GetMem
+				bcs .9
 
 				>STYA ZPCLBuf
 				txa
 				>STA.G hCLBuf
 				
-				>LDYAI 256
-				>SYSCALL GetMem
-				bcs CS.INIT.RTS
-
-				>STYA ZPPadBuf
-				txa
-				>STA.G hPadBuf
-				
-				>LDYAI USERSPACE.SIZE
-				>SYSCALL GetMem
-				bcs CS.INIT.RTS
-
-				>STYA ZPUsrBufPtr
-				>STYA.G UsrBuf
-				txa
-				>STA.G hUsrBuf				
-				
 				>SYSCALL SListNew
-				bcs CS.INIT.RTS
+				bcs .9
 				
 				>STA.G hSList
 				
 				stz bCompile
+				lda #127
+				sta RP
 
-.1				>SLEEP
+CS.RUN.LOOP		>SLEEP
 
 				>LDA.G bDebug
 				bpl .2
@@ -238,11 +262,11 @@ CS.RUN			>PUSHW L.MSG.GREETINGS
 .2				>LDA.G bTrace
 				bpl .3
 
-				>LDYA ZPFileBufPtr
+				>LDYA ZPCLBuf
 				jsr PrintTraceMsg
 
 .3				jsr CS.FORTH.Run
-				bcc .1
+				bcc CS.RUN.LOOP
 
 				cmp #MLI.E.EOF
 				beq .8
@@ -260,7 +284,7 @@ CS.RUN			>PUSHW L.MSG.GREETINGS
 				>SYSCALL GetErrorMessage
 				>LDYA ZPCLBuf
 				>SYSCALL PutS
-				bra .1
+				bra CS.RUN.LOOP
 				
 *				jsr PrintErrMsg
 
@@ -301,14 +325,14 @@ CS.RUN.ARGS		inc ArgIndex
 				sta (pData),y
 				bra CS.RUN.ARGS
 
-.4				>LDA.G hFileBuf
+.4				>LDA.G hFile
 				bne .90
 
 				>LDYA ZPPtr1
-				jsr CS.RUN.LoadFile
+				jsr CS.RUN.FOpen
 				bcs .9
 
-				>STA.G hFileBuf
+				>STA.G hFile
 				bra CS.RUN.ARGS
 
 .8				clc
@@ -322,10 +346,10 @@ CS.RUN.ARGS		inc ArgIndex
 				sec						QUIT Process
 				rts
 *--------------------------------------
-CS.FORTH.Run	>LDA.G hFileBuf
-				bne CS.FORTH.Run.File
+CS.FORTH.Run	jsr CL.Reset
 
-				jsr CL.Reset
+				>LDA.G hFile
+				bne CS.FORTH.Run.File
 
 				lda #80
 				sta CL.MaxCnt
@@ -351,49 +375,32 @@ CS.FORTH.Run	>LDA.G hFileBuf
 				jmp CS.RUN.EXEC
 				
 .9				rts				
-				
+*--------------------------------------
 CS.FORTH.Run.File
-				lda (ZPFileBufPtr)
+				>PUSHWI 256
+				>PUSHW ZPCLBuf
+
+				>LDA.G hFile
+				>SYSCALL fgets
+				bcs .9
+
+				lda (ZPCLBuf)
 				beq .8
-
-				ldy #$ff
-
-.3				iny
-				lda (ZPFileBufPtr),y
-				sta (ZPCLBuf),y
-				beq .4
-
-				eor #C.CR
-				bne .3
-
-				sta (ZPCLBuf),y
-				
-				iny
-
-.4				tya
-
-				clc
-				adc ZPFileBufPtr
-				sta ZPFileBufPtr
-				bcc .5
-				
-				inc ZPFileBufPtr+1
-				
-.5				lda (ZPCLBuf)
-				beq CS.FORTH.Run.File
 				
 				cmp #'#'
-				beq CS.FORTH.Run.File
-
-				>LDYA ZPCLBuf
-				>STYA ZPCLBufPtr
+				bne .1
 				
-				jmp CS.RUN.EXEC
-
-.8				lda #MLI.E.EOF
+				ldy #1
+				lda (ZPCLBuf),y
+				beq .1
 				
-				sec
-				rts
+				cmp #'!'
+				beq .8
+				
+.1				jmp CS.RUN.EXEC
+
+.8				clc
+.9				rts
 *--------------------------------------
 CS.RUN.EXEC		lda (ZPCLBufPtr)
 				beq .8
@@ -409,28 +416,106 @@ CS.RUN.EXEC		lda (ZPCLBufPtr)
 
 				rts
 
-.2				>PUSHB.G hSList
-				>PUSHW ZPCLBufPtr
-				>SYSCALL SListLookup
+.2				jsr CS.RUN.GetSymbol
 				bcs .5
 				
+				bit ZPType
+				bmi .4
+				
+				bvc .3
+				
+				>PUSHW ZPAddrPtr
+				
+				rts
+				
+.3				ldy #1
+				>PUSHB (ZPAddrPtr),y
+				>PUSHB (ZPAddrPtr)
+				rts
+				
+.4				bit bCompile
+				bmi .40
+				
+				jsr .80
+				bcc CS.RUN.EXEC
+				
+				rts
+				
+.40				>LDYA ZPAddrPtr
+				jsr EmitJsrYA		
+				bra CS.RUN.EXEC
+				
+.5				jsr CS.RUN.GetNum
+				bcs .9
+
+.6				jsr NextChar			Skip SPACE if any
+				bne .1
+				
+.8				clc
+.9				rts
+				
+.7				txa
+				asl
+				tax
+	
+				cpx #$A2				; ECOLON always EXECUTE
+				beq .71
+
+ 				bit bCompile
+				bmi .72
+				
+.70				bcs .99					cannot exec compil only
+
+.71				jmp (J.KEYWORDS,x)
+
+.72				jmp CP.RUN
+
+.80				jmp (ZPAddrPtr)
+
+.99				lda #E.SYN
+				sec
+				rts
+*--------------------------------------
+CS.RUN.FOpen	>PUSHYA
+				>PUSHBI	O.RDONLY
+				>PUSHBI S.FI.T.TXT
+				>PUSHWZ					Aux type
+				>SYSCALL FOpen
+				bcs .9
+
+				>STA.G hFile
+				
+.9				rts
+*--------------------------------------
+CS.RUN.GetSymbol
+				>PUSHB.G hSList
+				>PUSHW ZPCLBufPtr
+				>SYSCALL SListLookup
+				bcs .9
+				
 				>STYA ZPKeyID
+	
+				txa
+				jsr NextKW
 				
 				>PUSHB.G hSList
 				>PUSHW ZPKeyID
-				>PUSHWI ZPAddrPtr
+				>PUSHWI ZPType
 				>PUSHWI 4				4 bytes
 				>PUSHWZ					From Start
 				
 				>SYSCALL SListGetData
 				bcs .9
 				
-				jmp (ZPCodePtr)
-
-.8				clc
+				
+				
+				
+				
+				
+				
 .9				rts
-
-.5				>PUSHW ZPCLBufPtr
+*--------------------------------------
+CS.RUN.GetNum	>PUSHW ZPCLBufPtr
 				>PUSHWI ZPCLBufPtr
 				>PUSHBI 10
 				>SYSCALL StrToL
@@ -447,31 +532,16 @@ CS.RUN.EXEC		lda (ZPCLBufPtr)
 				
 				inc pStack
 
-.6				jsr NextChar			Skip SPACE if any
-				beq .8
-				
-				jmp .1
-				
-.7				txa
-				asl
-				tax
-				
-				jmp (J.KEYWORDS,x)
-*--------------------------------------
-CS.RUN.LoadFile	>PUSHYA
-				>PUSHBI	O.RDONLY
-				>PUSHBI S.FI.T.TXT
-				>PUSHWZ					Aux type
-				>SYSCALL LoadTxtFile
-				bcs .9
+				bit bCompile
+				bmi .1
 
-				phx
-				txa
-				>SYSCALL GetMemPtr
-				>STYA ZPFileBuf
-				>STYA ZPFileBufPtr
-				pla
+*				clc
+				rts
 
+.1				>PULLYA
+				jsr EmitPushYA
+
+				clc
 .9				rts
 *--------------------------------------
 CS.DOEVENT		sec
@@ -483,10 +553,21 @@ CS.QUIT			>LDA.G hSList
 				>PUSHA
 				>SYSCALL SListFree
 
-.1				ldy #hFileBuf
+.1				>LDA.G hFile
+				beq .2
+				
+				>SYSCALL FClose
+
+.2				ldy #hCodeBuf
 				jsr .7
 				
-				ldy #hUsrBuf
+				ldy #hDataBuf
+				jsr .7
+				
+				ldy #hInputBuf
+				jsr .7
+
+				ldy #hOutputBuf
 				jsr .7
 
 				ldy #hCLBuf
@@ -504,63 +585,10 @@ PrintPrompt		>PUSHW L.MSG.PROMPT
 				>SYSCALL PrintF
 				rts
 *--------------------------------------
-PrintErrMsg		>LDYA ZPFileBuf
+PrintErrMsg		>LDYA.G ZPCLBuf
 				>STYA ZPPtr1
 
-				stz ZPPtr2
-				stz ZPPtr2+1			Line counter
-
-.1				inc ZPPtr2
-				bne .2
-				inc ZPPtr2+1
-
-.2				>LDYA ZPPtr1
-				>STYA ZPPtr3			save line start
-
-.20				lda (ZPPtr1)
-				beq .4					EoF
-
-				inc ZPPtr1
-				bne .3
-				inc ZPPtr1+1
-.3				cmp #C.CR
-				bne .20					Scan until EoL
-
-				ldx ZPPtr1
-				cpx ZPFileBufPtr
-				lda ZPPtr1+1
-				sbc ZPFileBufPtr+1
-				bcc .1					not this line....
-
-.4				>LDA.G bTrace
-				bmi .5
-				
-				jsr PrintTraceMsg.3
-
-.5				lda ZPPtr3
-				cmp ZPFileBufPtr
-				bne .6
-
-				lda ZPPtr3+1
-				cmp ZPFileBufPtr+1 
-				beq .8
-
-.6				>PUSHBI '-'
-				ldy #S.PS.hStdErr
-				lda (pPS),y
-				>SYSCALL FPutC
-				inc ZPPtr3
-				bne .5
-				inc ZPPtr3+1
-				bra .5
-				
-.8				ldy #S.PS.hStdErr
-				lda (pPS),y
-				>PUSHA
-				>PUSHW L.MSG.ERR
-				>PUSHW ZPPtr2			Line counter
-				>PUSHBI 2
-				>SYSCALL FPrintF
+				clc
 
 				rts
 *--------------------------------------
@@ -670,12 +698,6 @@ IsSpaceOrCR		cmp #C.SPACE
 IsEndKW.8		clc
 				rts
 *--------------------------------------
-PUSHADDR		lda ZPAddrPtr+1
-				>PUSHA
-				lda ZPAddrPtr
-				>PUSHA
-				rts
-*--------------------------------------
 CheckStackPop4	lda pStack
 				sec
 				sbc #4
@@ -688,7 +710,58 @@ CheckStackPop4	lda pStack
 				sec
 				rts
 *--------------------------------------
+EmitPullA		lda #$B2				lda (zp)
+				jsr EmitByte
+				
+				lda #pStack
+				jsr EmitByte
+				
+				lda #$E6				inc zp
+
+				lda #pStack
+				bra EmitByte
+*--------------------------------------
+EmitPushYA		pha
+				tya
+				
+				jsr EmitPushA
+				
+				pla
+
+EmitPushA		pha
+				lda #$A9				LDA imm
+				jsr EmitByte
+				
+				pla
+				jsr EmitByte
+				
+				lda #$C6				DEC zp
+				jsr EmitByte
+				
+				lda #pStack
+				jsr EmitByte
+
+				lda #$92				STA (zp)
+				jsr EmitByte
+				
+				lda #pStack
+				bra EmitByte
+*--------------------------------------
+EmitJsrYA		pha
+				lda #$20
+				jsr EmitByte
+				tya
+				jsr EmitByte
+				pla
+*--------------------------------------
+EmitByte		sta (ZPCodePtr)
+				inc ZPCodePtr
+				bne .8
+				inc ZPCodePtr+1
+.8				rts				
+*--------------------------------------
 				.INB usr/src/bin/forth.s.cl
+				.INB usr/src/bin/forth.s.cp
 				.INB usr/src/bin/forth.s.kw
 *--------------------------------------
 CS.END
@@ -798,9 +871,7 @@ KEYWORDS		.AT "DUP"				( n - n n ) Duplicate top of stack.
 				.AT ":"					( - ) Begin a colon definition.
 				.AT ";"					( - ) End of a colon definition.
 				.AT "VARIABLE"			( n - ) Create a variable with initial value n.
-*										( - addr ) Return address when executed.
 				.AT "CONSTANT"			( n - ) Create a constant with value n.
-*										( - n ) Return the value n when executed.
 				.AT "CODE"				( - ) Create assembly-language definition.
 				.AT ";CODE"				( - ) Create a new defining word, with runtime code routine in high-level Forth.
 				.AT "DO"				( end+1 start - ) Set up loop, given index range.
@@ -822,15 +893,26 @@ KEYWORDS		.AT "DUP"				( n - n n ) Duplicate top of stack.
 *--------------------------------------
 				.DUMMY
 				.OR 0
-DS.START				
+DS.START		.BS 128					RETURN STACK		
+
 bDebug			.BS 1
 bTrace			.BS 1
 bExitOnEOF		.BS 1
+
+hCodeBuf		.BS 1
+CodeBuf			.BS 2
+
+hDataBuf		.BS 1
+DataBuf			.BS 2
+
+hInputBuf		.BS 1
+InputBuf		.BS 2
+
+hOutputBuf		.BS 1
+OutputBuf		.BS 2
+
 hCLBuf			.BS 1
-hPadBuf			.BS 1
-hUsrBuf			.BS 1
-UsrBuf			.BS 2
-hFileBuf		.BS 1
+hFile			.BS 1
 hSList			.BS 1
 
 DS.END			.ED

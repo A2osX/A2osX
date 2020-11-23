@@ -58,9 +58,13 @@ KW.Lookup		>LDYA L.KEYWORDS
 				rts
 *--------------------------------------
 KW.DUP			lda pStack
-				sec
-				sbc #2
-				bcc .9
+				beq .9
+
+				cmp #$FF
+				beq .9
+				
+				cmp #1
+				bcc .99
 				
 				lda (pStack)
 				tax
@@ -72,9 +76,13 @@ KW.DUP			lda pStack
 				clc
 				rts
 				
-.9				lda #E.STKOVERFLOW
+.9				lda #E.STACKERROR
 				sec
 				rts
+				
+.99				lda #E.STKOVERFLOW
+				sec
+				rts				
 *--------------------------------------
 KW.DROP			lda pStack
 				beq .9
@@ -187,7 +195,40 @@ KW.Sub			jsr CheckStackPop4
 				clc
 .9				rts
 *--------------------------------------
-KW.Mul
+KW.Mul			jsr CheckStackPop4
+				bcs .9
+				
+				>PULLW ZPPtr1
+				>PULLW ZPPtr2
+				
+				stz ZPPtr3
+				stz ZPPtr3+1
+				
+				ldx #16
+
+.1				lsr ZPPtr2+1
+				ror ZPPtr2
+				bcc .2
+				
+				clc
+				lda ZPPtr1
+				adc ZPPtr3
+				sta ZPPtr3
+				
+				lda ZPPtr1+1
+				adc ZPPtr3+1
+				sta ZPPtr3+1
+				
+.2				asl ZPPtr1
+				rol ZPPtr1+1
+				
+				dex
+				bne .1
+				
+				>PUSHW ZPPtr3
+
+				clc
+.9				rts
 *--------------------------------------
 KW.Div
 *--------------------------------------
@@ -197,7 +238,9 @@ KW.DivMod
 *--------------------------------------
 KW.MulDivMod
 *--------------------------------------
-KW.MulDiv
+KW.MulDiv		
+				clc
+				rts
 *--------------------------------------
 KW.MAX			jsr CheckStackPop4
 				bcs .9
@@ -355,11 +398,11 @@ KW.LWR			jsr CheckStackPop4
 				sbc (pStack),y
 				inc pStack
 
-				inc pStack
-				
-				rol
+				ror
+				lda #0
 				sta (pStack)
-
+				ldy #1
+				sta (pStack),y
 				clc
 
 .9				rts
@@ -376,11 +419,12 @@ KW.GTR			jsr CheckStackPop4
 				sbc (pStack),y
 				inc pStack
 
-				inc pStack
-				
-				rol
+				lda #0
+				ror
 				eor #$80
 				sta (pStack)
+				ldy #1
+				sta (pStack),y
 
 				clc
 
@@ -400,8 +444,6 @@ KW.EQ			jsr CheckStackPop4
 				sbc (pStack),y
 				inc pStack
 
-				inc pStack
-				
 				bcc .1
 				
 				txa
@@ -410,38 +452,41 @@ KW.EQ			jsr CheckStackPop4
 				sec
 				.HS 90					BCC
 .1				clc
+
+				lda #0
 				ror
 				sta (pStack)
+				ldy #1
+				sta (pStack),y
 
 				clc
 .9				rts
 *--------------------------------------
-KW.NEGATIVE		>PULLA
-				>PULLA
-				bpl .9
+KW.NEGATIVE		ldy #1
+				lda (pStack),y
 
-				sec
-				.HS 90					BCC
-.9				clc
+				asl
+				
+				lda #0
 				ror
 				sta (pStack)
+				sta (pStack),y
 
 				clc
 				rts
 *--------------------------------------
-KW.ZERO			>PULLA
-				tax
-				>PULLA
-				bne .9
-				
-				txa
+KW.ZERO			clc
+				ldy #1
+				lda (pStack),y
+				ora (pStack)
 				bne .9
 				
 				sec
-				.HS 90					BCC
-.9				clc
+
+.9				lda #0
 				ror
 				sta (pStack)
+				sta (pStack),y
 				
 				clc
 				rts
@@ -549,7 +594,7 @@ KW.KEY			>SYSCALL GetChar
 				
 				>PUSHA
 				
-.9				rts				
+.9				rts
 *--------------------------------------
 KW.EMIT			>PULLA
 				>SYSCALL PutChar
@@ -658,11 +703,11 @@ KW.FILL2		tax
 				clc
 				rts
 *--------------------------------------
-KW.HERE			>PUSHW ZPUsrBufPtr
+KW.HERE			>PUSHW ZPDataPtr
 				clc
 				rts
 *--------------------------------------
-KW.PAD			>PUSHW ZPPadBuf
+KW.PAD			>PUSHW ZPOutputPtr
 				clc
 				rts
 *--------------------------------------
@@ -679,17 +724,10 @@ KW.VLIST
 				clc
 				rts
 *--------------------------------------
-KW.BCOLON
+KW.BCOLON		bit bCompile
+				bmi KW.COLON.SYN
 
-				clc
-				rts
-*--------------------------------------
-KW.ECOLON
-
-				clc
-				rts
-*--------------------------------------
-KW.VARIABLE		>PUSHB.G hSList
+				>PUSHB.G hSList
 				>PUSHW ZPCLBufPtr
 
 				>SYSCALL SListNewKey
@@ -700,54 +738,243 @@ KW.VARIABLE		>PUSHB.G hSList
 				txa
 				jsr NextKW
 				
-				>LDYA L.PUSHADDR
-				>STYA ZPUsrCodePtr
+				lda #SYM.T.CODE
+				sta ZPType
+				
+				>LDYA ZPCodePtr
+				>STYA ZPAddrPtr
 				
 				>PUSHB.G hSList
 				>PUSHW ZPKeyID
-				>PUSHWI ZPUsrBufPtr
-				>PUSHWI 4				BufPtr+CodePtr
+				>PUSHWI ZPType
+				>PUSHWI 4
+				>SYSCALL SListAddData
+				bcs .9
+
+				sec
+				ror bCompile
+
+				clc
+.9				rts
+
+
+KW.COLON.SYN	lda #E.SYN
+				sec
+				rts
+*--------------------------------------
+KW.ECOLON		bit bCompile
+				bpl KW.COLON.SYN
+
+				lda #$60
+				jsr EmitByte
+
+				stz bCompile
+
+				clc
+				rts
+*--------------------------------------
+KW.VARIABLE		lda pStack
+				cmp #$FE
+				bcc .99
+
+				>PUSHB.G hSList
+				>PUSHW ZPCLBufPtr
+
+				>SYSCALL SListNewKey
+				bcs .9
+				
+				>STYA ZPKeyID
+				
+				txa
+				jsr NextKW
+				
+				lda #SYM.T.VAR
+				sta ZPType
+				
+				>LDYA ZPDataPtr
+				>STYA ZPAddrPtr
+				
+				>PUSHB.G hSList
+				>PUSHW ZPKeyID
+				>PUSHWI ZPType
+				>PUSHWI 4
 				>SYSCALL SListAddData
 				bcs .9
 				
 				>PULLA
-				sta (ZPUsrBufPtr)
+				sta (ZPDataPtr)
 				>PULLA
 				ldy #1
-				sta (ZPUsrBufPtr),y
+				sta (ZPDataPtr),y
 				
-				lda ZPUsrBufPtr
+				lda ZPDataPtr
 				clc
 				adc #2
-				sta ZPUsrBufPtr
+				sta ZPDataPtr
 				bcc .9
 	
-				inc ZPUsrBufPtr+1
+				inc ZPDataPtr+1
 				
 				clc
 .9				rts
+
+.99				lda #E.STACKERROR
+				sec
+				rts
 *--------------------------------------
 KW.CONSTANT
 *--------------------------------------
 KW.ACODE
 *--------------------------------------
 KW.FCODE
+
+				clc
+				rts
 *--------------------------------------
-KW.DO
+KW.DO			tsx
+
+				lda $101,x
+				clc
+				adc #0
+				pha
+				
+				lda $102,x
+				adc #0
+
+				ldy RP
+				sta (pData),y
+				dey
+
+				pla
+				sta (pData),y
+				dey
+				
+				>PULLA					start
+				tax
+				
+				>PULLA
+				sta (pData),y
+				dey
+
+				txa
+				sta (pData),y
+				dey
+
+				>PULLA					end+1
+				tax
+				
+				>PULLA
+				sta (pData),y
+				dey
+
+				txa
+				sta (pData),y
+				dey
+
+				sty RP
+				
+				clc
+				rts
 *--------------------------------------
-KW.LOOP
+KW.LOOP			lda #1
+				ldx #0
+
+KW.LOOPax		ldy RP
+			
+				iny						end+1
+				
+				iny
+				iny						start
+				
+				clc
+				adc (pData),y
+				sta (pData),y
+
+				pha
+				
+				iny
+				txa
+				adc (pData),y
+				sta (pData),y
+				
+				tax
+				
+				pla
+
+				ldy RP
+				iny						end+1
+
+				cmp (pData),y
+				txa
+				iny
+				sbc (pData),y
+				bcs .8
+				
+				lda RP
+				clc
+				adc #5
+				tay
+				lda (pData),y
+				sta ZPPtr1
+				iny
+				lda (pData),y
+				sta ZPPtr1+1
+
+				pla
+				pla
+				
+				jmp (ZPPtr1)
+
+.8				lda RP
+				clc
+				adc #6
+				sta RP
+
+*				clc
+				rts
 *--------------------------------------
-PW.pLOOP
+PW.pLOOP		>PULLA
+				tax
+				>PULLA
+
+				bra KW.LOOPax
 *--------------------------------------
-KW.I
+KW.I			ldy RP
+
+				iny						end+1
+				
+				iny
+				iny						start
+				
+				lda (pData),y
+				tax
+				iny
+				
+				lda (pData),y
+				>PUSHA
+				
+				txa
+				>PUSHA
+				
+				clc
+				rts
 *--------------------------------------
 KW.LEAVE
+
+				clc
+				rts
 *--------------------------------------
-KW.IF
+KW.IF			
+				clc
+				rts
 *--------------------------------------
-KW.ELSE
+KW.ELSE			
+				clc
+				rts
 *--------------------------------------
 KW.ENDIF
+				clc
+				rts
 *--------------------------------------
 KW.BEGIN
 *--------------------------------------
