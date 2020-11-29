@@ -21,14 +21,14 @@ This document lists all of the **Forth Words** supported in the A2osX implementa
 | D+ | ( d1 d2 - sum ) | Working | Add double-precision numbers |
 | - | ( n1 n2 - diff ) | Working | Subtract (n1-n2) | | |
 | * | ( n1 n2 - prod ) | Working | Multiply |
-| / | ( n1 n2 - quot ) | | Divide (n1/n2) | | |
-| MOD | ( n1 n2 - rem ) | | Modulo (remainder from division) | | |
-| /MOD | ( n1 n2 - rem quot ) | | Divide, giving remainder and quotient |
-| */MOD | ( n1 n2 - rem quot ) | | Multiply, then divide (n1*n2/n3), with double-precision intermediate |
-| */ | ( n1 n2 - quot ) |  | Like */MOD, but give quotient only |
-| MAX | 	( n1 n2 - max ) | Working | Maximum |
+| / | ( n1 n2 - quot ) | Working | Divide (n1/n2) | | |
+| MOD | ( n1 n2 - rem ) | Working | Modulo (remainder from division) | | |
+| /MOD | ( n1 n2 - rem quot ) | Working | Divide, giving remainder and quotient |
+| */MOD | ( n1 n2 n3 - rem quot ) | | Multiply, then divide (n1*n2/n3), with double-precision intermediate |
+| */ | ( n1 n2 n3 - quot ) |  | Like */MOD, but give quotient only |
+| MAX | ( n1 n2 - max ) | Working | Maximum |
 | MIN | ( n1 n2 - min ) | Working | Minimum |
-| ABS | ( n - absolute ) | | Absolute value |
+| ABS | ( n - absolute ) | Working | Absolute value |
 | DABS | ( d - absolute ) | | Absolute value of double-precision number |
 | MINUS | ( n - -n ) | Working | Change sign |
 | DMINUS | ( d - -d ) | Working | Change sign of double-precision number |
@@ -88,10 +88,10 @@ This document lists all of the **Forth Words** supported in the A2osX implementa
 | EDITOR | ( - ) | | Set context vocabulary to Editor vocabulary |
 | ASSEMBLER | ( - ) | | Set context vocabulary to Assembler |
 | VLIST | ( - ) | | Print names in context vocabulary |
+| VARIABLE | ( n - ) | Working | Create a variable with initial value n |
+| CONSTANT | ( n - ) | Working | Create a constant with value n |
 | : | ( - ) | Working | Begin a colon definition |
 | ; | ( - ) | Working | End of a colon definition |
-| VARIABLE | ( n - ) | Working | Create a variable with initial value n |
-| CONSTANT | ( n - ) | | Create a constant with value n |
 | CODE | ( - ) | | Create assembly-language definition |
 | ;CODE | ( - ) | | Create a new defining word, with runtime code routine in high-level Forth |
 | DO | ( end+1 start - ) | Working | Set up loop, given index range |
@@ -102,10 +102,10 @@ This document lists all of the **Forth Words** supported in the A2osX implementa
 | IF | ( f - ) | Working | If top of stack is true, execute true clause |
 | ELSE | ( - ) | Working | Beginning of the false clause |
 | ENDIF | ( - ) | Working | End of the IF-ELSE structure |
-| BEGIN | ( - ) | | Start an indefinite loop |
-| UNTIL | ( f - ) | | Loop back to BEGIN until f is true |
-| REPEAT | ( - ) | | Loop back to BEGIN unconditionally |
-| WHILE | ( f - ) | | Exit loop immediately if f is false |
+| BEGIN | ( - ) | Working | Start an indefinite loop |
+| UNTIL | ( f - ) | Working | Loop back to BEGIN until f is true |
+| REPEAT | ( - ) | Working | Loop back to BEGIN unconditionally |
+| WHILE | ( f - ) | Working | Exit loop immediately if f is false |
 | ( | ( - ) | | Begin comment, terminated by ) | |
 
 ## License

@@ -49,6 +49,7 @@ CL.MaxCnt		.BS 1
 ArgIndex		.EQ *
 bCompile		.BS 1
 RP				.BS 1
+Sign			.BS 1
 
 ZS.END			.ED
 *--------------------------------------
@@ -76,9 +77,10 @@ L.MSG.GREETINGS	.DA MSG.GREETINGS
 L.MSG.USAGE		.DA MSG.USAGE
 L.MSG.ECHOCRLF	.DA MSG.ECHOCRLF
 L.MSG.DEBUG		.DA MSG.DEBUG
-L.MSG.ERR		.DA MSG.ERR
+L.MSG.TRACE		.DA MSG.TRACE
 L.MSG.PROMPT	.DA MSG.PROMPT
 L.MSG.PROMPTCRLF	.DA MSG.PROMPTCRLF
+L.MSG.OK		.DA MSG.OK
 L.FMT.Byte		.DA FMT.Byte
 L.FMT.int16		.DA FMT.int16
 J.ESC			.DA CL.BS			left arrow
@@ -168,11 +170,11 @@ J.KEYWORDS		.DA KW.DUP
 				.DA KW.EDITOR
 				.DA KW.ASSEMBLER
 				.DA KW.VLIST
-				.DA KW.BCOLON
-				.DA KW.ECOLON			A2
-*--------------------------------------
 				.DA KW.VARIABLE
 				.DA KW.CONSTANT
+				.DA KW.BCOLON
+				.DA KW.ECOLON			A6
+*--------------------------------------
 				.DA KW.ACODE
 				.DA KW.FCODE
 				.DA KW.DO
@@ -187,11 +189,8 @@ J.KEYWORDS		.DA KW.DUP
 				.DA KW.UNTIL
 				.DA KW.REPEAT
 				.DA KW.WHILE
-				.DA KW.COMMENT
 *--------------------------------------
-J.CP			.DA CP.VARIABLE
-				.DA CP.CONSTANT
-				.DA CP.ACODE
+J.CP			.DA CP.ACODE
 				.DA CP.FCODE
 				.DA CP.DO
 				.DA CP.LOOP
@@ -205,7 +204,6 @@ J.CP			.DA CP.VARIABLE
 				.DA CP.UNTIL
 				.DA CP.REPEAT
 				.DA CP.WHILE
-				.DA CP.COMMENT
 				.DA 0
 *--------------------------------------
 CS.INIT			clc
@@ -215,7 +213,7 @@ CS.RUN			>PUSHW L.MSG.GREETINGS
 				>PUSHW A2osX.KVER
 				>PUSHBI 2
 				>SYSCALL PrintF
-*			>DEBUG
+
 				bcs CS.INIT.RTS
 
 				jsr CS.RUN.ARGS
@@ -271,7 +269,7 @@ CS.RUN			>PUSHW L.MSG.GREETINGS
 				stz bCompile
 				lda #127
 				sta RP
-
+*--------------------------------------
 CS.RUN.LOOP		>SLEEP
 
 				>LDA.G bDebug
@@ -279,40 +277,189 @@ CS.RUN.LOOP		>SLEEP
 
 				jsr PrintDebugMsg
 
-.2				>LDA.G bTrace
-				bpl .3
+.2				jsr CS.FORTH.Run
+				bcs .7
+				
+				>LDA.G hFile
+				bne CS.RUN.LOOP
+				
+				>PUSHW L.MSG.OK
+				>PUSHBI 0
+				>SYSCALL PrintF
+				bcs .99
+				
+				bra CS.RUN.LOOP
 
-				>LDYA ZPCLBuf
-				jsr PrintTraceMsg
-
-.3				jsr CS.FORTH.Run
-				bcc CS.RUN.LOOP
-
-				cmp #MLI.E.EOF
+.7				cmp #MLI.E.EOF
 				beq .8
 
 				cmp #3
 				beq .99
 
 				pha
-				>LDA.G bExitOnEOF
-				bmi .9
+				>LDA.G hFile
+				beq .71
+				
+				>LDA.G bTrace
+				bmi .70
 
-				pla
+				jsr PrintTraceMsg
+				
+.70				pla
+				pha
+				jsr PrintErrPtr
+				bra .9
+				
+.71				pla
+
 				>PUSHA
 				>PUSHW ZPCLBuf
 				>SYSCALL GetErrorMessage
 				>LDYA ZPCLBuf
 				>SYSCALL PutS
-				bra CS.RUN.LOOP
+				bcc CS.RUN.LOOP
 
-*				jsr PrintErrMsg
+				pha
 
 .9				pla
-.99				sec
-				rts
+				sec
+.99				rts
 
 .8				lda #0					Exit Code = Success
+				sec
+				rts
+*--------------------------------------
+CS.FORTH.Run	jsr CL.Reset
+
+				>LDA.G hFile
+				bne CS.FORTH.Run.File
+
+				lda #80
+				sta CL.MaxCnt
+
+				jsr PrintPrompt
+				bcs .9
+
+.1				>SYSCALL GetChar
+				bcs .9					I/O error
+
+.2				cmp #3					Ctrl-C
+				beq .9					CS
+
+				jsr CL.CHARIN
+
+				bit CL.bReady			Something to execute ?
+				bpl .1
+
+				>PUSHW L.MSG.PROMPTCRLF
+				>PUSHBI 0
+				>SYSCALL PrintF
+
+				jmp CS.RUN.EXEC
+
+.9				rts
+*--------------------------------------
+CS.FORTH.Run.File
+				>INCW.G LineCounter
+				
+				>PUSHWI 256
+				>PUSHW ZPCLBuf
+
+				>LDA.G hFile
+				>SYSCALL fgets
+				bcs .9
+
+				>LDA.G bTrace
+				bpl .1
+
+				jsr PrintTraceMsg
+
+.1				lda (ZPCLBuf)
+				beq .8
+
+				cmp #'\'
+				beq .8
+
+				cmp #'#'
+				bne .2
+
+				ldy #1
+				lda (ZPCLBuf),y
+				beq .2
+
+				cmp #'!'
+				beq .8
+
+.2				jmp CS.RUN.EXEC
+
+.8				clc
+.9				rts
+*--------------------------------------
+CS.RUN.EXEC		lda (ZPCLBufPtr)
+				beq .8					EOL
+
+				jsr IsSpaceOrCR
+				bcc .1
+				
+				jsr NextChar
+				bra CS.RUN.EXEC
+
+.1				jsr KW.Lookup
+				bcs .2
+			
+				jsr .7
+				bcc CS.RUN.EXEC
+
+				rts
+
+.2				jsr CS.RUN.GetSymbol
+				bcs .5
+
+				bit ZPType
+				bmi .4					CODE
+
+				>PUSHW ZPAddrPtr		CONSTANT,VARIABLE
+				bra CS.RUN.EXEC
+				
+.4				bit bCompile
+				bmi .40
+
+				jsr .80
+				bcc CS.RUN.EXEC
+
+				rts
+
+.40				>LDYA ZPAddrPtr
+				jsr EmitJsrYA
+				bra CS.RUN.EXEC
+
+.5				jsr CS.RUN.GetNum
+				bcc CS.RUN.EXEC
+
+				rts
+
+.8				clc
+.9				rts
+
+.7				txa
+				asl
+				tax
+
+				cpx #$A6				; ECOLON always EXECUTE
+				beq .71
+
+ 				bit bCompile
+				bmi .72
+
+.70				bcs .99					cannot exec compil only
+
+.71				jmp (J.KEYWORDS,x)
+
+.72				jmp CP.RUN
+
+.80				jmp (ZPAddrPtr)
+
+.99				lda #E.SYN
 				sec
 				rts
 *--------------------------------------
@@ -366,141 +513,6 @@ CS.RUN.ARGS		inc ArgIndex
 				sec						QUIT Process
 				rts
 *--------------------------------------
-CS.FORTH.Run	jsr CL.Reset
-
-				>LDA.G hFile
-				bne CS.FORTH.Run.File
-
-				lda #80
-				sta CL.MaxCnt
-
-				jsr PrintPrompt
-				bcs .9
-
-.1				>SYSCALL GetChar
-				bcs .9					I/O error
-
-.2				cmp #3					Ctrl-C
-				beq .9					CS
-
-				jsr CL.CHARIN
-
-				bit CL.bReady			Something to execute ?
-				bpl .1
-
-				>PUSHW L.MSG.PROMPTCRLF
-				>PUSHBI 0
-				>SYSCALL PrintF
-
-				jmp CS.RUN.EXEC
-
-.9				rts
-*--------------------------------------
-CS.FORTH.Run.File
-				>PUSHWI 256
-				>PUSHW ZPCLBuf
-
-				>LDA.G hFile
-				>SYSCALL fgets
-				bcs .9
-
-				lda (ZPCLBuf)
-				beq .8
-
-				cmp #'\'
-				beq .8
-
-				cmp #'#'
-				bne .1
-
-				ldy #1
-				lda (ZPCLBuf),y
-				beq .1
-
-				cmp #'!'
-				beq .8
-
-.1				jmp CS.RUN.EXEC
-
-.8				clc
-.9				rts
-*--------------------------------------
-CS.RUN.EXEC		lda (ZPCLBufPtr)
-				beq .8
-
-.1				jsr KW.Lookup
-				bcs .2
-
-				tya
-				jsr NextKW
-
-				jsr .7
-				bcc CS.RUN.EXEC
-
-				rts
-
-.2				jsr CS.RUN.GetSymbol
-				bcs .5
-
-				bit ZPType
-				bmi .4
-
-				bvc .3
-
-				>PUSHW ZPAddrPtr
-
-				rts
-
-.3				ldy #1
-				>PUSHB (ZPAddrPtr),y
-				>PUSHB (ZPAddrPtr)
-				rts
-
-.4				bit bCompile
-				bmi .40
-
-				jsr .80
-				bcc CS.RUN.EXEC
-
-				rts
-
-.40				>LDYA ZPAddrPtr
-				jsr EmitJsrYA
-				bra CS.RUN.EXEC
-
-.5				jsr CS.RUN.GetNum
-				bcs .9
-
-.6				jsr NextChar			Skip SPACE if any
-				bne .1
-
-.8				clc
-.9				rts
-
-.7				txa
-				asl
-				tax
-
-				cpx #$A2				; ECOLON always EXECUTE
-				beq .71
-
- 				bit bCompile
-				bmi .72
-
-.70				bcs .99					cannot exec compil only
-
-.71				jmp (J.KEYWORDS,x)
-
-.72				jmp CP.RUN
-
-.80
-*			>DEBUG
-				jmp (ZPAddrPtr)
-
-.99				lda #E.SYN
-				sec
-				rts
-*--------------------------------------
 CS.RUN.FOpen	>PUSHYA
 				>PUSHBI	O.RDONLY
 				>PUSHBI S.FI.T.TXT
@@ -530,13 +542,6 @@ CS.RUN.GetSymbol
 				>PUSHWZ					From Start
 
 				>SYSCALL SListGetData
-				bcs .9
-
-
-
-
-
-
 
 .9				rts
 *--------------------------------------
@@ -608,48 +613,74 @@ PrintPrompt		>PUSHW L.MSG.PROMPT
 				>SYSCALL PrintF
 				rts
 *--------------------------------------
-PrintErrMsg		>LDYA.G ZPCLBuf
-				>STYA ZPPtr1
-
-				clc
-
+PrintDebugMsg	>PUSHW L.MSG.DEBUG
+				>PUSHW ZPCodePtr
+				>PUSHW ZPDataPtr
+				>PUSHB pStack
+				>PUSHB RP
+				>PUSHBI 6
+				>SYSCALL PrintF
+				
 				rts
 *--------------------------------------
-PrintDebugMsg
-				clc
-				rts
-*--------------------------------------
-PrintTraceMsg	>STYA ZPPtr3
-
-PrintTraceMsg.3	>PUSHBI '>'
-				ldy #S.PS.hStdErr
-				lda (pPS),y
-				>SYSCALL FPutC
-
-				ldy #$ff
-
-.1				iny
-				lda (ZPPtr3),y
-				beq .8
-
-				cmp #C.CR
-				beq .8
-
-				phy
-				>PUSHA
-				ldy #S.PS.hStdErr
-				lda (pPS),y
-				>SYSCALL FPutC
-				ply
-				bra .1
-
-.8 				ldy #S.PS.hStdErr
+PrintTraceMsg	ldy #S.PS.hStdErr
 				lda (pPS),y
 				>PUSHA
 
-				>PUSHW L.MSG.ECHOCRLF
-				>PUSHBI 0
+				>PUSHW L.MSG.TRACE
+
+				>PUSHW.G LineCounter
+				>PUSHW ZPCLBuf
+				>PUSHBI 4
 				>SYSCALL FPrintF
+
+				rts
+*--------------------------------------
+PrintErrPtr		lda ZPCLBufPtr
+				sec
+				sbc ZPCLBuf
+
+				tax
+				
+				ldy #0
+				lda #C.SPACE
+				
+.1				sta (ZPCLBuf),y
+				iny
+				cpy #7
+				bne .1
+				
+				txa
+				beq .3
+				
+				lda #'-'
+				
+.2				sta (ZPCLBuf),y
+				iny
+				dex
+				bne .2
+				
+.3				lda #'^'
+				sta (ZPCLBuf),y
+				iny
+
+				lda #C.CR
+				sta (ZPCLBuf),y
+				iny
+
+				lda #C.LF
+				sta (ZPCLBuf),y
+				iny
+				
+				txa
+				sta (ZPCLBuf),y
+				
+				ldy #S.PS.hStdErr
+				lda (pPS),y
+				>PUSHA
+				
+				>PUSHW ZPCLBuf
+				>SYSCALL FPutS
 
 				rts
 *--------------------------------------
@@ -676,22 +707,20 @@ NextKW			clc
 				inc ZPCLBufPtr+1
 *--------------------------------------
 NextCharNB		lda (ZPCLBufPtr)
-				beq .8
+				beq .9
 
 				jsr IsSpaceOrCR
-				bcs .8
+				bcc .8
 
-				inc ZPCLBufPtr
-				bne NextCharNB
-				inc ZPCLBufPtr+1
+				jsr NextChar
 				bra NextCharNB
 
 .8				rts
-*--------------------------------------
-NextChar		lda (ZPCLBufPtr)
-				beq .8
 
-				inc ZPCLBufPtr
+.9				sec
+				rts
+*--------------------------------------
+NextChar		inc ZPCLBufPtr
 				bne .8
 
 				inc ZPCLBufPtr+1
@@ -709,17 +738,15 @@ ToUpperCase		cmp #'a'
 .8				clc						exit CC to allow Jmp to
 				rts
 *--------------------------------------
-IsSpaceOrCR		cmp #C.SPACE
-				beq IsEndKW.8
+IsSpaceOrCR		cmp #C.SPACE			CS=TRUE
+				beq .8
 
 				cmp #C.CR
-				beq IsEndKW.8
+				beq .8
 
-				sec
-				rts
-
-IsEndKW.8		clc
-				rts
+				clc
+				
+.8				rts
 *--------------------------------------
 CheckStackPop4	lda pStack
 				sec
@@ -739,15 +766,16 @@ CheckStackPop4	lda pStack
 *--------------------------------------
 CS.END
 *--------------------------------------
-MSG.GREETINGS	.AZ "\r\nA2osX-FORTH %d.%d (figForth)\r\n\r\n"
+MSG.GREETINGS	.AZ "\r\nA2osX-FORTH %d.%d (figFORTH)\r\n"
 MSG.USAGE		.AS "Usage : FORTH <option> file\r\n"
 				.AS "   -D : Debug Mode\r\n"
 				.AS "   -T : Trace On"
 MSG.ECHOCRLF	.AZ "\r\n"
-MSG.DEBUG		.AZ "pStack=%H"
-MSG.ERR			.AZ "^\r\nLine #%D:"
-MSG.PROMPT		.AZ "\e[?7hOK\r\n> "	Enable Line Wrap
+MSG.DEBUG		.AZ "(CODE:%H, DATA=%H, SP=%h, RP=%h)\r\n"
+MSG.TRACE		.AZ "[%5D]%s\r\n"
+MSG.PROMPT		.AZ "\e[?7h\r\n> "		Enable Line Wrap
 MSG.PROMPTCRLF	.AZ "\e[?7l\r\n"		Disable Line Wrap
+MSG.OK			.AZ "OK\r\n"
 FMT.Byte		.AZ "%d "
 FMT.int16		.AZ "%I "
 *--------------------------------------
@@ -774,8 +802,8 @@ KEYWORDS		.AT "DUP"				( n - n n ) Duplicate top of stack.
 				.AT "/"					( n1 n2 - quot ) Divide (n1/n2).
 				.AT "MOD"				( n1 n2 - rem ) Modulo (remainder from division).
 				.AT "/MOD"				( n1 n2 - rem quot ) Divide, giving remainder and quotient.
-				.AT "*/MOD"				( n1 n2 - rem quot ) Multiply, then divide (n1*n2/n3), with double-precision intermediate.
-				.AT "*/"				( n1 n2 - quot ) Like */MOD, but give quotient only.
+				.AT "*/MOD"				( n1 n2 n3 - rem quot ) Multiply, then divide (n1*n2/n3), with double-precision intermediate.
+				.AT "*/"				( n1 n2 n3 - quot ) Like */MOD, but give quotient only.
 				.AT "MAX"				( n1 n2 - max ) Maximum.
 				.AT "MIN"				( n1 n2 - min ) Minimum.
 				.AT "ABS"				( n - absolute ) Absolute value.
@@ -840,11 +868,11 @@ KEYWORDS		.AT "DUP"				( n - n n ) Duplicate top of stack.
 				.AT "EDITOR"			( - ) Set context vocabulary to Editor vocabulary.
 				.AT "ASSEMBLER"			( - ) Set context vocabulary to Assembler.
 				.AT "VLIST"				( - ) Print names in context vocabulary.
+				.AT "VARIABLE"			( n - ) Create a variable with initial value n.
+				.AT "CONSTANT"			( n - ) Create a constant with value n.
 *--------------------------------------
 				.AT ":"					( - ) Begin a colon definition.
 				.AT ";"					( - ) End of a colon definition.
-				.AT "VARIABLE"			( n - ) Create a variable with initial value n.
-				.AT "CONSTANT"			( n - ) Create a constant with value n.
 				.AT "CODE"				( - ) Create assembly-language definition.
 				.AT ";CODE"				( - ) Create a new defining word, with runtime code routine in high-level Forth.
 				.AT "DO"				( end+1 start - ) Set up loop, given index range.
@@ -859,8 +887,6 @@ KEYWORDS		.AT "DUP"				( n - n n ) Duplicate top of stack.
 				.AT "UNTIL"				( f - ) Loop back to BEGIN until f is true.
 				.AT "REPEAT"			( - ) Loop back to BEGIN unconditionally.
 				.AT "WHILE"				( f - ) Exit loop immediately if f is false.
-*--------------------------------------
-				.AT "("					( - ) Begin comment, terminated by ).
 *--------------------------------------
 				.DA #0
 *--------------------------------------
@@ -886,6 +912,7 @@ OutputBuf		.BS 2
 
 hCLBuf			.BS 1
 hFile			.BS 1
+LineCounter		.BS 2
 hSList			.BS 1
 
 DS.END			.ED
