@@ -8,12 +8,12 @@ This document lists all of the **Forth Words** supported in the A2osX implementa
 
 | Word | Syntax | Status | Description | Comment |
 |-|-|-|-|-|
-| DUP | 	( n - n n ) | Working | Duplicate top of stack |
+| DUP | ( n - n n ) | Working | Duplicate top of stack |
 | DROP | ( n - ) | Working | Discard top of stack |
 | SWAP | ( n1 n2 - n2 n1 ) | Working | Reverse top two stack items |
 | OVER | ( n1 n2 - n1 n2 n1 ) | Working | Copy second item to top |
-| ROT | ( n1 n2 n3 - n2 n3 n1 ) | | Rotate third item to top |
-| -DUP | ( n - n ? ) | | Duplicate only if non-zero |
+| ROT | ( n1 n2 n3 - n2 n3 n1 ) | Working | Rotate third item to top |
+| -DUP | ( n - n ? ) | Working | Duplicate only if non-zero |
 | >R | ( n - ) | | Move top item to return stack |
 | R> | ( - n ) | | Retrieve item from return stack |
 | R | ( - n ) | Working | Copy top of return stack onto stack |
@@ -78,7 +78,7 @@ This document lists all of the **Forth Words** supported in the A2osX implementa
 | BLANKS | ( addr u - ) | Working | Fill u bytes in memory with blanks |
 | HERE | ( - addr ) | Working | Return address above dictionary |
 | PAD | ( - addr ) | Working | Return address of scratch area |
-| ALLOT | ( u - ) | | Leave a gap of n bytes in the dictionary |
+| ALLOT | ( u - ) | Working | Leave a gap of n bytes in the dictionary |
 | , | ( n - ) | | Compile number n into the dictionary |
 | ' | ( - addr ) | | Find address of next string in dictionary |
 | FORGET | ( - ) | | Delete all definitions above and including the following definition |

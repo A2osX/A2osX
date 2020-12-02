@@ -43,6 +43,7 @@ KW.Lookup		>LDYA L.KEYWORDS
 				jsr IncPtr1
 
 .6				inx
+				inx
 				lda (ZPPtr1)			Array Ending 0, lookup failed
 				bne .1
 
@@ -55,21 +56,27 @@ KW.Lookup		>LDYA L.KEYWORDS
 			
 				jmp IsSpaceOrCR			CS=end of valid chars
 *--------------------------------------
+KW.mDUP			lda (pStack)
+				ldy #1
+				ora (pStack),y
+				bne KW.DUP
+				
+				clc
+				rts
+*--------------------------------------
 KW.DUP			lda pStack
 				beq .9
 
 				cmp #$FF
-				beq .9
+				bcs .9
 				
-				cmp #1
+				cmp #2
 				bcc .99
 				
-				lda (pStack)
-				tax
 				ldy #1
 				lda (pStack),y
 				>PUSHA
-				txa
+				lda (pStack),y
 				>PUSHA
 				clc
 				rts
@@ -88,6 +95,7 @@ KW.DROP			lda pStack
 				inc pStack
 				beq .9
 				inc pStack
+
 				clc
 				rts
 				
@@ -121,29 +129,65 @@ KW.SWAP			ldy #3
 				iny						#3
 				txa
 				sta (pStack),y
+
 				clc
 				rts
 *--------------------------------------
-KW.OVER			lda pStack
-				sec
-				sbc #2
-				bcc .9
+KW.OVER			jsr CheckStackPop4
+				bcs .9
+				
+				cmp #2
+				bcc .99
 				
 				ldy #3
 				lda (pStack),y
 				>PUSHA
 				lda (pStack),y
 				>PUSHA
+
 				clc
 				rts
 
-.9				lda #E.STKOVERFLOW
+.99				lda #E.STKOVERFLOW
 				sec
+.9				rts
+*--------------------------------------
+KW.ROT			lda pStack
+				beq .9
+				
+				cmp #$FB
+				bcs .9
+				
+				ldy #5
+				lda (pStack),y			n1 HI
+				pha
+				dey
+				lda (pStack),y			n1 LO
+				pha
+				
+.1				dey
+	
+				lda (pStack),y
+				iny
+				iny
+				sta (pStack),y
+				dey
+				dey
+				bne .1
+
+				iny
+				
+				pla
+				sta (pStack)
+				pla
+				sta (pStack),y
+				
+				clc
 				rts
-*--------------------------------------
-KW.ROT
-*--------------------------------------
-KW.mDUP
+				
+.9				lda #E.STACKERROR
+				sec
+				rts				
 *--------------------------------------
 KW.gR
 *--------------------------------------
@@ -535,7 +579,7 @@ KW.LWR			jsr CheckStackPop4
 				inc pStack
 
 				lda (pStack),y
-				sbc (pStack),y
+				sbc (pStack)
 				inc pStack
 
 				ror
@@ -556,7 +600,7 @@ KW.GTR			jsr CheckStackPop4
 				inc pStack
 
 				lda (pStack),y
-				sbc (pStack),y
+				sbc (pStack)
 				inc pStack
 
 				lda #0
@@ -852,11 +896,54 @@ KW.HERE			>PUSHW ZPDataPtr
 				clc
 				rts
 *--------------------------------------
-KW.PAD			>PUSHW ZPOutputPtr
+KW.PAD			>PUSHW ZPOutputBufPtr
 				clc
 				rts
+				
+KW.ALLOT.9		lda #E.STACKERROR
+				sec
+				rts				
 *--------------------------------------
-KW.ALLOT
+KW.ALLOT		lda #SYM.T.VAR
+				sta ZPType
+
+				lda pStack
+				beq KW.ALLOT.9
+
+				cmp #$FF
+				bcs KW.ALLOT.9
+				
+				>PUSHB.G hSList
+				>PUSHW ZPCLBufPtr
+
+				>SYSCALL SListNewKey
+				bcs .9
+				
+				>STYA ZPKeyID
+				
+				txa
+				jsr NextKW
+				
+				>LDYA ZPDataPtr
+				>STYA ZPAddrPtr
+				
+				>PULLA
+				clc
+				adc ZPDataPtr
+				sta ZPDataPtr
+				
+				>PULLA
+				adc ZPDataPtr+1
+				sta ZPDataPtr+1
+				
+				>PUSHB.G hSList
+				>PUSHW ZPKeyID
+				>PUSHWI ZPType
+				>PUSHWI 4
+				>SYSCALL SListAddData
+				
+.9				rts
+*--------------------------------------
 KW.nCOMPILE
 KW.QUOTE
 KW.FORGET
@@ -869,9 +956,53 @@ KW.ASSEMBLER
 				sec
 				rts
 *--------------------------------------
-KW.VLIST
-				clc
-				rts
+KW.VLIST		bit bCompile
+				bpl .10
+
+.8				clc
+.9				rts
+
+.10				stz ZPPtr2
+				stz ZPPtr2+1
+				
+.1				>LDYA ZPPtr2
+				>STYA ZPPtr1
+				
+				>PUSHB.G hSList
+				>PUSHW ZPPtr1
+				>PUSHW ZPOutputBufPtr
+				>SYSCALL SListGetByID
+				bcs .8
+				
+				>STYA ZPPtr2			Save Next ID
+
+				>PUSHB.G hSList
+				>PUSHW ZPPtr1			KeyID
+				>PUSHW ZPType
+				>PUSHWI 4
+				>PUSHWZ					from Start
+				>SYSCALL SListGetData
+				bcs .9
+
+				>PUSHW L.MSG.DUMP2
+				>PUSHW ZPOutputBufPtr
+				ldx #4
+				bit ZPType
+				bmi .2
+				dex
+				dex
+				bvs .2
+				dex
+				dex
+.2				>PUSHW L.MSG.TYPES,x
+				>PUSHW ZPAddrPtr
+				>PUSHBI 6
+				>SYSCALL PrintF
+				jmp .1
+				
+KW.VC.9			lda #E.STACKERROR
+				sec
+				rts	
 *--------------------------------------
 KW.VARIABLE		lda #SYM.T.VAR
 				bra KM.VC
@@ -881,14 +1012,12 @@ KW.CONSTANT		lda #SYM.T.CONST
 KM.VC			sta ZPType
 
 				lda pStack
-				cmp #$FE
-				bcs .10
+				beq KW.VC.9
+
+				cmp #$FF
+				bcs KW.VC.9
 				
-				lda #E.STACKERROR
-				sec
-				rts
-				
-.10				>PUSHB.G hSList
+				>PUSHB.G hSList
 				>PUSHW ZPCLBufPtr
 
 				>SYSCALL SListNewKey
@@ -972,7 +1101,7 @@ KW.ECOLON		bit bCompile
 				bpl KW.COLON.SYN
 
 				lda #$60
-				jsr EmitByte
+				jsr CP.Emit.Byte
 
 				stz bCompile
 
@@ -984,152 +1113,6 @@ KW.ACODE
 KW.FCODE
 
 				lda #E.SYN
-				sec
-				rts
-*--------------------------------------
-KW.DO			tsx
-
-				lda $101,x
-				clc
-				adc #0
-				pha
-				
-				lda $102,x
-				adc #0
-
-				ldy RP
-				sta (pData),y
-				dey
-
-				pla
-				sta (pData),y
-				dey
-				
-				>PULLA					start
-				tax
-				
-				>PULLA
-				sta (pData),y
-				dey
-
-				txa
-				sta (pData),y
-				dey
-
-				>PULLA					end+1
-				tax
-				
-				>PULLA
-				sta (pData),y
-				dey
-
-				txa
-				sta (pData),y
-				dey
-
-				sty RP
-				
-				clc
-				rts
-*--------------------------------------
-KW.LOOP			lda #1
-				ldx #0
-
-KW.LOOPax		ldy RP
-			
-				iny						end+1
-				
-				iny
-				iny						start
-				
-				clc
-				adc (pData),y
-				sta (pData),y
-
-				pha
-				
-				iny
-				txa
-				adc (pData),y
-				sta (pData),y
-				
-				tax
-				
-				pla
-
-				ldy RP
-				iny						end+1
-
-				cmp (pData),y
-				txa
-				iny
-				sbc (pData),y
-				bcs .8
-				
-				lda RP
-				clc
-				adc #5
-				tay
-				lda (pData),y
-				sta ZPPtr1
-				iny
-				lda (pData),y
-				sta ZPPtr1+1
-
-				pla
-				pla
-				
-				jmp (ZPPtr1)
-
-.8				lda RP
-				clc
-				adc #6
-				sta RP
-
-*				clc
-				rts
-*--------------------------------------
-PW.pLOOP		>PULLA
-				tax
-				>PULLA
-
-				bra KW.LOOPax
-*--------------------------------------
-KW.I			ldy RP
-
-				iny						end+1
-				
-				iny
-				iny						start
-				
-				lda (pData),y
-				tax
-				iny
-				
-				lda (pData),y
-				>PUSHA
-				
-				txa
-				>PUSHA
-				
-				clc
-				rts
-*--------------------------------------
-KW.LEAVE
-*--------------------------------------
-KW.IF			
-*--------------------------------------
-KW.ELSE			
-*--------------------------------------
-KW.ENDIF
-*--------------------------------------
-KW.BEGIN
-*--------------------------------------
-KW.UNTIL
-*--------------------------------------
-KW.REPEAT
-*--------------------------------------
-KW.WHILE		lda #E.SYN
 				sec
 				rts
 *--------------------------------------

@@ -25,8 +25,8 @@ SYM.T.CODE		.EQ 128
 ZS.START
 ZPCodePtr		.BS 2
 ZPDataPtr		.BS 2
-ZPInputPtr		.BS 2
-ZPOutputPtr		.BS 2
+ZPInputBufPtr	.BS 2
+ZPOutputBufPtr	.BS 2
 
 ZPKeyID			.BS 2
 ZPType			.BS 1
@@ -81,6 +81,10 @@ L.MSG.TRACE		.DA MSG.TRACE
 L.MSG.PROMPT	.DA MSG.PROMPT
 L.MSG.PROMPTCRLF	.DA MSG.PROMPTCRLF
 L.MSG.OK		.DA MSG.OK
+L.MSG.DUMP2		.DA MSG.DUMP2
+L.MSG.TYPES		.DA MSG.CONST
+				.DA MSG.VAR
+				.DA MSG.CODE
 L.FMT.Byte		.DA FMT.Byte
 L.FMT.int16		.DA FMT.int16
 J.ESC			.DA CL.BS			left arrow
@@ -93,13 +97,13 @@ L.KEYWORDS		.DA KEYWORDS
 J.KEYWORDS		.DA KW.DUP
 				.DA KW.DROP
 				.DA KW.SWAP
-				.DA KW.OVER
+J.KEYWORDS.OVER	.DA KW.OVER
 				.DA KW.ROT
 				.DA KW.mDUP
 				.DA KW.gR
 				.DA KW.Rg
 				.DA KW.R
-				.DA KW.Add
+J.KEYWORDS.ADD	.DA KW.Add
 				.DA KW.DAdd
 				.DA KW.Sub
 				.DA KW.Mul
@@ -117,7 +121,7 @@ J.KEYWORDS		.DA KW.DUP
 				.DA KW.AND
 				.DA KW.OR
 				.DA KW.XOR
-				.DA KW.LWR
+J.KEYWORDS.LWR	.DA KW.LWR
 				.DA KW.GTR
 				.DA KW.EQ
 				.DA KW.NEGATIVE
@@ -172,26 +176,15 @@ J.KEYWORDS		.DA KW.DUP
 				.DA KW.VLIST
 				.DA KW.VARIABLE
 				.DA KW.CONSTANT
-				.DA KW.BCOLON
-				.DA KW.ECOLON			A6
 *--------------------------------------
+				.DA KW.BCOLON
+KW.ECOLON.ID	.EQ *-J.KEYWORDS
+				.DA KW.ECOLON
 				.DA KW.ACODE
 				.DA KW.FCODE
-				.DA KW.DO
-				.DA KW.LOOP
-				.DA PW.pLOOP
-				.DA KW.I
-				.DA KW.LEAVE
-				.DA KW.IF
-				.DA KW.ELSE
-				.DA KW.ENDIF
-				.DA KW.BEGIN
-				.DA KW.UNTIL
-				.DA KW.REPEAT
-				.DA KW.WHILE
 *--------------------------------------
-J.CP			.DA CP.ACODE
-				.DA CP.FCODE
+KW.CONLY		.EQ *-J.KEYWORDS
+*--------------------------------------
 				.DA CP.DO
 				.DA CP.LOOP
 				.DA CP.pLOOP
@@ -241,7 +234,7 @@ CS.RUN			>PUSHW L.MSG.GREETINGS
 				>SYSCALL GetMem
 				bcs .9
 
-				>STYA.G InputBuf
+				>STYA ZPInputBufPtr
 				txa
 				>STA.G hInputBuf
 
@@ -249,7 +242,7 @@ CS.RUN			>PUSHW L.MSG.GREETINGS
 				>SYSCALL GetMem
 				bcs .9
 
-				>STYA.G OutputBuf
+				>STYA ZPOutputBufPtr
 				txa
 				>STA.G hOutputBuf
 
@@ -406,7 +399,7 @@ CS.RUN.EXEC		lda (ZPCLBufPtr)
 
 .1				jsr KW.Lookup
 				bcs .2
-			
+
 				jsr .7
 				bcc CS.RUN.EXEC
 
@@ -430,7 +423,7 @@ CS.RUN.EXEC		lda (ZPCLBufPtr)
 				rts
 
 .40				>LDYA ZPAddrPtr
-				jsr EmitJsrYA
+				jsr CP.Emit.JsrYA
 				bra CS.RUN.EXEC
 
 .5				jsr CS.RUN.GetNum
@@ -441,27 +434,23 @@ CS.RUN.EXEC		lda (ZPCLBufPtr)
 .8				clc
 .9				rts
 
-.7				txa
-				asl
-				tax
+.7				bit bCompile
+				bmi .71
 
-				cpx #$A6				; ECOLON always EXECUTE
-				beq .71
-
- 				bit bCompile
-				bmi .72
-
-.70				bcs .99					cannot exec compil only
-
-.71				jmp (J.KEYWORDS,x)
-
-.72				jmp CP.RUN
-
-.80				jmp (ZPAddrPtr)
-
-.99				lda #E.SYN
+				cpx #KW.CONLY
+				bcc .70
+				
+				lda #E.SYN
 				sec
 				rts
+
+.70				jmp (J.KEYWORDS,x)		INTERPRET
+
+.71				jmp CP.RUN				COMPILE
+
+.80
+*				>DEBUG
+				jmp (ZPAddrPtr)
 *--------------------------------------
 CS.RUN.ARGS		inc ArgIndex
 
@@ -551,6 +540,9 @@ CS.RUN.GetNum	>PUSHW ZPCLBufPtr
 				>SYSCALL StrToL
 				bcs .9
 
+				bit bCompile
+				bmi .1
+
 				ldy #2
 				lda (pStack)
 				sta (pStack),y
@@ -561,16 +553,26 @@ CS.RUN.GetNum	>PUSHW ZPCLBufPtr
 				sta (pStack),y
 
 				inc pStack
-
-				bit bCompile
-				bpl .9
-
-.1				>PULLYA
-				jsr EmitPushA
-				tya
-				jmp EmitPushA
-
+				
+*				clc
 .9				rts
+
+.1				lda #$A9				lda #imm
+				jsr CP.Emit.Byte
+				ldy #1
+				lda (pStack),y
+				jsr CP.Emit.Byte
+
+				jsr CP.Emit.PUSHA
+				
+				lda #$A9				lda #imm
+				jsr CP.Emit.Byte
+				lda (pStack)
+				jsr CP.Emit.Byte
+
+				jsr CP.Emit.PUSHA
+				
+				>RET 4
 *--------------------------------------
 CS.DOEVENT		sec
 				rts
@@ -749,9 +751,10 @@ IsSpaceOrCR		cmp #C.SPACE			CS=TRUE
 .8				rts
 *--------------------------------------
 CheckStackPop4	lda pStack
-				sec
-				sbc #4
-				bcc .9
+				beq .9
+				
+				cmp #$FD
+				bcs .9
 
 				clc
 				rts
@@ -766,7 +769,7 @@ CheckStackPop4	lda pStack
 *--------------------------------------
 CS.END
 *--------------------------------------
-MSG.GREETINGS	.AZ "\r\nA2osX-FORTH %d.%d (figFORTH)\r\n"
+MSG.GREETINGS	.AZ "\e[?7h\r\nA2osX-FORTH %d.%d (figFORTH)\r\n"
 MSG.USAGE		.AS "Usage : FORTH <option> file\r\n"
 				.AS "   -D : Debug Mode\r\n"
 				.AS "   -T : Trace On"
@@ -776,6 +779,10 @@ MSG.TRACE		.AZ "[%5D]%s\r\n"
 MSG.PROMPT		.AZ "\e[?7h\r\n> "		Enable Line Wrap
 MSG.PROMPTCRLF	.AZ "\e[?7l\r\n"		Disable Line Wrap
 MSG.OK			.AZ "OK\r\n"
+MSG.DUMP2		.AZ "%s %s%D "
+MSG.CONST		.AZ "Const V="
+MSG.VAR			.AZ "Var @="
+MSG.CODE		.AZ "Code @="
 FMT.Byte		.AZ "%d "
 FMT.int16		.AZ "%I "
 *--------------------------------------
@@ -890,6 +897,48 @@ KEYWORDS		.AT "DUP"				( n - n n ) Duplicate top of stack.
 *--------------------------------------
 				.DA #0
 *--------------------------------------
+CODE.RPDROP2	inc RP
+				inc RP
+CODE.RPDROP2.L	.EQ *-CODE.RPDROP2
+*--------------------------------------
+CODE.TESTTRUE	>PULLA
+				>PULLA
+				tax
+.1				bpl .1+5
+CODE.TESTTRUE.L	.EQ *-CODE.TESTTRUE
+*--------------------------------------
+CODE.TESTFALSE	>PULLA
+				>PULLA
+				tax
+.1				bmi .1+5
+CODE.TESTFALSE.L	.EQ *-CODE.TESTFALSE
+*--------------------------------------
+CODE.PULLA		>PULLA
+CODE.PULLA.L	.EQ *-CODE.PULLA
+*--------------------------------------
+CODE.PUSHA		>PUSHA
+CODE.PUSHA.L	.EQ *-CODE.PUSHA
+*--------------------------------------
+CODE.LOOP		ldy #2
+				lda (pStack),y
+				cmp (pStack)
+				inc pStack
+
+				lda (pStack),y
+				sbc (pStack)
+
+				dec pStack
+
+.1				bcc .1+5				
+CODE.LOOP.L		.EQ *-CODE.LOOP
+*--------------------------------------
+CODE.LOOPEND	lda pStack				POP 4 bytes
+				clc
+				adc #4
+				sta pStack
+				clc
+CODE.LOOPEND.L	.EQ *-CODE.LOOPEND
+*--------------------------------------
 				.DUMMY
 				.OR 0
 DS.START		.BS 128					RETURN STACK
@@ -905,10 +954,7 @@ hDataBuf		.BS 1
 DataBuf			.BS 2
 
 hInputBuf		.BS 1
-InputBuf		.BS 2
-
 hOutputBuf		.BS 1
-OutputBuf		.BS 2
 
 hCLBuf			.BS 1
 hFile			.BS 1
