@@ -1,0 +1,218 @@
+NEW
+  AUTO 3,1
+                .LIST OFF
+                .OP 65C02
+                .OR $2000
+                .TF bin/acc
+*--------------------------------------
+                .INB inc/macros.i
+                .INB inc/a2osx.i
+*--------------------------------------
+* Zero Page Segment, up to 32 bytes
+*--------------------------------------
+                .DUMMY
+                .OR ZPBIN
+ZS.START
+ZPPtr1          .BS 2                   ; address pointer (used in arg parsing)
+ArgIndex        .BS 1                   ; index offset for argument parsing
+bFast           .BS 1                   ; arg variable - fast mode if = 1
+bSlow           .BS 1                   ; arg variable - slow mode if = 1
+ZS.END          .ED
+*--------------------------------------
+*            File Header (16 Bytes)
+*--------------------------------------
+CS.START        cld
+                jmp (.1,x)
+                .DA #$61                ; 6502,Level 1 (65c02)
+                .DA #1                  ; BIN Layout Version 1
+                .DA #0                  ; Events disabled (enable with S.PS.F.EVENT)
+                .DA #0
+                .DA CS.END-CS.START     ; Code Size (without Constants)
+                .DA DS.END-DS.START     ; Data SegmentSize
+                .DA #32                 ; Stack Size
+                .DA #ZS.END-ZS.START    ; Zero Page Size
+                .DA 0
+*--------------------------------------
+* Relocation Table
+*--------------------------------------
+.1              .DA CS.INIT
+                .DA CS.RUN
+                .DA CS.DOEVENT
+                .DA CS.QUIT
+L.MSG.USAGE     .DA MSG.USAGE           ; msg for usage / help text
+L.MSG.FAST      .DA MSG.MSG.FAST        ; msg for saying fast mode is enabled
+L.MSG.SLOW      .DA MSG.MSG.SLOW        ; msg for saying slow mode is enabled
+                .DA 0
+*--------------------------------------
+* Called once at process creation
+* Put code for loading LIB here
+*--------------------------------------
+CS.INIT         clc                     ; nothing to init, so just clc and return
+                rts
+*--------------------------------------
+* Called until exit with CS
+* if RUN exits with CC, RN entered again
+*--------------------------------------
+CS.RUN
+.1              inc ArgIndex            ; Check next argument
+                lda ArgIndex
+                >SYSCALL ArgV           ; check for an arg at index in A
+                bcs .4                  ; If doesn't exist, we're done with args
+
+                >STYA ZPPtr1            ; ArgV pointer was in Y,A so stick into ZPPtr1
+                lda (ZPPtr1)
+                cmp #'-'                ; does arg have a hyphen?
+                bne .9                  ; no, we're done as we don't use any non-hyphened args
+
+                jsr CS.RUN.CheckOpt     ; if it had a hyphen, check and set arg if recognized
+                bcc .1                  ; if we recognized the arg, then loop again to check next
+
+
+*--- Fast Mode Test -------------------
+.4
+                bit bFast               ; did they want us to switch to fast mode?
+                bpl .5                  ; no, so go check next possibility
+                >PUSHW L.MSG.FAST       ; push address for fast mode message
+                >PUSHBI 0
+                >SYSCALL PrintF         ; print fast mode msg
+                jsr CS.RUN.SetFastMode  ; call fast mode routine
+                jmp .99                 ; jump to successful exit
+
+*--- Slow mode test -------------------
+.5
+                bit bSlow               ; did they want us to switch to slow mode?
+                bpl .9                  ; no, so go display usage
+                >PUSHW L.MSG.SLOW       ; push address for slow mode message
+                >PUSHBI 0
+                >SYSCALL PrintF         ; print slow mode message
+                jsr CS.RUN.SetSlowMode  ; call slow mode routine
+                jmp .99                 ; jump to successful exit
+
+*--- Display usage and error out ------
+.9
+                >PUSHW L.MSG.USAGE      ; push address for usage text
+                >PUSHBI 0
+                >SYSCALL PrintF         ; print usage message
+                lda #E.SYN              ; set OS return code as Syntax Error
+                sec                     ; indicate we don't want CS.RUN called again
+                rts                     ; return to OS
+
+*--- Successful exit ------------------
+.99
+                lda #0                  ; set OS return code to success
+                sec                     ; indicate we don't want CS.RUN called again
+                rts                     ; return to OS
+*--------------------------------------
+* Called if option S.PS.F.EVENT enabled in Header
+* Timer Event : every 10th seconds
+*--------------------------------------
+CS.DOEVENT      sec                     ; we don't use this since we don't have timer events
+                rts
+*--------------------------------------
+* Called once, when RUN exited with CS
+* Put code for unloading LIB here
+*--------------------------------------
+CS.QUIT         clc                     ; nothing to do on exit except clear carry and return
+                rts
+*--------------------------------------
+* CheckOpt assumes a set ZPPtr1 which is the address of the command line argument being examined.
+* We start at 1 to look past the '-' as position 0 since that was checked by the caller.
+* OptionList is a list of possible options and each character correlates with a memory offset
+* in OptionVars, which are only one byte since they are in ZP but this also allows for us to
+* simply use indexed addressing to reference them easily as well instead of doing 16-bit
+* address juggling.
+* The options are checked in reverse from end-to-start and indexed by X.
+*--------------------------------------
+CS.RUN.CheckOpt ldy #1                  ; set up y to look at second character of passed in arg
+                lda (ZPPtr1),y          ; check second character of passed in argument into A
+                ldx #OptionVars-OptionList-1 ; clever way to put size of OptionList into X
+
+.2              cmp OptionList,x        ; compare the arg we got to the OptionList at X
+                beq .3                  ; if it is a match, go handle it.
+                dex                     ; if not, decrement so we can check next OptionList
+                bpl .2                  ; if we haven't reached end of OptionList, go check next
+                sec                     ; set carry if we didn't find a match
+                rts                     ; return to caller
+
+.3              ldy OptionVars,x        ; since we matched, find ZP addr of matching option into Y
+                lda #$ff                ; we will set this ZP option to $FF
+                sta 0,y                 ; store A into the ZP address we have in Y
+                clc                     ; clear carry since we found a match
+                rts                     ; return to caller
+*--------------------------------------
+* CS.RUN.SetFastMode
+* Calls a few different ways to enable accelerators, mainly ZipChip, Titan, and TransWarp.
+* However, it also works for RocketChip as well.
+* The first one (using $C05C) came from some documentation, but not sure which accelerator uses it.
+*--------------------------------------
+CS.RUN.SetFastMode
+                sta $C05C               ; not sure which accelerator follows this? Not RC at least..
+
+*                lda #$05                ; enable Titan Accelerator //e fast mode
+*                sta $C086               ; by storing $05 to $C086
+
+                lda #$5A                ; unlock ZipChip so we can configure it
+                sta $C05A               ; by storing $5A into $C05A 4 times
+                sta $C05A               ; to trigger the unlock latch
+                sta $C05A
+                sta $C05A
+
+                lda #0                  ; enable ZipChip fast mode by storing #0
+                sta $C05B               ; into $C05B
+
+                lda #$A5                ; lock ZipChip to prevent more configs
+                sta $C05A               ; by setting $C05A to $A5
+
+                lda #0                  ; enable TransWarp fast mode by storing #0
+                sta $C074               ; into $C074
+
+                rts
+*--------------------------------------
+* CS.RUN.SetSlowMode
+* Calls a few different ways to disable accelerators, mainly ZipChip, Titan, and TransWarp.
+* However, it also works for RocketChip as well.
+* The first one (using $C05C) came from some documentation, but not sure which accelerator uses it.
+*--------------------------------------
+CS.RUN.SetSlowMode
+                sta $C05D               ; not sure which accelerator follows this? Not RC at least..
+
+*                lda #$01                ; enable Titan Accelerator //e slow mode
+*                sta $C086               ; by storing $01 to $C086
+
+                lda #$5A                ; unlock ZipChip so we can configure it
+                sta $C05A               ; by storing $5A into $C05A 4 times
+                sta $C05A               ; to trigger the unlock latch
+                sta $C05A
+                sta $C05A
+
+                lda #0                  ; disable ZipChip acceleration by setting location
+                sta $C05A               ; $C05A to #0
+
+                lda #$A5                ; lock ZipChip to prevent more configs
+                sta $C05A               ; by setting $C05A to $A5
+
+                lda #1                  ; disable TransWarp acceleration by storing #1
+                sta $C074               ; into $C074
+                rts
+*--------------------------------------
+CS.END
+*--------------------------------------
+MSG.USAGE       .AS "Usage : ACC\r\n"
+                .AS "    -F : Fast speed\r\n"
+                .AZ "    -S : Slow speed\r\n"
+MSG.MSG.FAST    .AZ "FAST mode enabled\r\n"
+MSG.MSG.SLOW    .AZ "SLOW mode enabled\r\n"
+*--------------------------------------
+OptionList      .AS "FfSs"
+OptionVars      .DA #bFast,#bFast,#bSlow,#bSlow
+*--------------------------------------
+* Per Process DATA segment (0 filled before INIT)
+*--------------------------------------
+                .DUMMY
+                .OR 0
+DS.START
+DS.END          .ED
+*--------------------------------------
+MAN
+SAVE usr/src/bin/acc.s
+ASM
