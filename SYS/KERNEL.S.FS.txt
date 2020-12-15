@@ -1,8 +1,8 @@
 NEW
   AUTO 3,1
 *--------------------------------------
-IO.OPEN.REG		>MLICALL MLIGETFILEINFO
-				bcc .10					Already Exists
+FS.OPEN.REG		>MLICALL MLIGETFILEINFO
+				bcc .2					Already Exists
 
 				bit IO.Open.FLAGS		Create if not exists ?
 				bpl .9					No, return MLI error
@@ -18,35 +18,35 @@ IO.OPEN.REG		>MLICALL MLIGETFILEINFO
 				jsr FS.CREATE
 				bcs .9
 
-.10				ldx #0
-				jsr IO.MkFD
+.2				ldx #0
+				jsr DEV.MkFD
 				bcs .9
 
-				jsr FS.OPEN
+				jsr FS.MLIOPEN
 				bcs .99
 
 				lda IO.Open.FLAGS
 				bit #O.WRONLY
-				beq .20					Write mode ?
+				beq .5					Write mode ?
 
 				and #O.APPEND			Append ?
-				bne .11					yes, go to end of file
+				bne .3					yes, go to end of file
 
 				stz K.MLI.PARAMS+2
 				stz K.MLI.PARAMS+3
 				stz K.MLI.PARAMS+4
 				>MLICALL MLISETEOF		no, reset size to 0
-				bra .21
+				bra .4
 
-.11				>MLICALL MLIGETEOF
+.3				>MLICALL MLIGETEOF
 				bcs .99
 
 				>MLICALL MLISETMARK
-.21				bcs .99
+.4				bcs .99
 
-.20				lda IO.Open.FLAGS
+.5				lda IO.Open.FLAGS
 				and #O.TEXT				Text Mode ?
-				beq .8
+				beq .6
 
 				lda #$FF
 				sta K.MLI.PARAMS+2
@@ -54,36 +54,54 @@ IO.OPEN.REG		>MLICALL MLIGETFILEINFO
 				sta K.MLI.PARAMS+3
 				>MLICALL MLINEWLINE
 				bcs .99
-
-.8				lda IO.hFD
-.9				rts
+				
+.6				>LDYAI K.MLI.PATH+1
+				>STYA ZPPtr1
+				jsr K.MkNod.I
+				bcc .8
 
 .99				pha						Save Error Code
 				lda IO.hFD
 				jsr K.Close
 				pla
 				sec
-				rts
-*--------------------------------------
-IO.READ.REG		ldx #MLIREAD
-				.HS 2C					BIT ABS
-*--------------------------------------
-IO.WRITE.REG	ldx #MLIWRITE
 
-				ldy #S.FD.REG.REF
-				lda (pFD),y
-				sta K.MLI.PARAMS+1
-				>PULLW K.MLI.PARAMS+2
-				>PULLW K.MLI.PARAMS+4
+.8
 
-				lda #4					Param Count = 4 for MLIREAD & MLIWRITE
-				jsr GP.MLICall
+.9				rts
+*--------------------------------------
+FS.OPEN.DIR		ldx #1
+				jsr DEV.MkFD
 				bcs .9
-				>LDYA K.MLI.PARAMS+6
 
-.9				
-*IO.WRITE.REG.RTS
+				lda K.MLI.PATH+2
+				beq .8					"/"
+
+				>MLICALL MLIGETFILEINFO
+				bcs .9
+				
+				lda K.MLI.PARAMS+S.FI.T
+				cmp #S.FI.T.DIR
+				bne .99
+				
+				jsr FS.MLIOPEN
+				bcs .98
+				
+.8				>LDYAI K.MLI.PATH+1
+				>STYA ZPPtr1
+				jsr K.MkNod.I
+				bcc .9
+
+.98				pha						Save Error Code
+				lda IO.hFD
+				jsr K.Close
+				pla
+				sec
 				rts
+				
+.99				lda #MLI.E.UNSUPST
+				sec
+.9				rts
 *--------------------------------------
 FS.CLOSE.REG
 FS.CLOSE.DIR	ldy #S.FD.REG.REF
@@ -100,8 +118,25 @@ FS.CLOSE.DIR	ldy #S.FD.REG.REF
 
 				jsr K.FreeMem
 
-.2				lda IO.hFD
-				jmp K.FreeMem
+.2				jmp DEV.Destroy
+*--------------------------------------
+FS.READ.REG		ldx #MLIREAD
+				.HS 2C					BIT ABS
+*--------------------------------------
+FS.WRITE.REG	ldx #MLIWRITE
+
+				ldy #S.FD.REG.REF
+				lda (pFD),y
+				sta K.MLI.PARAMS+1
+				>PULLW K.MLI.PARAMS+2
+				>PULLW K.MLI.PARAMS+4
+
+				lda #4					Param Count = 4 for MLIREAD & MLIWRITE
+				jsr GP.MLICall
+				bcs .9
+				>LDYA K.MLI.PARAMS+6
+
+.9				rts
 *--------------------------------------
 FS.EOF.REG		>MLICALL MLIGETMARK
 				bcs .9
@@ -130,6 +165,7 @@ FS.EOF.REG		>MLICALL MLIGETMARK
 *--------------------------------------
 FS.CREATE		sta K.MLI.PARAMS+7		Storage Type
 				ldx #3
+
 .1				lda DATELO,x
 				sta K.MLI.PARAMS+8,x	Create Date/Time
 				dex
@@ -140,7 +176,7 @@ FS.CREATE		sta K.MLI.PARAMS+7		Storage Type
 				>MLICALL MLICREATE
 				rts
 *--------------------------------------
-FS.OPEN			>LDYAI 1024				get a ProDOS IOBUF
+FS.MLIOPEN		>LDYAI 1024				get a ProDOS IOBUF
 				ldx #S.MEM.F.ALIGN
 				jsr MEM.GetMem.YAX
 				bcs .9
@@ -152,6 +188,7 @@ FS.OPEN			>LDYAI 1024				get a ProDOS IOBUF
 
 				>MLICALL MLIOPEN
 				bcs .9
+
 				lda K.MLI.PARAMS+5		get ref_num
 				ldy #S.FD.REG.REF
 				sta (pFD),y
@@ -159,72 +196,25 @@ FS.OPEN			>LDYAI 1024				get a ProDOS IOBUF
 				sta K.MLI.PARAMS+1		Next MLI Calls are REF_NUM based
 
 *				clc
-.9				
-FS.OPEN.RTS		rts
-*--------------------------------------
-FS.FSTAT.A		>PUSHA
 
-FS.FSTAT		>PUSHWI K.S.STAT
-				ldx #SYS.FStat
-				jsr PFT.CheckNode2
-				bcs .9
-				
-				ldy #2
-				lda (pStack),y
-				
-				tax
-				
-				lda OF.Table.hPath-1,x
-				jsr K.GetMemPtr
-				jsr PFT.YAToMLIPATH
-				
-				jsr FS.Stat.203
-				bcs .9
-				
-				lda (pFD)				#S.FD.T
-				bne .9
-
-				ldy #S.FD.REG.REF
-				lda (pFD),y
-				sta K.MLI.PARAMS+1
-
-				>MLICALL MLIGETEOF				
-				
-				ldx #2
-
-.1				lda K.MLI.PARAMS+2,x
-				sta K.S.STAT+S.STAT.SIZE,x
-				dex
-				bpl .1
-				
-.9				>RET 3				
-*--------------------------------------
-FS.STAT.YA		>PUSHYA
-				>PUSHWI K.S.STAT
-				ldx #SYS.Stat
-				jsr PFT.CheckPath2
-				bcs .9
-
-				jsr FS.Stat.203
-				
-.9				>POP 4
-FS.STAT.YA.RTS	rts
+.9
+FS.MLIOPEN.RTS	rts
 *--------------------------------------
 FS.Stat			bit A2osX.FSID
 				bmi FS.Stat.FX
-	
+
 FS.Stat.203		>MLICALL MLIGETFILEINFO
-				bcs FS.STAT.YA.RTS
+				bcs FS.MLIOPEN.RTS
 
 				jsr FS.ClrStat
-				
+
 				lda K.MLI.PARAMS+S.FI.T
 				cmp #S.FI.T.DIR
 				bne .1
-				
+
 				lda /S.STAT.MODE.DIR
 				sta K.S.STAT+S.STAT.MODE+1
-				
+
 .1				lda K.MLI.PARAMS+S.FI.A
 				sta K.S.STAT+S.STAT.P.ACCESS
 
@@ -236,7 +226,7 @@ FS.Stat.203		>MLICALL MLIGETFILEINFO
 				sta K.S.STAT,y
 				dex
 				bne .3
-				
+
 				>LDYAI K.MLI.PARAMS+S.FI.CDATE
 				ldx #K.S.STAT+S.STAT.CTIME
 				jsr FS.PTime2StatYAX
@@ -247,11 +237,11 @@ FS.Stat.203		>MLICALL MLIGETFILEINFO
 *--------------------------------------
 FS.Stat.FX		>MLICALL MLIGETFILEINFOEX
 				bcc .1
-				
+
 				cmp #MLI.E.BADCALL
 				beq FS.Stat.203			Apple WS CARD
 				rts
-				
+
 .1				>LDYAI K.MLI.PARAMS+3
 				>STYA ZPPtr3
 *--------------------------------------
@@ -277,7 +267,7 @@ FS.DirEnt2Stat	jsr FS.ClrStat
 				ldy #S.FIEX.ACCESS
 				lda (ZPPtr3),y
 				sta K.S.STAT+S.STAT.P.ACCESS
-				
+
 				ldy #S.FIEX.ACL
 				lda (ZPPtr3),y
 				cmp #$57
@@ -290,14 +280,14 @@ FS.DirEnt2Stat	jsr FS.ClrStat
 				ldy #S.FIEX.ACL.GID
 				lda (ZPPtr3),y
 				sta K.S.STAT+S.STAT.GID
-				
+
 				ldy #S.FIEX.ACL.MOD
 				lda (ZPPtr3),y
 				tsb K.S.STAT+S.STAT.MODE
 				iny
 				lda (ZPPtr3),y
 				tsb K.S.STAT+S.STAT.MODE+1
-				
+
 .7				lda #S.FIEX.CTIME
 				ldx #K.S.STAT+S.STAT.CTIME
 				jsr FS.PTime2StatAX

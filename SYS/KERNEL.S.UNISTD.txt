@@ -21,61 +21,30 @@ K.Open			jsr PFT.YAToMLIPATH
 				stz IO.Open.AUXTYPE
 				stz IO.Open.AUXTYPE+1
 *--------------------------------------
-UNISTD.Open		ldx #5					/DEV/
+UNISTD.Open		ldx #5					/dev/
 				cpx K.MLI.PATH
-				bcs .99
+				bcs .8
 
 .1				lda K.MLI.PATH,x
-				cmp DEV.FIFO-1,x
-				bne .99
+				cmp UNISTD.DEV-1,x
+				bne .8
 				dex
 				bne .1
 *--------------------------------------
 * /DEV/xxxxxx (CDEV,BDEV,DSOCK,SSOCK,PIPE)
 *--------------------------------------
-				>LDYAI K.MLI.PATH+6		skip $/DEV/
+				>LDYAI K.MLI.PATH+6		skip $/dev/
 
 				jsr K.GetDevByName
-				bcc .7
-
-				ldx #2
-.10				lda Nod.Table.hPath-2,x
-				beq .3
-
-				jsr K.GetMemPtr
-				>STYA ZPPtr1
-
-				ldy #0
-
-.2				lda (ZPPtr1),y
-				iny
-				cmp K.MLI.PATH,y
-				bne .3
-
-				cmp #0					end of string ?
-
-				bne .2
-
-				lda Nod.Table.hFD-2,x		return hFD
-				jsr UNISTD.GetPFD
-				bra .71
-
-.3				inx
-				cpx #K.NOD.MAX+2
-				bne .10
-
-				lda #MLI.E.NODEV
-*				sec
-				rts						no OF found
+				bcs .9
 *--------------------------------------
-.7				stx IO.hFD
-				>STYA pFD
+				stx IO.hDevNod			pFD set by GetDevByName
 
-.71				lda (pFD)				#S.FD.T
+				lda (pFD)				#S.FD.T
 				tax
 
-				jmp (.8-2,x)
-.8
+				jmp (.2-2,x)
+.2
 *				.DA STDIO.IOERR			REG
 				.DA STDIO.IOERR			DIR
 				.DA IO.OPEN.CDEV
@@ -85,7 +54,9 @@ UNISTD.Open		ldx #5					/DEV/
 				.DA IO.OPEN.SSOCK
 				.DA IO.OPEN.PIPE
 
-.99				jmp IO.OPEN.REG
+.8				jmp FS.OPEN.REG
+
+.9				rts
 */--------------------------------------
 * # close
 * ## C
@@ -95,7 +66,7 @@ UNISTD.Open		ldx #5					/DEV/
 * `lda fd`
 * `>SYSCALL close`
 *\--------------------------------------
-K.Close			jsr UNISTD.GetPFD
+K.Close			jsr DEV.GetPFD
 
 UNISTD.Close	lda (pFD)				#S.FD.T
 				tax
@@ -122,12 +93,12 @@ UNISTD.Close	lda (pFD)				#S.FD.T
 * CC: Y,A = bytes read
 * CS: A = EC
 *\--------------------------------------
-K.Read			jsr UNISTD.GetPFD
+K.Read			jsr DEV.GetPFD
 
 UNISTD.Read		lda (pFD)				#S.FD.T
 				tax
 				jmp (.1,x)
-.1				.DA IO.READ.REG
+.1				.DA FS.READ.REG
 				.DA STDIO.IOERR			DIR
 				.DA IO.READ.CDEV
 				.DA STDIO.IOERR			BDEV
@@ -149,12 +120,12 @@ UNISTD.Read		lda (pFD)				#S.FD.T
 * CC: Y,A = bytes written
 * CS: A = EC
 *\--------------------------------------
-K.Write			jsr UNISTD.GetPFD
+K.Write			jsr DEV.GetPFD
 
 UNISTD.Write	lda (pFD)				#S.FD.T
 				tax
 				jmp (.1,x)
-.1				.DA IO.WRITE.REG
+.1				.DA FS.WRITE.REG
 				.DA STDIO.IOERR			DIR
 				.DA IO.WRITE.CDEV
 				.DA STDIO.IOERR			BDEV
@@ -163,27 +134,21 @@ UNISTD.Write	lda (pFD)				#S.FD.T
 				.DA IO.WRITE.SSOCK
 				.DA IO.WRITE.PIPE
 *--------------------------------------
-UNISTD.GetPFD	sta IO.hFD
-				jsr K.GetMemPtr
-				>STYA pFD
-				rts
-*--------------------------------------
 IO.OPEN.CDEV
-IO.OPEN.BDEV	jsr SHARED.GetPDrv
-				ldx #IOCTL.OPEN
-				lda IO.hFD
-				jsr SHARED.pDrvJmp
+IO.OPEN.BDEV	ldx #IOCTL.OPEN
+				lda IO.hDevNod
+				jsr DEV.pDrvJmp
 				bcs IO.WRITE.CDEV.RTS
 *--------------------------------------
 IO.OPEN.DSOCK
-*--------------------------------------
-IO.OPEN.SSOCK
-				lda IO.hFD
-*--------------------------------------
-IO.CLOSE.CDEV
-IO.CLOSE.BDEV
+IO.OPEN.SSOCK	lda IO.hDevNod
 				clc
 				rts
+*--------------------------------------
+IO.CLOSE.CDEV
+IO.CLOSE.BDEV	ldx #IOCTL.CLOSE
+				lda IO.hDevNod
+				jmp DEV.pDrvJmp
 *--------------------------------------
 IO.READ.CDEV	ldx #IOCTL.READ
 				.HS 2C					BIT ABS
@@ -192,9 +157,9 @@ IO.WRITE.CDEV	ldx #IOCTL.WRITE
 
 				>PULLW K.S.IOCTL+S.IOCTL.BUFPTR
 				>PULLW K.S.IOCTL+S.IOCTL.BYTECNT
-				jsr SHARED.GetPDrv
+				
 				>LDYAI K.S.IOCTL
-				jsr SHARED.pDrvJmp
+				jsr DEV.pDrvJmp
 				bcs .9
 
 				>LDYA K.S.IOCTL+S.IOCTL.BYTECNT
@@ -227,51 +192,7 @@ IO.WRITE.SSOCK	ldy #S.FD.SSOCK.WRITE
 .1				jmp $FFFF				SELF MODIFIED
 *--------------------------------------
 IO.EOF.CDEV		lda #S.IOCTL.STATCODE.EOF
-				jmp SHARED.GetDevStatus
-*--------------------------------------
-* X = 0 > REG
-* X = 1 > DIR
-* X = 2 > PIPE
-*--------------------------------------
-IO.MkFD			stx .8+1
-
-				ldy IO.MkFD.Y,x
-				lda #0
-				ldx #S.MEM.F.INIT0+S.MEM.F.FD
-				jsr MEM.GetMem.YAX
-				bcs .9
-
-				>STYA pFD
-				stx IO.hFD
-
-.8				ldx #$ff				SELF MODIFIED
-				lda IO.MkFD.T,x
-				sta (pFD)				X = hFD, A = T
-*				clc
-.9				rts
-
-IO.MkFD.Y		.DA #S.FD.REG,#S.FD.DIR,#S.FD.PIPE
-IO.MkFD.T		.DA #S.FD.T.REG,#S.FD.T.DIR,#S.FD.T.PIPE
-*--------------------------------------
-IO.CLOSE.NOD	ldx #2
-
-				lda IO.hFD
-
-.1				cmp Nod.Table.hFD-2,x
-				bne .2
-
-				stz Nod.Table.hFD-2,x
-				lda Nod.Table.hPath-2,x
-				stz Nod.Table.hPath-2,x
-				jmp K.FreeMem
-
-.2				inx
-				cpx #K.Nod.MAX+2
-				bne .1
-
-				lda #E.INVH
-*				sec
-				rts
+				jmp DEV.GetDevStatus
 */--------------------------------------
 * # ChOwn
 * ## C
@@ -310,17 +231,9 @@ K.ChOwn			jsr PFT.CheckPath2
 				
 K.ChOwn.RET4	>RET 4				
 *--------------------------------------
-SHARED.GetPDrv	ldy #S.FD.DEV.DRVPTR
-				lda (pFD),y
-				sta pDRV
-				iny
-				lda (pFD),y
-				sta pDRV+1
-				rts
-*--------------------------------------
-DEV.FIFO		.AS "/dev/fifo"			STAT,UNISTD
+UNISTD.DEV		.AS "/dev/"
 *--------------------------------------
 MAN
-SAVE USR/SRC/SYS/KERNEL.S.UNISTD
-LOAD USR/SRC/SYS/KERNEL.S
+SAVE usr/src/sys/kernel.s.unistd
+LOAD usr/src/sys/kernel.s
 ASM

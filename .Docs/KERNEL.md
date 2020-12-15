@@ -81,7 +81,7 @@ X = hDev
 
 # GetDevStatus  
 
-## C   
+## C  
 `int getdevstatus(short int DevID, S.DIB *dstat);`  
 
 ## ASM  
@@ -491,14 +491,11 @@ A = Child PSID
 Load TXT a file in memory (with ending 0)  
 
 ## C  
-`int loadtxtfile ( const char * filename, short int flags, short int ftype, int auxtype );`  
+`int loadtxtfile ( const char * filename );`  
 
 ## ASM  
 **In:**  
-`>PUSHW filename`  
-`>PUSHB flags`  
-`>PUSHB ftype`  
-`>PUSHW auxtype`  
+`>LDYA filename`  
 `>SYSCALL loadtxtfile`  
 
 ## RETURN VALUE  
