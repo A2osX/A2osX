@@ -98,7 +98,7 @@ This document lists all of the **Forth Words** supported in the A2osX implementa
 | LOOP | ( - ) | Working | Increment index, terminate loop if equal to limit |
 | +LOOP | ( n - ) | Working | Increment index by n. Terminate loop if outside limit |
 | I | ( - index ) | Working | Place loop index on stack |
-| LEAVE | ( - ) | | Terminate loop at next LOOP or +LOOP |
+| LEAVE | ( - ) | Working | Terminate loop at next LOOP or +LOOP |
 | IF | ( f - ) | Working | If top of stack is true, execute true clause |
 | ELSE | ( - ) | Working | Beginning of the false clause |
 | ENDIF | ( - ) | Working | End of the IF-ELSE structure |
