@@ -178,37 +178,33 @@ K.FPutS.RTS		rts
 * `char *fgets(hFILE stream, char * s, int n);`
 * ## ASM
 * **In:**
-* `>PUSHW n`
+* `>PUSHB hFILE`
 * `>PUSHW s`
-* `lda hFILE`
+* `>PUSHW n`
 * `>SYSCALL fgets`
 * ## RETURN VALUE 
 *  Y,A: s 
 * CC = success
 *\--------------------------------------
-* (pStack)+2	n
-* (pStack)+0	s
+* (pStack)+4	h
+* (pStack)+2	s -> ZPPtr2
+* (pStack)+0	n -> ZPPtr1
 *--------------------------------------
-K.FGetS			jsr PFT.CheckNodeA
+K.FGetS			jsr PFT.CheckNode4
 				bcs K.FPutS.RTS
 
-				lda (pStack)
-				sta ZPPtr2				s LO
-				ldy #1
-				lda (pStack),y
-				sta ZPPtr2+1			s HI
+				ldy #3
 
-				iny
-				lda (pStack),y			n LO
-				sta ZPPtr1
-
-				iny
-				lda (pStack),y			n HI
-				sta ZPPtr1+1
-				bmi .3					already something in buffer
+.1				lda (pStack),y
+				sta ZPPtr1,y
+				dey
+				bpl .1
+				
+				lda ZPPtr1+1
+				bmi .4					already something in buffer
 			
-.1				jsr STDIO.Get.1
-				bcc .2
+.2				jsr STDIO.Get.1
+				bcc .3
 
 				cmp #MLI.E.EOF
 				beq .9
@@ -220,59 +216,52 @@ K.FGetS			jsr PFT.CheckNodeA
 				lda #0					BLOCKING
 				rts
 
-.2				lda K.IOBuf
+.3				lda K.IOBuf
 				cmp #C.LF				Discard any leading LF from a prev CR/LF
-				beq .1
+				beq .2
 
-				cmp #C.CR
-				beq .8					empty string
-
-				jsr SHARED.PutCharPtr2
-
+				clc						set n = !n + 1
 				lda ZPPtr1
 				eor #$ff
+				adc #1
 				sta ZPPtr1
 
 				lda ZPPtr1+1
 				eor #$ff
+				adc #0
 				sta ZPPtr1+1
+				
+				bra .5
 *--------------------------------------
-.3				inc ZPPtr1
-				bne .4
-				inc ZPPtr1+1
-				beq .8					Buffer full
-			
 .4				jsr STDIO.Get.1
-				bcs .5
+				bcs .6
 
-				lda K.IOBuf
+.5				lda K.IOBuf
 				cmp #C.CR
 				beq .8
 				
 				jsr SHARED.PutCharPtr2
-				bra .3
+
+				inc ZPPtr1
+				bne .4
+				inc ZPPtr1+1
+				bne .4
 				
-.5				cmp #MLI.E.EOF
+				beq .8					Buffer full
+				
+.6				cmp #MLI.E.EOF
 				beq .8					String terminated by EOF
 
 				cmp #E.NODATA
 				sec
 				bne .9					I/O error
 
-				lda ZPPtr2				NO DATA, but string not yet terminated
-				sta (pStack)			s
+				ldy #3
 
-				ldy #1
-				lda ZPPtr2+1
-				sta (pStack),y			s
-
-				iny
-				lda ZPPtr1
-				sta (pStack),y			!n LO
-
-				iny
-				lda ZPPtr1+1
-				sta (pStack),y			!n HI
+.7				lda ZPPtr1,y			NO DATA, but string not yet terminated
+				sta (pStack),y
+				dey
+				bpl .7
 
 				lda #0					BLOCKING
 *				sec
@@ -281,7 +270,7 @@ K.FGetS			jsr PFT.CheckNodeA
 .8				lda #0
 				sta (ZPPtr2)			terminate string
 				clc
-.9				>RET 4
+.9				>RET 5
 */--------------------------------------
 * # getchar (BLOCKING)
 * Get char from StdIn
@@ -661,6 +650,733 @@ K.Rename		jsr PFT.CheckPath2
 				>MLICALL MLIRENAME
 
 .9				>RET 4
+*/--------------------------------------
+* # PrintF (BLOCKING)
+* # FPrintF (BLOCKING)
+* # SPrintF
+* Prints C-Style String
+* ## C
+* `int printf ( const char *format, ... );`
+* `int fprintf ( short int stream, const char *format, ... );`
+* `int sprintf ( char *str, const char *format, ... );`
+* ## ASM
+* **In:**
+* PrintF : (example is for printing Y,A as integer : format="%I", 2 bytes)  
+* `>PUSHW format`
+* `>PUSHW i`
+* `...`
+* `>PUSHBI 2`	#bytecount
+* `>SYSCALL PrintF`
+* FPrintF : 
+* `>PUSHB hFILE`
+* `>PUSHW format`
+* `>PUSHW i`
+* `...`
+* `>PUSHBI 2`	#bytecount
+* `>SYSCALL fprintf`
+* SPrintF : 
+* `>PUSHW str`
+* `>PUSHW format`
+* `>PUSHW i`
+* `...`
+* `>PUSHBI 2`	#bytecount
+* `>SYSCALL sprintf`
+* ## RETURN VALUE
+* CC : success, Y,A = bytes sent
+* CS : error, A = code from Output
+* Specifiers :
+* + %b : pull 1 byte to Print BIN 
+* + %d : pull 1 byte unsigned DEC 0..255
+* + %D : pull 2 bytes unsigned DEC 0..65535
+* + %u : pull 4 bytes long unsigned DEC 0..4294967295
+* + %e : pull 5 Bytes float (-)1.23456789e+12
+* + %f : pull 5 Bytes float (-)3.1415
+* + %h : pull 1 byte to Print HEX
+* + %H : pull 2 bytes to Print HEX
+* + %i : pull 1 byte to Print signed DEC -128..127
+* + %I : pull 2 bytes to Print signed DEC -32768..32767
+* + %L : pull 4 bytes signed DEC -2147483648..2147483647
+* + %s : pull 2 bytes ptr to C-Style String
+* + %S : pull 2 bytes ptr to P-Style String
+* + \b : Print 'BS' (08)
+* + \e : Print 'ESC' ($1B,27)
+* + \f : Print 'FF' ($0C,12)
+* + \n : Print 'LF' ($0A,10)
+* + \r : Print 'CR' ($0D,13)
+* + \t : Print 'TAB' ($09,09)
+* + \v : Print 'VT' ($0B,11)
+* + \xHH : Print byte with hexadecimal value HH (1 to 2 digits)
+* + \\\\ : Print \
+* + \\% : Print %
+* Modifiers for len and padding : 
+* + %d	  : '9'  '12'
+* + %2d	  : ' 9' '12'
+* + %02d  : '09' '12'
+* + %11s  : 'ABCDEFGH   '	
+* + %011s : 'ABCDEFGH000'
+* + %2f	  :	'3.14'
+*\--------------------------------------
+				.DUMMY					ZPTMP+5,5  Used by : STDIO2
+				.OR ZPTMP+5				5 Bytes
+PrintF.Cnt		.BS 2
+PrintF.hFILE	.BS 1
+STDIO.StackBytePtr	.BS 1
+STDIO.ExitPopCnt	.BS 1
+				.ED
+*--------------------------------------
+K.PrintF.PadL	.EQ FAC+5
+K.PrintF.PadC	.EQ ARG.SIGN
+*--------------------------------------
+K.PrintF		ldy #S.PS.hStdOut
+				lda	(pPS),y
+				sta PrintF.hFILE
+
+				ldx #1
+				.HS 2C					BIT ABS
+*--------------------------------------
+K.FPrintf		ldx #2
+				.HS 2C					BIT ABS
+*--------------------------------------
+K.SPrintf		ldx #3
+*--------------------------------------
+K.PrintF.1		sec						format string->ptr2
+				jsr STDIO.GetParams
+
+				stx pIOBuf
+				sta pIOBuf+1			Output buffer->pIOBuf
+
+				sty STDIO.ExitPopCnt	Total bytes to POP
+
+.1				jsr SHARED.GetCharPtr2
+				bne .22
+
+				jmp .8					end of format..
+
+.22				cmp #'%'
+				bne .10
+				stz K.PrintF.PadL
+				stz K.PrintF.PadC
+				lda (ZPPtr2)
+				beq .7					end of format... print % and exit
+
+				jsr ZP.IsDigit
+				bcs .6					no digit....go check specifier
+				cmp #'0'				...a 0...mmm... padding char?
+				bne .4
+				sta K.PrintF.PadC
+				jsr SHARED.NextCharPtr2	skip 0 ...
+				lda (ZPPtr2)
+				beq .7
+
+				jsr ZP.IsDigit
+				bcs .6					%0x ??????
+
+.4				jsr MATH32.Dec2ACC32
+				bcs .99
+				lda ACC32
+				sta K.PrintF.PadL
+				lda K.PrintF.PadC
+				bne .5
+				lda #C.SPACE
+				sta K.PrintF.PadC
+
+.5				jsr SHARED.AddYToPtr2		skip all processed chars
+
+				lda (ZPPtr2)
+				beq .7
+
+.6				ldx	#PrintFTBL1.Cnt-1	do we have a %x command?
+.61				cmp PrintFTBL1,x
+				beq .62
+				dex
+				bpl	.61
+				bra .20					unknown ...
+
+.62				jsr SHARED.NextCharPtr2
+				txa						yes, jmp to it!
+				asl
+				tax
+				jsr PrintF.ESC
+.11				bcc .1
+				bra .99
+.7				lda #'%'
+				bra .20
+*--------------------------------------	
+.10				cmp #'\'
+				bne .20
+
+				jsr SHARED.GetCharPtr2
+				beq .99
+				ldx	#PrintFTBL2.Cnt-1
+.12				cmp PrintFTBL2,x
+				beq .19
+				dex
+				bpl	.12
+
+				cmp #'x'				\xHH
+				bne .1
+
+				jsr MATH32.Hex2ACC32
+				bcs .99
+
+				jsr SHARED.AddYToPtr2
+.14				lda ACC32
+				bra .20
+.19				lda	PrintFTBL2.OUT,x
+
+.20				jsr	PrintF.PutC
+				bcc .11
+*--------------------------------------
+.99				lda #E.BADARG
+				sec
+				jmp STDIO.Exit
+*--------------------------------------
+.8				ldx PrintF.hFILE
+				beq .80					Writing to buffer, append \0
+
+				>PUSHW PrintF.Cnt		Writing to File/dev...
+				>PUSHWI K.IOBuf
+
+				txa
+				jsr K.FWrite
+				bcc .81
+
+				tay
+				bne .9
+			
+				>RET 4					0=BLOCKING
+
+.80				ldy PrintF.Cnt			A=0, Writing to buffer, append \0
+				sta (pIOBuf),y
+				clc
+.81				>LDYA PrintF.Cnt
+*				clc
+.9				jmp STDIO.Exit
+*--------------------------------------
+PrintFTBL1		.AS	"bdDuefhHiILsS"
+PrintFTBL1.Cnt	.EQ *-PrintFTBL1
+PrintFTBL2		.AS	"abefnrtv\%"
+PrintFTBL2.Cnt	.EQ *-PrintFTBL2
+PrintFTBL2.OUT	.HS 07.08.1B.0C.0A.0D.09.0B		\a\b\e\f\n\r\t\v
+				.DA #'\'				\\
+				.DA #'%'				\%
+*--------------------------------------
+PrintF.ESC		jmp (.1,x)
+.1				.DA PrintF.B
+				.DA PrintF.D,PrintF.DD,PrintF.U
+				.DA PrintF.E,PrintF.F
+				.DA PrintF.H,PrintF.HH
+				.DA PrintF.I,PrintF.II,PrintF.L
+				.DA PrintF.S,PrintF.SS
+*--------------------------------------
+PrintF.B		jsr STDIO.GetStackByte
+				bcs PrintF.B.RTS
+				ldy #8
+
+.1				asl
+				pha
+				lda #'0'/2
+				rol
+				jsr PrintF.PutC
+				bcs .9
+				pla
+				dey
+				bne .1
+				rts
+
+.9				ply
+PrintF.B.RTS
+				rts
+*--------------------------------------
+PrintF.I		sec						signed short
+				.HS 90					BCC
+PrintF.D		clc						unsigned short (BYTE)
+
+				ldy #1
+				bra PrintF.NUM
+
+PrintF.II		sec						signed int
+				.HS 90					BCC
+PrintF.DD		clc						unsigned int (WORD)
+
+				ldy #2
+				bra PrintF.NUM
+
+PrintF.L		sec						signed long
+				.HS 90					BCC
+PrintF.U		clc						unsigned long (DWORD)
+
+				ldy #4
+
+PrintF.NUM		sty .2+1
+
+				ror ACC32.Sign			save signed/unsigned flag
+				jsr MATH32.ACC32ZERO
+
+.1				jsr STDIO.GetStackByte
+				bcs PrintF.B.RTS
+
+				sta ACC32-1,y			PULL 4,2 or 1
+				dey
+				bne .1
+				
+				bit ACC32.Sign
+				bpl .4
+				
+.2				ldy #$ff				SELF MODIFIED
+
+				lda ACC32-1,y			Get highest Byte
+				bpl .4					positive....
+
+				lda #$ff
+
+.3				cpy #4
+				beq .4
+
+				iny
+				sta ACC32-1,y
+				bra .3
+				
+.4				ldx K.PrintF.PadL
+				ldy K.PrintF.PadC
+
+				rol ACC32.Sign			get back signed/unsigned flag
+				jsr MATH32.ACC322STR10
+				bra PrintF.StrNum
+*--------------------------------------	
+* EXP(8) 1(s) 1significants(31)
+* http://apple2.org.za/gswv/a2zine/GS.WorldView/Resources/GS.TECH.INFO/AppleSoft/
+*--------------------------------------		
+PrintF.E		sec						Force "E+12"
+				.HS 90					BCC
+PrintF.F		clc
+
+				lda	(pStack)			get current stack Ptr
+				sec						at least 5 bytes remaining ?
+				sbc #5
+				bcc PrintF.StrNum.Err
+				sta (pStack)
+
+*				sec
+				adc pStack
+				ldy pStack+1			A,Y = float
+				ldx #FPU.SETFAC
+				jsr GP.ROMCALL
+				ldy #A2osX.NumStrBuf+1	FOUT.1 will do a DEY
+				ldx #FPU.FOUT
+				jsr GP.ROMCALL
+	
+PrintF.StrNum	ldy #0
+.2				lda A2osX.NumStrBuf,y
+				beq .8
+				iny
+				jsr PrintF.PutC
+				bcc .2
+
+.9				rts
+
+.8				clc
+				rts
+PrintF.StrNum.Err
+				lda #E.STACK
+				sec
+				rts
+*--------------------------------------
+PrintF.S		ldy #$ff				CSTR
+				.HS 2C					bit abs
+PrintF.SS		ldy #$00				PSTR
+
+				sty .1+1
+			
+				jsr STDIO.GetStackByte
+				bcs .9
+
+				sta ZPPtr1+1
+				jsr STDIO.GetStackByte
+				bcs .9
+
+				sta ZPPtr1
+			
+				lda (ZPPtr1)			if CSTR:last char=0, if PSTR:len=0
+				beq .8
+				
+				ldy .1+1
+				
+.1				lda #$ff				Self Modified
+				bne .11					CSTR
+
+				tya						PSTR
+				cmp (ZPPtr1)			len check
+				
+				beq .2
+				
+.11				iny
+				lda	(ZPPtr1),y
+				beq .2
+		
+				jsr PrintF.PutC
+				bcs .9
+
+				lda K.PrintF.PadL
+				beq .1
+				cpy	K.PrintF.PadL
+				bne .1
+.8				clc
+				rts
+				
+.2				lda K.PrintF.PadL
+				beq .8
+				
+.3				cpy K.PrintF.PadL
+				beq .8
+				
+				lda K.PrintF.PadC
+				jsr PrintF.PutC
+				bcs .9
+			
+				iny
+				bne .3
+
+*				clc
+.9				rts
+*--------------------------------------
+PrintF.HH		jsr STDIO.GetStackByte
+				bcs PrintF.PutC.RTS
+				pha						LO byte
+				jsr STDIO.GetStackByte
+				plx
+				bcs PrintF.PutC.RTS
+				pha
+				txa
+				jsr PrintF.H.1
+				plx
+				bcs PrintF.PutC.RTS
+				txa
+				bra PrintF.H.1
+*--------------------------------------
+PrintF.H		jsr STDIO.GetStackByte
+				bcs PrintF.PutC.RTS
+PrintF.H.1		jsr MATH32.AToHexAX
+				jsr PrintF.PutC
+				bcs PrintF.PutC.RTS
+				txa
+*--------------------------------------
+PrintF.PutC		phy
+				ldy PrintF.Cnt
+				sta (pIOBuf),y
+				ply
+				inc PrintF.Cnt
+				bne .8
+				lda PrintF.hFILE
+				bne .9
+
+				inc pIOBuf+1
+				inc PrintF.Cnt+1
+.8				clc
+				rts
+
+.9				lda #E.BUF
+				sec
+PrintF.PutC.RTS	rts		
+*/--------------------------------------
+* # ScanF (BLOCKING)
+* # FScanF (BLOCKING)
+* # SScanF
+* Read formatted data from string
+* ## C
+* `int scanf( const char *format, ... );`
+* `int fscanf( short int stream, const char *format, ... );`
+* `int sscanf ( const char *s, const char *format, ... );`
+* ## ASM
+* **In:**
+* ScanF :
+* `>PUSHW format`
+* `>PUSHW ptr`
+* `...`
+* `>PUSHB bytecount`
+* `>SYSCALL scanf`
+* FScanF :
+* `>PUSHB stream`
+* `>PUSHW format`
+* `>PUSHW ptr`
+* `...`
+* `>PUSHB bytecount`
+* `>SYSCALL fscanf`
+* SScanF :
+* `>PUSHW s`
+* `>PUSHW format`
+* `>PUSHW ptr`
+* `...`
+* `>PUSHB bytecount`
+* `>SYSCALL sscanf`
+* Specifiers :
+* + %i : short int
+* + %d : byte
+* + %I : int
+* + %D : word
+* + %L : long int
+* + %U : dword
+* + %h : HEX byte
+* + %H : HEX word
+* + %s : string
+* TODO : %10s
+* ## RETURN VALUE
+* A = Number of arguments filled.
+*\--------------------------------------
+K.ScanF			ldy #S.PS.hStdIn
+				lda	(pPS),y
+				sta PrintF.hFILE
+				
+				ldx #1
+				.HS 2C					BIT ABS
+*--------------------------------------
+K.FScanF		ldx #2
+				.HS 2C					BIT ABS
+*--------------------------------------
+K.SScanF		ldx #3
+*--------------------------------------
+K.SScanF.1		clc						format string->ptr1
+				jsr STDIO.GetParams
+
+				stx ZPPtr2
+				sta ZPPtr2+1			Output buffer->ZPPtr2
+
+				sty STDIO.ExitPopCnt	Total bytes to POP
+			
+				ldx PrintF.hFILE
+				beq .1
+				
+				txa
+				>PUSHA
+				>PUSHW pIOBuf
+				>PUSHWI 256 
+				jsr K.FGetS
+				bcc .1
+				
+				tax
+				bne PrintF.PutC.RTS
+				>RET 4
+				
+.1				jsr SHARED.GetCharPtr1	End Of format?
+				beq .8
+
+				cmp #'%' 				Escape ?
+				beq .2
+
+				cmp #C.SPACE			Space ?
+				beq .12
+			
+				sta .11+1
+			
+				jsr SHARED.GetCharPtr2
+				beq .9
+				
+.11				cmp #$ff				Same char in string?
+				beq .1
+				
+				bra .9
+
+.12				jsr SHARED.GetCharPtr2
+				beq .9
+				cmp #C.SPACE
+				bne .9
+				
+.13				jsr SHARED.GetCharPtr2
+				cmp #C.SPACE			another space ?
+				beq .13
+				
+				bra .1
+
+.2				jsr SHARED.GetCharPtr1	Get specifier after %
+				beq .9					unexpected End of format after "%" ?
+
+				ldx #K.SScanFJMP-K.SScanFTBL-2
+
+.3				cmp K.SScanFTBL,x
+				beq .4
+				dex
+				dex
+				bpl .3
+
+.9				lda #MLI.E.EOF
+				sec
+				jmp STDIO.Exit
+
+.4				jsr STDIO.GetStackByte
+				bcs .9
+				sta ZPPtr3+1
+				jsr STDIO.GetStackByte
+				bcs .9
+				sta ZPPtr3
+				
+				jsr .5
+				bcs .9					out of Ptr on stack
+
+				inc .8+1				parsed one more arg!
+				bra .1
+
+.8				lda #$ff				SELF MODIFIED Arg processed
+				clc
+				jmp STDIO.Exit
+*--------------------------------------
+.5				jmp (K.SScanFJMP,x)
+*--------------------------------------
+K.SScanFTBL		.DA #'i,#1,#'d,#1,#'I,#2,#'D,#2,#'l,#4,#'u,#4,#'h,#1,#'H,#2,#'s,#2
+K.SScanFJMP		.DA K.SScanF.I
+				.DA K.SScanF.D
+				.DA K.SScanF.II
+				.DA K.SScanF.DD
+				.DA K.SScanF.L
+				.DA K.SScanF.U
+				.DA K.SScanF.H
+				.DA K.SScanF.HH
+				.DA K.SScanF.S
+*--------------------------------------
+K.SScanF.I		
+K.SScanF.D		
+K.SScanF.II
+K.SScanF.DD
+K.SScanF.L
+K.SScanF.U		lda K.SScanFTBL+1,x		Get VAR size
+				pha						Save VAL size
+
+				jsr MATH32.Dec2ACC32
+				bra K.SScanF.GetVAL
+*--------------------------------------
+K.SScanF.HH
+K.SScanF.H		lda K.SScanFTBL+1,x		Get VAR size
+				pha
+
+				jsr MATH32.Hex2ACC32
+
+K.SScanF.GetVAL	jsr SHARED.AddYToPtr2	Y=char count parsed
+
+.1				ply						get back VAL size 
+
+.2				lda ACC32-1,y
+				dey
+				sta (ZPPtr3),y
+				bne .2
+
+.9				rts
+*--------------------------------------
+K.SScanF.S		ldy #$ff
+
+.1				iny
+				lda (ZPPtr2),y			Get char in string to scan
+				sta (ZPPtr3),y			store in param ptr
+				beq K.SScanF.Fwd		end of string to scan ?
+				
+				cmp (ZPPtr1)			match format next char ? 
+				beq .2
+				
+				cmp #C.SPACE			is it a space ?
+				bne .1
+				
+.2				lda #0					add \0 to param ptr
+				sta (ZPPtr3),y
+
+K.SScanF.Fwd	jmp SHARED.AddYToPtr2		Y=char count parsed
+*--------------------------------------
+* IN:
+* CC : format in ZPPtr1
+* CS : format in ZPPtr2
+* X = 3 : get format & buffer
+* X = 2 : get format & hFile
+* X = 1 : get format only
+* OUT:
+* X = Buf LO
+* A = Buf HI
+* format on stack
+* Y = BytePtr
+*--------------------------------------
+STDIO.GetParams	stz PrintF.Cnt
+				stz PrintF.Cnt+1
+
+				lda (pStack)			Bytecount
+				
+				tay
+				sty STDIO.StackBytePtr
+
+				iny
+				lda (pStack),y			format LO
+				pha
+
+				iny
+				lda (pStack),y			format HI
+				bcs .10
+				
+				sta ZPPtr1+1
+				pla
+				sta ZPPtr1
+				bra .11
+
+.10				sta ZPPtr2+1
+				pla
+				sta ZPPtr2
+				
+.11				dex
+				beq .1
+				
+				dex
+				beq .2
+				
+.3				stz PrintF.hFILE
+				
+				iny
+				lda (pStack),y			str LO
+				tax
+
+				iny
+				lda (pStack),y			str HI
+				
+				rts
+
+.2				iny
+				lda (pStack),y			hFILE
+				sta PrintF.hFILE
+
+.1				ldx #K.IOBuf
+				lda /K.IOBuf
+				
+STDIO.GetParams.RTS
+				rts
+*--------------------------------------
+STDIO.GetStackPtr
+				jsr STDIO.GetStackByte
+				bcs STDIO.GetParams.RTS
+				tax
+*--------------------------------------
+STDIO.GetStackByte
+				phy
+
+				ldy STDIO.StackBytePtr
+				beq .9
+
+				lda (pStack),y
+				dec STDIO.StackBytePtr
+
+				ply
+				clc
+				rts
+
+.9				lda #E.STACK
+
+				ply
+				sec
+				rts
+*--------------------------------------
+STDIO.Exit		php
+				pha
+				
+				lda pStack
+				sec
+				adc STDIO.ExitPopCnt
+				sta pStack
+				
+				pla
+				plp
+				rts
 *--------------------------------------
 MAN
 SAVE usr/src/sys/kernel.s.stdio

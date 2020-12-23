@@ -895,9 +895,9 @@ string is then terminated with a null byte.
 
 ## ASM  
 **In:**  
-`>PUSHW n`  
+`>PUSHB hFILE`  
 `>PUSHW s`  
-`lda hFILE`  
+`>PUSHW n`  
 `>SYSCALL fgets`  
 
 ## RETURN VALUE   

@@ -13,8 +13,25 @@ CP.RUN			cpx #KW.CONLY
 
 .1				jmp (J.KEYWORDS,x)
 *--------------------------------------
-CP.DO			jsr CP.Emit.DO
-				jsr CP.PushCodePtr		for compiling LOOP later
+CP.DO			jsr CP.Emit.DO			I,n -> RP
+*			>DEBUG
+				ldy RP
+
+				lda ZPCodePtr+1
+				sta (pData),y
+				dey
+
+				lda ZPCodePtr
+				sta (pData),y
+				dey						push CodePtr=DOTEST on RP for LOOP/LEAVE
+
+				sty RP
+
+				jsr CP.Emit.DOTEST		CODE: I < n ?
+				
+				ldx #KW.DO.ID
+				jsr CP.Emit.JMP0000		to put jmp LOOPEND
+				
 				clc
 				rts
 *--------------------------------------
@@ -24,67 +41,128 @@ CP.LOOP			lda #$00
 				lda #$01				>PUSHBI 1
 				jsr CP.Emit.PUSHBI
 *--------------------------------------
-CP.pLOOP		jsr CP.Emit.LOOP
-				jsr CP.Emit.JMPBack
+CP.pLOOP		ldy RP
+*			>DEBUG
+				iny
+				bmi .9
+				
+				lda (pData),y
+				cmp #KW.DO.ID
+				bne .9
+
+				phy
+				jsr CP.Emit.LOOP		CODE: I=I+n
+				ply
+				
+				iny						POP LOOPEND@ -> Ptr1
+				lda (pData),y
+				sta ZPPtr1
+
+				iny
+				lda (pData),y
+				sta ZPPtr1+1
+				
+				jsr CP.Emit.JMPBack		CODE: JMP to DOTEST
+				
+				sty RP					discard ID DOTEST@ LOOPEND@
+				
+				jsr CP.UpdatePtr1		update JMP LOOPEND@ with CodePtr 
+				
 				jsr CP.Emit.LOOPEND
 
-				inc RP
-				inc RP
-
 				clc
+				rts
+				
+.9				lda #E.NODO
+				sec
 				rts
 *--------------------------------------
 CP.I			jsr CP.Emit.I
 				clc
 				rts
 *--------------------------------------
-CP.LEAVE		jsr CP.Emit.LEAVE
-				jsr CP.Emit.JMPBack
+CP.LEAVE		ldy RP
+*			>DEBUG
+.1				iny
+				bmi .9
 
+				lda (pData),y
+				cmp #KW.DO.ID
+				beq .2
+				
+				iny
+				iny
+				bpl .1					skip 3 bytes on RP
+
+.9				lda #E.NODO
+				sec
+				rts				
+				
+.2				phy
+				jsr CP.Emit.LEAVE		set  I = END on RP
+				ply
+				
+				iny						skip LOOPEND ptr
+				iny
+				
+				jsr CP.Emit.JMPBack		jmp DOTEST
+				
 				clc
 				rts
 *--------------------------------------
 CP.IF			jsr CP.Emit.TESTTRUE
+				ldx #KW.IF.ID
 				jsr CP.Emit.JMP0000		to put jmp -> ELSE/ENDIF later
 
 				clc
 				rts
 *--------------------------------------
-CP.ELSE			jsr CP.PopPtr1			get previous JMP -> ptr1
+CP.ELSE			jsr CP.PopCodePtr		get previous JMP -> ptr1
+				ldx #KW.IF.ID
 				jsr CP.Emit.JMP0000		to put jmp -> ENDIF later
 				jsr CP.UpdatePtr1
 
 				clc
 				rts
 *--------------------------------------
-CP.ENDIF		jsr CP.PopPtr1
+CP.ENDIF		jsr CP.PopCodePtr
 				jsr CP.UpdatePtr1
 
 				clc
 				rts
 *--------------------------------------
-CP.BEGIN		jsr CP.PushCodePtr
+CP.BEGIN		jsr CP.PushCodePtr		X = BEGIN ID
 
 				clc
 				rts
 *--------------------------------------
 CP.UNTIL		jsr CP.Emit.TESTFALSE
-				jsr CP.Emit.JMPBack
-				jsr CP.Emit.RPDROP2
 
-				clc
-				rts
+				bra CP.WHILE.1
 *--------------------------------------
-CP.REPEAT		jsr CP.Emit.JMPBack
+CP.REPEAT		ldy RP
+				iny
+				bmi CP.E.NOBEGIN
+				
+				jsr CP.Emit.JMPBack
 
 				clc
 				rts
 *--------------------------------------
 CP.WHILE		jsr CP.Emit.TESTTRUE
+				
+CP.WHILE.1		ldy RP
+				iny
+				bmi CP.E.NOBEGIN
+				
 				jsr CP.Emit.JMPBack
 				jsr CP.Emit.RPDROP2
 
 				clc
+				rts
+*--------------------------------------
+CP.E.NOBEGIN	lda #E.NOFOR
+				sec
 				rts
 *--------------------------------------
 CP.Emit.JMP0000	lda #$4C				JMP
@@ -100,8 +178,7 @@ CP.Emit.JMP0000	lda #$4C				JMP
 *--------------------------------------
 CP.Emit.JMPBack	lda #$4C				JMP
 				jsr CP.Emit.Byte
-
-				ldy RP
+				
 				iny
 				lda (pData),y
 				jsr CP.Emit.Byte
@@ -184,6 +261,17 @@ CP.Emit.DO		ldx #CODE.DO.L
 
 				rts
 *--------------------------------------
+CP.Emit.DOTEST	ldx #CODE.DOTEST.L
+				ldy #0
+
+.1				lda CODE.DOTEST,y
+				jsr CP.Emit.Byte
+				iny
+				dex
+				bne .1
+
+				rts
+*--------------------------------------
 CP.Emit.LOOP	ldx #CODE.LOOP.L
 				ldy #0
 
@@ -251,10 +339,19 @@ CP.PushCodePtr	ldy RP
 				sta (pData),y
 				dey
 
+				txa
+				sta (pData),y
+				dey
+
 				sty RP
 				rts
 *--------------------------------------
-CP.PopPtr1		ldy RP
+CP.PopCodePtr	ldy RP
+				iny
+				lda (pData),y
+				cmp #KW.IF.ID
+				bne .9
+
 				iny
 				lda (pData),y
 				sta ZPPtr1
@@ -265,6 +362,11 @@ CP.PopPtr1		ldy RP
 
 				sty RP
 
+				clc
+				rts
+				
+.9				lda #E.NOIF
+				sec
 				rts
 *--------------------------------------
 CP.UpdatePtr1	lda ZPCodePtr

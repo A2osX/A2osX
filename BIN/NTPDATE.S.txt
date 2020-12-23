@@ -1,0 +1,434 @@
+NEW
+  AUTO 3,1
+				.LIST OFF
+				.OP	65C02
+				.OR	$2000
+				.TF bin/ntpdate
+*--------------------------------------
+				.INB inc/macros.i
+				.INB inc/a2osx.i
+				.INB inc/mli.i
+				.INB inc/eth.i
+				.INB inc/libtcpip.i
+*--------------------------------------
+TIMEOUT.MAX		.EQ 250					25 sec.
+*--------------------------------------
+				.DUMMY
+				.OR ZPBIN
+ZS.START
+ZPIPCfgPtr		.BS 2
+ZPPtr			.BS 2
+hSocket			.BS 1
+hFrame			.BS 1
+TimeOut			.BS 1
+iArg			.BS 1
+
+iHost			.BS 1
+bSet			.BS 1
+bDaemon			.BS 1
+
+Time1900		.BS 4
+Adjust			.BS 4
+
+STime			.BS S.TIME
+
+ZS.END			.ED
+*--------------------------------------
+*			File Header (16 Bytes)
+*--------------------------------------
+CS.START		cld
+				jmp (.1,x)
+				.DA #$61				6502,Level 1 (65c02)
+				.DA #1					BIN Layout Version 1
+				.DA #S.PS.F.EVENT
+				.DA #0
+				.DA CS.END-CS.START		Code Length To Relocate
+				.DA DS.END-DS.START		Data Segment to Allocate
+				.DA #16					SS
+				.DA #ZS.END-ZS.START	Zero Page Size
+				.DA 0
+*--------------------------------------
+.1				.DA CS.INIT
+				.DA CS.RUN
+				.DA CS.DOEVENT		
+				.DA	CS.QUIT
+J.CheckArgs		.DA CheckArgs.A
+				.DA CheckArgs.S
+				.DA CheckArgs.D
+L.LIBTCPIP		.DA LIBTCPIP
+L.SA.LOCAL		.DA SA.LOCAL
+L.SA.REMOTE		.DA SA.REMOTE
+L.SA.REMOTE.AD	.DA SA.REMOTE+S.SOCKADDR.ADDR
+L.NTP.Request	.DA NTP.Request
+L.MSG.USAGE		.DA MSG.USAGE
+L.MSG.IPKO		.DA MSG.IPKO
+L.MSG.UNKNOWN	.DA MSG.UNKNOWN
+L.MSG.SOCKET	.DA MSG.SOCKET
+L.MSG.TIMEOUT	.DA MSG.TIMEOUT
+L.MSG.TIME		.DA MSG.TIME
+				.DA 0
+*--------------------------------------
+CS.INIT			>LDYA L.LIBTCPIP
+				>SYSCALL LoadLib
+				bcs .9
+				
+				sta hLIBTCPIP
+
+				clc
+.9				rts
+*--------------------------------------
+CS.RUN			jsr CheckArgs
+				bcs .9
+				
+				jsr OpenSocket
+				bcs .9
+				
+.1				jsr SendNTPRequest
+				bcs .2
+			
+				jsr DecodeNTPReply
+				bcs .2
+
+				bit bSet
+				bpl .2
+
+				jsr SetProDOSTime
+				
+.2				bit bDaemon			
+				bpl .7
+				
+				lda #TIMEOUT.MAX
+				sta TimeOut
+				
+.3				>SLEEP
+				
+				lda TimeOut
+				bne .3
+	
+				bra .1
+				
+.7				bcc .8
+				rts
+
+.8				lda #0
+				sec
+.9				rts
+*--------------------------------------
+CS.DOEVENT		lda (pEvent)
+				bpl .9					is it a TIMER event?
+
+				lda TimeOut
+				beq .9
+
+				dec TimeOut
+
+.9				sec						do not discard TIMER event
+				rts
+*--------------------------------------
+CS.QUIT			lda hSocket
+				beq .1
+
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Shutdown
+
+.1				lda hLIBTCPIP
+				beq .8
+
+				>SYSCALL UnloadLib
+
+.8				clc
+				rts
+*--------------------------------------
+CheckArgs		inc iArg
+				lda iArg
+				>SYSCALL ArgV
+				bcs .8
+
+				>STYA ZPPtr
+				lda (ZPPtr)
+				cmp #'-'
+				bne .4
+
+				ldy #2
+				lda (ZPPtr),y
+				bne .9
+				
+				dey
+				lda (ZPPtr),y
+
+				ldx #OptionCnt-2
+
+.2				cmp OptionList,x
+				beq .3
+
+				cmp OptionList+1,x
+				beq .3
+
+				dex
+				dex
+				bpl .2
+				
+				bra .9
+				
+.3				inc iArg
+
+				jsr .5
+				bcc CheckArgs
+				bcs .9
+
+.4				lda iHost
+				bne .9
+				
+				lda iArg
+				sta iHost
+				bra CheckArgs
+				
+.5				jmp (J.CheckArgs,x)		
+
+.8				lda iHost
+				beq .9
+
+				clc
+				rts
+
+.9				>PUSHW L.MSG.USAGE
+				>PUSHBI 0
+				>SYSCALL PrintF
+				lda #E.SYN
+				sec
+				rts
+				
+CheckArgs.A		lda iArg
+				>SYSCALL ArgV
+				bcs .9
+				
+				>SYSCALL AToL
+				>PUSHWI 0
+				>PUSHWI 3600
+				>FPU IMUL32
+				>PULLL Adjust
+				
+				clc
+				
+.9				rts
+
+CheckArgs.S		sec
+				ror bSet
+				rts
+
+CheckArgs.D		sec
+				ror bDaemon
+				rts
+*--------------------------------------
+OpenSocket		>LIBCALL hLIBTCPIP,LIBTCPIP.GETCFG	is TCPIP loaded ?
+				bcs .99
+
+				>STYA ZPIPCfgPtr
+
+				lda (ZPIPCfgPtr)		Configured ?
+				bmi .10
+				
+.99				>LDYA L.MSG.IPKO
+				>SYSCALL PutS
+				sec
+				rts
+
+.10				ldy #S.IPCFG.IP+3
+				ldx #3
+				
+.1				lda (ZPIPCfgPtr),y
+				sta SA.LOCAL+S.SOCKADDR.ADDR,x
+				dey
+				dex
+				bpl .1
+
+				lda #TIMEOUT.MAX
+				sta TimeOut
+
+.2				>PUSHW L.SA.REMOTE.AD
+				lda iHost
+				>SYSCALL ArgV
+				>PUSHYA
+				>LIBCALL hLIBTCPIP,LIBTCPIP.HST.GetByName
+				bcc .3
+
+				>SLEEP
+				lda TimeOut
+				bne .2
+
+				>PUSHW L.MSG.UNKNOWN
+				lda iHost
+				>SYSCALL ArgV
+				>PUSHYA
+				>PUSHBI 2
+				>SYSCALL PrintF
+				sec
+				rts
+				
+.3				>PUSHBI S.IP.PROTOCOL.UDP
+				lda #S.SOCKET.T.DGRAM
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Socket
+				bcs .9
+
+				sta hSocket
+
+				>PUSHW L.SA.LOCAL
+				lda hSocket
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Bind
+				bcs .9
+				
+				>PUSHW L.SA.REMOTE
+				lda hSocket
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Connect
+				bcc .8
+
+.9				pha
+				>PUSHW L.MSG.SOCKET
+				>PUSHBI 0
+				>SYSCALL PrintF
+				pla
+				sec
+.8				rts
+*--------------------------------------
+SendNTPRequest	>PUSHWI NTP.Request.End-NTP.Request
+				>PUSHW L.NTP.Request
+
+				lda hSocket
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Send
+				bcs .9
+
+				lda #TIMEOUT.MAX
+				sta TimeOut
+
+.1				lda hSocket
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Recv
+				bcc .8
+
+				>SLEEP
+				lda TimeOut
+				bne .1
+
+.9				>PUSHW L.MSG.TIMEOUT
+				lda iHost
+				>SYSCALL ArgV
+				>PUSHYA
+				>PUSHBI 2
+				>SYSCALL PrintF
+
+				sec
+.8				rts
+*--------------------------------------
+DecodeNTPReply	sta hFrame
+				>SYSCALL GetMemPtr
+				>STYA ZPPtr
+				
+				lda #S.UDP+40
+
+				clc
+				adc ZPPtr
+				sta ZPPtr
+				lda /S.UDP+40
+				adc ZPPtr+1
+				sta ZPPtr+1
+
+				ldy #3
+				ldx #0
+				
+				clc
+				
+.1				lda	(ZPPtr),y
+				adc Adjust,x
+				sta Time1900,x
+				inx
+				dey
+				bpl .1
+
+				>PUSHWI Time1900
+				>PUSHWI STime
+				>SYSCALL CTime2Time
+
+				lda STime+S.TIME.YEAR
+				sec
+				sbc #70
+				sta STime+S.TIME.YEAR
+
+				>PUSHW L.MSG.TIME
+				
+				ldy #0
+
+.2				>PUSHB STime,y
+				iny
+				cpy #7
+				bne .2
+				
+				>PUSHBI 7
+				>SYSCALL PrintF
+				
+				lda hFrame
+				>SYSCALL FreeMem
+				
+				rts
+*--------------------------------------
+SetProDOSTime	lda STime+S.TIME.MONTH
+				asl
+				asl
+				asl
+				asl
+				asl
+				sta DATELO
+				
+				lda STime+S.TIME.YEAR
+				rol
+				sta DATELO+1
+				
+				lda STime+S.TIME.DAY
+				ora DATELO
+				sta DATELO
+				
+				lda STime+S.TIME.HOUR
+				sta TIMELO+1
+
+				lda STime+S.TIME.MINUTE
+				sta TIMELO
+				
+				clc
+				rts
+*--------------------------------------
+CS.END
+LIBTCPIP		.AZ "libtcpip"
+hLIBTCPIP		.BS 1
+*--------------------------------------
+OptionList		.AS "AaSsDd"
+OptionCnt		.EQ *-OptionList
+*--------------------------------------
+MSG.USAGE		.AS "Usage : NTPDATE <ip|host>\r\n"
+				.AS "   -A (-)nn : TZ offset\r\n"
+				.AS "   -S : Set ProDOS date\r\n"
+				.AZ "   -D : Run as Daemon\r\n"
+MSG.IPKO		.AZ "TCP/IP Not Loaded/Configured."
+MSG.UNKNOWN		.AZ "%s: Unknown host\r\n"
+MSG.SOCKET		.AZ "Failed to open socket\r\n"
+MSG.TIMEOUT		.AZ "No response from %s\r\n"
+MSG.TIME		.AS "NTPDATE:%02d%02d/%02d/%02d %02d:%02d:%02d\r\n"
+*--------------------------------------
+SA.LOCAL		.DA #AF.INET			S.SOCKADDR.AF
+				.BS 1
+				.BS 4					S.SOCKADDR.ADDR
+				.BS 2					S.SOCKADDR.PORT
+*--------------------------------------
+SA.REMOTE		.DA #AF.INET			S.SOCKADDR.AF
+				.BS 1
+				.BS 4					S.SOCKADDR.ADDR
+				.DA UDP.PORT.NTP
+*--------------------------------------
+NTP.Request		.HS 1B
+				.BS 47
+NTP.Request.End	.EQ *
+*--------------------------------------
+				.DUMMY
+				.OR 0
+DS.START
+DS.END			.ED
+*--------------------------------------
+MAN
+SAVE usr/src/bin/ntpdate.s
+ASM
