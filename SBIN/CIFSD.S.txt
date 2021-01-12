@@ -11,8 +11,9 @@ NEW
 				.INB inc/eth.i
 				.INB inc/libtcpip.i
 				.INB inc/net.smb.i
+				.INB inc/libcifs.i
 *--------------------------------------
-TIMEOUT.MAX		.EQ 100					20 sec.
+TIMEOUT.MAX		.EQ 250					25 sec.
 *--------------------------------------
 * Zero Page Segment, up to 32 bytes
 *--------------------------------------
@@ -20,11 +21,15 @@ TIMEOUT.MAX		.EQ 100					20 sec.
 				.OR ZPBIN
 ZS.START
 ZPIPCfgPtr		.BS 2
+hSocket			.BS 1
 hResp			.BS 1
 ZPRespPtr		.BS 2
 TimeOut			.BS 1
-ZS.END
-				.ED
+hSMBContext		.BS 1
+hMount			.BS 1
+ZPPtr1			.BS 2
+ZPPtr2			.BS 2
+ZS.END			.ED
 *--------------------------------------
 *			File Header (16 Bytes)
 *--------------------------------------
@@ -44,9 +49,10 @@ CS.START		cld
 *--------------------------------------
 .1				.DA CS.INIT
 				.DA CS.RUN
-				.DA CS.DOEVENT		
+				.DA CS.DOEVENT
 				.DA	CS.QUIT
 L.LIBTCPIP		.DA LIBTCPIP
+L.LIBCIFS		.DA LIBCIFS
 L.MSG.TCPIPERR	.DA MSG.TCPIPERR
 L.MSG.USAGE		.DA MSG.USAGE
 L.MSG.UNKNOWN	.DA MSG.UNKNOWN
@@ -54,6 +60,7 @@ L.MSG.SESSION	.DA MSG.SESSION
 L.SMB.NegReq	.DA SMB.NegReq
 L.SMB.SessSetup	.DA SMB.SessSetup
 L.SMB.TreeConnReq	.DA SMB.TreeConnReq
+L.SMB.QueryPathInfo	.DA SMB.QueryPathInfo
 L.SMB.FindFirstReq	.DA SMB.FindFirstReq
 				.DA 0
 *--------------------------------------
@@ -63,17 +70,84 @@ L.SMB.FindFirstReq	.DA SMB.FindFirstReq
 CS.INIT			>LDYA L.LIBTCPIP
 				>SYSCALL LoadLib
 				bcs .9
+
 				sta hLIBTCPIP
-				
-				clc
-.9				rts
+
+				>LDYA L.LIBCIFS
+				>SYSCALL LoadLib
+				bcs .9
+
+				sta hLIBCIFS
+
+*				clc
+.9
+CS.INIT.RTS		rts
 *--------------------------------------
 * Called until exit with CS
 * if RUN exits with CC, RUN entered again
 *--------------------------------------
-CS.RUN			>LDA.G hSocket
-				bne .8
+CS.RUN			lda hSocket
+				beq .1
 
+				lda #0
+				clc
+				rts
+
+.1				jsr CS.RUN.CheckTCPIP
+				bcs CS.INIT.RTS
+
+				jsr CS.RUN.CheckArgs
+				bcs CS.INIT.RTS
+
+				jsr CS.RUN.Connect
+				bcs CS.INIT.RTS
+
+				>PUSHB hSocket
+				>PUSHBI 0
+				>LIBCALL hLIBCIFS,LIBCIFS.Negotiate
+
+*				jsr CS.RUN.Negotiate
+				bcs .9
+
+				sta hSMBContext
+
+				>PUSHB hSocket
+				>PUSHB hSMBContext
+				>PUSHWI 0
+				>PUSHWI 0
+				>PUSHBI 0
+				>LIBCALL hLIBCIFS,LIBCIFS.SessionSetup
+
+*				jsr CS.RUN.SessSetup
+				bcs .9
+
+				>PUSHB hSocket
+				>PUSHB hSMBContext
+				lda #2
+				>SYSCALL ArgV
+				>PUSHYA
+				>PUSHBI 0
+				>LIBCALL hLIBCIFS,LIBCIFS.TreeConnect
+
+*				jsr CS.RUN.TreeConn
+				bcs .9
+
+*				lda #3
+*				>SYSCALL ArgV
+*				>PUSHYA
+
+*				>PUSHW L.CS.CALLBACK
+
+*				>SYSCALL Mount
+*				bcs .9
+
+*				sta hMount
+
+.8				lda #0
+				clc
+.9				rts
+*--------------------------------------
+CS.RUN.CheckTCPIP
 				>LIBCALL hLIBTCPIP,LIBTCPIP.GETCFG	is TCPIP loaded ?
 				bcs .9
 
@@ -83,67 +157,66 @@ CS.RUN			>LDA.G hSocket
 
 				>LDYA L.MSG.TCPIPERR
 				>SYSCALL PutS
-				
+
 				lda #E.SYN
 				sec
-				rts
-
-.1				jsr CS.RUN.CheckArgs
-				bcs .90
-
-				jsr CS.RUN.Connect
-
-				>SLEEP
-
-				jsr CS.RUN.Negotiate
-				bcs .9
-				
-				>SLEEP
-				
-				jsr CS.RUN.SessSetup
-				bcs .9
-				
-				>SLEEP
-				
-				jsr CS.RUN.TreeConn
-				bcs .9
-				
-				>SLEEP
-				
-				jsr CIFS.OpenDir
-				bcs .9
-				
-	
-.8				lda #0
-				clc
 .9				rts
 
-.90				>LDYA L.MSG.USAGE
-				>SYSCALL PutS
-				lda #E.SYN
-				sec
+.1				lda #AF.INET
+				>STA.G SA.LOCAL
+				>STA.G SA.REMOTE
+
+				ldy #S.IPCFG.IP+3
+
+.3				lda (ZPIPCfgPtr),y
+				pha
+				dey
+				cpy #S.IPCFG.IP-1
+				bne .3
+
+				ldy #SA.LOCAL+S.SOCKADDR.ADDR
+
+.4				pla
+				sta (pData),y
+				iny
+				cpy #SA.LOCAL+S.SOCKADDR.ADDR+4
+				bne .4
+
+				lda #TCP.PORT.CIFS
+				>STA.G SA.REMOTE+S.SOCKADDR.PORT
+				iny
+				lda /TCP.PORT.CIFS
+				sta (pData),y
+
+				clc
 				rts
 *--------------------------------------
 CS.RUN.CheckArgs
 				ldy #S.PS.ARGC
 				lda (pPS),y
 				cmp #3
-				bcc .9
+				bcs .1
 
-				lda #TIMEOUT.MAX
+				>LDYA L.MSG.USAGE
+				>SYSCALL PutS
+				lda #E.SYN
+				sec
+				rts
+
+.1				lda #TIMEOUT.MAX
 				sta TimeOut
-				
-.1				>PUSHEA.G SA.REMOTE+S.SOCKADDR.ADDR
+
+.2				>PUSHEA.G SA.REMOTE+S.SOCKADDR.ADDR
 				lda #1
 				>SYSCALL ArgV
 				>PUSHYA
 				>LIBCALL hLIBTCPIP,LIBTCPIP.HST.GetByName
-				bcc .2
-				
+				bcc .3
+
 				>SLEEP
 				lda TimeOut
-				bne .1
-				
+				bne .2
+
 				>PUSHW L.MSG.UNKNOWN
 				lda #1
 				>SYSCALL ArgV
@@ -151,32 +224,10 @@ CS.RUN.CheckArgs
 				>PUSHBI 2
 				>SYSCALL PrintF
 				sec
-.9				rts
+				rts
 
-.2				lda #AF.INET
-				>STA.G SA.LOCAL
-				>STA.G SA.REMOTE
-				ldy #S.IPCFG.IP+3
-				
-.3				lda (ZPIPCfgPtr),y
-				pha
-				dey
-				cpy #S.IPCFG.IP-1
-				bne .3
-				
-				ldy #SA.REMOTE+S.SOCKADDR.PORT
-.4				pla
-				sta (pData),y
-				iny
-				cpy #SA.REMOTE+S.SOCKADDR.PORT+4
-				bne .4
-				
-				lda #TCP.PORT.CIFS
-				>STA.G SA.REMOTE+S.SOCKADDR.PORT
-				iny
-				lda /TCP.PORT.CIFS
-				sta (pData),y
-
+.3				lda #2
+				>SYSCALL ArgV
 
 				clc
 				rts
@@ -186,16 +237,43 @@ CS.RUN.Connect	>PUSHBI 0				no protocol
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Socket
 				bcs .9
 
-				>STA.G hSocket
+				sta hSocket
 
 				>PUSHEA.G SA.LOCAL
-				>LDA.G hSocket
+				lda hSocket
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Bind
 				bcs .9
-				
+
+				>SLEEP
+
 				>PUSHEA.G SA.REMOTE
-				>LDA.G hSocket
+				lda hSocket
+
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Connect
+				bcs .9
+
+				lda #TIMEOUT.MAX
+				sta TimeOut
+
+.1				>SLEEP
+
+				lda hSocket
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Recv
+				bcc .7
+
+				cmp #E.NODATA
+				beq .8
+
+				ldx TimeOut
+				bne .1
+
+				sec
+				rts
+
+.7				>SYSCALL Freemem
+
+.8				clc
+
 .9				rts
 *--------------------------------------
 CS.RUN.Negotiate
@@ -204,19 +282,19 @@ CS.RUN.Negotiate
 
 .1				>PUSHWI SMB.NegReq.end-SMB.NegReq
 				>PUSHW L.SMB.NegReq
-				>LDA.G hSocket
+				lda hSocket
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Send
 				bcc .2
-				
+
 				>SLEEP
 				ldx TimeOut
 				bne .1
-				
+
 				bra .99
-		
+
 .2				>SLEEP
 
-				>LDA.G hSocket
+				lda hSocket
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Recv
 				bcc .3
 
@@ -228,25 +306,25 @@ CS.RUN.Negotiate
 .3				sta hResp
 				>SYSCALL GetMemPtr
 				>STYA ZPRespPtr
-				
+
 				ldy #$3f
 				lda (ZPRespPtr),y
 				bne .9
-				
+
 				ldy #$5B
 				lda (ZPRespPtr),y
 				cmp #5
 				bne .9
-				
-				
+
+
 				lda hResp
 				>SYSCALL FreeMem
 *				clc
 				rts
-				
+
 .9				lda hResp
 				>SYSCALL FreeMem
-				
+
 .99				lda #MLI.E.INVPATH
 				sec
 				rts
@@ -257,19 +335,19 @@ CS.RUN.SessSetup
 
 .1				>PUSHWI SMB.SessSetup.end-SMB.SessSetup
 				>PUSHW L.SMB.SessSetup
-				>LDA.G hSocket
+				lda hSocket
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Send
 				bcc .2
-				
+
 				>SLEEP
 				ldx TimeOut
 				bne .1
-				
+
 				bra .99
-		
+
 .2				>SLEEP
 
-				>LDA.G hSocket
+				lda hSocket
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Recv
 				bcc .3
 
@@ -281,7 +359,7 @@ CS.RUN.SessSetup
 .3				sta hResp
 				>SYSCALL GetMemPtr
 				>STYA ZPRespPtr
-				
+
 				ldy #$3f
 				lda (ZPRespPtr),y
 				bne .9
@@ -292,7 +370,7 @@ CS.RUN.SessSetup
 				iny
 				lda (ZPRespPtr),y
 				sta SMB.TreeConnReq.UID+1
-				
+
 				>PUSHW L.MSG.SESSION
 				lda #$63
 				clc
@@ -301,18 +379,18 @@ CS.RUN.SessSetup
 				lda #0
 				adc ZPRespPtr+1
 				>PUSHYA
-				
+
 				>PUSHBI 2
 				>SYSCALL PrintF
-				
+
 				lda hResp
 				>SYSCALL FreeMem
 *				clc
 				rts
-				
+
 .9				lda hResp
 				>SYSCALL FreeMem
-				
+
 .99				lda #MLI.E.INVPATH
 				sec
 				rts
@@ -322,19 +400,19 @@ CS.RUN.TreeConn	lda #TIMEOUT.MAX
 
 .1				>PUSHWI SMB.TreeConnReq.end-SMB.TreeConnReq
 				>PUSHW L.SMB.TreeConnReq
-				>LDA.G hSocket
+				lda hSocket
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Send
 				bcc .2
-	
+
 				>SLEEP
 				ldx TimeOut
 				bne .1
-				
+
 				bra .99
-		
+
 .2				>SLEEP
 
-				>LDA.G hSocket
+				lda hSocket
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Recv
 				bcc .3
 
@@ -346,41 +424,43 @@ CS.RUN.TreeConn	lda #TIMEOUT.MAX
 .3				sta hResp
 				>SYSCALL GetMemPtr
 				>STYA ZPRespPtr
-				
+
 				ldy #$3f
 				lda (ZPRespPtr),y
 				bne .9
-				
+
 				ldy #$52
 				lda (ZPRespPtr),y
 				sta SMB.FindFirstReq.TID
 				iny
 				lda (ZPRespPtr),y
 				sta SMB.FindFirstReq.TID+1
-				
+
 				ldy #$56
 				lda (ZPRespPtr),y
 				sta SMB.FindFirstReq.UID
 				iny
 				lda (ZPRespPtr),y
 				sta SMB.FindFirstReq.UID+1
-				
+
 				lda hResp
 				>SYSCALL FreeMem
 *				clc
 				rts
-				
+
 .9				lda hResp
 				>SYSCALL FreeMem
-				
+
 .99				lda #MLI.E.INVPATH
 				sec
 				rts
 *--------------------------------------
 CS.DOEVENT		lda (pEvent)
 				bpl .9					is it a TIMER event?
+
 				lda TimeOut
 				beq .9
+
 				dec TimeOut
 .9				sec						do not discard TIMER event
 				rts
@@ -388,66 +468,27 @@ CS.DOEVENT		lda (pEvent)
 * Called once, when RUN exited with CS
 * Put code for unloading LIB here
 *--------------------------------------
-CS.QUIT			>LDA.G hSocket
+CS.QUIT			lda hMount
+				beq .1
+
+				>SYSCALL UMount
+
+.1				lda hSocket
+				beq .2
+
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Shutdown
-				
-				lda hLIBTCPIP
+
+.2				lda hLIBCIFS
+				beq .3
+
+				>SYSCALL UnloadLib
+
+.3				lda hLIBTCPIP
 				beq .8
+
 				>SYSCALL UnloadLib
 
 .8				clc
-				rts
-*--------------------------------------
-CIFS.OpenDir	lda #TIMEOUT.MAX
-				sta TimeOut
-
-.1				>PUSHWI SMB.FindFirstReq.end-SMB.FindFirstReq
-				>PUSHW L.SMB.FindFirstReq
-				>LDA.G hSocket
-				>LIBCALL hLIBTCPIP,LIBTCPIP.Send
-				bcc .2
-	
-				>SLEEP
-				ldx TimeOut
-				bne .1
-				
-				bra .99
-		
-.2				>SLEEP
-
-				>LDA.G hSocket
-				>LIBCALL hLIBTCPIP,LIBTCPIP.Recv
-				bcc .3
-
-				cmp #E.NODATA
-				beq .2
-
-				bra .99
-
-.3				sta hResp
-				>SYSCALL GetMemPtr
-				>STYA ZPRespPtr
-				
-				ldy #$3f
-				lda (ZPRespPtr),y
-				bne .9
-				
-				lda hResp
-				>SYSCALL FreeMem
-*				clc
-				rts
-				
-.9				lda hResp
-				>SYSCALL FreeMem
-				
-.99				lda #MLI.E.INVPATH
-				sec
-				rts
-*--------------------------------------
-CIFS.ReadDir
-*--------------------------------------
-CIFS.CloseDir
-				clc
 				rts
 *--------------------------------------
 CS.END
@@ -456,10 +497,12 @@ CS.END
 *--------------------------------------
 LIBTCPIP		.AZ "libtcpip"
 hLIBTCPIP		.BS 1
-MSG.TCPIPERR	.AZ "HTTPD:TCP/IP Not initialized properly."
+LIBCIFS			.AZ "libcifs"
+hLIBCIFS		.BS 1
+MSG.TCPIPERR	.AZ "CIFSD:TCP/IP Not initialized properly."
 MSG.USAGE		.AZ "Usage : CIFSD <ip|host> sharename mountpoint"
-MSG.UNKNOWN		.AZ "%s: Unknown host\r\n"
-MSG.SESSION		.AZ "Connected to: %s\r\n"
+MSG.UNKNOWN		.AZ "CIFSD:%s: Unknown host\r\n"
+MSG.SESSION		.AZ "CIFSD:Connected to: %s\r\n"
 *--------------------------------------
 SMB.NegReq		.DA #0					DIRECT TCP TRANSPORT
 				.DA #0					24 BITS LENGTH
@@ -521,7 +564,7 @@ SMB.SessSetup	.DA #0					DIRECT TCP TRANSPORT
 				.DA 0					MID
 
 				.DA #13					WORD COUNT
-				
+
 				.HS FF000000			NO MORE CMD
 				.DA 1280				MAX BUFFER
 				.DA 2					MAX MPX COUNT
@@ -535,11 +578,9 @@ SMB.SessSetup	.DA #0					DIRECT TCP TRANSPORT
 				.DA #SMB.SessSetup.end-2-*
 				.DA /SMB.SessSetup.end-2-*
 
-SMB.SessSetup.SecBlob
 *				.AZ ""					Password
-				.AZ "GUEST"				Account Name
+				.AZ "Guest"				Account Name
 				.AZ "?"					Primary Domain
-SMB.SessSetup.SecBlob.LEN .EQ *-SMB.SessSetup.SecBlob
 				.AZ "A2osX"				Native OS
 				.AZ	"A2osX-CIFSD"		Native LANMAN
 SMB.SessSetup.end	.EQ *
@@ -563,19 +604,72 @@ SMB.TreeConnReq.TID
 SMB.TreeConnReq.UID
 				.DA 0					UID
 				.DA 0					MID
-				
+
 				.DA #4					WORD COUNT
 				.HS FF000000			NO MORE CMD
-				.DA 0 
+				.DA 0
 				.DA 1					PASSWORD LEN
-				
+
 				.DA #SMB.TreeConnReq.end-2-*
 				.DA /SMB.TreeConnReq.end-2-*
 
 				.AZ ""					PASSWORD
-				.AZ	"\\SV-W2K-3\Apple"	PATH
+				.AZ	"_temp"				PATH
 				.AZ "?????"
 SMB.TreeConnReq.end	.EQ *
+*--------------------------------------
+* https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-cifs/9b171bbf-c6d8-4c88-ac85-23c795cbb5d3
+*--------------------------------------
+SMB.QueryPathInfo
+				.DA #0					DIRECT TCP TRANSPORT
+				.DA #0					24 BITS LENGTH
+				.DA /SMB.QueryPathInfo.end-1-*
+				.DA #SMB.QueryPathInfo.end-1-*
+				.DA #$FF
+				.AS "SMB"
+				.DA #S.SMB.H.CMD.TRANSACTION2
+				.HS 00000000
+				.DA #0					S.SMB.H.FLAGS
+				.DA S.SMB.H.FLAGS2.LONGNAMES
+				.DA 0					PIDHI
+				.HS 0000000000000000	SECFEAT
+				.DA 0					RSVD
+SMB.QueryPathInfo.TID
+				.DA $FFFF				TID
+				.DA $FEFF				PIDLO
+SMB.QueryPathInfo.UID
+				.DA 0					UID
+				.DA 0					MID
+* Trans2
+				.DA #15					WORD COUNT
+				.DA SMB.QueryPathInfo.PrmCnt		TotalParamCount
+				.DA 0					TotalDataCount
+				.DA 10					MaxParameterCount
+				.DA 460					MaxDataCount
+				.DA #1					MaxSetupCount
+				.HS 00					Reserved1
+				.DA 0					Flags
+				.HS 00000000			Timeout
+				.HS 0000				Reserved2
+				.DA SMB.QueryPathInfo.PrmCnt		ParameterCount
+				.DA 66					ParameterOffset
+				.HS 0000				DataCount
+				.HS 0000				DataOffset
+
+				.DA #1					SetupCount
+				.HS 00					Reserved3
+* TRANS2_QUERY_PATH_INFORMATION
+				.DA 5					TRANS2_QUERY_PATH_INFORMATION
+
+				.DA SMB.QueryPathInfo.PrmCnt+1	INCLUDING Padding byte below
+				.HS 00					Padding
+
+SMB.QueryPathInfo.Prm
+				.DA $0001				InformationLevel
+				.HS 00000000			SearchStorageType
+				.AZ "server.met"		FileName
+SMB.QueryPathInfo.PrmCnt	.EQ *-SMB.QueryPathInfo.Prm
+SMB.QueryPathInfo.end
 *--------------------------------------
 SMB.FindFirstReq
 				.DA #0					DIRECT TCP TRANSPORT
@@ -596,38 +690,39 @@ SMB.FindFirstReq.TID
 				.DA $FEFF				PIDLO
 SMB.FindFirstReq.UID
 				.DA 0					UID
-				.DA 0					MID				
-				
-				.DA #$0F				WORD COUNT
-				.DA 0					TotalParamCount
+				.DA 0					MID
+* Trans2
+				.DA #15					WORD COUNT
+				.DA SMB.FindFirstReq.PrmCnt		TotalParamCount
 				.DA 0					TotalDataCount
-				.DA 256					MaxParameterCount
-				.DA 1024				MaxDataCount
+				.DA 10					MaxParameterCount
+				.DA 460					MaxDataCount
 				.DA #1					MaxSetupCount
 				.HS 00					Reserved1
 				.DA 0					Flags
 				.HS 00000000			Timeout
 				.HS 0000				Reserved2
-				.DA 18					ParameterCount
-				.DA 68					ParameterOffset
+				.DA SMB.FindFirstReq.PrmCnt		ParameterCount
+				.DA 66					ParameterOffset
 				.HS 0000				DataCount
 				.HS 0000				DataOffset
 
 				.DA #1					SetupCount
 				.HS 00					Reserved3
-				
+* FIND_FIRST2
 				.DA 1					TRANS2_FIND_FIRST2
 
-				.DA SMB.FindFirstReq.end-2-*
+				.DA SMB.FindFirstReq.PrmCnt+1	INCLUDING Padding byte below
+				.HS 00					Padding
 
-				.HS 000000				Padding
-
-				.DA $373E				SearchAttributes
+SMB.FindFirstReq.Prm
+				.DA $0016				SearchAttributes
 				.DA 1024				SearchCount
-				.DA 0					Flags
-				.DA $0104				InformationLevel
+				.DA 3					Flags
+				.DA $0001				InformationLevel
 				.HS 00000000			SearchStorageType
-				.AS "\*"				FileName
+				.AZ "\*.*"				FileName
+SMB.FindFirstReq.PrmCnt	.EQ *-SMB.FindFirstReq.Prm
 SMB.FindFirstReq.end
 *--------------------------------------
 				.DUMMY
@@ -641,7 +736,6 @@ SA.REMOTE		.BS 1					S.SOCKADDR.AF
 				.BS 1
 				.BS 4					S.SOCKADDR.ADDR
 				.BS 2					S.SOCKADDR.PORT
-hSocket			.BS 1
 DS.END
 				.ED
 *--------------------------------------
