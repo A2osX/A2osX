@@ -15,13 +15,10 @@ NEW
 				.DUMMY
 				.OR ZPLIB
 ZS.START
-hSocket			.BS 1
-hReq			.BS 1
 ZPReqPtr		.BS 2
 ZPReqLen		.BS 2
 ZPCtxPtr		.BS 2
 
-hResp			.BS 1
 ZPRespPtr		.BS 2
 
 ZPPtr1			.BS 2
@@ -83,9 +80,7 @@ LIB.LOAD		>LDYA L.LIBTCPIP
 				>SYSCALL GetMem
 				bcs .9
 				
-				>STYA ZPReqPtr
 				stx hReq
-
 
 *				clc
 .9				rts
@@ -137,7 +132,6 @@ CIFS.Negotiate	lda (pStack)
 
 				ldx #LIBTCPIP.Recv
 				jsr GO.LIBTCPIP
-
 				bcc .3
 
 				cmp #E.NODATA
@@ -153,6 +147,9 @@ CIFS.Negotiate	lda (pStack)
 
 				ldy #3
 				lda (ZPRespPtr),y
+				clc
+				adc #4					+ NETBIOS header
+				sta ZPPtr1
 				tay
 				lda #0
 				
@@ -161,16 +158,16 @@ CIFS.Negotiate	lda (pStack)
 				
 				>STYA ZPCtxPtr
 
-				ldy #3
-				lda (ZPRespPtr),y
-
-				tay
+				ldy ZPPtr1
 
 .4				dey
 				lda (ZPRespPtr),y
 				sta (ZPCtxPtr),y
 				tya
 				bne .4
+
+				ldy #S.NETBIOS+S.SMB.H.FLAGS
+				sta (ZPCtxPtr),y
 
 				phx
 				
@@ -187,8 +184,7 @@ CIFS.Negotiate	lda (pStack)
 
 .98				lda #MLI.E.IO
 
-.99				>POP 2
-				rts
+.99				>RET 2
 *--------------------------------------
 * >PUSHB hSocket
 * >PUSHB hSMBContext
@@ -205,9 +201,13 @@ CIFS.SessionSetup
 
 .10				dec
 				sta (pStack)
-				
+	
 				ldy #5					hSMBContext
 				jsr GetSMBCtx
+
+				lda hReq
+				>SYSCALL GetMemPtr
+				>STYA ZPReqPtr
 
 				ldx #S.SMB.H.CMD.SESSION.SETUP.ANDX
 
@@ -257,7 +257,7 @@ CIFS.SessionSetup
 				
 				pla
 	
-				jsr GetReqLenYAtA
+				jsr SetReqLenYAtA
 
 				>PUSHYA
 				>PUSHW ZPReqPtr
@@ -314,12 +314,11 @@ CIFS.SessionSetup
 
 .98				lda #MLI.E.IO
 				sec
-.99				>POP 7
-				rts				
+.99				>RET 7			
 *--------------------------------------
 * >PUSHB hSocket
 * >PUSHB hSMBContext
-* >PUSHW path
+* >PUSHW pathname
 * >PUSHB 0
 * >LIBCALL TreeConnect
 * (SMBContext updated with TID)
@@ -334,6 +333,17 @@ CIFS.TreeConnect
 				
 				ldy #3					hSMBContext
 				jsr GetSMBCtx
+
+				lda hReq
+				>SYSCALL GetMemPtr
+				>STYA ZPReqPtr
+
+				ldy #1					pathname
+				lda (pStack),y
+				sta ZPPtr1
+				iny
+				lda (pStack),y
+				sta ZPPtr1+1
 
 				ldx #S.SMB.H.CMD.TREE.CONNECT.ANDX
 
@@ -367,13 +377,6 @@ CIFS.TreeConnect
 				sta (ZPReqPtr),y		PASSWORD = "\0"
 				iny
 				
-				ldy #1
-				lda (pStack),y
-				sta ZPPtr1
-				iny
-				lda (pStack),y
-				sta ZPPtr1+1
-				
 .3				lda (ZPPtr1)
 				inc ZPPtr1
 				bne .31
@@ -396,7 +399,7 @@ CIFS.TreeConnect
 				
 				pla
 				
-				jsr GetReqLenYAtA
+				jsr SetReqLenYAtA
 
 				>PUSHYA
 				>PUSHW ZPReqPtr
@@ -452,8 +455,7 @@ CIFS.TreeConnect
 
 .98				lda #MLI.E.IO
 				sec
-.99				>POP 5
-				rts				
+.99				>RET 5			
 *--------------------------------------
 CIFS.Mount
 *--------------------------------------
@@ -517,16 +519,19 @@ GetSMBCtx		lda (pStack),y
 * Y = LEN from S.NETBIOS.TYPE
 * A = Ptr to LEN Word
 *--------------------------------------
-GetReqLenYAtA	sty ZPReqLen
+SetReqLenYAtA	sty ZPReqLen
 				stz ZPReqLen+1
 				
+				sta ZPPtr1
 				pha
 				
 				tya
 				dec
 				dec
+				sec
+				sbc ZPPtr1
 				ply
-				
+
 				sta (ZPReqPtr),y
 				iny
 				lda #0
@@ -543,14 +548,7 @@ GetReqLenYAtA	sty ZPReqLen
 				dey
 				sta (ZPReqPtr),y
 				
-				lda ZPReqLen
-				clc
-				adc #S.TCP
-				tay
-				
-				lda ZPReqLen+1
-				adc /S.TCP
-				
+				>LDYA ZPReqLen
 				rts
 *--------------------------------------
 GetRespData		sta hResp
@@ -573,6 +571,9 @@ CS.END
 LIBTCPIP		.AZ "libtcpip"
 hLIBTCPIP		.BS 1
 aLIBTCPIP		.BS 2
+hSocket			.BS 1
+hReq			.BS 1
+hResp			.BS 1
 *--------------------------------------
 SMB.TRANSPORT	.DA #0					DIRECT TCP TRANSPORT
 				.DA #0					24 BITS LENGTH
@@ -623,14 +624,14 @@ SMB.SessionSetup.H
 				.DA 2					MAX MPX COUNT
 				.HS 0000				VC NUMBER
 				.HS 00000000			SESSION KEY
-				.DA 0					CI PASS LEN
-				.DA 0					CS PASS LEN
+				.DA 0					CI PASS LEN (ANSI)
+				.DA 0					CS PASS LEN (UNICODE)
 				.HS 00000000
 				.HS 00000000			CAPABILITIES
 SMB.SessionSetup.H.Len .EQ *-SMB.SessionSetup.H
 *				.BS 2					ByteCount
 SMB.SessionSetup.Guest
-				.AZ ""					Password
+*				.AZ ""					Password
 				.AZ "Guest"				Account Name
 				.AZ "?"					Primary Domain
 SMB.SessionSetup.Guest.Len	.EQ *-SMB.SessionSetup.Guest
