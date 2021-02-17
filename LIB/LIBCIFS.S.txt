@@ -20,6 +20,7 @@ ZPReqPtr		.BS 2
 ZPReqLen		.BS 2
 ZPCtxPtr		.BS 2
 pFD				.BS 2
+pPath			.BS 2
 
 ZPRespPtr		.BS 2
 
@@ -27,7 +28,7 @@ ZPPtr1			.BS 2
 ZPPtr2			.BS 2
 BufPtr			.BS 2
 hBuf			.BS 1
-
+bFlag			.BS 1
 
 ZS.END			.ED
 *--------------------------------------
@@ -86,7 +87,7 @@ J.CIFS2			.DA CIFS2.ChTyp
 				.DA CIFS2.Close
 				.DA CIFS2.Read
 				.DA CIFS2.Write
-				.DA CIFS2.ChOwn				
+				.DA CIFS2.ChOwn
 L.LIBTCPIP		.DA LIBTCPIP
 L.NETBIOS		.DA NETBIOS
 				.DA 0
@@ -349,7 +350,7 @@ CIFS.TreeConnect
 				jsr RequestSetupX
 
 				ldx #0
-				
+
 .1				lda SMB.TreeConnect.H,x
 				sta (ZPReqPtr),y
 				iny
@@ -456,44 +457,50 @@ CIFS.Mount		ldy #1
 				>PUSHA
 				lda (pStack),y			MP LO
 				>PUSHA
-				
+
 				>PUSHW L.CALLBACK
 				>SYSCALL2 Mount
 				bcs .9
-				
+
 				pha						hMount
-				
+
 				ldx #0
 
 .1				>PULLB MountTable,x
 				inx
 				cpx #4
 				bne .1
-	
-				clc
-				
+
 				pla
-				
+				clc
+				rts
+
 .9				>RET 4
 *--------------------------------------
 CIFS.UMount		clc
 				rts
 *--------------------------------------
 CIFS.CallBack	bit CIFS.Status
-				bmi .1
-				
-				jmp (J.CIFS,x)
-				
-.1				ldy #S.PS.PID
+				bpl .1
+
+				phy
+				pha
+				ldy #S.PS.PID
 				lda (pPS),y
 				cmp CIFS.PID
-				bne .8
+				beq .2
 
-				jmp (J.CIFS2,x)
-				
-.8				lda #0
+				pla
+				ply
+
+				lda #0
 				sec
-				rts				
+				rts
+
+.1				jmp (J.CIFS,x)
+.2				pla
+				ply
+				jmp (J.CIFS2,x)
 *--------------------------------------
 CIFS.ChTyp
 CIFS2.ChTyp
@@ -501,35 +508,30 @@ CIFS2.ChTyp
 CIFS.ChMod
 CIFS2.ChMod
 *--------------------------------------
-CIFS.FStat		
+CIFS.FStat
 *--------------------------------------
 CIFS2.FStat		lda #MLI.E.BADCALL
 				sec
 				rts
 *--------------------------------------
-CIFS.Stat		>STYA ZPPtr1			resolved path
-				
+CIFS.Stat		>STYA pPath				resolved path
+
 				jsr MakeTrans2Reg
 
 				ldx #0
-				
-.2				lda SMB.QueryPathInfo,x
+
+.1				lda SMB.QueryPathInfo,x
 				sta (ZPReqPtr),y
 				iny
 				inx
 				cpx #SMB.QueryPathInfo.Len
-				bne .2
+				bne .1
 
-.3				lda (ZPPtr1)
-				inc ZPPtr1
-				bne .4
+				jsr AppendPath
 
-				inc ZPPtr1+1
-
-.4				sta (ZPReqPtr),y
+				lda #0
+				sta (ZPReqPtr),y
 				iny
-				tax
-				bne .3				
 
 				jsr SetT2ReqLenYA
 
@@ -546,33 +548,36 @@ CIFS.Stat		>STYA ZPPtr1			resolved path
 				sta CIFS.PID
 
 				dec CIFS.Status
-				
+
 				lda #0
 				sec
 				rts
 
-				lda #MLI.E.INVPATH
-				sec
 .9				>RET 4
 *--------------------------------------
 CIFS2.Stat		lda MountTable+3		hSocket
 				ldx #LIBTCPIP.Recv
 			jsr GO.LIBTCPIP
 				bcs .9
-				
+
 				jsr GetRespData
 
 				ldy #S.NETBIOS+S.SMB.H.STATUS
 				lda (ZPRespPtr),y
 				beq .1
-				
+
 				lda #MLI.E.FNOTFND
 				bra .99
 
-.1				>PULLW ZPPtr1
+.1				>PULLW ZPPtr2			Stat Buffer
+
+				inc pStack				Skip Filename
 				inc pStack
-				inc pStack
-				
+
+				jsr GetRespDataOffset
+				jsr FileInfo2StatBuf
+				jsr StatBuf2Ptr2
+
 				stz CIFS.Status
 				clc
 				rts
@@ -582,18 +587,89 @@ CIFS2.Stat		lda MountTable+3		hSocket
 
 				dec CIFS.Retries
 				beq .90
-				
+
 				lda #0
 				sec
 				rts
-				
+
 .90				lda #MLI.E.IO
 .99				sec
 				stz CIFS.Status
-				>RET 4			
+				>RET 4
 *--------------------------------------
-CIFS.MKDir
-CIFS2.MKDir
+CIFS.MKDir		>STYA pPath				resolved path
+
+				jsr MakeTrans2Reg
+
+				ldx #0
+
+.1				lda SMB.CreateDirectory,x
+				sta (ZPReqPtr),y
+				iny
+				inx
+				cpx #SMB.CreateDirectory.Len
+				bne .1
+
+				jsr AppendPath
+
+				lda #0
+				sta (ZPReqPtr),y
+				iny
+
+				jsr SetT2ReqLenYA
+
+				>PUSHYA
+				>PUSHW ZPReqPtr
+				lda MountTable+3		hSocket
+
+				ldx #LIBTCPIP.Send
+			jsr GO.LIBTCPIP
+				bcs .9
+
+				ldy #S.PS.PID
+				lda (pPS),y
+				sta CIFS.PID
+
+				dec CIFS.Status
+
+				lda #0
+				sec
+				rts
+
+.9				>RET 4
+*--------------------------------------
+CIFS2.MKDir		lda MountTable+3		hSocket
+				ldx #LIBTCPIP.Recv
+			jsr GO.LIBTCPIP
+				bcs .9
+
+				jsr GetRespData
+
+				ldy #S.NETBIOS+S.SMB.H.STATUS
+				lda (ZPRespPtr),y
+				beq .1
+
+				lda #MLI.E.DUPFILE
+				bra .99
+
+.1				stz CIFS.Status
+				clc
+				>RET 4
+
+.9				cmp #E.NODATA
+				bne .99
+
+				dec CIFS.Retries
+				beq .90
+
+				lda #0
+				sec
+				rts
+
+.90				lda #MLI.E.IO
+.99				sec
+				stz CIFS.Status
+				>RET 4
 *--------------------------------------
 CIFS.MKNod
 CIFS2.MKNod
@@ -606,65 +682,75 @@ CIFS2.Pipe		lda #MLI.E.BADCALL
 				sec
 				rts
 *--------------------------------------
-CIFS.OpenDir	>STYA ZPPtr1			resolved path
+CIFS.OpenDir	>STYA pPath				resolved path
 
 				>LDYAI S.FD.DIR
 				>SYSCALL2 GetMem
 				bcs .9
-				
+
 				>STYA ZPPtr2
-				
+
 				lda #S.FD.T.DIR
 				sta (ZPPtr2)
-				
+
 				lda hHandler
 				ldy #S.FD.HANDLER
 				sta (ZPPtr2),y
-				
+
 				lda #0
-				ldy #S.FD.DIR.FC
+				ldy #S.FD.DIR.EPB
+				sta (ZPPtr2),y			EOF Flag
+				iny
 				sta (ZPPtr2),y
 				iny
 				sta (ZPPtr2),y
-				
-				>PUSHW ZPPtr1
+
+				>PUSHW pPath
 				>PUSHWI 0
 				txa
 				>PUSHA
 				>SYSCALL2 mknod
-				
-.9				rts				
 
+.9				rts
+*--------------------------------------
 CIFS2.OpenDir	lda #MLI.E.BADCALL
 				sec
 				rts
 *--------------------------------------
 CIFS.ReadDir	jsr GetPFD
 
-				ldy #S.FD.DIR.FC
-				lda (ZPPtr2),y
+				ldy #S.FD.DIR.EPB
+				lda (pFD),y
+				beq .1
+
+				lda #MLI.E.EOF
+				sec
+				rts
+
+.1				iny
+				lda (pFD),y
 				iny
-				ora (ZPPtr2),y
+				ora (pFD),y
 				bne CIFS.ReadDir.Next
 
 				jsr MakeTrans2Reg
 
 				ldx #0
-				
+
 .2				lda SMB.FindFirst,x
 				sta (ZPReqPtr),y
 				iny
 				inx
 				cpx #SMB.FindFirst.Len
 				bne .2
-				
+
 				bra CIFS.ReadDir.Send
-				
-CIFS.ReadDir.Next			
+
+CIFS.ReadDir.Next
 				jsr MakeTrans2Reg
 
 				ldx #0
-				
+
 .2				lda SMB.FindNext,x
 				sta (ZPReqPtr),y
 				iny
@@ -675,19 +761,35 @@ CIFS.ReadDir.Next
 				phy
 
 				ldy #S.FD.DIR.FC+1
-				lda (ZPPtr2),y
+				lda (pFD),y
 				tax
 				dey
-				lda (ZPPtr2),y
-			
-				ldy #S.NETBIOS+S.SMB.H+S.TRANS2.H		Search ID
-				sta (ZPRespPtr),y
+				lda (pFD),y
+
+				ldy #S.NETBIOS+S.SMB.H+SMB.Trans2.H.Len+7				Search ID
+				sta (ZPReqPtr),y
 				txa
 				iny
-				sta (ZPRespPtr),y
-	
+				sta (ZPReqPtr),y
+
 				ply
-CIFS.ReadDir.Send	
+CIFS.ReadDir.Send
+				lda (pPath)
+				beq .1
+
+				jsr AppendPath
+
+				lda #'\'
+				sta (ZPReqPtr),y
+				iny
+
+.1				lda #'*'
+				sta (ZPReqPtr),y
+				iny
+				lda #0
+				sta (ZPReqPtr),y
+				iny
+
 				jsr SetT2ReqLenYA
 
 				>PUSHYA
@@ -696,51 +798,60 @@ CIFS.ReadDir.Send
 
 				ldx #LIBTCPIP.Send
 			jsr GO.LIBTCPIP
-				bcs .9				
+				bcs .9
 
 				ldy #S.PS.PID
 				lda (pPS),y
 				sta CIFS.PID
 
 				dec CIFS.Status
-				
+
 				lda #0
 				sec
 .9				rts
 *--------------------------------------
-CIFS2.ReadDir	lda MountTable+3		hSocket
+CIFS2.ReadDir	jsr GetPFD
+
+				lda MountTable+3		hSocket
 				ldx #LIBTCPIP.Recv
 			jsr GO.LIBTCPIP
 				bcs .9
-				
+
 				jsr GetRespData
 
 				ldy #S.NETBIOS+S.SMB.H.STATUS
 				lda (ZPRespPtr),y
 				bne .99
 
+				ldy #S.FD.DIR.FC
+				lda (pFD),y
+				iny
+				ora (pFD),y
+				sta bFlag
+				bne .1
+
 				ldy #S.NETBIOS+S.SMB.H+S.TRANS2.H+1		Search ID
 				lda (ZPRespPtr),y
 				tax
 				dey
 				lda (ZPRespPtr),y
-	
+
 				ldy #S.FD.DIR.FC
-				sta (ZPPtr2),y
+				sta (pFD),y
 				iny
 				txa
-				sta (ZPPtr2),y
+				sta (pFD),y
 
-				jsr GetRespDataOffset
+.1				jsr GetRespDataOffset
 				jsr CIFS2.ReadDir.GetBuf
 				bcs .99
-				
+
 				jsr GetRespDataOffset
 				jsr CIFS2.ReadDir.FillBuf
-				
+
 				>LDYA BufPtr
 				ldx hBuf
-	
+
 				stz CIFS.Status
 				clc
 				rts
@@ -750,26 +861,44 @@ CIFS2.ReadDir	lda MountTable+3		hSocket
 
 				dec CIFS.Retries
 				beq .90
-				
+
 				lda #0
 				sec
 				rts
-				
+
 .90				lda #MLI.E.IO
 
 .99				stz CIFS.Status
 				sec
-				rts			
+				rts
 *--------------------------------------
 CIFS2.ReadDir.GetBuf
+				ldy #S.NETBIOS+S.SMB.H+S.TRANS2.H		Search Count
+				lda bFlag
+				bne .10
+
+				iny
+				iny
+
+.10				iny
+				iny
+				lda (ZPRespPtr),y		End Of Search
+				phy
+				ldy #S.FD.DIR.EPB
+				sta (pFD),y
+				ply
+
+				dey
+				dey
+
+				lda (ZPRespPtr),y		Search Count
+				beq .99
+				tax
+
 				lda #1					+Ending 0
 				sta ZPPtr2
 				stz ZPPtr2+1
 
-				ldy #S.NETBIOS+S.SMB.H+S.TRANS2.H+2		Search Count
-				lda (ZPRespPtr),y
-				tax
-				
 .1				lda ZPPtr2
 				clc
 				adc #S.STAT
@@ -777,7 +906,7 @@ CIFS2.ReadDir.GetBuf
 				bcc .2
 
 				inc ZPPtr2+1
-				
+
 .2				lda ZPPtr1
 				clc
 				adc #22
@@ -785,28 +914,28 @@ CIFS2.ReadDir.GetBuf
 				bcc .3
 
 				inc ZPPtr1+1
-				
+
 .3				lda (ZPPtr1)			Filename Len
 				pha
 				sec
 				adc ZPPtr2
 				sta ZPPtr2
 				bcc .4
-				
+
 				inc ZPPtr2+1
-				
+
 .4				pla
 				inc
 				sec
 				adc ZPPtr1
 				sta ZPPtr1
 				bcc .5
-				
+
 				inc ZPPtr1+1
-				
+
 .5				dex
 				bne .1
-				
+
 				>LDYA ZPPtr2
 				>SYSCALL2 GetMem
 				bcs .9
@@ -816,12 +945,22 @@ CIFS2.ReadDir.GetBuf
 				stx hBuf
 
 .9				rts
+
+.99				lda #MLI.E.EOF
+				sec
+				rts
 *--------------------------------------
 CIFS2.ReadDir.FillBuf
-				ldy #S.NETBIOS+S.SMB.H+S.TRANS2.H+2		Search Count
-				lda (ZPRespPtr),y
+				ldy #S.NETBIOS+S.SMB.H+S.TRANS2.H		Search Count
+				lda bFlag
+				bne .10
+
+				iny
+				iny
+
+.10				lda (ZPRespPtr),y
 				tax
-				
+
 .1				jsr FileInfo2StatBuf
 
 				lda ZPPtr1
@@ -829,59 +968,70 @@ CIFS2.ReadDir.FillBuf
 				adc #22
 				sta ZPPtr1
 				bcc .2
-				
+
 				inc ZPPtr1+1
-				
+
 .2				ldy #$ff
-				
+
 .3				iny
 				lda (ZPPtr1),y
 				sta (ZPPtr2),y
 				bne .3
-				
+
 				tya
 				sec
 				adc ZPPtr1
 				sta ZPPtr1
 				bcc .4
-				
+
 				inc ZPPtr1+1
-				
+
 .4				tya
 				sec
 				adc ZPPtr2
 				sta ZPPtr2
 				bcc .5
-				
-				inc ZPPtr2+1
-				
-.5				ldy #S.STAT-1
 
-.6				lda StatBuf,y
-				sta (ZPPtr2),y
-				dey
-				bpl .6
+				inc ZPPtr2+1
+
+.5				jsr StatBuf2Ptr2
 
 				lda #S.STAT
 				clc
 				adc ZPPtr2
 				sta ZPPtr2
 				bcc .7
-				
+
 				inc ZPPtr2+1
 
 .7				dex
 				bne .1
-				
+
 				lda #0
 				sta (ZPPtr2)
-				
+
 				rts
 *--------------------------------------
-CIFS.CloseDir	jsr GetPFD
-				
-			>DEBUG
+CIFS.CloseDir	tax
 
+				lda Nod.Table.hName-2,x
+				beq .1
+
+				phx
+
+				stz Nod.Table.hName-2,x
+				>SYSCALL2 FreeMem
+
+				plx
+
+.1				lda Nod.Table.hFD-2,x
+				stz Nod.Table.hFD-2,x
+				>SYSCALL2 FreeMem
+
+				stz CIFS.Status
+				clc
+				rts
+*--------------------------------------
 CIFS2.CloseDir	lda #MLI.E.INVPATH
 				sec
 				rts
@@ -889,10 +1039,7 @@ CIFS2.CloseDir	lda #MLI.E.INVPATH
 CIFS.Open
 CIFS2.Open
 *--------------------------------------
-CIFS.Close		jsr GetPFD
-
-			>DEBUG
-
+CIFS.Close
 CIFS2.Close
 				lda #MLI.E.INVPATH
 				sec
@@ -910,6 +1057,19 @@ CIFS2.ChOwn
 				sec
 				rts
 *--------------------------------------
+GetPFD			tax
+				phx
+
+				lda Nod.Table.hName-2,x
+				>SYSCALL2 GetMemPtr
+				>STYA pPath
+
+				plx
+				lda Nod.Table.hFD-2,x
+				>SYSCALL2 GetMemPtr
+				>STYA pFD
+				rts
+*--------------------------------------
 MakeTrans2Reg	lda MountTable+2
 				>SYSCALL2 GetMemPtr
 				>STYA ZPCtxPtr
@@ -918,7 +1078,7 @@ MakeTrans2Reg	lda MountTable+2
 				jsr RequestSetupX
 
 				ldx #0
-				
+
 .1				lda SMB.Trans2.H,x
 				sta (ZPReqPtr),y
 				iny
@@ -956,6 +1116,33 @@ RequestSetupX	phx
 
 				rts
 *--------------------------------------
+AppendPath		ldx #0
+
+.1				lda (pPath)
+				beq .4
+
+				inc pPath
+				bne .2
+
+				inc pPath+1
+
+.2				cmp #'/'
+				bne .3
+
+				lda #'\'
+
+.3				sta (ZPReqPtr),y
+				tax
+				iny
+				bra .1
+
+.4				cpx #'\'
+				bne .5
+
+				dey
+
+.5				rts
+*--------------------------------------
 * Y = LEN from S.NETBIOS.TYPE
 * A = Ptr to LEN Word
 *--------------------------------------
@@ -980,7 +1167,7 @@ SetReqLenYAtA	sty ZPReqLen
 *--------------------------------------
 SetT2ReqLenYA	sty ZPReqLen
 				stz ZPReqLen+1
-				
+
 				tya
 				sec
 				sbc #S.NETBIOS+S.SMB.H+SMB.Trans2.H.Len+7
@@ -990,11 +1177,11 @@ SetT2ReqLenYA	sty ZPReqLen
 
 				ldy #S.NETBIOS+S.SMB.H+19
 				sta (ZPReqPtr),y
-				
+
 				inc
 				inc
 				inc
-				
+
 				ldy #S.NETBIOS+S.SMB.H+SMB.Trans2.H.Len+2
 				sta (ZPReqPtr),y
 
@@ -1037,18 +1224,18 @@ GetRespDataOffset
 				lda (ZPRespPtr),y
 				adc ZPRespPtr+1
 				pha
-				
+
 				txa
 				clc
 				adc #S.NETBIOS
 				sta ZPPtr1
-				
+
 				pla
 				adc /S.NETBIOS
 				sta ZPPtr1+1
-				
-				
-				
+
+
+
 				rts
 *--------------------------------------
 FileInfo2StatBuf
@@ -1059,35 +1246,110 @@ FileInfo2StatBuf
 .1				stz StatBuf,x
 				dex
 				bpl .1
-				
-				ldy #20					File Attribute
-				lda (ZPPtr1),y
-				and #10
-				beq .2
-				
-				lda #S.STAT.MODE.DIR
-				sta StatBuf+S.STAT.MODE+1
-				
-.2				ldy #12+3					Data Size
+
+				ldy #0					Creation Date/Time
+				ldx #S.STAT.CTIME
+
+				jsr FileInfo2StatBufDT
+
+				ldy #4					Last Access Date/Time
+				ldx #S.STAT.ATIME
+
+				jsr FileInfo2StatBufDT
+
+				ldy #8					Last Write Date/Time
+				ldx #S.STAT.MTIME
+
+				jsr FileInfo2StatBufDT
+
+				ldy #12+3				Data Size
 				ldx #3
-				
-.3				lda (ZPPtr1),y
+
+.7				lda (ZPPtr1),y
 				sta StatBuf+S.STAT.SIZE,x
 				dey
 				dex
-				bpl .3
-				
+				bpl .7
+
+				ldy #20					File Attribute
+				lda (ZPPtr1),y
+				and #$10
+				beq .8
+
+				lda /S.STAT.MODE.DIR
+				sta StatBuf+S.STAT.MODE+1
+
 .8				plx
 
-				rts				
-*--------------------------------------
-GetPFD			tax
-				lsr
-				lda Nod.Table.hFD-2,x
-				>SYSCALL2 GetMemPtr
-				>STYA pFD
 				rts
-*--------------------------------------			
+*--------------------------------------
+* YYYYYYYM MMM DDDDD
+* HHHHHmmm mmm SSSSS
+*--------------------------------------
+FileInfo2StatBufDT
+				iny
+				lda (ZPPtr1),y
+				lsr
+
+				php
+
+				clc
+				adc #80
+				sta StatBuf+S.TIME.YEAR,x
+				lda #19
+				adc #0
+				sta StatBuf+S.TIME.CENTURY,x
+
+				dey
+
+				plp
+				lda (ZPPtr1),y
+				ror
+				lsr
+				lsr
+				lsr
+				lsr
+				sta StatBuf+S.TIME.MONTH,x
+
+				lda (ZPPtr1),y
+				and #$1F
+				sta StatBuf+S.TIME.DAY,x
+
+				iny
+				iny
+
+				lda (ZPPtr1),y
+				and #$1F
+				asl
+				sta StatBuf+S.TIME.SECOND,x
+
+				lda (ZPPtr1),y
+				and #$E0
+				sta StatBuf+S.TIME.MINUTE,x
+
+				lda (ZPPtr1),y
+				lsr
+				ror StatBuf+S.TIME.MINUTE,x
+				lsr
+				ror StatBuf+S.TIME.MINUTE,x
+				lsr
+				ror StatBuf+S.TIME.MINUTE,x
+				lsr StatBuf+S.TIME.MINUTE,x
+				lsr StatBuf+S.TIME.MINUTE,x
+
+				sta StatBuf+S.TIME.HOUR,x
+				rts
+* TODO : S.TIME.WDAY
+*--------------------------------------
+StatBuf2Ptr2	ldy #S.STAT-1
+
+.1				lda StatBuf,y
+				sta (ZPPtr2),y
+				dey
+				bpl .1
+
+				rts
+*--------------------------------------
 GO.LIBTCPIP		jmp (pLIBTCPIP)
 *--------------------------------------
 CS.END
@@ -1174,7 +1436,7 @@ SMB.Trans2.H	.DA #15					WORD COUNT
 			.BS 2					TotalParamCount
 				.DA 0					TotalDataCount
 				.DA 10					MaxParameterCount
-				.DA 512					MaxDataCount
+				.DA 480					MaxDataCount
 				.DA #0					MaxSetupCount
 				.HS 00					Reserved1
 				.DA 0					Flags
@@ -1186,7 +1448,33 @@ SMB.Trans2.H	.DA #15					WORD COUNT
 				.HS 0000				DataOffset
 				.DA #1					SetupCount
 				.HS 00					Reserved3
-SMB.Trans2.H.Len	.EQ *-SMB.Trans2.H				
+SMB.Trans2.H.Len	.EQ *-SMB.Trans2.H
+*--------------------------------------
+SMB.Open2		.DA 0					TRANS2_OPEN2
+			.BS 2
+SMB.Open2.Len 	.EQ *-SMB.Open2
+*--------------------------------------
+SMB.FindFirst	.DA 1					TRANS2_FIND_FIRST2
+			.BS 2						PrmCnt
+				.HS 000000				Padding
+				.DA $0037				SearchAttributes
+				.DA 1024				SearchCount
+				.DA 2					Flags
+				.DA SMB_INFO_STANDARD	InformationLevel
+				.HS 00000000			SearchStorageType
+*				.AZ "path\*"			FileName
+SMB.FindFirst.Len .EQ *-SMB.FindFirst
+*--------------------------------------
+SMB.FindNext	.DA 2					TRANS2_FIND_NEXT2
+			.BS 2						PrmCnt
+				.HS 000000				Padding
+			.BS 2						SID
+				.DA 1024				SearchCount
+				.DA SMB_INFO_STANDARD	InformationLevel
+				.HS	00000000			ResumeKey
+				.DA 2+8					Flags
+*				.AZ "path\*"			FileName
+SMB.FindNext.Len .EQ *-SMB.FindNext
 *--------------------------------------
 SMB.QueryPathInfo
 				.DA 5					TRANS2_QUERY_PATH_INFORMATION
@@ -1197,27 +1485,13 @@ SMB.QueryPathInfo
 *				.AZ "file"				FileName
 SMB.QueryPathInfo.Len	.EQ *-SMB.QueryPathInfo
 *--------------------------------------
-SMB.FindFirst	.DA 1					TRANS2_FIND_FIRST2
+SMB.CreateDirectory
+				.DA 13					TRANS2_CREATE_DIRECTORY
 			.BS 2						PrmCnt
 				.HS 000000				Padding
-				.DA $0037				SearchAttributes
-				.DA 1024				SearchCount
-				.DA 2					Flags
-				.DA SMB_INFO_STANDARD	InformationLevel
-				.HS 00000000			SearchStorageType
-				.AZ "*"					FileName
-SMB.FindFirst.Len .EQ *-SMB.FindFirst
-*--------------------------------------
-SMB.FindNext	.DA 2					TRANS2_FIND_NEXT2
-			.BS 2						PrmCnt
-				.HS 000000				Padding
-			.BS 2						SID
-				.DA 1024				SearchCount
-				.DA SMB_INFO_STANDARD	InformationLevel
-				.HS	00000000			ResumeKey	
-				.DA 2					Flags
-				.AZ "*"					FileName
-SMB.FindNext.Len .EQ *-SMB.FindNext
+				.HS 00000000			Reserved
+*				.AZ "DirName"
+SMB.CreateDirectory.Len	.EQ *-SMB.CreateDirectory
 *--------------------------------------
 LIBTCPIP		.AZ "libtcpip"
 hLIBTCPIP		.BS 1
