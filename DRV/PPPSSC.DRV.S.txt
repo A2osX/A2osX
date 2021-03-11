@@ -13,9 +13,6 @@ NEW
 				.INB inc/nic.i
 *--------------------------------------
 INBUF.SIZE		.EQ $800
-*AT+CGDCONT=1,"IP","APN","0.0.0.0",0,0
-*AT+CGDCONT=1,"PPP","APN","0.0.0.0",0,0
-*ATD*99#1
 *--------------------------------------
 				.DUMMY
 				.OR ZPBIN
@@ -108,7 +105,7 @@ Dev.Detect		>STYA ZPArgsPtr
 				lda #MLI.E.NODEV		Not Found in any slot, exiting
 				sec
 				rts
-
+*--------------------------------------
 .4				lda ZPPtr1+1
 				asl
 				asl
@@ -121,6 +118,7 @@ Dev.Detect		>STYA ZPArgsPtr
 				jsr SSC.Init
 				jsr PPP.ETCFILE
 				bcs .99
+
 				jsr PPP.Init
 				bcs .99
 
@@ -149,7 +147,13 @@ Dev.Detect		>STYA ZPArgsPtr
 				lda #A2osX.S.NIC
 				sta A2osX.S,x
 
-.9
+				lda #0
+				sec
+				rts
+				
+.9				ldx DEVSLOTn08F
+				stz SSC.RESET-$8F,x
+
 Dev.Detect.RTS	rts
 *--------------------------------------
 PPP.ETCFILE		>PUSHW L.ETCFILE
@@ -173,24 +177,27 @@ PPP.ETCFILE		>PUSHW L.ETCFILE
 				bcs .8
 				
 				lda FILE.Buf
+				beq .1
+				
 				cmp #'#'
 				beq .1
 				
 				>LDYA L.FILE.Buf
 				>SYSCALL PutS
-
+				
 				lda FILE.Buf
-				cmp #'?'
+				cmp #'>'
 				bne .2
 
 				>LDYA L.FILE.Bufp1
 				jsr SSC.WriteYA
 				bcs .9
-				bra .1
 
-.2				cmp #'!'
+.10				bra .1
+
+.2				cmp #'?'
 				bne .7
-				
+*--------------------------------------
 .3				jsr SSC.Read
 				bcs .9
 
@@ -200,44 +207,33 @@ PPP.ETCFILE		>PUSHW L.ETCFILE
 				lda #0
 				sta RCV.Buf,y
 
-				>LDYA L.RCV.Bufp1
+				>LDYA L.RCV.Buf
 				>STYA ZPPtr2
-	
-.4				ldy #0
+
+.4				jsr PPP.SkipCRLFPtr2
+				bcs .3
+				
+				ldy #$ff
 
 .5				iny
-				lda FILE.Buf,y
-				bne .6
-				
-				lda #C.CR
+				lda FILE.Buf+1,y		skip !
+				beq .10
 				
 .6				cmp (ZPPtr2),y
-				bne .60
+				beq .5
+				
+				lda (ZPPtr2),y
+				beq .60
 				
 				cmp #C.CR
-				bne .5
-				jmp .1
-				
-.60				ldy #0
-
-.61				iny
-				lda (ZPPtr2),y
-				cmp #C.LF
-				bne .61
-				
-				tya
-				sec
-				adc ZPPtr2
-				sta ZPPtr2
-				bcc .62
-				
-				inc ZPPtr2+1
-
-.62				lda (ZPPtr2)
-				bne .60
+				beq .60
 				
 				jsr PPP.ETCFILE.ERR1
 				bra .9
+				
+.60				jsr PPP.NextStrPtr2
+				lda (ZPPtr2)
+				bne .4
 				
 .7				jsr PPP.ETCFILE.ERR2
 				bra .9
@@ -257,6 +253,56 @@ PPP.ETCFILE		>PUSHW L.ETCFILE
 				plp
 
 				rts
+*--------------------------------------
+PPP.SkipCRLFPtr2
+.1				lda (ZPPtr2)
+				beq .9
+				
+				cmp #C.CR
+				bne .8
+				
+				ldy #1
+				lda (ZPPtr2),y
+				beq .9
+				
+				cmp #C.LF
+				bne .2
+				
+				iny
+				
+.2				tya
+				clc
+				adc ZPPtr2
+				sta ZPPtr2
+				bcc .1
+				
+				inc ZPPtr2+1
+				bra .1
+				
+.8				clc
+				rts
+				
+.9				sec
+				rts
+*--------------------------------------
+PPP.NextStrPtr2	ldy #$ff
+
+.1				iny
+				lda (ZPPtr2),y
+				beq .2
+				
+				cmp #C.CR
+				bne .1
+				
+.2				tya
+				clc
+				adc ZPPtr2
+				sta ZPPtr2
+				bcc .8
+				
+				inc ZPPtr2+1
+				
+.8				rts				
 *--------------------------------------
 PPP.ETCFILE.ERR1
 				>PUSHW L.MSG.UNEXPECTED
@@ -340,9 +386,9 @@ PPP.Init		>LDYAI PPP.LCPReq.LEN
 SSC.Init		ldx DEVSLOTn08F
 				stz SSC.RESET-$8F,x
 
-				lda #SSC.CTL.CLKINT+SSC.CTL.B115200+SSC.CTL.8D+SSC.CTL.1S+SSC.CMD.NOP
+				lda #SSC.CTL.1S+SSC.CTL.8D+SSC.CTL.CLKINT+SSC.CTL.B115200
 				sta SSC.CTL-$8F,x
-				lda #SSC.CMD.RIRQDIS+SSC.CMD.TE+SSC.CMD.DTR
+				lda #SSC.CMD.NOP+SSC.CMD.TE+SSC.CMD.RIRQDIS+SSC.CMD.DTR
 				sta SSC.CMD-$8F,x
 
 				lda SSC.DATA-$8F,x			discard any garbage byte
@@ -484,9 +530,8 @@ DumpBuf			>STYA ZPPtr1
 
 				lda (ZPPtr1)
 				cmp #$0D
-*			bne DumpBuf.PPP
-			bra DumpBuf.PPP
-			
+				bne DumpBuf.PPP
+
 				lda ZPBufLen
 				eor #$ff
 				sta ZPBufLen
@@ -509,12 +554,15 @@ DumpBuf			>STYA ZPPtr1
 .3				cmp #$0D
 				beq .4
 				
+				cmp #$0A
+				beq .4
+				
 				cmp #C.SPACE
 				bcs .4
 
 				ora #$20
 				
-.4				>SYSCALL PutS
+.4				>SYSCALL PutChar
 				bcc .1
 				
 .9				rts
@@ -722,8 +770,8 @@ PPP.LCPReq.DATA	.HS 01					Configure-Request
 				.DA /576,#576
 				.HS 02.06.000A0000		ACCM
 				.HS 05.06.002A2B78		MAGIC
-				.HS 07.02
-				.HS 08.02
+*				.HS 07.02
+*				.HS 08.02
 PPP.LCPReq.DATA.LEN	.EQ *-PPP.LCPReq.DATA
 *				.HS	0000				PADDING
 			.BS 2						FCS

@@ -22,12 +22,13 @@ ZPCtxPtr		.BS 2
 pFD				.BS 2
 pPath			.BS 2
 
-ZPRespPtr		.BS 2
-
 ZPPtr1			.BS 2
 ZPPtr2			.BS 2
 BufPtr			.BS 2
 hBuf			.BS 1
+hResp			.BS 1
+ZPRespPtr		.BS 2
+
 bFlag			.BS 1
 
 ZS.END			.ED
@@ -498,6 +499,7 @@ CIFS.CallBack	bit CIFS.Status
 				rts
 
 .1				jmp (J.CIFS,x)
+
 .2				pla
 				ply
 				jmp (J.CIFS2,x)
@@ -543,15 +545,7 @@ CIFS.Stat		>STYA pPath				resolved path
 			jsr GO.LIBTCPIP
 				bcs .9
 
-				ldy #S.PS.PID
-				lda (pPS),y
-				sta CIFS.PID
-
-				dec CIFS.Status
-
-				lda #0
-				sec
-				rts
+				jmp Sleep
 
 .9				>RET 4
 *--------------------------------------
@@ -578,6 +572,9 @@ CIFS2.Stat		lda MountTable+3		hSocket
 				jsr FileInfo2StatBuf
 				jsr StatBuf2Ptr2
 
+				lda hResp
+				>SYSCALL2 FreeMem
+	
 				stz CIFS.Status
 				clc
 				rts
@@ -593,6 +590,7 @@ CIFS2.Stat		lda MountTable+3		hSocket
 				rts
 
 .90				lda #MLI.E.IO
+
 .99				sec
 				stz CIFS.Status
 				>RET 4
@@ -626,15 +624,7 @@ CIFS.MKDir		>STYA pPath				resolved path
 			jsr GO.LIBTCPIP
 				bcs .9
 
-				ldy #S.PS.PID
-				lda (pPS),y
-				sta CIFS.PID
-
-				dec CIFS.Status
-
-				lda #0
-				sec
-				rts
+				jmp Sleep
 
 .9				>RET 4
 *--------------------------------------
@@ -647,26 +637,29 @@ CIFS2.MKDir		lda MountTable+3		hSocket
 
 				ldy #S.NETBIOS+S.SMB.H.STATUS
 				lda (ZPRespPtr),y
-				beq .1
+				clc
+				beq .8
 
 				lda #MLI.E.DUPFILE
-				bra .99
+				sec
+				
+.8				jsr FreeRespData
 
-.1				stz CIFS.Status
-				clc
+				stz CIFS.Status
 				>RET 4
 
 .9				cmp #E.NODATA
 				bne .99
 
 				dec CIFS.Retries
-				beq .90
+				beq .98
 
 				lda #0
 				sec
 				rts
 
-.90				lda #MLI.E.IO
+.98				lda #MLI.E.IO
+
 .99				sec
 				stz CIFS.Status
 				>RET 4
@@ -800,14 +793,8 @@ CIFS.ReadDir.Send
 			jsr GO.LIBTCPIP
 				bcs .9
 
-				ldy #S.PS.PID
-				lda (pPS),y
-				sta CIFS.PID
+				jmp Sleep
 
-				dec CIFS.Status
-
-				lda #0
-				sec
 .9				rts
 *--------------------------------------
 CIFS2.ReadDir	jsr GetPFD
@@ -815,58 +802,72 @@ CIFS2.ReadDir	jsr GetPFD
 				lda MountTable+3		hSocket
 				ldx #LIBTCPIP.Recv
 			jsr GO.LIBTCPIP
-				bcs .9
+				bcs .90
 
 				jsr GetRespData
 
 				ldy #S.NETBIOS+S.SMB.H.STATUS
 				lda (ZPRespPtr),y
-				bne .99
+				beq .1
 
-				ldy #S.FD.DIR.FC
+.91				sec
+				lda #MLI.E.IO
+				bra .9
+
+.1				ldy #S.FD.DIR.FC
 				lda (pFD),y
 				iny
 				ora (pFD),y
 				sta bFlag
-				bne .1
+				bne .2
 
 				ldy #S.NETBIOS+S.SMB.H+S.TRANS2.H+1		Search ID
 				lda (ZPRespPtr),y
 				tax
 				dey
-				lda (ZPRespPtr),y
+				ora (ZPRespPtr),y
+				beq .91
 
+				lda (ZPRespPtr),y
+				
 				ldy #S.FD.DIR.FC
 				sta (pFD),y
 				iny
 				txa
 				sta (pFD),y
 
-.1				jsr GetRespDataOffset
+.2				jsr GetRespDataOffset
 				jsr CIFS2.ReadDir.GetBuf
-				bcs .99
+				bcs .9
 
 				jsr GetRespDataOffset
 				jsr CIFS2.ReadDir.FillBuf
 
+				lda hResp
+				>SYSCALL2 FreeMem
+
 				>LDYA BufPtr
 				ldx hBuf
-
+				
 				stz CIFS.Status
 				clc
 				rts
+				
+.9				stz CIFS.Status
+				
+				jmp FreeRespData
 
-.9				cmp #E.NODATA
+.90				cmp #E.NODATA
 				bne .99
 
 				dec CIFS.Retries
-				beq .90
+				beq .98
 
 				lda #0
 				sec
 				rts
 
-.90				lda #MLI.E.IO
+.98				lda #MLI.E.IO
 
 .99				stz CIFS.Status
 				sec
@@ -1200,6 +1201,18 @@ SetReqLenNETBIOS
 				>LDYA ZPReqLen
 				rts
 *--------------------------------------
+Sleep			ldy #S.PS.PID
+				lda (pPS),y
+				sta CIFS.PID
+
+				dec CIFS.Status
+
+				stz CIFS.Retries
+				
+				lda #0
+				sec
+				rts
+*--------------------------------------
 GetRespData		sta hResp
 				>SYSCALL2 GetMemPtr
 
@@ -1236,6 +1249,14 @@ GetRespDataOffset
 
 
 
+				rts
+*--------------------------------------
+FreeRespData	php
+				pha
+				lda hResp
+				>SYSCALL2 FreeMem
+				pla
+				plp
 				rts
 *--------------------------------------
 FileInfo2StatBuf
@@ -1448,7 +1469,7 @@ SMB.ComWrite.H	.DA #12					WORD COUNT
 			.BS 2						FID
 			.BS 4						Offset
 				.HS 00000000			Timeout
-				.HS 00001				WriteMode=WritethroughMode
+				.HS 0001				WriteMode=WritethroughMode
 			.BS 2						Remaining
 				.HS 0000				Reserved
 			.BS 2						DataLength
@@ -1469,7 +1490,7 @@ SMB.Trans2.H	.DA #15					WORD COUNT
 			.BS 2					TotalParamCount
 				.DA 0					TotalDataCount
 				.DA 10					MaxParameterCount
-				.DA 480					MaxDataCount
+				.DA 450					MaxDataCount
 				.DA #0					MaxSetupCount
 				.HS 00					Reserved1
 				.DA 0					Flags
@@ -1541,7 +1562,6 @@ hLIBTCPIP		.BS 1
 pLIBTCPIP		.BS 2
 hSocket			.BS 1
 hReq			.BS 1
-hResp			.BS 1
 *--------------------------------------
 CIFS.Status		.BS 1
 CIFS.PID		.BS 1
