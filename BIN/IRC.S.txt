@@ -12,7 +12,7 @@ NEW
 				.INB inc/libtcpip.i
 *--------------------------------------
 TIMEOUT.MAX		.EQ 250					25 sec.
-MSGSIZE			.EQ 1024
+MSGSIZE			.EQ 2048
 TEXTMAX			.EQ 240
 *--------------------------------------
 * https://tools.ietf.org/html/rfc2812#section-3.3
@@ -21,33 +21,28 @@ TEXTMAX			.EQ 240
 				.OR ZPBIN
 ZS.START
 ZPPtr1			.BS 2
-
 bEscMode		.BS 1
-bRegister		.BS 1
 bJoin			.BS 1
 TimeOut			.BS 1
-
+hSocket			.BS 1
 TextPtr			.BS 1
 TextLen			.BS 1
 
-hReqBuf			.BS 1
-ReqPtr			.BS 1
-ReqLen			.BS 1
-hRespBuf		.BS 1
-ZPReqPtr		.BS 2
 ZPRespPtr		.BS 2
-
-hLineBuf		.BS 1
-hSocket			.BS 1
-hMsgBuf			.BS 1
-MsgLen			.BS 1
-ZPLineBufPtr	.BS 2
+ZPMsg			.BS 2
 ZPMsgPtr		.BS 2
+ZPOutputBufPtr	.BS 2
 
 ZPMsgPfxPtr		.BS 2
 ZPMsgCmdPtr		.BS 2
 ZPMsgArgPtr		.BS 2
 ZPMsgExtPtr		.BS 2
+
+BufPtr			.BS 1
+BufLen			.BS 1
+ZPBufPtr		.BS 2
+
+bPendingMsg		.BS 1
 
 ZS.END			.ED
 *--------------------------------------
@@ -104,6 +99,7 @@ L.IRC.CMDS		.DA IRC.CMDS
 J.IRC.CMDS		.DA CS.RUN.CMD.PING
 				.DA CS.RUN.CMD.JOIN
 				.DA CS.RUN.CMD.PART
+				.DA CS.RUN.CMD.QUIT
 				.DA CS.RUN.CMD.PRIVMSG
 				.DA CS.RUN.CMD.MODE
 				.DA CS.RUN.CMD.001
@@ -135,22 +131,25 @@ CS.RUN			jsr CS.RUN.CheckTCPIP
 				jsr CS.RUN.Connect
 				bcs CS.INIT.RTS
 
-				jsr CS.RUN.GETBUF
+				jsr CS.RUN.GetBuffers
 				bcs CS.INIT.RTS
 
 				jsr CS.RUN.SCRSETUP
 				bcs CS.INIT.RTS
 
-				jsr CS.RUN.REGISTER
+				jsr CS.RUN.Register
 				bcs CS.INIT.RTS
 
 CS.RUN.LOOP		>SLEEP
 
 				jsr CS.RUN.GetMsg
 				bcs .9
-				beq .2
+				bne .2
 
-				jsr CS.RUN.REQ
+				jsr CS.RUN.SplitMsg
+				bcs .2
+
+				jsr CS.RUN.ProcessMsg
 				bcs .9
 
 				>SLEEP
@@ -301,124 +300,42 @@ CS.RUN.Connect	>PUSHBI 0				no protocol
 				>SYSCALL PrintF
 				rts
 *--------------------------------------
-CS.RUN.GETBUF 	>LDYAI 256
-				>SYSCALL GetMem
-				bcs .9
-
-				stx hReqBuf
-				>STYA ZPReqPtr
-
+CS.RUN.GetBuffers
 				>LDYAI 256
 				>SYSCALL GetMem
 				bcs .9
 
-				stx hMsgBuf
-				>STYA ZPMsgPtr
+				>STYA ZPBufPtr
+				txa
+				>STA.G hBufBuf
 
 				>LDYAI MSGSIZE
 				>SYSCALL GetMem
 				bcs .9
 
-				stx hRespBuf
+				>STYA ZPMsg
+				txa
+				>STA.G hMsgBuf
+
+				>LDYAI MSGSIZE
+				>SYSCALL GetMem
+				bcs .9
+
 				>STYA ZPRespPtr
+				txa
+				>STA.G hRespBuf
 
 				>LDYAI 256
 				>SYSCALL GetMem
 				bcs .9
 
-				stx hLineBuf
-				>STYA ZPLineBufPtr
+				>STYA ZPOutputBufPtr
+				txa
+				>STA.G hOutputBuf
 
 .9				rts
 *--------------------------------------
-CS.RUN.SCRSETUP	>PUSHW L.SEQ.INIT
-				>PUSHBI 0
-				>SYSCALL PrintF
-				bcs .9
-
-				jsr CS.RUN.TOPUPDATE
-				bcs .9
-
-				jsr CS.RUN.TXTCLR
-
-
-.9				rts
-*--------------------------------------
-CS.RUN.TOPUPDATE
-				>PUSHW ZPLineBufPtr
-				>PUSHW L.MSG.TOPBAR
-				>PUSHB #K.VER
-				>PUSHB /K.VER
-
-				lda #1
-				>SYSCALL ArgV
-				>PUSHYA
-
-				lda #2
-				>SYSCALL ArgV
-				>PUSHYA
-
-				lda #3
-				>SYSCALL ArgV
-				>PUSHYA
-
-				>PUSHBI 8
-				>SYSCALL SPrintF
-
-				>PUSHW L.SEQ.BAR
-				>PUSHBI 1
-				>PUSHW ZPLineBufPtr
-				>PUSHBI 3
-				>SYSCALL PrintF
-
-				rts
-*--------------------------------------
-CS.RUN.STATUSPDATE
-				pha
-				phy
-				>PUSHW ZPLineBufPtr
-				>PUSHW L.MSG.STATUSBAR
-
-				lda #4
-				>SYSCALL ArgV
-				>PUSHYA
-				ply
-				pla
-				>PUSHYA
-				>PUSHBI 4
-
-				bra CS.RUN.STATUS
-*--------------------------------------
-CS.RUN.STATUSMSG
-				pha
-				>PUSHW ZPLineBufPtr
-				>PUSHW L.MSG.STATUSBARMSG
-				pla
-				>PUSHYA
-				>PUSHBI 2
-
-CS.RUN.STATUS	>SYSCALL SPrintF
-
-				>PUSHW L.SEQ.BAR
-				>PUSHBI 21
-				>PUSHW ZPLineBufPtr
-				>PUSHBI 3
-				>SYSCALL PrintF
-				rts
-*--------------------------------------
-CS.RUN.TXTCLR	lda #0
-				sta (pData)
-
-				stz TextPtr
-				stz TextLen
-				stz bEscMode
-
-				>PUSHW L.SEQ.TXTCLR
-				>PUSHBI 0
-				>SYSCALL PrintF
-				rts
-*--------------------------------------
-CS.RUN.REGISTER	>LDYA L.MSG.REGISTER
+CS.RUN.Register	>LDYA L.MSG.REGISTER
 				jsr CS.RUN.STATUSMSG
 
 				>PUSHW ZPRespPtr
@@ -444,9 +361,184 @@ CS.RUN.REGISTER	>LDYA L.MSG.REGISTER
 
 .9				rts
 *--------------------------------------
-CS.RUN.REQ		jsr CS.RUN.SplitMsg
-				bcs .9
+CS.RUN.GetMsg	bit bPendingMsg
+				bmi .10
+				
+				>LDYA ZPMsg
+				>STYA ZPMsgPtr
 
+.10				ldy BufLen
+				bne .2
+
+.1				>PUSHWI 255
+				>PUSHW ZPBufPtr
+				lda hSocket
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Read
+				bcs .7
+
+				sty BufLen
+				stz BufPtr
+
+.2				ldy BufPtr
+
+				lda (ZPBufPtr),y
+				cmp #C.CR
+				beq .6
+
+				cmp #C.LF
+				beq .3
+
+				sta (ZPMsgPtr)
+				inc ZPMsgPtr
+				bne .3
+				
+				inc ZPMsgPtr+1
+
+.3				inc BufPtr
+				dec	BufLen
+				bne .2
+
+				bra .1
+
+.6				inc BufPtr				Skip CR
+				dec	BufLen
+
+				stz bPendingMsg
+
+				lda #0
+				sta (ZPMsgPtr)			will exit with Z
+
+				clc
+				rts
+
+.7				cmp #E.NODATA
+				bne .9
+
+.8				lda #$80				will exit with NZ
+				sta bPendingMsg
+				clc
+
+.9				rts
+*--------------------------------------
+CS.RUN.SplitMsg	>LDYA L.MSG.NULL
+				>STYA ZPMsgPfxPtr
+				>STYA ZPMsgCmdPtr
+				>STYA ZPMsgArgPtr
+				>STYA ZPMsgExtPtr
+
+				ldy #0
+				ldx #0
+
+				lda (ZPMsg)
+				cmp #':'				do we have a prefix ?
+				bne .2
+
+				lda ZPMsg
+				clc
+				adc #1
+				sta ZPMsgPfxPtr
+				lda ZPMsg+1
+				adc #0
+				sta ZPMsgPfxPtr+1
+
+.1				iny
+				lda (ZPMsg),y
+				beq .9
+
+				cmp #C.SPACE
+				bne .1
+
+				lda #0
+				sta (ZPMsg),y			End Of prefix
+
+				iny						Skip blank
+
+				tya
+				tax						Save CMD start pos
+
+.2				iny
+
+				lda (ZPMsg),y
+				beq .4
+
+.3				cmp #C.SPACE			scan until end of CMD
+				bne .2
+
+				lda #0
+				sta (ZPMsg),y			End of CMD
+
+				iny						Skip blank
+
+.4				php
+
+				txa
+				clc
+				adc ZPMsg
+				sta ZPMsgCmdPtr
+
+				lda #0
+				adc ZPMsg+1
+				sta ZPMsgCmdPtr+1
+
+				plp
+				beq .80
+
+				tya
+				tax						Save Arg start pos
+
+				lda (ZPMsg),y
+				cmp #':'
+				beq .71					no arg....ext
+
+.6				iny
+
+				lda (ZPMsg),y
+				beq .7
+
+				cmp #':'				ARGS could be "ARG1 ARG2 ARG3"
+				bne .6
+
+				lda #0
+				sta (ZPMsg),y
+
+				iny						Skip :
+
+.7				php
+
+				txa
+				clc
+				adc ZPMsg
+				sta ZPMsgArgPtr
+
+				lda #0
+				adc ZPMsg+1
+				sta ZPMsgArgPtr+1
+
+				plp
+				beq .80
+
+				lda (ZPMsg),y
+				cmp #':'
+				bne .8
+
+.71				iny						Skip blank
+
+.8				tya
+				clc
+				adc ZPMsg
+				sta ZPMsgExtPtr
+
+				lda #0
+				adc ZPMsg+1
+				sta ZPMsgExtPtr+1
+
+.80				clc
+				rts
+
+.9				sec
+				rts
+**--------------------------------------
+CS.RUN.ProcessMsg
 				>LDYA L.IRC.CMDS
 				>STYA ZPPtr1
 
@@ -505,7 +597,8 @@ CS.RUN.CMD.JOIN	sec
 				>LDYA L.MSG.NULL
 				jsr CS.RUN.STATUSPDATE
 *--------------------------------------
-CS.RUN.CMD.PART	>PUSHW ZPRespPtr
+CS.RUN.CMD.PART
+CS.RUN.CMD.QUIT	>PUSHW ZPRespPtr
 				>PUSHW L.IRC.NAMES
 				lda #4					channel
 				>SYSCALL ArgV
@@ -544,9 +637,6 @@ CS.RUN.CMD.MODE
 *--------------------------------------
 CS.RUN.CMD.001	jsr CS.RUN.CMD.INFO
 
-				sec
-				ror bRegister
-
 				>LDYA L.MSG.JOIN
 				jsr CS.RUN.STATUSMSG
 
@@ -582,7 +672,11 @@ CS.RUN.CMD.001	jsr CS.RUN.CMD.INFO
 
 .9				rts
 *--------------------------------------
-CS.RUN.CMD.353	>LDYA ZPMsgExtPtr		RPL_NAMREPLY
+CS.RUN.CMD.353	ldy #80
+				lda #0
+				sta (ZPMsgExtPtr),y
+
+				>LDYA ZPMsgExtPtr		RPL_NAMREPLY
 				jmp CS.RUN.STATUSPDATE
 *--------------------------------------
 CS.RUN.CMD.372
@@ -595,176 +689,6 @@ CS.RUN.CMD.INFO	>PUSHW L.SEQ.INFOMSG
 				>SYSCALL PrintF
 				rts
 *--------------------------------------
-CS.RUN.GetMsg	ldy ReqLen
-				bne .2
-
-.1				>PUSHWI 255
-				>PUSHW ZPReqPtr
-				lda hSocket
-				>LIBCALL hLIBTCPIP,LIBTCPIP.Read
-				bcs .7
-
-				sty ReqLen
-				stz ReqPtr
-
-.2				ldy ReqPtr
-
-				lda (ZPReqPtr),y
-				cmp #C.CR
-				beq .6
-
-				cmp #C.LF
-				beq .3
-
-				ldy MsgLen
-				sta (ZPMsgPtr),y
-
-				inc MsgLen
-
-.3				inc ReqPtr
-				dec	ReqLen
-				bne .2
-
-				bra .1
-
-.6				inc ReqPtr				Skip CR
-				dec	ReqLen
-
-				lda #0
-
-				ldy MsgLen				will exit with NZ
-				stz MsgLen
-
-				sta (ZPMsgPtr),y
-
-				clc
-				rts
-
-.7				cmp #E.NODATA
-				bne .9
-
-.8				clc						will exit with NZ
-
-.9				rts
-*--------------------------------------
-CS.RUN.SplitMsg	>LDYA L.MSG.NULL
-				>STYA ZPMsgPfxPtr
-				>STYA ZPMsgCmdPtr
-				>STYA ZPMsgArgPtr
-				>STYA ZPMsgExtPtr
-
-				ldy #0
-				ldx #0
-
-				lda (ZPMsgPtr)
-				cmp #':'				do we have a prefix ?
-				bne .2
-
-				lda ZPMsgPtr
-				clc
-				adc #1
-				sta ZPMsgPfxPtr
-				lda ZPMsgPtr+1
-				adc #0
-				sta ZPMsgPfxPtr+1
-
-.1				iny
-				lda (ZPMsgPtr),y
-				beq .9
-
-				cmp #C.SPACE
-				bne .1
-
-				lda #0
-				sta (ZPMsgPtr),y		End Of prefix
-
-				iny						Skip blank
-
-				tya
-				tax						Save CMD start pos
-
-.2				iny
-
-				lda (ZPMsgPtr),y
-				beq .4
-
-.3				cmp #C.SPACE			scan until end of CMD
-				bne .2
-
-				lda #0
-				sta (ZPMsgPtr),y		End of CMD
-
-				iny						Skip blank
-
-.4				php
-
-				txa
-				clc
-				adc ZPMsgPtr
-				sta ZPMsgCmdPtr
-
-				lda #0
-				adc ZPMsgPtr+1
-				sta ZPMsgCmdPtr+1
-
-				plp
-				beq .80
-
-				tya
-				tax						Save Arg start pos
-
-				lda (ZPMsgPtr),y
-				cmp #':'
-				beq .71					no arg....ext
-
-.6				iny
-
-				lda (ZPMsgPtr),y
-				beq .7
-
-				cmp #':'				ARGS could be "ARG1 ARG2 ARG3"
-				bne .6
-
-				lda #0
-				sta (ZPMsgPtr),y
-
-				iny						Skip :
-
-.7				php
-
-				txa
-				clc
-				adc ZPMsgPtr
-				sta ZPMsgArgPtr
-
-				lda #0
-				adc ZPMsgPtr+1
-				sta ZPMsgArgPtr+1
-
-				plp
-				beq .80
-
-				lda (ZPMsgPtr),y
-				cmp #':'
-				bne .8
-
-.71				iny						Skip blank
-
-.8				tya
-				clc
-				adc ZPMsgPtr
-				sta ZPMsgExtPtr
-
-				lda #0
-				adc ZPMsgPtr+1
-				sta ZPMsgExtPtr+1
-
-.80				clc
-				rts
-
-.9				sec
-				rts
-*--------------------------------------
 CS.RUN.DUMPMSG	>PUSHW L.SEQ.DUMPMSG
 
 				>PUSHW ZPMsgPfxPtr
@@ -773,6 +697,95 @@ CS.RUN.DUMPMSG	>PUSHW L.SEQ.DUMPMSG
 				>PUSHW ZPMsgExtPtr
 
 				>PUSHBI 8
+				>SYSCALL PrintF
+				rts
+*--------------------------------------
+CS.RUN.SendMsg	>PUSHYA
+				>PUSHW ZPRespPtr
+				lda hSocket
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Write
+				rts
+*--------------------------------------
+CS.RUN.SCRSETUP	>PUSHW L.SEQ.INIT
+				>PUSHBI 0
+				>SYSCALL PrintF
+				bcs CS.RUN.TXTCLR.RTS
+
+				jsr CS.RUN.TOPUPDATE
+				bcs CS.RUN.TXTCLR.RTS
+*--------------------------------------
+CS.RUN.TXTCLR	lda #0
+				sta (pData)
+
+				stz TextPtr
+				stz TextLen
+				stz bEscMode
+
+				>PUSHW L.SEQ.TXTCLR
+				>PUSHBI 0
+				>SYSCALL PrintF
+CS.RUN.TXTCLR.RTS
+				rts
+*--------------------------------------
+CS.RUN.TOPUPDATE
+				>PUSHW ZPOutputBufPtr
+				>PUSHW L.MSG.TOPBAR
+				>PUSHB #K.VER
+				>PUSHB /K.VER
+
+				lda #1
+				>SYSCALL ArgV
+				>PUSHYA
+
+				lda #2
+				>SYSCALL ArgV
+				>PUSHYA
+
+				lda #3
+				>SYSCALL ArgV
+				>PUSHYA
+
+				>PUSHBI 8
+				>SYSCALL SPrintF
+
+				>PUSHW L.SEQ.BAR
+				>PUSHBI 1
+				>PUSHW ZPOutputBufPtr
+				>PUSHBI 3
+				>SYSCALL PrintF
+
+				rts
+*--------------------------------------
+CS.RUN.STATUSPDATE
+				pha
+				phy
+				>PUSHW ZPOutputBufPtr
+				>PUSHW L.MSG.STATUSBAR
+
+				lda #4
+				>SYSCALL ArgV
+				>PUSHYA
+				ply
+				pla
+				>PUSHYA
+				>PUSHBI 4
+
+				bra CS.RUN.STATUS
+*--------------------------------------
+CS.RUN.STATUSMSG
+				pha
+				>PUSHW ZPOutputBufPtr
+				>PUSHW L.MSG.STATUSBARMSG
+				pla
+				>PUSHYA
+				>PUSHBI 2
+
+CS.RUN.STATUS	>SYSCALL SPrintF
+
+				>PUSHW L.SEQ.BAR
+				>PUSHBI 21
+				>PUSHW ZPOutputBufPtr
+				>PUSHBI 3
 				>SYSCALL PrintF
 				rts
 *--------------------------------------
@@ -816,14 +829,6 @@ CS.RUN.CHARIN	bit bEscMode
 				cmp #C.DEL
 				bne CS.RUN.CHARIN.INS
 
-				lda TextLen
-				beq .8
-
-				lda TextPtr
-				beq .8
-
-				lda #C.BS
-				>SYSCALL PutChar
 				jmp CS.RUN.CHARIN.DEL
 *--------------------------------------
 CS.RUN.CHARIN.INS
@@ -851,11 +856,9 @@ CS.RUN.CHARIN.INS.8
 *--------------------------------------
 CS.RUN.CHARIN.CTRL
 				cmp #C.CR
-				bne .1
+				beq CS.RUN.CHARIN.CR
 
-				jmp CS.RUN.CHARIN.CR
-
-.1				cmp #$14				Ctrl-T
+				cmp #$14				Ctrl-T
 				bne .8
 
 				>PUSHW ZPRespPtr
@@ -914,22 +917,39 @@ CS.RUN.CHARIN.CR
 
 .9				rts
 *--------------------------------------
+CS.RUN.CHARIN.DEL
+
+*--------------------------------------
 CS.RUN.CHARIN.LEFT
 				clc
 
-				lda TextPtr
+				ldy TextPtr
 				beq .9
 
-				dec TextPtr
+				dey
+				sty TextPtr
+				lda #0
+				sta (pData),y
 
 				lda #C.BS
 				>SYSCALL PutChar
+				lda #C.SPACE
+				>SYSCALL PutChar
+				lda #C.BS
+				>SYSCALL PutChar
+
+
 .9				rts
+*--------------------------------------
 CS.RUN.CHARIN.DOWN
 CS.RUN.CHARIN.UP
 				clc
 				rts
+*--------------------------------------
 CS.RUN.CHARIN.RIGHT
+				clc
+				rts
+
 				lda TextPtr
 				cmp TextLen
 				clc
@@ -943,17 +963,6 @@ CS.RUN.CHARIN.RIGHT
 				>SYSCALL PutChar
 .9				rts
 *--------------------------------------
-CS.RUN.CHARIN.DEL
-
-				clc
-				rts
-*--------------------------------------
-CS.RUN.SendMsg	>PUSHYA
-				>PUSHW ZPRespPtr
-				lda  hSocket
-				>LIBCALL hLIBTCPIP,LIBTCPIP.Write
-				rts
-*--------------------------------------
 CS.DOEVENT		lda (pEvent)
 				bpl .9					is it a TIMER event?
 
@@ -965,38 +974,36 @@ CS.DOEVENT		lda (pEvent)
 .9				sec						do not discard TIMER event
 				rts
 *--------------------------------------
-CS.QUIT			lda hRespBuf
+CS.QUIT			ldy #hOutputBuf
+				jsr .7
+				
+				ldy #hRespBuf
+				jsr .7
+				
+				ldy #hMsgBuf
+				jsr .7
+
+				ldy #hBufBuf
+				jsr .7
+
+				lda hSocket
 				beq .1
-
-				>SYSCALL FreeMem
-
-.1				lda hReqBuf
-				beq .2
-
-				>SYSCALL FreeMem
-
-.2				lda hLineBuf
-				beq .3
-
-				>SYSCALL FreeMem
-
-.3				lda hMsgBuf
-				beq .4
-
-				>SYSCALL FreeMem
-
-.4				lda hSocket
-				beq .5
 
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Shutdown
 
-.5				lda hLIBTCPIP
-				beq .8
+.1				lda hLIBTCPIP
+				beq .2
 
 				>SYSCALL UnloadLib
 
-.8				clc
+.2				clc
 				rts
+
+.7				lda (pData),y
+				beq .8
+				
+				>SYSCALL FreeMem
+.8				rts				
 *--------------------------------------
 CS.END
 LIBTCPIP		.AZ "libtcpip"
@@ -1025,6 +1032,7 @@ IRC.REP.JOIN	.AZ "JOIN"
 IRC.CMDS		.AZ "PING"
 				.AZ "JOIN"
 				.AZ "PART"
+				.AZ "QUIT"
 				.AZ	"PRIVMSG"
 				.AZ "MODE"
 				.AZ "001"
@@ -1045,11 +1053,11 @@ IRC.NAMES		.AZ "NAMES %s\r\n"
 IRC.PRIVMSG		.AZ "PRIVMSG %s :%s\r\n"
 *--------------------------------------
 SEQ.INIT		.AZ "\ec\e(B\e)0\e[?7l\e[2;20r\e[22;1H\e[?7h"
-SEQ.BAR			.AZ "\e7\e[%d;1H\e[7m\e[37;40m%80s\e[0m\e8"
-SEQ.TXTCLR		.AZ "\e[22;1H\e[K\r\n\e[K\r\n\e[K\e[22;1H"
-SEQ.PRIVMSG		.AZ "\e7\e[20;1H\r\n\e[7m%s:\e[0m%s\e8"
+SEQ.BAR			.AZ "\e[?7l\e7\e[%d;1H\e[7m\e[37;40m%80s\e[0m\e8\e[?7h"
+SEQ.TXTCLR		.AZ "\e[22;1H\e[97;41m\e[K\r\n\e[K\r\n\e[K\e[22;1H"
+SEQ.PRIVMSG		.AZ "\e7\e[20;1H\r\n\e[93;44m\e[7m%s:\e[0m\e[93;44m%s\e[K\e8"
 SEQ.DUMPMSG		.AZ "\e7\e[20;1H\r\n\e[7m%s \e[0m%s %s %s\e8"
-SEQ.INFOMSG		.AZ "\e7\e[20;1H%s\r\n\e8"
+SEQ.INFOMSG		.AZ "\e7\e[20;1H\e[92;44m%s\r\n\e8"
 SEQ.RESET		.AZ "\ec"
 *--------------------------------------
 SA.LOCAL		.DA #AF.INET			S.SOCKADDR.AF
@@ -1065,6 +1073,10 @@ SA.REMOTE		.DA #AF.INET			S.SOCKADDR.AF
 				.DUMMY
 				.OR 0
 DS.START		.BS TEXTMAX+1
+hBufBuf			.BS 1
+hMsgBuf			.BS 1
+hRespBuf		.BS 1
+hOutputBuf		.BS 1
 DS.END			.ED
 *--------------------------------------
 MAN
