@@ -153,13 +153,21 @@ L538E  			lda A4L					get command #
 *--------------------------------------
 .2				sei						DISABLE IRQ
 
-				jsr XRW.TrackSelect
+				lda #2
+				sta XRW.RecalibrateCnt
+
+.3				jsr XRW.TrackSelect
 				bcs XRW.E.IO
 
 				jsr XRW.SectorIO
+				bcc .4
+
+				jsr XRW.Recalibrate
+				bcc .3
+				
 				bcs XRW.E.IO
 
-				inc buf+1
+.4				inc buf+1
 
 				inc XRW.ReqSector
 				inc XRW.ReqSector
@@ -188,31 +196,21 @@ XRW.E.EXIT		ldx A2L
 				rts
 *--------------------------------------
 XRW.TrackSelect	lda #2
-				sta XRW.RecalibrateCnt
 				sta XRW.BadSeek
 
-.1				stz XRW.RetryCnt
+.1				lda #32
+				sta XRW.RetryCnt
 
 .2  			jsr XRW.ReadAddr		read next address field.
 				bcc .4					if CC, A = current track
 
-.3  			inc XRW.RetryCnt	 	one less chance.
-				bpl .2					branch if < 128
+.3  			dec XRW.RetryCnt	 	one less chance.
+				bne .2					branch if < 128
 
-				dec XRW.RecalibrateCnt
-				sec
-				beq .9
-
-				ldy XRW.UnitIndex
-
-				lda #41
-				sta XRW.D2Trk-1,y
-
-				lda #0
-				sta XRW.D2VolNum-1,y	reset volnum for seeking 41 Qtracks
-
-				jsr XRW.Seek			Seek from Track 41 -> 0
-				bra .1
+				jsr XRW.Recalibrate
+				bcc .1
+				
+				rts
 
 .4  			ldy XRW.UnitIndex		(4)
 				lda XRW.AddrField.V		(4)
@@ -226,10 +224,10 @@ XRW.TrackSelect	lda #2
 				beq .5					2 bad seeks, already
 
 				dec XRW.BadSeek
-				bne .6
+				bne .7
 
 .5				lda XRW.SeekTime
-				bmi .6					seektime already > 128
+				bmi .7					seektime already > 128
 
 				clc
 				adc #IO.D2.SeekTimeI
@@ -237,19 +235,11 @@ XRW.TrackSelect	lda #2
 
 				sta XRW.D2SeekTime-1,y
 
-.6				lda XRW.ReqTrack
+.7				lda XRW.ReqTrack
 				jsr XRW.Seek
 				bra .3
 
-.8	
-*				jsr	XRW.SEEK2T
-
-*				lda #1
-*				jsr XRW.Wait100usecA
-
-*				jsr XRW.SEEKOFF
-				
-				clc
+.8				clc
 .9				rts
 *--------------------------------------
 				.LIST ON
@@ -325,7 +315,23 @@ XRW.ReadAddr.RTS
 				rts
 				.LIST OFF
 *--------------------------------------
-* A = target track
+XRW.Recalibrate	dec XRW.RecalibrateCnt
+				bne .1
+
+				sec
+				rts
+				
+.1				ldy XRW.UnitIndex
+
+				lda #41
+				sta XRW.D2Trk-1,y
+
+				lda #0
+				sta XRW.D2VolNum-1,y	reset volnum for seeking 41 Qtracks
+				jsr XRW.Seek
+
+				clc
+				rts
 *--------------------------------------
 XRW.Seek		ldx XRW.UnitIndex
 				pha						save target track
@@ -348,9 +354,10 @@ XRW.Seek		ldx XRW.UnitIndex
 				lda #1
 				bra .4
 
-.1				pha
+.1				jsr XRW.SEEKOFF
+				
+				pha
 
-				jsr XRW.SEEKOFF
 				bcs	.2
 
 * Current < Target, must move in
@@ -380,13 +387,14 @@ XRW.Seek		ldx XRW.UnitIndex
 
 .3				and #6
 				ora A2L
-*				bcs .30
 
-*				phx
-*				tax
-*				pla
+				bcs .30
 
-*.30
+				phx
+				tax
+				pla
+
+.30
 				tay
 
 				jsr XRW.SEEK2QT
@@ -403,45 +411,17 @@ XRW.Seek		ldx XRW.UnitIndex
 XRW.SEEKOFF
 				pha
 
-*				lda A2L
-*				ora #IO.D2.RData
-*				sta .1+1
-*				sta .2+1
+				lda A2L
+				ora #IO.D2.RData
+				sta .1+1
+				sta .2+1
 				
 				lda IO.D2.Ph0Off,x
-*.1				lda IO.D2.RData			SELF MODIFIED
-				nop
-				nop
+.1				lda IO.D2.RData			SELF MODIFIED
 				lda IO.D2.Ph0Off,y
-*.2				lda IO.D2.RData			SELF MODIFIED
+.2				lda IO.D2.RData			SELF MODIFIED
 
 				pla
-				rts
-*--------------------------------------
-XRW.CheckMotorOn
-				ldx A2L
-XRW.CheckMotorOnX
-				ldy #0					init loop counter.
-
-.1  			lda IO.D2.RData,x		read the shift register.
-				jsr .9					delay
-
-				pha
-				pla		  				more delay.
-
-				cmp IO.D2.RData,x		has shift reg changed ?
-				bne .9					yes, motor is moving.
-
-				dey		  				no, dec retry counter
-				bne .1					and try 256 times.
-
-.9				rts						Z if motor OFF
-*--------------------------------------
-XRW.TestWP		ldx A2L
-				lda IO.D2.ReadProt,x	test for write protected
-				lda IO.D2.ReadMode,x
-				rol		 				write protect-->carry-->bit 0=1
-				lda IO.D2.RData,x		keep in read mode
 				rts
 *--------------------------------------
 * preniblize subroutine (16 sector format)
@@ -568,18 +548,10 @@ L596F  			ldy #$FF	   			index to last byte of data to write.
 XRW.SectorIO	bit XRW.bWrite
 				bpl .1
 
-*				lda XRW.ReqTrack
-*				jsr	XRW.SEEK2T
-*				phx
-*				phy
-
 				jsr XRW.PreNibble
 
-*				ply
-*				plx
-*				jsr XRW.SEEKOFF
-
-.1  			stz XRW.RetryCnt
+.1				lda #32
+				sta XRW.RetryCnt
 
 			.DO XRWDBG=1
 			jsr XRW.DEBUG
@@ -597,8 +569,8 @@ XRW.SectorIO	bit XRW.bWrite
 
 				jmp XRW.Read
 
-.3				inc XRW.RetryCnt
-				bpl .2
+.3				dec XRW.RetryCnt
+				bne .2
 
 				sec
 
@@ -612,7 +584,7 @@ XRW.SectorIO	bit XRW.bWrite
 * on entry: x = slotnum times 16
 *--------------------------------------
 				.LIST ON
-				.BS $D300-*
+			.BS $D300-*
 
 XRW.Write		bit IO.D2.ReadProt,x	(4) PREWRITE MODE
 				.LIST OFF
@@ -968,17 +940,15 @@ XRW.SEEK2QTXY	pha
 				tay
 
 XRW.SEEK2QT
-*				lda A2L
-*				ora #IO.D2.RData
-*				sta .1+1
-*				sta .2+1
+				lda A2L
+				ora #IO.D2.RData
+				sta .1+1
+				sta .2+1
 
 				lda IO.D2.Ph0On,x
-*.1				lda IO.D2.RData			SELF MODIFIED
-				nop
-				nop
+.1				lda IO.D2.RData			SELF MODIFIED
 				lda IO.D2.Ph0On,y
-*.2				lda IO.D2.RData			SELF MODIFIED
+.2				lda IO.D2.RData			SELF MODIFIED
 				rts
 *--------------------------------------
 XRW.Trk2Qtrk	asl						x2
@@ -991,6 +961,32 @@ XRW.Trk2Qtrk	asl						x2
 				lsr						x3
 
 .1				adc #$ff				SELF MODIFIED
+				rts
+*--------------------------------------
+XRW.CheckMotorOn
+				ldx A2L
+XRW.CheckMotorOnX
+				ldy #0					init loop counter.
+
+.1  			lda IO.D2.RData,x		read the shift register.
+				jsr .9					delay
+
+				pha
+				pla		  				more delay.
+
+				cmp IO.D2.RData,x		has shift reg changed ?
+				bne .9					yes, motor is moving.
+
+				dey		  				no, dec retry counter
+				bne .1					and try 256 times.
+
+.9				rts						Z if motor OFF
+*--------------------------------------
+XRW.TestWP		ldx A2L
+				lda IO.D2.ReadProt,x	test for write protected
+				lda IO.D2.ReadMode,x
+				rol		 				write protect-->carry-->bit 0=1
+				lda IO.D2.RData,x		keep in read mode
 				rts
 *--------------------------------------
 				.LIST ON
