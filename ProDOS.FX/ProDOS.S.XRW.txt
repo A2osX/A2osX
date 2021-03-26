@@ -47,8 +47,7 @@ XRW.START		cld						$D8 to flag language card bank 1 (main)
 				jsr XRW.CheckMotorOnX	check if previous drive running.
 				beq L59BD				branch if stopped.
 
-				lda #1
-				jsr XRW.Wait100usecA
+				jsr XRW.Wait100usec
 
 				lda XRW.montimeh
 				bne .1
@@ -120,8 +119,7 @@ L59BD  			lda bloknml
 
 * motor was off, wait for it to speed up
 
-.6  			lda #1
-				jsr XRW.Wait100usecA	wait 100us for each count in montime
+.6  			jsr XRW.Wait100usec		wait 100us for each count in montime
 
 				lda XRW.montimeh
 				bmi .6					count up to 0000
@@ -153,6 +151,10 @@ L538E  			lda A4L					get command #
 *--------------------------------------
 .2				sei						DISABLE IRQ
 
+			.DO XRWDBG=1
+			jsr XRW.DEBUG
+			.FIN
+
 				lda #2
 				sta XRW.RecalibrateCnt
 
@@ -171,6 +173,10 @@ L538E  			lda A4L					get command #
 
 				inc XRW.ReqSector
 				inc XRW.ReqSector
+
+			.DO XRWDBG=1
+			jsr XRW.DEBUG
+			.FIN
 
 				jsr XRW.SectorIO		get 2nd half of block
 				dec buf+1
@@ -192,357 +198,7 @@ XRW.E.OK		plp						RESTORE IRQ STATE
 				lda #0
 
 XRW.E.EXIT		ldx A2L
-				bit IO.D2.DrvOff,x	 	turn off
-				rts
-*--------------------------------------
-XRW.TrackSelect	lda #2
-				sta XRW.BadSeek
-
-.1				lda #32
-				sta XRW.RetryCnt
-
-.2  			jsr XRW.ReadAddr		read next address field.
-				bcc .4					if CC, A = current track
-
-.3  			dec XRW.RetryCnt	 	one less chance.
-				bne .2					branch if < 128
-
-				jsr XRW.Recalibrate
-				bcc .1
-				
-				rts
-
-.4  			ldy XRW.UnitIndex		(4)
-				lda XRW.AddrField.V		(4)
-				sta XRW.D2VolNum-1,y	(4)
-				lda XRW.AddrField.T		(4)
-				sta XRW.D2Trk-1,y		(4)
-				cmp XRW.ReqTrack
-				beq .8
-
-				lda XRW.BadSeek
-				beq .5					2 bad seeks, already
-
-				dec XRW.BadSeek
-				bne .7
-
-.5				lda XRW.SeekTime
-				bmi .7					seektime already > 128
-
-				clc
-				adc #IO.D2.SeekTimeI
-				sta XRW.SeekTime
-
-				sta XRW.D2SeekTime-1,y
-
-.7				lda XRW.ReqTrack
-				jsr XRW.Seek
-				bra .3
-
-.8				clc
-.9				rts
-*--------------------------------------
-				.LIST ON
-XRW.ReadAddr	ldy #$FC
-				.LIST OFF
-				sty XRW.CheckSum		init nibble counter to $FCFC
-
-				ldx A2L					get slot #
-
-.1  			iny
-				bne .2					counter LO
-
-				inc XRW.CheckSum		counter HI
-				beq .99
-
-.2  			lda IO.D2.RData,x		read nibl
-				bpl .2
-
-.3 				cmp #$D5	 			address mark 1 ?
-				bne .1
-
-				nop
-
-.4	 			lda IO.D2.RData,x
-				bpl .4
-
-				cmp #$AA	   			address mark 2 ?
-				bne .3					if not, is it address mark 1 ?
-
-				ldy #3		   			index for 4 byte read
-
-.5  			lda IO.D2.RData,x
-				bpl .5
-
-				cmp #$96	   			address mark 3 ?
-				bne .3					if not, is it address mark 1
-
-				lda #0					init Chksum
-
-.6	  			sta XRW.CheckSum
-
-.7  			lda IO.D2.RData,x		read 'odd bit' nibl
-				bpl .7
-
-				rol		 				align odd bits, '1' into lsb.
-				sta XRW.Temp4x4			save them.
-
-.8  			lda IO.D2.RData,x		read 'even bit' nibl
-				bpl .8
-
-				and XRW.Temp4x4			merge odd and even bits.
-				sta XRW.AddrField.C,y	store data byte.
-				eor XRW.CheckSum
-				dey
-				bpl .6					loop on 4 data bytes.
-
-				tay		  				if final checksum non-zero,
-				bne .99					(2) then error.
-
-.9				lda IO.D2.RData,x		(4)
-				bpl .9					(2)
-
-				eor #$DE				(2)
-				bne .99					(2)
-
-				clc						(2)
-
-				rts						(6)
-
-.99				sec
-				.LIST ON
-XRW.ReadAddr.RTS
-				rts
-				.LIST OFF
-*--------------------------------------
-XRW.Recalibrate	dec XRW.RecalibrateCnt
-				bne .1
-
-				sec
-				rts
-				
-.1				ldy XRW.UnitIndex
-
-				lda #41
-				sta XRW.D2Trk-1,y
-
-				lda #0
-				sta XRW.D2VolNum-1,y	reset volnum for seeking 41 Qtracks
-				jsr XRW.Seek
-
-				clc
-				rts
-*--------------------------------------
-XRW.Seek		ldx XRW.UnitIndex
-				pha						save target track
-
-				jsr XRW.Trk2Qtrk
-				sta XRW.TargetQTrack
-
-				lda XRW.D2Trk-1,x
-
-				jsr XRW.Trk2Qtrk
-				sta XRW.CurrentQTrack
-
-				tay
-
-				pla
-				sta XRW.D2Trk-1,x		will be current track at the end
-
-				tya
-				jsr XRW.Seek2QTXY
-				lda #1
-				bra .4
-
-.1				jsr XRW.SEEKOFF
-				
-				pha
-
-				bcs	.2
-
-* Current < Target, must move in
-
-				inc
-
-				.HS B0					BCS
-
-* Current > Target, must move out
-
-.2				dec
-
-				sta XRW.CurrentQTrack
-
-				and #6
-				ora A2L
-				tax
-
-				pla
-
-				bcs	.3
-
-* Current < Target, must move in
-
-				inc
-				inc
-
-.3				and #6
-				ora A2L
-
-				bcs .30
-
-				phx
-				tax
-				pla
-
-.30
-				tay
-
-				jsr XRW.SEEK2QT
-
-				lda XRW.SeekTime
-.4				jsr XRW.Wait100usecA
-
-				lda XRW.CurrentQTrack
-				cmp	XRW.TargetQTrack
-				bne .1
-
-				jsr XRW.Wait25600usec
-
-XRW.SEEKOFF
-				pha
-
-				lda A2L
-				ora #IO.D2.RData
-				sta .1+1
-				sta .2+1
-				
-				lda IO.D2.Ph0Off,x
-.1				lda IO.D2.RData			SELF MODIFIED
-				lda IO.D2.Ph0Off,y
-.2				lda IO.D2.RData			SELF MODIFIED
-
-				pla
-				rts
-*--------------------------------------
-* preniblize subroutine (16 sector format)
-*
-* converts 256 bytes of user data in (buf) into 6 bit nibls in nbuf2.
-* high 6 bits are translated directly by the write routines.
-*
-* on entry: buf is 2-byte pointer to 256 bytes of user data.
-*
-* on exit: a,x,y undefined. write routine modified to do direct conversion
-*	of high 6 bits of user's buffer data.
-*--------------------------------------
-XRW.PreNibble	lda buf					self-modify the addresses because of
-				ldy buf+1				the fast timing required.
-
-				clc		  				all offsets are minus $AA.
-				adc #$02	  			the highest set is buf+$AC.
-				bcc L58FA				branch if no carry,
-
-				iny		  				otherwise add carry to high address.
-
-L58FA 			sta prn3+1	   			self mod 3
-				sty prn3+2
-
-				sec
-				sbc #$56				middle set is buf+$56.
-				bcs L5906				branch if no borrow,
-
-				dey		  				otherwise deduct from high.
-
-L5906  			sta prn2+1				self mod 2
-				sty prn2+2
-
-				sec
-				sbc #$56				low set is exactly buf
-				bcs L5912
-
-				dey
-
-L5912  			sta prn1+1				self mod 1
-				sty prn1+2
-
-				ldy #$AA				count up to 0.
-
-prn1			lda $1000,y				warning: self modified. get byte from lowest group.
-				and #$03	   			strip high 6 bits.
-				tax		  				index to 2 bit equivalent.
-				lda XRW.0000XX00,x
-				pha		  				save pattern
-
-prn2			lda $1056,y				warning: self modified. get byte from middle group.
-				and #$03
-				tax
-				pla		  				restore pattern.
-				ora XRW.00XX0000,x  	combine 2nd group with 1st.
-				pha		  				save new pattern.
-
-prn3			lda $10AC,y				warning: self modified. get byte from highest group.
-				and #$03
-				tax
-				pla		  				restore new pattern
-				ora XRW.XX000000,x 		and form final nibl.
-				pha
-
-				tya
-				eor #$FF
-				tax
-
-				pla
-				sta nbuf2,x	  			save in nibl buffer.
-				iny		  				inc to next set.
-				bne prn1				loop until all $56 nibls formed.
-
-				ldy buf					now prepare data bytes for write16 subr.
-				dey		  				prepare end address.
-				sty A2H
-				lda buf
-				sta wrefd1+1			warning: the following storage addresses
-				beq L595F				starting with 'wref' are refs into code
-
-				eor #$FF	   			space, changed by this routine.
-				tay		  				index to last byte of page in (buf).
-				lda (buf),y	  			pre-niblize the last byte of the page
-				iny		  				with the first byte of the next page.
-				eor (buf),y
-				and #$FC
-				tax
-				lda XRW.FC2Nib,x	  	get disk 7-bit nible equivalent.
-
-L595F  			sta pch
-				beq L596F				branch if data to be written is page aligned.
-
-				lda A2H					check if last byte is even
-				lsr						or odd address. shift even/odd -> carry.
-				lda (buf),y				if even, then leave intact.
-				bcc L596D				branch if odd.
-
-				iny		  				if even, then pre-xor with byte 1.
-				eor (buf),y
-L596D  			sta A1L					save result for write routine.
-
-L596F  			ldy #$FF	   			index to last byte of data to write.
-				lda (buf),y	  			to be used as a checksum.
-				and #$FC	   			strip extra bits
-				sta A1H					and save it.
-
-				ldy buf+1				now modify address references to
-				sty wrefa1+2	   		user data.
-				sty wrefa2+2
-
-				iny
-				sty wrefa3+2
-				sty wrefa4+2
-				sty wrefa5+2
-				sty wrefa6+2
-
-				ldx A2L					and lastly, index references to
-				stx wrefd2+1	   		controller.
-				stx wrefd3+1
-				stx wrefd4+1
-				stx wrefd5+1
+				bit IO.D2.DrvOff,x
 				rts
 *--------------------------------------
 XRW.SectorIO	bit XRW.bWrite
@@ -550,12 +206,8 @@ XRW.SectorIO	bit XRW.bWrite
 
 				jsr XRW.PreNibble
 
-.1				lda #32
+.1				lda #64
 				sta XRW.RetryCnt
-
-			.DO XRWDBG=1
-			jsr XRW.DEBUG
-			.FIN
 
 .2				jsr XRW.ReadAddr
 				bcs .3					(2)
@@ -565,9 +217,9 @@ XRW.SectorIO	bit XRW.bWrite
 				bne .3					(2)
 
 				bit XRW.bWrite			(4)
-				bmi XRW.Write			(3)
+				bpl XRW.Read			(2)
 
-				jmp XRW.Read
+				jmp XRW.Write			(3)
 
 .3				dec XRW.RetryCnt
 				bne .2
@@ -575,6 +227,165 @@ XRW.SectorIO	bit XRW.bWrite
 				sec
 
 .9				rts
+*--------------------------------------
+* read subroutine (16-sector format)
+*
+* reads encoded bytes into nbuf1 and nbuf2.
+* first reads nbuf2 high to low, then nbuf1 low to high.
+* on entry: x=slot# times $10, read mode
+* on exit: carry set if error, else if no error:
+*	acc=$AA, x=unchanged, y=0, carry clear.
+* observe 'no page cross' on some branches !!
+*--------------------------------------
+				.LIST ON
+XRW.Read		txa						get slot #
+				.LIST OFF
+				ora #$8C	   			prepare mods to read routine.
+				sta rd4+1				warning: the read routine is
+				sta rd5+1				self modified !!
+				sta rd6+1
+				sta rd7+1
+				sta rd8+1
+
+				lda buf					modify storage addresses also
+				ldy buf+1
+				sta ref3+1
+				sty ref3+2
+				sec
+				sbc #$54
+				bcs L571F				branch if no borrow
+
+				dey
+
+L571F  			sta ref2+1
+				sty ref2+2
+				sec
+				sbc #$57
+				bcs L572B				branch if no borrow
+
+				dey
+
+L572B  			sta ref1+1
+				sty ref1+2
+
+				ldy #$20				32 tries to find
+
+L5733  			dey
+				beq L576D				branch if can't find data header marks
+
+L5736  			lda IO.D2.RData,x
+				bpl L5736
+
+L573B  			eor #$D5	   			1st data mark
+				bne L5733
+
+				nop		  				delay
+
+L5740  			lda IO.D2.RData,x
+				bpl L5740
+
+				cmp #$AA	   			2nd data mark.
+				bne L573B				if not, check for 1st again
+
+				nop
+
+L574A  			lda IO.D2.RData,x
+				bpl L574A
+
+				cmp #$AD	   			3rd data mark
+				bne L573B				if not, check for data mark 1 again
+
+				ldy #$AA
+				lda #$00
+
+L5757  			sta pcl					use z-page for keeping checksum
+
+rd4				ldx IO.D2.RData+$60	  	warning: self modified
+				bpl rd4
+
+				lda XRW.Nib2FC-$96,x
+				sta nbuf2-$AA,y	  		save the two-bit groups in nbuf.
+				eor pcl					update checksum.
+				iny		  				next position in nbuf.
+				bne L5757				loop for all $56 two-bit groups.
+
+				ldy #$AA	  			now read directly into user buffer.
+				bne rd5					always taken.
+
+L576D			sec		  				error
+				rts
+
+ref1			sta $1000,y				warning: self modified
+
+rd5				ldx IO.D2.RData+$60		warning: self modified
+				bpl rd5
+
+				eor XRW.Nib2FC-$96,x	get actual 6-bit data from dnib table.
+				ldx nbuf2-$AA,y	  		get associated two-bit pattern
+				eor dnibl2,x	   		and combine to form whole byte.
+				iny
+				bne ref1				loop for $56 bytes.
+
+				pha		  				save for now, no time to store...
+				and #$FC	   			strip low bits.
+				ldy #$AA	   			prepare for next $56 bytes
+
+rd6				ldx IO.D2.RData+$60	  	warning: self modified
+				bpl rd6
+
+				eor XRW.Nib2FC-$96,x
+				ldx nbuf2-$AA,y
+				eor dnibl3,x
+ref2			sta $1000,y				warning: self modified
+				iny
+				bne rd6					loop unil this group of $56 read
+
+rd7				ldx IO.D2.RData+$60	  	warning: self modified
+				bpl rd7
+
+				and #$FC
+				ldy #$AC				last group is $54 long
+
+L57A5  			eor XRW.Nib2FC-$96,x
+				ldx nbuf2-$AC,y
+				eor dnibl4,x	   		combine to form full byte
+ref3			sta $1000,y				warning: self modified
+
+rd8				ldx IO.D2.RData+$60		warning: self modified
+				bpl rd8
+
+				iny
+				bne L57A5
+
+				and #$FC
+				eor XRW.Nib2FC-$96,x	checksum ok ?
+				bne L57CC				error if not.
+
+				ldx A2L					test end marks.
+
+L57C2  			lda IO.D2.RData,x
+				bpl L57C2
+
+				cmp #$DE
+
+				clc
+				beq L57CD				branch if good trailer
+
+L57CC  			sec
+
+L57CD  			pla		 				place last byte into user buffer
+				ldy #$55
+				sta (buf),y
+				.LIST ON
+XRW.Read.RTS	rts
+				.LIST OFF
+*--------------------------------------
+XRW.TestWP		ldx A2L
+				lda IO.D2.ReadProt,x	test for write protected
+				lda IO.D2.ReadMode,x
+				rol		 				write protect-->carry-->bit 0=1
+				lda IO.D2.RData,x		keep in read mode
+				rts
 *--------------------------------------
 * write subroutine (16 sector format)
 *
@@ -584,14 +395,12 @@ XRW.SectorIO	bit XRW.bWrite
 * on entry: x = slotnum times 16
 *--------------------------------------
 				.LIST ON
-			.BS $D300-*
-
 XRW.Write		bit IO.D2.ReadProt,x	(4) PREWRITE MODE
 				.LIST OFF
 				bit IO.D2.ReadMode,x	(4)
 
 				lda #$FF   				(2)
-				nop						(2)
+*				nop						(2)
 
 				sta IO.D2.WriteMode,x	(5) goto write mode
 				ora IO.D2.WShift,x		(4)
@@ -753,6 +562,10 @@ XRW.Write.RTS	rts	  					(6)
 *--------------------------------------
 XRW.Wait25600usec
 				lda #0
+				.HS 2C					BIT ABS
+
+XRW.Wait100usec	lda #1
+		
 XRW.Wait100usecA
 				phx
 
@@ -770,197 +583,6 @@ XRW.Wait100usecA
 				bne .1					(3)
 
 				plx
-				rts
-*--------------------------------------
-* read subroutine (16-sector format)
-*
-* reads encoded bytes into nbuf1 and nbuf2.
-* first reads nbuf2 high to low, then nbuf1 low to high.
-* on entry: x=slot# times $10, read mode
-* on exit: carry set if error, else if no error:
-*	acc=$AA, x=unchanged, y=0, carry clear.
-* observe 'no page cross' on some branches !!
-*--------------------------------------
-				.LIST ON
-XRW.Read		txa						get slot #
-				.LIST OFF
-				ora #$8C	   			prepare mods to read routine.
-				sta rd4+1				warning: the read routine is
-				sta rd5+1				self modified !!
-				sta rd6+1
-				sta rd7+1
-				sta rd8+1
-
-				lda buf					modify storage addresses also
-				ldy buf+1
-				sta ref3+1
-				sty ref3+2
-				sec
-				sbc #$54
-				bcs L571F				branch if no borrow
-
-				dey
-
-L571F  			sta ref2+1
-				sty ref2+2
-				sec
-				sbc #$57
-				bcs L572B				branch if no borrow
-
-				dey
-
-L572B  			sta ref1+1
-				sty ref1+2
-
-				ldy #$20				32 tries to find
-
-L5733  			dey
-				beq L576D				branch if can't find data header marks
-
-L5736  			lda IO.D2.RData,x
-				bpl L5736
-
-L573B  			eor #$D5	   			1st data mark
-				bne L5733
-
-				nop		  				delay
-
-L5740  			lda IO.D2.RData,x
-				bpl L5740
-
-				cmp #$AA	   			2nd data mark.
-				bne L573B				if not, check for 1st again
-
-				nop
-
-L574A  			lda IO.D2.RData,x
-				bpl L574A
-
-				cmp #$AD	   			3rd data mark
-				bne L573B				if not, check for data mark 1 again
-
-				ldy #$AA
-				lda #$00
-
-L5757  			sta pcl					use z-page for keeping checksum
-
-rd4				ldx IO.D2.RData+$60	  	warning: self modified
-				bpl rd4
-
-				lda XRW.Nib2FC-$96,x
-				sta nbuf2-$AA,y	  		save the two-bit groups in nbuf.
-				eor pcl					update checksum.
-				iny		  				next position in nbuf.
-				bne L5757				loop for all $56 two-bit groups.
-
-				ldy #$AA	  			now read directly into user buffer.
-				bne rd5					always taken.
-
-L576D			sec		  				error
-				rts
-
-ref1			sta $1000,y				warning: self modified
-
-rd5				ldx IO.D2.RData+$60		warning: self modified
-				bpl rd5
-
-				eor XRW.Nib2FC-$96,x	get actual 6-bit data from dnib table.
-				ldx nbuf2-$AA,y	  		get associated two-bit pattern
-				eor dnibl2,x	   		and combine to form whole byte.
-				iny
-				bne ref1				loop for $56 bytes.
-
-				pha		  				save for now, no time to store...
-				and #$FC	   			strip low bits.
-				ldy #$AA	   			prepare for next $56 bytes
-
-rd6				ldx IO.D2.RData+$60	  	warning: self modified
-				bpl rd6
-
-				eor XRW.Nib2FC-$96,x
-				ldx nbuf2-$AA,y
-				eor dnibl3,x
-ref2			sta $1000,y				warning: self modified
-				iny
-				bne rd6					loop unil this group of $56 read
-
-rd7				ldx IO.D2.RData+$60	  	warning: self modified
-				bpl rd7
-
-				and #$FC
-				ldy #$AC				last group is $54 long
-
-L57A5  			eor XRW.Nib2FC-$96,x
-				ldx nbuf2-$AC,y
-				eor dnibl4,x	   		combine to form full byte
-ref3			sta $1000,y				warning: self modified
-
-rd8				ldx IO.D2.RData+$60		warning: self modified
-				bpl rd8
-
-				iny
-				bne L57A5
-
-				and #$FC
-				eor XRW.Nib2FC-$96,x	checksum ok ?
-				bne L57CC				error if not.
-
-				ldx A2L					test end marks.
-
-L57C2  			lda IO.D2.RData,x
-				bpl L57C2
-
-				cmp #$DE
-
-				clc
-				beq L57CD				branch if good trailer
-
-L57CC  			sec
-
-L57CD  			pla		 				place last byte into user buffer
-				ldy #$55
-				sta (buf),y
-				.LIST ON
-XRW.Read.RTS	rts
-				.LIST OFF
-*--------------------------------------
-XRW.SEEK2T		ldx XRW.UnitIndex
-				jsr XRW.Trk2Qtrk
-
-XRW.SEEK2QTXY	pha
-				and #6
-				ora A2L
-				tax
-
-				pla
-				inc
-
-				and #6
-				ora A2L
-				tay
-
-XRW.SEEK2QT
-				lda A2L
-				ora #IO.D2.RData
-				sta .1+1
-				sta .2+1
-
-				lda IO.D2.Ph0On,x
-.1				lda IO.D2.RData			SELF MODIFIED
-				lda IO.D2.Ph0On,y
-.2				lda IO.D2.RData			SELF MODIFIED
-				rts
-*--------------------------------------
-XRW.Trk2Qtrk	asl						x2
-				sta .1+1
-
-				bit XRW.D2VolNum-1,x
-				bpl .1					x4
-				bvs .1					> $C0 ? (VOL=254)
-
-				lsr						x3
-
-.1				adc #$ff				SELF MODIFIED
 				rts
 *--------------------------------------
 XRW.CheckMotorOn
@@ -982,11 +604,415 @@ XRW.CheckMotorOnX
 
 .9				rts						Z if motor OFF
 *--------------------------------------
-XRW.TestWP		ldx A2L
-				lda IO.D2.ReadProt,x	test for write protected
-				lda IO.D2.ReadMode,x
-				rol		 				write protect-->carry-->bit 0=1
-				lda IO.D2.RData,x		keep in read mode
+				.LIST ON
+XRW.ReadAddr	ldy #$FC
+				.LIST OFF
+				sty XRW.CheckSum		init nibble counter to $FCFC
+
+				ldx A2L					get slot #
+
+.1  			iny
+				bne .2					counter LO
+
+				inc XRW.CheckSum		counter HI
+				beq .99
+
+.2  			lda IO.D2.RData,x		read nibl
+				bpl .2
+
+.3 				cmp #$D5	 			address mark 1 ?
+				bne .1
+
+				nop
+
+.4	 			lda IO.D2.RData,x
+				bpl .4
+
+				cmp #$AA	   			address mark 2 ?
+				bne .3					if not, is it address mark 1 ?
+
+				ldy #3		   			index for 4 byte read
+
+.5  			lda IO.D2.RData,x
+				bpl .5
+
+				cmp #$96	   			address mark 3 ?
+				bne .3					if not, is it address mark 1
+
+				lda #0					init Chksum
+
+.6	  			sta XRW.CheckSum
+
+.7  			lda IO.D2.RData,x		read 'odd bit' nibl
+				bpl .7
+
+				rol		 				align odd bits, '1' into lsb.
+				sta XRW.Temp4x4			save them.
+
+.8  			lda IO.D2.RData,x		read 'even bit' nibl
+				bpl .8
+
+				and XRW.Temp4x4			merge odd and even bits.
+				sta XRW.AddrField.C,y	store data byte.
+				eor XRW.CheckSum
+				dey
+				bpl .6					loop on 4 data bytes.
+
+				tay		  				if final checksum non-zero,
+				bne .99					(2) then error.
+
+				clc						(2)
+
+.9				lda IO.D2.RData,x		(4)
+				bpl .9					(2)
+
+				eor #$DE				(2)
+				bne .99					(2)
+
+				rts						(6)
+
+.99				sec
+				.LIST ON
+XRW.ReadAddr.RTS
+				rts
+				.LIST OFF
+*--------------------------------------
+XRW.TrackSelect	lda #2
+				sta XRW.BadSeekCnt
+
+.1				lda #64
+				sta XRW.RetryCnt
+
+.2  			jsr XRW.ReadAddr
+				bcc .4
+
+.3  			dec XRW.RetryCnt
+				bne .2
+
+				jsr XRW.Recalibrate
+				bcc .1
+				
+				rts
+
+.4  			ldx XRW.UnitIndex
+				lda XRW.AddrField.V
+				cmp #194
+				bcc .5
+				
+				lda #0
+				
+.5				sta XRW.D2VolNum-1,x
+
+				asl
+				asl						CS if 2 heads
+
+				lda XRW.ReqTrack
+				bcc .50
+
+				lsr						Track 160 -> 80+Carry
+				pha
+
+				lda #0					Carry = Head
+
+				rol
+				rol						A = 0/2
+				
+				ora A2L
+				tay						x = n0/n2
+				
+				lda IO.D2.Ph0On,y
+				lda IO.D2.Ph0On+4,y
+				
+				jsr XRW.Wait100usec
+
+				lda IO.D2.Ph0Off,y
+				lda IO.D2.Ph0Off+4,y
+				pla
+
+.50				sta XRW.ReqTrack2
+				
+				lda XRW.AddrField.T
+				sta XRW.D2Trk-1,x
+
+				cmp XRW.ReqTrack2
+				beq .8
+
+*			lda #"S"
+*			sta $722
+
+				lda XRW.BadSeekCnt
+				beq .6					2 bad seeks, already
+
+				dec XRW.BadSeekCnt
+				bne .7
+
+.6				lda XRW.SeekTime
+				bmi .7					seektime already > 128
+
+				clc
+				adc #IO.D2.SeekTimeI
+				sta XRW.SeekTime
+
+				sta XRW.D2SeekTime-1,x
+				
+.7				ldy XRW.D2Trk-1,x		From actual Pos...
+				lda XRW.ReqTrack2		....to Req
+				jsr XRW.SeekYA			X = XRW.UnitIndex
+
+				bra .3
+
+.8				clc
+XRW.TrackSelect.RTS
+				rts
+*--------------------------------------
+XRW.Recalibrate	sec
+				dec XRW.RecalibrateCnt
+				beq XRW.TrackSelect.RTS
+				
+				ldx XRW.UnitIndex
+
+				ldy #41					from 41... (4/4)
+				lda #0					....to 0
+				sta XRW.D2VolNum-1,x	reset volnum for seeking 41 4/4 tracks
+*--------------------------------------
+XRW.SeekYA		sta XRW.D2Trk-1,x		will be current track at the end
+
+				jsr XRW.Trk2Qtrk
+				sta XRW.TargetQTrack
+
+				tya
+
+				jsr XRW.Trk2Qtrk
+				sta XRW.CurrentQTrack
+
+				bit #1					A = Current QT
+				bne .1
+		
+*			cmp	XRW.TargetQTrack
+*			bcc .88
+*			>DEBUG
+*.88			
+			
+				jsr .10					we are on 0/4 or 2/4 track
+
+*				lda #1
+*				bra .9					no wait, next operation will be phy/plx/Ph0On,y
+				
+				bra .90
+				
+.1				cmp	XRW.TargetQTrack	we are on 1/4 or 3/4
+	
+				bcs .2					if CS, C > T, must move out
+
+				inc						CC: C < T, ON next PH
+
+				.HS B0					BCS
+
+.2				dec						CS: C > T, ON prev PH
+			
+				sta XRW.CurrentQTrack
+
+				bra .7					Ph ON to go to 0/4 or 2/4, then wait
+*--------------------------------------
+.3				bcs	.4					if CS, C > T, must move out
+
+				inc						CC: C < T, ON next PH
+
+				.HS B0					BCS
+
+.4				dec						CS: C > T, ON prev PH
+
+				sta XRW.CurrentQTrack
+
+				bit #1
+				bne .5					we must go to 1/4 or 3/4
+
+				lda IO.D2.Ph0Off,x		we must go to 0/4 or 2/4 : Off Prev Ph
+
+				bra .8					go wait....
+				
+.5				phy						we must go on 1/4 or 3/4
+				plx						Y already ON, -> X for Ph0Off,x
+				
+				bcs	.6					if CS, C > T, must move out
+
+				inc						CC: C < T, ON next PH
+
+* useless, AND #6 will do it
+
+*				.HS B0					BCS
+
+*.6				dec						CS: C > T, ON prev PH
+
+.6
+
+.7				jsr .10					now X and Y on
+
+.8				lda XRW.SeekTime
+
+.9				jsr XRW.Wait100usecA	...wait...
+
+.90				lda XRW.CurrentQTrack
+				cmp	XRW.TargetQTrack
+				bne .3
+
+				jsr XRW.Wait25600usec
+
+				lda IO.D2.Ph0Off,x
+				lda IO.D2.Ph0Off,y
+				clc						Exit wit CC (recalibrate)
+				rts
+
+.10				and #6
+				ora A2L
+				tay
+				lda IO.D2.Ph0On,y
+				rts
+*--------------------------------------
+* A = 0 -> 79, X = XRW.UnitIndex
+*--------------------------------------
+XRW.Trk2Qtrk	asl						x2, CC
+				sta pch
+
+				bit XRW.D2VolNum-1,x
+				bpl .1					< $80 : x4
+				
+				bvs .2					
+
+				lsr						$80 < v < $BF : x3
+
+.1				adc pch
+				rts
+
+.2				lda XRW.D2VolNum-1,x	> $C0 : 2 heads
+				lsr						CS if 80trk
+
+				lda pch
+				bcs .8					x2 for 80trk (ELITE III)
+				
+				asl						x4 for 40trk (ELITE II)
+				
+.8				rts
+*--------------------------------------
+* preniblize subroutine (16 sector format)
+*
+* converts 256 bytes of user data in (buf) into 6 bit nibls in nbuf2.
+* high 6 bits are translated directly by the write routines.
+*
+* on entry: buf is 2-byte pointer to 256 bytes of user data.
+*
+* on exit: a,x,y undefined. write routine modified to do direct conversion
+*	of high 6 bits of user's buffer data.
+*--------------------------------------
+XRW.PreNibble	lda buf					self-modify the addresses because of
+				ldy buf+1				the fast timing required.
+
+				clc		  				all offsets are minus $AA.
+				adc #$02	  			the highest set is buf+$AC.
+				bcc L58FA				branch if no carry,
+
+				iny		  				otherwise add carry to high address.
+
+L58FA 			sta prn3+1	   			self mod 3
+				sty prn3+2
+
+				sec
+				sbc #$56				middle set is buf+$56.
+				bcs L5906				branch if no borrow,
+
+				dey		  				otherwise deduct from high.
+
+L5906  			sta prn2+1				self mod 2
+				sty prn2+2
+
+				sec
+				sbc #$56				low set is exactly buf
+				bcs L5912
+
+				dey
+
+L5912  			sta prn1+1				self mod 1
+				sty prn1+2
+
+				ldy #$AA				count up to 0.
+
+prn1			lda $1000,y				warning: self modified. get byte from lowest group.
+				and #$03	   			strip high 6 bits.
+				tax		  				index to 2 bit equivalent.
+				lda XRW.0000XX00,x
+				pha		  				save pattern
+
+prn2			lda $1056,y				warning: self modified. get byte from middle group.
+				and #$03
+				tax
+				pla		  				restore pattern.
+				ora XRW.00XX0000,x  	combine 2nd group with 1st.
+				pha		  				save new pattern.
+
+prn3			lda $10AC,y				warning: self modified. get byte from highest group.
+				and #$03
+				tax
+				pla		  				restore new pattern
+				ora XRW.XX000000,x 		and form final nibl.
+				pha
+
+				tya
+				eor #$FF
+				tax
+
+				pla
+				sta nbuf2,x	  			save in nibl buffer.
+				iny		  				inc to next set.
+				bne prn1				loop until all $56 nibls formed.
+
+				ldy buf					now prepare data bytes for write16 subr.
+				dey		  				prepare end address.
+				sty A2H
+				lda buf
+				sta wrefd1+1			warning: the following storage addresses
+				beq L595F				starting with 'wref' are refs into code
+
+				eor #$FF	   			space, changed by this routine.
+				tay		  				index to last byte of page in (buf).
+				lda (buf),y	  			pre-niblize the last byte of the page
+				iny		  				with the first byte of the next page.
+				eor (buf),y
+				and #$FC
+				tax
+				lda XRW.FC2Nib,x	  	get disk 7-bit nible equivalent.
+
+L595F  			sta pch
+				beq L596F				branch if data to be written is page aligned.
+
+				lda A2H					check if last byte is even
+				lsr						or odd address. shift even/odd -> carry.
+				lda (buf),y				if even, then leave intact.
+				bcc L596D				branch if odd.
+
+				iny		  				if even, then pre-xor with byte 1.
+				eor (buf),y
+L596D  			sta A1L					save result for write routine.
+
+L596F  			ldy #$FF	   			index to last byte of data to write.
+				lda (buf),y	  			to be used as a checksum.
+				and #$FC	   			strip extra bits
+				sta A1H					and save it.
+
+				ldy buf+1				now modify address references to
+				sty wrefa1+2	   		user data.
+				sty wrefa2+2
+
+				iny
+				sty wrefa3+2
+				sty wrefa4+2
+				sty wrefa5+2
+				sty wrefa6+2
+
+				ldx A2L					and lastly, index references to
+				stx wrefd2+1	   		controller.
+				stx wrefd3+1
+				stx wrefd4+1
+				stx wrefd5+1
 				rts
 *--------------------------------------
 				.LIST ON
@@ -1027,7 +1053,7 @@ XRW.ReqTrack		.HS 00
 XRW.ReqSector		.HS 00
 				.HS 383C4044484C
 *				.HS FF
-XRW.BadSeek			.HS 00
+XRW.BadSeekCnt		.HS 00
 				.HS 5054585C606468
 XRW.00XX0000	.HS 00201030			used in fast prenib.
 XRW.EndMark		.HS EBAADE		  		table using 'unused' nibbles ($C4,$C5,$C6,$C7)
@@ -1043,12 +1069,10 @@ XRW.SeekTime		.HS 00
 				.HS FFFFFF
 				.HS 7C
 *				.HS FFFF
-XRW.MoveCnt			.EQ *
 XRW.Temp4x4			.HS 00
 XRW.CheckSum		.HS 00 				used for address header cksum
 				.HS 8084
-*				.HS FF
-XRW.RetryCnt		.HS 00
+				.HS FF
 				.HS 888C9094989CA0
 XRW.0000XX00	.HS 0008040C			used in fast prenib.
 *				.HS FF
@@ -1057,7 +1081,9 @@ XRW.CurrentQTrack	.HS 00
 *				.HS FF
 XRW.TargetQTrack	.HS 00
 				.HS B0B4B8BCC0C4C8
-				.HS FFFF
+*				.HS FFFF
+XRW.RetryCnt		.HS 00
+XRW.ReqTrack2		.HS 00
 				.HS CCD0D4D8DCE0
 XRW.bWrite			.HS 00
 				.HS E4E8ECF0F4F8FC
