@@ -1,0 +1,463 @@
+NEW
+  AUTO 3,1
+				.LIST OFF
+*--------------------------------------
+CORE.Init		>LDYAI CODESEG
+				>SYSCALL GetMem
+				bcs .9
+
+				>STYA ZPCodeBufPtr
+				txa
+				>STA.G hCodeBuf
+
+				>LDYAI CONSTSEG
+				>SYSCALL GetMem
+				bcs .9
+
+				>STYA ZPConstBufPtr
+				txa
+				>STA.G hConstBuf
+
+				>LDYAI DATASEG
+				>SYSCALL GetMem
+				bcs .9
+
+				>STYA ZPDataBufPtr
+				txa
+				>STA.G hDataBuf
+
+				>SYSCALL SListNew
+				bcs .9
+
+				>STA.G hLabels
+
+				>SYSCALL SListNew
+				bcs .9
+
+				>STA.G hVars
+
+				clc
+.9				rts
+*--------------------------------------
+CORE.Quit		>LDA.G hConstBuf
+				beq .1
+
+				>SYSCALL FreeMem
+
+.1				>LDA.G hCodeBuf
+				beq CORE.Cleanup
+
+				>SYSCALL FreeMem
+*--------------------------------------
+CORE.Cleanup	>LDA.G hVars
+				beq .1
+
+				>PUSHA
+				>SYSCALL SListFree
+
+				>STZ.G hVars
+
+.1				>LDA.G hLabels
+				beq .8
+
+				>PUSHA
+				>SYSCALL SListFree
+
+				>STZ.G hLabels
+
+.8				clc
+CORE.Quit.RTS	rts
+*--------------------------------------
+CORE.Compile	jsr CORE.GetChar
+				bcs CORE.Quit.RTS
+
+				cmp #'#'
+				beq .80					#/bin/acos....
+
+				cmp #';'
+				beq .80					Comment: skip line...
+
+				cmp #C.CR
+				beq .81 				Blank line...
+
+				jsr CORE.CheckCharNB
+				bcs .1					CS=SPACE -> go check VAR or KW
+
+				jsr CORE.IsLetter		LABEL must start with a letter
+				bcs .99
+
+				jsr CORE.CreateLabel
+				bcs .99
+
+				bra .8
+*--------------------------------------
+.1				jsr CORE.GetNextCharNB	skip SPACE(s) or ":"
+				bcs .99
+
+
+				jsr CORE.IsLetter
+				bcs .90
+
+				>LDYA L.ACOS.KW
+				jsr CORE.Lookup
+				bcs .3
+
+				jmp (J.ACOS.KW,x)
+*--------------------------------------
+.3				jsr CORE.CreateOrGetVar
+				bcs .90
+
+				jsr CORE.GetCharNB
+				bcs .90
+
+				cmp #'='
+				bne .90
+
+				jsr CORE.GetNextCharNB	skip '='
+				bcs .90
+
+				jsr EXP.Eval
+				bcs .99
+
+				jsr CODE.PULLL2ZPADDR	Store Int32 result in DATASEG
+*--------------------------------------
+.8				jsr CORE.GetCharNB
+				bcs .99
+
+				jsr CORE.IsEndInst
+				bcc .90
+
+				cmp #':'
+				beq .1
+
+				clc
+
+.81				jmp CORE.GetNextChar	skip char
+
+.80				jmp CORE.SkipLine
+
+.90				lda #E.CSYN
+				sec
+.99				rts
+*--------------------------------------
+CORE.Run		lda #$60				RTS
+				sta (ZPCodeBufPtr)
+
+				jsr CORE.Cleanup
+
+				lda ZPCodeBufPtr
+				sta ZPPtr1
+
+				lda ZPCodeBufPtr+1
+				sta ZPPtr1+1
+
+				>LDA.G hCodeBuf
+				>SYSCALL GetMemPtr
+				>STYA ZPCodeBufPtr
+
+				lda ZPPtr1
+				sec
+				sbc ZPCodeBufPtr
+				sta ZPPtr2
+
+				lda ZPPtr1+1
+				sbc ZPCodeBufPtr
+				sta ZPPtr1+2
+
+				>PUSHW L.MSG.RUN
+				>PUSHW ZPPtr1
+				>PUSHBI 2
+				>SYSCALL PrintF
+*			>DEBUG
+				jmp (ZPCodeBufPtr)
+*--------------------------------------
+CORE.Lookup		>STYA ZPPtr1
+
+				ldx #0
+
+.1				ldy #$ff
+
+.2				jsr .7					get next valid char in src text
+				bcs .3
+
+.20				jsr CORE.ToUpperCase
+				eor (ZPPtr1),y			match table char ?
+				asl						compare only 7 bits
+				bne .4					no match...get next table keyword
+
+				bcc .2					not last char in this keyword
+
+				jsr .7					next char in text...
+				bcc .4					valid....failed
+
+.8				tya						Keyword Len
+
+				clc
+				adc ZPInputBufPtr
+				sta ZPInputBufPtr
+				bcc .80
+
+				clc
+
+				inc ZPInputBufPtr+1
+
+.80				rts
+
+.3				dey
+				lda (ZPPtr1),y			was last char in this keyword ?
+				bmi .8
+
+				iny
+.41				jsr CORE.IncPtr1		skip chars to next keyword
+
+.4				lda (ZPPtr1)
+				bpl .41
+
+				jsr CORE.IncPtr1
+
+.6				inx
+				inx
+				lda (ZPPtr1)			Array Ending 0, lookup failed
+				bne .1
+
+.9				sec
+				rts
+
+.7				iny
+				lda (ZPInputBufPtr),y	Get Src text char...
+				beq .9					end of text
+
+				jmp CORE.IsLetterOrDigit	CS=end of valid chars
+*--------------------------------------
+CORE.IncPtr1	inc ZPPtr1
+				bne .8
+
+				inc ZPPtr1+1
+
+.8				rts
+*--------------------------------------
+CORE.CreateLabel
+				>LDA.G hLabels
+				jsr CORE.NewKey
+				bcs .9
+
+				>PUSHB.G hLabels
+				>PUSHW ZPSID
+				>PUSHWI ZPCodeBufPtr
+				>PUSHWI 2
+				>SYSCALL SListAddData
+.9				rts
+*--------------------------------------
+CORE.CreateOrGetVar
+				>LDA.G hVars
+				jsr CORE.GetAddr
+				bcc .8
+
+				>LDA.G hVars
+				jsr CORE.NewKey
+				bcs .9
+
+				>PUSHB.G hVars
+				>PUSHW ZPSID
+				>PUSHWI ZPDataBufPtr
+				>PUSHWI 2
+				>SYSCALL SListAddData
+				bcs .9
+
+				lda ZPDataBufPtr
+				sta ZPADDR
+
+*				clc
+				adc #4					longint
+				sta ZPDataBufPtr
+
+				lda ZPDataBufPtr+1
+				sta ZPADDR+1
+				adc #0
+				sta ZPDataBufPtr+1
+
+.8
+.9				rts
+*--------------------------------------
+CORE.NewKey		>PUSHA
+				>PUSHW ZPInputBufPtr
+				>SYSCALL SListNewKey
+				bcs .9
+
+				>STYA ZPSID
+
+				txa
+*				clc
+				adc ZPInputBufPtr
+				sta ZPInputBufPtr
+				bcc .1
+
+				clc
+				inc ZPInputBufPtr+1
+
+.1
+.9				rts
+*--------------------------------------
+CORE.GetAddr	>PUSHA
+				>PUSHA					for SListGetData
+
+				>PUSHW ZPInputBufPtr
+				>SYSCALL SListLookup
+				bcs .9
+
+				>STYA ZPSID
+
+				txa
+*				clc
+				adc ZPInputBufPtr
+				sta ZPInputBufPtr
+				bcc .1
+
+				inc ZPInputBufPtr+1
+
+.1				>PUSHW ZPSID
+				>PUSHWI ZPADDR
+				>PUSHWI 2				2 bytes
+				>PUSHWZ					From Start
+				>SYSCALL SListGetData
+				rts
+
+.9				>PULLA
+				rts
+*--------------------------------------
+CORE.ToUpperCase
+				cmp #'a'
+				bcc .8
+
+				cmp #'z'+1
+				bcs .8
+
+				eor #$20
+
+.8
+CORE.ToUpperCase.RTS
+				rts
+*--------------------------------------
+CORE.IsAOPSChar	ldx #0
+
+.1				cmp ACOS.AOPSChars,x
+				beq .8
+				
+				inx
+				cpx #ACOS.AOPSChars.Cnt
+				bcc .1
+				
+				rts
+				
+.8				txa
+				asl
+				tax
+
+*				clc
+				rts
+*--------------------------------------
+CORE.IsEndExp	cmp #','
+				beq CORE.ToUpperCase.RTS
+
+				cmp #';'
+				beq CORE.ToUpperCase.RTS
+
+CORE.IsEndInst	cmp #':'				CS=TRUE
+				beq .8
+
+				cmp #C.CR
+				beq .8
+
+				clc
+
+.8				rts
+*---------------------------------------
+CORE.IsLetterOrDigit
+				jsr CORE.IsDigit10
+				bcc CORE.IsLetterRTS
+*---------------------------------------
+CORE.IsLetter	cmp #'_'
+				bne .1
+
+				clc
+				rts
+
+.1				cmp #'A'
+				bcc .9
+
+				cmp #'Z'+1
+				bcc CORE.IsLetterRTS
+
+				cmp #'a'
+				bcc .9
+
+				cmp #'z'+1
+
+				rts						CC if lowercase
+
+.9				sec
+CORE.IsLetterRTS
+				rts
+*---------------------------------------
+CORE.IsDigit10	cmp #'0'
+				bcc .9
+
+				cmp #'9'+1
+				rts						cc if ok, cs if not
+
+.9				sec
+				rts
+*--------------------------------------
+CORE.CheckCharNB
+				cmp #C.SPACE
+				beq .9
+
+				cmp #C.LF
+				beq .9
+
+				cmp #C.TAB
+				beq .9
+
+				clc
+.9				rts
+*--------------------------------------
+CORE.GetCharNB	jsr CORE.GetChar
+				bcs CORE.GetNextCharNB.RTS
+				jsr CORE.CheckCharNB
+				bcc CORE.GetNextCharNB.RTS
+*--------------------------------------
+CORE.GetNextCharNB
+				jsr CORE.GetNextChar
+				bcs CORE.GetNextCharNB.RTS
+
+				jsr CORE.CheckCharNB
+				bcs CORE.GetNextCharNB
+
+CORE.GetNextCharNB.RTS
+				rts
+*--------------------------------------
+CORE.SkipLine	jsr CORE.GetNextChar
+				bcs CORE.GetNextCharNB.RTS
+
+				cmp #C.CR
+				bne CORE.SkipLine
+*--------------------------------------
+CORE.GetNextChar
+				inc ZPInputBufPtr
+				bne CORE.GetChar
+				inc ZPInputBufPtr+1
+*--------------------------------------
+CORE.GetChar	lda (ZPInputBufPtr)
+				bne .8
+
+				lda #MLI.E.EOF
+				sec
+				rts
+
+.8				clc
+				rts
+*--------------------------------------
+MAN
+SAVE usr/src/bin/acos.s.core
+LOAD usr/src/bin/acos.s
+ASM

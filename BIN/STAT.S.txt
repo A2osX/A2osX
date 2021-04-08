@@ -17,7 +17,16 @@ ArgIndex		.BS 1
 ArgFile			.BS 1
 ZPPtr1			.BS 2
 
-bFormatStr		.BS 1
+bAll			.BS 1
+bAccess			.BS 1
+bMod			.BS 1
+bUID			.BS 1
+bGID			.BS 1
+bSize			.BS 1
+bBlocks			.BS 1
+bCTime			.BS 1
+bMTime			.BS 1
+bATime			.BS 1
 	
 ZS.END			.ED	
 *--------------------------------------
@@ -48,12 +57,15 @@ L.MSG.Mod		.DA MSG.Mod
 L.MSG.UIDGIDSIZE 	.DA MSG.UIDGIDSIZE
 L.FMT.DateTime	.DA FMT.DateTime
 L.MSG.CMATimes	.DA MSG.CMATimes
+L.MSG.D			.DA MSG.D
+L.MSG.U			.DA MSG.U
 				.DA 0
 *--------------------------------------
 CS.INIT			clc
 				rts
 *--------------------------------------
-CS.RUN			
+CS.RUN			dec bAll			
+
 .1				inc ArgIndex
 				lda ArgIndex
 				>SYSCALL ArgV
@@ -90,20 +102,104 @@ CS.RUN
 				>SYSCALL Stat
 				bcs .9
 				
-				jsr CS.RUN.DUMP
+				jsr CS.RUN.CONVERT
+				
+				bit bAll
+				bmi .7
+				
+				jsr CS.RUN.PRINT
+				bcs .9
+
+				bra .8
+
+.7				jsr CS.RUN.DUMP
 				bcs .9
 				
-				lda #0
+.8				lda #0
 				sec
 .9				
 CS.RUN.RTS		rts
+*--------------------------------------
+CS.RUN.PRINT	bit bAccess
+				bpl .1
+				
+				>LDYA.G ATTR
+				>SYSCALL PutS
+				bcs CS.RUN.RTS
+				
+.1				bit bMod
+				bpl .2
+				
+				>LDYA.G MOD
+				>SYSCALL PutS
+				bcs CS.RUN.RTS
+				
+.2				bit bUID
+				bpl .3
+				
+				>PUSHW L.MSG.D
+				>PUSHW.G StatBuf+S.STAT.UID
+				>PUSHBI 2
+				>SYSCALL PrintF
+.9				bcs CS.RUN.RTS
+				
+.3				bit bGID
+				bpl .4
+				
+				>PUSHW L.MSG.D
+				>PUSHW.G StatBuf+S.STAT.GID
+				>PUSHBI 2
+				>SYSCALL PrintF
+				bcs .9
+
+.4				bit bSize
+				bpl .5
+				
+				>PUSHW L.MSG.U
+				>PUSHL.G StatBuf+S.STAT.SIZE
+				>PUSHBI 4
+				>SYSCALL PrintF
+				bcs CS.RUN.PRINT.RTS
+
+.5				bit bBlocks
+				bpl CS.RUN.PRINT2
+				
+				>PUSHW L.MSG.U
+				>PUSHL.G StatBuf+S.STAT.BLOCKS
+				>PUSHBI 4
+				>SYSCALL PrintF
+				bcs CS.RUN.PRINT.RTS
+
+CS.RUN.PRINT2	bit bCTime
+				bpl .7
+				
+				>LDYA.G TIME.Create
+				>SYSCALL PutS
+				bcs .9
+				
+.7				bit bMTime
+				bpl .8
+				
+				>LDYA.G TIME.Mod
+				>SYSCALL PutS
+				bcs .9
+				
+.8				bit bATime
+				bpl .9
+				
+				>LDYA.G TIME.Access
+				>SYSCALL PutS
+				
+.9
+CS.RUN.PRINT.RTS
+				rts
 *--------------------------------------
 CS.RUN.DUMP		lda ArgFile
 				>SYSCALL ArgV
 				>PUSHYA
 				>PUSHWI 0				Allocate
 				>SYSCALL RealPath
-				bcs CS.RUN.RTS
+				bcs CS.RUN.PRINT.RTS
 
 				>STYA ZPPtr1
 				phx
@@ -114,13 +210,11 @@ CS.RUN.DUMP		lda ArgFile
 				pla
 				>SYSCALL FreeMem
 				
-				jsr Access2CSTR
 				>PUSHW L.MSG.Access
 				>PUSHEA.G ATTR
 				>PUSHBI 2
 				>SYSCALL PrintF
 
-				jsr Mod2CSTR
 				>PUSHW L.MSG.Mod
 				>PUSHEA.G MOD
 				>PUSHBI 2
@@ -134,9 +228,18 @@ CS.RUN.DUMP		lda ArgFile
 				>PUSHBI 12
 				>SYSCALL PrintF
 				
-				jsr CS.RUN.PrintAMCTime
+				>PUSHW L.MSG.CMATimes
+				>PUSHEA.G TIME.Create
+				>PUSHEA.G TIME.Mod
+				>PUSHEA.G TIME.Access
+				>PUSHBI 6
+				>SYSCALL PrintF
 				
 				rts				
+*--------------------------------------
+CS.RUN.CONVERT	jsr Access2CSTR
+				jsr Mod2CSTR
+				jmp Times2CSTR
 *--------------------------------------
 Access2CSTR		ldy #S.STAT.P.ACCESS
 				lda (pData),y
@@ -208,8 +311,7 @@ Mod2CSTR		ldy #S.STAT.MODE+1
 
 				rts
 *--------------------------------------
-CS.RUN.PrintAMCTime
-				ldy #TIME.Access-1		Set NODATE as default
+Times2CSTR		ldy #TIME.Access-1		Set NODATE as default
 				jsr CS.RUN.PrintAMCTime.NODATE
 				ldy #TIME.Mod-1			Set NODATE as default
 				jsr CS.RUN.PrintAMCTime.NODATE
@@ -240,13 +342,7 @@ CS.RUN.PrintAMCTime
 				>PUSHEA.G StatBuf+S.STAT.CTIME
 				>SYSCALL StrFTime
 
-.8				>PUSHW L.MSG.CMATimes
-				>PUSHEA.G TIME.Create
-				>PUSHEA.G TIME.Mod
-				>PUSHEA.G TIME.Access
-				>PUSHBI 6
-				>SYSCALL PrintF
-				rts
+.8				rts
 *--------------------------------------
 CS.RUN.PrintAMCTime.NODATE
 				ldx #$ff
@@ -273,6 +369,7 @@ CS.RUN.CheckOpt	ldy #1
 
 .2				cmp OptionList,x
 				beq .3
+
 				dex
 				bpl .2
 
@@ -283,13 +380,23 @@ CS.RUN.CheckOpt	ldy #1
 				lda #$ff
 				sta 0,y
 
+				stz bAll
+
 				clc
 				rts
 *--------------------------------------
 CS.END
 *--------------------------------------
-OptionList		.AS "Cc"
-OptionVars		.DA #bFormatStr,#bFormatStr
+OptionList		.AS "AaMmUuGgSsBbCcMmLl"
+OptionVars		.DA #bAccess,#bAccess
+				.DA #bMod,#bMod
+				.DA #bUID,#bUID
+				.DA #bGID,#bGID
+				.DA #bSize,#bSize
+				.DA #bBlocks,#bBlocks
+				.DA #bCTime,#bCTime
+				.DA #bMTime,#bMTime
+				.DA #bATime,#bATime
 ATTRS			.AS "DeReBn----InWrRd"
 TYPES			.AS "-dbclssp"
 ACCESS			.AS "xwrxwrxwr"
@@ -297,7 +404,16 @@ MSG.NODATE		.AZ "<No-Date>"
 FMT.DateTime	.AZ "%d-%b-%y %H:%M:%S"
 *--------------------------------------
 MSG.USAGE		.AS "Usage : STAT File\r\n"
-				.AZ "   -C : Format\r\n"
+				.AS "   -A : Access Flags\r\n"
+				.AS "   -M : Mod Flags\r\n"
+				.AS "   -U : UID\r\n"
+				.AS "   -G : GID\r\n"
+				.AS "   -S : Size in bytes\r\n"
+				.AS "   -B : Size in blocks\r\n"
+				.AS "   -C : Creation date/time\r\n"
+				.AS "   -M : Modification date/time\r\n"
+				.AZ "   -L : Last access date/time\r\n"
+*--------------------------------------
 MSG.Filename	.AZ "Filename : %s\r\n"
 MSG.Access		.AZ "Access   : %s\r\n"
 MSG.Mod			.AZ "Mod      : %s\r\n"
@@ -308,6 +424,8 @@ MSG.UIDGIDSIZE	.AS "UID      : %10D\r\n"
 MSG.CMATimes	.AS "Created  : %s\r\n"
 				.AS "Modified : %s\r\n"
 				.AZ "Accessed : %s\r\n"
+MSG.D			.AZ "%D\r\n"
+MSG.U			.AZ "%u\r\n"
 *--------------------------------------
 				.DUMMY
 				.OR 0
