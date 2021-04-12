@@ -41,6 +41,7 @@ This document lists all of the **Forth Words** supported in the A2osX implementa
 | 0< | ( n - f ) | Working | True if top number negative |
 | 0= | ( n - f ) | Working | True if top number zero |
 | . | ( n - ) | Working | Print number |
+| U. | ( u - ) | Working | Print UNSINGED number |
 | .R | ( n u - ) | | Print number, right-justified in u column |
 | D. | ( d - ) | | Print double-precision number |
 | D.R | ( d u - ) | | Print double-precision number in u column |
