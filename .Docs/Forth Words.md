@@ -41,7 +41,7 @@ This document lists all of the **Forth Words** supported in the A2osX implementa
 | 0< | ( n - f ) | Working | True if top number negative |
 | 0= | ( n - f ) | Working | True if top number zero |
 | . | ( n - ) | Working | Print number |
-| U. | ( u - ) | Working | Print UNSINGED number |
+| U. | ( u - ) | Working | Print UNSIGNED number |
 | .R | ( n u - ) | | Print number, right-justified in u column |
 | D. | ( d - ) | | Print double-precision number |
 | D.R | ( d u - ) | | Print double-precision number in u column |
@@ -67,7 +67,8 @@ This document lists all of the **Forth Words** supported in the A2osX implementa
 | DECIMAL | ( - ) | | Set decimal base |
 | HEX | ( - ) | | Set hexadecimal base |
 | OCTAL | ( - ) | | Set octal base |
-| @ | ( addr - n ) |Working  | Replace word address by contents |
+| SP@ | ( - addr ) | Working  | Return the address of the top of the stack, just before SP@ was executed |
+| @ | ( addr - n ) | Working  | Replace word address by contents |
 | ! | ( n addr - ) | Working | Store second word at address on top |
 | C@ | ( addr - b ) | Working | Fetch one byte only |
 | C! | ( b addr - ) | Working | Store one byte only |
