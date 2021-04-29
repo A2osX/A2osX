@@ -36,9 +36,22 @@ CORE.Init		>LDYAI CODESEG
 
 				>STA.G hVars
 				
-				>LDYAI FWREF
+				>LDYAI STRVSEG
+				>SYSCALL StrVNew
+				bcs .9
+				
+				sta hStrings
+				
+				>LDYAI 256
 				>SYSCALL GetMem
 				bcs .9
+				
+				>STYA ZPStrBuf
+				txa
+				>STA.G hStrBuf
+				
+				>LDYAI FWREF
+				>SYSCALL GetMem
 
 				>STYA ZPFWRefBufPtr
 				txa
@@ -50,17 +63,27 @@ CORE.Init		>LDYAI CODESEG
 				clc
 .9				rts
 *--------------------------------------
-CORE.Quit		>LDA.G hConstBuf
+CORE.Quit		lda hStrings
 				beq .1
 
-				>SYSCALL FreeMem
+				>SYSCALL StrVFree
 
-.1				>LDA.G hCodeBuf
-				beq CORE.Cleanup
+.1				ldy #hStrBuf
+				jsr CORE.Quit.Freemem
 
-				>SYSCALL FreeMem
+				ldy #hDataBuf
+				jsr CORE.Quit.Freemem
+
+				ldy #hConstBuf
+				jsr CORE.Quit.Freemem
+
+				ldy #hCodeBuf
+				jsr CORE.Quit.Freemem
 *--------------------------------------
-CORE.Cleanup	>LDA.G hVars
+CORE.Cleanup	ldy #hFWRefBuf
+				jsr CORE.Quit.Freemem
+				
+				>LDA.G hVars
 				beq .1
 
 				>PUSHA
@@ -78,6 +101,19 @@ CORE.Cleanup	>LDA.G hVars
 
 .8				clc
 CORE.Quit.RTS	rts
+*--------------------------------------
+CORE.Quit.Freemem
+				lda (pData),y
+				beq .8
+				
+				pha
+				lda #0
+				sta (pData),y
+				pla
+				
+				>SYSCALL FreeMem
+				
+.8				rts				
 *--------------------------------------
 CORE.Compile	jsr CORE.GetChar
 				bcs CORE.Quit.RTS
@@ -132,14 +168,17 @@ CORE.Compile	jsr CORE.GetChar
 				jsr EXP.Eval			ZPTYPE set by CreateOrGetVar
 				bcs .99
 
-				ldx ZPTYPE
+				lda ZPTYPE
+				cmp EXP.TYPE
+				bne .91
+				
+				tax
 				beq .4
 
-
-
+				jsr CODE.STRSET			Store String in hSTRV
 				bra .8
 
-.4				jsr CODE.PULLL2ZPADDR	Store Int32 result in DATASEG
+.4				jsr CODE.INTSET			Store Int16 result in DATASEG
 *--------------------------------------
 .8				jsr CORE.GetCharNB
 				bcs .99
@@ -159,6 +198,10 @@ CORE.Compile	jsr CORE.GetChar
 .90				lda #E.CSYN
 				sec
 .99				rts
+
+.91				lda #E.TMISMATCH
+				sec
+				rts
 *--------------------------------------
 CORE.FWREF		>LDA.G hFWRefBuf
 				>SYSCALL GetMemPtr
@@ -273,7 +316,13 @@ CORE.Lookup		>STYA ZPPtr1
 				lda (ZPInputBufPtr),y	Get Src text char...
 				beq .9					end of text
 
-				jmp CORE.IsLetterOrDigit	CS=end of valid chars
+				cmp #'$'
+				bne .70
+				
+				clc
+				rts
+
+.70				jmp CORE.IsLetterOrDigit	CS=end of valid chars
 *--------------------------------------
 CORE.IncPtr1	inc ZPPtr1
 				bne .8
@@ -348,28 +397,43 @@ CORE.2FWRefBuf	sta (ZPFWRefBufPtr)
 .8				rts
 *--------------------------------------
 CORE.CreateOrGetVar
-				stz ZPTYPE
-
 				>LDA.G hVars
 				jsr CORE.GetAddr
-				bcc .1
+				bcc .2
 
 				>LDA.G hVars
 				jsr CORE.NewKey
-				bcs .9
+				bcs .99
 				
-				>PUSHB.G hVars
-				>PUSHW ZPSID
-				>PUSHWI ZPDataBufPtr
-				>PUSHWI 3				3 bytes : ADDR + TYPE
-				>SYSCALL SListAddData
-				bcs .9
+				jsr CORE.GetChar
+				bcs .1
+				
+				stz ZPTYPE
 
-				lda ZPDataBufPtr
+				cmp #'$'
+				bne .1
+				
+				sta ZPTYPE
+				
+				jsr CORE.GetNextChar	skip $
+
+				lda STRID
+				sta ZPADDR
+				
+				lda STRID+1
+				sta ZPADDR+1
+				
+				inc STRID
+				bne .10
+				
+				inc STRID+1
+				bra .10				
+			
+.1				lda ZPDataBufPtr
 				sta ZPADDR
 
-*				clc
-				adc #4					longint
+				clc
+				adc #2					Word
 				sta ZPDataBufPtr
 
 				lda ZPDataBufPtr+1
@@ -377,16 +441,35 @@ CORE.CreateOrGetVar
 				adc #0
 				sta ZPDataBufPtr+1
 
-.1				jsr CORE.GetChar
-				cmp #'$'
-				bne .8
+.10				>PUSHB.G hVars
+				>PUSHW ZPSID
+				>PUSHWI ZPADDR
+				>PUSHWI 3				3 bytes : ADDR + TYPE
+				>SYSCALL SListAddData
+				rts
+*--------------------------------------
+.2				ldx #0 
+
+				jsr CORE.GetChar
+				bcs .3
 				
-				sta ZPTYPE
+				cmp #'$'
+				bne .3
+				
+				tax
+				
 				jsr CORE.GetNextChar	skip $
 
-.8				clc
+.3				cpx ZPTYPE
+				bne .90
 
-.9				rts
+				clc
+				rts
+				
+.90				lda #E.TMISMATCH
+				sec				
+
+.99				rts
 *--------------------------------------
 CORE.NewKey		>PUSHA
 				>PUSHW ZPInputBufPtr

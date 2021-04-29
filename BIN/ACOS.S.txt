@@ -8,6 +8,7 @@ NEW
 CODESEG			.EQ 4096
 CONSTSEG		.EQ 1024
 DATASEG			.EQ 256
+STRVSEG			.EQ 2048
 FWREF			.EQ 1024
 EXP.DEPTH.MAX	.EQ 16
 *--------------------------------------
@@ -26,13 +27,14 @@ ZPInputBufPtr	.BS 2
 ZPSID			.BS 2
 ZPADDR			.BS 2
 ZPTYPE			.BS 1
-				.BS 1
+hStrings		.BS 1
+
+ZPStrBuf		.BS 2
 
 ZPPtr1			.BS 2
 ZPPtr2			.BS 2
-ZPPtr3			.BS 2
-hIn				.BS 1
-hOut			.BS 1
+ArgIndex		.BS 1
+bFlag			.BS 1
 
 ZPCodeBufPtr	.BS 2
 ZPConstBufPtr	.BS 2
@@ -42,8 +44,10 @@ ZPFWRefBufPtr	.BS 2
 EXP.ADDR		.BS 2
 EXP.TYPE		.BS 1
 EXP.AOPS		.BS 1
-ArgIndex		.BS 1
-bFlag			.BS 1
+
+STRID			.BS 2
+hIn				.BS 1
+hOut			.BS 1
 
 ZS.END			.ED
 *--------------------------------------
@@ -67,16 +71,18 @@ CS.START		cld
 				.DA CS.RUN
 				.DA CS.DOEVENT
 				.DA	CS.QUIT
+*--------------------------------------
 L.MSG.GREETINGS	.DA MSG.GREETINGS
 L.MSG.USAGE		.DA MSG.USAGE
 L.MSG.ECHOCRLF	.DA MSG.ECHOCRLF
 L.MSG.COMPILING	.DA MSG.COMPILING
 L.MSG.DEBUG		.DA MSG.DEBUG
-L.MSG.ERR		.DA MSG.ERR
+L.MSG.TRACE		.DA MSG.TRACE
+L.MSG.ERROR		.DA MSG.ERROR
 L.MSG.RUN		.DA MSG.RUN
 L.MSG.FWREFERR	.DA MSG.FWREFERR
 L.MSG.STR		.DA MSG.STR
-L.MSG.INT32		.DA MSG.INT32
+L.MSG.INT16		.DA MSG.INT16
 *--------------------------------------
 L.ACOS.AOPS		.DA ACOS.AOPS
 J.ACOS.AOPS		.DA EXP.ADD
@@ -185,33 +191,45 @@ CS.RUN			>PUSHW L.MSG.GREETINGS
 				jsr CS.RUN.ARGS
 				bcs CS.INIT.RTS
 
+				>LDYAI 256
+				>SYSCALL GetMem
+				bcs CS.INIT.RTS
+				>STYA.G InputBufPtr
+
 				jsr CORE.Init
 				bcs CS.INIT.RTS
 
 				>PUSHW L.MSG.COMPILING
-				>PUSHW ZPPtr2
+				>PUSHW ZPPtr2			File name
 				>PUSHBI 2
 				>SYSCALL PrintF
 				bcs CS.INIT.RTS
 
-.1				>SLEEP
+CS.RUN.LOOP		>SLEEP
 
 				>LDA.G bDebug
 				bpl .2
 
 				jsr PrintDebugMsg
 
-.2				>LDA.G bTrace
+.2				jsr CS.RUN.FGetS
+				bcs .4
+
+				>LDA.G bTrace
 				bpl .3
 
-				>LDYA ZPInputBufPtr
 				jsr PrintTraceMsg
 
 .3				jsr CORE.Compile
-				bcc .1
+				bcc CS.RUN.LOOP
 
 				cmp #MLI.E.EOF
+				beq CS.RUN.LOOP
+
+.4				cmp #MLI.E.EOF
 				bne .9
+
+				jsr CS.FClose
 
 				jsr CORE.FWREF
 				bcs .9
@@ -220,7 +238,7 @@ CS.RUN			>PUSHW L.MSG.GREETINGS
 				bcc .8
 
 .9				pha
-				jsr PrintErrMsg
+				jsr PrintErrorMsg
 				pla
 				sec
 				rts
@@ -258,25 +276,21 @@ CS.RUN.ARGS		inc ArgIndex
 				sta (pData),y
 				bra CS.RUN.ARGS
 
-.4				>LDA.G hFileBuf
+.4				>LDA.G hFile
 				bne .90
 
 				>LDYA ZPPtr1
-				>STYA ZPPtr2			form printing later
-				jsr CS.RUN.LoadFile
-				bcs .9
+				>STYA ZPPtr2			for printing later
+				jsr CS.RUN.FOpen
+				bcc CS.RUN.ARGS
 
-				>STYA ZPInputBufPtr
+.9				rts
 
-				txa
-				>STA.G hFileBuf
-				bra CS.RUN.ARGS
-
-.7				>LDA.G hFileBuf
+.7 				>LDA.G hFile
 				beq .90
 
 				clc
-.9				rts
+				rts
 
 .90				>PUSHW L.MSG.USAGE
 				>PUSHBI 0
@@ -286,85 +300,42 @@ CS.RUN.ARGS		inc ArgIndex
 				sec						QUIT Process
 				rts
 *--------------------------------------
-CS.RUN.LoadFile	>SYSCALL LoadTxtFile
+CS.RUN.FOpen	>PUSHYA
+				>PUSHBI	O.RDONLY
+				>PUSHBI S.FI.T.TXT
+				>PUSHWZ					Aux type
+				>SYSCALL FOpen
 				bcs .9
 
-				phx
-				txa
-				>SYSCALL GetMemPtr
-				plx
+				>STA.G hFile
 
 .9				rts
+*--------------------------------------
+CS.RUN.FGetS	>LDYA.G InputBufPtr
+				>STYA ZPInputBufPtr
+
+				>INCW.G LineCounter
+
+				>PUSHB.G hFile
+				>PUSHW ZPInputBufPtr
+				>PUSHWI 256
+				>SYSCALL FGetS
+
+				rts
 *--------------------------------------
 CS.DOEVENT		sec
 				rts
 *--------------------------------------
 CS.QUIT			jsr CORE.Quit
-				clc
-				rts
-*--------------------------------------
-PrintErrMsg		>LDA.G hFileBuf
 
-				>SYSCALL GetMemPtr
-				>STYA ZPPtr1
-
-				stz ZPPtr2
-				stz ZPPtr2+1			Line counter
-
-.1				inc ZPPtr2
-				bne .2
-				inc ZPPtr2+1
-
-.2				>LDYA ZPPtr1
-				>STYA ZPPtr3			save line start
-
-.20				lda (ZPPtr1)
-				beq .4					EoF
-
-				inc ZPPtr1
-				bne .3
-
-				inc ZPPtr1+1
-.3				cmp #C.CR
-				bne .20					Scan until EoL
-
-				ldx ZPPtr1
-				cpx ZPInputBufPtr
-				lda ZPPtr1+1
-				sbc ZPInputBufPtr+1
-				bcc .1					not this line....
-
-.4				>LDA.G bTrace
-				bmi .5
-
-				jsr PrintTraceMsg.3
-
-.5				lda ZPPtr3
-				cmp ZPInputBufPtr
-				bne .6
-
-				lda ZPPtr3+1
-				cmp ZPInputBufPtr+1
+CS.FClose		>LDA.G hFile
 				beq .8
 
-.6				>PUSHBI '-'
-				ldy #S.PS.hStdErr
-				lda (pPS),y
-				>SYSCALL FPutC
-				inc ZPPtr3
-				bne .5
+				>SYSCALL FClose
 
-				inc ZPPtr3+1
-				bra .5
+				>STZ.G hFile
 
-.8				ldy #S.PS.hStdErr
-				lda (pPS),y
-				>PUSHA
-				>PUSHW L.MSG.ERR
-				>PUSHW ZPPtr2			Line counter
-				>PUSHBI 2
-				>SYSCALL FPrintF
-
+.8				clc
 				rts
 *--------------------------------------
 PrintDebugMsg	>LDYA pStack
@@ -378,56 +349,85 @@ PrintDebugMsg	>LDYA pStack
 				>SYSCALL PrintF
 				rts
 *--------------------------------------
-PrintTraceMsg	>STYA ZPPtr3
-
-PrintTraceMsg.3	>PUSHBI '>'
-				ldy #S.PS.hStdErr
-				lda (pPS),y
-				>SYSCALL FPutC
-
-				ldy #$ff
-
-.1				iny
-				lda (ZPPtr3),y
-				beq .8
-
-				cmp #C.CR
-				beq .8
-
-				phy
-				>PUSHA
-				ldy #S.PS.hStdErr
-				lda (pPS),y
-				>SYSCALL FPutC
-				ply
-				bra .1
-
-.8 				ldy #S.PS.hStdErr
+PrintTraceMsg	ldy #S.PS.hStdErr
 				lda (pPS),y
 				>PUSHA
 
-				>PUSHW L.MSG.ECHOCRLF
-				>PUSHBI 0
+				>PUSHW L.MSG.TRACE
+				>PUSHW.G LineCounter
+				>PUSHW.G InputBufPtr
+				>PUSHBI 4
 				>SYSCALL FPrintF
 
 				rts
 *--------------------------------------
-CCODE.PUSHLYA	>STYA ZPADDR
-				ldy #3
-.1				lda (ZPADDR),y
-				>PUSHA
-				dey
-				bpl .1
-CCODE.PUSHLYA.LEN	.EQ *-CCODE.PUSHLYA
-*--------------------------------------
-CCODE.PULLLYA	>STYA ZPADDR
+PrintErrorMsg	>LDA.G bTrace
+				bmi .1
+
+				jsr PrintTraceMsg
+
+.1				lda ZPInputBufPtr
+
+				sec
+				>SBC.G InputBufPtr
+				tax
+			bcc *
+				>LDYA.G InputBufPtr
+				>STYA ZPInputBufPtr
+
+				txa
+				beq .3
+
 				ldy #0
-.1				>PULLA
-				sta (ZPADDR),y
+				lda #'-'
+
+.2				sta (ZPInputBufPtr),y
 				iny
-				cpy #4
-				bcc .1
-CCODE.PULLLYA.LEN	.EQ *-CCODE.PULLLYA
+				dex
+				bne .2
+
+				txa
+
+.3				sta (ZPInputBufPtr),y
+
+.8				ldy #S.PS.hStdErr
+				lda (pPS),y
+				>PUSHA
+				>PUSHW L.MSG.ERROR
+				>PUSHW ZPInputBufPtr
+				>PUSHBI 2
+				>SYSCALL FPrintF
+				rts
+*--------------------------------------
+* Precompiled code
+*--------------------------------------
+CCODE.PULLWS	>PULLA
+				pha
+				>PULLA
+				pha
+CCODE.PULLWS.LEN	.EQ *-CCODE.PULLWS
+*--------------------------------------
+CCODE.PUSHWS	pla
+				>PUSHA
+				pla
+				>PUSHA
+CCODE.PUSHWS.LEN	.EQ *-CCODE.PUSHWS
+*--------------------------------------
+CCODE.PUSHWYA	>STYA ZPADDR
+				ldy #1
+				lda (ZPADDR),y
+				>PUSHA
+				lda (ZPADDR)
+				>PUSHA
+CCODE.PUSHWYA.LEN	.EQ *-CCODE.PUSHWYA
+*--------------------------------------
+CCODE.PULLWYA	>STYA ZPADDR
+				>PULLA
+				sta (ZPADDR)
+				>PULLA
+				ldy #1
+				sta (ZPADDR),y
+CCODE.PULLWYA.LEN	.EQ *-CCODE.PULLWYA
 *--------------------------------------
 CCODE.PUSHA		>PUSHA
 CCODE.PUSHA.LEN	.EQ *-CCODE.PUSHA
@@ -445,26 +445,54 @@ CCODE.FPRINTSTR	pha
 				>SYSCALL PrintF
 CCODE.FPRINTSTR.LEN	.EQ *-CCODE.FPRINTSTR
 *--------------------------------------
-CCODE.FPRINTL	>PUSHW L.MSG.INT32
-				ldx #4
-				ldy #5
-
-.1				lda (pStack),y
+CCODE.FPRINTINT	pha
+				>PUSHW L.MSG.INT16
+				pla
 				>PUSHA
-				dex
+				tya
+				>PUSHA
+				>PUSHBI 2
+				>SYSCALL PrintF
+CCODE.FPRINTINT.LEN	.EQ *-CCODE.FPRINTINT
+*--------------------------------------
+CCODE.LEN		>PULLW ZPPtr1
+
+				ldy #$FF
+				
+.1				iny
+				lda (ZPPtr1),y
 				bne .1
 
-				>PUSHBI 4
-				>SYSCALL PrintF
-				>POP 4					Discard long on stack
-CCODE.FPRINTL.LEN	.EQ *-CCODE.FPRINTL
+				>PUSHYA
+CCODE.LEN.LEN	.EQ *-CCODE.LEN
+*--------------------------------------
+CCODE.LEFT		>PULLW ZPPtr2			cnt
+				lda (pStack)
+				sta ZPPtr1
+				ldy #1
+				lda (pStack),y
+				sta ZPPtr1+1
+
+				ldy #0
+				
+.1				lda (ZPPtr1),y
+				beq .8
+			
+				iny
+				cpy ZPPtr2
+				bne .1
+				
+				lda #0
+				sta (ZPPtr1),y
+.8							
+
+CCODE.LEFT.LEN	.EQ *-CCODE.LEFT
 *--------------------------------------
 				.INB usr/src/bin/acos.s.code
 				.INB usr/src/bin/acos.s.core
 				.INB usr/src/bin/acos.s.exp
 				.INB usr/src/bin/acos.s.fn
 				.INB usr/src/bin/acos.s.kw
-				.INB usr/src/bin/acos.s.str
 *--------------------------------------
 CS.END
 *--------------------------------------
@@ -477,11 +505,12 @@ MSG.USAGE		.AS "Usage : ACOS <option> file\r\n"
 MSG.ECHOCRLF	.AZ "\r\n"
 MSG.COMPILING	.AZ "Compiling : %s...\r\n"
 MSG.DEBUG		.AZ "pStack=%H CodePtr=%H\r\n"
-MSG.ERR			.AZ "-^\r\nLine #%D:"
+MSG.TRACE		.AZ "%05D>%s\r\n"
+MSG.ERROR		.AZ "      %s^\r\n"
 MSG.RUN			.AZ "Success, Code size = %D Bytes\r\nResolving FWRefs...\r\n"
 MSG.FWREFERR	.AZ "Unresolved FWRef : %s\r\n"
 MSG.STR			.AZ "%s"
-MSG.INT32		.AZ "%L"
+MSG.INT16		.AZ "%I"
 *--------------------------------------
 OptionList		.AS "DdTt"
 OptionVars		.DA #bDebug,#bDebug,#bTrace,#bTrace
@@ -572,6 +601,7 @@ ACOS.FN			.AT "BYTE"
 				.AT "INFO"
 				.AT "INSTR"
 				.AT "KEY"
+				.AT "LEN"
 				.AT "LEFT$"
 				.AT "MID$"
 				.AT "PDL"
@@ -591,12 +621,15 @@ ACOS.FN			.AT "BYTE"
 DS.START
 bDebug			.BS 1
 bTrace			.BS 1
-hFileBuf		.BS 1
+LineCounter		.BS 2
+hFile			.BS 1
+InputBufPtr		.BS 2
 hCodeBuf		.BS 1
 hConstBuf		.BS 1
 hDataBuf		.BS 1
 hLabels			.BS 1
 hVars			.BS 1
+hStrBuf			.BS 1
 hFWRefBuf		.BS 1
 DS.END			.ED
 *--------------------------------------

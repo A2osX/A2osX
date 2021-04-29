@@ -51,17 +51,17 @@ The  definitions are listed  in  ASCII  alphabetical order in several groups con
 
 #### Nucleus Words
 
- !   *   */   */MOD   +   +!   +loop   -   / /MOD   0<   0=   0>   1+   1-   2+   2-   < =   >   >R   ?DUP   @   ABS   AND   begin   C! C@   colon   CMOVE   constant   create   D+ D<   DEPTH   DNEGATE   do   does> DROP   DUP   else   EXECUTE   EXIT   FILL   I if   J   LEAVE   literal   loop   MAX   MIN MOD   MOVE   NEGATE   NOT   OR   OVER   PICK R>   R@   repeat   ROLL   ROT   semicolon SWAP   then   U*   U/   until   variable while   XOR
+!   *   */   */MOD   +   +!   +loop   -   / /MOD   0<   0=   0>   1+   1-   2+   2-   < =   >   >R   ?DUP   @   ABS   AND   begin   C! C@   colon   CMOVE   constant   create   D+ D<   DEPTH   DNEGATE   do   does> DROP   DUP   else   EXECUTE   EXIT   FILL   I if   J   LEAVE   literal   loop   MAX   MIN MOD   MOVE   NEGATE   NOT   OR   OVER   PICK R>   R@   repeat   ROLL   ROT   semicolon SWAP   then   U*   U/   until   variable while   XOR
 
 (note  that  lower  case entries refer to just  the  run-time  code corresponding to a compiling word.)
 
 #### Interpreter Words
 
- #   #>   #S   '   (   -TRAILING   . 79-STANDARD   <#   >IN   ?   ABORT   BASE   BLK CONTEXT   CONVERT   COUNT   CR   CURRENT DECIMAL   EMIT   EXPECT   FIND   FORTH   HERE HOLD   KEY   PAD   QUERY   QUIT   SIGN   SPACE SPACES   TYPE   U.   WORD
+#   #>   #S   '   (   -TRAILING   . 79-STANDARD   <#   >IN   ?   ABORT   BASE   BLK CONTEXT   CONVERT   COUNT   CR   CURRENT DECIMAL   EMIT   EXPECT   FIND   FORTH   HERE HOLD   KEY   PAD   QUERY   QUIT   SIGN   SPACE SPACES   TYPE   U.   WORD
 
 #### Compiler Words
 
- +LOOP   ,   ."   :   ;   ALLOT   BEGIN COMPILE   CONSTANT   CREATE   DEFINITIONS   DO DOES>   ELSE   FORGET   IF   IMMEDIATE LITERAL   LOOP   REPEAT   STATE   THEN   UNTIL VARIABLE   VOCABULARY   WHILE   [   [COMPILE]   ]
++LOOP   ,   ."   :   ;   ALLOT   BEGIN COMPILE   CONSTANT   CREATE   DEFINITIONS   DO DOES>   ELSE   FORGET   IF   IMMEDIATE LITERAL   LOOP   REPEAT   STATE   THEN   UNTIL VARIABLE   VOCABULARY   WHILE   [   [COMPILE]   ]
 
 #### Device Words
 
@@ -71,50 +71,50 @@ BLOCK   BUFFER   EMPTY-BUFFERS   LIST LOAD   SAVE-BUFFERS   SCR   UPDATE
 
 | Word | Syntax | I/C | Status | Description | Comment |
 |-|-|-|-|-|-|
-| ! | n addr -- | | Working | Store second word at address on top | |
+| ! | n addr -- | I,C | Working | Store second word at address on top | |
 | # | ud1 -- ud2 | | | Convert one digit of double number and add character to output string | |
 | #> | d -- addr n | | | Terminate output string for TYPE | |
 | #S | ud -- 0 0 | | | Convert all significant digits of double number to output string | |
 | ' | -- addr | I | | Find address of next string in dictionary | |
 | | -- | I | | Begin comment, terminated by | |
-| * | n1 n2 -- n3 | | Working | Arithmetic product of n1 times n2 | |
+| * | n1 n2 -- n3 | I,C | Working | Arithmetic product of n1 times n2 | |
 | */ | n1 n2 n3 -- n4 | || Multiply n1 by n2, divide result by n3 and leave quotient in n4 | |
 | */MOD | n1 n2 n3 -- n4 n5  | | | Multiply n1 by n2, divide result by n3 and leave remainder in n4 and quotient in n5 | |
-| + | n1 n2 -- n3 | | Working | Arithmetic result of n1 plus n2 | |
+| + | n1 n2 -- n3 | I,C | Working | Arithmetic result of n1 plus n2 | |
 | +! | n addr -- | | Working | Add second 16-bit number to contents of address | |
-| +LOOP | n -- | I,C | Working | Increment index by n. Terminate loop if outside limit | |
+| +LOOP | n -- | C | Working | Increment index by n. Terminate loop if outside limit | |
 | , | n -- | | | Allot two bytes in dictionary, storing n there | |
-| - | n1 n2 -- n3 | | Working | Subtract n2 from n1 leaveing result in n3 | |
+| - | n1 n2 -- n3 | I,C | Working | Subtract n2 from n1 leaveing result in n3 | |
 | -TRAILING | addr n1 -- addr n2 | | | Adjust char count n1 of a text string at addr to exclude trailing blank, resulting in string at addr new length on n2| |
-| . | n -- | | Working | Print number | |
-| ." | -- | I | Working  | Print message terminated by " |  |
-| / | n1 n2 -- n3 | | Working | Divide n1 divide by n2, leave quotient in n3| |
-| /MOD | n1 n2 -- n3 n4 | | Working | Divide n1 divide by n2, leave remainder in n3 and quotient in n4 | |
-| 0< | n -- flag | | Working | True if n less than zero | |
-| 0= | n -- flag | | Working | True if n zero | |
-| 0> | n -- flag | | Working | True if n greater than zero | |
+| . | n -- | I,C | Working | Print number | |
+| ." | -- | I,C | Working  | Print message terminated by " |  |
+| / | n1 n2 -- n3 | I,C | Working | Divide n1 divide by n2, leave quotient in n3| |
+| /MOD | n1 n2 -- n3 n4 | I,C | Working | Divide n1 divide by n2, leave remainder in n3 and quotient in n4 | |
+| 0< | n -- flag | I,C | Working | True if n less than zero | |
+| 0= | n -- flag | I,C | Working | True if n zero | |
+| 0> | n -- flag | I,C | Working | True if n greater than zero | |
 | 1+| n -- n+1 | | | Increment n by one | |
 | 1- | n -- n-1 | | | Decrement n by one | |
 | 2+ | n -- n+2 | | | Increment n by two | |
 | 2- | n -- n-2 | | | Decrement n by two| |
 | 79-STANDARD | | | | Returns Error if FORTH-79 Standard is not available| |
-| : | -- | | Working | Begin a colon definition | |
-| ; | -- | I,C | Working | End of a colon definition | |
-| < | n1 n2 -- flag | | Working | True if n1 less than n2 | |
+| : | -- | I | Working | Begin a colon definition | |
+| ; | -- | C | Working | End of a colon definition | |
+| < | n1 n2 -- flag | I,C | Working | True if n1 less than n2 | |
 | <# | -- | | | Initialize pictured number output  | |
-| = | n1 n2 -- flag | | Working | True if n1 equal to n2 | |
-| > | n1 n2 -- flag | | Working | True if n1 greater than n2 | |
+| = | n1 n2 -- flag | I,C | Working | True if n1 equal to n2 | |
+| > | n1 n2 -- flag | I,C | Working | True if n1 greater than n2 | |
 | >IN | -- addr | U | | Leave addr of variable of char offset input stream {0,,1023}| |
 | >R | n -- | C | | Move n to return stack | |
-| ? | addr -- | | Working  | Print contents of address | |
+| ? | addr -- | I,C | Working  | Print contents of address | |
 | ?DUP | n -- n ( n) | | duplicate n if non-zero | |
-| @ | addr -- n | | Working  | Put on stack number at addr | |
+| @ | addr -- n | I,C | Working  | Put on stack number at addr | |
 | ABORT | | | Clear data and return stacks | |
-| ABS | n1 -- n1 | | Working | Absolute value of n1 | |
-| ALLOT | n -- | | Working | Add n bytes to parameter field of most recently defined word | |
-| AND | n1 n2 -- n3 | | Working | Leave Logical bitwise AND of n1 and n2 | |
+| ABS | n1 -- n1 | I,C | Working | Absolute value of n1 | |
+| ALLOT | n -- | I,C | Working | Add n bytes to parameter field of most recently defined word | |
+| AND | n1 n2 -- n3 | I,C | Working | Leave Logical bitwise AND of n1 and n2 | |
 | BASE | -- addr | U | | Leave address of variable containing current input-output number conversion base. {{2..70} | |
-| BEGIN | -- | I,C | Working | Used in a colon-definition in the form: <br>BEGIN ... flag UNTIL or<br>BEGIN ... flag WHILE ... REPEAT  <br> BEGIN  marks  the  start of a  word  sequence  for  repetitive execution.   A BEGIN-UNTIL loop will be repeated until flag is true.   A  BEGIN-WHILE-REPEAT loop will be repeated until flag is  false.   The words after UNTIL or REPEAT will be  executed when  either loop is finished.  flag is always dropped  after being tested. | |
+| BEGIN | -- | C | Working | Used in a colon-definition in the form: <br>BEGIN ... flag UNTIL or<br>BEGIN ... flag WHILE ... REPEAT  <br> BEGIN  marks  the  start of a  word  sequence  for  repetitive execution.   A BEGIN-UNTIL loop will be repeated until flag is true.   A  BEGIN-WHILE-REPEAT loop will be repeated until flag is  false.   The words after UNTIL or REPEAT will be  executed when  either loop is finished.  flag is always dropped  after being tested. | |
 | BLK | -- addr | U | | Leave  the address of a variable containing the number of  the mass storage block being interpreted as the input stream.  If the  content  is  zero,  the input stream is  taken  from  the terminal.| |
 | BLOCK | n -- addr | | | Return address of first byte of memory for block n.  If block n is not in memory, retrieve it first | |
 | BUFFER | n -- addr | | | Obtain next block buffer, assign to n | |
@@ -122,37 +122,37 @@ BLOCK   BUFFER   EMPTY-BUFFERS   LIST LOAD   SAVE-BUFFERS   SCR   UPDATE
 | C@ | addr -- byte | | Working | Leave on stack addr, with high bits set to 0 for 16-bit field | |
 | CMOVE | addr1 addr2 n -- | | | Move n bytes at addr1 to addr2 | |
 | COMPILE | | C | | When  a  word containing COMPILE executes,  the  16-bit  value following   the  compilation  address  of  COMPILE  is  copied (compiled) into the dictionary.   i.e.,  COMPILE DUP will copy the compilation address of DUP.    <br>COMPILE  [ 0 , ]   will copy zero. | |
-| CONSTANT | n -- | | Working | A defining word used in the form: <br>n CONSTANT **name** <br>to  create  a dictionary entry for **name**,  leaving n  in  its parameter  field.   When **name** is later executed,  n will  be left on the stack. | |
+| CONSTANT | n -- | I,C | Working | A defining word used in the form: <br>n CONSTANT **name** <br>to  create  a dictionary entry for **name**,  leaving n  in  its parameter  field.   When **name** is later executed,  n will  be left on the stack. | |
 | CONTEXT | -- addr | U | | Leave  the address of a variable specifying the vocabulary  in which   dictionary   searches   are   to   be   made,   during interpretation of the input stream. | | 
 | CONVERT | d1 addr1 -- d2 addr2 | | | Convert to the equivalent stack number  the text beginning  at addr1+1  with regard to BASE.   The new value  is  accumulated into double number d1, being left as d2.  addr2 is the address of the first non-convertible character. | |
 | COUNT | addr -- addr+1 n | | | Leave  the  address  addr+1 and the character  count  of  text beginning  at addr.   The first byte at addr must contain  the character count n.  Range of n is {0..255}. | |
-| CR | -- | | Working | Do a carriage-return | |
+| CR | -- | I,C | Working | Do a carriage-return | |
 | CREATE | | | |   A defining word used in the form:  <br>CREATE  **name**<br> to  create a dictionary entry for <name>,  without  allocating any  parameter  field memory.   When **name**  is  subsequently executed,  the address of the first byte of **name**'s parameter field is left on the stack. | |
 | CURRENT | -- addr | U | | Leave the address of a variable specifying the vocabulary into which new word definitions are to be entered. | |
-| D+ | d1 d2 -- d3 | | Working | Leave arithmetic sum of d1 plus d2 | |
+| D+ | d1 d2 -- d3 | I,C | Working | Leave arithmetic sum of d1 plus d2 | |
 | D< | d1 d2 -- flag | | | True is d1 less than d2 | | 
 | DECIMAL | -- | | | Set input-output numeric conversation base to ten  | |
 | DEFINITIONS | -- | | | Set current vocabulary to context vocabulary | |
 | DEPTH | -- n | | | Leave number of the quantity of 16-bit values contained in the data stack, before n added | |
 | DNEGATE | d -- -d | | | Leave the two's complement of a double number. | |
-| DO | n1 n2 -- | I,C | Working | Used in a colon-definition: <br>DO ... LOOP   or  <br>DO ... +LOOP  <br>Begin a loop which will terminate based on control parameters. The loop index begins at n2, and terminates based on the limit n1.   At LOOP or +LOOP, the index is modified by a positive or negative  value.   The range of a DO-LOOP is determined by the terminating word.   DO-LOOP may be nested.  Capacity for three levels  of  nesting  is specified as a  minimum  for  standard systems. | |
-| DOES | | I,C| | Define  the run-time action of a word created by a  high-level defining word.  Used in the form:   <br>: **name** ... CREATE ... DOES> ... ; <br>and then   **namex  name**<br>Marks  the  termination of the defining part of  the  defining word **name** and begins the defining of the run-time action for words  that will later be defined by **name**.   On execution of **namex**  the  sequence  of  words  between  DOES>  and  ;  are executed, with the address of **namex**'s parameter field on the stack. | |
-| DROP | n -- | | Working | Drop top number from the stack | |
-| DUP | n -- n n | | Working | Duplicate top of stack | |
-| ELSE | -- | I,C | Working | Used in a colon-definition in the form: <br>IF ... ELSE ... THEN  <br> ELSE executes after the true part following IF.   ELSE  forces execution  to skip till just after THEN.   It has no effect on  the stack.  (see IF) | |
-| EMIT | char -- | | Working | Transmit character to current output device | |
+| DO | n1 n2 -- | C | Working | Used in a colon-definition: <br>DO ... LOOP   or  <br>DO ... +LOOP  <br>Begin a loop which will terminate based on control parameters. The loop index begins at n2, and terminates based on the limit n1.   At LOOP or +LOOP, the index is modified by a positive or negative  value.   The range of a DO-LOOP is determined by the terminating word.   DO-LOOP may be nested.  Capacity for three levels  of  nesting  is specified as a  minimum  for  standard systems. | |
+| DOES | | I,C | | Define  the run-time action of a word created by a  high-level defining word.  Used in the form:   <br>: **name** ... CREATE ... DOES> ... ; <br>and then   **namex  name**<br>Marks  the  termination of the defining part of  the  defining word **name** and begins the defining of the run-time action for words  that will later be defined by **name**.   On execution of **namex**  the  sequence  of  words  between  DOES>  and  ;  are executed, with the address of **namex**'s parameter field on the stack. | |
+| DROP | n -- | I,C | Working | Drop top number from the stack | |
+| DUP | n -- n n | I,C | Working | Duplicate top of stack | |
+| ELSE | -- | C | Working | Used in a colon-definition in the form: <br>IF ... ELSE ... THEN  <br> ELSE executes after the true part following IF.   ELSE  forces execution  to skip till just after THEN.   It has no effect on  the stack.  (see IF) | |
+| EMIT | char -- | I,C | Working | Transmit character to current output device | |
 | EMPTY-BUFFERS | | | | Mark all block buffers as empty, without necessarily affecting their actual contents.  UPDATEd blocks are not written to mass  storage. | |
 | EXECUTE | addr -- | | | Execute the dictionary entry whose compilation address is on the stack. | |
 | EXIT | | C | | When compiled within a colon-definition,  terminate  execution of that definition,  at that point.   May not be used within a DO...LOOP. | |
 | EXPECT | addr n -- | | | Transfer  characters  from  the terminal  beginning  at  addr, upward,  until a "return" or the count of n has been received.   Take  no action for n less than or equal to zero.   One or two nulls are added at the end of text. | |
-| FILL | addr n byte -- | | Working | Fill memory starting at addr with n copies of byte | |
+| FILL | addr n byte -- | I,C | Working | Fill memory starting at addr with n copies of byte | |
 | FIND | -- addr ||| Leave the compilation address of the next word name,  which is accepted from the input stream.   If that word cannot be found in  the  dictionary after a search of CONTEXT and FORTH  leave zero. | |
 | FORGET | -- | | | Execute in the form:  <br>FORGET  **name**  <br>Delete  from  the dictionary **name** (which is in  the  CURRENT vocabulary)  and  all  words added  to  the  dictionary  after **name**,  regardless  of  their vocabulary.   Failure  to  find **name** in CURRENT or FORTH is an error condition. | |
 | FORTH | -- | I | | The name of the primary vocabulary.  Execution makes FORTH the CONTEXT  vocabulary.   New  definitions become a part  of  the FORTH  until  a differing CURRENT vocabulary  is  established.    User  vocabularies  conclude by 'chaining'  to  FORTH,  so  it should  be  considered that FORTH is 'contained'  within  each user's vocabulary.y | |
 | HERE | -- addr | | Working | Return address of next available dictionary location.| |
 | HOLD | char -- | | | Insert ASCII character into pictured output string. May only be used between <# and #>. | |
 | I | -- n | C | Working | Copy loop index on stack.  May only be used in the form: <br>DO ... I ... LOOP or <br>DO ... I ... +LOOP | |
-| IF | flag -- | I,C | Working | Used in a colon-definition in the form:<br>flag  IF ... ELSE ... THEN   or<br>flag  IF ... THEN<br>If  flag is true,  the words following IF are executed and the words following ELSE are skipped.   The ELSE part is optional. If flag is false, words between IF and ELSE, or between IF and THEN  (when  no  ELSE is  used),  are  skipped.   IF-ELSE-THEN conditionals may be nested. | |
+| IF | flag -- | C | Working | Used in a colon-definition in the form:<br>flag  IF ... ELSE ... THEN   or<br>flag  IF ... THEN<br>If  flag is true,  the words following IF are executed and the words following ELSE are skipped.   The ELSE part is optional. If flag is false, words between IF and ELSE, or between IF and THEN  (when  no  ELSE is  used),  are  skipped.   IF-ELSE-THEN conditionals may be nested. | |
 | IMMEDIATE | | | | Marks the most recently made dictionary entry as a word  which will  be  executed when encountered during compilation  rather than compiled. | |
 | J | -- n | C | | Return  the index of the next outer loop.   May only  be  used within a nested DO-LOOP in the form: <br>DO ... DO ... J ... LOOP ... LOOP | |
 | KEY | -- char | | Working | Read key, put ASCII value on stack | |
@@ -160,44 +160,44 @@ BLOCK   BUFFER   EMPTY-BUFFERS   LIST LOAD   SAVE-BUFFERS   SCR   UPDATE
 | LIST | n -- | | | List  the ASCII symbolic contents of screen n on  the  current output device, setting SCR to contain n.  n is unsigned. | |
 | LITERAL | n -- | I | | f  compiling,  then  compile  the stack value n as  a  16-bit literal, which when later executed, will leave n on the stack. | |
 | LOAD | n -- | | | Begin  interpretation  of  screen n by  making  it  the  input stream;  preserve  the  locators of the present  input  stream (from  >IN  and  BLK).   If interpretation is  not  terminated explicitly  it  will be terminated when the  input  stream  is exhausted.    Control   then  returns  to  the  input   stream containing  LOAD,  determined by the input stream locators >IN and BLK. | |
-| LOOP | -- | I,C | Working |Increment  the DO-LOOP index by one,  terminating the loop  if the  new  index is equal to or greater than  the  limit.   The limit  and  index  are signed numbers in  the  range  {-32,768..32,767}. | |
-| MAX | n1 n2 -- n3 | | Working | Leave the greater of two numbers. | |
-| MIN | n1 n2 -- n3 | | Working | Leave the lesser of two numbers. | |
-| MOD | n1 n2 -- n3 | | Working | Divide n1 by n2,  leaving the remainder n3, with the same sign as n1. | |
+| LOOP | -- | C | Working |Increment  the DO-LOOP index by one,  terminating the loop  if the  new  index is equal to or greater than  the  limit.   The limit  and  index  are signed numbers in  the  range  {-32,768..32,767}. | |
+| MAX | n1 n2 -- n3 | I,C | Working | Leave the greater of two numbers. | |
+| MIN | n1 n2 -- n3 | I,C | Working | Leave the lesser of two numbers. | |
+| MOD | n1 n2 -- n3 | I,C | Working | Divide n1 by n2,  leaving the remainder n3, with the same sign as n1. | |
 | MOVE | addr1 addr2 n -- | | | Move the specified quantity n of 16-bit memory cells beginning at addr1 into memory at addr2.  The contents of addr1 is moved first.  If n is negative or zero, nothing is moved. | |
 | NEGATE | n -- -n | | | Leave the two's complement of a number,  i.e.,  the difference of zero less n. | |
 | NOT | flag1 -- flag2 | | | Reverse the boolean value of flag1.  This is identical to 0=. | |
-| OR | n1 n2 -- n3 | | Working | Leave the bitwise inclusive-or of two numbers. | |
-| OVER | n1 n2 -- n1 n2 n1 | | Working | Leave a copy of the second number on the stack. | |
-| PAD | -- addr | | Working | The address of a scratch area used to hold character strings for intermediate processing.   The minimum capacity of PAD is 64 characters (addr through addr+63). | |
+| OR | n1 n2 -- n3 | I,C | Working | Leave the bitwise inclusive-or of two numbers. | |
+| OVER | n1 n2 -- n1 n2 n1 | I,C | Working | Leave a copy of the second number on the stack. | |
+| PAD | -- addr | I,C | Working | The address of a scratch area used to hold character strings for intermediate processing.   The minimum capacity of PAD is 64 characters (addr through addr+63). | |
 | PICK | n1 -- n2 | | | Return the contents of the n1-th stack value,  not counting n1 itself.  An error condition results for n less than one.  <br>2 PICK  is equivalent to OVER.  {1..n} | |
 | QUERY | | | | ccept input of up to 80 characters (or until a 'return') from the operator's terminal, into the terminal input buffer.  WORD may be used to accept text from this buffer  as  the  input stream, by setting >IN and BLK to zero. | |
 | QUIT | | | | Clear the return stack, setting execution mode, and return control to the terminal.  No message is given. | |
 | R> | -- n | C | | Transfer n from the return stack to the data stack. | |
 | R@ | -- n | C | | Copy the number on top of the return stack to the data stack. | |
-| REPEAT | -- | I,C | Working | Used in a colon-definition in the form: <br>BEGIN ... WHILE ... REPEAT  <br>At  run-time,  REPEAT returns to just after the  corresponding BEGIN. | |
+| REPEAT | -- | C | Working | Used in a colon-definition in the form: <br>BEGIN ... WHILE ... REPEAT  <br>At  run-time,  REPEAT returns to just after the  corresponding BEGIN. | |
 | ROLL | n -- | | | Extract  the  n-th stack value to the top of  the  stack,  not counting  n  itself,  moving  the remaining  values  into  the vacated position.   An error condition results for n less than one.  {1..n}  <br> 3  ROLL  =  ROT<br>   1  ROLL  =  null operation | |
-| ROT | n1 n2 n3 -- n2 n3 n1 | | Working | Rotate the top three values, bringing the deepest to the top. | |
+| ROT | n1 n2 n3 -- n2 n3 n1 | I,C | Working | Rotate the top three values, bringing the deepest to the top. | |
 | SAVE-BUFFERS | | | | Write  all  blocks to mass-storage that have been  flagged  as UPDATEd.   An  error condition results if mass-storage writing is not completed. | |
 | SCR | -- addr | U | | Leave  the address of a variable containing the number of  the screen most recently listed. | |
 | SIGN | n -- | C | | Insert  the ASCII "-" (minus sign) into the  pictured  numeric output string, if n is negative. | |
-| SPACE | -- |Working  | Transmit an ASCII blank to the current output device. | |
-| SPACES | n -- | | Working | Transmit  n  spaces  to the current output  device.   Take  no action for n of zero or less. | |
+| SPACE | -- | I,C | Working | Transmit an ASCII blank to the current output device. | |
+| SPACES | n -- | I,C | Working | Transmit  n  spaces  to the current output  device.   Take  no action for n of zero or less. | |
 | STATE | -- addr | U | | Leave  the address of the variable containing the  compilation state.  A non-zero content indicates compilation is occurring, but the value itself may be installation dependent. | |
-| SWAP | n1 n2 -- n2 n1 | | Working | Reverse top two stack items | |
-| THEN | | I,C | | Used in a colon-definition in the form:<br>IF ... ELSE ... THEN   or<br>IF ... THEN<br>THEN  is  the point where execution resumes after ELSE  or  IF (when no ELSE is present). | |
+| SWAP | n1 n2 -- n2 n1 | I,C | Working | Reverse top two stack items | |
+| THEN | | C | Working | Used in a colon-definition in the form:<br>IF ... ELSE ... THEN   or<br>IF ... THEN<br>THEN  is  the point where execution resumes after ELSE  or  IF (when no ELSE is present). | |
 | TYPE | addr n -- | | | Transmit  n  characters beginning at address  to  the  current output device.  No action takes place for n less than or equal to zero. | |
 | U* | un1 un2 -- ud3 | | | Perform an unsigned multiplication of un1 by un2,  leaving the double number product ud3.  All values are unsigned. | |
-| U. | un -- | | Working | Display  un converted according to BASE as an unsigned number, in a free-field format, with one trailing blank. | |
+| U. | un -- | I,C | Working | Display  un converted according to BASE as an unsigned number, in a free-field format, with one trailing blank. | |
 | U/MOD | ud1 un2 -- un3 un 4 | | | Perform  the  unsigned division of double number ud1  by  un2, leaving the remainder un3,  and the quotient un4.   All values are unsigned. | |
 | U< | un1 un2 -- flag | | | Leave the flag representing the magnitude comparison of un1  < un2 where un1 and un2 are treated as 16-bit unsigned integers. | |
-| UNTIL | flag -- | I,C | Working | LWithin a colon-definition, mark the end of a BEGIN-UNTIL loop, which will terminate based on flag.  If flag is true, the loop is terminated.   If flag is false,  execution returns to  the first word after BEGIN.  BEGIN-UNTIL structures may be nested. | |
+| UNTIL | flag -- | C | Working | LWithin a colon-definition, mark the end of a BEGIN-UNTIL loop, which will terminate based on flag.  If flag is true, the loop is terminated.   If flag is false,  execution returns to  the first word after BEGIN.  BEGIN-UNTIL structures may be nested. | |
 | UPDATE | | | | Mark  the  most recently referenced block  as  modified.   The block  will subsequently be automatically transferred to  mass storage  should  its memory buffer be needed for storage of  a different block, or upon execution of SAVE-BUFFERS. | |
-| VARIABLE | n -- | | Working | A defining word executed in the form:<br>VARIABLE  **name** to  create a dictionary entry for **name** and allot  two  bytes for  storage  in the parameter field.   The  application  must initialize  the stored value.   When **name** is later executed, it will place the storage address on the stack. | |
+| VARIABLE | n -- | I,C | Working | A defining word executed in the form:<br>VARIABLE  **name** to  create a dictionary entry for **name** and allot  two  bytes for  storage  in the parameter field.   The  application  must initialize  the stored value.   When **name** is later executed, it will place the storage address on the stack. | |
 | VOCABULARY | -- | | | A defining word executed in the form:<br>VOCABULARY  **name**<br>to  create (in the CURRENT vocabulary) a dictionary entry  for **name**,   which   specifies  a  new  ordered  list   of   word definitions.   Subsequent execution of **name** will make it the CONTEXT   vocabulary.    When   **name**  becomes  the   CURRENT vocabulary (see DEFINITIONS), new definitions will be  created in that list.<br>In lieu of any further specification, new vocabularies 'chain' to  FORTH.   That  is,  when  a dictionary  search  through  a vocabulary is exhausted, FORTH will be searched. | |
-| WHILE | flag -- | I,C | Working | Used in the form:<br>BEGIN ... flag WHILE ... REPEAT<br>Select conditional execution based on flag.   On a true  flag, continue execution through to REPEAT,  which then returns back to just after BEGIN.   On a false flag, skip execution to just after REPEAT, exiting the structure. | |
+| WHILE | flag -- | C | Working | Used in the form:<br>BEGIN ... flag WHILE ... REPEAT<br>Select conditional execution based on flag.   On a true  flag, continue execution through to REPEAT,  which then returns back to just after BEGIN.   On a false flag, skip execution to just after REPEAT, exiting the structure. | |
 | WORD | char -- addr | | | Receive  characters  from the input stream until the  non-zero delimiting  character  is encountered or the input  stream  is exhausted,  ignoring leading delimiters.   The characters  are stored  as  a  packed string with the character count  in  the first  character position.   The actual delimiter  encountered (char  or  null)  is stored at the end of  the  text  but  not included  in the count.   If the input stream was exhausted as WORD is called,  then a zero length will result.   The address of the beginning of this packed string is left on the stack. | |
-| XOR | n1 n2 -- n3 | | Working | Leave the bitwise exclusive-or of two numbers. | |
+| XOR | n1 n2 -- n3 | I,C | Working | Leave the bitwise exclusive-or of two numbers. | |
 | [ | | I | | End the compilation mode.   The text from the input stream  is subsequently executed.  See ] | |
 | [COMPILE] | | I,C | | Used in a colon-definition in the form:<br>[COMPILE] **name**<br>Forces  compilation  of  the  following  word.    This  allows compilation  of  an IMMEDIATE word when it would otherwise  be executed. | |
 | ] | | | | Sets the compilation mode.   The text from the input stream is subsequently compiled.  See [ | |
@@ -329,13 +329,13 @@ The Reference Word Set contain both Standard Word Definitions  and uncontrolled 
 
 | Word | Syntax | I/C | Status | Description | Comment |
 |-|-|-|-|-|-|
-| -DUP | n -- n ? | | Working | Duplicate only if non-zero |  **should be ?DUP** |
+| -DUP | n -- n ? | RENAMED to ?DUP | Working | Duplicate only if non-zero |  **should be ?DUP** |
 | R | -- n | | Working | Copy top of return stack onto stack |** really >R  maybe** |
-| MINUS | n -- -n | | Working | Change sign | **rename NEGATE** |
-| DMINUS | d -- -d | | Working | Change sign of double-precision number | **rename DNEGATE**|
+| MINUS | n -- -n | RENAMED to NEGATE | Working | Change sign | **rename NEGATE** |
+| DMINUS | d -- -d |RENAMED to DNEGATE | Working | Change sign of double-precision number | **rename DNEGATE**|
 | ?TERMINAL | -- f | | | True if terminal break request present | |
 | SIGN | 	( n d -- d | | | Insert sign of n to output string | |
-| ENDIF | -- | | Working | End of the IF-ELSE structure | **there is no ENDIF like statement in forth, i think maybe IFs are only in loops or DOs or create word type structure so there is other "terminating" words that tell you IF is done**|
+| ENDIF | -- | | RENAMED to THEN | End of the IF-ELSE structure | **there is no ENDIF like statement in forth, i think maybe IFs are only in loops or DOs or create word type structure so there is other "terminating" words that tell you IF is done**|
 
 ## License
 A2osX is licensed under the GNU General Pulic License |
