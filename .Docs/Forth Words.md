@@ -52,21 +52,21 @@ A numerical value with two logical states;   0 = false,  non-zero = true.
 
 The  definitions are listed  in  ASCII  alphabetical order in several groups consisting of:
 
-#### Nucleus Words
+### Nucleus Words
 
  !   *   */   */MOD   +   +!   +loop   -   / /MOD   0<   0=   0>   1+   1-   2+   2-   < =   >   >R   ?DUP   @   ABS   AND   begin   C! C@   colon   CMOVE   constant   create   D+ D<   DEPTH   DNEGATE   do   does> DROP   DUP   else   EXECUTE   EXIT   FILL   I if   J   LEAVE   literal   loop   MAX   MIN MOD   MOVE   NEGATE   NOT   OR   OVER   PICK R>   R@   repeat   ROLL   ROT   semicolon SWAP   then   U*   U/   until   variable while   XOR
 
 (note  that  lower  case entries refer to just  the  run-time  code corresponding to a compiling word.)
 
-#### Interpreter Words
+### Interpreter Words
 
  #   #>   #S   '   (   -TRAILING   . 79-STANDARD   <#   >IN   ?   ABORT   BASE   BLK CONTEXT   CONVERT   COUNT   CR   CURRENT DECIMAL   EMIT   EXPECT   FIND   FORTH   HERE HOLD   KEY   PAD   QUERY   QUIT   SIGN   SPACE SPACES   TYPE   U.   WORD
 
-#### Compiler Words
+### Compiler Words
 
  +LOOP   ,   ."   :   ;   ALLOT   BEGIN COMPILE   CONSTANT   CREATE   DEFINITIONS   DO DOES>   ELSE   FORGET   IF   IMMEDIATE LITERAL   LOOP   REPEAT   STATE   THEN   UNTIL VARIABLE   VOCABULARY   WHILE   [   [COMPILE]   ]
 
-#### Device Words
+### Device Words
 
  BLOCK   BUFFER   EMPTY-BUFFERS   LIST LOAD   SAVE-BUFFERS   SCR   UPDATE
 
@@ -79,7 +79,7 @@ The  definitions are listed  in  ASCII  alphabetical order in several groups con
 | #> | d -- addr n | | | Terminate output string for TYPE | |
 | #S | ud -- 0 0 | | | Convert all significant digits of double number to output string | |
 | ' | -- addr | I | | Find address of next string in dictionary | |
-| | -- | I | | Begin comment, terminated by | |
+| ( | -- | I,C | | Begin comment, terminated by ) | |
 | * | n1 n2 -- n3 | I,C | Working | Arithmetic product of n1 times n2 | |
 | */ | n1 n2 n3 -- n4 | || Multiply n1 by n2, divide result by n3 and leave quotient in n4 | |
 | */MOD | n1 n2 n3 -- n4 n5  | | | Multiply n1 by n2, divide result by n3 and leave remainder in n4 and quotient in n5 | |
@@ -110,9 +110,9 @@ The  definitions are listed  in  ASCII  alphabetical order in several groups con
 | >IN | -- addr | U | | Leave addr of variable of char offset input stream {0,,1023}| |
 | >R | n -- | C | | Move n to return stack | |
 | ? | addr -- | I,C | Working | Print contents of address | |
-| ?DUP | n -- n ( n) | | duplicate n if non-zero | |
+| ?DUP | n -- n n | I,C | impl. | duplicate n if non-zero | |
 | @ | addr -- n | I,C | Working | Put on stack number at addr | |
-| ABORT | | | Clear data and return stacks | |
+| ABORT -- | | | | Clear data and return stacks | |
 | ABS | n1 -- n1 | I,C | Working | Absolute value of n1 | |
 | ALLOT | n -- | I,C | Working | Add n bytes to parameter field of most recently defined word | |
 | AND | n1 n2 -- n3 | I,C | Working | Leave Logical bitwise AND of n1 and n2 | |
@@ -132,8 +132,6 @@ The  definitions are listed  in  ASCII  alphabetical order in several groups con
 | CR | -- | I,C | Working | Do a carriage-return | |
 | CREATE | | | |   A defining word used in the form:  <br>CREATE  **name**<br> to  create a dictionary entry for <name>,  without  allocating any  parameter  field memory.   When **name**  is  subsequently executed,  the address of the first byte of **name**'s parameter field is left on the stack. | |
 | CURRENT | -- addr | U | | Leave the address of a variable specifying the vocabulary into which new word definitions are to be entered. | |
-| D+ | d1 d2 -- d3 | I,C | Working | Leave arithmetic sum of d1 plus d2 | |
-| D< | d1 d2 -- flag | | | True is d1 less than d2 | | 
 | DECIMAL | -- | | | Set input-output numeric conversation base to ten  | |
 | DEFINITIONS | -- | | | Set current vocabulary to context vocabulary | |
 | DEPTH | -- n | | | Leave number of the quantity of 16-bit values contained in the data stack, before n added | |
@@ -192,7 +190,7 @@ The  definitions are listed  in  ASCII  alphabetical order in several groups con
 | TYPE | addr n -- | | | Transmit  n  characters beginning at address  to  the  current output device.  No action takes place for n less than or equal to zero. | |
 | U* | un1 un2 -- ud3 | | | Perform an unsigned multiplication of un1 by un2,  leaving the double number product ud3.  All values are unsigned. | |
 | U. | un -- | I,C | Working | Display  un converted according to BASE as an unsigned number, in a free-field format, with one trailing blank. | |
-| U/MOD | ud1 un2 -- un3 un 4 | | | Perform  the  unsigned division of double number ud1  by  un2, leaving the remainder un3,  and the quotient un4.   All values are unsigned. | |
+| U/MOD | ud1 un2 -- un3 un4 | | | Perform the unsigned division of double number ud1 by un2, leaving the remainder un3, and the quotient un4.  All values are unsigned. | |
 | U< | un1 un2 -- flag | | | Leave the flag representing the magnitude comparison of un1  < un2 where un1 and un2 are treated as 16-bit unsigned integers. | |
 | UNTIL | flag -- | C | Working | LWithin a colon-definition, mark the end of a BEGIN-UNTIL loop, which will terminate based on flag.  If flag is true, the loop is terminated.   If flag is false,  execution returns to  the first word after BEGIN.  BEGIN-UNTIL structures may be nested. | |
 | UPDATE | | | | Mark  the  most recently referenced block  as  modified.   The block  will subsequently be automatically transferred to  mass storage  should  its memory buffer be needed for storage of  a different block, or upon execution of SAVE-BUFFERS. | |
@@ -222,7 +220,7 @@ DOUBLE NUMBER WORD SET
 | 2VARIABLE | | | | A defining word used in the form:<br>2VARIABLE  **name**<br>to  create a dictionary entry of **name** and assign four  bytes for  storage  in the parameter field.   When **name** is  later executed,  it  will leave the address of the first byte of its parameter field is placed on the stack. | |
 | D+ | d1 d2 -- d3 | I,C | impl. | Leave the arithmetic sum of d1 and d2. | |
 | D- | d1 d2 -- d3 | I,C | impl. | Subtract d2 from d1 and leave the difference d3. | |
-| | D. | d -- | I,C | impl. | Display d converted according to BASE in a free field  format, with one trailing blank.  Display the sign only if negative. | |
+| D. | d -- | I,C | impl. | Display d converted according to BASE in a free field  format, with one trailing blank.  Display the sign only if negative. | |
 | D.R | d n -- | | | Display  d converted according to BASE,  right aligned in an n character field. Display the sign only if negative. | |
 | D0= | d -- flag | | | Leave true if d is zero. | |
 | D< | d1 d2 -- flag | | | True if d1 is less than d2. | |
@@ -276,7 +274,7 @@ The Reference Word Set contain both Standard Word Definitions  and uncontrolled 
 | B/BUF | -- 1024 | | | A constant leaving 1024, the number of bytes per block buffer. | |
 | BELL | | | | Activate  a terminal bell or noise-maker as appropriate to the device in use. | |
 | BL | -- n | | | Leave the ASCII character value for space (decimal 32). | |
-|  BLANKS | addr n -- | | Working | Fill  an area of memory over n bytes with the value for  ASCII blank,  starting at addr.  If n is less than or equal to zero, take no action. | |
+| BLANKS | addr n -- | | Working | Fill  an area of memory over n bytes with the value for  ASCII blank,  starting at addr.  If n is less than or equal to zero, take no action. | |
 | C, | n -- | | | Store  the  low-order  8 bits of n at the  next  byte  in  the dictionary, advancing the dictionary pointer. | |
 | CHAIN | | | | Used in the form:<br>CHAIN  **name**<br> Connect  the CURRENT vocabulary to all definitions that  might be  entered  into the vocabulary **name** in  the  future.   The CURRENT  vocabulary may not be FORTH or ASSEMBLER.  Any  given vocabulary may only be chained  once, but may be the object of any  number  of chainings.  For  example,  every  user-defined vocabulary may include the sequence:<br>CHAIN  FORTH | |
 | COM | n1 -- n2 | | | Leave the one's complement of n1. | |
@@ -289,7 +287,7 @@ The Reference Word Set contain both Standard Word Definitions  and uncontrolled 
 | END | | I,C | |  A synonym for UNTIL. | |
 | ERASE | addr n -- | | Working | Fill  an area of memory over n bytes with zeros,  starting  at addr.  If n is zero or less, take no action. | |
 | FLD | -- addr | | | A variable pointing to the field length reserved for a  number during output conversion. | |
-| H. | n --| | | Output  n  as a hexadecimal integer with one  trailing  blank.  The current base is unchanged. | |
+| H. | n -- | | | Output  n  as a hexadecimal integer with one  trailing  blank.  The current base is unchanged. | |
 | HEX | -- | | | Set the numeric input-output conversion base to sixteen. | |
 | I' | -- n | C | | Used within a colon-definition executed only from within a DO-LOOP to return the corresponding loop index. | |
 | IFEND | | | | Terminate  a  conditional  interpretation  sequence  begun  by IFTRUE. | |
@@ -328,7 +326,7 @@ The Reference Word Set contain both Standard Word Definitions  and uncontrolled 
 | WHERE | | | | Output information about the status of FORTH,  (e.g., after an error  abort).   Indicate at least the last word compiled  and the last block accessed. | |
 | \LOOP | n -- | I, C | | A DO-LOOP terminating word.   The loop index is decremented by n  and  the loop terminated when the resultant  index  becomes equal to or less than the limit.  Magnitude logic is used, and n must be positive. | |
 
-###Words from original implementation that should be removed (or perhaps are really renamed)
+## Words from original implementation that should be removed (or perhaps are really renamed)
 
 | Word | Syntax | I/C | Status | Description | Comment |
 |-|-|-|-|-|-|
