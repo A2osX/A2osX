@@ -23,23 +23,26 @@ The I/C Column symbols indicate attributes of the defined words:
 ### Stack Parameters
 Unless otherwise stated, all reference to numbers apply to 16-bit signed integers.   The implied range of values is shown as {from..to}.   The  content  of an address is shown  by  double curly  brackets,  particularly for the contents of  variables, i.e.,  BASE {{2..70}}.
 
-### addr                                                   {0..65,535}
+### addr                                             {0..65,535}
 A value representing the address of a byte,  within the  FORTH standard memory space.   This addressed byte may represent the first byte of a larger data field in memory.
 
-### byte                                                   {0..255}
+### byte                                             {0..255}
 A  value representing an 8 bit byte.   When in a larger field, the higher bits are zero.
 
-### char                                                   {0..127}
+### char                                             {0..127}
 A value representing a 7 bit ASCII character code.   When in a larger field, the higher bits are zero.
+
+### n                                                {-32,768..32,767}
+16 bit signed integer number.  Any other symbol refers to an arbitrary signed 16-bit  integer in the range {-32,768..32,767}, unless otherwise noted.
+
+### u                                                 {0..65,535}
+16 bit unsigned integer number. 
 
 ### d                                  {-2,147,483,648..2,147,483,647}
 32 bit signed 'double' number.   The most significant 16-bits, with sign, is most accessible on the stack.
 
 ### flag
 A numerical value with two logical states;   0 = false,  non-zero = true.
-
-### n                                                 {-32,768..32,767}
-16 bit signed integer number.  Any other symbol refers to an arbitrary signed 16-bit  integer in the range {-32,768..32,767}, unless otherwise noted.
 
 ### Input Text
 
@@ -51,21 +54,21 @@ The  definitions are listed  in  ASCII  alphabetical order in several groups con
 
 #### Nucleus Words
 
-!   *   */   */MOD   +   +!   +loop   -   / /MOD   0<   0=   0>   1+   1-   2+   2-   < =   >   >R   ?DUP   @   ABS   AND   begin   C! C@   colon   CMOVE   constant   create   D+ D<   DEPTH   DNEGATE   do   does> DROP   DUP   else   EXECUTE   EXIT   FILL   I if   J   LEAVE   literal   loop   MAX   MIN MOD   MOVE   NEGATE   NOT   OR   OVER   PICK R>   R@   repeat   ROLL   ROT   semicolon SWAP   then   U*   U/   until   variable while   XOR
+ !   *   */   */MOD   +   +!   +loop   -   / /MOD   0<   0=   0>   1+   1-   2+   2-   < =   >   >R   ?DUP   @   ABS   AND   begin   C! C@   colon   CMOVE   constant   create   D+ D<   DEPTH   DNEGATE   do   does> DROP   DUP   else   EXECUTE   EXIT   FILL   I if   J   LEAVE   literal   loop   MAX   MIN MOD   MOVE   NEGATE   NOT   OR   OVER   PICK R>   R@   repeat   ROLL   ROT   semicolon SWAP   then   U*   U/   until   variable while   XOR
 
 (note  that  lower  case entries refer to just  the  run-time  code corresponding to a compiling word.)
 
 #### Interpreter Words
 
-#   #>   #S   '   (   -TRAILING   . 79-STANDARD   <#   >IN   ?   ABORT   BASE   BLK CONTEXT   CONVERT   COUNT   CR   CURRENT DECIMAL   EMIT   EXPECT   FIND   FORTH   HERE HOLD   KEY   PAD   QUERY   QUIT   SIGN   SPACE SPACES   TYPE   U.   WORD
+ #   #>   #S   '   (   -TRAILING   . 79-STANDARD   <#   >IN   ?   ABORT   BASE   BLK CONTEXT   CONVERT   COUNT   CR   CURRENT DECIMAL   EMIT   EXPECT   FIND   FORTH   HERE HOLD   KEY   PAD   QUERY   QUIT   SIGN   SPACE SPACES   TYPE   U.   WORD
 
 #### Compiler Words
 
-+LOOP   ,   ."   :   ;   ALLOT   BEGIN COMPILE   CONSTANT   CREATE   DEFINITIONS   DO DOES>   ELSE   FORGET   IF   IMMEDIATE LITERAL   LOOP   REPEAT   STATE   THEN   UNTIL VARIABLE   VOCABULARY   WHILE   [   [COMPILE]   ]
+ +LOOP   ,   ."   :   ;   ALLOT   BEGIN COMPILE   CONSTANT   CREATE   DEFINITIONS   DO DOES>   ELSE   FORGET   IF   IMMEDIATE LITERAL   LOOP   REPEAT   STATE   THEN   UNTIL VARIABLE   VOCABULARY   WHILE   [   [COMPILE]   ]
 
 #### Device Words
 
-BLOCK   BUFFER   EMPTY-BUFFERS   LIST LOAD   SAVE-BUFFERS   SCR   UPDATE
+ BLOCK   BUFFER   EMPTY-BUFFERS   LIST LOAD   SAVE-BUFFERS   SCR   UPDATE
 
 ## Words
 
@@ -106,9 +109,9 @@ BLOCK   BUFFER   EMPTY-BUFFERS   LIST LOAD   SAVE-BUFFERS   SCR   UPDATE
 | > | n1 n2 -- flag | I,C | Working | True if n1 greater than n2 | |
 | >IN | -- addr | U | | Leave addr of variable of char offset input stream {0,,1023}| |
 | >R | n -- | C | | Move n to return stack | |
-| ? | addr -- | I,C | Working  | Print contents of address | |
+| ? | addr -- | I,C | Working | Print contents of address | |
 | ?DUP | n -- n ( n) | | duplicate n if non-zero | |
-| @ | addr -- n | I,C | Working  | Put on stack number at addr | |
+| @ | addr -- n | I,C | Working | Put on stack number at addr | |
 | ABORT | | | Clear data and return stacks | |
 | ABS | n1 -- n1 | I,C | Working | Absolute value of n1 | |
 | ALLOT | n -- | I,C | Working | Add n bytes to parameter field of most recently defined word | |
@@ -134,7 +137,7 @@ BLOCK   BUFFER   EMPTY-BUFFERS   LIST LOAD   SAVE-BUFFERS   SCR   UPDATE
 | DECIMAL | -- | | | Set input-output numeric conversation base to ten  | |
 | DEFINITIONS | -- | | | Set current vocabulary to context vocabulary | |
 | DEPTH | -- n | | | Leave number of the quantity of 16-bit values contained in the data stack, before n added | |
-| DNEGATE | d -- -d | | | Leave the two's complement of a double number. | |
+| DNEGATE | d -- -d | I,C | impl. | Leave the two's complement of a double number. | |
 | DO | n1 n2 -- | C | Working | Used in a colon-definition: <br>DO ... LOOP   or  <br>DO ... +LOOP  <br>Begin a loop which will terminate based on control parameters. The loop index begins at n2, and terminates based on the limit n1.   At LOOP or +LOOP, the index is modified by a positive or negative  value.   The range of a DO-LOOP is determined by the terminating word.   DO-LOOP may be nested.  Capacity for three levels  of  nesting  is specified as a  minimum  for  standard systems. | |
 | DOES | | I,C | | Define  the run-time action of a word created by a  high-level defining word.  Used in the form:   <br>: **name** ... CREATE ... DOES> ... ; <br>and then   **namex  name**<br>Marks  the  termination of the defining part of  the  defining word **name** and begins the defining of the run-time action for words  that will later be defined by **name**.   On execution of **namex**  the  sequence  of  words  between  DOES>  and  ;  are executed, with the address of **namex**'s parameter field on the stack. | |
 | DROP | n -- | I,C | Working | Drop top number from the stack | |
@@ -171,7 +174,7 @@ BLOCK   BUFFER   EMPTY-BUFFERS   LIST LOAD   SAVE-BUFFERS   SCR   UPDATE
 | OVER | n1 n2 -- n1 n2 n1 | I,C | Working | Leave a copy of the second number on the stack. | |
 | PAD | -- addr | I,C | Working | The address of a scratch area used to hold character strings for intermediate processing.   The minimum capacity of PAD is 64 characters (addr through addr+63). | |
 | PICK | n1 -- n2 | | | Return the contents of the n1-th stack value,  not counting n1 itself.  An error condition results for n less than one.  <br>2 PICK  is equivalent to OVER.  {1..n} | |
-| QUERY | | | | ccept input of up to 80 characters (or until a 'return') from the operator's terminal, into the terminal input buffer.  WORD may be used to accept text from this buffer  as  the  input stream, by setting >IN and BLK to zero. | |
+| QUERY | | | | Accept input of up to 80 characters (or until a 'return') from the operator's terminal, into the terminal input buffer.  WORD may be used to accept text from this buffer  as  the  input stream, by setting >IN and BLK to zero. | |
 | QUIT | | | | Clear the return stack, setting execution mode, and return control to the terminal.  No message is given. | |
 | R> | -- n | C | | Transfer n from the return stack to the data stack. | |
 | R@ | -- n | C | | Copy the number on top of the return stack to the data stack. | |
@@ -217,17 +220,17 @@ DOUBLE NUMBER WORD SET
 | 2ROT | d1 d2 d3 -- d2 d3 d1 | | | Rotate the third double number to the top of the stack. | |
 | 2SWAP | d1 d2 -- d2 d1 | | | Exchange the top two double numbers on the stack. | |
 | 2VARIABLE | | | | A defining word used in the form:<br>2VARIABLE  **name**<br>to  create a dictionary entry of **name** and assign four  bytes for  storage  in the parameter field.   When **name** is  later executed,  it  will leave the address of the first byte of its parameter field is placed on the stack. | |
-| D+ | d1 d2 -- d3 | | | Leave the arithmetic sum of d1 and d2. | |
-| D- | d1 d2 -- d3 | | | Subtract d2 from d1 and leave the difference d3. | |
-| | D. | d -- | | | Display d converted according to BASE in a free field  format, with one trailing blank.  Display the sign only if negative. | |
+| D+ | d1 d2 -- d3 | I,C | impl. | Leave the arithmetic sum of d1 and d2. | |
+| D- | d1 d2 -- d3 | I,C | impl. | Subtract d2 from d1 and leave the difference d3. | |
+| | D. | d -- | I,C | impl. | Display d converted according to BASE in a free field  format, with one trailing blank.  Display the sign only if negative. | |
 | D.R | d n -- | | | Display  d converted according to BASE,  right aligned in an n character field. Display the sign only if negative. | |
 | D0= | d -- flag | | | Leave true if d is zero. | |
 | D< | d1 d2 -- flag | | | True if d1 is less than d2. | |
 | D= | d1 d2 -- flag | | | True if d1 equals d2. | |
-| DABS | d1 -- d2 | | | Leave as a positive double number d2,  the absolute value of a double number, d1.  {0..2,147,483,647} | |
+| DABS | d1 -- d2 | I,C | impl. | Leave as a positive double number d2,  the absolute value of a double number, d1.  {0..2,147,483,647} | |
 | DMAX | d1 d2 -- d3 | | | Leave the larger of two double numbers. | |
 | DMIN | d1 d2 -- d3 | | | Leave the smaller of two double numbers. | |
-| DNEGATE | d -- -d | | | Leave  the double number two's complement of a double  number, i.e., the difference 0 less d. | |
+| DNEGATE | d -- -d | I,C | impl. | Leave  the double number two's complement of a double  number, i.e., the difference 0 less d. | |
 | DU< | ud1 ud2 -- flag | | | rue if ud1 is less than ud2.  Both numbers are unsigned. | |
 
 ##Assembler Word Set
