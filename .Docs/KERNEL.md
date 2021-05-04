@@ -122,7 +122,7 @@ Create a hDEV
 # OpenDir  
 
 ## C  
-`int hDIR opendir (const char * dirpath);`  
+`short int hDIR opendir (const char * dirpath);`  
 
 ## ASM  
 `>LDYA dirpath`  
@@ -231,17 +231,21 @@ Return X+Y, X-Y, X*Y, X/Y, X mod Y....
 ## RETURN VALUE  
  On stack (long)  
 
-# FAdd,FSub,FMult,FDiv,FPwr  
-Return X+Y, X-Y, X*Y, X/Y, X^Y  
+# FAdd,FSub,FMul,FDiv,FPwr  
+Return X*Y, X/Y, X+Y, X-Y  
+
+## C  
+`float pwr ( float x, float y);`  
 
 ## ASM  
 **In:**  
 `>PUSHF X (float)`  
 `>PUSHF Y (float)`  
+`>FPU fmul`  
+`>FPU fdiv`  
+`>FPU fmod`							TODO  
 `>FPU fadd`  
 `>FPU fsub`  
-`>FPU fmult`  
-`>FPU fdiv`  
 `>FPU fpwr`  
 
 ## RETURN VALUE  
@@ -424,7 +428,7 @@ Load a file in AUX memory (Stock Objects)
 # GetStkObj  
 
 ## C  
-`int *ptr getstkobj (shoirt int hStkObj);`  
+`int *ptr getstkobj (short int hStkObj);`  
 
 ## ASM  
 `lda hStkObj`  
@@ -480,12 +484,11 @@ A = Child PSID
 `int kill(short int pid, short int sig);`  
 
 ## ASM  
+`>PUSHB pid`  
 `>PUSHB sig`  
-`lda pid`  
 `>SYSCALL kill`  
 
 ## RETURN VALUE  
-A = Child PSID  
 
 # LoadTxtFile  
 Load TXT a file in memory (with ending 0)  
@@ -1355,8 +1358,8 @@ Concatenate strings
 
 ## ASM  
 **In:**   
+`>PUSHWI destination`  
 `>PUSHWI source`  
-`>LDYAI destination`  
 `>SYSCALL strcat`  
 
 ## RETURN VALUE   
@@ -1370,8 +1373,8 @@ Copy string
 
 ## ASM  
 **In:**   
+`>PUSHWI destination`  
 `>PUSHWI source`  
-`>LDYAI destination`  
 `>SYSCALL strcpy`  
 
 ## RETURN VALUE   
@@ -1416,8 +1419,8 @@ Compare 2 strings
 
 ## ASM  
 **In:**   
+`>PUSHWI s1`  
 `>PUSHWI s2`  
-`>LDYAI s1`  
 `>SYSCALL strcmp`  
 
 ## RETURN VALUE   
@@ -1434,8 +1437,8 @@ Compare 2 strings, ignoring case
 
 ## ASM  
 **In:**   
+`>PUSHWI s1`  
 `>PUSHWI s2`  
-`>LDYAI s1`  
 `>SYSCALL strcasecmp`  
 
 ## RETURN VALUE   
@@ -1444,11 +1447,21 @@ CS : no match
  CC, Y,A=0  
  CS, Y,A > 0 or < 0  
 
+# StrVSet  
+
+## ASM  
+`>PUSHB hSTRV`  
+`>PUSHW id`  
+`>PUSHW ptr`  
+`>SYSCALL StrVSet`  
+
+## RETURN VALUE  
+
 # StrVGet  
 
 ## ASM  
 `>PUSHB hSTRV`  
-`>PUSHB index`  
+`>PUSHW id`  
 `>PUSHW ptr`  
 `>SYSCALL StrVGet`  
 
@@ -1456,25 +1469,21 @@ CS : no match
  CC: Y,A = Ptr  
  CS: Y,A = NULL  
 
-# StrVShift  
+# StrVNew  
 
 ## ASM  
-`>PUSHB hSTRV`  
-`>PUSHB index`  
-`>SYSCALL StrVShift`  
+`>LDYA size`  
+`>SYSCALL StrVNew`  
 
 ## RETURN VALUE  
 
-# StrVAdd  
+# StrVFree  
 
 ## ASM  
-`>PUSHB hSTRV`  
-`>PUSHW str`  
-`>SYSCALL StrVAdd`  
+`lda hSTRV`  
+`>SYSCALL StrVFree`  
 
 ## RETURN VALUE  
-CC : str added to hSTRV  
-CS : hSTRV full  
 
 # Time  
 Get System Time in Buffer  

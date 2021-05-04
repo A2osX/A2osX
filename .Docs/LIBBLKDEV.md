@@ -6,7 +6,7 @@ Copyright 2015 - 2020, Remy Gibert and the A2osX contributors.
 # D2TrkRead16s  
 Write a track (16 sectors)  
  PUSHB = DSSS0000  
- PUSHB = TrackNum * 4	: 0->136+	  
+ PUSHB = TrackNum * 4	: 0->136+  
  PUSHW = Ptr to 16*256 buffer  
 
 ## RETURN VALUE  
@@ -16,7 +16,9 @@ Write a track (16 sectors)
 # D2TrkWrite16s  
 Write a track (16 sectors)  
  PUSHB = DSSS0000  
- PUSHB = TrackNum * 4	: 0->136+	  
+ PUSHB = VolNum  
+ PUSHB = HeadNum (0,1)  
+ PUSHB = TrackNum * 4	: 0->136+  
  PUSHW = Ptr to 16*256 buffer  
 
 ## RETURN VALUE  
@@ -38,7 +40,7 @@ Write a track (NIBBLE)
  Compute space needed for ProDOS Catalog  
 
 ## C  
-int getprodoscatsize (short int options, short int catsize, int devsize );    
+int getprodoscatsize (short int options, short int catsize, int devsize );  
 
 ## ASM  
 **In:**  
@@ -46,7 +48,7 @@ int getprodoscatsize (short int options, short int catsize, int devsize );
  PUSHB = Catalog Size (in blocks)  
  PUSHB = Options  
 
-## RETURN VALUE   
+## RETURN VALUE  
  X=BlockCount (max 22)  
  Y,A=BufSize  (max $4400)  
 

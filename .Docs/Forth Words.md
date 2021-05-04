@@ -270,7 +270,7 @@ The Reference Word Set contain both Standard Word Definitions  and uncontrolled 
 | ABORT" | flag -- | I,C | | Used in a colon-definition in the form:<br>ABORT" stack empty"<br>If the flag is true,  print the following text,  till ".  Then execute ABORT. | |
 | AGAIN | | I,C | | Effect  an  unconditional jump back to the start of  a  BEGIN-AGAIN loop. | |
 | ASCII | -- char (executing)<br>-   (compiling) | I,C | | Leave  the  ASCII  character  value  of  the  next   non-blank character in the input stream.   If compiling, compile it as a literal, which will be later left when executed. | |
-| ASHIFT | n1 n2 -- n3 | | | Shift  the  value  n1 arithemetically n2 bits left  if  n2  is positive,  shifting  zeros  into  the  least-significant bit positions.   If  n2 is negative, n1 is  shifted  right.   Sign extension is to be consistent with the processor's  arithmetic shift. | |
+| ASHIFT | n1 n2 -- n3 | | | Shift the value n1 arithmetically n2 bits left if n2  is positive,  shifting  zeros  into  the  least-significant bit positions.   If  n2 is negative, n1 is  shifted  right.   Sign extension is to be consistent with the processor's  arithmetic shift. | |
 | B/BUF | -- 1024 | | | A constant leaving 1024, the number of bytes per block buffer. | |
 | BELL | | | | Activate  a terminal bell or noise-maker as appropriate to the device in use. | |
 | BL | -- n | | | Leave the ASCII character value for space (decimal 32). | |
