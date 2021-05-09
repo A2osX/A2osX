@@ -716,7 +716,7 @@ CS : not found
 # SListFree  
 
 ## ASM  
-`>PUSHB hSList`  
+`lda hSList`  
 `>SYSCALL SListFree`  
 
 ## RETURN VALUE  

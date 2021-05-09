@@ -2,7 +2,10 @@ NEW
   AUTO 3,1
 				.LIST OFF
 *--------------------------------------
-CORE.Init		>LDYAI CODESEG
+CORE.Init		ldy #CCS.MAX
+				sty pCCS
+
+				>LDYAI CODESEG
 				>SYSCALL GetMem
 				bcs .9
 
@@ -86,7 +89,6 @@ CORE.Cleanup	ldy #hFWRefBuf
 				>LDA.G hVars
 				beq .1
 
-				>PUSHA
 				>SYSCALL SListFree
 
 				>STZ.G hVars
@@ -94,7 +96,6 @@ CORE.Cleanup	ldy #hFWRefBuf
 .1				>LDA.G hLabels
 				beq .8
 
-				>PUSHA
 				>SYSCALL SListFree
 
 				>STZ.G hLabels
@@ -122,13 +123,15 @@ CORE.Compile	jsr CORE.GetChar
 				beq .80					#/bin/acos....
 
 				cmp #';'
-				beq .80					Comment: skip line...
+				bne .1
 
-				cmp #C.CR
+.80				jmp CORE.SkipLine		Comment: skip line...
+
+.1				cmp #C.CR
 				beq .88 				EOL
 
 				jsr CORE.CheckCharNB
-				bcs .1					CS=SPACE -> go check VAR or KW
+				bcs .2					CS=SPACE -> go check VAR or KW
 
 				jsr CORE.IsLetter		LABEL must start with a letter
 				bcs .99
@@ -138,20 +141,23 @@ CORE.Compile	jsr CORE.GetChar
 
 				bra .8
 *--------------------------------------
-.1				jsr CORE.GetNextCharNB	skip SPACE(s) or ":"
+.2				jsr CORE.GetNextCharNB	skip SPACE(s) or ":"
 				bcs .99
 
-				cmp #C.CR
+.21				cmp #C.CR
 				beq .88 				EOL
 
 				jsr CORE.IsLetter
 				bcs .90
 
 				>LDYA L.ACOS.KW
-				jsr CORE.Lookup
+				jsr CORE.LookupSkip
 				bcs .3
 
-				jmp (J.ACOS.KW,x)
+				jsr CORE.KW.JMP
+				bcs .99
+				
+				bra .8
 *--------------------------------------
 .3				jsr CORE.CreateOrGetVar
 				bcs .90
@@ -181,19 +187,22 @@ CORE.Compile	jsr CORE.GetChar
 .4				jsr CODE.INTSET			Store Int16 result in DATASEG
 *--------------------------------------
 .8				jsr CORE.GetCharNB
-				bcs .99
+				bcs .88
 
 				cmp #':'
-				beq .1
+				beq .2					go skip : and continue
 
-				cmp #C.CR
-				bne .90
+				bra .21
 
-.88				clc
+.88				ldy pCCS
+				bmi .89
+	
+				jsr KW.ENDIF
+				bcs .99
+	
+.89				clc
 
 				jmp CORE.GetNextChar	skip char
-
-.80				jmp CORE.SkipLine
 
 .90				lda #E.CSYN
 				sec
@@ -202,6 +211,8 @@ CORE.Compile	jsr CORE.GetChar
 .91				lda #E.TMISMATCH
 				sec
 				rts
+*--------------------------------------
+CORE.KW.JMP		jmp (J.ACOS.KW,x)
 *--------------------------------------
 CORE.FWREF		>LDA.G hFWRefBuf
 				>SYSCALL GetMemPtr
@@ -337,7 +348,12 @@ CORE.LookupOPS	lda (ZPInputBufPtr)
 .19				sec	
 .99				rts				
 *--------------------------------------
-CORE.Lookup		>STYA ZPPtr1
+CORE.LookupSkip	sec
+				.HS	90					BCC
+CORE.Lookup		clc
+				php
+
+				>STYA ZPPtr1
 
 				ldx #0
 
@@ -356,7 +372,10 @@ CORE.Lookup		>STYA ZPPtr1
 				jsr .10					next char in text...
 				bcc .4					valid....failed
 
-.3				tya						Keyword Len
+.3				plp
+				bcc .8
+				
+				tya						Keyword Len
 
 				jmp CORE.SkipA
 
@@ -377,8 +396,10 @@ CORE.Lookup		>STYA ZPPtr1
 				lda (ZPPtr1)			Array Ending 0, lookup failed
 				bne .1
 
+				plp
+
 .9				sec
-				rts
+.8				rts
 *--------------------------------------
 .10				iny
 				lda (ZPInputBufPtr),y	Get Src text char...
@@ -603,7 +624,15 @@ CORE.IsOPSChar	phx
 				clc
 				rts
 *--------------------------------------
-CORE.IsEndExp	cmp #')'
+CORE.IsKW		jsr CORE.IsLetter
+				bcs .9
+
+				>LDYA L.ACOS.KW
+				jmp CORE.Lookup
+
+.9				rts
+*--------------------------------------
+CORE.IsEndExp	cmp #')'				CS = true
 				beq CORE.ToUpperCase.RTS
 
 				cmp #','
@@ -612,9 +641,9 @@ CORE.IsEndExp	cmp #')'
 				cmp #';'
 				beq CORE.ToUpperCase.RTS
 
-CORE.IsEndInst	cmp #':'				CS=TRUE
+CORE.IsEndInst	cmp #':'				CS = true
 				beq .8
-
+			
 				cmp #C.CR
 				beq .8
 
@@ -630,7 +659,7 @@ CORE.IsLetterOrDigit
 				jsr CORE.IsDigit10
 				bcc CORE.IsLetterRTS
 *---------------------------------------
-CORE.IsLetter	cmp #'_'
+CORE.IsLetter	cmp #'_'				CC = true
 				bne .1
 
 				clc
