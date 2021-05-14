@@ -829,6 +829,21 @@ A = hFILE
 CC = OK, CS = ERROR  
 A = hFD  
 
+# fputc (BLOCKING)  
+Print A (char) to hFILE  
+
+## C  
+`int fputc ( hFILE stream , short int character );`  
+
+## ASM  
+**In:**  
+`>PUSHB stream`  
+`>PUSHB character`  
+`>SYSCALL fputc`  
+
+## RETURN VALUE   
+CC = success  
+
 # putchar (BLOCKING)  
 Print A (char) to StdOut  
 
@@ -839,21 +854,6 @@ Print A (char) to StdOut
 **In:**  
 `lda character`  
 `>SYSCALL putchar`  
-
-## RETURN VALUE   
-CC = success  
-
-# fputc (BLOCKING)  
-Print A (char) to hFILE  
-
-## C  
-`int fputc ( hFILE stream , short int character );`  
-
-## ASM  
-**In:**  
-`>PUSHB character`  
-`lda stream`  
-`>SYSCALL fputc`  
 
 ## RETURN VALUE   
 CC = success  
@@ -1004,9 +1004,9 @@ Read bytes from file
 
 ## ASM  
 **In:**  
-`>PUSHWI count`  
+`>PUSHB stream`  
 `>PUSHW ptr`  
-`lda stream`  
+`>PUSHW count`  
 `>SYSCALL fread`  
 
 ## RETURN VALUE  
@@ -1020,9 +1020,9 @@ Write bytes to file
 
 ## ASM  
 **In:**  
-`>PUSHWI count`  
+`>PUSHB stream`  
 `>PUSHW ptr`  
-`lda stream`  
+`>PUSHW count`  
 `>SYSCALL fwrite`  
 
 ## RETURN VALUE  
@@ -1046,9 +1046,9 @@ Set the file-position indicator for hFILE
 
 ## ASM  
 **In:**  
-`>PUSHBI whence`  
+`>PUSHB stream`  
 `>PUSHL offset`  
-`lda stream`  
+`>PUSHB whence`  
 `>SYSCALL fseek`  
 
 # FEOF  
@@ -1561,8 +1561,8 @@ Convert S.TIME struct to CSTR
 
 ## ASM  
 **In:**  
+`>PUSHW pathname`  
 `>PUSHB flags`  
-`>LDYA pathname`  
 `>SYSCALL open`  
 
 ## RETURN VALUE  
@@ -1586,9 +1586,9 @@ REG File created on ProDOS : T=TXT,X=$0000
 
 ## ASM  
 **In:**  
-`>PUSHWI count`  
+`>PUSHB fd`  
 `>PUSHW buf`  
-`lda fd`  
+`>PUSHW count`  
 `>SYSCALL read`  
 
 ## RETURN VALUE  
@@ -1602,14 +1602,27 @@ CS: A = EC
 
 ## ASM  
 **In:**  
-`>PUSHWI count`  
+`>PUSHB fd`  
 `>PUSHW buf`  
-`lda fd`  
+`>PUSHW count`  
 `>SYSCALL write`  
 
 ## RETURN VALUE  
 CC: Y,A = bytes written  
 CS: A = EC  
+
+# LSeek  
+Set the file-position indicator for hFD  
+
+## C  
+`int lseek( short int hFD, long offset, short int whence );`  
+
+## ASM  
+**In:**  
+`>PUSHB hFD`  
+`>PUSHL offset`  
+`>PUSHB whence`  
+`>SYSCALL fseek`  
 
 # ChOwn  
 

@@ -1,6 +1,35 @@
 NEW
   AUTO 3,1
 */--------------------------------------
+* # fputc (BLOCKING)
+* Print A (char) to hFILE
+* ## C
+* `int fputc ( hFILE stream , short int character );`
+* ## ASM
+* **In:**
+* `>PUSHB stream`
+* `>PUSHB character`
+* `>SYSCALL fputc`
+* ## RETURN VALUE 
+* CC = success
+*\--------------------------------------
+K.FPutC			lda (pStack)			character
+				sta K.IOBuf
+
+				ldy #1
+				lda (pStack),y			hFile
+				>PUSHA
+
+				jsr STDIO.Put1
+				bcc .8
+				
+				tay
+				beq .9					BLOCKING, keep parms on stack
+
+.8				>POP 2
+
+.9				rts
+*/--------------------------------------
 * # putchar (BLOCKING)
 * Print A (char) to StdOut
 * ## C
@@ -12,56 +41,28 @@ NEW
 * ## RETURN VALUE 
 * CC = success
 *\--------------------------------------
-K.PutChar		>PUSHA					character
+K.PutChar		sta K.IOBuf				character
 
 				ldy #S.PS.hStdOut
 				lda	(pPS),y
-				jsr K.FPutC
-				bcc .8
-
-				tay
-				bne .8
-
-				>PULLA					CS,A=0:BLOCKING, restore A
-
-.8				rts
-*/--------------------------------------
-* # fputc (BLOCKING)
-* Print A (char) to hFILE
-* ## C
-* `int fputc ( hFILE stream , short int character );`
-* ## ASM
-* **In:**
-* `>PUSHB character`
-* `lda stream`
-* `>SYSCALL fputc`
-* ## RETURN VALUE 
-* CC = success
-*\--------------------------------------
-K.FPutC			jsr PFT.CheckNodeA
-				bcs .8
-
-				lda (pStack)			character
-				sta K.IOBuf
+				>PUSHA
+*--------------------------------------
+STDIO.Put1		>PUSHWI K.IOBuf			buf
 
 				lda #0
 				>PUSHA
 				inc						write 1 byte
 				>PUSHA
 
-				>PUSHWI K.IOBuf			buf
-				jsr IO.Write
-				bcc .8					pop char...
+				jsr K.FWrite
+				bcc .9
 
-				cmp #E.NODATA
-				sec
-				bne .8
+				tay
+				bne .9
 
-				inc						CS,A=0:BLOCKING
-				rts
+				>POP 5
 
-.8				>POP 1
-				rts
+.9				rts
 */--------------------------------------
 * # puts (BLOCKING)
 * Write Str to StdOut, appends '\r\n'
@@ -76,13 +77,13 @@ K.FPutC			jsr PFT.CheckNodeA
 *\--------------------------------------
 K.PutS			>STYA .1+1
 
-				ldy #0
+				ldx #0
 
-.1				lda $FFFF,y				SELF MODIFIED
+.1				lda $FFFF,x				SELF MODIFIED
 				beq .2
 
-				sta K.IOBuf,y
-				iny
+				sta K.IOBuf,x
+				inx
 				bne .1
 
 .9				lda #E.BUF
@@ -90,33 +91,32 @@ K.PutS			>STYA .1+1
 				rts
 
 .2				lda #C.CR
-				sta K.IOBuf,y
-				iny
+				sta K.IOBuf,x
+				inx
 				beq .9
 
 				lda #C.LF
-				sta K.IOBuf,y
-				iny
+				sta K.IOBuf,x
+				inx
 				beq .9
-
-				lda #0
-				sta K.IOBuf,y
 
 				ldy #S.PS.hStdOut
 				lda	(pPS),y
 				>PUSHA
 				>PUSHWI K.IOBuf
+				>PUSHBI 0
+				txa
+				>PUSHA
 
-				jsr K.FPutS
+				jsr K.FWrite
+				bcc .99
 
-				bcc K.PutS.RTS
 				tay
-				bne K.PutS.RTS
+				bne .99
 
-				>LDYA .1+1				CS,A=0:BLOCKING, restore Y,A
+				>POP 5					pop hFile, buffer & len
 
-K.PutS.RET3		>POP 3					pop StdOut & buffer
-K.PutS.RTS		rts
+.99				rts
 */--------------------------------------
 * # fputs (BLOCKING)
 * Write Str to hFILE
@@ -130,42 +130,52 @@ K.PutS.RTS		rts
 * ## RETURN VALUE 
 * CC = success
 *\--------------------------------------
-K.FPutS			jsr PFT.CheckNode2		set IO.hFD
-				bcs K.PutS.RET3
-
-				lda (pStack)
-				sta ZPPtr2				Get String
+K.FPutS			lda (pStack)
+				sta ZPPtr1				Get String
+				sta ZPPtr2
+				
 				ldy #1
 				lda (pStack),y
+				sta ZPPtr1+1
 				sta ZPPtr2+1
-
+				
 				ldy #0
 				ldx #0
 
-.1				lda (ZPPtr2),y
+.1				lda (ZPPtr1),y
 				beq .2
 
 				iny
 				bne .1
 
 				inx
+				inc ZPPtr1+1
 				bra .1
 
-.2				txa
-				>PUSHA					push len HI
+.2				phy
 
-				tya
-				>PUSHA					push len LO
+				ldy #2
+				lda (pStack),y
+				>PUSHA
 
 				>PUSHW ZPPtr2
-				jsr IO.Write
-				bcc K.PutS.RET3
 				
-				cmp #E.NODATA
-				sec
-				bne K.PutS.RET3			IO Error
+				txa
+				>PUSHA					push len HI
 
-				inc						FF-> 0 = BLOCKING
+				pla
+				>PUSHA					push len LO
+
+				jsr K.Write
+				bcc .8
+				
+				tay
+				bne .8
+				
+				>POP 5
+				rts
+				
+.8				>POP 2				
 
 K.FPutS.RTS		rts
 */--------------------------------------
@@ -190,10 +200,7 @@ K.FPutS.RTS		rts
 * (pStack)+2	s -> ZPPtr2
 * (pStack)+0	n -> ZPPtr1
 *--------------------------------------
-K.FGetS			jsr PFT.CheckNode4
-				bcs K.FPutS.RTS
-
-				ldy #3
+K.FGetS			ldy #3
 
 .1				lda (pStack),y
 				sta ZPPtr1,y
@@ -203,18 +210,13 @@ K.FGetS			jsr PFT.CheckNode4
 				lda ZPPtr1+1
 				bmi .4					already something in buffer
 			
-.2				jsr STDIO.Get.1
-				bcc .3
+.2				ldy #4
+				lda (pStack),y
+				jsr STDIO.Get1
+				bcs .9
 
-				cmp #MLI.E.EOF
-				beq .9
-
-				cmp #E.NODATA
-				sec
-				bne .9					IO error
-
-				lda #0					BLOCKING
-				rts
+*				BLOCKING > POP 5 FREAD parms
+*				EOF or IOERR.... > POP 5 FGETS parms
 
 .3				lda K.IOBuf
 				cmp #C.LF				Discard any leading LF from a prev CR/LF
@@ -233,7 +235,9 @@ K.FGetS			jsr PFT.CheckNode4
 				
 				bra .5
 *--------------------------------------
-.4				jsr STDIO.Get.1
+.4				ldy #4
+				lda (pStack),y
+				jsr STDIO.Get1
 				bcs .6
 
 .5				lda K.IOBuf
@@ -249,12 +253,15 @@ K.FGetS			jsr PFT.CheckNode4
 				
 				beq .8					Buffer full
 				
-.6				cmp #MLI.E.EOF
+.6				tay
+				beq .70
+				
+				cmp #MLI.E.EOF
 				beq .8					String terminated by EOF
 
-				cmp #E.NODATA
-				sec
-				bne .9					I/O error
+				bra .9					I/O error > POP 5 FGETS parms
+
+.70				jsr .9					> POP 5 FREAD parms
 
 				ldy #3
 
@@ -298,29 +305,27 @@ K.GetChar		ldy #S.PS.hStdIn
 *  CC = success
 *   A = char
 *\--------------------------------------
-K.GetC			jsr PFT.CheckNodeA
-				bcs .9
-
-				jsr STDIO.Get.1
+K.GetC			jsr STDIO.Get1
 				bcc .8
 				
-				cmp #E.NODATA
-				sec
+				tay
 				bne .9					I/O error
 
-				inc						0 = BLOCKING
+				>POP 5					BLOCKING
 				rts
 
 .8				lda K.IOBuf
 
 .9				rts
 *--------------------------------------
-STDIO.Get.1		lda #0
+STDIO.Get1		>PUSHA
+
+				>PUSHWI K.IOBuf
+				lda #0
 				>PUSHA
 				inc						read 1 byte
 				>PUSHA
-				>PUSHWI K.IOBuf
-				jmp IO.Read
+				jmp K.FRead
 */--------------------------------------
 * # ungetc
 * push byte back into input stream
@@ -402,17 +407,17 @@ K.FClose		jsr PFT.CheckNodeA
 * `int fread (short int stream, void * ptr, int count );`
 * ## ASM
 * **In:**
-* `>PUSHWI count`
+* `>PUSHB stream`
 * `>PUSHW ptr`
-* `lda stream`
+* `>PUSHW count`
 * `>SYSCALL fread`
 * ## RETURN VALUE
 *  Y,A = Bytes Read
 *\--------------------------------------
-K.FRead			jsr PFT.CheckNodeA
-				bcs K.FWrite.RET4
+K.FRead			jsr PFT.CheckNode4
+				bcs K.FWrite.RET5
 
-				jsr IO.Read
+				jsr UNISTD.Read
 				bcs K.FWrite.9
 
 K.FRead.RTS		rts			
@@ -423,32 +428,33 @@ K.FRead.RTS		rts
 * `int fwrite ( short int stream, const void * ptr, int count );`
 * ## ASM
 * **In:**
-* `>PUSHWI count`
+* `>PUSHB stream`
 * `>PUSHW ptr`
-* `lda stream`
+* `>PUSHW count`
 * `>SYSCALL fwrite`
 * ## RETURN VALUE
 *  Y,A = Bytes Written
 *\--------------------------------------
-K.FWrite		jsr PFT.CheckNodeA
-				bcs K.FWrite.RET4
+K.FWrite		jsr PFT.CheckNode4
+				bcs K.FWrite.RET5
 			
-				jsr IO.Write
-				bcc K.FWrite.RTS
+				jsr UNISTD.Write
+				bcc K.FRead.RTS
 
 K.FWrite.9		cmp #E.NODATA
 				sec
-				bne K.FWrite.RTS		IO Error
+				bne K.FRead.RTS			IO Error
 
 				dec pStack				FF = NODATA
 				dec pStack
 				dec pStack
-				dec pStack				keep ptr & count on stack
+				dec pStack
+				dec pStack				keep stream, ptr & count on stack
 				inc						0 = BLOCKING
 *				sec
-K.FWrite.RTS	rts
+				rts
 
-K.FWrite.RET4	>RET 4
+K.FWrite.RET5	>RET 5
 */--------------------------------------
 * # FFlush
 * ## C
@@ -476,25 +482,30 @@ STDIO.IOERR		lda #MLI.E.IO
 * `int fseek( short int stream, long offset, short int whence );`
 * ## ASM
 * **In:**
-* `>PUSHBI whence`
+* `>PUSHB stream`
 * `>PUSHL offset`
-* `lda stream`
+* `>PUSHB whence`
 * `>SYSCALL fseek`
 *\-------------------------------------
-K.FSeek			jsr PFT.CheckNodeA
+K.FSeek			ldy #5
+				jsr PFT.CheckNodeY
 				bcc .11
 
 				>RET 5
 
 .11				lda (pFD)
 				bne STDIO.IOERR
-				>PULLL ACC32
+				
 				>PULLA					whence
-				cmp #SEEK.END
+				tax
+				
+				>PULLL ACC32
+				cpx #SEEK.END
 				beq .30
+
 				bcs .98
 
-				dec
+				dex
 				beq .20
 
 				stz K.MLI.PARAMS+2
@@ -557,17 +568,17 @@ K.FSeek.RTS		rts
 K.FEOF			jsr PFT.CheckNodeA
 				bcs K.FSeek.RTS
 
-IO.EOF			lda (pFD)
+				lda (pFD)
 				tax
 				jmp (.1,x)
 .1				.DA FS.EOF.REG
 				.DA STDIO.IOERR			DIR
-				.DA IO.EOF.CDEV
+				.DA DEV.EOF
 				.DA STDIO.IOERR			BDEV
 				.DA STDIO.IOERR			LNK
 				.DA STDIO.IOERR			DSOCK
 				.DA IO.EOF.SSOCK
-				.DA IO.EOF.PIPE
+				.DA PIPE.EOF
 */--------------------------------------
 * # FTell
 * Return the current value of the file-position indicator
@@ -831,20 +842,19 @@ K.PrintF.1		sec						format string->ptr2
 				sec
 				jmp STDIO.Exit
 *--------------------------------------
-.8				ldx PrintF.hFILE
+.8				lda PrintF.hFILE
 				beq .80					Writing to buffer, append \0
 
-				>PUSHW PrintF.Cnt		Writing to File/dev...
+				>PUSHA
 				>PUSHWI K.IOBuf
-
-				txa
+				>PUSHW PrintF.Cnt		Writing to File/dev...
 				jsr K.FWrite
 				bcc .81
 
 				tay
 				bne .9
 			
-				>RET 4					0=BLOCKING
+				>RET 5					0=BLOCKING
 
 .80				ldy PrintF.Cnt			A=0, Writing to buffer, append \0
 				sta (pIOBuf),y
@@ -1070,6 +1080,7 @@ PrintF.PutC		phy
 				ply
 				inc PrintF.Cnt
 				bne .8
+
 				lda PrintF.hFILE
 				bne .9
 
