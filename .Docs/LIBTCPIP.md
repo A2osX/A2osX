@@ -5,9 +5,9 @@ Copyright 2015 - 2020, Remy Gibert and the A2osX contributors.
 
 # ARP.Clear  
  Clear ARP Cache  
-**In:**   
+**In:**  
 
-## RETURN VALUE   
+## RETURN VALUE  
 
 # ARP.Query  
  Query ARP Cache and returns HW address  
@@ -17,7 +17,7 @@ Copyright 2015 - 2020, Remy Gibert and the A2osX contributors.
 
 ## RETURN VALUE  
  CC: hit: MAC filled  
- CS: missed   
+ CS: missed  
 
 # ARP.Add  
  Add a static ARP cache record  
@@ -34,19 +34,19 @@ Copyright 2015 - 2020, Remy Gibert and the A2osX contributors.
 
 # DNS.Clear  
  Clear DNS Cache  
-**In:**   
+**In:**  
 
-## RETURN VALUE   
+## RETURN VALUE  
 
 # DNS.Query  
  Query DNS for specified host  
 **In:**  
   PUSHW = PTR to IP to fill with cached data  
-*	PUSHW = hostname PTR to PSTR   
+*	PUSHW = hostname PTR to PSTR  
 
 ## RETURN VALUE  
   CC: hit: IP filled with address  
-  CS: missed   
+  CS: missed  
 
 # DNS.Add  
  Add a static DNS record  
@@ -69,8 +69,8 @@ Create a new socket
 
 ## ASM  
 **In:**  
+`>PUSHB type`  
 `>PUSHB protocol`  
-`lda type`  
 `>LIBCALL hLIBTCPIP,LIBTCPIP.socket`  
 
 ## RETURN VALUE  
@@ -85,8 +85,8 @@ bind a name to a socket
 
 ## ASM  
 **In:**  
+`>PUSHB fd`  
 `>PUSHW addr`  
-`lda fd`  
 `>LIBCALL hLIBTCPIP,LIBTCPIP.socket`  
 
 ## RETURN VALUE  
@@ -101,8 +101,8 @@ Initiate a connection on a socket
 
 ## ASM  
 **In:**  
+`>PUSHB fd`  
 `>PUSHW addr`  
-`lda fd`  
 `>LIBCALL hLIBTCPIP,LIBTCPIP.socket`  
 
 ## RETURN VALUE  
@@ -157,9 +157,9 @@ Close socket
 
 ## ASM  
 **In:**  
-`>PUSHWI count`  
+`>PUSHB fd`  
 `>PUSHW buf`  
-`lda fd`  
+`>PUSHW count`  
 `>LIBCALL hLIBTCPIP,LIBTCPIP.read`  
 
 ## RETURN VALUE  
@@ -173,26 +173,37 @@ CS: A = EC
 
 ## ASM  
 **In:**  
-`>PUSHWI count`  
+`>PUSHB fd`  
 `>PUSHW buf`  
-`lda fd`  
+`>PUSHW count`  
 `>LIBCALL hLIBTCPIP,LIBTCPIP.write`  
 
 ## RETURN VALUE  
 CC: Y,A = bytes written  
 CS: A = EC  
 
-# Recv (RAW,DGRAM,SEQPKT)  
-
 # RecvFrom (RAW,DGRAM,SEQPKT)  
 
 ## C  
-`hMem recv(hFD fd);`  
 `hMem recvfrom(hFD fd, struct sockaddr *addr);`  
 
 ## ASM  
 **In:**  
+`>PUSHB fd`  
 `>PUSHW addr`		(RecvFrom)  
+`>LIBCALL hLIBTCPIP,LIBTCPIP.Recv`  
+
+## RETURN VALUE  
+CC: A = hMem  
+CS: A = EC  
+
+# Recv (RAW,DGRAM,SEQPKT)  
+
+## C  
+`hMem recv(hFD fd);`  
+
+## ASM  
+**In:**  
 `lda fd`  
 `>LIBCALL hLIBTCPIP,LIBTCPIP.Recv`  
 
@@ -200,20 +211,33 @@ CS: A = EC
 CC: A = hMem  
 CS: A = EC  
 
-# Send (RAW,DGRAM,SEQPKT)  
-
 # SendTo (RAW,DGRAM,SEQPKT)  
 
 ## C  
-`int skt.send(hFD fd, const void *buf, int count);`  
 `int skt.sendto(hFD fd, const void *buf, int count, const struct sockaddr *addr);`  
 
 ## ASM  
 **In:**  
-`>PUSHW addr`		(SendTo)  
-`>PUSHWI count`  
+`>PUSHB fd`  
 `>PUSHW buf`  
-`lda fd`  
+`>PUSHWI count`  
+`>PUSHW addr`  
+`>LIBCALL hLIBTCPIP,LIBTCPIP.sendto`  
+
+## RETURN VALUE  
+CC: Y,A = bytes written  
+CS: A = EC  
+
+# Send (RAW,DGRAM,SEQPKT)  
+
+## C  
+`int skt.send(hFD fd, const void *buf, int count);`  
+
+## ASM  
+**In:**  
+`>PUSHB fd`  
+`>PUSHW buf`  
+`>PUSHWI count`  
 `>LIBCALL hLIBTCPIP,LIBTCPIP.send`  
 
 ## RETURN VALUE  
@@ -241,8 +265,8 @@ Set Socket Options
 
 ## ASM  
 **In:**  
-`>PUSHBI opts`  
-`lda fd`  
+`>PUSHB fd`  
+`>PUSHB opts`  
 `>LIBCALL hLIBTCPIP,LIBTCPIP.SetSockOpt`  
 
 ## RETURN VALUE  
