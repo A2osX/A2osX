@@ -3,12 +3,12 @@ NEW
 				.LIST OFF
 *--------------------------------------
 CSH.Init		>SYSCALL SListNew
-				bcs .9
+				bcs .99
 
 				>STA.G CSH.hDefines
 
 				>SYSCALL SListNew
-				bcs .9
+				bcs .99
 
 				>STA.G CSH.hTags
 
@@ -19,7 +19,7 @@ CSH.Init		>SYSCALL SListNew
 
 				>LDYAI 256
 				>SYSCALL GetMem
-				bcs .9
+.99				bcs .9
 
 				>STYA ZPCSHCode
 				txa
@@ -48,6 +48,14 @@ CSH.Init		>SYSCALL SListNew
 				>STYA ZPCSHStack
 				txa
 				>STA.G CSH.hStack
+
+				>LDYAI 256
+				>SYSCALL GetMem
+				bcs .9
+
+				>STYA ZPCSHfDecl
+				txa
+				>STA.G CSH.hfDecl
 
 				lda #0
 				>STA.G CSH.ConstPtr
@@ -79,6 +87,9 @@ CSH.Quit		>LDA.G CSH.hSymbols
 				jsr .7
 
 				>LDA.G hFileBuf
+				jsr .7
+
+				>LDA.G CSH.hfDecl
 				jsr .7
 
 				>LDA.G CSH.hStack
@@ -115,30 +126,70 @@ CSH.Run.1		cmp #C.CR				empty line....
 				jmp CSH.DIR
 
 .4				cmp #'}'				End of block ?
-				bne .40
+				bne .10
 
 				jsr CSH.CheckStack		must be something on stack....
-				bcs .9
+				bcs CSH.Quit.RTS
+
 				jsr CSH.GetNextCharNB	Skip '}'
 				jsr CSH.Pop				was expected....
 				jsr CSH.Pop				get stacked Cmd...
 				tax
 				jmp (J.CSH.KW.END,x)
+*--------------------------------------
+.10				jsr CSH.IsLetter
+				bcc .20
 
-.40				jsr CSH.IsLetter
-				bcc .5
 
 
+				bcs .29					error, todo : PREOPS ++ --.....
+*--------------------------------------
+.20				>LDYA L.CSH.TMODS
+				jsr CSH.LookupID
+				bcs .50
 
-				bra .99					error, todo : PREOPS ++ --.....
+				jsr CSH.tDecl.JMP
+				bcs .59
 
-.5				jsr CSH.SavePtr			Save Ptr, in case of while,for....
+				jsr CSH.AddSymbol		add with undef value...
+				bcs .99					OOM or DUP
+
+				jsr CSH.GetCharNB
+				bcs .99
+
+				cmp #';'
+				beq .8
+
+				cmp #'='
+				bne .21
+
+				jsr CSH.GetNextCharNB	skip '='
+				bcs .99
+
+				lda ZPVarType
+				jsr CSH.ExpEval
+				bcs .9
+
+				jsr CSH.SetVarValueFromStack	X= Type, Set value to this var
+.29				bcs .99
+
+				bra .68
+
+.21				cmp #'('
+				bne .99
+
+				jsr CSH.fDecl
+				bcs .99
+
+				bra .68
+*--------------------------------------
+.50				jsr CSH.SavePtr			Save Ptr, in case of while,for....
 				>LDYA L.CSH.KW
 				jsr CSH.LookupID
 				bcs .6					not an internal CSH keyword....
 
 				jsr CSH.KW.JMP
-				bcs .9
+.59				bcs .9
 				bra .8
 
 .6				jsr CSH.GetVar
@@ -148,7 +199,13 @@ CSH.Run.1		cmp #C.CR				empty line....
 				jsr CSH.GetVarDef		Get Type & ptr...
 				bcs .9
 
-				jsr CSH.GetCharNB
+				lda ZPVarQual
+				bit #CSH.Q.FUNC
+				beq .60
+				
+
+*--------------------------------------
+.60				jsr CSH.GetCharNB
 				bcs .9
 
 				cmp #'='				TODO: all AOPS
@@ -164,7 +221,7 @@ CSH.Run.1		cmp #C.CR				empty line....
 				jsr CSH.SetVarValueFromStack 	X = Exp Type
 				bcs .9
 
-				jsr CSH.GetChar
+.68				jsr CSH.GetCharNB
 				cmp #';'
 				beq .8
 
@@ -337,46 +394,67 @@ CSH.AddSymbol	>LDA.G CSH.hSymbols
 .9				rts
 
 .99				lda #E.OOM
-				.HS 2C					BIT ABS
-CSH.TMISMATCH	lda #E.TMISMATCH
-				sec
+*				sec
 				rts
 *--------------------------------------
-CSH.fDeclaration
-				lda #CSH.Q.FUNC
-				tsb ZPVarType
+CSH.fDecl		lda ZPCSHfDecl
+				sta ZPVarDataPtr
+				
+				lda ZPCSHfDecl+1
+				sta ZPVarDataPtr+1
 
-
-				jsr CSH.SkipLine
-				clc
-				rts
-
-
+				lda ZPVarID
+				jsr CSH.fDeclAddA
+				lda ZPVarID+1
+				jsr CSH.fDeclAddA
+			>DEBUG	
 				jsr CSH.GetNextCharNB	Skip (
 				bcs .9
 
 .1				cmp #')'
 				beq .5
 
-				jsr CSH.GetDeclaration
+.2				jsr CSH.fDeclGetArg
 				bcs .99
 
-
+				jsr CSH.GetCharNB
+				bcs .9
+				
+				cmp #')'
+				beq .5
+				
+				cmp #','
+				bne .9
+				
+				jsr CSH.GetNextCharNB	Skip ,
+				bcs .9
+				
+				bra .2
 
 .5				jsr CSH.GetNextCharNB	Skip )
+				bcs .9
 
-				clc
-				rts
+				cmp #';'
+				bne .9
+				
+				jsr CSH.GetNextCharNB	Skip ;
+
+.8				lda #0
+				sta (ZPCSHfDecl)
+				
+				jmp CSH.SetVarValueFromStack
 
 .9				lda #E.CSYN
 				sec
 .99				rts
 *--------------------------------------
-CSH.GetDeclaration
-				>ENTER 4
+CSH.fDeclGetArg	>ENTER 4
 				
-				>LDYA L.CSH.MTYPES
+				>LDYA L.CSH.TMODS
 				jsr CSH.LookupID
+				bcs .9
+				
+				jsr CSH.tDecl
 				bcs .9
 				
 				
@@ -384,8 +462,26 @@ CSH.GetDeclaration
 				
 .9				lda #E.CSYN
 				sec
+
 .8				>LEAVE
 				rts
+*--------------------------------------
+CSH.fDeclAddA	sta (ZPCSHfDecl)
+				inc ZPCSHfDecl
+				bne .8
+				
+				inc ZPCSHfDecl+1
+				
+.8				rts				
+*--------------------------------------
+CSH.tDecl		jsr CSH.tDecl.JMP
+				bcs .9
+				
+				
+				
+.9				rts
+
+CSH.tDecl.JMP	jmp (J.CSH.TMODS,x)
 *--------------------------------------
 CSH.NewKey		>PUSHA
 				>PUSHW ZPInputBufPtr
@@ -771,14 +867,19 @@ CSH.GetChar		lda (ZPInputBufPtr)
 				sec
 				rts
 *---------------------------------------
+CSH.IsEndArg
+*---------------------------------------
 CSH.IsOPChar	ldx #CSH.OPChars.Cnt-1
 
 .1				cmp CSH.OPChars,x
 				beq .8
+
 				dex
 				bpl .1
+
 				sec
 				rts
+
 .8				clc
 				rts
 *---------------------------------------
@@ -788,16 +889,21 @@ CSH.IsLetterOrDigit
 *---------------------------------------
 CSH.IsLetter	cmp #'_'
 				bne .1
+
 				clc
 				rts
+
 .1				cmp #'A'
 				bcc .9
+
 				cmp #'Z'+1
 				bcc CSH.IsLetterRTS
 
 				cmp #'a'
 				bcc .9
+
 				cmp #'z'+1
+
 				rts						CC if lowercase
 
 .9				sec
