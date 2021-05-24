@@ -40,6 +40,12 @@ set SRCDIR=%~dp0..\LIB
 set FILTER=LIBTCPIP.S*.txt
 Call :SCAN
 
+set DOCFILE=%~dp0..\.Docs\Commands.md
+set SRCDIR=%~dp0..\BIN
+set FILTER=*.S.txt
+Call :SCAN
+
+
 echo.
 echo All done : !c! Files scanned.
 echo.
