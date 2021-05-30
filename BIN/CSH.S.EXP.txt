@@ -3,23 +3,27 @@ NEW
 				.LIST OFF
 *--------------------------------------
 * Input:
-*   ZPInputBufPtr, A = Expected type
+*   ZPInputBufPtr, Y,A = Expected type/qual
 * Output:
 *   CS, A = EC
-*   CC, X = Var Type, Value on Stack
+*   CC, Y,A = type/qual, Value on Stack
 *--------------------------------------
 CSH.ExpEval		ldx ZPPtr1
 				phx
 				ldx ZPPtr1+1			local : used by lookup
 				phx
+
 				ldx ZPPtr2				local : VarType
 				phx
-				ldx ZPPtr2+1			local : BOP
+				ldx ZPPtr2+1			local : VarQual
 				phx
 
-				sta ZPPtr2				local : expected type
+				ldx ZPPtr3				local : BOP
+				phx
 
-				lda #$ff
+				>STYA ZPPtr2			local : expected type/qual
+
+				lda #$ff				no previous OP
 				pha
 *--------------------------------------
 .10				jsr CSH.GetCharNB
@@ -31,12 +35,11 @@ CSH.ExpEval		ldx ZPPtr1
 				jsr CSH.GetNextCharNB	skip (
 				bcs .19
 
-				lda ZPPtr2
-
+				>LDYA ZPPtr2
 				jsr CSH.ExpEval
 				bcs .19
 
-				stx ZPPtr2
+				>STYA ZPPtr2			update type/qual
 
 				jsr CSH.GetCharNB
 				bcs .19
@@ -55,32 +58,30 @@ CSH.ExpEval		ldx ZPPtr1
 				jsr CSH.GetDefine
 				bcc .10
 
-				jsr CSH.GetVar
+				jsr CSH.VarLookup
 				bcs .21
 
-				ldx ZPPtr2				YA=VarID, X=expected var type (or 0=any)
-
-				jsr CSH.GetVarValueOnStack		Y,A = VarID, Get value on stack
+				jsr CSH.GetValue		Check type & Get value on stack
 				bcs .29
 
-				stx ZPPtr2				store real var type
 				bra .30
 
-.21				lda ZPPtr2				var type
+.21				>LDYA ZPPtr2			var type/qual
 				jsr CSH.fCall			X = function index
 				bcs .29
 
-				stx ZPPtr2				store real var type
+				>STYA ZPPtr2			store real var type
 				bra .30
-
+*--------------------------------------
 .22				jsr CSH.IsDigit10		number ?
 				bcs .24
 
-				ldx ZPPtr2
+				ldy ZPPtr2
 				bne .23
 
-				ldx #CSH.T.SINT
-				stx ZPPtr2
+				ldy #CSH.T.SINT
+				sty ZPPtr2
+				stz ZPPtr2+1
 
 .23				jsr CSH.GetNumOnStack
 				bcs .29
@@ -112,31 +113,31 @@ CSH.ExpEval		ldx ZPPtr1
 				jsr CSH.LookupOP
 				bcs .90
 
-				stx ZPPtr2+1			save OP(n)
+				stx ZPPtr3				save OP(n)
 
-.32				pla						get OP(n-1)
+.32				plx						get OP(n-1)
 				bmi .33					$ff....
 
-				cmp ZPPtr2+1
+				cpx ZPPtr3
 				bcc .33					OP(n) has precedence, on stack : V1,V2
 
-				ldy ZPPtr2				OP(n-1) has precedence...
-
+				>LDYA ZPPtr2			OP(n-1) has precedence...
 				jsr CSH.BOP.EXEC		compute V(n-1) <OP(n-1)> V(n)
 				bcc .32
 
 				bcs .99
 
-.33				pha						push back OP(n-1)
-				lda ZPPtr2+1			get OP(n)
+.33				phx						push back OP(n-1)
+
+				lda ZPPtr3				get OP(n)
 				pha						push OP(n) on stack
 
 				jmp .10					go check for next token
 *--------------------------------------
-.80				pla						any OP on stack ?
+.80				plx						any OP on stack ?
 				bmi .88
 
-				ldy ZPPtr2				Var Type
+				>LDYA ZPPtr2			Var Type
 				jsr CSH.BOP.EXEC
 				bcc .80
 
@@ -148,19 +149,23 @@ CSH.ExpEval		ldx ZPPtr1
 				bpl .99
 
 				sec
-				.HS 90					BCC
+				bra .89
+
 .88				clc
 
-				ldx ZPPtr2				X = Var Type
+				>LDYA ZPPtr2				Type/Qual
 
-				ply
-				sty ZPPtr2+1
-				ply
-				sty ZPPtr2
-				ply
-				sty ZPPtr1+1
-				ply
-				sty ZPPtr1
+.89				plx
+				stx ZPPtr3
+				plx
+				stx ZPPtr2+1
+				plx
+				stx ZPPtr2
+				plx
+				stx ZPPtr1+1
+				plx
+				stx ZPPtr1
+
 				rts
 *--------------------------------------
 CSH.AddContCharP
@@ -188,6 +193,7 @@ CSH.AddContCharP
 				adc ZPCSHConst
 				sta ZPCSHConst
 				bcc .3
+
 				inc ZPCSHConst+1
 .3				jsr CSH.GetNextChar		Skip "
 
@@ -199,11 +205,9 @@ CSH.AddContCharP
 				rts
 *--------------------------------------
 CSH.GetNumOnStack
-				txa
-				beq .99
-
-				cpx #CSH.T.FLOAT
+				cpy #CSH.T.FLOAT
 				bcc .1
+
 				bne .99
 
 				>PUSHW ZPInputBufPtr
@@ -215,8 +219,6 @@ CSH.GetNumOnStack
 .1				>PUSHW ZPInputBufPtr
 				>PUSHWI ZPInputBufPtr
 				>PUSHBI 10
-				phx
-
 				bcc .2
 
 				>SYSCALL StrToUL
@@ -224,10 +226,10 @@ CSH.GetNumOnStack
 
 .2				>SYSCALL StrToL
 
-.3				plx
-				bcs .9
+.3				bcs .9
 
-				lda CSH.TYPESIZE,x
+				ldy ZPPtr2
+				lda CSH.TYPESIZE-1,y
 				cmp #4
 				beq .8
 
@@ -253,6 +255,233 @@ CSH.GetNumOnStack
 .99				lda #E.TMISMATCH
 				sec
 				rts
+*--------------------------------------
+CSH.VarLookup	>PUSHB.G CSH.hSymbols
+
+				>PUSHW ZPInputBufPtr
+				>SYSCALL SListLookup
+				bcs .9
+
+				phy
+				pha
+				
+				txa
+*				clc
+				adc ZPInputBufPtr
+				sta ZPInputBufPtr
+				bcc .1
+
+				inc ZPInputBufPtr+1
+				clc
+
+.1				>PUSHB.G CSH.hSymbols
+
+				pla
+				>PUSHA
+				pla
+				>PUSHA					KeyID
+
+				>PUSHEA.G CSH.VarDef
+				>PUSHWI 8				8 bytes
+				>PUSHWI 0				From Start
+				>SYSCALL SListGetData
+.9				rts
+*--------------------------------------
+CSH.GetValue	lda ZPPtr2				target type
+				beq .1
+
+				>LDA.G CSH.VarDef		Type
+				cmp #CSH.T.VOID
+				beq .11
+
+				cmp ZPPtr2
+				bne .9
+
+.11				lda ZPPtr2+1			qual
+				>CMP.G CSH.VarDef+1
+				beq .2
+
+.9				lda #E.TMISMATCH
+				sec
+				rts
+				
+.1				>LDA.G CSH.VarDef		Type
+				sta ZPPtr2
+				iny
+				lda (pData),y
+				sta ZPPtr2+1
+				
+.2				lda ZPPtr3
+				pha
+				lda ZPPtr3+1
+				pha
+
+				>LDA.G CSH.VarDef+4
+				sta ZPPtr3
+				iny
+				lda (pData),y
+				sta ZPPtr3+1
+
+				ldx ZPPtr2
+				ldy CSH.TYPESIZE-1,x
+				
+.3				dey
+				lda (ZPPtr3),y
+				>PUSHA
+				tya
+				bne .3
+				
+				pla
+				sta ZPPtr3+1
+				pla
+				sta ZPPtr3
+
+				clc
+				rts
+*--------------------------------------
+* Input:
+*   ZPInputBufPtr, Y,A = Expected type/qual
+* Output:
+*   CS, A = EC
+*   CC, Y,A = type/qual, Result on Stack
+*--------------------------------------
+CSH.fCall		ldx ZPPtr1
+				phx
+				ldx ZPPtr1+1			local : fdef Ptr
+				phx
+				ldx ZPPtr2				local : type
+				phx
+				ldx ZPPtr2+1			local : qual
+				phx
+				ldx ZPPtr3				local : variadic size
+				phx
+				ldx ZPPtr3+1			local : f
+				phx
+
+				>STYA ZPPtr2			save Type/qual
+
+				stz ZPPtr3				Reset VARIADIC byte count
+
+				>LDYA L.CSH.FN
+				jsr CSH.LookupFN
+				bcs .10
+
+				stx	ZPPtr3+1			X = function index
+
+				>STYA ZPPtr1			f() definition, starting at returned type
+
+				jsr CSH.GetCharNB
+				bcs .10
+
+				cmp #'('
+				bne .52
+			
+				jsr CSH.GetNextCharNB	skip '('
+
+				bcs .10
+
+				jsr CSH.ZPPtr1GetW		Y,A = Return value Type/Qual
+
+				ldx ZPPtr2
+				beq .1					no check required
+
+				cpy ZPPtr2
+				bne .91
+
+				cmp ZPPtr2+1
+				bne .91
+
+.1				>STYA ZPPtr2			this will be the returned type/qual
+
+				jsr CSH.ZPPtr1GetNextW	advance to arg list type
+				beq .7					end of list, go check ending ')'
+*--------------------------------------
+.3				cpy #CSH.T.VARIADIC		if VARIADIC, don't advance to next arg and assume type = 0
+				bne .4
+
+				ldy #0
+				lda #0
+
+.4				jsr CSH.ExpEval			Y,A = 0 if VARIADIC
+				bcs .93
+
+				jsr CSH.GetVarSize		Y,A = Var Type/Qual
+
+				tax
+				lda (ZPPtr1)
+				eor #CSH.T.VARIADIC
+				bne .5
+
+				txa
+				clc						make sure pointer only 2 bytes
+				adc ZPPtr3
+				sta ZPPtr3				Add to byte count
+				bra .51					stay on VARIADIC tag
+
+.5				jsr CSH.ZPPtr1NextW
+
+.51				jsr CSH.GetCharNB
+.10				bcs .90
+
+				cmp #','
+				bne .6
+
+				jsr CSH.GetNextCharNB	Skip ,
+				jsr CSH.ZPPtr1GetW
+				bne .3					Another ARG....
+
+.52				bra .90					extra args....error
+
+.6				cmp #')'
+				bne .90
+
+				jsr CSH.ZPPtr1GetW
+				beq .8					no more arg after ')', exit
+
+				cpy #CSH.T.VARIADIC
+				bne .90					missing arg
+
+				>PUSHB ZPPtr3			push VARIADIC byte count
+				bra .8
+
+.7				jsr CSH.GetCharNB
+				bcs .90
+
+				cmp #')'
+				bne .90
+
+.8				jsr CSH.GetNextCharNB	Skip )
+
+				ldx ZPPtr3+1
+				jsr CSH.Exec
+				bcs .93
+
+				>LDYA ZPPtr2			type/qual
+				bra .93
+
+.90				lda #E.CSYN
+				bra .92
+
+.91				lda #E.TMISMATCH
+
+.92				sec
+
+.93				plx
+				stx ZPPtr3+1
+				plx
+				stx ZPPtr3
+
+				plx
+				stx ZPPtr2+1
+				plx
+				stx ZPPtr2
+
+				plx
+				stx ZPPtr1+1
+				plx
+				stx ZPPtr1
+
+.99				rts
 *--------------------------------------
 MAN
 SAVE usr/src/bin/csh.s.exp
