@@ -9,7 +9,11 @@ CIFS2.ChMod
 *--------------------------------------
 CIFS.FStat
 *--------------------------------------
-CIFS2.FStat		lda #MLI.E.BADCALL
+CIFS2.FStat
+				txa
+				ora #$80
+				
+*				lda #MLI.E.BADCALL
 				sec
 				rts
 *--------------------------------------
@@ -35,15 +39,7 @@ CIFS.Stat		>STYA pPath				resolved path
 
 				jsr SetT2ReqLenYA
 
-				pha
-				>PUSHB MountTable+3		hSocket
-				>PUSHW ZPReqPtr
-				
-				pla
-				>PUSHYA
-
-				ldx #LIBTCPIP.Send
-			jsr GO.LIBTCPIP
+				jsr WriteSocket
 				bcs .9
 
 				jmp Sleep
@@ -115,14 +111,7 @@ CIFS.MKDir		>STYA pPath				resolved path
 
 				jsr SetT2ReqLenYA
 
-				pha
-				>PUSHB MountTable+3		hSocket
-				>PUSHW ZPReqPtr
-				pla
-				>PUSHYA
-
-				ldx #LIBTCPIP.Send
-			jsr GO.LIBTCPIP
+				jsr WriteSocket
 				bcs .9
 
 				jmp Sleep
@@ -275,15 +264,7 @@ CIFS.ReadDir.Send
 
 				jsr SetT2ReqLenYA
 
-				pha
-				
-				>PUSHB MountTable+3		hSocket
-				>PUSHW ZPReqPtr
-				pla
-				>PUSHYA
-				
-				ldx #LIBTCPIP.Send
-			jsr GO.LIBTCPIP
+				jsr WriteSocket
 				bcs .9
 
 				jmp Sleep
@@ -536,6 +517,8 @@ CIFS2.ChOwn
 *--------------------------------------
 CIFS.FOpen		>STYA pPath				resolved path
 
+				jsr GetGTX
+
 				ldx #S.SMB.H.CMD.NT.CREATE.ANDX
 				jsr RequestSetupX
 
@@ -573,14 +556,7 @@ CIFS.FOpen		>STYA pPath				resolved path
 
 				jsr SetReqLenYAtA
 
-				pha
-				>PUSHB MountTable+3		hSocket
-				>PUSHW ZPReqPtr
-				pla
-				>PUSHYA
-
-				ldx #LIBTCPIP.Send
-			jsr GO.LIBTCPIP
+				jsr WriteSocket
 				bcs .9
 
 				jmp Sleep
@@ -605,14 +581,14 @@ CIFS2.FOpen		jsr ReadSocket
 				>SYSCALL2 GetMem
 				bcs .99
 
-				>STYA ZPPtr2
+				>STYA pFD
 
 				lda #S.FD.T.REG
-				sta (ZPPtr2)
+				sta (pFD)
 
 				lda hHandler
 				ldy #S.FD.PFT
-				sta (ZPPtr2),y
+				sta (pFD),y
 
 				ldy #S.NETBIOS+S.SMB.H+6	FileID
 				lda (ZPRespPtr),y
@@ -621,10 +597,10 @@ CIFS2.FOpen		jsr ReadSocket
 				lda (ZPRespPtr),y
 				
 				ldy #S.FD.REG.REF+1
-				sta (ZPPtr2),y
+				sta (pFD),y
 				dey
 				pla
-				sta (ZPPtr2),y
+				sta (pFD),y
 
 				ldy #4					path
 
@@ -661,33 +637,44 @@ CIFS2.FOpen		jsr ReadSocket
 *--------------------------------------
 CIFS.FClose		jsr GetPFD
 
+				jsr GetGtx
+				
 				ldx #S.SMB.H.CMD.CLOSE
 				jsr RequestSetupX
 
 				ldx #0
 
-.1				lda SMB.ComCreate.H,x
+.1				lda SMB.ComClose.H,x
 				sta (ZPReqPtr),y
 				iny
 				inx
-				cpx #SMB.ComCreate.H.Len
+				cpx #SMB.ComClose.H.Len
 				bne .1
 
-				tya						save Y = LEN
+				phy						save Y = LEN
+				
+				ldy #S.FD.REG.REF
+				lda (pFD),y
+				pha
+				iny
+				lda (pFD),y
+				
+				ldy #S.NETBIOS+S.SMB.H+2	FileID
+				sta (ZPReqPtr),y
+				pla
+				dey
+				sta (ZPReqPtr),y
+				
+				ply
+
+				tya
 				
 				iny						Skip ByteCount
 				iny
 
 				jsr SetReqLenYAtA
 
-				pha
-				>PUSHB MountTable+3		hSocket
-				>PUSHW ZPReqPtr
-				pla
-				>PUSHYA
-
-				ldx #LIBTCPIP.Send
-			jsr GO.LIBTCPIP
+				jsr WriteSocket
 				bcs .9
 
 				jmp Sleep
@@ -744,12 +731,91 @@ CIFS2.FRead
 				clc
 				>RET 5
 *--------------------------------------
-CIFS.FWrite
-				clc
-				>RET 5
+CIFS.FWrite		ldy #4
+				lda (pStack),y
+	
+				jsr GetPFD
+				
+				jsr GetGTX
+
+				ldx #S.SMB.H.CMD.WRITE.ANDX
+				jsr RequestSetupX
+
+				ldx #0
+
+.1				lda SMB.ComWrite.H,x
+				sta (ZPReqPtr),y
+				iny
+				inx
+				cpx #SMB.ComWrite.H.Len
+				bne .1
+
+				sty LenOfs
+
+				iny
+				iny
+				
+				sty ZPReqLen
+				stz ZPReqLen+1
+				
+				ldy #S.FD.REG.REF
+				lda (pFD),y
+				pha
+				iny
+				lda (pFD),y
+				
+				ldy #S.NETBIOS+S.SMB.H+6	FileID
+				sta (ZPReqPtr),y
+				pla
+				dey
+				sta (ZPReqPtr),y
+
+				jsr SetReqLen
+
+				jsr WriteSocket
+				bcs .9
+
+				jmp Sleep
+
+.9				>RET 5
 *--------------------------------------
-CIFS2.FWrite
+CIFS2.FWrite	ldy #4
+				lda (pStack),y
+				
+				jsr ReadSocket
+				bcs .9
+
+				jsr GetRespData
+
+				ldy #S.NETBIOS+S.SMB.H.STATUS
+				lda (ZPRespPtr),y
 				clc
+				beq .8
+
+				lda #MLI.E.IO
+				sec
+				
+.8				jsr FreeRespData
+
+				stz CIFS.Status
+
+				>RET 5
+
+.9				cmp #E.NODATA
+				bne .99
+
+				dec CIFS.Retries
+				beq .98
+
+				lda #0
+				sec
+				rts
+
+.98				lda #MLI.E.IO
+
+.99				sec
+				stz CIFS.Status
+
 				>RET 5
 *--------------------------------------
 CIFS.FFlush
@@ -764,7 +830,9 @@ CIFS.Remove
 CIFS2.Remove
 CIFS.Rename
 CIFS2.Rename	
-				lda #MLI.E.BADCALL
+*				lda #MLI.E.BADCALL
+				txa
+				ora #$80
 				sec
 				rts
 *--------------------------------------
