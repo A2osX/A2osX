@@ -1,7 +1,7 @@
 NEW
   AUTO 3,1
 *---------------------------------------
-* DU: Disk Usage - Bobbi - June 10, 2021
+* DU: Disk Usage - Bobbi - June 14, 2021
 *---------------------------------------
                          .LIST OFF
                          .OP 65C02
@@ -29,6 +29,7 @@ ZPPW                     .BS 2
 hLineBuf                 .BS 1
 ZPLineBuf                .BS 2
 bPass2                   .BS 1
+bDirLevel                .BS 1
 ZS.END
                          .ED
 *--------------------------------------
@@ -59,7 +60,6 @@ L.MSG.DIRSUMM            .DA MSG.DIRSUMM
 L.MSG.BDEV               .DA MSG.BDEV
 L.MSG.BDEVEXT            .DA MSG.BDEVEXT
 L.MSG.CWD                .DA MSG.CWD
-L.MSG.TOTSUMM            .DA MSG.TOTSUMM
 J.CS.RUN.PRINT           .DA CS.RUN.PRINT.REG
                          .DA CS.RUN.PRINT.DIR
                          .DA CS.RUN.PRINT.CDEV
@@ -74,7 +74,8 @@ CS.INIT                  clc
                          rts
 *--------------------------------------
 CS.RUN              
-.1                       >INC.G ArgCount
+.1                       stz bDirLevel
+                         >INC.G ArgCount
                          >SYSCALL ArgV
                          bcs .6
                          >STYA ZPPtr1
@@ -130,29 +131,31 @@ CS.RUN
                          >STYA ZPLineBuf
                          stx hLineBuf
 *--------------------------------------
-CS.RUN.LOOP              stz bPass2
+CS.RUN.LOOP
+                         stz bPass2
 
 .1                       ldy #S.PS.hStdIn
                          lda (pPS),y
                          >SYSCALL FEOF
-                         bcs .99                 I/O error
+                         bcc .2
+                         rts                     I/O error
 
-                         tay
-                         bne .2                  no char
+.2                       tay
+                         bne .3                  no char
 
                          >SYSCALL GetChar
                          cmp #$03                Ctrl-C
                          beq .99                 Abort....
 
                          cmp #$13                Ctrl-S
-                         bne .2
+                         bne .3
 
                          >LDA.G bPause
                          eor #$ff
                          sta (pData),y
                          bne .1
 
-.2                       >LDA.G bPause
+.3                       >LDA.G bPause
                          bne .1
 
                          jsr GetEntry            First entry
@@ -195,68 +198,68 @@ CS.RUN.LOOP              stz bPass2
                          jsr CS.RUN.PrintCwd
                          jsr CS.RUN.NewLine                         
 
-.91                      jsr LeaveSubDir        "cd .."
-                         bcs .98                This means we are done
+.91                      dec bDirLevel
+                         jsr LeaveSubDir        "cd .."
+                         bcs .97                This means we are done
 
                          jsr BasePath..         Prune pathname
 
                          jsr GetNextEntry       Get next entry
                          jmp CS.RUN.LOOP        Go again
 
-.98                      
-                         jsr CS.RUN.PrintTotSumm
+.97                      >LDA.G bSummary
+                         beq .98
+                         inc bDirLevel
+                         jsr CS.RUN.PrintDirSumm
+                         jsr CS.RUN.PrintCwd
                          jsr CS.RUN.NewLine
-
-                         lda #0
+.98                      lda #0
                          sec
 .99                      rts
 *--------------------------------------
 CS.RUN.PRINT.JMP
                          jmp (J.CS.RUN.PRINT,x)
 *--------------------------------------
-CS.RUN.PRINT.REG
-                         bit bPass2
+CS.RUN.PRINT.REG         bit bPass2
                          bmi .1
                          clc
                          rts
 
-.1                       ldy #S.STAT.BLOCKS+1
-                         lda (ZPFileStat),y
-                         pha
-                         dey
-                         lda (ZPFileStat),y
-                         clc
-                         >ADC.G DirBlksL
-                         sta (pData),y
-                         pla
-                         iny
-                         adc (pData),y
-                         sta (pData),y
-       
+.1                       ldx bDirLevel         X is loop ctr bDirLevel..0
+.2                       >LEA.G BlkCounters
+                         >STYA ZPPtr1
                          ldy #S.STAT.BLOCKS+1
                          lda (ZPFileStat),y
                          pha
                          dey
                          lda (ZPFileStat),y
+                         pha
+                         txa                   Get loop counter
+                         asl                   x2
+                         tay
+                         pla
                          clc
-                         >ADC.G TotBlksL
-                         sta (pData),y
+                         adc (ZPPtr1),y
+                         sta (ZPPtr1),y
                          pla
                          iny
-                         adc (pData),y
-                         sta (pData),y
-       
+                         adc (ZPPtr1),y
+                         sta (ZPPtr1),y
+                         dex
+                         cpx #$ff
+                         bne .2
+
                          >LDA.G bAllFiles
                          beq .8
 
                          >PUSHW L.MSG.REG1
                          ldy #S.STAT.BLOCKS+1
                          ldx #2
-.2                       lda (ZPFileStat),y
+.3                       lda (ZPFileStat),y
                          >PUSHA
                          dey
                          dex
-                         bne .2     (2)
+                         bne .3     (2)
                          >PUSHBI 2
                          >SYSCALL PrintF
                          bcs .9                         
@@ -278,6 +281,7 @@ CS.RUN.PRINT.DIR         bit bPass2
                          cmp #'.'
                          beq .8
 
+                         inc bDirLevel
                          >LDYA ZPFileName
                          jmp EnterSubDirYA
 
@@ -313,6 +317,8 @@ CS.RUN.PRINT.BDEV        bit bPass2
                          jsr CS.RUN.NewLine
                          bcs .9
 
+                         inc bDirLevel
+
                          >LDYA ZPFileName
                          jsr EnterSubDirYA
                          bcs .9
@@ -320,22 +326,32 @@ CS.RUN.PRINT.BDEV        bit bPass2
 .8                       clc
 .9                       rts
 *--------------------------------------
-CS.RUN.PrintDirSumm      >PUSHW L.MSG.DIRSUMM
-                         >LDA.G DirBlksL
-                         >PUSHW.G DirBlksL
+CS.RUN.PrintDirSumm      >LEA.G BlkCounters
+                         >STYA ZPPtr1
+                         lda bDirLevel
+                         asl
+                         clc
+                         adc ZPPtr1
+                         sta ZPPtr1
+                         lda #$00
+                         adc ZPPtr1+1
+                         sta ZPPtr1+1
+                         >PUSHW L.MSG.DIRSUMM
+                         ldy #$01
+                         lda (ZPPtr1),y
+                         >PUSHA
+                         dey
+                         lda (ZPPtr1),y
+                         >PUSHA
                          >PUSHBI 2
                          >SYSCALL PrintF
 
+                         ldy #$01
                          lda #$00
-                         >STA.G DirBlksL
-                         >STA.G DirBlksH
-                         rts
-*--------------------------------------
-CS.RUN.PrintTotSumm      >PUSHW L.MSG.TOTSUMM
-                         >LDA.G TotBlksL
-                         >PUSHW.G TotBlksL
-                         >PUSHBI 2
-                         >SYSCALL PrintF
+                         sta (ZPPtr1),y
+                         dey
+                         sta (ZPPtr1),y 
+
                          rts
 *--------------------------------------
 CS.RUN.PrintCwd          >PUSHW L.MSG.CWD
@@ -357,20 +373,16 @@ CS.RUN.NewLine           lda #C.CR
 CS.DOEVENT               sec
                          rts
 *--------------------------------------
-CS.QUIT
-                         jsr LeaveSubDir
+CS.QUIT                  jsr LeaveSubDir
                          bcc CS.QUIT
                          >LDA.G hFilter
                          beq .3
                          >SYSCALL FreeMem
 .3                       >LDA.G hPW
-                         beq .4
-                         
+                         beq .4                         
                          >SYSCALL FreeMem
-                         
 .4                       lda hLineBuf
                          beq .8
-                         
                          >SYSCALL FreeMem
                          
 .8                       clc
@@ -393,7 +405,6 @@ MSG.CWD             .AZ "%s"
 MSG.DIRSUMM         .AZ "%5D  "
 MSG.BDEVEXT         .AZ "/%15s s%dd%d Blocks Used:%5D Total:%5D"
 MSG.BDEV            .AZ "\e[32m%s/\e[0m"
-MSG.TOTSUMM         .AZ "Total: %5D blocks"
 *--------------------------------------
                     .DUMMY
                     .OR 0
@@ -403,11 +414,8 @@ TIME.SysTime        .BS S.TIME
 bPause              .BS 1
 bSummary            .BS 1
 bAllFiles           .BS 1
-DirBlksL            .BS 1
-DirBlksH            .BS 1
-TotBlksL            .BS 1
-TotBlksH            .BS 1
 hPW                 .BS 1
+BlkCounters         .BS 16           Array of 16 bit integers, size 8
                     .INB usr/src/shared/x.fileenum.g
 DS.END              .ED
 *--------------------------------------
