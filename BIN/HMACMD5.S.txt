@@ -18,12 +18,11 @@ ZS.START
 ZPPtr1			.BS 2
 ZPDataBufPtr	.BS 2
 ZPDataLen		.BS 2
-
 ArgIndex		.BS 1
-Arg1				.BS 1
-Arg2				.BS 1
+aOptD				.BS 1
+aOptK				.BS 1
 bText			.BS 1
-bKey			.BS 1
+bGotKey			.BS 1
 hFile			.BS 1
 hDataBuf		.BS 1
 hHMACMD5Ctx		.BS 1
@@ -51,6 +50,8 @@ CS.START		cld
 				.DA	CS.QUIT
 L.LIBCRYPT		.DA LIBCRYPT
 L.MSG.USAGE		.DA MSG.USAGE
+L.HMACMD5.IPAD		.DA HMACMD5.IPAD
+L.HMACMD5.OPAD		.DA HMACMD5.OPAD
 				.DA 0
 *--------------------------------------
 CS.INIT			>LDYA L.LIBCRYPT
@@ -65,11 +66,12 @@ CS.INIT			>LDYA L.LIBCRYPT
 CS.RUN			ldy #S.PS.ARGC
 				lda (pPS),y
 				beq .99
-.0				ldx #0
+.0				lda #0
+				pha
 
 .1				inc ArgIndex
 				lda ArgIndex
-				phx
+	
 				>SYSCALL ArgV
 				plx
 				bcs .8
@@ -82,7 +84,7 @@ CS.RUN			ldy #S.PS.ARGC
 				lda (ZPPtr1),y
 				beq .99
 
-				ldy #OptionVars-OptionList-1
+				ldy #OptionEnd-OptionList-1
 
 .2				cmp OptionList,y
 				beq .3
@@ -96,29 +98,28 @@ CS.RUN			ldy #S.PS.ARGC
 				sec
 				rts
 
-.3				ldx OptionVars,y
+.3				tya
+				lsr
+				pha
+				tax
 				sec
-				ror 0,x
+				ror bText,x
 				bra .1
 
-.4				txa
-				bpl .99
-				lda ArgIndex
-				sta $fe,x
+.4				lda ArgIndex
+				sta aOptD,x
 				bra .0
 
-.8				lda Arg1
-				beq .99
-				lda Arg2
+.8				lda bGotKey
 				beq .99
 
 				lda bText
 				beq CS.RUN.FILE
 *--------------------------------------
-CS.RUN.TEXT		lda Arg1
+CS.RUN.TEXT		lda aOptD
 				>SYSCALL ArgV
 				>PUSHYA
-				lda Arg2
+				lda aOptK
 				>SYSCALL ArgV
 				>PUSHYA
 				>PUSHEA.G HMACMD5Buf
@@ -132,36 +133,89 @@ CS.RUN.FILE		>LDYAI FILEBUF.SIZE
 				>STYA ZPDataBufPtr
 				stx hDataBuf
 
-				lda Arg1
+				lda aOptD
 				>SYSCALL ArgV
 				>PUSHYA
 				>PUSHBI	O.RDONLY
 				>PUSHBI 0				ftype
 				>PUSHWZ					Aux type
 				>SYSCALL FOpen
-				bcs .9
+				bcc .1
 
-				sta hFile
+.9				rts
 
-				>LIBCALL hLIBCRYPT,LIBCRYPT.MD5Init
+.1				sta hFile
+
+				lda aOptK
+				>SYSCALL ArgV
+				>STYA ZPDataBufPtr
+				>SYSCALL2 strlen
+				>STYA ZPDataLen
+				cpy #65
+				bcs .2
+				tay
+				beq .3
+
+.2				>LIBCALL hLIBCRYPT,LIBCRYPT.MD5Init
 				bcs .9
 
 				sta hHMACMD5Ctx
 
-.1				>SLEEP
+				>SLEEP
+
+				>PUSHB hHMACMD5Ctx
+				lda aOptK
+				>SYSCALL ArgV
+				>PUSHYA
+				>PUSHW ZPDataLen
+				>LIBCALL hLIBCRYPT,LIBCRYPT.MD5Update
+				>PUSHB hHMACMD5Ctx
+				>PUSHEA.G HMACMD5Buf
+				>LIBCALL hLIBCRYPT,LIBCRYPT.MD5Finalize
+
+				jsr RevertASCII
+
+.3				ldy #0
+.4				lda #$36
+				cpy ZPDataLen
+				bcs .5
+				eor (ZPDataBufPtr),y
+.5				sta HMACMD5.IPAD,y
+				eor #$6A			#$36 eor #$5C
+				sta HMACMD5.OPAD,y
+				iny
+				cpy #64
+				bne .4
+				stz HMACMD5.IPAD+64
+				stz HMACMD5.OPAD+64
+
+rebase
+				>LIBCALL hLIBCRYPT,LIBCRYPT.MD5Init
+				bcc .6
+
+				rts
+
+.6				sta hHMACMD5Ctx
+
+				>PUSHB hHMACMD5Ctx
+				>PUSHW L.HMACMD5.IPAD
+				>PUSHWI 64
+				>LIBCALL hLIBCRYPT,LIBCRYPT.MD5Update
+
+.7				>SLEEP
 
 				>PUSHB hFile
 				>PUSHW ZPDataBufPtr		Dst Ptr
 				>PUSHWI FILEBUF.SIZE	Bytes To Read
 				>SYSCALL FRead
-				bcc .2
+				bcc .8
 
 				cmp #MLI.E.EOF
-				beq .8
+				beq .10
 
-.9				rts
+.99				rts
 
-.2				>STYA ZPDataLen
+.8				>STYA ZPDataLen
 
 				>SLEEP
 
@@ -169,17 +223,65 @@ CS.RUN.FILE		>LDYAI FILEBUF.SIZE
 				>PUSHW ZPDataBufPtr
 				>PUSHW ZPDataLen
 				>LIBCALL hLIBCRYPT,LIBCRYPT.MD5Update
-				bra .1
+				bra .7
 
-.8				>PUSHB hHMACMD5Ctx
+.10				>PUSHB hHMACMD5Ctx
+				>PUSHEA.G HMACMD5Buf
+				>LIBCALL hLIBCRYPT,LIBCRYPT.MD5Finalize
+
+				jsr RevertASCII
+
+				>LIBCALL hLIBCRYPT,LIBCRYPT.MD5Init
+				bcs .99
+
+				sta hHMACMD5Ctx
+
+				>PUSHB hHMACMD5Ctx
+				>PUSHW L.HMACMD5.OPAD
+				>PUSHWI 64
+				>LIBCALL hLIBCRYPT,LIBCRYPT.MD5Update
+
+				>PUSHB hHMACMD5Ctx
+				>PUSHW L.HMACMD5.IPAD
+				>PUSHWI 16
+				>LIBCALL hLIBCRYPT,LIBCRYPT.MD5Update
+
+				>PUSHB hHMACMD5Ctx
 				>PUSHEA.G HMACMD5Buf
 				>LIBCALL hLIBCRYPT,LIBCRYPT.MD5Finalize
 
 CS.RUN.PRINT	>LEA.G HMACMD5Buf
 				>SYSCALL PutS
 				lda #0
-*				sec
-*				rts
+				sec
+				rts
+
+*--------------------------------------
+RevertASCII			>LEA.G HMACMD5Buf
+				>STYA ZPDataBufPtr
+				ldx #16
+				stx ZPDataLen
+				ldy #31
+.1				lda (ZPDataBufPtr),y
+				cmp #$3A
+				bcc .2
+				sbc #7
+.2				and #$0f
+				sta bText
+				dey
+				lda (ZPDataBufPtr),y
+				cmp #$3A
+				bcc .3
+				sbc #7
+.3				asl
+				asl
+				asl
+				asl
+				ora bText
+				sta HMACMD5.IPAD-1,x
+				dex
+				dey
+				bpl .1
 *--------------------------------------
 CS.DOEVENT		sec
 				rts
@@ -206,9 +308,12 @@ LIBCRYPT		.AZ "libcrypt"
 hLIBCRYPT		.BS 1
 *--------------------------------------
 OptionList		.AS "DdKk"
-OptionVars		.DA #bText,#bText, #bKey,#bKey
+OptionEnd
 *--------------------------------------
-MSG.USAGE		.AZ "Usage : HMACMD5 [ -d input text | input file -k key ]\r\n"
+MSG.USAGE		.AZ "Usage : HMACMD5 [ -d input text | input file ] [ -k key ]\r\n"
+*--------------------------------------
+HMACMD5.IPAD	.BS 65
+HMACMD5.OPAD	.BS 65
 *--------------------------------------
 				.DUMMY
 				.OR 0
