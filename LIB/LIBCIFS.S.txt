@@ -35,7 +35,7 @@ auxtype			.BS 2
 ZPRespPtr		.BS 2
 
 bFlag			.BS 1
-LenOfs			.BS 1
+ByteCountOfs	.BS 1
 
 ZS.END			.ED
 *--------------------------------------
@@ -536,6 +536,7 @@ CIFS.CallBack	bit CIFS.Status
 
 				phy
 				pha
+
 				ldy #S.PS.PID
 				lda (pPS),y
 				cmp CIFS.PID
@@ -574,9 +575,7 @@ GetGTX			lda MountTable+2
 				>STYA ZPCtxPtr
 				rts
 *--------------------------------------
-MakeTrans2Req	jsr GetGTX
-
-				ldx #S.SMB.H.CMD.TRANS2
+MakeTrans2Req	ldx #S.SMB.H.CMD.TRANS2
 				jsr RequestSetupX
 
 				ldx #0
@@ -601,15 +600,13 @@ RequestSetupX	phx
 				>SYSCALL2 GetMemPtr
 				>STYA ZPReqPtr
 
-				plx
-
 				ldy #0
 
 .1				lda (ZPCtxPtr),y
 				cpy #S.NETBIOS+S.SMB.H.CMD
 				bne .2
 
-				txa
+				pla
 
 .2				sta (ZPReqPtr),y
 				iny
@@ -618,13 +615,52 @@ RequestSetupX	phx
 
 				rts
 *--------------------------------------
-GetPathLen		ldy #$ff
-				
+ReqSetupPtr2	sty ByteCountOfs
+
+				iny
+				iny						+2 for ByteCount
+
+ReqT2SetupPtr2	sty ZPReqLen
+				stz ZPReqLen+1
+
+				tya
+
+				clc
+				adc ZPReqPtr
+				sta ZPPtr2
+
+				lda ZPReqPtr+1
+				adc #0
+				sta ZPPtr2+1
+
+				rts
+*--------------------------------------
+AppendPathPtr2	ldx #0
+
+				ldy #$ff
+
 .1				iny
 				lda (pPath),y
-				bne .1
-				
-				tya
+				beq .4
+
+.2				cmp #'/'
+				bne .3
+
+				lda #'\'
+
+.3				sta (ZPPtr2),y
+				tax
+				bra .1
+
+.4				cpx #'\'
+				bne .5
+
+				dey
+
+.5				
+*				lda #0
+				sta (ZPPtr2),y
+
 				rts
 *--------------------------------------
 AppendPath		ldx #0
@@ -654,21 +690,6 @@ AppendPath		ldx #0
 
 .5				rts
 *--------------------------------------
-SetReqLen		lda ZPReqLen
-				sec
-				sbc LenOfs
-				
-				ldy LenOfs
-				sta (ZPReqPtr),y
-
-				iny
-
-				lda ZPReqLen+1
-				sbc #0
-				sta (ZPReqPtr),y
-
-				bra SetReqLenNETBIOS
-*--------------------------------------
 * Y = LEN from S.NETBIOS.TYPE
 * A = Ptr to LEN Word
 *--------------------------------------
@@ -691,12 +712,12 @@ SetReqLenYAtA	sty ZPReqLen
 				iny
 				lda #0
 				sta (ZPReqPtr),y
-				bra SetReqLenNETBIOS
+				bra SetReqLen
 *--------------------------------------
 SetT2ReqLenYA	sty ZPReqLen
 				stz ZPReqLen+1
 
-				tya
+SetT2ReqLen		lda ZPReqLen
 				sec
 				sbc #S.NETBIOS+S.SMB.H+SMB.Trans2.H.Len+7
 
@@ -712,13 +733,13 @@ SetT2ReqLenYA	sty ZPReqLen
 
 				ldy #S.NETBIOS+S.SMB.H+SMB.Trans2.H.Len+2
 				sta (ZPReqPtr),y
-
-SetReqLenNETBIOS
-				lda ZPReqLen
+*--------------------------------------
+SetReqLen		lda ZPReqLen
 				sec
 				sbc #S.NETBIOS
 				ldy #S.NETBIOS.LEN+2
 				sta (ZPReqPtr),y
+
 				lda ZPReqLen+1
 				sec
 				sbc /S.NETBIOS
@@ -733,7 +754,7 @@ Sleep			ldy #S.PS.PID
 
 				dec CIFS.Status
 
-				stz CIFS.Retries
+Sleep2			stz CIFS.Retries
 
 				lda #0
 				sec
@@ -1008,16 +1029,16 @@ SMB.ComCreate.H	.DA #24					WORD COUNT
 			.BS 2						NameLength
 				.HS 00000000			Flags
 				.HS 00000000			RootDirectoryFID
-			.BS 4						DesiredAccess 
+				.HS 00000010			DesiredAccess = GENERIC_ALL
 				.HS 0000000000000000	AllocationSize
 				.HS 00000000			ExtFileAttributes
-				.HS 00000000			ShareAccess 
-			.BS 4						CreateDisposition	
+				.HS 00000000			ShareAccess
+			.BS 4						CreateDisposition
 				.HS 00000000			CreateOptions
 				.HS 00000000			ImpersonationLevel
 				.HS	00					SecurityFlags
-SMB.ComCreate.H.Len .EQ *-SMB.ComCreate.H			
-*				.BS 2					ByteCount	
+SMB.ComCreate.H.Len .EQ *-SMB.ComCreate.H
+*				.BS 2					ByteCount
 *				.AZ "path\file"
 *--------------------------------------
 SMB.ComClose.H	.DA #3					WORD COUNT
@@ -1025,6 +1046,27 @@ SMB.ComClose.H	.DA #3					WORD COUNT
 				.HS 00000000			LastTimeModified
 				.HS 0000				ByteCount
 SMB.ComClose.H.Len	.EQ *-SMB.ComClose.H
+*--------------------------------------
+SMB.ComFlush.H	.DA #1					WORD COUNT
+			.BS 2						FID
+				.HS 0000				ByteCount
+SMB.ComFlush.H.Len	.EQ *-SMB.ComFlush.H
+*--------------------------------------
+SMB.ComDelete.H	.DA #1					WORD COUNT
+				.HS 0000				SearchAttributes
+SMB.ComDelete.H.Len	.EQ *-SMB.ComDelete.H
+*			.BS 2						ByteCount
+*			.HS 04						BufferFormat
+*			.AZ "path\file"
+*--------------------------------------
+SMB.ComRename.H	.DA #1					WORD COUNT
+				.HS 0000				SearchAttributes
+SMB.ComRename.H.Len	.EQ *-SMB.ComRename.H
+*			.BS 2						ByteCount
+*			.HS 04						BufferFormat
+*			.AZ "oldpath"
+*			.HS 04						BufferFormat
+*			.AZ "newpath"
 *--------------------------------------
 SMB.ComRead.H	.DA #10					WORD COUNT
 				.HS FF000000			NO MORE CMD
@@ -1042,11 +1084,11 @@ SMB.ComWrite.H	.DA #12					WORD COUNT
 			.BS 2						FID
 			.BS 4						Offset
 				.HS 00000000			Timeout
-				.HS 0001				WriteMode=WritethroughMode
+				.HS 0100				WriteMode=WritethroughMode
 				.HS 0000				Remaining
 				.HS 0000				Reserved
 			.BS 2						DataLength
-			.BS 2						DataOffset
+				.DA S.SMB.H+SMB.ComWrite.H.Len	DataOffset
 SMB.ComWrite.H.Len	.EQ *-SMB.ComWrite.H
 *			.BS 2						ByteCount
 *			DATA.....
