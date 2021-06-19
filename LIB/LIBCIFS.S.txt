@@ -570,7 +570,7 @@ GetPFD			tax
 				>STYA pFD
 				rts
 *--------------------------------------
-GetGTX			lda MountTable+2
+GetCTX			lda MountTable+2
 				>SYSCALL2 GetMemPtr
 				>STYA ZPCtxPtr
 				rts
@@ -635,6 +635,19 @@ ReqT2SetupPtr2	sty ZPReqLen
 
 				rts
 *--------------------------------------
+PutBytePtr2		sta (ZPPtr2)
+				inc ZPPtr2
+				bne .1
+				
+				inc ZPPtr2+1
+				
+.1				inc ZPReqLen
+				bne .8
+				
+				inc ZPReqLen+1
+				
+.8				rts				
+*--------------------------------------
 AppendPathPtr2	ldx #0
 
 				ldy #$ff
@@ -657,10 +670,41 @@ AppendPathPtr2	ldx #0
 
 				dey
 
-.5				
-*				lda #0
-				sta (ZPPtr2),y
+.5				sta (ZPPtr2),y			A = 0
 
+				tya
+
+				sec						+1 for \0
+
+				adc ZPReqLen
+				sta ZPReqLen
+				bcc .6
+				
+				inc ZPReqLen+1
+
+.6				tya
+
+				sec						+1 for \0
+
+				adc ZPPtr2
+				sta ZPPtr2
+				bcc .8
+				
+				inc ZPPtr2+1
+
+
+.8				rts
+*--------------------------------------
+Add2ByteCount	ldy ByteCountOfs
+				clc
+				adc (ZPReqPtr),y
+				sta (ZPReqPtr),y
+
+				iny						ByteCountOfs+1
+				
+				lda #0
+				adc (ZPReqPtr),y
+				sta (ZPReqPtr),y
 				rts
 *--------------------------------------
 AppendPath		ldx #0
@@ -760,6 +804,38 @@ Sleep2			stz CIFS.Retries
 				sec
 				rts
 *--------------------------------------
+Exit.OK			lda hResp
+				>SYSCALL2 FreeMem
+
+				stz CIFS.Status
+				clc
+				rts
+*--------------------------------------
+Exit.KO			pha
+				lda hResp
+				>SYSCALL2 FreeMem
+				pla
+
+				stz CIFS.Status
+				sec
+				rts
+*--------------------------------------
+Exit.NODATA		cmp #E.NODATA
+				bne .99
+
+				dec CIFS.Retries
+				beq .98
+
+				lda #0
+				sec
+				rts
+
+.98				lda #MLI.E.OFFLINE
+
+.99				stz CIFS.Status
+				sec
+				rts
+*--------------------------------------
 GetRespData		sta hResp
 				>SYSCALL2 GetMemPtr
 
@@ -773,8 +849,48 @@ GetRespData		sta hResp
 				sta	ZPRespPtr+1
 				rts
 *--------------------------------------
-GetRespDataOffset
-				ldy #S.NETBIOS+S.SMB.H+15				Data Offset
+CheckSMBStatus	ldy #S.NETBIOS+S.SMB.H.STATUS
+				lda (ZPRespPtr),y
+				clc
+				beq FreeRespData.RTS
+
+				stz CIFS.Status
+
+				cmp #2					SRV
+				bcs .9
+				
+				iny
+				iny
+				
+				lda (ZPRespPtr),y		ERR CODE
+				ldx #MLIERR01-SMBERR01
+
+.1				cmp SMBERR01-1,x
+				beq .2
+				
+				dex
+				bne .1
+				
+				sec
+				bra .9
+				
+.2				lda MLIERR01-1,x
+				sec		
+				bra FreeRespData
+
+.9				lda #MLI.E.IO
+*--------------------------------------
+FreeRespData	php
+				pha
+				lda hResp
+				>SYSCALL2 FreeMem
+				pla
+				plp
+
+FreeRespData.RTS
+				rts
+*--------------------------------------
+GetRespDataPtr1	ldy #S.NETBIOS+S.SMB.H+15				Data Offset
 				lda (ZPRespPtr),y
 				clc
 				adc ZPRespPtr
@@ -794,16 +910,6 @@ GetRespDataOffset
 				adc /S.NETBIOS
 				sta ZPPtr1+1
 
-
-
-				rts
-*--------------------------------------
-FreeRespData	php
-				pha
-				lda hResp
-				>SYSCALL2 FreeMem
-				pla
-				plp
 				rts
 *--------------------------------------
 FileInfo2StatBuf
@@ -944,6 +1050,9 @@ CIFS.BADCALL	lda #MLI.E.BADCALL
 				rts
 *--------------------------------------
 CS.END
+*--------------------------------------
+SMBERR01		.DA #2,#3,#32
+MLIERR01		.DA #MLI.E.FNOTFND,#MLI.E.PNOTFND,#MLI.E.OPEN
 *--------------------------------------
 NETBIOS			.DA #0					DIRECT TCP TRANSPORT
 				.DA #0					24 BITS LENGTH
