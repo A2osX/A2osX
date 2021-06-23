@@ -3,7 +3,7 @@ NEW
                                 .LIST OFF
                                 .OP     65C02
                                 .OR     $2000
-                                .TF bin/sed
+                                .TF bin/xargs
 *--------------------------------------
                                 .INB inc/macros.i
                                 .INB inc/a2osx.i
@@ -17,16 +17,13 @@ ZS.START
 ArgIndex                .BS 1
 ArgPattern              .BS 1
 ZPPtr1                  .BS 2
-ZPPatternPtr            .BS 2
+ZPCommandPtr            .BS 2
 ZPBufPtr                .BS 2
+ZPCmdBuf                .BS 2
 hFile                   .BS 1
 hBuf                    .BS 1
-LineNum                 .BS 2
-char                    .BS 1
-delimiter               .BS 1
-replaceidx              .BS 1
-
-bIgnoreCase             .BS 1
+hCmdBuf                 .BS 1
+DashArgs                .BS 1
 
 ZS.END                  .ED
 *--------------------------------------
@@ -52,6 +49,7 @@ CS.START                cld
                                 .DA CS.QUIT
 L.MSG.USAGE                     .DA MSG.USAGE
 L.MSG.CRLF                      .DA MSG.CRLF
+L.CMD.SPC                       .DA CMD.SPC
                                 .DA 0
 *--------------------------------------
 CS.INIT                         clc
@@ -60,9 +58,6 @@ CS.INIT                         clc
 CS.RUN                          jsr CS.RUN.CheckArgs
                                 bcs CS.RUN.LOOP.RTS
 
-                                stz LineNum
-                                stz LineNum+1
-
 CS.RUN.LOOP                     >SLEEP
 
                                 >PUSHB hFile
@@ -70,11 +65,6 @@ CS.RUN.LOOP                     >SLEEP
                                 >PUSHWI 256
                                 >SYSCALL FGetS
                                 bcs .9
-
-                                inc LineNum
-                                bne .2
-
-                                inc LineNum+1
 
 .2                              jsr CS.RUN.PRINT
 
@@ -103,9 +93,7 @@ CS.RUN.CheckArgs
                                 lda ArgIndex
                                 sta ArgPattern
                                 >LDYA ZPPtr1
-                                >STYA ZPPatternPtr
-                                jsr CS.RUN.SEDParser
-                                bcs .97
+                                >STYA ZPCommandPtr
                                 bra CS.RUN.CheckArgs
 
 .11                             lda hFile
@@ -137,7 +125,7 @@ CS.RUN.CheckArgs
 
                                 tax
                                 lda #$80
-                                sta bIgnoreCase-1,x 
+                                sta DashArgs-1,x 
                                 bra CS.RUN.CheckArgs
                                 
 .4                              lda hFile
@@ -168,6 +156,13 @@ CS.RUN.CheckArgs
                                 >STYA ZPBufPtr
                                 stx hBuf
 
+                                >LDYAI 256
+                                >SYSCALL GetMem
+                                bcs .9
+
+                                >STYA ZPCmdBuf
+                                stx hCmdBuf
+
 *                               clc
 
 .9                              rts
@@ -191,54 +186,6 @@ CS.RUN.NextArg                  inc ArgIndex
 
 .9                              rts
 *--------------------------------------
-CS.RUN.SEDParser
-* On entry, the expression is in ZPPatternPtr
-* We are looking for "s/search string/replace string/"
-* The '/' delimiter can be any char
-* On exit. ZPPatternPtr points to delimiter-terminated search string, 
-*          replaceidx contains the offset to the start of replacement str
-
-                                stz LineNum               Reusing this as cntr
-
-                                lda (ZPPatternPtr)
-                                cmp #'s'                  Substitute cmd
-                                bne .8                    If not, error
-
-                                ldy #$01                  Delimiter char
-                                lda (ZPPatternPtr),y
-                                sta delimiter             Stash for later
-
-.2                              iny
-                                lda (ZPPatternPtr),y
-                                beq .4                    End of string
-                                cmp delimiter             Is it delimiter?
-                                bne .2
-
-                                inc LineNum               Keep count
-                                lda LineNum
-                                cmp #$01                  Second delim
-                                bne .2
-
-                                sty replaceidx
-                                bra .2
-
-.4                              lda LineNum               Check # of delims
-                                cmp #$02
-                                bne .8
-
-                                inc ZPPatternPtr          Eat 's/'
-                                bne .5
-                                inc ZPPatternPtr+1
-.5                              inc ZPPatternPtr
-                                bne .7
-                                inc ZPPatternPtr+1
-
-.7                              clc
-                                rts                       No error return
-
-.8                              sec
-                                rts
-*--------------------------------------
 CS.RUN.OPEN                     >PUSHYA
                                 >PUSHBI O.RDONLY+O.TEXT
                                 >PUSHBI S.FI.T.TXT
@@ -250,101 +197,26 @@ CS.RUN.OPEN                     >PUSHYA
 
 .9                              rts
 *--------------------------------------
-CS.RUN.PRINT                    >LDYA ZPBufPtr
-                                >STYA ZPPtr1
+CS.RUN.PRINT                    >PUSHW ZPCmdBuf
+                                >PUSHW ZPCommandPtr
+                                >SYSCALL StrCpy
 
-.1                              lda (ZPPtr1)
-                                beq .7                  EOL. No match.
+                                >PUSHW ZPCmdBuf
+                                >PUSHW L.CMD.SPC
+                                >SYSCALL StrCat
 
-                                ldy #$ff
+                                >PUSHW ZPCmdBuf
+                                >LDYA ZPBufPtr
+                                >PUSHYA
+                                >SYSCALL StrCat
 
-.2                              iny
-                                lda (ZPPtr1),y
-                                bne .3
+                                >LDYA ZPCmdBuf
+                                >SYSCALL PutS
 
-                                lda (ZPPatternPtr),y    EOL
-                                cmp delimiter
-                                bne .7                  Not end of pattern
-*                                                       No match.
-
-.3                              lda (ZPPatternPtr),y
-                                cmp delimiter
-                                beq .5                  Match
-
-                                jsr CS.RUN.toUpper
-                                sta char
-                                lda (ZPPtr1),y
-                                jsr CS.RUN.toUpper
-                                cmp char
-                                beq .2
-
-                                bra .6                  No match
- 
-* Found a match                               
-.5                              jsr CS.RUN.GotMatch
-                                bra .1
- 
-* Mismatch with pattern, keep going
-.6                              jsr CS.RUN.NoMatch
-                                bra .1
-
-* Hit EOL but not end of pattern, return
-.7                              jsr CS.RUN.NoMatch
-                                lda #C.CR
-                                >SYSCALL PutChar
-                                lda #C.LF
-                                >SYSCALL PutChar
-                                clc
+                                >PUSHW ZPCmdBuf
+                                >PUSHBI S.PS.F.HOLD
+                                >SYSCALL ExecL
                                 rts
-*--------------------------------------
-CS.RUN.GotMatch                 phy
-                                ldy replaceidx
-                                dey
-.1                              lda (ZPPatternPtr),y
-                                cmp delimiter
-                                beq .5
-                                phy
-                                >SYSCALL PutChar
-                                ply
-                                iny
-                                bra .1
-
-.5                              ply
-                                tya                  Advance ZPPtr1 by Y
-                                clc
-                                adc ZPPtr1
-                                sta ZPPtr1
-                                lda #$00
-                                adc ZPPtr1+1
-                                sta ZPPtr1+1
-                                ldy #$00
-                                rts
-*--------------------------------------
-CS.RUN.NoMatch                  lda (ZPPtr1)         Print ZPPtr1->ZPPtr1+Y
-                                phy
-                                >SYSCALL PutChar
-                                ply
-                                inc ZPPtr1
-                                bne .2
-                                inc ZPPtr1+1
-.2                              dey
-                                cpy #$ff
-                                bne CS.RUN.NoMatch
-                                ldy #$00
-                                rts
-*--------------------------------------
-CS.RUN.toUpper                  bit bIgnoreCase
-                                bpl .9
-
-                                cmp #'a'
-                                bcc .9
-
-                                cmp #'z'+1
-                                bcs .9
-
-                                eor #$20
-
-.9                              rts     
 *--------------------------------------
 CS.QUIT                         lda hFile
                                 beq .1
@@ -353,7 +225,10 @@ CS.QUIT                         lda hFile
 
 .1                              lda hBuf
                                 beq .8
+                                >SYSCALL FreeMem
 
+                                lda hCmdBuf
+                                beq .8
                                 >SYSCALL FreeMem
 
 .8                              clc
@@ -364,13 +239,13 @@ CS.DOEVENT                      sec
 *--------------------------------------
 CS.END
 *--------------------------------------
-OptionList          .AS "HhIi"
+OptionList          .AS "Hh"
 OptionList.Cnt      .EQ *-OptionList
 *--------------------------------------
-MSG.USAGE           .AS "Usage : SED [-I] s/pattern/replacement/ <File>\r\n"
-                    .AS "   or : CMD|SED [-I] s/pattern/replacement/\r\n"
-                    .AS "   -I : Ignore Case"
+MSG.USAGE           .AS "Usage : XARGS command <file>\r\n"
+                    .AS "   or : CMD|XARGS command"
 MSG.CRLF            .AZ "\r\n"
+CMD.SPC             .AZ " "
 *--------------------------------------
                                 .DUMMY
                                 .OR 0
@@ -378,5 +253,5 @@ DS.START
 DS.END                  .ED
 *--------------------------------------
 MAN
-SAVE usr/src/bin/sed.s
+SAVE usr/src/bin/xargs.s
 ASM
