@@ -20,7 +20,7 @@ CIFS.Stat		>STYA pPath				resolved path
 
 				jsr GetCTX
 
-				jsr MakeTrans2Req
+				jsr RequestT2SetupX
 
 				ldx #0
 
@@ -49,6 +49,8 @@ CIFS2.Stat		jsr ReadSocket
 				jsr GetRespData
 
 				jsr CheckSMBStatus
+				
+				lda #MLI.E.INVPATH		Return this for stat() match ProDOS Behavior
 				bcs .90
 
 				jsr GetRespDataPtr1
@@ -72,9 +74,11 @@ CIFS2.Stat		jsr ReadSocket
 *--------------------------------------
 CIFS.MKDir		>STYA pPath				resolved path
 
+				jsr ClearSocket
+				
 				jsr GetCtx
 
-				jsr MakeTrans2Req
+				jsr RequestT2SetupX
 
 				ldx #0
 
@@ -172,7 +176,7 @@ CIFS.ReadDir	jsr GetPFD
 				ora (pFD),y
 				bne CIFS.ReadDir.Next
 
-				jsr MakeTrans2Req
+				jsr RequestT2SetupX
 
 				ldx #0
 
@@ -186,7 +190,7 @@ CIFS.ReadDir	jsr GetPFD
 				bra CIFS.ReadDir.Send
 
 CIFS.ReadDir.Next
-				jsr MakeTrans2Req
+				jsr RequestT2SetupX
 
 				ldx #0
 
@@ -500,16 +504,20 @@ CIFS.FOpen		>STYA pPath				resolved path
 
 				ldy #3					fopen flags
 				lda (pStack),y
-				bpl .3					O.CREATE
+				bit #O.WRONLY
+				beq .8
+				
+				bit #O.CREATE
+				bne .3
 				
 				ldx #3					FILE_OPEN_IF
 
 .3				bit #O.APPEND
-				bmi .4
+				bne .8
 				
 				ldx #5					FILE_OVERWRITE_IF
 
-.4				txa
+.8				txa
 
 				ldy #S.NETBIOS+S.SMB.H+SMB.Trans2.H.Len+7	CreateDisposition
 				sta (ZPReqPtr),y
@@ -529,19 +537,9 @@ CIFS2.FOpen		jsr ReadSocket
 				jsr CheckSMBStatus
 				bcs .90
 
-				>LDYAI S.FD.REG
-				>SYSCALL2 GetMem
+				jsr CIFS.NewFD
 				bcs .91
-
-				>STYA pFD
-
-				lda #S.FD.T.REG
-				sta (pFD)
-
-				lda hHandler
-				ldy #S.FD.PFT
-				sta (pFD),y
-
+				
 				ldy #S.NETBIOS+S.SMB.H+6	FileID
 				lda (ZPRespPtr),y
 				pha
@@ -553,8 +551,35 @@ CIFS2.FOpen		jsr ReadSocket
 				dey
 				pla
 				sta (pFD),y
+				
+				ldy #3					fopen flags
+				lda (pStack),y
+				bit #O.APPEND
+				beq .3
 
-				ldy #4					path
+				ldy #S.NETBIOS+S.SMB.H+56+3	EOF
+				ldx #4
+				
+.1				lda (ZPRespPtr),y
+				pha
+				dey
+				dex
+				bne .1
+				
+				ldx #4
+				ldy #S.FD.REG.REF+2
+				
+.2				pla
+				sta (pFD),y
+				iny
+				dex
+				bne .2
+				
+				bra .8
+				
+.3				jsr CIFS.Seek0
+
+.8				ldy #4					path
 
 				lda (pStack),y
 				>PUSHA
@@ -562,11 +587,10 @@ CIFS2.FOpen		jsr ReadSocket
 				>PUSHA
 
 				>PUSHWZ					mod
-				txa						hFD
-				>PUSHA
+				>PUSHB hFD
 				>SYSCALL2 mknod
 
-.91				jsr Exit.OK	
+.91				jsr Exit.KO	
 				bra .90
 
 .9				jsr Exit.NODATA
@@ -656,19 +680,24 @@ CIFS.FRead		ldy #4					hNod
 
 				jsr ReqSetupPtr2
 
-				ldy #S.FD.REG.REF
-				lda (pFD),y
-				pha
-				iny
-				lda (pFD),y
-
-				ldy #S.NETBIOS+S.SMB.H+6	FileID
-				sta (ZPReqPtr),y
-				pla
-				dey
-				sta (ZPReqPtr),y
-
+				jsr CIFS.RWGetFidOfs
 				
+				ldy #1					DataLen HI
+				lda (pStack),y
+				bne .2
+				
+				lda #0
+				ldx #1					256 bytes to read
+				bra .3
+				
+.2				lda (pStack)			DataLen LO			
+				ldx #0
+				
+.3				ldy #S.NETBIOS+S.SMB.H+11 MaxCountOfBytesToReturn
+				sta (ZPReqPtr),y
+				iny
+				txa
+				sta (ZPReqPtr),y
 				
 				jsr SetReqLen
 
@@ -687,18 +716,84 @@ CIFS2.FRead		jsr ReadSocket
 				jsr CheckSMBStatus
 				bcs .90
 
-				lda hResp
-				>SYSCALL2 FreeMem
+				ldy #S.NETBIOS+S.SMB.H+10
+				lda (ZPRespPtr),y
+				iny
+				ora (ZPRespPtr),y
+				bne .10
+				
+				jsr Exit.OK
+				
+				lda #MLI.E.EOF
+				sec
+				bra .90
 
-				ldy #1
+.10				ldy #S.NETBIOS+S.SMB.H+13	DataOffset LO
+				lda (ZPRespPtr),y
+				inc
+				inc
+*				clc
+				adc ZPRespPtr
+				sta ZPPtr1
+				
+				lda #0
+				adc ZPRespPtr+1
+				sta ZPPtr1+1
+
+				ldy #3					DataPtr HI
 				lda (pStack),y
-				ora (pStack)
-				clc
-				beq .90
+				sta ZPPtr2+1
 
-				stz CIFS.Status			Back to CIFS.FRead for next chunk
+				dey						DataPtr LO
+				lda (pStack),y
+				sta ZPPtr2
 
-				jmp Sleep2
+				ldy #S.NETBIOS+S.SMB.H+11	DataLength LO
+				lda (ZPRespPtr),y
+				tax
+
+				jsr CIFS.CopyX
+				
+				ldy #S.NETBIOS+S.SMB.H+11
+				jsr CIFS2.RWSetOfsY
+
+				ldy #S.NETBIOS+S.SMB.H+11	DataLength HI
+				lda (ZPRespPtr),y
+				beq .2					less than 256
+
+				inc CIFS.Cnt+1
+
+				ldy #1					DataLen HI
+				lda (pStack),y
+				dec
+				sta (pStack),y
+				
+				ldy #3					DataPtr HI
+				lda (pStack),y
+				inc
+				sta (pStack),y
+				bra .7
+
+.2				dey						DataLength LO
+				lda (ZPRespPtr),y
+				
+				sta CIFS.Cnt
+				
+				lda #0
+				sta (pStack)			DataLen LO
+
+.7				jsr Exit.OK
+
+				ldy #1					DataLen HI
+				lda (pStack),y
+				ora (pStack)			DataLen LO
+				bne .8
+				
+				>LDYA CIFS.Cnt
+				
+				bra .90
+
+.8				jmp Sleep2				Back to CIFS.FRead for next chunk
 
 .9				jsr Exit.NODATA
 				beq .99
@@ -726,18 +821,8 @@ CIFS.FWrite		ldy #4					hNod
 				bne .1
 
 				jsr ReqSetupPtr2
-
-				ldy #S.FD.REG.REF
-				lda (pFD),y
-				pha
-				iny
-				lda (pFD),y
-
-				ldy #S.NETBIOS+S.SMB.H+6	FileID
-				sta (ZPReqPtr),y
-				pla
-				dey
-				sta (ZPReqPtr),y
+				
+				jsr CIFS.RWGetFidOfs
 
 				ldy #3					DataPtr HI
 				lda (pStack),y
@@ -762,14 +847,11 @@ CIFS.FWrite		ldy #4					hNod
 
 .6				pha
 				ldy #S.NETBIOS+S.SMB.H+21	DataLength
-				clc
-				adc #2
 				sta (ZPReqPtr),y
 
 				iny
 
 				txa
-				adc #0
 				sta (ZPReqPtr),y
 
 				pla
@@ -791,15 +873,10 @@ CIFS.FWrite		ldy #4					hNod
 				iny
 				sta (ZPReqPtr),y
 
-				ldy #0
 				plx
 
-.70				lda (ZPPtr1),y
-				sta (ZPPtr2),y
-				iny
-				dex
-				bne .70
-
+				jsr CIFS.CopyX
+				
 				jsr SetReqLen
 
 				jsr WriteSocket
@@ -834,18 +911,31 @@ CIFS2.FWrite	jsr ReadSocket
 				jsr CheckSMBStatus
 				bcs .90
 
-				lda hResp
-				>SYSCALL2 FreeMem
+				ldy #S.NETBIOS+S.SMB.H+5	Count LO
+				jsr CIFS2.RWSetOfsY
 
-				ldy #1
+				ldy #S.NETBIOS+S.SMB.H+5	Count LO
+				lda (ZPRespPtr),y
+				bne .1
+				
+				inc CIFS.Cnt+1
+				bra .7
+
+.1				sta CIFS.Cnt
+
+.7				jsr Exit.OK
+
+				ldy #1					DataLen HI
 				lda (pStack),y
-				ora (pStack)
+				ora (pStack)			DataLen LO
+
+				bne .8
+				
+				>LDYA CIFS.Cnt
 				clc
-				beq .90
+				bra .90
 
-				stz CIFS.Status			Back to CIFS.FWrite for next chunk
-
-				jmp Sleep2
+.8				jmp Sleep2				
 
 .9				jsr Exit.NODATA
 				beq .99
@@ -870,7 +960,7 @@ CIFS.Remove		>STYA pPath				resolved path
 				jsr ClearSocket
 
 				jsr GetCTX
-				
+
 				ldx #S.SMB.H.CMD.DELETE
 				jsr RequestSetupX
 
@@ -955,6 +1045,15 @@ CIFS.Rename		>STYA pPath				resolved src path
 				ldy #1
 				lda (pStack),y
 				sta pPath+1
+				
+.2				inc pPath				skip /mount
+				bne .3
+				
+				inc pPath+1
+				
+.3				lda (pPath)
+				cmp #'/'
+				bne .2
 
 				lda #$04				BufferFormat
 				jsr PutBytePtr2
@@ -990,6 +1089,104 @@ CIFS2.Rename	jsr ReadSocket
 .9				jmp Exit.NODATA
 
 .99				>RET 4
+*--------------------------------------
+CIFS.NewFD		>LDYAI S.FD.REG
+				>SYSCALL2 GetMem
+				bcs .9
+
+				>STYA pFD
+				stx hFD
+
+				lda #S.FD.T.REG
+				sta (pFD)
+
+				lda hHandler
+				ldy #S.FD.PFT
+				sta (pFD),y
+
+*				clc
+
+.9				rts
+*--------------------------------------
+CIFS.RWGetFidOfs
+				ldx #6
+				ldy #S.FD.REG.REF
+
+.1				lda (pFD),y
+				pha
+				iny
+				dex
+				bne .1
+
+				ldx #6
+				ldy #S.NETBIOS+S.SMB.H+5+5
+
+.2				pla
+				sta (ZPReqPtr),y
+				dey
+				dex
+				bne .2
+
+				rts
+*--------------------------------------
+CIFS2.RWSetOfsY	phy
+
+				ldy #4					hNod
+				lda (pStack),y
+
+				jsr GetPFD
+
+				ply						Count LO
+				phy
+				lda (ZPRespPtr),y
+
+				ldy #S.FD.REG.REF+2
+				clc
+				adc (pFD),y
+				sta (pFD),y
+
+				ply
+				iny						Count HI
+				lda (ZPRespPtr),y
+				
+				ldy #S.FD.REG.REF+3
+				adc (pFD),y
+				sta (pFD),y
+				bcc .8
+				
+				iny
+				lda (pFD),y
+				inc
+				sta (pFD),y
+				bne .8
+		
+				iny
+				lda (pFD),y
+				inc
+				sta (pFD),y
+
+.8				rts
+*--------------------------------------
+CIFS.CopyX		ldy #0
+
+.1				lda (ZPPtr1),y
+				sta (ZPPtr2),y
+				iny
+				dex
+				bne .1
+				
+				rts
+*--------------------------------------
+CIFS.Seek0		ldx #4
+				ldy #S.FD.REG.REF+2
+				lda #0
+				
+.1				sta (pFD),y
+				iny
+				dex
+				bne .1
+				
+				rts
 *--------------------------------------
 MAN
 SAVE usr/src/lib/libcifs.io.s
