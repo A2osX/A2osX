@@ -1,0 +1,353 @@
+NEW
+  AUTO 3,1
+                                .LIST OFF
+                                .OP     65C02
+                                .OR     $2000
+                                .TF bin/od
+*--------------------------------------
+                                .INB inc/macros.i
+                                .INB inc/a2osx.i
+                                .INB inc/kernel.i
+                                .INB inc/mli.i
+                                .INB inc/mli.e.i
+*--------------------------------------
+                                .DUMMY
+                                .OR ZPBIN
+ZS.START
+ArgIndex                .BS 1
+ArgPattern              .BS 1
+ZPPtr1                  .BS 2
+ZPBufPtr                .BS 2
+hFile                   .BS 1
+hBuf                    .BS 1
+char                    .BS 1
+ByteCount               .BS 3
+bPause                  .BS 1
+bPipe                   .BS 1
+bIsTTY                  .BS 1
+bTemp                   .BS 1
+bDummy                  .BS 1
+
+ZS.END                  .ED
+*--------------------------------------
+*                       File Header (16 Bytes)
+*--------------------------------------
+CS.START                cld
+                        jmp (.1,x)
+                        .DA #$61                  6502,Level 1 (65c02)
+                        .DA #1                    BIN Layout Version 1
+                        .DA #0                    S.PS.F.EVENT
+                        .DA #0
+                        .DA CS.END-CS.START       Code Size (without Constants)
+                        .DA DS.END-DS.START       Data Segment Size
+                        .DA #16                   Stack Size
+                        .DA #ZS.END-ZS.START      Zero Page Size
+                        .DA 0
+*--------------------------------------
+* Relocation Table
+*--------------------------------------
+.1                      .DA CS.INIT
+                        .DA CS.RUN
+                        .DA CS.DOEVENT          
+                        .DA CS.QUIT
+L.MSG.USAGE             .DA MSG.USAGE
+L.MSG.CRLF              .DA MSG.CRLF
+L.MSG.OFFSET            .DA MSG.OFFSET
+L.MSG.HEXBYTE           .DA MSG.HEXBYTE
+                        .DA 0
+*--------------------------------------
+CS.INIT                 clc
+                        rts
+*--------------------------------------
+CS.RUN                  stz bPipe
+                        stz bIsTTY
+                        jsr CS.RUN.ISATTY
+                        jsr CS.RUN.CheckArgs
+                        bcs CS.RUN.LOOP.RTS
+
+                        stz ByteCount
+                        stz ByteCount+1
+                        stz ByteCount+2
+
+CS.RUN.LOOP             lda bPipe                If reading from pipe
+                        bne .2                   No ^C/^S handling
+
+                        ldy #S.PS.hStdIn
+                        lda (pPS),y
+                        >SYSCALL FEOF
+                        bcs .9                   I/O Error
+
+                        tay
+                        bne .1                   No char
+
+                        >SYSCALL GetChar
+                        bcs .9                   I/O error
+                        cmp #$03                 Ctrl-C
+                        beq .9
+                        cmp #$13                 Ctrl-S
+                        bne .1
+                        
+                        lda bPause
+                        eor #$ff
+                        sta bPause
+                        bne CS.RUN.LOOP                        
+
+.1                      lda bPause
+                        bne CS.RUN.LOOP
+
+.2                      >SLEEP
+
+                        lda hFile
+                        >SYSCALL GetC
+                        bcs .7
+
+                        jsr CS.RUN.PRINTBYTE
+                        bra CS.RUN.LOOP
+
+.7                      cmp #MLI.E.EOF
+                        bne .9
+
+                        jsr CS.RUN.FINISHUP
+
+.8                      lda #0                     Exit with no Error
+
+.9                      sec
+CS.RUN.LOOP.RTS         rts
+*--------------------------------------
+CS.RUN.CheckArgs        jsr CS.RUN.NextArg
+                        bcs .4
+
+                        lda (ZPPtr1)
+                        cmp #'-'
+                        beq .1
+
+.11                     lda hFile
+                        bne .97
+
+                        >LDYA ZPPtr1
+                        jsr CS.RUN.OPEN
+                        bcs .9
+
+                        sta hFile
+                        bra CS.RUN.CheckArgs
+
+.1                      ldy #1 
+                        lda (ZPPtr1),y
+
+                        ldx #OptionList.Cnt-1
+
+.2                      cmp OptionList,x
+                        beq .3
+
+                        dex
+                        bpl .2
+
+                        bra .97
+
+.3                      txa
+                        lsr
+                        beq .98
+
+                        tax
+                        lda #$80
+                        sta bDummy-1,x 
+                        bra CS.RUN.CheckArgs
+                                
+.4                      lda hFile
+                        bne .80
+
+                        ldy #S.PS.hStdIn
+                        lda (pPS),y
+                        tax
+                                
+                        lsr
+                        bcs .97
+                                
+                        lda Nod.Table.hFD-2,x
+                        >SYSCALL GetMemPtr
+                        >STYA ZPPtr1
+                        lda (ZPPtr1)
+                        cmp #S.FD.T.PIPE
+                        bne .97
+                                
+                        ldy #S.PS.hStdIn
+                        lda (pPS),y
+                        sta hFile
+                        inc bPipe                        
+
+.80                     >LDYAI 256
+                        >SYSCALL GetMem
+                        bcs .9
+
+                        >STYA ZPBufPtr
+                        stx hBuf
+
+*                       clc
+
+.9                      rts
+
+.97                     lda #E.SYN
+
+.98                     pha
+                        >PUSHW L.MSG.USAGE
+                        >PUSHBI 0
+                        >SYSCALL PrintF
+                        pla
+                        sec
+                        rts
+*--------------------------------------
+CS.RUN.NextArg          inc ArgIndex
+                        lda ArgIndex
+                        >SYSCALL ArgV
+                        bcs .9
+
+                        >STYA ZPPtr1
+
+.9                      rts
+*--------------------------------------
+CS.RUN.OPEN             >PUSHYA
+                        >PUSHBI O.RDONLY+O.TEXT
+                        >PUSHBI S.FI.T.TXT
+                        >PUSHWZ                         Aux type
+                        >SYSCALL FOpen
+                        bcs .9
+                        sta hFile
+.9                      rts
+*--------------------------------------
+CS.RUN.ISATTY           ldy #S.PS.hStdOut
+                        lda (pPS),y
+                        tax
+                        lsr
+                        bcc .9
+                        lda Nod.Table.hFD-2,x
+                        >SYSCALL GetMemPtr
+                        >STYA ZPPtr1
+                        lda (ZPPtr1)
+                        beq .9
+                        inc bIsTTY
+.9                      rts
+*--------------------------------------
+CS.QUIT                 lda hFile
+                        beq .1
+                        >SYSCALL FClose
+.1                      lda hBuf
+                        beq .8
+                        >SYSCALL FreeMem
+.8                      clc
+                        rts
+*--------------------------------------
+CS.RUN.PRINTBYTE
+                pha                           Char is in A
+
+                lda ByteCount                 Divisible by 16
+                and #$0f
+                sta bTemp
+                bne .2
+
+                >PUSHW L.MSG.OFFSET           Print offset
+                lda ByteCount+2
+                >PUSHA
+                lda ByteCount+1
+                >PUSHA
+                lda ByteCount
+                >PUSHA
+                >PUSHBI 3
+                >SYSCALL PrintF
+
+.2              ldy bTemp                     Offset mod 16
+                pla                           Character
+                pha
+                sta (ZPBufPtr),y
+                
+                >PUSHW L.MSG.HEXBYTE
+                pla
+                >PUSHA
+                >PUSHBI 1
+                >SYSCALL PrintF
+
+.6              inc ByteCount
+                bne .7
+                inc ByteCount+1
+                bne .7
+                inc ByteCount+2
+
+.7              lda bTemp
+                cmp #$0f
+                bne .9
+
+                jsr CS.RUN.PRINTASCII
+
+.9              rts
+*--------------------------------------
+CS.RUN.PRINTASCII
+                lda #'>'
+                >SYSCALL PutChar
+
+                ldy #$00
+.7              lda (ZPBufPtr),y
+                phy
+                cmp #$7f
+                bcs .75                  Character >= $7f
+                cmp #C.SPACE
+                bcc .75                  Character < Space
+                bra .8
+.75             lda #'.'
+
+.8              >SYSCALL PutChar
+                ply
+                cpy bTemp
+                beq .85
+                iny
+                bra .7
+
+.85             lda #'<'
+                >SYSCALL PutChar
+
+                lda #C.CR
+                >SYSCALL PutChar
+                lda bIsTTY
+                beq .9
+                lda #C.LF
+                >SYSCALL PutChar
+.9              rts
+*--------------------------------------
+CS.RUN.FINISHUP
+                lda ByteCount
+                and #$0f
+                bne .1
+                rts
+.1              pha
+                lda #' '
+                >SYSCALL PutChar
+                lda #' '
+                >SYSCALL PutChar
+                lda #' ' 
+                >SYSCALL PutChar
+                pla
+                inc
+                cmp #$10
+                bne .1
+.2              jsr CS.RUN.PRINTASCII
+                rts
+*--------------------------------------
+CS.DOEVENT      sec
+                rts
+*--------------------------------------
+CS.END
+*--------------------------------------
+OptionList              .AS "x"
+OptionList.Cnt          .EQ *-OptionList
+*--------------------------------------
+MSG.USAGE               .AS "Usage : OD <File> or CMD|OD"
+MSG.CRLF                .AZ "\r\n"
+MSG.OFFSET              .AZ "%h%h%h "
+MSG.HEXBYTE             .AZ "%h "
+*--------------------------------------
+                                .DUMMY
+                                .OR 0
+DS.START
+DS.END                  .ED
+*--------------------------------------
+MAN
+SAVE usr/src/bin/od.s
+ASM
