@@ -14,11 +14,29 @@ X.ENTER.SUBDIR	.EQ 0
 X.COPY.TO.DEST	.EQ 0
 X.DELETE.SOURCE	.EQ 0
 *--------------------------------------
-ZPPtr1			.EQ ZPBIN
-ZPPtr2			.EQ ZPBIN+2
-ZPFileName		.EQ ZPBIN+4
-ZPFileStat		.EQ ZPBIN+6
-ZPFullPath		.EQ ZPBIN+8
+* Zero Page Segment, up to 32 bytes
+*--------------------------------------
+				.DUMMY
+				.OR ZPBIN
+ZS.START
+
+ZPPtr1			.BS 2
+ZPPtr2			.BS 2
+ZPFileName		.BS 2
+ZPFileStat		.BS 2
+
+ZPFullPath		.BS 2
+
+ArgIndex		.BS 1
+HexFileType		.BS 1
+
+hSrcFullPath	.BS 1
+bPause			.BS 1
+
+bContinue		.BS 1
+bRecurse		.BS 1
+
+ZS.END			.ED
 *--------------------------------------
 *			File Header (16 Bytes)
 *--------------------------------------
@@ -26,11 +44,12 @@ CS.START		cld
 				jmp (.1,x)
 				.DA #$61				6502,Level 1 (65c02)
 				.DA #1					BIN Layout Version 1
-				.DA 0
-				.DA CS.END-CS.START		CS
-				.DA DS.END-DS.START		DS
-				.DA #16					SS
-				.DA #10					ZP
+				.DA #0					S.PS.F.EVENT
+				.DA #0
+				.DA CS.END-CS.START		Code Size (without Constants)
+				.DA DS.END-DS.START		Data SegmentSize
+				.DA #16					Stack Size
+				.DA #ZS.END-ZS.START	Zero Page Size
 				.DA 0
 *--------------------------------------
 * Relocation Table
@@ -39,6 +58,7 @@ CS.START		cld
 				.DA CS.RUN
 				.DA CS.DOEVENT		
 				.DA	CS.QUIT
+*--------------------------------------
 L.MSG.USAGE		.DA MSG.USAGE
 L.MSG.FILE		.DA MSG.FILE
 L.MSG.OK		.DA MSG.OK
@@ -49,7 +69,8 @@ L.PRODOS.FT.TXT	.DA PRODOS.FT.TXT
 CS.INIT			clc
 				rts
 *--------------------------------------
-CS.RUN			>INC.G ArgCount
+CS.RUN			inc ArgIndex
+				lda ArgIndex
 				>SYSCALL ArgV
 				bcs .7
 
@@ -57,12 +78,14 @@ CS.RUN			>INC.G ArgCount
 				lda (ZPPtr1)
 				cmp #'-'
 				bne .4
+
 				ldy #1 
 				lda (ZPPtr1),y
 
 				ldx #OptionVars-OptionList-1
 .2				cmp OptionList,x
 				beq .3
+
 				dex
 				bne .2
 
@@ -75,10 +98,10 @@ CS.RUN			>INC.G ArgCount
 
 .3				ldy OptionVars,x
 				lda #$80
-				sta (pData),y
+				sta $0,y
 				bra CS.RUN
 *--------------------------------------
-.4				>LDA.G HexFileType
+.4				lda HexFileType
 				bne .5
 				
 				jsr GetHexFileType
@@ -96,15 +119,14 @@ CS.RUN			>INC.G ArgCount
 .7				>LDA.G hSrcBasePath
 				beq .99					no src ? ERROR
 
-				>LDA.G HexFileType
+				lda HexFileType
 				beq .99					we also have a TYPE
 				
 				>LDYAI 256
 				>SYSCALL GetMem
 				bcs .99
 				>STYA ZPFullPath
-				txa
-				>STA.G hSrcFullPath
+				stx hSrcFullPath
 *--------------------------------------
 CS.RUN.LOOP		ldy #S.PS.hStdIn
 				lda (pPS),y
@@ -123,13 +145,13 @@ CS.RUN.LOOP		ldy #S.PS.hStdIn
 				cmp #$13				Ctrl-S
 				bne .1
 
-				>LDA.G bPause
+				lda bPause
 				eor	#$ff
-				sta (pData),y
+				sta bPause
 				bne CS.RUN.LOOP
 
-.1				>LDA.G bPause
-				bne CS.RUN.LOOP			Pause...
+.1				bit bPause
+				bmi CS.RUN.LOOP			Pause...
 *--------------------------------------
 				jsr GetEntry
 				bcs CS.RUN.LEAVE
@@ -171,7 +193,7 @@ CS.RUN.LEAVE	jsr LeaveSubDir
 				sec
 .99				rts
 *--------------------------------------
-CS.RUN.DIR		>LDA.G bRecurse
+CS.RUN.DIR		bit bRecurse
 				bpl .8
 
 				lda (ZPFileName)
@@ -210,8 +232,7 @@ CS.RUN.FILE		jsr FilterMatch
 				
 				>PUSHW ZPFullPath
 
-				ldy #HexFileType
-				>PUSHB (pData),y
+				>PUSHB HexFileType
 
 				>SYSCALL ChTyp
 				jsr CS.RUN.CheckErr
@@ -220,6 +241,7 @@ CS.RUN.FILE		jsr FilterMatch
 .9				rts
 *--------------------------------------
 CS.RUN.CheckErr	bcs .1
+
 				>LDYA L.MSG.OK
 				>SYSCALL PutS
 				rts
@@ -231,7 +253,8 @@ CS.RUN.CheckErr	bcs .1
 				>PUSHA
 				>PUSHBI 1
 				>SYSCALL PrintF
-				>LDA.G bContinue
+
+				lda bContinue
 				eor #$80
 				asl
 				pla
@@ -254,12 +277,17 @@ CS.DOEVENT		sec
 *--------------------------------------
 CS.QUIT			jsr LeaveSubDir
 				bcc CS.QUIT
+
 				>LDA.G hFilter
 				beq .1
+
 				>SYSCALL FreeMem
-.1				>LDA.G hSrcFullPath
+
+.1				lda hSrcFullPath
 				beq .8
+
 				>SYSCALL FreeMem
+
 .8				clc
 				rts
 *--------------------------------------
@@ -271,69 +299,88 @@ GetHexFileType	ldy #$ff
 
 				cpy #3
 				bne .9
+
 				lda (ZPPtr1)
 				cmp #'0'
 				bne .1
+
 				ldy #1
 				lda (ZPPtr1),y
 				jsr IsDigit16
 				bcs .9
+
 				asl
 				asl
 				asl
 				asl
-				>STA.G HexFileType
-				ldy #2
+				sta HexFileType
+				
+				iny
 				lda (ZPPtr1),y
 				jsr IsDigit16
 				bcs .9
-				>ORA.G HexFileType
-				sta (pData),y
-				clc
+
+				tsb HexFileType
+*				clc
 				rts
 
 .1				ldx #0
+
 				>LDYA L.PRODOS.FT.TXT
 				>STYA ZPPtr2
+
 .2				ldy #2
 
 .21				lda (ZPPtr1),y
 				cmp #'a'
 				bcc .4
+
 				cmp #'z'+1
 				bcs .4
+
 				eor #$20
+
 .4				cmp (ZPPtr2),y
 				bne .5
+
 				dey
 				bpl .21
-				lda PRODOS.FT.ID,x
-				>STA.G HexFileType
+
+				lda PRODOS.FT.HEX,x
+				sta HexFileType
 				clc
 				rts
+
 .5				clc
 				lda ZPPtr2
 				adc #3
 				sta ZPPtr2
-				lda ZPPtr2+1
-				adc #0
-				sta ZPPtr2+1
-				inx
-				cpx #PRODOS.FT.COUNT
+				bcc .6
+				
+				inc ZPPtr2+1
+
+.6				inx
+				cpx #PRODOS.FT.TXT-PRODOS.FT.HEX
 				bne .2
+
 .9				sec
 				rts
 *---------------------------------------
 IsDigit16		cmp #'0'
 				bcc .9
+
 				cmp #'9'+1
 				bcc .8
+
 				cmp #'A'
 				bcc .9
+
 				cmp #'F'+1
 				bcc .1
+
 				cmp #'a'
 				bcc .9
+
 				cmp #'f'+1
 				bcs .9
 
@@ -342,8 +389,10 @@ IsDigit16		cmp #'0'
 *				clc
 				sbc #'A'-11			cc so A->10 (11-CC)
 				clc
+
 .8				and #$0F
 				rts
+
 .9				sec
 				rts
 *--------------------------------------
@@ -362,27 +411,20 @@ MSG.OK			.AZ "[OK]"
 MSG.ERR			.AZ "[%h]\r\n"
 MSG.FILE		.AZ "CHTYP File:%S..."
 *--------------------------------------
-PRODOS.FT.COUNT	.EQ 6
-PRODOS.FT.ID	.HS 0406FAFCFDFF
+PRODOS.FT.HEX	.HS 0406FAFCFDCBCCCFFF
 PRODOS.FT.TXT	.AS "TXT"
 				.AS "BIN"
 				.AS "ASM"
 				.AS "BAS"
 				.AS "VAR"
+				.AS "PIX"
+				.AS "FON"
+				.AS "PAK"				
 				.AS "SYS"
 *--------------------------------------
 				.DUMMY
 				.OR 0
-DS.START
-ArgCount		.BS 1
-
-hSrcFullPath	.BS 1
-bPause			.BS 1
-bContinue		.BS 1
-bRecurse		.BS 1
-HexFileType		.BS 1
-
-				.INB usr/src/shared/x.fileenum.g
+DS.START		.INB usr/src/shared/x.fileenum.g
 DS.END			.ED
 *--------------------------------------
 MAN
