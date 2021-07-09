@@ -270,6 +270,12 @@ Example
 
 In this example, only those volumes that are attached to Slot 7 are listed.
 
+### IRC
+
+	irc ip|host port userid #channel
+
+**irc**, short for internet relay chat, is 
+
 ### KILL
 
 	kill [-0|-1|-2] pid
@@ -366,11 +372,29 @@ Normally **rm** displays each file name being deleted.  With the Quiet option (*
 
 **SH** is one of the interactive and script processing shells under development for A2osX. The SH shell is similar to the BASH Shell in Linux and uses primarily the BASH syntax structure for scripting.  A SH Shell Developers Guide is available in the Documentation Library of A2osX.
 
+### SHUTDOWN
+
+	shutdown [-t seconds] -r | systemfile
+
+**shutdown** is a utility that can be used to exit A2osX and either restart A2osX or optionally load and run another ProDOS system program (.SYSTEM, or type SYS).  
+
+### STAT
+
+	stat [-a] [-d] [-u] [-g] [-s] [-b] [-c] [-m] [-l] filespec
+
+**stat** is a utility for displaying the meta data associated with a file such as the access flags, modification date/time, and or owner id.  When used without any options **stat** will return all the meta data.  With one or more options, **stat** will only return the meta data for the options specified.  These options are [-a] Access Flags, [-d] Mod Flags, [-u] User Owner ID, [-g] Group Owner ID,  [-s] Size in bytes, [-b] Size in blocks, [-c] Creation date/time, [-m] Modification date/time, and [-l] Last access date/time.
+
 ### TERM
 
 	term <device>
 
 The **TERM** command is used to start an interactive terminal (VT100) session using an available serial device.  You must pass to **term** a valid device name (in lower case) in the form of /dev/comX where X is the slot number of your super serial card.  You must have already installed the device driver for this card using the **INSDRV** command and specifying the **SSC.I.DRV**.  When you execute the **insdrv ssc.i.drv** command it will search for an available (not used by another process) super serial card and will return to you the name of device installed (i.e. **com2**).  Once you start a **TERM** session, you can disconnect from the remote host and return to the shell prompt by pressing Control-T.  If you have more then one Apple running A2osX, you could set up one as a host with an SSC that has the right driver installed and a GETTY set for that device (see the User Guide) and then use the other Apple with an SSC to connect to the first one using **TERM**.
+
+### UNAME
+
+	uname [-h] [-m] [-c] [-s] [-a] [-v] [-b] [-k] [-z]
+
+The **UNAME** command display information about the running machine. When used without any options **uname** will return the Machine Type/SubType, CPU Type, CPU Speed, Kernel Version, Kernel Build and Kernel Mode.  With one or more options, **uname** will only return the data for the options specified, in the order given on the command line. These options are [-h] Host name, [-m] Machine Type/SubType, [-c] CPU Type, [-s] CPU Speed, [-a] Alternate CPU, [-v] Kernel Version, [-b] Kernel Build, [-k] Kernel Mode, and [-z] Kernel Timing. 
 
 ### UNPAK
 
