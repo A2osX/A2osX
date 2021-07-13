@@ -841,7 +841,7 @@ Print A (char) to hFILE
 `>PUSHB character`  
 `>SYSCALL fputc`  
 
-## RETURN VALUE   
+## RETURN VALUE  
 CC = success  
 
 # putchar (BLOCKING)  
@@ -855,7 +855,7 @@ Print A (char) to StdOut
 `lda character`  
 `>SYSCALL putchar`  
 
-## RETURN VALUE   
+## RETURN VALUE  
 CC = success  
 
 # puts (BLOCKING)  
@@ -869,7 +869,7 @@ Write Str to StdOut, appends '\r\n'
 `>LDYAI str`  
 `>SYSCALL PutS`  
 
-## RETURN VALUE   
+## RETURN VALUE  
 CC = success  
 
 # fputs (BLOCKING)  
@@ -884,7 +884,7 @@ Write Str to hFILE
 `>PUSHW str`  
 `>SYSCALL fputs`  
 
-## RETURN VALUE   
+## RETURN VALUE  
 CC = success  
 
 # fgets (BLOCKING)  
@@ -903,8 +903,8 @@ string is then terminated with a null byte.
 `>PUSHW n`  
 `>SYSCALL fgets`  
 
-## RETURN VALUE   
- Y,A: s   
+## RETURN VALUE  
+ Y,A: s  
 CC = success  
 
 # getchar (BLOCKING)  
@@ -917,7 +917,7 @@ Get char from StdIn
 **In:**  
 `>SYSCALL getchar`  
 
-## RETURN VALUE   
+## RETURN VALUE  
  CC = success  
   A = char  
 
@@ -932,7 +932,7 @@ Get char from Node
 `lda stream`  
 `>SYSCALL getc`  
 
-## RETURN VALUE   
+## RETURN VALUE  
  CC = success  
   A = char  
 
@@ -947,7 +947,7 @@ push byte back into input stream
 `>PUSHB stream`  
 `>SYSCALL ungetc`  
 
-## RETURN VALUE   
+## RETURN VALUE  
  CC = success  
   A = char  
 
@@ -979,7 +979,7 @@ TODO: replace flags/ftype/auxtype with mode="w+,t=TYP,x=AUXTYPE"
  + ,t=123 or t=$ff or t=TXT  
  + ,x=12345 or x=$ffff  
 
-## RETURN VALUE   
+## RETURN VALUE  
  CC : A = hFILE  
  CS : A = EC  
 
@@ -1063,7 +1063,7 @@ Test the end-of-file indicator for hFILE
 `>SYSCALL feof`  
 
 ## RETURN VALUE  
- CC :   
+ CC :  
  A = $ff EOF  
  A = 0 NOT EOF  
  CS :  
@@ -1123,20 +1123,20 @@ Prints C-Style String
 
 ## ASM  
 **In:**  
-PrintF : (example is for printing Y,A as integer : format="%I", 2 bytes)    
+PrintF : (example is for printing Y,A as integer : format="%I", 2 bytes)  
 `>PUSHW format`  
 `>PUSHW i`  
 `...`  
 `>PUSHBI 2`	#bytecount  
 `>SYSCALL PrintF`  
-FPrintF :   
+FPrintF :  
 `>PUSHB hFILE`  
 `>PUSHW format`  
 `>PUSHW i`  
 `...`  
 `>PUSHBI 2`	#bytecount  
 `>SYSCALL fprintf`  
-SPrintF :   
+SPrintF :  
 `>PUSHW str`  
 `>PUSHW format`  
 `>PUSHW i`  
@@ -1148,7 +1148,7 @@ SPrintF :
 CC : success, Y,A = bytes sent  
 CS : error, A = code from Output  
 Specifiers :  
-+ %b : pull 1 byte to Print BIN   
++ %b : pull 1 byte to Print BIN  
 + %d : pull 1 byte unsigned DEC 0..255  
 + %D : pull 2 bytes unsigned DEC 0..65535  
 + %u : pull 4 bytes long unsigned DEC 0..4294967295  
@@ -1172,11 +1172,11 @@ Specifiers :
 + \\\\ : Print \  
 + \\% : Print %  
 
-Modifiers for len and padding :   
+Modifiers for len and padding :  
 + %d	  : '9'  '12'  
 + %2d	  : ' 9' '12'  
 + %02d  : '09' '12'  
-+ %11s  : 'ABCDEFGH   '	  
++ %11s  : 'ABCDEFGH   '  
 + %011s : 'ABCDEFGH000'  
 + %2f	  :	'3.14'  
 
