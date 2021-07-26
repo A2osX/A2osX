@@ -77,7 +77,7 @@ Y,A = Ptr to installed driver
 ## RETURN VALUE  
 CC = OK, CS = ERROR  
 Y,A = FD  
-X = hDev  
+X = hFD  
 
 # GetDevStatus  
 
@@ -108,7 +108,7 @@ Create a hDEV
 # IOCTL  
 
 ## C  
-`int ioctl(short int DevID, short int request, void *param);`  
+`int ioctl(short int hFD, short int request, void *param);`  
 
 ## ASM  
 `>PUSHB hDEV`  
@@ -399,17 +399,6 @@ Y,A = PTR to MemBlock
  CS :  
   A = EC  
 
-# LoadStkObj  
-Load a file in AUX memory (Stock Objects)  
- PUSHW = PATH (Handled by....  
- PUSHB = MODE  ...  
- PUSHB = TYPE  ...  
- PUSHW = AUXTYPE ...FOpen)  
-
-## RETURN VALUE  
- Y,A = File Length  
- X = hMem of Loaded Object in AUX mem  
-
 # GetStkObjPtr  
 
 ## ASM  
@@ -489,6 +478,17 @@ A = Child PSID
 `>SYSCALL kill`  
 
 ## RETURN VALUE  
+
+# LoadStkObj  
+Load a file in AUX memory (Stock Objects)  
+ PUSHW = PATH (Handled by....  
+ PUSHB = MODE  ...  
+ PUSHB = TYPE  ...  
+ PUSHW = AUXTYPE ...FOpen)  
+
+## RETURN VALUE  
+ Y,A = File Length  
+ X = hMem of Loaded Object in AUX mem  
 
 # LoadTxtFile  
 Load TXT a file in memory (with ending 0)  
