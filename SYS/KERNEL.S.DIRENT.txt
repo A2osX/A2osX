@@ -40,7 +40,6 @@ K.OpenDir		jsr PFT.CheckPathYA
 *\--------------------------------------
 				.DUMMY					ZPTMP,9
 				.OR ZPTMP				9 Bytes
-K.ReadDir.hBlk	.BS 1
 K.ReadDir.ECIB	.BS 1
 
 K.ReadDir.EL	.BS 1
@@ -82,7 +81,7 @@ K.ReadDir.ROOT	ldy #S.FD.DIR.FC		did we already returned something ?
 
 				>LDYAI 16+S.STAT*18+1	14*(Vols+Stat) + 4*(PFT+Stat) + \0
 
-				jsr K.ReadDir.GetBufYA
+				jsr K.ReadDir.GetBuf
 				bcs DIRENT.RTS
 
 .1				lda (ZPPtr2)
@@ -186,20 +185,14 @@ K.ReadDir.DEV	jmp DIRENT.EOF			TODO : /dev
 *--------------------------------------
 K.ReadDir.DIR  	sta K.MLI.PARAMS+1		A=#S.DIR.PRODOS.REF
 
-				lda /K.Buf256			read in
+				stz K.MLI.PARAMS+2
+				lda /K.Buf256			read in Buf256+IOBuf
+				sta K.MLI.PARAMS+3
 
-				stz K.MLI.PARAMS+2		For reading
-				sta K.MLI.PARAMS+3		For reading
-
-				ldy #4					Skip 4 bytes linked list
-				sty ZPPtr2				PTR to Buffer for PASS #1
-				sty ZPPtr3				PTR to Buffer for PASS #2
-
-				sta ZPPtr2+1			PTR to Buffer for PASS #1
-				sta ZPPtr3+1			PTR to Buffer for PASS #2
-
-				>LDYAI 512
-				>STYA K.MLI.PARAMS+4
+				stz K.MLI.PARAMS+4
+				lda /512
+				sta K.MLI.PARAMS+5
+				
 				>MLICALL MLIREAD		Read A block from directory
 				bcs .99
 
@@ -207,30 +200,18 @@ K.ReadDir.DIR  	sta K.MLI.PARAMS+1		A=#S.DIR.PRODOS.REF
 				lda (pFD),y
 				bne .2					no, we have all we need....
 
-				ldy #$1f+3
 				ldx #3
 
-.1				lda (ZPPtr2),y			Get K.ReadDir.EL....	From Block
+.1				lda K.Buf256+$23,x		Get K.ReadDir.EL....	From Block
 				sta K.ReadDir.EL,x
-				dey
 				dex
 				bpl .1
 
-				ldx #8
-
-				ldy #16
-
-.10				lda (ZPPtr2),y
-				pha
-				iny
-				dex
-				bne .10
-
-				ldx #8
+				ldx #7
 
 				ldy #S.FD.DIR.ACL+7
 
-.20				pla
+.20				lda K.Buf256+$14,x
 				cpy #S.FD.DIR.MODE+1
 				bne .30
 
@@ -239,7 +220,7 @@ K.ReadDir.DIR  	sta K.MLI.PARAMS+1		A=#S.DIR.PRODOS.REF
 .30				sta (pFD),y
 				dey
 				dex
-				bne .20
+				bpl .20
 
 				inc K.ReadDir.EC		Add one to EC because we include VOL/DIR Header
 				bne .4
@@ -270,8 +251,11 @@ K.ReadDir.DIR  	sta K.MLI.PARAMS+1		A=#S.DIR.PRODOS.REF
 				bne .5
 
 				iny
-				clc
-				beq .99					no...exit
+				bne .5
+				
+				lda #MLI.E.EOF
+				sec
+				rts
 *--------------------------------------
 * pass #1 compute BufSize...
 *--------------------------------------
@@ -282,7 +266,9 @@ K.ReadDir.DIR  	sta K.MLI.PARAMS+1		A=#S.DIR.PRODOS.REF
 				sta K.ReadDir.BufSize
 				stz K.ReadDir.BufSize+1
 
-K.ReadDir.DIR1	lda (ZPPtr2)			X = EntryCount In This Block
+				jsr K.ReadDir.P3Init
+
+K.ReadDir.DIR1	lda (ZPPtr3)
 				beq .7					Free slot....goto next
 
 				and #$F0				get storage_type
@@ -292,7 +278,7 @@ K.ReadDir.DIR1	lda (ZPPtr2)			X = EntryCount In This Block
 				cmp #$E0				directory header ?
 				beq .2
 
-				lda (ZPPtr2)			regular DIR or File, get LEN
+				lda (ZPPtr3)			regular DIR or File, get LEN
 				and #$F					compute filename len
 				sec						add "#<filename>" + S.STAT
 				adc #S.STAT
@@ -308,21 +294,13 @@ K.ReadDir.DIR1	lda (ZPPtr2)			X = EntryCount In This Block
 
 				inc K.ReadDir.BufSize+1
 
-.3				inx
+.3				inx						X,Y = !Total entry Count
 				bne .7
 
 				iny
-				bra K.ReadDir.DIR2		we reached last entry in whole DIR
+				beq K.ReadDir.DIR2		we reached last entry in whole DIR
 
-.7				lda ZPPtr2
-				clc
-				adc K.ReadDir.EL
-				sta ZPPtr2
-				bcc .8
-
-				inc ZPPtr2+1
-
-.8				dec K.ReadDir.ECIB
+.7				jsr K.ReadDir.P3Next
 				bne K.ReadDir.DIR1
 *--------------------------------------
 * pass #2 Fill Buffer...(ZPPtr1 & Ptr2 can now be trashed)
@@ -330,10 +308,13 @@ K.ReadDir.DIR1	lda (ZPPtr2)			X = EntryCount In This Block
 K.ReadDir.DIR2	lda K.ReadDir.EPB
 				sta K.ReadDir.ECIB
 
+				>LDYA K.ReadDir.BufSize	Get a BufSize bytes buffer for storing results
 				jsr K.ReadDir.GetBuf
-				bcc .1
+				bcc .10
 
 				rts
+				
+.10				jsr K.ReadDir.P3Init
 				
 .1				lda (ZPPtr3)
 				beq .7					Empty slot, skip
@@ -368,17 +349,8 @@ K.ReadDir.DIR2	lda K.ReadDir.EPB
 				ora K.ReadDir.EC
 				beq .8						0! no more files in DIR
 
-.7				dec K.ReadDir.ECIB			0! no more file in block
-				beq .8
-
-				lda ZPPtr3
-				clc
-				adc K.ReadDir.EL
-				sta ZPPtr3
-				bcc .1
-
-				inc ZPPtr3+1
-				bra .1
+.7				jsr K.ReadDir.P3Next
+				bne .1
 
 .8				ldx #3
 				ldy #S.FD.DIR.EL+3
@@ -393,9 +365,28 @@ K.ReadDir.EXIT	ldx K.ReadDir.hBuf
 				txa
 				jmp K.GetMemPtr
 *--------------------------------------
+K.ReadDir.P3Init
+				ldy #4					Skip 4 bytes linked list
+				sty ZPPtr3
+
+				lda /K.Buf256
+				sta ZPPtr3+1
+				rts
+*--------------------------------------
+K.ReadDir.P3Next
+				lda ZPPtr3
+				clc
+				adc K.ReadDir.EL
+				sta ZPPtr3
+				bcc .8
+
+				inc ZPPtr3+1
+
+.8				dec K.ReadDir.ECIB			0! no more file in block
+
+				rts
+*--------------------------------------
 K.ReadDir.GetBuf
-				>LDYA K.ReadDir.BufSize	Get a BufSize bytes buffer for storing results
-K.ReadDir.GetBufYA
 				jsr K.GetMem0			make sure 0 filled
 				bcs .9
 
@@ -471,7 +462,9 @@ K.ReadDir.AddToBuf
 				sta (ZPPtr4)
 				inc ZPPtr4
 				bne .8
+
 				inc ZPPtr4+1
+
 .8				rts
 *--------------------------------------
 K.ReadDir.AddStatACL
