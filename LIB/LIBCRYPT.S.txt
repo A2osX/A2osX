@@ -14,26 +14,39 @@ NEW
 ZS.START
 ZPCtxPtr		.BS 2
 ZPDataPtr		.BS 2
+ZPKeyPtr		.BS 2
 ZPHashPtr		.BS 2
-ZPChunkLen		.BS 2
 
-MD4.ABCD
-MD5.ABCD
-MD4.A
-MD5.A			.BS 4					Chunk Level,A,B,C,D
-MD4.B
-MD5.B			.BS 4
-MD4.C
-MD5.C			.BS 4
-MD4.D
-MD5.D			.BS 4
+MDx.ABCD
+MDx.A			.BS 4					Chunk Level,A,B,C,D
+MDx.B			.BS 4
+MDx.C			.BS 4
+MDx.D			.BS 4
 
-MD4.F1
-MD5.F1			.BS 4
-MD4.F2
-MD5.F2			.BS 4
+MDx.F1			.BS 4
+MDx.F2			.BS 4
 
 ZS.END			.ED
+*--------------------------------------
+* TEMP storage allowed here because of:
+* - No Task switching when in a LIB
+* - No I/O (printf....)
+*--------------------------------------
+				.DUMMY
+				.OR $1100
+ZPDataLen		.BS 2
+ZPChunkLen		.BS 2
+
+MDx.MODE		.BS 1
+
+MDx.DTemp		.BS 4
+MDx.F			.BS 4
+MDx.i			.BS 1
+MDx.BUFFER64	.BS 64
+
+HMACMD5.IPAD	.BS 65
+HMACMD5.OPAD	.BS 65
+				.ED
 *--------------------------------------
 * DWORD Macros : Do NOT disturb carry with cpx, cpy...
 *--------------------------------------
@@ -124,6 +137,10 @@ CS.START		cld
 				.DA MD4Init
 				.DA MD4Update
 				.DA MD4Finalize
+				.DA MD5
+				.DA MD5Init
+				.DA MD5Update
+				.DA MD5Finalize
 				.DA HMACMD5
 *--------------------------------------
 J.MD4.XXXX		.DA MD4.0015
@@ -133,8 +150,6 @@ J.MD5.XXXX		.DA MD5.0015
 				.DA MD5.1631
 				.DA MD5.3247
 				.DA MD5.4863
-L.HMACMD5.IPAD	.DA HMACMD5.IPAD
-L.HMACMD5.OPAD	.DA HMACMD5.OPAD
 				.DA 0
 *--------------------------------------
 LIB.LOAD
@@ -152,17 +167,35 @@ LIB.UNLOAD		clc
 * ## RETURN VALUE
 * CC
 *\--------------------------------------
-MD4				>PULLW ZPHashPtr
+MD4				clc
+				.HS B0					BCS
+*/--------------------------------------
+* ## MD5
+* Return MD5 Hash for input String
+* # C
+* `void MD5 (const char* str, char* digest);`
+* # ASM
+* `>PUSHW str`
+* `>PUSHW digest`
+* `>LIBCALL hLIBCRYPT,LIBCRYPT.MD5`
+* ## RETURN VALUE
+* CC
+*\--------------------------------------
+MD5				sec
+
+				ror MDx.MODE
+				
+				>PULLW ZPHashPtr
 				>PULLYA
 				>STYA ZPDataPtr
 				>SYSCALL2 strlen
 				>STYA ZPDataLen
-.1				jsr MDxInit.I
+.1				jsr MD5Init
 				bcs .9
 
 				pha						save MD4 Context hMem
 
-				jsr MD4Update.I
+				jsr MDxUpdate.I
 				jsr MDxFinalize.I
 
 				pla
@@ -179,26 +212,36 @@ MD4				>PULLW ZPHashPtr
 * ## RETURN VALUE
 * A = hMem To S.MD4
 *\--------------------------------------
-MD4Init			
-MDxInit.I		>LDYAI S.MD4
+MD4Init
+*/--------------------------------------
+* ## MD5Init
+* Initialize a MD5 computation
+* # C
+* `hMD5 MD5init();`
+* # ASM
+* `>LIBCALL hLIBCRYPT,LIBCRYPT.MD5Init`
+* ## RETURN VALUE
+* A = hMem To S.MD5
+*\--------------------------------------
+MD5Init			>LDYAI S.MDx
 				>SYSCALL2 getmem
 				bcs MDxInit.9
 
 				>STYA ZPCtxPtr
 
-MD5Reset.I		ldy #0
+MDxReset.I		ldy #0
 
-.1				lda MD4.ABCDINIT,y
+.1				lda MDx.ABCDINIT,y
 				sta (ZPCtxPtr),y
 				iny
-				cpy #S.MD4.BITCOUNT
+				cpy #S.MDx.BITCOUNT
 				bne .1
 
 				lda #0
 
 .2				sta	(ZPCtxPtr),y
 				iny
-				cpy #S.MD4				Includes S.MD4/5.FINALIZED Flag
+				cpy #S.MDx				Includes S.MDx.FINALIZED Flag
 				bne .2
 
 				txa
@@ -216,21 +259,32 @@ MDxInit.9		rts
 * `>hLIBCRYPT,LIBCRYPT.MD4Update`
 * ## RETURN VALUE
 *\--------------------------------------
-MD4Update		>PULLW ZPDataLen		get LEN
+MD4Update		clc
+				.HS B0					BCS
+*/--------------------------------------
+* ## MD5Update
+* Add Data to MD5 computation
+* # C
+* `void MD5update (hMD5 MD5, char* data, int len);`
+* # ASM
+* `>PUSHB MD5`
+* `>PUSHW data`
+* `>PUSHW len`
+* `>hLIBCRYPT,LIBCRYPT.MD5Update`
+* ## RETURN VALUE
+*\--------------------------------------
+MD5Update		sec
+
+				ror MDx.MODE
+				
+				>PULLW ZPDataLen		get LEN
 				>PULLW ZPDataPtr		get DATA
 
 				>PULLA
-				>SYSCALL2 GetMemPtr	get MD5 Context
+				>SYSCALL2 GetMemPtr		get MD5 Context
 				>STYA ZPCtxPtr
 
-MD4Update.I		clc
-				.HS B0					BCS
-				
-MD5Update.I		sec
-
-				ror MD.MODE
-				
-				ldy #S.MD4.FINALIZED
+MDxUpdate.I		ldy #S.MDx.FINALIZED
 				lda (ZPCtxPtr),y
 				beq .1
 
@@ -257,7 +311,7 @@ MD5Update.I		sec
 				ldy #0
 
 .51				lda (ZPDataPtr),y		Load Buffer with data
-				sta MD4.BUFFER64,y
+				sta MDx.BUFFER64,y
 				iny
 				cpy ZPChunkLen
 				bne .51
@@ -267,7 +321,7 @@ MD5Update.I		sec
 * Append "$80" & Padding & original size
 			
 				lda #$80				no, Append $80
-.52				sta MD5.BUFFER64,y
+.52				sta MDx.BUFFER64,y
 
 				asl
 *				lda #0
@@ -276,7 +330,7 @@ MD5Update.I		sec
 				cpy #64
 				bcc .52
 
-				ldy #S.MD4.EXTRABIT		Mark MD5 Context as Appended
+				ldy #S.MDx.EXTRABIT		Mark MD5 Context as Appended
 				ror
 *				lda #$80
 				sta (ZPCtxPtr),y
@@ -316,7 +370,23 @@ MD5Update.I		sec
 * `>LIBCALL hLIBCRYPT,LIBCRYPT.MD4Finalize`
 * ## RETURN VALUE
 *\--------------------------------------
-MD4Finalize		>PULLW ZPHashPtr
+MD4Finalize		clc
+				.HS B0					BCS
+*/--------------------------------------
+* ## MD5Finalize
+* # C
+* `void MD5finalize (hMD5 MD5, char* digest);`
+* # ASM
+* `>PUSHB MD5`
+* `>PUSHW digest`
+* `>LIBCALL hLIBCRYPT,LIBCRYPT.MD5Finalize`
+* ## RETURN VALUE
+*\--------------------------------------
+MD5Finalize		sec
+
+				ror MDx.MODE
+				
+				>PULLW ZPHashPtr
 				>PULLA
 				pha
 				>SYSCALL2 GetMemPtr
@@ -328,7 +398,7 @@ MD4Finalize		>PULLW ZPHashPtr
 				>SYSCALL2 FreeMem
 				rts
 
-MDxFinalize.I	ldy #S.MD4.FINALIZED
+MDxFinalize.I	ldy #S.MDx.FINALIZED
 
 				lda (ZPCtxPtr),y
 				bne .11
@@ -336,6 +406,7 @@ MDxFinalize.I	ldy #S.MD4.FINALIZED
 				jsr MDxExtraChunk
 
 .11				ldy #0
+				sty MDx.i
 
 .1				lda (ZPCtxPtr),y
 				lsr
@@ -343,13 +414,13 @@ MDxFinalize.I	ldy #S.MD4.FINALIZED
 				lsr
 				lsr
 				tax
-				lda MD4.DIGITS,x
+				lda MDx.DIGITS,x
 				jsr .7
 
 				lda (ZPCtxPtr),y
 				and #$0F
 				tax
-				lda MD4.DIGITS,x
+				lda MDx.DIGITS,x
 				jsr .7
 
 				iny
@@ -357,16 +428,16 @@ MDxFinalize.I	ldy #S.MD4.FINALIZED
 				bne .1
 
 				lda #0
-				sta (ZPHashPtr)
 				clc
-				rts
 
-.7				sta (ZPHashPtr)
-				inc ZPHashPtr
-				bne MDxFinalize.RTS
+.7				phy
 
-				inc ZPHashPtr+1
-
+				ldy MDx.i
+				inc MDx.i
+				sta (ZPHashPtr),y
+				
+				ply
+				
 MDxFinalize.RTS	rts
 */--------------------------------------
 * ## HMACMD5
@@ -385,11 +456,15 @@ MDxFinalize.RTS	rts
 *--------------------------------------
 HMACMD5			>PULLW ZPHashPtr
 				>PULLW ZPDataPtr
-				>PULLW HMAC.DTemp
+				>PULLW ZPKeyPtr
 
-				jsr MDxInit.I
+				jsr MD5Init
 				bcs MDxFinalize.RTS
 			
+				sec
+
+				ror MDx.MODE			Switch to MD5
+				
 				pha
 
 				>LDYA ZPDataPtr
@@ -401,11 +476,9 @@ HMACMD5			>PULLW ZPHashPtr
 				tay
 				beq .4
 
-.2				>PUSHW ZPHashPtr
-				jsr MD5Update.I
+.2				jsr MDxUpdate.I
 				jsr MDxFinalize.I
 
-				>PULLW ZPHashPtr
 				>LDYA ZPCtxPtr
 				>STYA ZPDataPtr
 
@@ -430,24 +503,22 @@ HMACMD5			>PULLW ZPHashPtr
 				stz HMACMD5.IPAD+64
 				stz HMACMD5.OPAD+64
 
-				jsr MD5Reset.I
+				jsr MDxReset.I
 
-				>LDYA L.HMACMD5.IPAD
+				>LDYAI HMACMD5.IPAD
 				>STYA ZPDataPtr
 				>LDYAI 64
 				>STYA ZPDataLen
-				>PUSHW ZPHashPtr
-				jsr MD5Update.I
+				
+				jsr MDxUpdate.I
 
-				>LDYA HMAC.DTemp
+				>LDYA ZPKeyPtr
 				>STYA ZPDataPtr
 				>SYSCALL2 strlen
 				>STYA ZPDataLen
-				jsr MD5Update.I
 
+				jsr MDxUpdate.I
 				jsr MDxFinalize.I
-
-				>PULLW ZPHashPtr
 
 				ldy #0
 
@@ -457,22 +528,22 @@ HMACMD5			>PULLW ZPHashPtr
 				cpy #16
 				bne .8
 
-				jsr MD5Reset.I
+				jsr MDxReset.I
 
-				>LDYA L.HMACMD5.OPAD
+				>LDYAI HMACMD5.OPAD
 				>STYA ZPDataPtr
 				>LDYAI 64
 				>STYA ZPDataLen
-				jsr MD5Update.I
+				jsr MDxUpdate.I
 
-				>LDYA L.HMACMD5.IPAD
+				>LDYAI HMACMD5.IPAD
 				>STYA ZPDataPtr
 
 				ldy #16
 				sty ZPDataLen
-				jsr MD5Update.I
 
-				jsr MDxFinalize.I
+				jsr MDxUpdate.I
+				jsr MDxFinalize.I		MDx.MODE setup by MD5Update
 				
 				pla
 				>SYSCALL2 FreeMem
@@ -488,16 +559,16 @@ HMACMD5			>PULLW ZPHashPtr
 *   ZPCtxPtr = MD4 Context
 *--------------------------------------
 MDxAppendBitCnt	ldx #56
-				ldy #S.MD4.BITCOUNT		Append 8 Bytes of BITCOUNT
+				ldy #S.MDx.BITCOUNT		Append 8 Bytes of BITCOUNT
 
 .1				lda (ZPCtxPtr),y
-				sta MD4.BUFFER64,x
+				sta MDx.BUFFER64,x
 				inx
 				iny
-				cpy #S.MD4.BITCOUNT+8
+				cpy #S.MDx.BITCOUNT+8
 				bne .1
 
-				ldy #S.MD4.FINALIZED	Mark MD5 Context as Finalized
+				ldy #S.MDx.FINALIZED	Mark MD5 Context as Finalized
 				lda #$80
 				sta (ZPCtxPtr),y
 				rts
@@ -511,12 +582,12 @@ MDxUpdateBitCnt	stz ZPChunkLen+1
 				lda ZPChunkLen
 				asl
 				rol ZPChunkLen+1
-				asl						times 8 to get bit count
+				asl						times 8 to get BITCOUNT
 				rol ZPChunkLen+1
 				asl
 				rol ZPChunkLen+1
 				clc
-				ldy #S.MD4.BITCOUNT
+				ldy #S.MDx.BITCOUNT
 				adc (ZPCtxPtr),y
 				sta (ZPCtxPtr),y
 				iny
@@ -540,23 +611,23 @@ MDxUpdateBitCnt	stz ZPChunkLen+1
 *  In : 
 *   ZPCtxPtr = MDx Context
 *--------------------------------------
-MDxExtraChunk	ldy #S.MD4.FINALIZED
+MDxExtraChunk	ldy #S.MDx.FINALIZED
 				lda #$80
 				sta (ZPCtxPtr),y		Mark MD5 Context as "finalized"
 				ldx #0
-				ldy #S.MD4.EXTRABIT		Extra Bit already appended ?
+				ldy #S.MDx.EXTRABIT		Extra Bit already appended ?
 				lda (ZPCtxPtr),y
 				bne .1
 
 				lda #$80
-				sta MD4.BUFFER64		Add extra bit to buffer
+				sta MDx.BUFFER64		Add extra bit to buffer
 				sta (ZPCtxPtr),y		Mark Extrabit added
 				inx
 
-.1				stz MD5.BUFFER64,x		pad with "0"...
+.1				stz MDx.BUFFER64,x		pad with "0"...
 				inx
 				cpx #56
-				bne .1					...until room for bitcount
+				bne .1					...until room for BITCOUNT
 
 				jsr MDxAppendBitCnt
 				jsr MDxTransform
@@ -569,7 +640,7 @@ MDxUpdateABCD0	ldy #0
 
 .1				clc						ADC32 A+A0->A0, B, C, D.... 
 
-.2				lda MD4.ABCD,y
+.2				lda MDx.ABCD,y
 				adc (ZPCtxPtr),y
 				sta (ZPCtxPtr),y
 				iny
@@ -582,7 +653,17 @@ MDxUpdateABCD0	ldy #0
 
 				rts
 *--------------------------------------
-MDxTransform	bit MD.MODE
+MDxTransform	ldy #15					init ABCD Chunk with Context ABCD0
+
+.1				lda (ZPCtxPtr),y
+				sta MDx.ABCD,y
+				dey
+				bpl .1
+
+				lda #0					make sure A = MDx.i = 0 before transform
+				sta MDx.i
+				
+				bit MDx.MODE
 				bpl MD4Transform
 				
 				jmp MD5Transform
@@ -590,63 +671,54 @@ MDxTransform	bit MD.MODE
 * MD4Transform 
 *  In: 
 *   ZPCtxPtr = MD4 Context
-*   512 Bits Padded chunk in MD4.BUFFER64
+*   512 Bits Padded chunk in MDx.BUFFER64
 *  Out:
-*   Updated MD4.ABCD
+*   Updated MDx.ABCD
 * https://tools.ietf.org/html/rfc1320	MD4
 *--------------------------------------
-MD4Transform	ldy #15					init ABCD Chunk with Context ABCD0
-
-.1				lda (ZPCtxPtr),y
-				sta MD4.ABCD,y
-				dey
-				bpl .1
-
-				stz MD4.i				Start Proceed 0 to 47 bytes
-				lda #0					lda MD4.i
-
-.2				lsr
+MD4Transform	lsr
 				lsr
 				lsr
 				and #6
 				cmp #6
-				bne .3
+				bne .1
+
 				lda #0
 
-.3				tax
+.1				tax
 
 				jsr MD4.XXXX
 
-				inc MD5.i
-				lda MD5.i
+				inc MDx.i
+				lda MDx.i
 				cmp #48
-				bne .2
+				bne MD4Transform
 
 				rts
 *--------------------------------------
 MD4.XXXX		jmp (J.MD4.XXXX,x)
 *--------------------------------------
-MD4.0015		>NOT32 MD4.B,MD4.F2
-				>AND32 MD4.B,MD4.C,MD4.F1
-				>AND32 MD4.F2,MD4.D,MD4.F2
-				>ORA32 MD4.F1,MD4.F2,MD4.F
+MD4.0015		>NOT32 MDx.B,MDx.F2
+				>AND32 MDx.B,MDx.C,MDx.F1
+				>AND32 MDx.F2,MDx.D,MDx.F2
+				>ORA32 MDx.F1,MDx.F2,MDx.F
 				bra MD4.XXXX.END
 *--------------------------------------
-MD4.1631		>AND32 MD4.B,MD4.C,MD4.F1
-				>AND32 MD4.B,MD4.D,MD4.F2
-				>ORA32 MD4.F1,MD4.F2,MD4.F1
-				>AND32 MD4.C,MD4.D,MD4.F2
-				>ORA32 MD4.F1,MD4.F2,MD4.F
+MD4.1631		>AND32 MDx.B,MDx.C,MDx.F1
+				>AND32 MDx.B,MDx.D,MDx.F2
+				>ORA32 MDx.F1,MDx.F2,MDx.F1
+				>AND32 MDx.C,MDx.D,MDx.F2
+				>ORA32 MDx.F1,MDx.F2,MDx.F
 				bra MD4.XXXX.END
 *--------------------------------------
-MD4.3247		>EOR32 MD4.B,MD4.C,MD4.F
-				>EOR32 MD4.F,MD4.D,MD4.F
+MD4.3247		>EOR32 MDx.B,MDx.C,MDx.F
+				>EOR32 MDx.F,MDx.D,MDx.F
 *--------------------------------------
-MD4.XXXX.END	>MOV32 MD4.D,MD4.DTemp
-				>MOV32 MD4.C,MD4.D
-				>MOV32 MD4.B,MD4.C
-				>ADC32 MD4.A,MD4.F,MD4.B
-				lda MD4.i
+MD4.XXXX.END	>MOV32 MDx.D,MDx.DTemp
+				>MOV32 MDx.C,MDx.D
+				>MOV32 MDx.B,MDx.C
+				>ADC32 MDx.A,MDx.F,MDx.B
+				lda MDx.i
 				lsr
 				lsr
 				and #$0C
@@ -657,9 +729,9 @@ MD4.XXXX.END	>MOV32 MD4.D,MD4.DTemp
 				ldx #0
 				clc
 
-.1				lda MD4.K-4,y 			ADC32 MD4.K[i],MD4.F,MD4.F
-				adc MD4.B,x
-				sta MD4.B,x
+.1				lda MD4.K-4,y 			ADC32 MDx.K[i],MDx.F,MDx.F
+				adc MDx.B,x
+				sta MDx.B,x
 				iny
 				inx
 				txa
@@ -667,7 +739,7 @@ MD4.XXXX.END	>MOV32 MD4.D,MD4.DTemp
 				bne .1
 
 .3				tax
-				ldy MD4.i
+				ldy MDx.i
 				lda MD4.g,y
 				asl
 				asl
@@ -675,41 +747,31 @@ MD4.XXXX.END	>MOV32 MD4.D,MD4.DTemp
 
 				clc
 
-.2				lda MD4.BUFFER64,y		ADC32 M[g],MD4.F,MD4.F
-				adc MD4.B,x
-				sta MD4.B,x
+.2				lda MDx.BUFFER64,y		ADC32 M[g],MDx.F,MDx.F
+				adc MDx.B,x
+				sta MDx.B,x
 				iny
 				inx
 				txa
 				eor #4					DO NOT DISTURB carry with cpx !!!
 				bne .2
 
-				ldy MD4.i
+				ldy MDx.i
 				ldx MD4.s,y				get s[i] in x
 
-				>ROL32x MD4.B
-				>MOV32 MD4.DTemp,MD4.A
+				>ROL32x MDx.B
+				>MOV32 MDx.DTemp,MDx.A
 				rts
 *--------------------------------------
 * MD5Transform 
 *  In: 
 *   ZPCtxPtr = MD5 Context
-*   512 Bits Padded chunk in MD5.BUFFER64
+*   512 Bits Padded chunk in MDx.BUFFER64
 *  Out:
-*   Updated MD5.ABCD
+*   Updated MDx.ABCD
 * https://tools.ietf.org/html/rfc1321	MD5
 *--------------------------------------
-MD5Transform	ldy #15					init ABCD Chunk with Context ABCD0
-
-.1				lda (ZPCtxPtr),y
-				sta MD5.ABCD,y
-				dey
-				bpl .1
-
-				stz MD5.i				Start Proceed 0 to 63 bytes
-				lda #0					lda MD5.i
-
-.2				lsr
+MD5Transform	lsr
 				lsr
 				lsr
 				and #6
@@ -717,40 +779,40 @@ MD5Transform	ldy #15					init ABCD Chunk with Context ABCD0
 
 				jsr MD5.XXXX
 
-				inc MD5.i
-				lda MD5.i
+				inc MDx.i
+				lda MDx.i
 				cmp #64
-				bne .2
+				bne MD5Transform
 
 				rts
 *--------------------------------------
 MD5.XXXX		jmp (J.MD5.XXXX,x)
 *--------------------------------------
-MD5.0015		>NOT32 MD5.B,MD5.F2
-				>AND32 MD5.B,MD5.C,MD5.F1
-				>AND32 MD5.F2,MD5.D,MD5.F2
-				>ORA32 MD5.F1,MD5.F2,MD5.F
+MD5.0015		>NOT32 MDx.B,MDx.F2
+				>AND32 MDx.B,MDx.C,MDx.F1
+				>AND32 MDx.F2,MDx.D,MDx.F2
+				>ORA32 MDx.F1,MDx.F2,MDx.F
 				bra MD5.XXXX.END
 *--------------------------------------
-MD5.1631		>NOT32 MD5.D,MD5.F2
-				>AND32 MD5.D,MD5.B,MD5.F1
-				>AND32 MD5.F2,MD5.C,MD5.F2
-				>ORA32 MD5.F1,MD5.F2,MD5.F
+MD5.1631		>NOT32 MDx.D,MDx.F2
+				>AND32 MDx.D,MDx.B,MDx.F1
+				>AND32 MDx.F2,MDx.C,MDx.F2
+				>ORA32 MDx.F1,MDx.F2,MDx.F
 				bra MD5.XXXX.END
 *--------------------------------------
-MD5.3247		>EOR32 MD5.B,MD5.C,MD5.F
-				>EOR32 MD5.F,MD5.D,MD5.F
+MD5.3247		>EOR32 MDx.B,MDx.C,MDx.F
+				>EOR32 MDx.F,MDx.D,MDx.F
 				bra MD5.XXXX.END
 *--------------------------------------
-MD5.4863		>NOT32 MD5.D,MD5.F1
-				>ORA32 MD5.F1,MD5.B,MD5.F2
-				>EOR32 MD5.F2,MD5.C,MD5.F
+MD5.4863		>NOT32 MDx.D,MDx.F1
+				>ORA32 MDx.F1,MDx.B,MDx.F2
+				>EOR32 MDx.F2,MDx.C,MDx.F
 *--------------------------------------
-MD5.XXXX.END	>MOV32 MD5.D,MD5.DTemp
-				>MOV32 MD5.C,MD5.D
-				>MOV32 MD5.B,MD5.C
-				>ADC32 MD5.A,MD5.F,MD5.F
-				lda MD5.i
+MD5.XXXX.END	>MOV32 MDx.D,MDx.DTemp
+				>MOV32 MDx.C,MDx.D
+				>MOV32 MDx.B,MDx.C
+				>ADC32 MDx.A,MDx.F,MDx.F
+				lda MDx.i
 				asl
 				asl
 				tay
@@ -758,9 +820,9 @@ MD5.XXXX.END	>MOV32 MD5.D,MD5.DTemp
 				ldx #0
 				clc
 
-.1				lda MD5.K,y 			ADC32 MD5.K[i],MD5.F,MD5.F
-				adc MD5.F,x
-				sta MD5.F,x
+.1				lda MD5.K,y 			ADC32 MD5.K[i],MDx.F,MDx.F
+				adc MDx.F,x
+				sta MDx.F,x
 				iny
 				inx
 				txa
@@ -768,7 +830,7 @@ MD5.XXXX.END	>MOV32 MD5.D,MD5.DTemp
 				bne .1
 
 				tax
-				ldy MD5.i
+				ldy MDx.i
 				lda MD5.g,y
 				asl
 				asl
@@ -776,25 +838,25 @@ MD5.XXXX.END	>MOV32 MD5.D,MD5.DTemp
 
 				clc
 
-.2				lda MD5.BUFFER64,y		ADC32 M[g],MD5.F,MD5.F
-				adc MD5.F,x
-				sta MD5.F,x
+.2				lda MDx.BUFFER64,y		ADC32 M[g],MDx.F,MDx.F
+				adc MDx.F,x
+				sta MDx.F,x
 				iny
 				inx
 				txa
 				eor #4					DO NOT DISTURB carry with cpx !!!
 				bne .2
 
-				ldy MD5.i
+				ldy MDx.i
 				ldx MD5.s,y				get s[i] in x
 
-				>ROL32x MD5.F
-				>ADC32 MD5.B,MD5.F,MD5.B
-				>MOV32 MD5.DTemp,MD5.A
+				>ROL32x MDx.F
+				>ADC32 MDx.B,MDx.F,MDx.B
+				>MOV32 MDx.DTemp,MDx.A
 				rts
 *--------------------------------------
 CS.END
-MD4.ABCDINIT	.HS 01234567.89ABCDEF.FEDCBA98.76543210
+MDx.ABCDINIT	.HS 01234567.89ABCDEF.FEDCBA98.76543210
 *--------------------------------------
 MD4.s			.DA #3,#7,#11,#19,#3,#7,#11,#19,#3,#7,#11,#19,#3,#7,#11,#19
 				.DA #3,#5,#9,#13,#3,#5,#9,#13,#3,#5,#9,#13,#3,#5,#9,#13
@@ -833,23 +895,7 @@ MD5.K			.HS 78A46AD7.56B7C7E8.DB702024.EECEBDC1
 				.HS 4F7EA86F.E0E62CFE.144301A3.A111084E
 				.HS 827E53F7.35F23ABD.BBD2D72A.91D386EB
 *--------------------------------------
-MD4.DIGITS		.AS "0123456789abcdef"
-*--------------------------------------
-ZPDataLen		.BS 2
-
-MD.MODE			.BS 1
-
-MD4.DTemp
-MD5.DTemp		.BS 4
-MD4.F
-MD5.F			.BS 4
-MD4.i
-MD5.i			.BS 1
-MD4.BUFFER64
-MD5.BUFFER64	.BS 64
-HMAC.DTemp		.BS 4
-HMACMD5.IPAD	.BS 65
-HMACMD5.OPAD	.BS 65
+MDx.DIGITS		.AS "0123456789abcdef"
 *--------------------------------------
 MAN
 SAVE usr/src/lib/libcrypt.s
