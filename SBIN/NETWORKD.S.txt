@@ -6,7 +6,7 @@ NEW
 				.TF sbin/networkd
 *--------------------------------------
 LIB.MAX			.EQ 4
-DBG				.EQ 2
+DBG				.EQ 0
 *--------------------------------------
 				.INB inc/macros.i
 				.INB inc/a2osx.i
@@ -21,10 +21,10 @@ DBG				.EQ 2
 				.DUMMY
 				.OR ZPBIN
 ZS.START
-pNETCFG			.BS 2
 pBuf			.BS 2
+pNETCFG			.BS 2
 hEtcNetwork		.BS 1
-hLineBuf		.BS 1
+hBuf			.BS 1
 hFrameIn		.BS 1
 ZS.END			.ED
 *--------------------------------------
@@ -41,7 +41,7 @@ CS.START		cld
 				.DO DBG=1
 				.DA #128				Stack Size
 				.ELSE
-				.DA #64					Stack Size
+				.DA #32					Stack Size
 				.FIN
 				.DA #ZS.END-ZS.START	Zero Page Size
 				.DA 0
@@ -61,7 +61,6 @@ L.MSG.OK		.DA MSG.OK
 L.MSG.ERR		.DA MSG.ERR
 L.DEVNAME		.DA DEVNAME
 L.IOCTL			.DA IOCTL
-L.DCB.NIC		.DA DCB.NIC
 L.ETCNETWORK	.DA ETCNETWORK
 				.DO DBG=1
 L.MSG.DBG		.DA MSG.DBG
@@ -70,18 +69,46 @@ L.MSG.DBG.REJECT	.DA MSG.DBG.REJECT
 				.DA 0
 *--------------------------------------
 CS.INIT			lda DevID
-				bne .99
+				bne .8
 
-				jsr CS.INIT.DEV
-				bcs .9
+				>LDYAI 64
+				>SYSCALL GetMem
+				bcs .99
 
-				jsr CS.INIT.LIBS
-				bcs .9
+				>STYA pBuf
+				stx hBuf
 				
-				jsr CS.INIT.CONF
-.9				rts
+				>STYA IOCTL+S.IOCTL.BUFPTR	for CS.INIT.DEV
+				
+				jsr CS.INIT.DEV
+				bcs .90
 
-.99				>LDYA L.MSG.RUNNING
+				lda LibCnt
+
+.1				inc
+				>SYSCALL ArgV
+				bcs .2
+
+				jsr CS.INIT.LIB
+				bcs .90
+
+				inc LibCnt
+				lda LibCnt
+				cmp #LIB.MAX
+				bne .1
+				
+.2				jsr CS.INIT.CONF
+
+.90				php
+				pha
+				lda hBuf
+				>SYSCALL FreeMem
+				pla
+				plp
+				
+.99				rts
+
+.8				>LDYA L.MSG.RUNNING
 				>SYSCALL PutS
 				lda #0
 				sec
@@ -110,24 +137,22 @@ CS.INIT.DEV		>PUSHW L.DEVNAME
 				>PUSHBI 2
 				>SYSCALL PrintF
 				
-				>LDYA L.DCB.NIC
-				>STYA IOCTL+S.IOCTL.BUFPTR
 				lda #S.IOCTL.S.GETDCB
 				sta IOCTL+S.IOCTL.S
 
-				>PUSHB DevID
-				>PUSHBI IOCTL.STATUS
+				ldx #IOCTL.STATUS
+*--------------------------------------
+CS.IOCTL		lda DevID
+				>PUSHA
+				txa
+				>PUSHA
 				>PUSHW L.IOCTL
 				>SYSCALL IOCTL
 				rts
 *--------------------------------------
-CS.INIT.LIBS	lda LibCnt
-
-.1				inc
-				>SYSCALL ArgV
-				bcs .8
-
-				phy
+* pBuf = DCB.NIC
+*--------------------------------------
+CS.INIT.LIB		phy
 				pha
 				>PUSHW L.MSG.LIB
 				pla
@@ -141,18 +166,44 @@ CS.INIT.LIBS	lda LibCnt
 			
 				>SYSCALL LoadLib
 				jsr CS.RUN.CheckErr
-				bcs CS.INIT.LIBS.9
+				bcs .9
 
 				ldy LibCnt
 				sta hLIBs,y
 				tay
 				ldx #LIBNET.GETCFG
 				jsr A2osX.LIBCALL
-				bcs CS.INIT.LIBS.9
+				bcs .9
 
 				>STYA pNETCFG
 
-				jsr CS.INIT.SETUP.NETCFG
+				lda DevID
+				ldy #S.NETCFG.DevID
+				sta (pNETCFG),y
+
+				ldy #S.DCB.NIC.FLAGS
+				lda (pBuf),y
+				
+				ldy #S.NETCFG.DevFlags
+				sta (pNETCFG),y
+
+				ldx #6
+				ldy #S.DCB.NIC.MAC
+				
+.2				lda (pBuf),y
+				pha
+				iny
+				dex
+				bne .2
+
+				ldx #6
+				ldy #S.NETCFG.MAC+5
+
+.3				pla
+				sta (pNETCFG),y
+				dey
+				dex
+				bne .3
 
 				>PUSHW pNETCFG
 
@@ -161,59 +212,25 @@ CS.INIT.LIBS	lda LibCnt
 
 				ldx #LIBNET.SETCFG
 				jsr A2osX.LIBCALL
-				bcs CS.INIT.LIBS.9
 				
-				inc LibCnt
-				lda LibCnt
-				cmp #LIB.MAX
-				bne .1
+*				clc
 
-.8				clc
-
-CS.INIT.LIBS.9	rts
+.9				rts
 *--------------------------------------
-CS.INIT.SETUP.NETCFG
-
-				lda DevID
-				ldy #S.NETCFG.DevID
-				sta (pNETCFG),y
-
-				iny						S.NETCFG.DevFlags
-				lda DCB.NIC+S.DCB.NIC.FLAGS
-				sta (pNETCFG),y
-
-				ldx #5
-				ldy #S.NETCFG.MAC+5
-
-.2				lda DCB.NIC+S.DCB.NIC.MAC,x
-				sta (pNETCFG),y
-				dey
-				dex
-				bpl .2
-				
-				rts
-*--------------------------------------
-CS.INIT.CONF	>LDYAI 64
-				>SYSCALL GetMem
-				bcs CS.INIT.LIBS.9
-
-				>STYA pBuf
-				stx hLineBuf
-				
-				>PUSHW L.ETCNETWORK
+CS.INIT.CONF	>PUSHW L.ETCNETWORK
 				>PUSHBI	O.RDONLY+O.TEXT
 				>PUSHBI S.FI.T.TXT
 				>PUSHWZ
 				>SYSCALL FOpen
-				bcs .98
+				bcs .9
 
 				sta hEtcNetwork
 
 .1				>PUSHB hEtcNetwork
 				>PUSHW pBuf
-				>PUSHWI 64
+				>PUSHWI 63
 				>SYSCALL FGetS
-				bcs .80
+				bcs .8
 
 				>PUSHW L.MSG.EXEC
 				>PUSHW pBuf
@@ -227,25 +244,15 @@ CS.INIT.CONF	>LDYAI 64
 				>SLEEP
 				bra .1
 
-.98				pha
-				jsr .81
-				pla
-				sec
-				rts
-
-.80				lda hEtcNetwork
+.8				lda hEtcNetwork
 				>SYSCALL FClose
 
-.81				lda hLineBuf
-				>SYSCALL FreeMem
 *				clc
-				rts
+
+.9				rts
 *--------------------------------------
-CS.RUN			>PUSHB DevID
-				>PUSHBI IOCTL.READ
-				>PUSHW L.IOCTL
-				
-				>SYSCALL IOCTL
+CS.RUN			ldx #IOCTL.READ
+				jsr CS.IOCTL
 				bcs .8					No Frame
 
 				sta hFrameIn
@@ -288,12 +295,12 @@ CS.RUN			>PUSHB DevID
 
 .2				.DO DBG=1
 				jsr CS.RUN.FILTER
-				
 				bcs .33
 				
 				>LDYA L.MSG.DBG.REJECT
 				>SYSCALL puts
 .33				.FIN
+
 				lda hFrameIn
 				>SYSCALL FreeMem
 				jmp CS.RUN
@@ -305,8 +312,10 @@ CS.RUN			>PUSHB DevID
 CS.RUN.FILTER	lda (pBuf)
 				cmp #$ff
 				beq .9
+
 				dec
 				beq .9
+
 				ldy #S.ETH.EII.TYPE+1
 				lda (pBuf),y
 				bne .9
@@ -370,10 +379,8 @@ CS.QUIT			ldx #0
 .7				lda DevID
 				beq .8
 
-				>PUSHA
-				>PUSHBI IOCTL.CLOSE
-				>PUSHWZ
-				>SYSCALL IOCTL
+				ldx #IOCTL.CLOSE
+				jsr CS.IOCTL
 				
 .8				clc
 				rts
@@ -385,8 +392,10 @@ MSG.DEV.KO		.AZ "NETWORKD:No Device Found, exiting."
 MSG.DEV.OK		.AZ "NETWORKD:Bound To Device : %s\r\n"
 MSG.LIB			.AZ "NETWORKD:Loading %s..."
 MSG.EXEC		.AZ "NETWORKD:Running %s..."
+*--------------------------------------
 MSG.OK			.AZ "[OK]"
 MSG.ERR			.AZ "[%h]\r\n"
+*--------------------------------------
 ETCNETWORK		.AZ "${BOOT}etc/network"
 				.DO DBG=1
 MSG.DBG			.AS "FRM ETH:%h%h%h%h%h%h.%h%h%h%h%h%h.%h%h\r\n"
@@ -400,7 +409,6 @@ LibCnt			.BS 1
 hLIBs			.BS LIB.MAX+1			for ending 0 if MAX libs
 DEVNAME			.AZ "/dev/eth1"
 IOCTL			.BS S.IOCTL
-DCB.NIC			.BS S.DCB.NIC
 *--------------------------------------
 				.DUMMY
 				.OR 0
