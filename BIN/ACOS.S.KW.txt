@@ -16,10 +16,156 @@ KW.EDIT
 				sec
 				rts
 *--------------------------------------
-*KW.END
 KW.FILL
 KW.FLAG
-KW.FOR
+				lda #E.CSYN
+				sec
+				rts
+*--------------------------------------
+* FOR var = exp1 TO exp2 STEP exp3 ... NEXT
+*--------------------------------------
+KW.FOR			jsr CORE.GetNextCharNB
+				bcs .98
+
+				jsr CORE.CreateOrGetVar
+				bcs .99
+
+				lda VAR.TYPE
+				bne .97
+
+				jsr CORE.GetNextCharNB
+				bcs .98
+
+				cmp #'='
+				bne .98
+
+				jsr KW.GetIntExp
+				bcs .99
+
+				jsr CODE.LDVARDDRI
+
+				ldx #RT.IntSet.ID
+				jsr CODE.JSRRT			set var = START value
+
+				>LDYA L.ACOS.KW
+				jsr CORE.LookupSkip
+				bcs .98
+
+				cpx #KWID.TO
+				bne .98
+*--------------------------------------
+				jsr KW.PushCodePtr2CCS	NEXT will JMP back here
+*--------------------------------------
+				jsr CODE.LDVARDDRI
+
+				ldx #RT.IntGet.ID
+				jsr CODE.JSRRT			get var value on stack
+
+				jsr KW.GetIntExp		get exp2 on stack
+				bcs .99
+
+				ldx #FPU.iNE			var value = exp 2 ?
+				jsr CODE.FPUCALL
+
+				jsr CODE.TESTTRUE
+
+				jsr KW.FalseJMP2CCS		if false, exit after NEXT
+
+				>LDYA L.ACOS.KW
+				jsr CORE.Lookup
+				bcs .98
+
+				cpx #KWID.STEP
+				bne .1
+
+				lda #4
+				jsr CORE.SkipA			skip "STEP"
+
+				jsr KW.GetIntExp		get exp3 value on stack
+				bcs .99
+
+				bra .2
+
+.1				ldy #1					push 1 on stack
+				ldx #0
+				jsr CODE.PUSHYXI
+
+.2				ldy VAR.ADDR			push Address to update by NEXT
+				ldx VAR.ADDR+1
+				jsr CODE.PUSHYXI
+
+				clc
+				lda #KWID.FOR
+				jmp KW.PushA2CCS
+
+.97				lda #E.TMISMATCH
+				sec
+				rts
+
+.98				lda #E.CSYN
+				sec
+.99				rts
+*--------------------------------------
+KW.NEXT			ldy pCCS
+				bmi .98
+
+				lda (pdata),y
+				cmp #KWID.FOR
+				bne .98
+
+				jsr CODE.PULLYX			pull var address from stack
+
+				ldx #RT.IntGet.ID		will set VAR.ADDR
+				jsr CODE.JSRRT			get var value on stack
+
+				ldx #FPU.iADD			new value = value + STEP (on stack)
+				jsr CODE.FPUCALL
+
+				ldx #RT.IntUpd.ID
+				jsr CODE.JSRRT			set var = new value
+
+				ldy pCCS
+
+				iny						pull JMP FALSE address
+				lda (pData),y
+				sta ZPPtr1
+
+				iny
+				lda (pData),y
+				sta ZPPtr1+1
+
+				lda	#$4C				JMP abs ...
+				jsr CODE.EmitByte
+
+				iny						...to loop address
+				lda (pData),y
+				jsr CODE.EmitByte
+
+				iny
+				lda (pData),y
+				jsr CODE.EmitByte
+
+				lda ZPCodeBufPtr		and finally update JMP FALSE
+				sta (ZPPtr1)
+
+				lda ZPCodeBufPtr+1
+				ldy #1
+				sta (ZPPtr1),y
+
+				lda pCCS
+				clc
+				adc #5
+				sta pCCS
+
+				clc
+				rts
+
+.98				
+KW.TO
+KW.STEP			lda #E.NOFOR	
+				sec
+				rts
+*--------------------------------------
 KW.FREE
 				lda #E.CSYN
 				sec
@@ -30,21 +176,19 @@ KW.GET			jsr CORE.GetNextCharNB
 
 				jsr CORE.CreateOrGetVar
 				bcs .99
-				
+
 				ldx #RT.GET.ID
 				jsr CODE.JSRRT
 
-				ldy ZPADDR
-				ldx ZPADDR+1
-				jsr CODE.LDYXI
-				
+				jsr CODE.LDVARDDRI
+
 				ldx #RT.StrSet.ID
 				clc
-				jmp CODE.JSRRT	
+				jmp CODE.JSRRT
 
 .9				lda #E.CSYN
 				sec
-				
+
 .99				rts
 *--------------------------------------
 KW.GOSUB		lda #$20				JSR abs
@@ -55,16 +199,16 @@ KW.GOTO			lda #$4C				JMP abs
 KW.GOTO1		jsr CODE.EmitByte
 				jsr CORE.GetNextCharNB
 				bcs .90
-				
+
 				jsr CORE.GetLabel
 				bcc .1
 
 				jsr CORE.AddFWRef
 				bcs .99
 
-.1				lda ZPADDR
+.1				lda VAR.ADDR
 				jsr CODE.EmitByte
-				lda ZPADDR+1
+				lda VAR.ADDR+1
 				clc
 				jmp CODE.EmitByte
 
@@ -74,62 +218,31 @@ KW.GOTO1		jsr CODE.EmitByte
 *--------------------------------------
 KW.HOME			ldx #8					CLRSCR
 				jsr CODE.LDXI
-				
+
 				ldx #RT.OUTX.ID
 				clc
 				jmp CODE.JSRRT
 *--------------------------------------
-* IP exp THEN st1 ELSE st2 
+* IF exp THEN st1 ELSE st2
 *--------------------------------------
 KW.IF			jsr EXP.Eval
-
 				bcs .99
-				
+
 				lda EXP.TYPE
-				bne .91
+				bne .98
 
-				ldx #0
+				jsr CODE.TESTTRUE
 
-.1				lda CCODE.TESTTRUE,x
-				jsr CODE.EmitByte
-				inx
-				cpx #CCODE.TESTTRUE.LEN
-				bne .1
+				jsr KW.FalseJMP2CCS
 
-				ldy pCCS
-
-				dey
-				lda ZPCodeBufPtr+1
-				sta (pData),y
-
-				dey
-				lda ZPCodeBufPtr
-				sta (pData),y
-
-				dey
 				lda #KWID.IF
-				sta (pData),y
 
-				sty pCCS
-				
-				lda ZPCodeBufPtr
 				clc
-				adc #2
-				sta ZPCodeBufPtr
-				bcc .8
-				
-				inc ZPCodeBufPtr+1
+				jmp KW.PushA2CCS
 
-.8				clc
-				rts
-				
-.90				lda #E.CSYN
+.98				lda #E.TMISMATCH
 				sec
-				rts
-
-.91				lda #E.TMISMATCH
-				sec
-.99				rts	
+.99				rts
 *--------------------------------------
 KW.ENDIF		sec
 				.HS 90					BCC
@@ -137,6 +250,8 @@ KW.ENDIF		sec
 KW.ELSE			clc
 
 				ldy pCCS
+				bmi .9
+
 				lda (pData),y
 				eor #KWID.IF
 				bne .9
@@ -144,7 +259,7 @@ KW.ELSE			clc
 				iny
 				lda (pData),y
 				sta ZPPtr1
-				
+
 				iny
 				lda (pData),y
 				sta ZPPtr1+1			ZPPtr1 = JMP if FALSE
@@ -153,22 +268,22 @@ KW.ELSE			clc
 
 				lda	#$4C				JMP abs
 				jsr CODE.EmitByte
-			
+
 				ldy pCCS
 				iny
-				
+
 				lda ZPCodeBufPtr
 				sta (pData),y
 				iny
 				lda ZPCodeBufPtr+1
-				sta (pData),y				
-				
+				sta (pData),y
+
 				lda ZPCodeBufPtr
 				clc
 				adc #2
 				sta ZPCodeBufPtr
 				bcc .1
-				
+
 				inc ZPCodeBufPtr+1
 
 .1				lda ZPCodeBufPtr
@@ -183,7 +298,7 @@ KW.ELSE			clc
 
 .5				lda ZPCodeBufPtr
 				sta (ZPPtr1)
-				
+
 				ldy #1
 				lda ZPCodeBufPtr+1
 				sta (ZPPtr1),y
@@ -209,33 +324,31 @@ KW.INPUT		stz hIn					Defaut to Keyboard
 
 				jsr CORE.GetNextCharNB
 				bcs .9
-				
+
 				cmp #'"'
 				bne .5
-				
+
 				jsr EXP.CreateStrConst
 				bcs .99
-				
+
 				ldx #RT.StrOut.ID
 				jsr CODE.JSRRT
 
 .5				jsr CORE.CreateOrGetVar
 				bcs .99
-				
+
 				ldx #RT.INPUT.ID
 				jsr CODE.JSRRT
 
-				ldy ZPADDR
-				ldx ZPADDR+1
-				jsr CODE.LDYXI
-				
+				jsr CODE.LDVARDDRI
+
 				ldx #RT.StrSet.ID
 				clc
 				jmp CODE.JSRRT
 
 .9				lda #E.CSYN
 				sec
-				
+
 .99				rts
 *--------------------------------------
 KW.KILL
@@ -245,12 +358,15 @@ KW.MARK
 KW.MODEM
 KW.MOVE
 KW.MSG
-KW.NEXT
+
+				lda #E.CSYN
+				sec
+				rts
+*--------------------------------------
 KW.NIBBLE
 KW.NOT
 KW.ON
-KW.NOCAR		>DEBUG
-				lda #E.CSYN
+KW.NOCAR		lda #E.CSYN
 				sec
 				rts
 *--------------------------------------
@@ -266,33 +382,33 @@ KW.POSITION
 				sec
 				rts
 *--------------------------------------
-KW.PRINT		stz ZPPtr2				put ending CR 
+KW.PRINT		stz ZPPtr2				put ending CR
 				stz hOut				Default to screen
 
-.10				jsr CORE.GetNextCharNB
+				jsr CORE.GetCharNB
 				bcs .8
-				
+
 .11				cmp #'\'
 				bne .13
-				
+
 .12				ldx #RT.OUTCRLF.ID
 				jsr CODE.JSRRT
-				bra .10
+				bra .72
 
 .13				jsr CORE.IsEndInst
 				bcs .8
-				
+
 				jsr CORE.IsKW
 				bcc .8
 
-				stz ZPPtr2				put ending CR 
+				stz ZPPtr2				put ending CR
 
 				jsr EXP.Eval
 				bcs .99
 
 				lda EXP.TYPE
 				beq .6
-				
+
 				ldx #RT.StrOut.ID
 				bra .7
 
@@ -304,7 +420,7 @@ KW.PRINT		stz ZPPtr2				put ending CR
 
 .70				cmp #'\'
 				beq .12
-				
+
 				jsr CORE.IsEndInst
 				bcs .8
 
@@ -317,26 +433,26 @@ KW.PRINT		stz ZPPtr2				put ending CR
 
 				tax
 				jsr CODE.PutChar
-			
-				bra .10					go skip
-				
+
+				bra .72					go skip
+
 .71				cmp #';'
 				bne .90
 
 				ror ZPPtr2				suppress ending CR
 
-				jsr CORE.GetNextCharNB	skip ;
+.72				jsr CORE.GetNextCharNB	skip "/", ";" or ","
 				bcc .11
 
 .8				bit ZPPtr2
 				bmi .80
-				
+
 				ldx #RT.OUTCRLF.ID
 				jsr CODE.JSRRT
-				
+
 .80				clc
 				rts
-				
+
 .90				lda #E.CSYN
 				sec
 .99				rts
@@ -355,7 +471,7 @@ KW.RETURN
 * TODO : check context
 
 KW.END			lda #$60				RTS
-				
+
 				clc
 				jmp CODE.EmitByte
 *--------------------------------------
@@ -372,10 +488,10 @@ KW.THEN			ldy pCCS
 				lda (pData),y
 				eor #KWID.IF
 				bne .9
-				
+
 				clc
 				rts
-				
+
 .9				lda #E.NOIF
 				sec
 				rts
@@ -387,6 +503,57 @@ KW.WHENd
 KW.WRITE
 				lda #E.CSYN
 				sec
+				rts
+*--------------------------------------
+KW.GetIntExp	jsr CORE.GetNextCharNB
+				bcs .98
+
+				jsr EXP.Eval
+				bcs .99
+
+				lda EXP.TYPE
+				beq .99
+
+				lda #E.TMISMATCH
+				sec
+				rts
+
+.98				lda #E.CSYN
+*				sec
+.99				rts
+*--------------------------------------
+KW.PushA2CCS	ldy pCCS
+
+				dey
+				sta (pData),y
+
+				sty pCCS
+				rts
+*--------------------------------------
+KW.FalseJMP2CCS	jsr KW.PushCodePtr2CCS
+
+				lda ZPCodeBufPtr
+				clc
+				adc #2
+				sta ZPCodeBufPtr
+				bcc .8
+
+				inc ZPCodeBufPtr+1
+
+.8				rts
+*--------------------------------------
+KW.PushCodePtr2CCS
+				ldy pCCS
+
+				dey
+				lda ZPCodeBufPtr+1
+				sta (pData),y
+
+				dey
+				lda ZPCodeBufPtr
+				sta (pData),y
+
+				sty pCCS
 				rts
 *--------------------------------------
 MAN

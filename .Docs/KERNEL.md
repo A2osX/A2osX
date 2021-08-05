@@ -1334,8 +1334,11 @@ CS : A = Error Code
 `>SYSCALL expand`  
 
 ## RETURN VALUE  
- Y,A = PTR to Expanded String   
- X = hMem to Expanded String (C-String)  
+if expanded == null  
+ Y,A = PTR to Expanded String  
+ X = hMem to Expanded String  
+if expanded = null  
+ Y,A = strlen  
 
 # StrLen  
 Returns Length of C-String  
