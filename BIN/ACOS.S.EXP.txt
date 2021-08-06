@@ -6,8 +6,8 @@ NEW
 * Out: CC, int16 on stack or pSTR in stack
 *--------------------------------------
 EXP.Eval		stz EXP.TYPE
-
-EXP.Eval.R		lda EXP.AOPS
+*--------------------------------------
+EXP.Eval.R		lda EXP.AOP
 				pha
 
 				lda #$FF
@@ -39,9 +39,7 @@ EXP.Eval.R		lda EXP.AOPS
 				bne .20
 
 				jsr EXP.CreateStrConst
-				bcs .37
-
-				bra .40
+				bra .39
 *--------------------------------------
 .20				jsr CORE.IsLetter
 				bcs .30					No, go check for number...
@@ -52,33 +50,17 @@ EXP.Eval.R		lda EXP.AOPS
 
 				>LDYA L.ACOS.FN
 				jsr CORE.LookupSkip
-				bcs .21
+				bcs .25
 
 				jsr EXP.FNjmpX
-				bcs .99
-
-				bra .40
-
-.21				jsr EXP.VARLookup
-				bcs .37
-
-				ldy EXP.ADDR
-				ldx EXP.ADDR+1
+				bra .39
 				
-				lda EXP.TYPE
-				bne .22
-
-				jsr CODE.LDYXI
-
-				ldx #RT.IntGet.ID
-				jsr CODE.JSRRT
-				bra .40
-				
-.22				jsr CODE.PUSHYXI
-				bra .40
+.25				jsr EXP.VARLookup
+				bra .39
 *--------------------------------------
 .30				jsr EXP.Int16
-.37				bcs .99
+*--------------------------------------
+.39				bcs .99
 *--------------------------------------
 .40				jsr CORE.GetCharNB
 .41				bcs .80
@@ -89,39 +71,54 @@ EXP.Eval.R		lda EXP.AOPS
 				jsr CORE.IsKW
 				bcc .80
 
-				jsr CORE.LookupOPS
-.39				bcs .90
+				jsr CORE.LookupLOPS
+				bcs .51
 
-				stx EXP.AOPS
+				phx
+				jsr EXP.ComputeAll		compute all until $FF
+				plx
+				
+				bcs .99
+
+				txa
+				lsr
+				adc #14
+				>PUSHA
+				jsr EXP.Eval.R
+				bcs .99
+
+				bra .40
+
+.51				jsr CORE.LookupAOPS
+				bcs .90
+
+				stx EXP.AOP
 
 				lda (pStack)			get op context
 				bmi .60					no prev op, go get arg2
 
-				ldy EXP.TYPE
-				bne .51					no precedence for strings
-
-				cmp EXP.AOPS			we have arg1 A=op1 arg2 X=op2
+				cmp EXP.AOP				we have arg1 A=op1 arg2 X=op2
 				bcc .60
 
-.51				inc pStack				prev op has precedence
+				inc pStack				prev op has precedence
 
 				tay
 				jsr EXP.ComputeY		go compute (arg1 op1 arg2)
 				bcs .90
 
-.60				lda EXP.AOPS			we must compute arg2 op2 arg3 before
+.60				lda EXP.AOP				we must compute arg2 op2 arg3 before
 				>PUSHA
 
 				jsr CORE.GetCharNB
 				bcs .90
 				jmp .11
 *--------------------------------------
-.80				>PULLA
-				tay
-				bmi .88					nothing to do
+.80				jsr EXP.ComputeAll		go compute (arg1 op1 arg2)
+				bcs .99
+				
+				inc pStack				discard $FF
 
-				jsr EXP.ComputeY		go compute (arg1 op1 arg2)
-				bcc .80
+				bra .88
 
 .90				lda #E.ESYN
 
@@ -132,11 +129,9 @@ EXP.Eval.R		lda EXP.AOPS
 				bpl .98
 
 				sec
-				.HS 90					BCC
-.88				clc
 
-				pla
-				sta EXP.AOPS
+.88				pla
+				sta EXP.AOP
 
 				tya
 
@@ -227,12 +222,9 @@ EXP.VARLookup	>LDA.G hVars
 				jsr CORE.GetVarType
 
 				cpx EXP.TYPE
-				bne .90
+				beq .7
 
-				clc
-				rts
-
-.90				lda #E.TMISMATCH
+				lda #E.TMISMATCH
 				sec
 .99				rts
 *--------------------------------------
@@ -254,16 +246,45 @@ EXP.VARLookup	>LDA.G hVars
 				>PUSHWI EXP.ADDR
 				>PUSHWI 3				3 bytes : ADDR + TYPE
 				>SYSCALL SListAddData
-				rts
-				
+				bcc .7
+
 .9				inc pStack				discard extra hVars
 				rts
 *--------------------------------------
-EXP.ComputeY	lda EXP.TYPE
+.7				ldy EXP.ADDR
+				ldx EXP.ADDR+1
+				
+				lda EXP.TYPE
+				bne .8
 
+				jsr CODE.LDYXI
+
+				ldx #RT.IntGet.ID
+				clc
+				jmp CODE.JSRRT
+				
+.8				clc 
+				jmp CODE.PUSHYXI
+*--------------------------------------
+EXP.ComputeAll	lda (pStack)
+				bmi .8					nothing to do
+
+				inc pStack
+
+				tay
+				jsr EXP.ComputeY		go compute (arg1 op1 arg2)
+				bcc EXP.ComputeAll
+				
+*				sec				
+				rts
+				
+.8				clc
+				rts				
+*--------------------------------------
+EXP.ComputeY	lda EXP.TYPE
 				bne .1
 
-				ldx ACOS.OPS2FPU,y
+				ldx ACOS.AOPS2FPU,y
 				jsr CODE.FPUCALL
 				clc
 				rts
@@ -276,29 +297,26 @@ EXP.ComputeY	lda EXP.TYPE
 				jmp CODE.JSRRT	
 
 .2				stz EXP.TYPE			at the end ....TRUE/FALSE is int
-	
+
 				cpy #11					<>
 				bne .3
 				
-				ldx #SYS.StrCmp
-				jsr CODE.SYSCALL
-				jsr CODE.PUSHYA
+				ldx #RT.StrCmp.ID
 				clc
-				rts
+				jmp CODE.JSRRT
 				
 .3				cpy #13					=
 				bne .9
 								
-				ldx #SYS.StrCmp
-				jsr CODE.SYSCALL
-				jsr CODE.PUSHYA
+				ldx #RT.StrCmp.ID
+				jsr CODE.JSRRT
 
 				ldx #RT.NOT.ID
-				jsr CODE.JSRRT	
 				clc
-				rts
+				jmp CODE.JSRRT	
 
-.9				sec
+.9				lda #E.TMISMATCH
+				sec
 				rts
 *--------------------------------------
 MAN
