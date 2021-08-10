@@ -99,6 +99,12 @@ The  definitions are listed  in  ASCII  alphabetical order in several groups con
 |-|-|-|-|-|-|
 | + | n1 n2 -- n3 | I,C | Working | Arithmetic result of n1 plus n2 | |
 | +! | n addr -- | | Working | Add second 16-bit number to contents of address | |
+| - | n1 n2 -- n3 | I,C | Working | Subtract n2 from n1 leaveing result in n3 | |
+| * | n1 n2 -- n3 | I,C | Working | Arithmetic product of n1 times n2 | |
+| */ | n1 n2 n3 -- n4 | || Multiply n1 by n2, divide result by n3 and leave quotient in n4 | |
+| */MOD | n1 n2 n3 -- n4 n5  | | | Multiply n1 by n2, divide result by n3 and leave remainder in n4 and quotient in n5 | |
+| / | n1 n2 -- n3 | I,C | Working | Divide n1 divide by n2, leave quotient in n3| |
+| /MOD | n1 n2 -- n3 n4 | I,C | Working | Divide n1 divide by n2, leave remainder in n3 and quotient in n4 | |
 | 1+ | n -- n+1 | | | Increment n by one | |
 | 1- | n -- n-1 | | | Decrement n by one | |
 | 2+ | n -- n+2 | | | Increment n by two | |
@@ -173,17 +179,9 @@ The  definitions are listed  in  ASCII  alphabetical order in several groups con
 | #S | ud -- 0 0 | | | Convert all significant digits of double number to output string | |
 | ' | -- addr | I | | Find address of next string in dictionary | |
 | ( | -- | I,C | | Begin comment, terminated by ) | |
-| * | n1 n2 -- n3 | I,C | Working | Arithmetic product of n1 times n2 | |
-| */ | n1 n2 n3 -- n4 | || Multiply n1 by n2, divide result by n3 and leave quotient in n4 | |
-| */MOD | n1 n2 n3 -- n4 n5  | | | Multiply n1 by n2, divide result by n3 and leave remainder in n4 and quotient in n5 | |
-| + | n1 n2 -- n3 | I,C | Working | Arithmetic result of n1 plus n2 | |
-| +! | n addr -- | | Working | Add second 16-bit number to contents of address | |
 | , | n -- | | | Allot two bytes in dictionary, storing n there | |
-| - | n1 n2 -- n3 | I,C | Working | Subtract n2 from n1 leaveing result in n3 | |
 | . | n -- | I,C | Working | Print number | |
 | ." | -- | I,C | Working  | Print message terminated by " |  |
-| / | n1 n2 -- n3 | I,C | Working | Divide n1 divide by n2, leave quotient in n3| |
-| /MOD | n1 n2 -- n3 n4 | I,C | Working | Divide n1 divide by n2, leave remainder in n3 and quotient in n4 | |
 | 79-STANDARD | | | | Returns Error if FORTH-79 Standard is not available| |
 | : | -- | I | Working | Begin a colon definition | |
 | ; | -- | C | Working | End of a colon definition | |
