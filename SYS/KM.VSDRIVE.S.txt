@@ -302,11 +302,13 @@ VSDRIVE.Install	ldx #PATCH.LEN
 				asl
 				
 				ora #SSC.DATA
+				sta DRV.SSCWrite.D+1
 				sta DRV.SSCSend.D+1
 				sta DRV.SSCGet.D+1
 				
 				inc						#SSC.STATUS
 				
+				sta DRV.SSCWrite.S+1
 				sta DRV.SSCSend.S+1
 				sta DRV.SSCGet.S+1
 				sta DRV.SSCClose.S+1
@@ -363,12 +365,22 @@ PATCH.LEN		.EQ *-PATCH
 * PC,A1,A2 are used by Disk II Driver,
 * so we use it safely as Tmp Ptr
 *--------------------------------------
-DRV.PCL			.EQ $3A
-DRV.PCH			.EQ $3B
-DRV.A1L			.EQ $3C
-DRV.A1H			.EQ $3D
-DRV.A2L			.EQ $3E
-DRV.A2H			.EQ $3F
+*DRV.PCL			.EQ $3A
+*DRV.PCH			.EQ $3B
+*DRV.A1L			.EQ $3C
+*DRV.A1H			.EQ $3D
+*DRV.A2L			.EQ $3E
+*DRV.A2H			.EQ $3F
+*--------------------------------------
+				.DUMMY
+				.OR $3A
+DRV.CmdBuf.Sum	.BS 1					Reverse order for dey
+DRV.CmdBuf.BlkH	.BS 1
+DRV.CmdBuf.BlkL	.BS 1
+DRV.CmdBuf.Cmd	.BS 1
+DRV.CmdBuf.Env	.BS 1
+				.ED
+*--------------------------------------
 DRV.COMMAND 	.EQ $42
 DRV.UNITNUM		.EQ $43
 DRV.BUFF		.EQ $44
@@ -400,27 +412,37 @@ DRV.START.OK	tax
 
 				ora	#2					W=2,R=3
 
-				ldy DRV.UNITNUM
+				bit DRV.UNITNUM
 				bpl .2
 
 				adc #2					CC from bcs
 
 .2				sta DRV.CmdBuf.Cmd		store cmd
-				eor #ADT.CMD.VSD
-				eor DRV.BLKNUM
-				eor DRV.BLKNUM+1
-				sta DRV.CmdBuf.Sum		Compute & store CheckSum
 
+				lda #ADT.CMD.VSD
+				sta DRV.CmdBuf.Env
+				
 				lda DRV.BLKNUM
 				sta DRV.CmdBuf.BlkL
 
 				lda DRV.BLKNUM+1
 				sta DRV.CmdBuf.BlkH
+				
+				stz DRV.CmdBuf.Sum
 *--------------------------------------
 * send CMD+CS
 *--------------------------------------
 				php
 				sei
+
+				phx
+
+				ldy #DRV.200.LEN-1
+
+.1				lda DRV.200,y
+				sta $200,y
+				dey
+				bpl .1
 				
 *				lda #SSC.CMD.NOP+SSC.CMD.RIRQDIS+SSC.CMD.TE+SSC.CMD.DTR
 DRV.INIT.C		inc SSC.CMD				SELF MODIFIED
@@ -429,29 +451,27 @@ DRV.INIT.C		inc SSC.CMD				SELF MODIFIED
 
 .3				lda DRV.CmdBuf.Sum,y
 				jsr DRV.SSCSend
+				eor DRV.CmdBuf.Sum
+				sta DRV.CmdBuf.Sum
 				dey
-				bpl .3
+				bne .3
 
-				ldy #DRV.200.LEN-1
-
-.5				lda DRV.200,y
-				sta $200,y
-				dey
-				bpl .5
+				jsr DRV.SSCSend			A = Sum
 *--------------------------------------
+				plx
 				dex						1-1=0 if read
 				bne DRV.DO.CMD.W		go write
 *--------------------------------------
 * Read block
 *--------------------------------------
-DRV.DO.CMD.R	ldy #3					Read Back and check 4 bytes
+DRV.DO.CMD.R	ldy #4					Read Back and check 4 bytes
 
 .1				jsr DRV.SSCGet
-				eor DRV.CmdBuf.BlkH,y
+				eor DRV.CmdBuf.Sum,y
 				bne DRV.DO.CMD.ERR
 
 				dey
-				bpl .1
+				bne .1
 
 				ldy #4					Read 4 bytes DATE/TIME + 1 Byte Checksum
 
@@ -505,17 +525,27 @@ DRV.DO.CMD.W	lda #$B1				lda (),y
 
 				sec
 				.HS 90					BCC
-.1				clc
+DRV.SSCWrite.1	clc
 
-.2				jsr $200
-				jsr DRV.SSCSend
+DRV.SSCWrite.2	jsr $200
+
+				tax
+
+DRV.SSCWrite.S	lda SSC.STATUS			SELF MODIFIED
+				and #SSC.STATUS.TDRE	Outgoing char?
+				beq DRV.SSCWrite.S
+
+DRV.SSCWrite.D	stx SSC.DATA			SELF MODIFIED
+				
+				txa
+				
 				eor DRV.CmdBuf.Sum
 				sta DRV.CmdBuf.Sum
 				iny
-				bne .2
+				bne DRV.SSCWrite.2
 
 				inc DRV.BUFF+1
-				bcs .1
+				bcs DRV.SSCWrite.1
 				
 				dec DRV.BUFF+1
 				dec DRV.BUFF+1			
@@ -541,19 +571,21 @@ DRV.SSCClose
 DRV.SSCClose.C	dec SSC.CMD				SELF MODIFIED
 DRV.SSCClose.S	bit SSC.STATUS			SELF MODIFIED
 				bmi DRV.SSCClose.S
+
 				plp
 				clc
 				rts	
 *--------------------------------------
-DRV.SSCSend		pha
+DRV.SSCSend		tax
 
 DRV.SSCSend.S	lda SSC.STATUS			SELF MODIFIED
 				and #SSC.STATUS.TDRE	Outgoing char?
 				beq DRV.SSCSend.S
 
-				pla
+DRV.SSCSend.D	stx SSC.DATA			SELF MODIFIED
+
+				txa						Restore A for checksumming
 				
-DRV.SSCSend.D	sta SSC.DATA			SELF MODIFIED
 				rts
 *--------------------------------------
 DRV.SSCGet
@@ -569,12 +601,6 @@ DRV.200			bit RRAMWRAMBNK1
 				bit RRAMWRAMBNK2
 				rts	
 DRV.200.LEN		.EQ *-DRV.200
-*--------------------------------------
-DRV.CmdBuf.Sum	.BS 1					Reverse order for dey
-DRV.CmdBuf.BlkH	.BS 1
-DRV.CmdBuf.BlkL	.BS 1
-DRV.CmdBuf.Cmd	.BS 1
-DRV.CmdBuf.Env	.DA #ADT.CMD.VSD
 *--------------------------------------
 				.EP
 *--------------------------------------
