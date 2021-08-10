@@ -70,6 +70,21 @@ The  definitions are listed  in  ASCII  alphabetical order in several groups con
 
  BLOCK   BUFFER   EMPTY-BUFFERS   LIST LOAD   SAVE-BUFFERS   SCR   UPDATE
 
+## TERMINALINPUT-OUTPUT
+
+| Word | Syntax | I/C | Status | Description | Comment |
+|-|-|-|-|-|-|
+| CR | -- | I,C | Working | Do a carriage-return | |
+| EMIT | char -- | I,C | Working | Transmit character to current output device | |
+| SPACE | -- | I,C | Working | Transmit an ASCII blank to the current output device. | |
+| SPACES | n -- | I,C | Working | Transmit  n  spaces  to the current output  device.   Take  no action for n of zero or less. | |
+| TYPE | addr n -- | I,C | Working | Transmit  n  characters beginning at address  to  the  current output device.  No action takes place for n less than or equal to zero. | |
+| COUNT | addr -- addr+1 n | I,C | Working | Leave  the  address  addr+1 and the character  count  of  text beginning  at addr.   The first byte at addr must contain  the character count n.  Range of n is {0..255}. | |
+| KEY | -- char | I,C | Working | Read key, put ASCII value on stack | |
+| EXPECT | addr n -- | I,C | Working | Transfer  characters  from  the terminal  beginning  at  addr, upward,  until a "return" or the count of n has been received.   Take  no action for n less than or equal to zero.   One or two nulls are added at the end of text. | |
+| QUERY | | | | Accept input of up to 80 characters (or until a 'return') from the operator's terminal, into the terminal input buffer.  WORD may be used to accept text from this buffer  as  the  input stream, by setting >IN and BLK to zero. | |
+| WORD | char -- addr | | | Receive  characters  from the input stream until the  non-zero delimiting  character  is encountered or the input  stream  is exhausted,  ignoring leading delimiters.   The characters  are stored  as  a  packed string with the character count  in  the first  character position.   The actual delimiter  encountered (char  or  null)  is stored at the end of  the  text  but  not included  in the count.   If the input stream was exhausted as WORD is called,  then a zero length will result.   The address of the beginning of this packed string is left on the stack. | |
+
 ## Words
 
 | Word | Syntax | I/C | Status | Description | Comment |
@@ -128,8 +143,6 @@ The  definitions are listed  in  ASCII  alphabetical order in several groups con
 | CONSTANT | n -- | I,C | Working | A defining word used in the form: <br>n CONSTANT **name** <br>to  create  a dictionary entry for **name**,  leaving n  in  its parameter  field.   When **name** is later executed,  n will  be left on the stack. | |
 | CONTEXT | -- addr | U | | Leave  the address of a variable specifying the vocabulary  in which   dictionary   searches   are   to   be   made,   during interpretation of the input stream. | | 
 | CONVERT | d1 addr1 -- d2 addr2 | | | Convert to the equivalent stack number  the text beginning  at addr1+1  with regard to BASE.   The new value  is  accumulated into double number d1, being left as d2.  addr2 is the address of the first non-convertible character. | |
-| COUNT | addr -- addr+1 n | | | Leave  the  address  addr+1 and the character  count  of  text beginning  at addr.   The first byte at addr must contain  the character count n.  Range of n is {0..255}. | |
-| CR | -- | I,C | Working | Do a carriage-return | |
 | CREATE | | | |   A defining word used in the form:  <br>CREATE  **name**<br> to  create a dictionary entry for <name>,  without  allocating any  parameter  field memory.   When **name**  is  subsequently executed,  the address of the first byte of **name**'s parameter field is left on the stack. | |
 | CURRENT | -- addr | U | | Leave the address of a variable specifying the vocabulary into which new word definitions are to be entered. | |
 | DECIMAL | -- | | | Set input-output numeric conversation base to ten  | |
@@ -141,11 +154,9 @@ The  definitions are listed  in  ASCII  alphabetical order in several groups con
 | DROP | n -- | I,C | Working | Drop top number from the stack | |
 | DUP | n -- n n | I,C | Working | Duplicate top of stack | |
 | ELSE | -- | C | Working | Used in a colon-definition in the form: <br>IF ... ELSE ... THEN  <br> ELSE executes after the true part following IF.   ELSE  forces execution  to skip till just after THEN.   It has no effect on  the stack.  (see IF) | |
-| EMIT | char -- | I,C | Working | Transmit character to current output device | |
 | EMPTY-BUFFERS | | | | Mark all block buffers as empty, without necessarily affecting their actual contents.  UPDATEd blocks are not written to mass  storage. | |
 | EXECUTE | addr -- | | | Execute the dictionary entry whose compilation address is on the stack. | |
 | EXIT | | C | | When compiled within a colon-definition,  terminate  execution of that definition,  at that point.   May not be used within a DO...LOOP. | |
-| EXPECT | addr n -- | | | Transfer  characters  from  the terminal  beginning  at  addr, upward,  until a "return" or the count of n has been received.   Take  no action for n less than or equal to zero.   One or two nulls are added at the end of text. | |
 | FILL | addr n byte -- | I,C | Working | Fill memory starting at addr with n copies of byte | |
 | FIND | -- addr | | | Leave the compilation address of the next word name,  which is accepted from the input stream.   If that word cannot be found in  the  dictionary after a search of CONTEXT and FORTH  leave zero. | |
 | FORGET | -- | | | Execute in the form:  <br>FORGET  **name**  <br>Delete  from  the dictionary **name** (which is in  the  CURRENT vocabulary)  and  all  words added  to  the  dictionary  after **name**,  regardless  of  their vocabulary.   Failure  to  find **name** in CURRENT or FORTH is an error condition. | |
@@ -156,7 +167,6 @@ The  definitions are listed  in  ASCII  alphabetical order in several groups con
 | IF | flag -- | C | Working | Used in a colon-definition in the form:<br>flag  IF ... ELSE ... THEN   or<br>flag  IF ... THEN<br>If  flag is true,  the words following IF are executed and the words following ELSE are skipped.   The ELSE part is optional. If flag is false, words between IF and ELSE, or between IF and THEN  (when  no  ELSE is  used),  are  skipped.   IF-ELSE-THEN conditionals may be nested. | |
 | IMMEDIATE | | | | Marks the most recently made dictionary entry as a word  which will  be  executed when encountered during compilation  rather than compiled. | |
 | J | -- n | C | | Return  the index of the next outer loop.   May only  be  used within a nested DO-LOOP in the form: <br>DO ... DO ... J ... LOOP ... LOOP | |
-| KEY | -- char | | Working | Read key, put ASCII value on stack | |
 | LEAVE | -- | C | Working | Force  termination  of a DO-LOOP at the next LOOP or +LOOP  by setting  the  loop  limit equal to the current  value  of  the index.   The  index itself remains  unchanged,  and  execution proceeds   normally   until  the  loop  terminating  word   is encountered. | |
 | LIST | n -- | | | List  the ASCII symbolic contents of screen n on  the  current output device, setting SCR to contain n.  n is unsigned. | |
 | LITERAL | n -- | I | | f  compiling,  then  compile  the stack value n as  a  16-bit literal, which when later executed, will leave n on the stack. | |
@@ -172,7 +182,6 @@ The  definitions are listed  in  ASCII  alphabetical order in several groups con
 | OVER | n1 n2 -- n1 n2 n1 | I,C | Working | Leave a copy of the second number on the stack. | |
 | PAD | -- addr | I,C | Working | The address of a scratch area used to hold character strings for intermediate processing.   The minimum capacity of PAD is 64 characters (addr through addr+63). | |
 | PICK | n1 -- n2 | | | Return the contents of the n1-th stack value,  not counting n1 itself.  An error condition results for n less than one.  <br>2 PICK  is equivalent to OVER.  {1..n} | |
-| QUERY | | | | Accept input of up to 80 characters (or until a 'return') from the operator's terminal, into the terminal input buffer.  WORD may be used to accept text from this buffer  as  the  input stream, by setting >IN and BLK to zero. | |
 | QUIT | | | | Clear the return stack, setting execution mode, and return control to the terminal.  No message is given. | |
 | R> | -- n | C | | Transfer n from the return stack to the data stack. | |
 | R@ | -- n | C | | Copy the number on top of the return stack to the data stack. | |
@@ -182,12 +191,9 @@ The  definitions are listed  in  ASCII  alphabetical order in several groups con
 | SAVE-BUFFERS | | | | Write  all  blocks to mass-storage that have been  flagged  as UPDATEd.   An  error condition results if mass-storage writing is not completed. | |
 | SCR | -- addr | U | | Leave  the address of a variable containing the number of  the screen most recently listed. | |
 | SIGN | n -- | C | | Insert  the ASCII "-" (minus sign) into the  pictured  numeric output string, if n is negative. | |
-| SPACE | -- | I,C | Working | Transmit an ASCII blank to the current output device. | |
-| SPACES | n -- | I,C | Working | Transmit  n  spaces  to the current output  device.   Take  no action for n of zero or less. | |
 | STATE | -- addr | U | | Leave  the address of the variable containing the  compilation state.  A non-zero content indicates compilation is occurring, but the value itself may be installation dependent. | |
 | SWAP | n1 n2 -- n2 n1 | I,C | Working | Reverse top two stack items | |
 | THEN | | C | Working | Used in a colon-definition in the form:<br>IF ... ELSE ... THEN   or<br>IF ... THEN<br>THEN  is  the point where execution resumes after ELSE  or  IF (when no ELSE is present). | |
-| TYPE | addr n -- | | | Transmit  n  characters beginning at address  to  the  current output device.  No action takes place for n less than or equal to zero. | |
 | U* | un1 un2 -- ud3 | | | Perform an unsigned multiplication of un1 by un2,  leaving the double number product ud3.  All values are unsigned. | |
 | U. | un -- | I,C | Working | Display  un converted according to BASE as an unsigned number, in a free-field format, with one trailing blank. | |
 | U/MOD | ud1 un2 -- un3 un4 | | | Perform the unsigned division of double number ud1 by un2, leaving the remainder un3, and the quotient un4.  All values are unsigned. | |
@@ -197,7 +203,6 @@ The  definitions are listed  in  ASCII  alphabetical order in several groups con
 | VARIABLE | n -- | I,C | Working | A defining word executed in the form:<br>VARIABLE  **name** to  create a dictionary entry for **name** and allot  two  bytes for  storage  in the parameter field.   The  application  must initialize  the stored value.   When **name** is later executed, it will place the storage address on the stack. | |
 | VOCABULARY | -- | | | A defining word executed in the form:<br>VOCABULARY  **name**<br>to  create (in the CURRENT vocabulary) a dictionary entry  for **name**,   which   specifies  a  new  ordered  list   of   word definitions.   Subsequent execution of **name** will make it the CONTEXT   vocabulary.    When   **name**  becomes  the   CURRENT vocabulary (see DEFINITIONS), new definitions will be  created in that list.<br>In lieu of any further specification, new vocabularies 'chain' to  FORTH.   That  is,  when  a dictionary  search  through  a vocabulary is exhausted, FORTH will be searched. | |
 | WHILE | flag -- | C | Working | Used in the form:<br>BEGIN ... flag WHILE ... REPEAT<br>Select conditional execution based on flag.   On a true  flag, continue execution through to REPEAT,  which then returns back to just after BEGIN.   On a false flag, skip execution to just after REPEAT, exiting the structure. | |
-| WORD | char -- addr | | | Receive  characters  from the input stream until the  non-zero delimiting  character  is encountered or the input  stream  is exhausted,  ignoring leading delimiters.   The characters  are stored  as  a  packed string with the character count  in  the first  character position.   The actual delimiter  encountered (char  or  null)  is stored at the end of  the  text  but  not included  in the count.   If the input stream was exhausted as WORD is called,  then a zero length will result.   The address of the beginning of this packed string is left on the stack. | |
 | XOR | n1 n2 -- n3 | I,C | Working | Leave the bitwise exclusive-or of two numbers. | |
 | [ | | I | | End the compilation mode.   The text from the input stream  is subsequently executed.  See ] | |
 | [COMPILE] | | I,C | | Used in a colon-definition in the form:<br>[COMPILE] **name**<br>Forces  compilation  of  the  following  word.    This  allows compilation  of  an IMMEDIATE word when it would otherwise  be executed. | |
