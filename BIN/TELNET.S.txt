@@ -51,7 +51,6 @@ L.MSG.IPKO		.DA MSG.IPKO
 L.MSG.USAGE		.DA MSG.USAGE
 L.MSG.UNKNOWN	.DA MSG.UNKNOWN
 L.MSG.HOSTOK	.DA MSG.HOSTOK
-L.MSG.SKTKO		.DA MSG.SKTKO
 L.MSG.SKTOK		.DA MSG.SKTOK
 L.MSG.SKTERR	.DA MSG.SKTERR
 L.MSG.IOERR		.DA MSG.IOERR
@@ -61,6 +60,7 @@ L.MSG.USER		.DA MSG.USER
 CS.INIT			>LDYA L.LIBTCPIP
 				>SYSCALL LoadLib
 				bcs .9
+
 				sta hLIBTCPIP
 
 .9				rts
@@ -80,8 +80,10 @@ CS.RUN.IPOK		ldy #S.PS.ARGC
 				lda (pPS),y
 				cmp #1
 				bcc .9
+
 				ldy #S.IPCFG.IP+3
 				ldx #3
+
 .1				lda (ZPIPCfgPtr),y
 				sta SA.LOCAL+S.SOCKADDR.ADDR,x
 				dey
@@ -120,6 +122,7 @@ CS.RUN.IPOK		ldy #S.PS.ARGC
 CS.RUN.HOSTOK	lda #2
 				>SYSCALL ArgV
 				bcs CS.RUN.PORTOK
+
 				>SYSCALL AToI
 				>STYA SA.REMOTE+S.SOCKADDR.PORT
 
@@ -144,19 +147,14 @@ CS.RUN.OPENSKT	>PUSHBI S.SOCKET.T.STREAM
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Socket
 				bcs .9
 
-				sta hSocket
+.1				sta hSocket
 
 				>PUSHA
 				>PUSHW L.SA.LOCAL
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Bind
 				bcc .2
 
-.9				pha
-				>LDYA L.MSG.SKTKO
-				>SYSCALL PutS
-				pla
-				sec
-.99				rts
+.9				jmp CS.RUN.SKTERR
 
 .2				lda #TIMEOUT.MAX
 				sta TimeOut
@@ -177,78 +175,71 @@ CS.RUN.OPENSKT	>PUSHBI S.SOCKET.T.STREAM
 				lda #ERR.SKT.NOCONN
 				bra .9
 
-.4				>PUSHW L.MSG.SKTOK
-				>PUSHBI 0
-				>SYSCALL PrintF
+.4				>LDYA L.MSG.SKTOK
+				>SYSCALL Puts
 
 				>LDYAI BUFSIZE
 				>SYSCALL GetMem
-				bcs .99
+				bcc .5
 
-				>STYA ZPBufPtr
+.5				>STYA ZPBufPtr
 				stx hBuf
-
+*--------------------------------------
 CS.RUN.LOOP		>SLEEP
 
 				lda hSocket
 				>LIBCALL hLIBTCPIP,LIBTCPIP.EOF
-				bcs .98
+				bcs CS.RUN.SKTERR
 
 				tay
 				bne .2					EOF, no char
 
-				>PUSHB hSocket
-				>PUSHW ZPBufPtr
-				>PUSHWI BUFSIZE
+				lda hSocket
+				jsr CS.RUN.PushRead
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Read
-.98				bcs .99
+				bcs CS.RUN.SKTERR
 
 				>STYA ZPBufLen
 
 				ldy #S.PS.hStdOut
 				lda (pPS),y
-				>PUSHA
-				>PUSHW ZPBufPtr
-
-				>PUSHW ZPBufLen
+				jsr CS.RUN.PushWrite
 				>SYSCALL FWrite
-				bcs .11
+				bcs CS.RUN.IOERR
 
 .2				ldy #S.PS.hStdIn
 				lda (pPS),y
 				>SYSCALL FEOF
-				bcs .11					CS.RUN.IOERR
+				bcs CS.RUN.IOERR
 
 				tay
 				bne CS.RUN.LOOP			EOF = true, no char from STDIN
 
 				ldy #S.PS.hStdIn
 				lda (pPS),y
-				>PUSHA
-				>PUSHW ZPBufPtr
-				>PUSHWI BUFSIZE
+				jsr CS.RUN.PushRead
 				>SYSCALL FRead
-.11				bcc .3
+				bcs CS.RUN.IOERR
 
-				bra CS.RUN.IOERR
-.99				bra CS.RUN.SKTERR
-
-.3				>STYA ZPBufLen
+				>STYA ZPBufLen
 
 				lda (ZPBufPtr)
 				cmp #$14				Ctrl-T
-				beq CS.RUN.USER
+				beq CS.RUN.USERINT
 
-				>PUSHB hSocket
-				>PUSHW ZPBufPtr
-				>PUSHW ZPBufLen
+				lda hSocket
+				jsr CS.RUN.PushWrite
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Write
-.9				bcs CS.RUN.SKTERR
+				bcc CS.RUN.LOOP
+*--------------------------------------
+CS.RUN.SKTERR	ldx #0
 
-				jmp CS.RUN.LOOP
+				bra CS.RUN.ERR
 *--------------------------------------
-CS.RUN.SKTERR	pha
-				>PUSHW L.MSG.SKTERR
+CS.RUN.IOERR	ldx #2
+
+CS.RUN.ERR		pha
+				>PUSHW L.MSG.SKTERR,x
 				pla
 				pha
 				>PUSHA
@@ -258,28 +249,31 @@ CS.RUN.SKTERR	pha
 				sec
 				rts
 *--------------------------------------
-CS.RUN.IOERR	pha
-				>PUSHW L.MSG.IOERR
-				pla
-				pha
-				>PUSHA
-				>PUSHBI 1
-				>SYSCALL PrintF
-				pla
-				sec
-				rts
-*--------------------------------------
-CS.RUN.USER		>LDYA L.MSG.USER
+CS.RUN.USERINT	>LDYA L.MSG.USER
 				>SYSCALL PutS
 				lda #0
 				sec
 				rts
 *--------------------------------------
+CS.RUN.PushRead	>PUSHA
+				>PUSHW ZPBufPtr
+				>PUSHWI BUFSIZE
+				rts
+*--------------------------------------
+CS.RUN.PushWrite
+				>PUSHA
+				>PUSHW ZPBufPtr
+				>PUSHW ZPBufLen
+				rts
+*--------------------------------------
 CS.DOEVENT		lda (pEvent)
 				bpl .9					is it a TIMER event?
+
 				lda TimeOut
 				beq .9
+
 				dec TimeOut
+
 .9				sec						do not discard TIMER event
 				rts
 *--------------------------------------
@@ -308,8 +302,7 @@ MSG.IPKO		.AZ "TCP/IP Not Loaded/Configured."
 MSG.USAGE		.AZ "Usage : TELNET <ip|host> [port]"
 MSG.UNKNOWN		.AZ "%s: Unknown host\r\n"
 MSG.HOSTOK		.AZ "Connecting to %d.%d.%d.%d:%D (%s)..."
-MSG.SKTKO		.AZ "Failed to Open Socket."
-MSG.SKTOK		.AZ "Connected\r\n(Exit key is Ctrl-T)\r\n"
+MSG.SKTOK		.AZ "Connected\r\n(Exit key is Ctrl-T)"
 MSG.SKTERR		.AZ "Socket Error : $%h\r\n"
 MSG.IOERR		.AZ "I/O Error : $%h\r\n"
 MSG.USER		.AZ "User interrupt."
@@ -327,8 +320,7 @@ SA.REMOTE		.DA #AF.INET			S.SOCKADDR.AF
 				.DUMMY
 				.OR 0
 DS.START
-DS.END
-				.ED
+DS.END			.ED
 *--------------------------------------
 MAN
 SAVE usr/src/bin/telnet.s
