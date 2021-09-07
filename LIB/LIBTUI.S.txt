@@ -12,11 +12,20 @@ NEW
 *--------------------------------------
 				.DUMMY
 				.OR ZPLIB
-hScrn			.BS 1
-				.BS 1
+
 ZPScrnPtr		.BS 2
 ZPObjPtr		.BS 2
+
+ZPLineBufPtr	.BS 2
+ZPLineBufCnt	.BS 2
+
 ZPPtr1			.BS 2
+ZPPtr2			.BS 2
+TempW			.BS 2
+TempC			.BS 2
+TempI			.BS 2
+bResize			.BS 1
+
 				.ED
 *--------------------------------------
 *			File Header (16 Bytes)
@@ -35,22 +44,58 @@ CS.START		cld
 *--------------------------------------
 .1				.DA LIB.LOAD
 				.DA LIB.UNLOAD
-				.DA LIB.Open
+				.DA LIB.Init
+				.DA LIB.GetEvent
+				.DA LIB.Dispatch
 				.DA LIB.Close
-				.DA LIB.LBOXNew
+				.DA OBJ.New
+				.DA OBJ.Destroy
+				.DA OBJ.Run
+				.DA OBJ.Draw
+				.DA OBJ.GetProp
+				.DA OBJ.SetProp
+				.DA OBJ.Activate
+				.DA OBJ.Deactivate
 *--------------------------------------
-L.SEQ.TERMCAP	.DA SEQ.TERMCAP
+J.ObjNew		.DA SCRN.New
+				.DA TBOX.New
+				.DA LBOX.New
+*--------------------------------------
+J.ObjDestroy	.DA SCRN.Destroy
+				.DA TBOX.Destroy
+				.DA LBOX.Destroy
+*--------------------------------------
+J.ObjRun		.DA SCRN.Run
+				.DA TBOX.Run
+				.DA LBOX.Run
+*--------------------------------------
+J.ObjDraw		.DA SCRN.Draw
+				.DA TBOX.Draw
+				.DA LBOX.Draw
+*--------------------------------------
+J.ObjActivate	.DA SCRN.Activate
+				.DA TBOX.Activate
+				.DA LBOX.Activate
+*--------------------------------------
+J.ObjDeactivate	.DA SCRN.Deactivate
+				.DA TBOX.Deactivate
+				.DA LBOX.Deactivate
+*--------------------------------------
 L.SEQ.INIT		.DA SEQ.INIT
+L.SEQ.GOTOXY	.DA SEQ.GOTOXY
+L.SEQ.COLOR		.DA SEQ.COLOR
+L.SEQ.CLOSE		.DA SEQ.CLOSE
 L.FMT.ESCCSI.R	.DA FMT.ESCCSI.R
 				.DA 0
 *--------------------------------------
 LIB.LOAD		lda LibCnt
 				bne .8
 
-				>LDYAI 256
+				>LDYAI 512
 				>SYSCALL2 GetMem
 				bcs .9
 
+				>STYA LineBuf
 				stx hLineBuf
 
 
@@ -68,15 +113,18 @@ LIB.UNLOAD		dec LibCnt
 .8				clc
 				rts
 *--------------------------------------
-LIB.Open		>LDYAI S.SCRN
+LIB.Init		sta TempW				F
+
+				>LDYAI S.SCRN
 				>SYSCALL2 GetMem
 				bcs .99
-				
+
 				>STYA ZPScrnPtr
 				txa
-				>PUSHA
-				
+				>PUSHA					hScrn
+
 				lda #0
+				>PUSHA					Init Counter
 
 				ldy #S.SCRN-1
 
@@ -84,37 +132,42 @@ LIB.Open		>LDYAI S.SCRN
 				dey
 				bpl .10
 
-				jsr CheckCh.Reset
+				lda TempW
+				ldy #S.OBJ.F
+				sta (ZPScrnPtr),y
 
-				>LDYA L.SEQ.TERMCAP
-				>SYSCALL2 puts
+				jsr LIB.GetC.Reset
 
-				lda #0
-				>PUSHA
+				>LDYA L.SEQ.INIT
+				jsr LIB.YAOut
+				bcs .98
 
 .1				>SLEEP
 
-				ldy #1
+				ldy #1					hScrn
 				lda (pStack),y
-				jsr GetScrn
-				
-				jsr CheckCh
-				bcs .97
-			
+
+				jsr LIB.GetC
+				bcs .98
+
 				beq .2
 
-				>SYSCALL2 PutChar
-				bcs .97
-				
+				>SYSCALL PutChar
+				bcs .98
+
+				ldy #1					hScrn
+				lda (pStack),y
+				jsr LIB.GetScrn
+
 .2				ldy #S.OBJ.W
 				lda (ZPScrnPtr),y
 				bne .8
-				
+
 				lda (pStack)
 				dec
 				sta (pStack)
 				bne .1
-				
+
 				lda #80
 
 				ldy #S.OBJ.W
@@ -124,139 +177,321 @@ LIB.Open		>LDYAI S.SCRN
 				iny						S.OBJ.H
 				sta (ZPScrnPtr),y
 
-.8				inc pStack
-				
-				>LDYA ZPScrnPtr
+.8				>LDYA ZPScrnPtr
 				jsr LIB.SetObjX2Y2
-				
+
+				ldy #S.OBJ.S
+				lda #S.OBJ.S.bACTIVE
+				sta (ZPScrnPtr),y
+
+				inc pStack				Discard counter
 				>PULLA					hScrn
 				clc
-				rts
-	
-.97				inc pStack
-				inc pStack
+.99				rts
 
 .98				pha
-				lda	hScrn
+				inc pStack				Discard counter
+				>PULLA					hScrn
 				>SYSCALL2 FreeMem
 				pla
 				sec
 
-.99				rts	
+				rts
 *--------------------------------------
-LIB.Close		>SYSCALL2 FreeMem
+LIB.GetEvent	stz bResize
+
+				>PUSHA					hScrn
+
+				jsr LIB.GetC
+				bcs .9
+
+				bit bResize
+				bpl .8
+				
+				lda (pStack)
+				jsr LIB.GetScrn
+
+				ldy #S.OBJ.fRESIZE
+				lda (ZPScrnPtr),y
+				sta ZPPtr1
+
+				iny
+				lda (ZPScrnPtr),y
+				sta ZPPtr1+1
+
+				jsr .10
+
+				stz bResize
+
+				lda #0
+				clc
+.8
+.9				inc pStack
+
+				rts
+
+.10				jmp (ZPPtr1)
+*--------------------------------------
+LIB.Dispatch	jsr OBJ.Run
+				bcc .8
+				
+				lda (pStack)
+				cmp #3					Ctrl-C
+				beq .9
+
+				clc
+
+.8				
+
+.9				inc pStack				Destroy Event
+				inc pStack				on Stack
+
+				rts
+*--------------------------------------
+LIB.Close		jsr OBJ.Destroy
+
+				>LDYA L.SEQ.CLOSE
+				jsr LIB.YAOut
 
 				clc
 				rts
 *--------------------------------------
-LIB.LBOXNew		>PULLW ZPPtr1			Params
-				
-				>PULLA					 hScrn
-				jsr GetScrn
-				
-				>LDYAI S.LBOX
-				>SYSCALL2 GetMem
-				bcs .9
-				
-				>STYA ZPObjPtr
-				
-				lda #S.OBJ.T.LBOX
-				sta (ZPObjPtr)
-				
-				ldy #S.OBJ.P
-				lda hScrn
-				sta (ZPObjPtr),y
+LIB.FindActive	ldx ZPObjPtr
+				phx
+				ldx ZPObjPtr+1
+				phx
 
-				iny						#S.OBJ.F
-				lda #S.OBJ.F.bHBorder+S.OBJ.F.bVBorder
-				sta (ZPObjPtr),y
+				jsr LIB.GetObj
+
+*				ldy #S.OBJ.P
+*				lda (ZPObjPtr),y
+*				sec
+*				beq .80
+
+				ldy #S.OBJ.Childs
 				
-				ldy #S.OBJ.X1
+.1				phy
+				lda (ZPObjPtr),y
+				beq .7
 				
-.1				lda (ZPPtr1),y
-				sta (ZPObjPtr),y
+				pha
+
+				>SYSCALL2 GetMemPtr
+				>STYA ZPPtr1
+				ldy #S.OBJ.S
+				lda (ZPPtr1),y
+				and #S.OBJ.S.bACTIVE
+				bne .8
+				
+				pla
+
+.7				ply
 				iny
-				cpy #S.OBJ.H+1
+				cpy #S.OBJ
 				bne .1
 				
+*				sec
+				bra .80
 				
-				
-.8				txa				
+.8				pla
+				ply
 				clc
-.9				rts				
+				
+.80				plx
+				stx ZPObjPtr+1
+				plx
+				stx ZPObjPtr
+			
+				rts
 *--------------------------------------
-LIB.LBOXSetData	>SYSCALL2 GetMemPtr
+LIB.GotoXY		>PUSHW ZPLineBufPtr
+				>PUSHW L.SEQ.GOTOXY
+
+				tya
+				inc
+				>PUSHA
+
+				txa
+				inc
+				>PUSHA
+
+				>PUSHBI 2
+				jmp LIB.LineBufPrintF
+*--------------------------------------
+LIB.SetColor	tax
+				>PUSHW ZPLineBufPtr
+				>PUSHW L.SEQ.COLOR
+
+				>PUSHB OBJ.COLORS,x
+				>PUSHB OBJ.COLORS+1,x
+
+				>PUSHBI 2
+				jmp LIB.LineBufPrintF
+*--------------------------------------
+LIB.GetScrn		>SYSCALL2 GetMemPtr
+				>STYA ZPScrnPtr
+				rts
+*--------------------------------------
+LIB.GetObj		>SYSCALL2 GetMemPtr
 				>STYA ZPObjPtr
-
-
 				rts
 *--------------------------------------
-LIB.LBOXFocus
-*--------------------------------------
-LIB.LBOXRun
-*--------------------------------------
-LIB.LBOXClose
-				clc
-				rts
-*--------------------------------------
-LIB.SetObjX2Y2	>STYA ZPObjPtr
+LIB.SetObjX2Y2	>STYA ZPPtr1
 
 				ldy #S.OBJ.X1
-				jsr .1
-				
-				ldy #S.OBJ.Y1
+				jsr .7
 
-.1				clc
-				
-				lda (ZPObjPtr),y
+				ldy #S.OBJ.Y1
+				jsr .7
+
+				ldy #S.OBJ.F
+				lda (ZPPtr1),y
+				and #S.OBJ.F.bHBorder
+				beq .1
+
+				ldy #S.OBJ.InnerX
+				lda (ZPPtr1),y
+				inc
+				sta (ZPPtr1),y
+
+				iny
+				iny
+
+				lda (ZPPtr1),y			S.OBJ.InnerW
+				dec
+				dec
+				sta (ZPPtr1),y
+
+.1				ldx #0
+
+				ldy #S.OBJ.F
+				lda (ZPPtr1),y
+				bit #S.OBJ.F.bVBorder+S.OBJ.F.bTITLE
+				beq .2
+
+				dex
+
+.2				bit #S.OBJ.F.bVBorder+S.OBJ.F.bSTATUS
+				beq .3
+
+				dex
+
+.3				txa
+				beq .4
+
+				ldy #S.OBJ.InnerY
+				lda (ZPPtr1),y
+				inc
+				sta (ZPPtr1),y
+
+ 				txa
+
+				iny
+				iny
+
+				clc
+				adc (ZPPtr1),y			S.OBJ.InnerH
+				sta (ZPPtr1),y
+
+.4				ldy #S.OBJ.F
+				lda (ZPPtr1),y
+				bit #S.OBJ.F.bMENU
+				beq .5
+
+				ldy #S.OBJ.InnerY
+				lda (ZPPtr1),y
+				inc
+				sta (ZPPtr1),y
+
+				iny
+				iny
+
+				lda (ZPPtr1),y			S.OBJ.InnerH
+				dec
+				sta (ZPPtr1),y
+
+.5				rts
+*--------------------------------------
+.7				lda (ZPPtr1),y			S.OBJ.X1/Y1
+				tax
+
 				iny
 				iny						S.OBJ.W/H
-				adc (ZPObjPtr),y
+				phy
+
+				clc
+				adc (ZPPtr1),y
+				dec
 				iny
 				iny						S.OBJ.X2/Y2
-				sta (ZPObjPtr),y
+				sta (ZPPtr1),y
+				iny
+				iny
+
+				txa
+				sta (ZPPtr1),y			S.OBJ.InnerX/Y
+
+				ply						S.OBJ.W/H
+				lda (ZPPtr1),y
+				iny
+				iny
+				iny
+				iny
+				iny
+				iny
+				sta (ZPPtr1),y			S.OBJ.InnerW/H
+
 				rts
 *--------------------------------------
-LIB.DrawFrame
-				clc
-				rts
-*--------------------------------------
-CheckCh			ldy #S.PS.hStdIn
+LIB.GetC		>PUSHA					hScrn
+
+				ldy #S.PS.hStdIn
 				lda (pPS),y
 				>SYSCALL2 FEOF
 				bcs .9
-				
-				tay
-				bne .18
-				
-				>SYSCALL2 GetChar
-				bcs .9
 
-				tax
+				tay
+				beq .10
+				
+				inc pStack
+				bra .18
+
+.10				>SYSCALL2 GetChar
+				bcc .11
+
+.9				inc pStack
+				rts
+
+.11				pha
+
+				>PULLA
+				jsr LIB.GetScrn
+
+				plx
 
 				ldy #S.SCRN.bEscMode
 				lda (ZPScrnPtr),y
 				beq .20
-				
+
 				bmi .40					IAC mode
-				
+
 				iny 					S.SCRN.InBufPtr
 				lda (ZPScrnPtr),y
 
 				cpx #'['				CSI ?
-				bne .10
-	
+				bne .12
+
 				cmp #S.SCRN.InBufPtr
 				bne .49					buffer not empty...bad SEQ
 
-.10				jsr CheckCh.ToBuf
+.12				jsr LIB.GetC.ToBuf
 				bcs .49					Buffer Full
 
 				cpx #'['
 				beq .18
 
 				cpx #64
-				bcs CheckCh.ESCSEQ		if CC, not a letter...SEQ is incomplete
+				bcs LIB.GetC.ESCSEQ		if CC, not a letter...SEQ is incomplete
 
 .18				lda #0
 				clc
@@ -266,59 +501,58 @@ CheckCh			ldy #S.PS.hStdIn
 				bne .30
 
 				inc						A = $01
-				
-				jsr CheckCh.SetMode
-				
-				lda #0
-				clc
-				rts
+
+				bra .31
 *--------------------------------------
 .30				cpx #IAC
 				bne .38
 
 				dec						A = $FF
-				jsr CheckCh.SetMode
 
-				inx						X = 0
+.31				jsr LIB.GetC.SetMode
 
-.38				txa
+				lda #0
 				clc
 				rts
 *--------------------------------------
-.40				jsr CheckCh.ToBuf
+.38				txa
+				clc
+.39				rts
+*--------------------------------------
+.40				jsr LIB.GetC.ToBuf
 				bcs .49					Buffer Full
-				
+
 				cpy #S.SCRN.InBuf		First char...
 				beq .48
-				
+
 				ldy #S.SCRN.InBuf
 				lda (ZPScrnPtr),y
-				cmp #SB
-				bne CheckCh.IACSEQ
-				
-				cpx #SE
+				cmp #SB					First char is SB ?
+				bne LIB.GetC.IACSEQ		no ...
+
+				cpx #SE					is SE after SB ..... ?
 				bne .48
-				
-				bra CheckCh.IACSEQ
-				
-.49				jsr CheckCh.Reset
+
+				bra LIB.GetC.IACSEQ		yes, we have IAC SB .....SE
+
+.49				jsr LIB.GetC.Reset
 
 .48				lda #0
 				clc
-.9				rts
+				rts
 *--------------------------------------
-CheckCh.ESCSEQ	cmp #S.SCRN.InBuf+2
+LIB.GetC.ESCSEQ	cmp #S.SCRN.InBuf+2
 				bcs .2
 
 				ldy #ESC.Out-ESC.In-1
 				txa
-				
+
 .1				cmp ESC.In,y
 				beq .7
-				
+
 				dey
 				bpl .1
-				
+
 				bra .6
 *--------------------------------------
 * \e[xxx;yyyR
@@ -327,55 +561,113 @@ CheckCh.ESCSEQ	cmp #S.SCRN.InBuf+2
 				bne .6
 
 				lda #S.SCRN.InBuf+1		skip ESC [
-				jsr GetScrnOfs
+				jsr LIB.GetC.GetScrnOfs
 				>PUSHYA
 
 				>PUSHW L.FMT.ESCCSI.R
-				
+
 				lda #S.OBJ.H
-				jsr GetScrnOfs
+				jsr LIB.GetC.GetScrnOfs
 				>PUSHYA
 
 				lda #S.OBJ.W
-				jsr GetScrnOfs
+				jsr LIB.GetC.GetScrnOfs
 				>PUSHYA
-				
+
 				>PUSHBI 4				2 pointers
 				>SYSCALL2 sscanf
-				
+
 .6				ldx #0
 				bra .8
-				
+
 .7				ldx ESC.Out,y
 
-.8				jsr CheckCh.Reset
-				
+.8				jsr LIB.GetC.Reset
+
 				txa
 				clc
-.9				rts
+				rts
 *--------------------------------------
-CheckCh.IACSEQ
-			>DEBUG
-				jsr CheckCh.Reset
+* IAC SB TN.O.NAWS ww ww hh hh IAC SE
+*--------------------------------------
+LIB.GetC.IACSEQ	ldy #S.SCRN.InBuf
+				lda (ZPScrnPtr),y
+				cmp #SB
+				bne .8
+
+				iny
+				lda (ZPScrnPtr),y
+				cmp #TN.O.NAWS
+				bne .8
+
+				iny
+				lda (ZPScrnPtr),y
+				bne .8
+
+				iny
+				lda (ZPScrnPtr),y
+				cmp #80
+				bcs .1
+
+				lda #80
+
+.1				tax
+
+				iny
+				lda (ZPScrnPtr),y
+				bne .8
+
+				iny
+				lda (ZPScrnPtr),y
+				cmp #24
+				bcs .2
+
+				lda #24
+
+.2				ldy #S.OBJ.H
+
+				sta (ZPScrnPtr),y
+
+				dey						S.OBJ.W
+
+				txa
+				sta (ZPScrnPtr),y
+
+				>LDYA ZPScrnPtr
+				jsr LIB.SetObjX2Y2
+
+				sec
+				ror bResize
+
+.8				jsr LIB.GetC.Reset
 
 				lda #0
 				clc
 				rts
 *--------------------------------------
-CheckCh.Reset	lda #0
+LIB.GetC.Reset	lda #0
 
-CheckCh.SetMode	ldy #S.SCRN.bEscMode
+LIB.GetC.SetMode
+				ldy #S.SCRN.bEscMode
 				sta (ZPScrnPtr),y
-				
+
 				iny						Y = S.SCRN.InBufPtr
 				tya
 				sta (ZPScrnPtr),y
 
 				rts
 *--------------------------------------
-CheckCh.ToBuf	ldy #S.SCRN.InBufPtr
+LIB.GetC.GetScrnOfs
+				clc
+				adc ZPScrnPtr
+				tay
+				lda ZPScrnPtr+1
+				adc #0
+.9				rts
+*--------------------------------------
+LIB.GetC.ToBuf	ldy #S.SCRN.InBufPtr
 				lda (ZPScrnPtr),y
-				
+
 				cmp #S.SCRN.EndBuf		buffer full
 				bcs .9
 
@@ -387,44 +679,203 @@ CheckCh.ToBuf	ldy #S.SCRN.InBufPtr
 				tya
 				ply
 				sta (ZPScrnPtr),y
-				
-*				clc				
-				
-.9				rts				
+
+*				clc
+
+.9				rts
 *--------------------------------------
-GetScrn			sta hScrn
-				>SYSCALL2 GetMemPtr
-				>STYA ZPScrnPtr
+LIB.LineBufInit	>LDYA LineBuf
+				>STYA ZPLineBufPtr
+				stz ZPLineBufCnt
+				stz ZPLineBufCnt+1
 				rts
 *--------------------------------------
-GetScrnOfs		clc
-				adc ZPScrnPtr
-				tay
-				lda ZPScrnPtr+1
-				adc #0
-.9				rts
+LIB.LineBufSeqOut
+.1				lda SEQS,x
+				beq .8
+
+				jsr LIB.LineBufCOut
+				inx
+				bra .1
+
+.8				rts
+*--------------------------------------
+LIB.LineBufYAOut
+				ldx #0
+*--------------------------------------
+LIB.LineBufYAOutX
+				>STYA ZPPtr1			X = MaxLen
+
+				ldy #$ff
+
+.1				iny
+				lda (ZPPtr1),y
+				beq .8
+
+				jsr LIB.LineBufCOut
+				dex
+				bne .1
+
+.8				rts
+*--------------------------------------
+LIB.LineBufPrintF
+				>SYSCALL2 SPrintF
+				tya
+
+				clc
+				adc ZPLineBufPtr
+				sta ZPLineBufPtr
+				bcc .1
+
+				inc ZPLineBufPtr+1
+				clc
+
+.1				tya
+				adc ZPLineBufCnt
+				sta ZPLineBufCnt
+				bcc .8
+				
+				inc ZPLineBufCnt+1
+				clc
+
+.8				rts
+*--------------------------------------
+LIB.LineBufHOut	pha
+				lsr
+				lsr
+				lsr
+				lsr
+				jsr .1
+
+				pla
+				and #$0F
+
+.1				ora #$30
+				cmp #'9'+1
+				bcc LIB.LineBufCOut
+
+				adc #6
+*--------------------------------------
+LIB.LineBufCOut	sta (ZPLineBufPtr)
+				inc ZPLineBufPtr
+				bne .1
+
+				inc ZPLineBufPtr+1
+
+.1				inc ZPLineBufCnt
+				bne .8
+	
+				inc ZPLineBufCnt+1
+				
+.8				rts
+*--------------------------------------
+LIB.LineBufOut	ldy #S.PS.hStdOut
+				lda (pPS),y
+				>PUSHA
+				>PUSHW LineBuf
+				>PUSHW ZPLineBufCnt
+				>SYSCALL fwrite
+				rts
+*--------------------------------------
+LIB.YAOut		dec pStack
+				>PUSHYA
+				ldy #S.PS.hStdOut
+				lda (pPS),y
+				ldy #2
+				sta (pStack),y
+				>SYSCALL fputs
+				rts
+*--------------------------------------
+				.INB usr/src/lib/libtui.s.obj
+				.INB usr/src/lib/libtui.s.lbox
+				.INB usr/src/lib/libtui.s.scrn
+				.INB usr/src/lib/libtui.s.tbox
 *--------------------------------------
 CS.END
 *--------------------------------------
 LibCnt			.BS 1
 hLineBuf		.BS 1
+LineBuf			.BS 2
 *--------------------------------------
 ESC.In			.AS "DBAC"
-ESC.Out			.HS 080A0B15
+ESC.Out			.DA #C.BS,#C.LF,#C.VT,#C.FS
 *--------------------------------------
 FMT.ESCCSI.R	.AZ "%d;%d"
 *--------------------------------------
-SEQ.TERMCAP		.DA #C.ESC
+OBJ.SIZES		.DA S.SCRN,S.TBOX,S.LBOX
+*--------------------------------------
+OBJ.COLORS		.DA #93,#44				SCRN
+				.DA #93,#104			TBOX
+				.DA #93,#104			LBOX
+*--------------------------------------
+SEQ.INIT		.DA #C.ESC
+				.AS "c"					FF
+				.DA #C.ESC
 				.AS "[999;999H"			Set Cursor Pos to 999,999
 				.DA #C.ESC
-				.AZ "[6n"				then query Cursor Pos
-SEQ.INIT		.AS "\ec\e(B\e)0"
-SEQ.SCROLLRGN	.AZ "\e[?7l\e[2;%dr"
-SEQ.SCROLLCURUP	.AS "\e[?7l\e[%d;%dr"
-SEQ.SCROLLUP	.AZ "\eD"
-SEQ.SCROLLCURDN	.AS "\e[?7l\e[%d;%dr"
-SEQ.SCROLLDN	.AZ "\eM"
-SEQ.CLOSE		.AZ "\ec"
+				.AS "[6n"				then query Cursor Pos
+				.DA #C.ESC
+				.AS "(B"				font select
+				.DA #C.ESC
+				.AS ")0"				font select
+				.DA #C.ESC
+				.AS "[?7l"				Disable Line Wrap
+				.DA #C.ESC
+				.AS "[?25l"				Hide Cursor
+				.DA #0
+*--------------------------------------
+SEQ.GOTOXY		.AZ "\e[%d;%dH"
+*--------------------------------------
+SEQ.COLOR		.AZ "\e[%d;%dm"
+*--------------------------------------
+SEQS			.EQ *
+*--------------------------------------
+SEQ.CURON		.DA #C.ESC
+				.AS "[?25h"				Show Cursor
+				.DA #0
+SEQ.CUROFF		.DA #C.ESC
+				.AS "[?25l"				Hide Cursor
+				.DA #0
+*--------------------------------------
+SEQ.BAR			.DA #C.ESC
+				.AS "[1m"				BOLD
+				.DA #C.ESC
+				.AS "[7m"				INVERSE
+				.DA #C.ESC
+				.AS "[37;40m"
+				.DA #0
+SEQ.BAREND		.DA #C.ESC
+				.AS "[0m"
+				.DA #0
+*--------------------------------------
+SEQ.BORDERTL	.DA #C.SO,#'l'
+				.DA #0
+SEQ.BORDERTR	.DA #C.SO,#'k',#C.SI
+				.DA #0
+SEQ.BORDERBL	.DA #C.SO,#'m'
+				.DA #0
+SEQ.BORDERBR	.DA #C.SO,#'j',#C.SI
+				.DA #0
+*SEQ.BORDERH		.DA #C.SO,#'q',#C.SI
+*					.DA #0
+SEQ.BORDERV		.DA #C.SO,#'x',#C.SI
+				.DA #0
+SEQ.INVERSE		.DA #C.ESC
+				.AS "[7m"
+				.DA #0
+SEQ.NORMAL		.DA #C.ESC
+				.AS "[0m"
+				.DA #0
+*--------------------------------------
+*SEQ.SCROLLCURUP	.AS "\e[?7l\e[%d;%dr"
+*SEQ.SCROLLUP	.AZ "\eD"
+*SEQ.SCROLLCURDN	.AS "\e[?7l\e[%d;%dr"
+*SEQ.SCROLLDN	.AZ "\eM"
+*--------------------------------------
+SEQ.CLOSE		.DA #C.ESC
+				.AS "c"
+				.DA #C.ESC
+				.AZ "[?7h"				Enable Line Wrap
 *--------------------------------------
 MAN
 SAVE usr/src/lib/libtui.s

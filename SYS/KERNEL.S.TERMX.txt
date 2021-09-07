@@ -123,11 +123,9 @@ TERMX.CONTROL	lda (ZPDCBPtr)			#S.DCB.TTY.DEVID
 				sta CLRMIXED
 
 				jsr TERMX.SCRCPY
-
+				
 				lda #0
-				ldy #S.DCB.TTY.bCURON
-				sta (ZPDCBPtr),y
-				iny						#S.DCB.TTY.bTITLE
+				ldy	#S.DCB.TTY.bTITLE
 				sta (ZPDCBPtr),y
 				clc
 				rts
@@ -159,6 +157,7 @@ TERMX.ISOPENED	ldy #S.DCB.TTY.S
 *--------------------------------------
 TERMX.READ		bit bActive				is screen active?
 				bpl .6					no....go check flush...
+
 				jsr TERMX.CBLNK
 
 				bit	OPENAPPLE
@@ -198,6 +197,7 @@ TERMX.READ		bit bActive				is screen active?
 				bpl .7
 
 				lda #C.LF
+
 .21				jsr TERMX.COUT		no remap....send char....
 				bra .7					and flush
 
@@ -534,6 +534,10 @@ TERMX.CSI.Exec	stz CsiH
 				.DA Csi.CLRL			K
 				.DA	Csi.Home			H
 *--------------------------------------
+* CRLF : ESC [ 20
+* LINEWRAP : ESC [ ? 7 
+* CUR : ESC [ ? 25
+*--------------------------------------
 Csi.SetM		sec
 				.HS 90					BCC
 *--------------------------------------
@@ -545,32 +549,46 @@ Csi.ResetM		clc
 				dex
 				bne .99
 
-				ldx CsiH
-
 				lda CsiP
+				ldx CsiH
 				php
-
-				cmp #20					bCRLF
 				bne .1
 
-				txa
+				cmp #20					bCRLF
 				bne .98
 
 				ldy #S.DCB.TTY.bCRLF
 				bra .8
-
-.1				cmp #7
+*--------------------------------------
+.1				cpx #'?'
 				bne .98
 
-				cpx #'?'
-				bne .98
+				cmp #7
+				bne .2
 
 				ldy #S.DCB.TTY.bLINEWRAP
+				bra .8
+				
+.2				cmp #25
+				bne .98
+
+				ldy #S.DCB.TTY.bCURON
+				plp
+				lda #0
+				ror
+				sta (ZPDCBPtr),y
+				bmi .80
+				
+				jsr TERMX.CUROFF
+
+				clc
+				rts
 
 .8				plp
 				ror
 				sta (ZPDCBPtr),y
-				clc
+	
+.80				clc
 				rts
 
 .98				plp
@@ -912,11 +930,13 @@ RESET.MODE		lda #0
 				rts
 *--------------------------------------
 RESET			ldy #S.DCB.TTY.M
+
 .1				lda RESET.VALUES-S.DCB.TTY.M,y
 				sta (ZPDCBPtr),y
 				iny
 				cpy #S.DCB.TTY.INBUF+1
 				bne .1
+
 				jmp TERMX.CLRSCR
 *--------------------------------------
 RESETATTR		lda #$80
@@ -933,6 +953,7 @@ ENQ				ldx #0
 				inx
 				cpx #ENQ.String.Len
 				bne .1
+
 .8				clc
 				rts
 *--------------------------------------
@@ -1030,6 +1051,7 @@ SCROLL.UP		ldy #S.DCB.TTY.SCROLLTOP
 				ldy #S.DCB.TTY.SCROLLBOT
 				cmp (ZPDCBPtr),y
 				bne .1
+
 				bra CLRLINE
 *--------------------------------------
 SCROLL.DN		ldy #S.DCB.TTY.SCROLLBOT
@@ -1050,51 +1072,61 @@ SCROLL.DN		ldy #S.DCB.TTY.SCROLLBOT
 				clc
 				rts
 *--------------------------------------
-TERMX.CBLNK		bit bActive
-				bpl .9
+TERMX.CBLNK		jsr TERMX.CCheck
+				bcs TERMX.RTS
 
 				lda DevMgr.Timer
 				and #CURSOR.BLINK.SPEED
-				ldy #S.DCB.TTY.bCURON
 				eor (ZPDCBPtr),y
-				bne TERMX.CBLNK.1
+				asl
+				beq TERMX.RTS
 
-.9				rts
-
-TERMX.CUROFF	bit bActive
-				bpl TERMX.RTS
-				ldy #S.DCB.TTY.bCURON
 				lda (ZPDCBPtr),y
-				beq	TERMX.RTS
-
-TERMX.CBLNK.1	lda (ZPDCBPtr),y
-				bne TERMX.CBLNK.OFF
-
+				eor #CURSOR.BLINK.SPEED
+				sta (ZPDCBPtr),y
+				asl
+				beq TERMX.CUROFF.1
+				
 				jsr GetCharAtCurPos
 				bcs TERMX.RTS			Out of screen
 
 				and #$80
 				eor #" "
+				jmp SetCharAtY.SCR
+*--------------------------------------
+TERMX.CUROFF	jsr TERMX.CCheck
+				bcs TERMX.RTS
 
-TERMX.CBLNK.SET
-				jsr SetCharAtY.SCR
-				ldy #S.DCB.TTY.bCURON
-				lda (ZPDCBPtr),y
-				eor #CURSOR.BLINK.SPEED
-				sta (ZPDCBPtr),y
-				rts
+				asl
+				beq TERMX.RTS			already off
+				
+TERMX.CUROFF.1	jsr GetCharAtCurPos
+				bcs TERMX.RTS			Out of screen
 
-TERMX.CBLNK.OFF
-				jsr GetCharAtCurPos
-				bcc TERMX.CBLNK.SET	if not Out of screen
+				jmp SetCharAtY.SCR
 
 TERMX.RTS		rts
+*--------------------------------------
+TERMX.CCheck	sec
+				
+				bit bActive
+				bpl .9
+
+				ldy #S.DCB.TTY.bCURON
+				lda (ZPDCBPtr),y
+				bpl .9
+				
+				clc
+				
+.9				rts				
 *--------------------------------------
 DecOut			jsr MATH.A2STR10NP
 
 				ldx #0
+
 .1				lda FOUTBuf,x
 				beq TERMX.RTS
+
 				inx
 				jsr TERMX.COUT
 				bra .1
@@ -1107,11 +1139,13 @@ TERMX.COUT		pha						save char
 				inc
 				cmp #S.DCB.TTY.OUTBUF.MAX
 				bne .1
+
 				lda #S.DCB.TTY.OUTBUF
 
 .1				dey						OUTTAIL
 				cmp (ZPDCBPtr),y		HEAD+1 = TAIL ?
 				beq .9					CS, full!
+
 				iny
 				sta (ZPDCBPtr),y		new head
 				ply						old head
@@ -1119,6 +1153,7 @@ TERMX.COUT		pha						save char
 				sta (ZPDCBPtr),y
 				clc
 				rts
+
 .9				pla
 				pla
 				rts
@@ -1128,6 +1163,7 @@ Char.Out.Get	ldy #S.DCB.TTY.OUTTAIL
 				iny						OUTHEAD
 				cmp (ZPDCBPtr),y
 				beq .9					CS
+
 				tay
 				lda (ZPDCBPtr),y
 				pha
@@ -1135,6 +1171,7 @@ Char.Out.Get	ldy #S.DCB.TTY.OUTTAIL
 				inc
 				cmp #S.DCB.TTY.OUTBUF.MAX
 				bne .1
+
 				lda #S.DCB.TTY.OUTBUF
 
 .1				ldy #S.DCB.TTY.OUTTAIL
@@ -1182,6 +1219,7 @@ TERMX.CLRSCR.2	sty .1+1
 
 .1				cpx #$ff				SELF MODIFIED
 				beq .9
+
 				jsr TERMX.SETUP.L1X
 				lda #" "
 
@@ -1204,9 +1242,11 @@ TERMX.CLRSCR.2	sty .1+1
 				bra .1
 
 .7				ldy #39
+
 .8				sta (ZPScrBL1),y
 				dey
 				bpl .8
+
 .9				rts
 *--------------------------------------
 TERMX.Title.ON	ldy #S.DCB.TTY.bTITLE
@@ -1228,8 +1268,10 @@ TERMX.Title.ON	ldy #S.DCB.TTY.bTITLE
 
 				cmp #$40
 				bcc .2
+
 				cmp #$60
 				bcs .2
+
 				and #$1F				remap UPPERCASE
 
 .2				phy
@@ -1480,7 +1522,7 @@ RESET.VALUES	.DA #0					MODE
 				.DA #0					CV.SAVE
 				.DA #0					SCROLLTOP
 				.DA #23					SCROLLBOT
-				.DA #0					bCURON
+				.DA #$80				bCURON
 				.DA #0					bTITLE
 
 				.DA #$80				bNORMAL
@@ -1501,10 +1543,10 @@ TERMX.DIB	.DA #S.DIB.S.WRITE+S.DIB.S.READ
 				.DA #0
 				.DA K.VER
 *--------------------------------------
-*					` a b c d e f g h i j k l m n o
-REMAP.E0.FF		.HS 5B4142434445464748495FA0DF544e4f
-*					p q r s t u v w x y z { | } ~ DEL
-				.HS 50DF5253545556575F595a5b5c5d5e5f
+*					`  a  b  c  d  e  f  g  h  i  j  k  l  m  n  o
+REMAP.E0.FF		.HS 5B.41.42.43.44.45.46.47.48.49.20.5e.5a.5a.4e.4f
+*					p  q  r  s  t  u  v  w  x  y  z  {  |  }  ~  DEL
+				.HS 50.5c.52.53.54.55.56.57.5a.59.5a.5b.5c.5d.5e.5f
 *--------------------------------------
 SCR.BL			.HS	00.80.00.80.00.80.00.80.28.A8.28.A8.28.A8.28.A8.50.D0.50.D0.50.D0.50.D0
 SCR.BH			.HS	04.04.05.05.06.06.07.07.04.04.05.05.06.06.07.07.04.04.05.05.06.06.07.07
