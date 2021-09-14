@@ -28,7 +28,7 @@ The A2osX team is proud to present "A2osX and the Languages of Development," a v
 
 ### Upcoming Release - 0.94 Stable Alpha
 
-The A2osX Team is preparing to issue the first Stable Alpha of A2osX Version 0.94.  This new version will include an updated version of ProDOS FX, further kernel enhancements to improve memory usage and for the first time an included Assembler so developers can edit, assemble and test problems all from with A2osX.  We are inviting interested developers and testers to [join us on Slack!](#join-us-on-slack!)
+The A2osX Team is preparing to issue the first Stable Alpha of A2osX Version 0.94.  This new version will include an updated version of ProDOS FX, further kernel enhancements to improve memory usage and for the first time an included Assembler so developers can edit, assemble and test problems all from with A2osX.  We are inviting interested developers and testers to [join us on Slack!](#join-us-on-slack)
 
 If you would like to read all the past news articles for A2osX, you can read the news article found **[here](.Docs/News.md)**.
 
