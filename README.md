@@ -24,7 +24,7 @@ Consult the **[documentation](#documentation)** section below to find other reso
 
 ### KansasFest 2021
 
-The A2osX team is proud to present "A2osX and the Languages of Development", a virtual KansasFest 2021 presentation by Patrick Kloepfer, which you can find **[here](https://www.youtube.com/watch?v=5OO9vj991vo)**
+The A2osX team is proud to present "A2osX and the Languages of Development," a virtual KansasFest 2021 presentation by Patrick Kloepfer, which you can find **[here](https://www.youtube.com/watch?v=5OO9vj991vo)**.
 
 ### Upcoming Release - 0.94 Stable Alpha
 
