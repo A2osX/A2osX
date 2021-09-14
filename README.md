@@ -22,7 +22,13 @@ Consult the **[documentation](#documentation)** section below to find other reso
 
 ## News
 
-The A2osX Team is preparing to issue the first Stable Alpha of A2osX Version 0.94.  This new version will include an updated version of ProDOS FX, further kernel enhancements to improve memory usage and for the first time an included Assembler so developers can edit, assemble and test problems all from with A2osX.  We are inviting interested developers and testers to please join our A2osX Slack channel to get release announcements, learn more about new features, get support and provide feedback.  An invite to our Slack channel can be found **[here](https://join.slack.com/t/a2osx/shared_invite/zt-ens62cl0-xeAFLjlRfUSMtzdc6o~Xew)**.
+### KansasFest 2021
+
+The A2osX team is proud to present "A2osX and the Languages of Development," a virtual KansasFest 2021 presentation by Patrick Kloepfer, which you can find **[here](https://www.youtube.com/watch?v=5OO9vj991vo)**.
+
+### Upcoming Release - 0.94 Stable Alpha
+
+The A2osX Team is preparing to issue the first Stable Alpha of A2osX Version 0.94.  This new version will include an updated version of ProDOS FX, further kernel enhancements to improve memory usage and for the first time an included Assembler so developers can edit, assemble and test problems all from with A2osX.  We are inviting interested developers and testers to [join us on Slack!](#join-us-on-slack)
 
 If you would like to read all the past news articles for A2osX, you can read the news article found **[here](.Docs/News.md)**.
 
@@ -47,6 +53,10 @@ In addition, there is the developer generated Technical Specifications that docu
 ## How You Can Help
 
 The A2osX Team welcomes your help in making this the best operating environment for the Apple 2!  Specifically, the more users who can test the most current RELEASE, CANDIDATE or STABLE media on their unique hardware and report back their findings, the better A2osX becomes.  In additions, comments on, suggestions, or contributions to our documentation are greatly appreciated.  Lastly, A2osX would not be what it is without our great core development team. We could certainly use more developers, especially in Assembly (S-C Assembler familiar even better) to contribute new utilities, applications and features for A2osX.
+
+### Join us on Slack!
+
+We are inviting interested developers and testers to please join our A2osX Slack channel to get release announcements, learn more about new features, get support and provide feedback.  An invite to our Slack channel can be found **[here](https://join.slack.com/t/a2osx/shared_invite/zt-ens62cl0-xeAFLjlRfUSMtzdc6o~Xew)**.
 
 ## License
 A2osX is licensed under the GNU General Public License.
