@@ -24,6 +24,10 @@ Consult the **[documentation](#documentation)** section below to find other reso
 
 The A2osX Team is preparing to issue the first Stable Alpha of A2osX Version 0.94.  This new version will include an updated version of ProDOS FX, further kernel enhancements to improve memory usage and for the first time an included Assembler so developers can edit, assemble and test problems all from with A2osX.  We are inviting interested developers and testers to please join our A2osX Slack channel to get release announcements, learn more about new features, get support and provide feedback.  An invite to our Slack channel can be found **[here](https://join.slack.com/t/a2osx/shared_invite/zt-ens62cl0-xeAFLjlRfUSMtzdc6o~Xew)**.
 
+### KansasFest 2021
+
+The A2osX team is proud to present "A2osX and the Languages of Development", a virtual KansasFest 2021 presentation by Patrick Kloepfer, which you can find **[here](https://www.youtube.com/watch?v=5OO9vj991vo)
+
 If you would like to read all the past news articles for A2osX, you can read the news article found **[here](.Docs/News.md)**.
 
 ## **Visit us at [A2osX](http://www.a2osx.com)**
