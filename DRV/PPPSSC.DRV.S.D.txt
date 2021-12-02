@@ -4,15 +4,17 @@ NEW
 *--------------------------------------
 *			Driver Code
 *--------------------------------------
-INBUF.SIZE		.EQ 4096
-*--------------------------------------
 ZPIOCTL			.EQ ZPDRV
 ZPBufPtr		.EQ ZPDRV+2
 ZPCount			.EQ ZPDRV+4
 ZPnCount		.EQ ZPDRV+6
 ZPFCS			.EQ ZPDRV+8
+ZPb7D			.EQ ZPDRV+10
+				.DO DBG=1
+TempB			.EQ ZPDRV+11
+				.FIN
 *--------------------------------------
-DRV.CS.START	cld
+DRV.CS.START	cld!
 				jmp (.1,x)
 .1				.DA STATUS
 				.DA A2osX.BADCALL
@@ -109,10 +111,11 @@ OPEN.1			>LDYAI INBUF.SIZE
 				bcs .9
 
 				stx hINBUF
-				sta INBUF.BASEH
 
-				>STYA READ.BUF+1
+				>STYA READ.GetByte.BUF+1
 				>STYA READ.SSC.BUF+1
+
+				sta INBUF.BASEH
 
 				stz INBUF.TAIL
 				stz INBUF.TAIL+1
@@ -120,10 +123,6 @@ OPEN.1			>LDYAI INBUF.SIZE
 				stz INBUF.HEAD+1
 				stz INBUF.CNT
 				stz INBUF.CNT+1
-
-				ldx DEVSLOTn08F
-				lda #C.XOFF
-				jsr WRITE.Byte
 
 				lda #S.DIB.S.OPENED
 				tsb DIB+S.DIB.S
@@ -136,6 +135,10 @@ CLOSE			php
 				sei
 
 				ldx DEVSLOTn08F
+
+				lda #SSC.CMD.RIRQDIS
+				sta SSC.CMD-$8F,x		Applewin Bug ???
+
 				stz SSC.RESET-$8F,x
 
 				lda #S.DIB.S.OPENED
@@ -150,35 +153,38 @@ CLOSE			php
 *--------------------------------------
 READ			>STYA ZPIOCTL
 
-				jsr READ.SSC
+.1				jsr READ.SSC
 				bcs .99
 
-.1				jsr READ.Sync
+.2				bit INBUF.MidFrame
+				bmi .97
+
+				jsr READ.Sync
 				bcs .98
 
 				cmp #$C0				C021 = LCP
 				beq .6
 
 				tay						0021 = IP
-				bne .1
+				bne .2
 
 				jsr READ.GetByteEsc
 				bcs .98
 
 				cmp #$21
-				bne .1
+				bne .2
 
 				jsr READ.GetByteEsc
 				bcs .98
 
 				cmp #$45				45 = S.IP.V.IHL
-				bne .1
+				bne .2
 
 				jsr READ.GetByteEsc
 				bcs .98
 
 *				tay						ignore DSCP.ECN
-*				bne .1
+*				bne .2
 
 				jsr READ.GetByteEsc		HHLL = S.IP.TOTAL.LENGTH
 				bcs .98
@@ -195,11 +201,11 @@ READ			>STYA ZPIOCTL
 *				clc
 				adc #4					already 4 bytes read
 				sta ZPnCount
-				bcc .2
+				bcc .3
 
 				inc ZPnCount+1
 
-.2				jsr READ.NewFrame
+.3				jsr READ.NewFrame
 				bcs .99
 
 				phx						hFrame
@@ -213,57 +219,199 @@ READ			>STYA ZPIOCTL
 
 				lda #MLI.E.IO
 				sec
-				rts
-
+.99				rts
+*--------------------------------------
 .6				jsr READ.GetByteEsc
 				bcs .98
 
-				cmp #$21
-				bne .1
+				cmp #$21				C021 = LCP
+				bne .2
 
 				jsr READ.GetByteEsc
 				bcs .98
 
-				cmp #$09
-				bne .1
+				cmp #$09				EchoReq ?
+				bne .2
+
+				ldy #7
+
+.7				jsr READ.GetByteEsc
+				dey
+				bne .7
+
+				jsr READ.GetFrameTail
+				bcs .98
 
 				jsr READ.SendEchoRep
-				bra .1
+
+				jmp .2
+
+.97				sec
 
 .98				lda	#E.NODATA
 
-.99				rts
+				rts
 *--------------------------------------
 READ.SSC		php
 				sei
+
+				stz INBUF.LastByte
+
+			.DO DBG=1
+			stz INBUF.FirstByte
+			stz TempB
+			.FIN
 
 				ldx DEVSLOTn08F
 
 				lda SSC.STATUS-$8F,x
 				bit #SSC.STATUS.nDCD	true when 0
-				bne READ.SSC.98
+				bne .9
 
+				.DO SWFC=1
 				lda #C.XON
-				jsr WRITE.Byte
+				sta SSC.DATA-$8F,x
+				.FIN
 
-READ.SSC.1		ldy #0
+				.DO HWFC=1
+				lda #SSC.CMD.NOP+SSC.CMD.TE+SSC.CMD.RIRQDIS+SSC.CMD.DTR
+				sta SSC.CMD-$8F,x
+				.FIN
 
-READ.SSC.2		lda SSC.STATUS-$8F,x
+				ldy #0
+
+.2				lda SSC.STATUS-$8F,x
 				and #SSC.STATUS.RDRF
-				bne READ.SSC.3
-				
-				iny
-				bne READ.SSC.2
+				bne .3
 
+				iny
+				bne .2
+
+				.DO SWFC=1
 				lda #C.XOFF
-				jsr WRITE.Byte
+				sta SSC.DATA-$8F,x
+				.FIN
+
+				.DO HWFC=1
+				lda #SSC.CMD.NOP+SSC.CMD.RIRQDIS+SSC.CMD.DTR
+				sta SSC.CMD-$8F,x
+				.FIN
 
 				plp
 				clc
 				rts
 
-READ.SSC.3		lda SSC.DATA-$8F,x
-				
+.3				lda SSC.DATA-$8F,x
+
+				cmp #$7E
+				beq .4
+
+				cmp #$FF
+				bne .4
+
+				lda #$7E
+				jsr READ.SSC.StoreByte
+
+				lda #$ff
+.4
+			.DO DBG=1
+			sta INBUF.FirstByte
+			inc TempB
+			.FIN
+
+				jsr READ.SSC.StoreByte
+
+.40				ldy #0
+
+.5				lda SSC.STATUS-$8F,x
+				and #SSC.STATUS.RDRF
+				beq .6
+
+				lda SSC.DATA-$8F,x
+				sta INBUF.LastByte
+				jsr READ.SSC.StoreByte
+
+			.DO DBG=1
+			inc TempB
+			.FIN
+
+				bra .40
+
+.6				iny
+				bne .5
+
+				.DO SWFC=1
+				lda #C.XOFF
+				sta SSC.DATA-$8F,x
+				.FIN
+
+				.DO HWFC=1
+				lda #SSC.CMD.NOP+SSC.CMD.RIRQDIS+SSC.CMD.DTR
+				sta SSC.CMD-$8F,x
+				.FIN
+
+			.DO DBG=1
+
+			lda TempB
+			beq .7
+
+			ldy #34
+			jsr READ.SCC.PrintAy
+
+			lda INBUF.FirstByte
+			jsr READ.SCC.PrintAy
+
+			lda INBUF.LastByte
+			jsr READ.SCC.PrintAy
+			.FIN
+
+.7				sec
+				lda INBUF.LastByte
+				eor #$7E
+				bne .8
+
+				clc
+
+.8				ror INBUF.MidFrame
+
+				plp
+
+				clc
+				rts
+
+.9				lda #MLI.E.IO
+
+				plp
+
+				sec
+.99				rts
+*--------------------------------------
+			.DO DBG=1
+READ.SCC.PrintAy
+			pha
+			lsr
+			lsr
+			lsr
+			lsr
+			jsr .1
+
+			pla
+			and #$0F
+
+.1			ora #$B0
+			cmp #"9"+1
+			bcc .2
+
+			adc #6
+.2 			sta $7D0,y
+
+			iny
+
+			rts
+		.FIN
+*--------------------------------------
+READ.SSC.StoreByte
+
 READ.SSC.BUF	sta $FFFF				SELF MODIFIED
 
 				inc READ.SSC.BUF+1
@@ -277,23 +425,19 @@ READ.SSC.BUF	sta $FFFF				SELF MODIFIED
 				inc INBUF.CNT+1
 
 .2				inc INBUF.HEAD
-				bne READ.SSC.1
+				bne .8
 
 				inc INBUF.HEAD+1
 
 				lda INBUF.HEAD+1
-				cmp /INBUF.SIZE
-				bne READ.SSC.1
+				eor /INBUF.SIZE
+				bne .8
 
 				stz INBUF.HEAD+1
 				lda INBUF.BASEH
 				sta READ.SSC.BUF+2
-				bra READ.SSC.1
 
-READ.SSC.98		lda #MLI.E.IO
-				plp
-				sec
-				rts
+.8				rts
 *--------------------------------------
 READ.NewFrame	lda ZPCount
 				clc
@@ -322,6 +466,13 @@ READ.NewFrame	lda ZPCount
 				pla
 				sta (ZPIOCTL),y
 
+				ldy #S.ETH.EII.TYPE-1
+				lda #0
+
+.1				sta (ZPBufPtr),y		Zero Src/Dst MAC
+				dey
+				bpl .1
+
 				ldy #S.ETH.EII.TYPE
 				lda /S.ETH.EII.TYPE.IP
 				sta (ZPBufPtr),y
@@ -331,7 +482,7 @@ READ.NewFrame	lda ZPCount
 				lda #S.ETH.EII.TYPE.IP
 				sta (ZPBufPtr),y
 
-				ldy #S.IP.V.IHL.DSCP.ECN
+				ldy #S.IP.V.IHL
 				lda #$45
 				sta (ZPBufPtr),y
 
@@ -369,19 +520,21 @@ READ.GetFrame	inc ZPnCount
 				bne .1
 
 				inc ZPnCount+1
-				beq .2
+				beq READ.GetFrameTail
 
 .1				jsr READ.GetByteEsc
-				bcs .9
+				bcs READ.GetFrame.RTS
 
 				sta (ZPBufPtr)
+
 				inc ZPBufPtr
 				bne READ.GetFrame
 
 				inc ZPBufPtr+1
 				bra READ.GetFrame
 
-.2				jsr READ.GetByteEsc		skip FCS HI
+READ.GetFrameTail
+				jsr READ.GetByteEsc		skip FCS HI
 				bcs .9
 
 				jsr READ.GetByteEsc		skip FCS LO
@@ -394,8 +547,10 @@ READ.GetFrame	inc ZPnCount
 				beq .9
 
 				sec
+.9
 
-.9				rts
+READ.GetFrame.RTS
+				rts
 *--------------------------------------
 READ.Sync		jsr READ.GetByte
 				bcs READ.GetByte.RTS
@@ -403,7 +558,7 @@ READ.Sync		jsr READ.GetByte
 .1				cmp #$7E
 				bne READ.Sync
 
-				jsr READ.GetByte
+				jsr READ.GetByteEsc
 				bcs READ.GetByte.RTS
 
 				cmp #$FF
@@ -416,13 +571,13 @@ READ.Sync		jsr READ.GetByte
 				bne .1
 *--------------------------------------
 READ.GetByteEsc	jsr READ.GetByte
-				bcs READ.GetByte.9
+				bcs READ.GetByte.RTS
 
 				cmp #$7D
 				bne READ.GetByte.8
 
 				jsr READ.GetByte
-				bcs READ.GetByte.9
+				bcs READ.GetByte.RTS
 
 				eor #%00100000
 *				clc
@@ -438,20 +593,30 @@ READ.GetByte	lda INBUF.CNT
 
 READ.GetByte.1	dec INBUF.CNT
 
-READ.BUF		lda $FFFF				SELF MODIFIED
-				inc READ.BUF+1
-				bne READ.GetByte.8
+READ.GetByte.BUF
+				lda $FFFF				SELF MODIFIED
 
-				inc READ.BUF+2
+				inc READ.GetByte.BUF+1
+				bne .1
+
+				inc READ.GetByte.BUF+2
+
+.1				inc INBUF.TAIL
+				bne READ.GetByte.8
 
 				inc INBUF.TAIL+1
+				
+				phy
+
 				ldy INBUF.TAIL+1
 				cpy /INBUF.SIZE
-				bne READ.GetByte.8
+				bne .7
 
 				stz INBUF.TAIL+1
 				ldy INBUF.BASEH
-				sty READ.BUF+2
+				sty READ.GetByte.BUF+2
+
+.7				ply
 
 READ.GetByte.8	clc
 				rts
@@ -461,23 +626,44 @@ READ.GetByte.RTS
 				rts
 *--------------------------------------
 READ.SendEchoRep
+			.DO DBG=1
+			lda #"P"
+			sta $7D0+33
+			.FIN
+
 				ldx DEVSLOTn08F
+
+				.DO HWFC=1
+				lda #SSC.CMD.NOP+SSC.CMD.TE+SSC.CMD.RIRQDIS+SSC.CMD.DTR
+				sta SSC.CMD-$8F,x
+				.FIN
 
 				lda #$7E
 				jsr WRITE.Byte
 
 				ldy #0
 
-.1				lda PPP.EchoRep,y
-				phy
+.1				lda LCP.EchoRep,y
+
 				jsr WRITE.ByteEsc
-				ply
+
 				iny
-				cpy #PPP.EchoRep.TOTAL
+				cpy #LCP.EchoRep.TOTAL
 				bne .1
 
 				lda #$7E
-				jmp WRITE.Byte
+				jsr WRITE.Byte
+
+.2				lda SSC.STATUS-$8F,x
+				bit #SSC.STATUS.TDRE 	Register Empty ?
+				beq .2
+
+				.DO HWFC=1
+				lda #SSC.CMD.NOP+SSC.CMD.RIRQDIS+SSC.CMD.DTR
+				sta SSC.CMD-$8F,x
+				.FIN
+
+				rts
 *--------------------------------------
 * 7E FF 03 00 21 ... FCS FCS 7E
 *--------------------------------------
@@ -518,6 +704,11 @@ WRITE			>STYA ZPIOCTL
 				lda SSC.STATUS-$8F,x
 				bit #SSC.STATUS.nDCD	true when 0
 				bne .9
+
+				.DO HWFC=1
+				lda #SSC.CMD.NOP+SSC.CMD.TE+SSC.CMD.RIRQDIS+SSC.CMD.DTR
+				sta SSC.CMD-$8F,x
+				.FIN
 
 				lda #$ff
 				sta ZPFCS
@@ -564,6 +755,11 @@ WRITE			>STYA ZPIOCTL
 				lda #$7E
 				jsr WRITE.Byte
 
+				.DO HWFC=1
+				lda #SSC.CMD.NOP+SSC.CMD.RIRQDIS+SSC.CMD.DTR
+				sta SSC.CMD-$8F,x
+				.FIN
+
 				plp
 				clc
 				rts
@@ -592,27 +788,15 @@ WRITE.ByteEsc	cmp #$7D
 				cmp #$7E
 				beq .1
 
-				cmp #$20
+				cmp #32
 				bcs WRITE.Byte
-				
-*				pha
-*				and #7
-*				tay						bit mask
-*				lda ACCM.BIT2MASK,y
-*				sta .10+1
 
-*				pla
-*				pha
-*				lsr
-*				lsr
-*				lsr
-*				tay
-*				lda ACCM.OUT,y
-
-*.10			and #$FF				SELF MODIFIED
-*				beq WRITE.Byte.1
-
-*				pla
+				tax
+				bit ACCM.OUT,x
+				php
+				ldx DEVSLOTn08F
+				plp
+				bpl WRITE.Byte
 
 .1				eor #%00100000
 				pha
@@ -624,9 +808,9 @@ WRITE.ByteEsc	cmp #$7D
 
 WRITE.Byte		pha
 
-WRITE.Byte.1	lda SSC.STATUS-$8F,x
+.1				lda SSC.STATUS-$8F,x
 				bit #SSC.STATUS.TDRE 	Register Empty ?
-				beq WRITE.Byte.1
+				beq .1
 
 				pla
 				sta SSC.DATA-$8F,x
@@ -651,6 +835,11 @@ INBUF.BASEH		.BS 1
 INBUF.TAIL		.BS 2
 INBUF.HEAD		.BS 2
 INBUF.CNT		.BS 2
+			.DO DBG=1
+INBUF.FirstByte	.BS 1
+			.FIN
+INBUF.LastByte	.BS 1
+INBUF.MidFrame	.BS 1
 *--------------------------------------
 DIB				.DA #0
 				.DA #0,#0,#0			size
@@ -668,21 +857,22 @@ DCB.IP			.BS 4
 DCB.MASK		.HS FF.FF.FF.FF
 DCB.GW			.BS 4
 *--------------------------------------
-ACCM.IN			.HS 000A0000
-ACCM.OUT		.HS FFFFFFFF
+ACCM.OUT		.HS 8080808080808080	Default = FFFFFFFF
+				.HS 8080808080808080
+				.HS 8080808080808080
+				.HS 8080808080808080
 *--------------------------------------
-ACCM.BIT2MASK	.HS 0102040810204080
-*--------------------------------------
-PPP.EchoRep		.HS FF03
+FRAME.HEADER	.HS 7E					7EFF03
+LCP.EchoRep		.HS FF03
 				.HS C021				LCP
-PPP.EchoRep.DATA
+LCP.EchoRep.DATA
 				.HS 0A					Echo-Reply
 				.HS FF					ID
-				.DA /PPP.EchoRep.LEN,#PPP.EchoRep.LEN
+				.DA /LCP.EchoRep.LEN,#LCP.EchoRep.LEN
 				.HS 05.06.EA4C2B41		MAGIC
-PPP.EchoRep.LEN		.EQ *-PPP.EchoRep.DATA
+LCP.EchoRep.LEN		.EQ *-LCP.EchoRep.DATA
 			.BS 2						FCS
-PPP.EchoRep.TOTAL	.EQ *-PPP.EchoRep
+LCP.EchoRep.TOTAL	.EQ *-LCP.EchoRep
 *--------------------------------------
 FCS.LO			.DA #$0000,#$1189,#$2312,#$329b,#$4624,#$57ad,#$6536,#$74bf
 				.DA #$8c48,#$9dc1,#$af5a,#$bed3,#$ca6c,#$dbe5,#$e97e,#$f8f7

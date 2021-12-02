@@ -5,7 +5,10 @@ NEW
 				.OR $2000
 				.TF drv/pppssc.drv
 *--------------------------------------
-DBG				.EQ 0
+DBG				.EQ 1
+HWFC			.EQ 0
+SWFC			.EQ 1		
+INBUF.SIZE		.EQ 2048
 *--------------------------------------
 				.INB inc/macros.i
 				.INB inc/a2osx.i
@@ -26,12 +29,16 @@ ZPPtr2			.BS 2
 ZPPtr3			.BS 2
 
 ZPBufLen		.BS 2
-
 FCS				.BS 2
+
+DWORD			.BS 4
+
 hETCFILE		.BS 1
 b7D				.BS 1
+bLCP			.BS 1
+bIPCP			.BS 1
 Len				.BS 1
-bConfigured		.BS 1
+
 ZS.END			.ED
 *--------------------------------------
 *			File Header (16 Bytes)
@@ -58,7 +65,9 @@ L.ETCFILE		.DA ETCFILE
 L.MSG.ETCFILE	.DA MSG.ETCFILE
 L.MSG.UNEXPECTED	.DA MSG.UNEXPECTED
 L.MSG.SYNTAX	.DA MSG.SYNTAX
+L.MSG.SSCInit	.DA MSG.SSCInit
 L.MSG.LCPInit	.DA MSG.LCPInit
+L.MSG.IPCPInit	.DA MSG.IPCPInit
 L.MSG.LocalIP	.DA MSG.LocalIP
 L.MSG.RemoteIP	.DA MSG.RemoteIP
 				.DO DBG=1
@@ -66,30 +75,30 @@ L.MSG.DUMPBUF	.DA MSG.DUMPBUFS
 				.DA MSG.DUMPBUFR
 L.MSG.HEXDUMP	.DA MSG.HEXDUMP
 				.FIN
-L.PPP.ConfReq	.DA PPP.ConfReq
-L.PPP.EchoRep	.DA PPP.EchoRep
-L.PPP.IPCPReq	.DA PPP.IPCPReq
+L.LCP.ConfReq	.DA LCP.ConfReq
+L.LCP.EchoRep	.DA LCP.EchoRep
+L.IPCP.ConfReq	.DA IPCP.ConfReq
 L.IN.Buf		.DA IN.Buf
 L.IN.Bufp1		.DA IN.Buf+1
 L.OUT.Buf		.DA OUT.Buf
-J.LCP			.DA LCP.ConfReq
-				.DA LCP.ConfAck
-				.DA LCP.ConfNak
+J.LCP			.DA LCP.IN.ConfReq
+				.DA LCP.IN.ConfAck
+				.DA LCP.IN.ConfNak
 				.DA LCP.Discard
 				.DA LCP.Discard
 				.DA LCP.Discard
 				.DA LCP.Discard
 				.DA LCP.Discard
-				.DA LCP.EchoReq
+				.DA LCP.IN.EchoReq
 				.DA LCP.Discard
 				.DA LCP.Discard
 				.DA LCP.Discard
 				.DA LCP.Discard
 				.DA LCP.Discard
 				.DA LCP.Discard
-J.IPCP			.DA IPCP.ConfReq
-				.DA IPCP.ConfAck
-				.DA IPCP.ConfNak
+J.IPCP			.DA IPCP.IN.ConfReq
+				.DA IPCP.IN.ConfAck
+				.DA IPCP.IN.ConfNak
 				.DA IPCP.Discard
 				.DA IPCP.Discard
 				.DA IPCP.Discard
@@ -145,11 +154,12 @@ Dev.Detect		>STYA ZPArgsPtr
 				sta DEVSLOTn08F
 *--------------------------------------
 				jsr SSC.Init
+				bcs .9
 
 				jsr PPP.ETCFILE
 				bcs .9
 
-				jsr PPP.LCPInit
+				jsr PPP.Init
 				bcs .9
 
 				>PUSHW L.MSG.DETECT.OK
@@ -182,27 +192,30 @@ Dev.Detect		>STYA ZPArgsPtr
 
 				rts
 
-.99				ldx DEVSLOTn08F
-				stz SSC.RESET-$8F,x
+.99				pha
+				jsr SSC.Close
+				pla
+
+*				sec
 
 Dev.Detect.RTS	rts
 *--------------------------------------
-PPP.LCPInit		>LDYA L.MSG.LCPInit
+PPP.Init		>LDYA L.MSG.LCPInit
 				>SYSCALL PutS
 				
-				>LDYA L.PPP.EchoRep		Pre calculate EchoRep FCS
+				>LDYA L.LCP.EchoRep		Pre calculate EchoRep FCS
 				jsr PPP.FCS16.Set
 
-				>LDYA L.PPP.ConfReq
+				>LDYA L.LCP.ConfReq
 				jsr PPP.FCS16.Set
 
 				.DO DBG=1
-				>LDYA L.PPP.ConfReq
+				>LDYA L.LCP.ConfReq
 				ldx #0
 				jsr DumpBuf.PPP
 				.FIN
 
-				>LDYA L.PPP.ConfReq
+				>LDYA L.LCP.ConfReq
 				jsr SSC.WritePPP
 				bcs .9
 
@@ -221,19 +234,49 @@ PPP.LCPInit		>LDYA L.MSG.LCPInit
 				jsr DumpBuf.PPP
 				.FIN
 
-				jsr LCP.IN.JUMP
+				jsr PPP.IN.JUMP
 				bcs .9
 
-				bit bConfigured
+				bit bLCP
 				bpl .1
+				
+				>LDYA L.MSG.IPCPInit
+				>SYSCALL PutS
+				
+				jsr IPCP.OUT.ConfReq
+				bcs .9
+				
+.2				jsr SSC.ReadPPP
+				bcs .9
+
+				tya
+				beq .2
+
+				sty ZPBufLen
+				stz ZPBufLen+1
+				
+				.DO DBG=1
+				>LDYA L.IN.Buf
+				ldx #2
+				jsr DumpBuf.PPP
+				.FIN
+
+				jsr PPP.IN.JUMP
+				bcs .9
+
+				bit bIPCP
+				bpl .2
+				
 *				clc
 				rts
 
-.9				lda #MLI.E.IO
+.9				jsr SSC.Close
+				
+				lda #MLI.E.IO
 *				sec
 				rts
 *--------------------------------------
-LCP.IN.JUMP		lda IN.Buf+3
+PPP.IN.JUMP		lda IN.Buf+3
 				cmp #$21
 				bne LCP.Discard
 
@@ -269,7 +312,7 @@ IPCP.Discard
 				clc
 				rts
 *--------------------------------------
-LCP.ConfReq		ldy #0
+LCP.IN.ConfReq	ldy #0
 
 .1				lda IN.Buf,y			FF03C021
 				sta OUT.Buf,y
@@ -310,13 +353,33 @@ LCP.ConfReq		ldy #0
 				phy
 				phx
 
-				ldx #3
+				ldx #4
 
 .3				lda IN.Buf+2,y
-				sta ACCM.OUT,x
+				sta DWORD-1,x
 				iny
 				dex
-				bpl .3
+				bne .3
+
+*				ldx	#0
+
+				ldy #0
+				
+.4				lda #1
+
+.5				and DWORD,y
+				bne .6
+
+				stz ACCM.OUT,x
+
+.6				inx
+				asl
+				bne .5
+				
+				iny
+				cpy #4
+				bne .4
+
 
 				plx
 				ply
@@ -373,33 +436,27 @@ LCP.Ack.Next	txa
 
 				rts
 *--------------------------------------
-LCP.ConfAck		>LDYA L.PPP.IPCPReq
-				jsr PPP.FCS16.Set
-
-				.DO DBG=1
-				>LDYA L.PPP.IPCPReq
-				ldx #0
-				jsr DumpBuf.PPP
-				.FIN
-
-				>LDYA L.PPP.IPCPReq
-				jmp SSC.WritePPP
-*--------------------------------------
-LCP.ConfNak
+LCP.IN.ConfAck	sec
+				ror bLCP
 
 				clc
 				rts
 *--------------------------------------
-LCP.EchoReq		.DO DBG=1
-				>LDYA L.PPP.EchoRep
+LCP.IN.ConfNak
+
+				clc
+				rts
+*--------------------------------------
+LCP.IN.EchoReq	.DO DBG=1
+				>LDYA L.LCP.EchoRep
 				ldx #0
 				jsr DumpBuf.PPP
 				.FIN
 
-				>LDYA L.PPP.EchoRep
+				>LDYA L.LCP.EchoRep
 				jmp SSC.WritePPP
 *--------------------------------------
-IPCP.ConfReq	ldy #0
+IPCP.IN.ConfReq	ldy #0
 
 .1				lda IN.Buf,y			FF038021
 				sta OUT.Buf,y
@@ -481,19 +538,19 @@ IPCP.ConfReq	ldy #0
 				>LDYA L.OUT.Buf
 				jmp SSC.WritePPP
 *--------------------------------------
-IPCP.ConfAck	sec
-				ror bConfigured
+IPCP.IN.ConfAck	sec
+				ror bIPCP
 
 *				clc
 				rts
 *--------------------------------------
-IPCP.ConfNak	ldy #10
+IPCP.IN.ConfNak	ldy #10
 				ldx #0
 
 				>PUSHW L.MSG.LocalIP
 
 .1				lda IN.Buf,y
-				sta PPP.IPCPReq,y
+				sta IPCP.ConfReq,y
 				sta DCB.IP,x
 				>PUSHA
 				inx
@@ -503,131 +560,76 @@ IPCP.ConfNak	ldy #10
 
 				>PUSHBI 4
 				>SYSCALL PrintF
-
-				jmp LCP.ConfAck
 *--------------------------------------
-SSC.Init		ldx DEVSLOTn08F
-				stz SSC.RESET-$8F,x
+IPCP.OUT.ConfReq
+				>LDYA L.IPCP.ConfReq
+				jsr PPP.FCS16.Set
 
-				lda #SSC.CTL.1S+SSC.CTL.8D+SSC.CTL.CLKINT+SSC.CTL.B115200
+				.DO DBG=1
+				>LDYA L.IPCP.ConfReq
+				ldx #0
+				jsr DumpBuf.PPP
+				.FIN
+
+				>LDYA L.IPCP.ConfReq
+				jmp SSC.WritePPP
+*--------------------------------------
+SSC.Init		>LDYA L.MSG.SSCInit
+				>SYSCALL PutS
+				
+				jsr SSC.Close
+
+				ldy #0
+
+.10				lda SSC.STATUS-$8F,x
+				bit #SSC.STATUS.nDCD+SSC.STATUS.nDSR	true when 0
+				bne .20
+				
+				iny
+				bne .10
+				
+*				bra .9
+
+.20				lda #SSC.CTL.1S+SSC.CTL.8D+SSC.CTL.CLKINT+SSC.CTL.B115200
 				sta SSC.CTL-$8F,x
+
 				lda #SSC.CMD.NOP+SSC.CMD.TE+SSC.CMD.RIRQDIS+SSC.CMD.DTR
 				sta SSC.CMD-$8F,x
-
-				lda SSC.DATA-$8F,x			discard any garbage byte
-				lda SSC.STATUS-$8F,x		clear any IRQ pending
-				rts
-*--------------------------------------
-SSC.WritePPP	>STYA ZPPtr1
-
-				ldy #7
-				lda (ZPPtr1),y			Len LO
-				clc
-				adc #6
-				eor #$ff
-				sta ZPPtr3
-
-				dey
-				lda (ZPPtr1),y			Len HI
-				adc #0
-				eor #$ff
-				sta ZPPtr3+1
-
-				php
-				sei
-
-				ldx DEVSLOTn08F
 
 				ldy #0
 
 .1				lda SSC.STATUS-$8F,x
-				bit #SSC.STATUS.nDCD	true when 0
-				bne .9
-
-				bit #SSC.STATUS.TDRE 	Register Empty ?
-				bne .2
-
+				bit #SSC.STATUS.nDCD+SSC.STATUS.nDSR	true when 0
+				beq .2
+				
 				iny
 				bne .1
 
-.9				lda	#MLI.E.IO
-
-				plp
+.9				lda #MLI.E.IO
 				sec
 				rts
 
-.2				lda #$7E
+.2				lda SSC.DATA-$8F,x			discard any garbage byte
+
+				.DO SWFC=1
+				lda #C.XOFF
 				sta SSC.DATA-$8F,x
+				.FIN
 
-.3				inc ZPPtr3
-				bne .31
+				.DO HWFC=1
+				lda #SSC.CMD.NOP+SSC.CMD.RIRQDIS+SSC.CMD.DTR
+				sta SSC.CMD-$8F,x
+				.FIN
 
-				inc ZPPtr3+1
-				beq .8
-
-
-.31				lda SSC.STATUS-$8F,x
-				bit #SSC.STATUS.TDRE
-				beq .3
-
-				lda (ZPPtr1),y
-				cmp #$7D
-				beq .4
-
-				cmp #$7E
-				beq .4
-
-				cmp #$20
-				bcs .6
-
-				phx
-				phy
-
-				and #7
-				tax						bit in byte
-
-				lda (ZPPtr1),y
-				lsr
-				lsr
-				lsr
-				tay
-
-				lda ACCM.OUT,y
-				and ACCM.BIT2MASK,x
-				cmp #1
-
-				ply
-				plx
-
-				lda (ZPPtr1),y
-				bcc .6
-
-.4				lda #$7D
-				sta SSC.DATA-$8F,x
-
-.5				lda SSC.STATUS-$8F,x
-				bit #SSC.STATUS.TDRE
-				beq .5
-
-				lda (ZPPtr1),y
-				eor #%00100000
-
-.6				sta SSC.DATA-$8F,x
-				iny
-				bne .3
-
-				inc ZPPtr1+1
-				bra .3
-
-.8				lda SSC.STATUS-$8F,x
-				bit #SSC.STATUS.TDRE
-				beq .8
-
-				lda #$7E
-				sta SSC.DATA-$8F,x
-
-				plp
 				clc
+				rts
+*--------------------------------------
+SSC.Close		ldx DEVSLOTn08F
+				stz SSC.RESET-$8F,x
+
+				lda #SSC.CMD.RIRQDIS
+				sta SSC.CMD-$8F,x		Applewin Bug ???
+
 				rts
 *--------------------------------------
 SSC.ReadPPP		php
@@ -635,11 +637,21 @@ SSC.ReadPPP		php
 
 				ldx DEVSLOTn08F
 
-.1				stz b7D
+				.DO SWFC=1
+				lda #C.XON
+				sta SSC.DATA-$8F,x
+				.FIN
 
-				ldy #0
+				.DO HWFC=1
+				lda #SSC.CMD.NOP+SSC.CMD.TE+SSC.CMD.RIRQDIS+SSC.CMD.DTR
+				sta SSC.CMD-$8F,x
+				.FIN
 
-.2				lda SSC.STATUS-$8F,x
+				stz b7D
+
+.10				ldy #0
+
+.1				lda SSC.STATUS-$8F,x
 				bit #SSC.STATUS.nDCD	true when 0
 				bne .9
 
@@ -647,35 +659,49 @@ SSC.ReadPPP		php
 				bne .3
 
 				iny
-				bne .2
+				bne .1
 
-.8				plp
+.8	
+				.DO SWFC=1
+				lda #C.XOFF
+				sta SSC.DATA-$8F,x
+				.FIN
+
+				.DO HWFC=1
+				lda #SSC.CMD.NOP+SSC.CMD.RIRQDIS+SSC.CMD.DTR
+				sta SSC.CMD-$8F,x
+				.FIN
+
+				plp
 				clc
 				rts
 
 .3				lda SSC.DATA-$8F,x
+
 				bit b7D
 				bmi .4
 
-				cmp #$7E
-				bne .4
+				cmp #$7D
+				bne .40
 
 				ror b7D
 				bra .1
 
-.4				cmp #$FF
-				bne .1
+.4				stz b7D
+				eor #%00100000
+				
+.40				cmp #$FF
+				bne .10
 
 				sta IN.Buf
 				ldy #1
+
 				stz b7D
 
-.5				lda SSC.STATUS-$8F,x
-				bit #SSC.STATUS.nDCD	true when 0
-				bne .9
+.5				lda #SSC.STATUS.RDRF
 
-				bit #SSC.STATUS.RDRF	incoming char?
-				beq .5
+.50				bit SSC.STATUS-$8F,x	incoming char?
+				beq .50
 
 				lda SSC.DATA-$8F,x
 				bit b7D
@@ -689,6 +715,7 @@ SSC.ReadPPP		php
 
 .6				stz b7D
 				eor #%00100000
+
 				sta IN.Buf,y
 				iny
 				bra .5
@@ -698,9 +725,111 @@ SSC.ReadPPP		php
 
 				sta IN.Buf,y
 				iny
-				bra .5
+				bne .5
 
 .9				lda	#MLI.E.IO
+				plp
+				sec
+.99				rts
+*--------------------------------------
+SSC.WritePPP	>STYA ZPPtr1
+
+				ldy #7
+				lda (ZPPtr1),y			Len LO
+				clc
+				adc #6
+				sta ZPPtr3
+
+				php
+				sei
+
+				ldx DEVSLOTn08F
+
+				lda SSC.STATUS-$8F,x
+				bit #SSC.STATUS.nDCD	true when 0
+				bne .9
+
+				.DO HWFC=1
+				lda #SSC.CMD.NOP+SSC.CMD.TE+SSC.CMD.RIRQDIS+SSC.CMD.DTR
+				sta SSC.CMD-$8F,x
+				.FIN
+				
+				lda #SSC.STATUS.TDRE
+
+.1				bit SSC.STATUS-$8F,x 	Register Empty ?
+				beq .1
+
+				lda #$7E
+				sta SSC.DATA-$8F,x
+
+.2				lda (ZPPtr1)
+
+				cmp #$7D
+				beq .5
+
+				cmp #$7E
+				beq .5
+
+				cmp #32
+				bcs .6
+				
+				tay
+				lda ACCM.OUT,y
+				beq .53
+				
+.5				lda #SSC.STATUS.TDRE
+				
+.51				bit SSC.STATUS-$8F,x 	Register Empty ?
+				beq .51
+
+				lda #$7D
+				sta SSC.DATA-$8F,x
+				
+				lda #SSC.STATUS.TDRE
+				
+.52				bit SSC.STATUS-$8F,x 	Register Empty ?
+				beq .52				
+
+				lda (ZPPtr1)
+				eor #%00100000
+				bra .6
+				
+.53				lda (ZPPtr1)
+
+.6				sta SSC.DATA-$8F,x
+				
+				inc ZPPtr1
+				bne .60
+				
+				inc ZPPtr1+1
+				
+.60				dec ZPPtr3
+				bne .2
+
+				lda #SSC.STATUS.TDRE
+
+.7				bit SSC.STATUS-$8F,x 	Register Empty ?
+				beq .7
+
+				lda #$7E
+				sta SSC.DATA-$8F,x
+
+				lda #SSC.STATUS.TDRE
+				
+.8				bit SSC.STATUS-$8F,x 	Register Empty ?
+				beq .8
+				
+				.DO HWFC=1
+				lda #SSC.CMD.NOP+SSC.CMD.RIRQDIS+SSC.CMD.DTR
+				sta SSC.CMD-$8F,x
+				.FIN
+
+				plp
+				clc
+				rts
+
+.9				lda	#MLI.E.IO
+
 				plp
 				sec
 				rts
@@ -752,6 +881,7 @@ DumpBuf.PPP		>STYA ZPPtr1
 				lda ZPPtr2
 				adc #16
 				sta ZPPtr2
+				bcs .8
 				lda ZPPtr2+1
 				adc #0
 				sta ZPPtr2+1
@@ -768,7 +898,7 @@ DumpBuf.PPP		>STYA ZPPtr1
 				ora ZPPtr3
 				bne .1
 
-				clc
+.8				clc
 
 .9				rts
 				.FIN
@@ -868,7 +998,9 @@ ETCFILE			.AZ "${ROOT}etc/ppp.conf"
 MSG.ETCFILE		.AZ "Executing %s File...\r\n"
 MSG.UNEXPECTED	.AZ "\r\nERR:Unexpected reply From Modem\r\n{%s}\r\n"
 MSG.SYNTAX		.AZ "\r\nERR:Bad Syntax In ppp.conf\r\n{%s}\r\n"
-MSG.LCPInit		.AZ "LCP/IPCP Negotiation..."
+MSG.SSCInit		.AZ "Connecting..."
+MSG.LCPInit		.AZ "LCP Negotiation..."
+MSG.IPCPInit	.AZ "IPCP Negotiation..."
 MSG.LocalIP		.AZ "Local IP is %d.%d.%d.%d\r\n"
 MSG.RemoteIP	.AZ "Remote IP is %d.%d.%d.%d\r\n"
 				.DO DBG=1
@@ -887,30 +1019,34 @@ FD.DEV			.DA #S.FD.T.CDEV
 				.DA 0					BUFPTR
 FD.DEV.NAME		.AZ "eth1"
 *--------------------------------------
-PPP.ConfReq		.HS FF03
+LCP.ConfReq		.HS FF03
 				.HS C021				LCP
-PPP.ConfReq.DATA
+LCP.ConfReq.DATA
 				.HS 01					Configure-Request
 				.HS FF					ID
-				.DA /PPP.ConfReq.LEN,#PPP.ConfReq.LEN
+				.DA /LCP.ConfReq.LEN,#LCP.ConfReq.LEN
 *				.HS 01.04				MRU
 *				.DA /1400,#1400
+				.DO SWFC=1
 				.HS 02.06.000A0000		ACCM
+				.ELSE
+				.HS 02.06.00000000		ACCM
+				.FIN
 				.HS 05.06.EA4C2B41		MAGIC
 *				.HS 07.02
 *				.HS 08.02
-PPP.ConfReq.LEN	.EQ *-PPP.ConfReq.DATA
+LCP.ConfReq.LEN	.EQ *-LCP.ConfReq.DATA
 			.BS 2						FCS
 *--------------------------------------
-PPP.IPCPReq		.HS FF03
+IPCP.ConfReq	.HS FF03
 				.HS 8021				IPCP
-PPP.IPCPReq.DATA
+IPCP.ConfReq.DATA
 				.HS 01					Configure-Request
 				.HS FF					ID
-				.DA /PPP.IPCPReq.LEN,#PPP.IPCPReq.LEN
+				.DA /IPCP.ConfReq.LEN,#IPCP.ConfReq.LEN
 *				.HS 02.06.00.2D.0F.00	VJ
 				.HS 03.06.00.00.00.00	IP Address
-PPP.IPCPReq.LEN		.EQ *-PPP.IPCPReq.DATA
+IPCP.ConfReq.LEN	.EQ *-IPCP.ConfReq.DATA
 			.BS 2						FCS
 *--------------------------------------
 IN.Buf			.BS 256
