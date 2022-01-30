@@ -6,43 +6,46 @@ NEW
 *   ZPLineBufPtr, Y,A = Expected type/qual
 * Output:
 *   CS, A = EC
-*   CC, Y,A = type/qual, Value on Stack
+*   CC, Y,A = type/qual
 *--------------------------------------
-CC.ExpEval		ldx ZPPtr1
-				phx
-				ldx ZPPtr1+1			local : used by lookup
-				phx
+CC.EXP.Eval00	lda #0
+				tay
 
-				ldx ZPPtr2				local : expected T/Q
+CC.EXP.Eval		ldx ZPPtr2				local : expected T/Q
 				phx
 				ldx ZPPtr2+1
 				phx
 
 				ldx ZPPtr3				local : BOP
 				phx
-
-				ldx ZPPtr3+1			local : PREOPS
+				ldx ZPPtr3+1			local : PREOP
 				phx
 
-				>STYA ZPPtr2			
+				>STYA ZPPtr2
 
 				lda #$ff				no previous OP
 				pha
 *--------------------------------------
 .10				jsr CC.GetCharNB
 				bcs .19
-				
-				jsr CC.ExpPreops
-				bcs .19
 
-.11				cmp #'('
+				cmp #'('
 				bne .20
 
 				jsr CC.GetNextCharNB	skip (
 				bcs .19
 
-				>LDYA ZPPtr2			expected T/Q
-				jsr CC.ExpEval
+				>LDYA L.CC.TYPEQUAL
+				jsr CC.LookupID
+				bcs .12
+
+				jsr CC.EXP.Cast
+				bcs .19
+
+				bra .20
+*--------------------------------------
+.12				>LDYA ZPPtr2			expected T/Q
+				jsr CC.EXP.Eval
 				bcs .19
 
 				>STYA ZPPtr2			update T/Q
@@ -56,32 +59,44 @@ CC.ExpEval		ldx ZPPtr1
 				jsr CC.GetNextCharNB	skip )
 				bcc .31
 
-.19				jmp .90
+.19				jmp CC.EXP.Eval.ESYN
 *--------------------------------------
-.20				jsr CC.IsLetter		define, f() or Var ?
+.20				jsr CC.ExpPreops
+				bcs .29
+
+				jsr CC.IsLetter			define, f() or Var ?
 				bcs .22
 
 				jsr CC.GetDefine
 				bcc .10
 
-				jsr CC.SymLookup
+				jsr CC.SYM.Lookup
 				bcs .22
 
-				>LDA.G CC.VarDef+1		qual
-				and #CC.Q.FUNC
+				ldy #SYM.Q
+				lda (ZPSymBufPtr),y
+				and #SYM.Q.FUNC
 				bne .21
 
-				jsr CC.ExpGet			Check T/Q & Get value on stack
+				jsr CC.EXP.CheckGetSymType
 				bcs .29
+
+				jsr CC.EXP.Get			Check T/Q & Get value on stack
+				bcs .29
+
+				jsr CC.SYM.FreeBufPop
 
 				bra .30
 *--------------------------------------
 .21				>LDYA ZPPtr2			get expected T/Q
 
-				jsr CC.fExecRetV
+				jsr CC.F.CallRetV
 				bcs .29
 
 				>STYA ZPPtr2			store real T/Q
+
+				jsr CC.SYM.FreeBufPop
+
 				bra .30
 *--------------------------------------
 .22				jsr CC.IsDigit10		number ?
@@ -90,148 +105,181 @@ CC.ExpEval		ldx ZPPtr1
 				ldy ZPPtr2
 				bne .23
 
-				ldy #CC.T.SINT
+				ldy #SYM.T.SINT
 				sty ZPPtr2
 				stz ZPPtr2+1
 
-.23				jsr CC.GetNumOnStack
+.23				jsr CC.EXP.GetNum
 				bcs .29
 
 				bra .30
-
+*--------------------------------------
 .24				cmp #'"'				String literal
-				bne .90
+				bne CC.EXP.Eval.ESYN
 
 				jsr CC.AddContCharP
-.29				bcs .99
+.29				bcs CC.EXP.Eval.Err
 *--------------------------------------
 .30				jsr CC.GetCharNB
-				bcs .90
+				bcs CC.EXP.Eval.ESYN
 
-.31				cmp #';'
-				beq .80
-
-				cmp #','
-				beq .80
-
-				cmp #')'
-				beq .80
+.31				jsr CC.IsEndArg			, ; ) ?
+				bcc CC.EXP.Eval.End
 
 				jsr CC.IsOPChar
-				bcs .90
+				bcs CC.EXP.Eval.ESYN
 
-				>LDYA L.CC.BOPS		we are at V1 op1 V2 op2...
+				>LDYA L.CC.BOPS			we are at V1 op1 V2 op2...
 				jsr CC.LookupOP
-				bcs .90
+				bcs CC.EXP.Eval.ESYN
 
 				stx ZPPtr3				save OP(n)
 
-.32				plx						get OP(n-1)
-				bmi .33					$ff....
+.33				plx						get OP(n-1)
+				bmi .38					$ff....
 
 				cpx ZPPtr3
-				bcc .33					OP(n) has precedence, on stack : V1,V2
+				bcc .38					OP(n) has precedence, on stack : V1,V2
 
 				>LDYA ZPPtr2			OP(n-1) has precedence...
-				jsr CC.ExpBops			compute V(n-1) <OP(n-1)> V(n)
-				bcc .32
+				jsr CC.EXP.BOPS			compute V(n-1) <OP(n-1)> V(n)
+				bcc .33
 
-				bcs .99
+				bcs CC.EXP.Eval.Err
 
-.33				phx						push back OP(n-1)
+.38				phx						push back OP(n-1)
 
 				lda ZPPtr3				get OP(n)
 				pha						push OP(n) on stack
 
 				jmp .10					go check for next token
 *--------------------------------------
-.80				plx						any OP on stack ?
-				bmi .88
+CC.EXP.Eval.End	plx						any OP on stack ?
+				bmi CC.EXP.Eval.Exit
 
 				>LDYA ZPPtr2			Var Type
-				jsr CC.ExpBops
-				bcc .80
+				jsr CC.EXP.BOPS
+				bcc CC.EXP.Eval.End
 
-				bcs .99
+				bra CC.EXP.Eval.Err
+*--------------------------------------
+CC.EXP.Eval.ESYN
+				lda #E.ESYN
 
-.90				lda #E.ESYN
-
-.99				plx
-				bpl .99
+CC.EXP.Eval.Err
+				plx
+				bpl CC.EXP.Eval.Err
 
 				sec
-				bra .89
+				bra CC.EXP.Eval.ExitErr
+*--------------------------------------
+CC.EXP.Eval.Exit
+				>LDYA ZPPtr2			Type/Qual
+				clc
 
-.88				clc
-
-				>LDYA ZPPtr2				Type/Qual
-
-.89				plx
+CC.EXP.Eval.ExitErr
+				plx
 				stx ZPPtr3+1
 				plx
 				stx ZPPtr3
+
 				plx
 				stx ZPPtr2+1
 				plx
 				stx ZPPtr2
-				plx
-				stx ZPPtr1+1
-				plx
-				stx ZPPtr1
 
 				rts
+*--------------------------------------
+CC.EXP.CheckGetSymType
+				lda ZPPtr2
+				ora ZPPtr2+1
+				bne .1
+
+				lda (ZPSymBufPtr)
+				sta ZPPtr2
+
+				ldy #SYM.Q
+				lda (ZPSymBufPtr),y
+				sta ZPPtr2+1
+
+				clc
+				rts
+
+.1				>LDYA ZPPtr2
+				jmp CC.SYM.CheckTypeYA
+*--------------------------------------
+CC.EXP.Cast		jsr CC.TYPE.Decl
+				bcs .99
+
+				>STYA ZPPtr2
+
+				jsr CC.GetCharNB
+				bcs .9
+
+				cmp #')'
+				bne .9
+
+				jsr CC.GetNextCharNB	skip )
+
+				clc
+				rts
+
+.9				lda #E.ESYN
+				sec
+.99				rts
 *--------------------------------------
 CC.ExpPreops	>LDYA L.CC.PREOPS
 
 				jsr CC.LookupOP
 				bcc .8
-				
+
 				ldx #$ff
 
 .8				stx ZPPtr3+1
-				
+
 				jmp CC.GetCharNB
 *--------------------------------------
 * Y,A = Type/Qual, X = OP
 *--------------------------------------
-CC.ExpBops		cpy #CC.T.UINT
+CC.EXP.BOPS		cpy #SYM.T.UINT
 				bcs .3
 
-				cpy #CC.T.UCHAR
+				cpy #SYM.T.UCHAR
 				beq .1
 
-				cpy #CC.T.SCHAR
+				cpy #SYM.T.SCHAR
 				beq .2
 
 				lda #E.TMISMATCH
 				sec
 				rts
 
-.1				ldy J.CC.bBOPS,x
-				lda J.CC.bBOPS+1,x
+.1				lda J.CC.bBOPS,x
+				ldy J.CC.bBOPS+1,x
 				tax
-				jsr CODE.JSRYX
+				lda #$20				JSR
+				jsr CODE.TOABSYX
 				clc
 				rts
 
-.2				ldy J.CC.cBOPS,x
-				lda J.CC.cBOPS+1,x
+.2				lda J.CC.cBOPS,x
+				ldy J.CC.cBOPS+1,x
 				tax
-				jsr CODE.JSRYX
+				lda #$20				JSR
+				jsr CODE.TOABSYX
 				clc
 				rts
 
 .3				txa
 				clc
-				adc CC.Type2FPU-CC.T.UINT,y
+				adc CC.Type2FPU-SYM.T.UINT,y
 				tax
 				jsr CODE.FPUCALL
 
 				clc
 				rts
 *--------------------------------------
-CC.AddContCharP
-				ldy #0
+CC.AddContCharP	ldy #0
 
 .1				jsr CC.GetNextChar
 				bcs .9
@@ -270,8 +318,7 @@ CC.AddContCharP
 				sec
 				rts
 *--------------------------------------
-CC.GetNumOnStack
-				cpy #CC.T.FLOAT
+CC.EXP.GetNum	cpy #SYM.T.FLOAT
 				bcc .1
 
 				beq .11
@@ -310,6 +357,11 @@ CC.GetNumOnStack
 
 .3				bcs .9
 
+				ldy #1					anticipate 2 bytes if *
+				lda ZPPtr2+1
+				and #SYM.Q.PPPOINTER
+				bne .5
+
 				ldx ZPPtr2
 				lda CC.TYPESIZE-1,x
 
@@ -325,94 +377,233 @@ CC.GetNumOnStack
 *				clc
 .9				rts
 *--------------------------------------
-CC.SymLookup	>PUSHB.G CC.hSymbols
-
-				>PUSHW ZPLineBufPtr
-				>SYSCALL SListLookup
-				bcs .9
-
-				phy
-				pha
-
-				txa
-*				clc
-				adc ZPLineBufPtr
-				sta ZPLineBufPtr
-				bcc .1
-
-				inc ZPLineBufPtr+1
-
-.1				>PUSHB.G CC.hSymbols
-
-				pla
-				>PUSHA
-				pla
-				>PUSHA					KeyID
-
-				>PUSHEA.G CC.VarDef
-				>PUSHWI SYMDEFSIZE
-				>PUSHWZ					From Start
-				>SYSCALL SListGetData
-.9				rts
-*--------------------------------------
 * ZPPtr2 = expected T/Q
 * ZPPtr3+1 = PREOPS
 *--------------------------------------
-CC.ExpGet		ldx ZPPtr3+1
-				bmi CC.ExpGet2
+CC.EXP.Get		>LDYA L.CC.AOPS
+				jsr CC.LookupOP
+				bcs .20
 
-				jmp (J.CC.PREOPS,x)
+				>LDYA ZPPtr2			get expected T/Q
+				jsr CC.EXP.Eval
+				bcs .99
+
+				jsr CC.SYM.SetValue
+				bcs .99
+
+				clc
+				rts
+*--------------------------------------
+.20				>LDYA L.CC.POSTOPS
+				jsr CC.LookupOP
+				bcs .1
+
+				cpx #4					'['
+				bne *
+
+				jmp CC.EXP.Array
+*--------------------------------------
+.1				ldx ZPPtr3+1			preop
+				bpl .8
+
+				lda ZPPtr2				target T
+				beq .3
+
+				lda (ZPSymBufPtr)		SYM.T
+				cmp #SYM.T.VOID
+				beq .2
+
+				cmp ZPPtr2				T
+				bne .9
+
+.2				lda ZPPtr2+1			Q
+
+				ldy #SYM.Q
+				cmp (ZPSymBufPtr),y
+				bne .9
+
+.3				lda (ZPSymBufPtr)		SYM.T
+				sta ZPPtr2				T
+				pha
+				ldy #SYM.Q
+				lda (ZPSymBufPtr),y
+				sta ZPPtr2+1			Q
+				ply						Y,A = T/Q
+
+				jsr CC.SYM.PushValue
+
+				clc
+.99				rts
+
+.9				lda #E.TMISMATCH
+				sec
+				rts
+
+.8				jmp (J.CC.PREOPS,x)
+*--------------------------------------
+CC.EXP.Array	ldy #SYM.Q
+				lda (ZPSymBufPtr),y
+				and #SYM.Q.AAARRAY
+				beq .9
+
+				jsr CC.EXP.PushDeref	push base address
+
+				ldy #SYM.T.SINT
+				lda #0
+
+				jsr CC.EXP.Eval
+				bcs .99					int16 on stack
+
+				jsr CC.GetCharNB
+				bcs .9
+
+				cmp #']'
+				bne .9
+
+				jsr CC.GetNextCharNB	skip ']'
+				bcs .9
+
+				jsr CC.SYM.GetSymSizeOfInAXC
+
+				pha
+				txa
+				jsr CODE.PUSHI
+				pla
+				jsr CODE.PUSHI			sizeof on stack
+
+				ldx #FPU.iMUL
+				jsr CODE.FPUCALL		sizeof*int16
+
+				ldx #FPU.iAdd
+				jsr CODE.FPUCALL		add to base address
+
+				lda (ZPSymBufPtr)		SYM.T
+				pha
+
+				ldy #SYM.Q
+				lda (ZPSymBufPtr),y
+				sec
+				sbc #SYM.Q.ARRAY
+				ply
+
+				jsr CC.SYM.GetYASizeOfInAXC
+				jsr CODE.PushFromPtr	A = byte count
+
+				clc
+				rts
+
+.9				lda #E.ESYN
+				sec
+.99				rts
+*--------------------------------------
+CC.EXP.PushAddr	ldy #SYM.Addr+1
+				lda (ZPSymBufPtr),y
+				bne .7
+* LOCAL
+				jsr CODE.PUSHpBASEp1
+
+				ldy #SYM.Addr
+				lda (ZPSymBufPtr),y
+				eor #$FF
+				inc
+				jsr CODE.LDAI
+				jsr CODE.PUSHpBASEpA
+
+				clc
+				rts
+* DATASEG
+.7				jsr CODE.PUSHI
+
+				ldy #SYM.Addr
+				lda (ZPSymBufPtr),y
+				jsr CODE.PUSHI
+
+				clc
+				rts
+*--------------------------------------
+CC.EXP.PushDeref
+				ldy #SYM.Addr+1
+				lda (ZPSymBufPtr),y
+				bne .7
+* LOCAL				
+				jsr CODE.SETpBASEp1
+
+				ldy #SYM.Addr
+				lda (ZPSymBufPtr),y
+				eor #$FF
+				inc
+				jsr CODE.LDAI
+				jsr CODE.SETpBASEpA
+
+				jsr CODE.Deref
 				
-CC.ExpGet.Ref	>LDA.G CC.VarDef+5		DataPtr+1
-				jsr CODE.PUSHI
-				>LDA.G CC.VarDef+4		DataPtr
-				jsr CODE.PUSHI
+				clc
+				rts
+* DATASEG
+.7				jsr CODE.LDAI
+				lda #$85				STA zp
+				jsr CODE.EmitByte
+				lda #ZPPtr1+1
+				jsr CODE.EmitByte
+
+				ldy #SYM.Addr
+				lda (ZPSymBufPtr),y
+				jsr CODE.LDAI
+
+				lda #$85				STA zp
+				jsr CODE.EmitByte
+				lda #ZPPtr1+1
+				jsr CODE.EmitByte
+
+				jsr CODE.Deref
 
 				clc
 				rts
+*--------------------------------------
+CC.EXP.GetRef	ldy #SYM.Addr+1
+				lda (ZPSymBufPtr),y
+				jsr CODE.PUSHI
 
-CC.ExpGet.Deref
+				ldy #SYM.Addr
+				lda (ZPSymBufPtr),y
+				jsr CODE.PUSHI
 
+				lda (ZPSymBufPtr)		SYM.T
+
+				sta ZPPtr2				T
+
+				ldy #SYM.Q
+				lda (ZPSymBufPtr),y
 				clc
-				rts
+				adc #SYM.Q.POINTER
+				bcs .9					more than ***
 
-
-CC.ExpGet2		lda ZPPtr2				target type
-				beq .1
-
-				>LDA.G CC.VarDef		Type
-				cmp #CC.T.VOID
-				beq .11
-
-				cmp ZPPtr2
-				bne .9
-
-.11				lda ZPPtr2+1			qual
-				>CMP.G CC.VarDef+1
-				bne .9
-
-.1				>LDA.G CC.VarDef		Type
-				sta ZPPtr2
-				pha
-				iny
-				lda (pData),y
-				sta ZPPtr2+1			qual
-				ply
-
-				jsr CC.GetVarSize		X = size
-
-				>LDA.G CC.VarDef+4		DataPtr
-				pha
-				iny
-				lda (pData),y
-				ply
-
-.3				jsr CODE.PushXFromYA
-				clc
+				sta ZPPtr2+1			Q
+*				clc
 				rts
 
 .9				lda #E.TMISMATCH
 				sec
+				rts
+*--------------------------------------
+CC.EXP.GetDeref
+
+				clc
+				rts
+*--------------------------------------
+CC.EXP.IntConst	>PUSHW ZPLineBufPtr
+				>PUSHWI ZPLineBufPtr
+				>PUSHBI 10
+				>SYSCALL StrToUL
+
+				>PULLA
+				tay
+
+				>PULLA
+
+				inc pStack
+				inc pStack
+
 				rts
 *--------------------------------------
 MAN

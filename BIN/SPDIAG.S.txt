@@ -1,0 +1,272 @@
+NEW
+  AUTO 3,1
+				.LIST OFF
+				.OP	65C02
+				.OR	$2000
+				.TF bin/spdiag
+*--------------------------------------
+				.INB inc/macros.i
+				.INB inc/mli.i
+				.INB inc/a2osx.i
+				.INB inc/kernel.i
+*--------------------------------------
+				.DUMMY
+				.OR ZPBIN
+ZS.START
+ZPPtr1			.BS 2
+DevId			.BS 1
+DevCount		.BS 1
+ZS.END			.ED
+*--------------------------------------
+*			File Header (16 Bytes)
+*--------------------------------------
+CS.START		cld
+				jmp (.1,x)
+				.DA #$61				6502,Level 1 (65c02)
+				.DA #1					BIN Layout Version 1
+				.DA #0					S.PS.F.EVENT
+				.DA #0
+				.DA CS.END-CS.START		Code Size (without Constants)
+				.DA DS.END-DS.START		Data SegmentSize
+				.DA #64					Stack Size
+				.DA #ZS.END-ZS.START	Zero Page Size
+				.DA 0
+*--------------------------------------
+* Relocation Table
+*--------------------------------------
+.1				.DA CS.INIT
+				.DA CS.RUN
+				.DA CS.EVENT
+				.DA	CS.QUIT
+L.MSG.SP.FOUND	.DA MSG.SP.FOUND
+L.MSG.SP.OK		.DA MSG.SP.OK
+L.MSG.DEV		.DA MSG.DEV
+L.MSG.DEV.DIB	.DA MSG.DEV.DIB
+L.MSG.DEV.C		.DA MSG.DEV.C
+L.MSG.DEV.B		.DA MSG.DEV.B
+L.MSG.ERR		.DA MSG.ERR
+				.DA 0
+*--------------------------------------
+CS.INIT			clc
+				rts
+*--------------------------------------
+CS.RUN			lda #$C1
+				sta ZPPtr1+1
+
+				lda #$20				JSR
+				>STA.G DEV.SPCallCode
+
+				>LEA.G DEV.SPCallParam
+				>STYA.G DEV.SPCallCode+4
+
+				lda #$60				RTS
+				>STA.G DEV.SPCallCode+6
+
+				lda #3					ParamCount
+				>STA.G DEV.SPCallParam
+
+				>LEA.G DEV.DIB
+				>STYA.G DEV.SPCallParam+2
+*--------------------------------------
+.1				ldx #SmartPort.SIG-SmartPort.OFS-1
+
+.2				ldy SmartPort.OFS,x		Check if there is a smartport firmware
+				lda (ZPPtr1),y
+				cmp SmartPort.SIG,x
+				bne .7					not a Disk Controller...
+
+				dex
+				bpl .2
+
+				>PUSHW L.MSG.SP.FOUND
+				lda ZPPtr1+1
+				and #7
+				>PUSHA
+
+				ldy #$FB
+				lda (ZPPtr1),y			Get device id
+				>PUSHA
+
+				>PUSHBI 2
+				>SYSCALL Printf
+				bcs .9
+
+				ldy #$ff
+				lda (ZPPtr1),y
+*				clc
+				adc #3
+				ldy #1
+				sta (pData),y
+
+				lda ZPPtr1+1
+				iny
+				sta (pData),y
+
+				ldx #0					Unit Number = 0
+				lda #0					Status Code = Get Controller Status
+				jsr CS.SPStatusCall
+				bcs .6
+
+				jsr CS.SPEnum
+				bcs .9
+
+				bra .7
+
+.6				jsr CS.SPError
+				bcs .9
+
+.7				inc ZPPtr1+1
+				lda ZPPtr1+1
+				cmp #$C8
+				bne .1
+
+				lda #0
+				sec
+.9				rts
+*--------------------------------------
+CS.SPEnum		>PUSHW L.MSG.SP.OK
+
+				>PUSHB.G DEV.DIB		Unit Count
+				sta DevCount
+				>PUSHBI 1
+				>SYSCALL PrintF
+				bcs .9
+				
+				lda DevCount
+				beq .8
+				
+				stz DevId
+				
+.1				inc DevId
+
+				>PUSHW L.MSG.DEV
+				>PUSHB DevId
+				>PUSHBI 1
+				>SYSCALL PrintF
+				bcs .9
+				
+				ldx DevId			
+				lda #3					Status Code = Get DIB
+				jsr CS.SPStatusCall
+				bcs .6
+
+				jsr CS.DumpDIB
+				bcs .9
+				
+				bra .7
+				
+.6				jsr CS.SPError
+				bcs .9				
+				
+.7				dec DevCount
+				bne .1
+
+.8				clc
+				
+.9				rts
+*--------------------------------------
+CS.DumpDIB		>PUSHW L.MSG.DEV.DIB
+
+				>LDA.G DEV.DIB+S.DIB.S
+
+				ldy #DEV.SFLAGS+7
+				ldx #7
+
+.1				lsr
+				pha
+				lda #'-'
+				bcc .2
+
+				lda MSG.SFLAGS,x
+
+.2				sta (pData),y
+				pla
+				dey
+				dex
+				bpl .1
+
+				>PUSHEA.G DEV.SFLAGS
+				>PUSHB.G DEV.DIB+S.DIB.T
+				>PUSHB.G DEV.DIB+S.DIB.ST
+				>PUSHEA.G DEV.DIB+S.DIB.IDS
+				>PUSHB.G DEV.DIB+S.DIB.VERSION
+				>PUSHB.G DEV.DIB+S.DIB.VERSION+1
+
+				>PUSHBI 8
+
+				>SYSCALL PrintF
+				bcs .9
+
+				>LDA.G DEV.DIB+S.DIB.S
+				bpl .4					char device...
+
+				>PUSHW L.MSG.DEV.B
+
+				>PUSHBI 0
+				>PUSHB.G DEV.DIB+S.DIB.SIZE+2
+				>PUSHB.G DEV.DIB+S.DIB.SIZE+1
+				>PUSHB.G DEV.DIB+S.DIB.SIZE
+				>PUSHBI 4
+				bra .8
+
+.4				>PUSHW L.MSG.DEV.C
+				>PUSHBI 0
+
+.8				>SYSCALL PrintF
+.9				rts
+*--------------------------------------
+CS.SPStatusCall	>STA.G DEV.SPCallParam+4	Status Code
+
+				txa
+				>STA.G DEV.SPCallParam+1	Unit Number
+
+				jmp (pData)
+**--------------------------------------
+CS.SPError		tax
+				>PUSHW L.MSG.ERR
+				txa
+				>PUSHA
+				>PUSHBI 1
+				>SYSCALL PrintF
+				rts
+*--------------------------------------
+CS.EVENT		sec
+				rts
+*--------------------------------------
+CS.QUIT			clc
+				rts
+*--------------------------------------
+CS.END
+MSG.SP.FOUND	.AZ "Slot #%2d:DevId = %b, "
+MSG.SP.OK		.AS "Dev Count = %d\r\n"
+				.AZ "         Status   Typ/Sub IDString         Version Size (BLK)\r\n"
+MSG.DEV			.AZ " Dev #%2d:"
+MSG.DEV.DIB		.AZ "%s $%h/$%h %16S %03d.%03d "
+MSG.DEV.B		.AZ "%10u\r\n"
+MSG.DEV.C		.AZ "n/a\r\n"
+MSG.ERR			.AZ "Error : $%h\r\n"
+*--------------------------------------
+MSG.SFLAGS		.AS "bwrlneio"
+*--------------------------------------
+SmartPort.OFS	.HS 01030507
+SmartPort.SIG	.HS 20000300
+*--------------------------------------
+BLANK.DIB		.DA #0
+				.BS 3
+				>PSTR "(No IDS String!)"
+				.DA #0
+				.DA #0
+				.DA 0
+*--------------------------------------
+				.DUMMY
+				.OR 0
+DS.START
+DEV.SPCallCode	.BS 7					jsr $ffff, Call#, ParamPtr, RTS
+DEV.SPCallParam	.BS 8
+DEV.DIB			.BS S.DIB
+DEV.SFLAGS		.BS 9
+DS.END			.ED
+*--------------------------------------
+MAN
+SAVE usr/src/bin/spdiag.s
+ASM
