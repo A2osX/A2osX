@@ -3,136 +3,87 @@ NEW
 *--------------------------------------
 ILDR.START		jsr MLI	  				check for file 'atinit'
 				.DA #MLIGETFILEINFO
-				.DA gfi_list
-				bcc gfi_ok	   			branch if 'atinit' file found
+				.DA ILDR.GFINFO
+				bcs ILDR.ENUMPM
 
-				cmp #MLI.E.FNOTFND
-				beq ILDR.SYSTEM			if so, continue loading interpreter
-
-ATINIT.KO		jmp badatinit
-				
-gfi_ok 			lda gfi_type
+				lda ILDR.GFINFO+S.FI.T
 				cmp #$E2				is 'atinit' correct file type?
-				bne ATINIT.KO			error - wrong file type
+				bne ILDR.ENUMPM			error - wrong file type
 
-				jsr MLI	  				open 'atinit' file
-				.DA #MLIOPEN
-				.DA atopen
-				bne ATINIT.KO			error
+				ldy #ILDR.ATINIT
+				lda /ILDR.ATINIT
+				jsr ILDR.LoadFile
+				bcc .1
 
-				lda #$9F				max size = 39.75k ($2000-$BF00)
-				sta rdlen+1
-				stz rdlen
+				jmp ILDR.MLIERR
 
-				jsr MLI	  				read 'atinit' file to 'sysentry'
-				.DA #MLIREAD
-				.DA rdparm
-				bne ATINIT.KO			error - too big
-
-				jsr MLI	  				close 'atinit' file
-				.DA #MLICLOSE
-				.DA clparm
-				bne ATINIT.KO			error
-
-				lda RROMBNK2			enable ROM
+.1				lda RROMBNK2			enable ROM
 				jsr sysentry			execute ATinit
 *--------------------------------------
-ILDR.SYSTEM		lda /dbuf				search directory buffer
-				sta idxl+1
-				lda #$04	   			start 1 entry past header
-				bne H2434				always.
+* BOOT block read 4 directory blocks at dbuf=$C00 -> $13FF
+*--------------------------------------
+ILDR.ENUMPM		.DO PM
 
-H2432  			lda idxl				calc next entry position
-H2434  			clc
-				adc dbuf+35	  			inc to next entry address
-				sta idxl
-				bcs H2451				branch if page cross.
-				adc dbuf+35	  			test for end of block.
-				bcc H2453				branch if not page cross
-				lda idxl+1
-				lsr						end of block?
-				bcc H2453				no.
-				cmp #$09	   			end of directory?
-				bne H244D				no.
-				jmp nointrp				no interpreter, go quit.
+				jsr ILDR.EnumInit
 
-H244D  			lda #$04				reset index to 1st entry in next block.
-				sta idxl
-H2451  			inc idxl+1				inc to next page.
-H2453  			ldy #$10	   			check file type.
-				lda #$FF	   			must be a prodos sys file
-				eor (idxl),y
-				bne H2432				if not sys.
+.1				ldx #S.FI.T.BIN
+				ldy #ILDR.KMSFX
+				lda /ILDR.KMSFX
+				jsr ILDR.EnumNext
+				bcs .4
 
-				tay		  				see if active
-				lda (idxl),y
-				beq H2432				if deleted file.
+				jsr ILDR.LoadFilePBuf
+				bcs ILDR.MLIERR
 
-				and #$0F	   			strip file 'kind'.
-				sta pbuf	   			save length of name.
-				cmp #$08	   			must be at least 'x.system'
-				bcc H2432				else, ignore it.
-
-				tay		  				compare last 7 chars for '.system'
-				ldx #$06
-
-H246C  			lda (idxl),y
-				eor iterp,x
-				asl						ignore bit 7
-				bne H2432				branch if something else
-
-				dey
-				dex
-				bpl H246C
-
-				ldy #$00
-
-H247A  			iny
-				lda (idxl),y
-				sta pbuf,y
-				cpy pbuf
-				bne H247A
-
-				jsr MLI	  				open interpreter file
-				.DA #$C8
-				.DA opparm
-				bne badlod
-
-				jsr MLI	  				get eof (length of file)
-				.DA #$D1
-				.DA efparm
-				bne badlod
-
-				lda eof+2
-				bne toolong
-
-				lda eof+1
-				cmp #$9F				max size = 39.75k ($2000-$BF00)
-				bcs toolong
-
-				sta rdlen+1
-				lda eof
-				sta rdlen				(read entire file)
-
-				jsr MLI	  				read interpreter file
-				.DA #$CA
-				.DA rdparm
-				beq H24C8				go close if successfully read.
-
-				cmp #$56	   			memory conflict?
-				beq toolong	  			then too large
-				bne badlod	   			else, unable to load.
-
-H24C8  			jsr MLI	  				close interpreter file
-				.DA #$CC
-				.DA clparm
-				bne badlod	   			hopefully never taken
-
-				lda RROMBNK2			enable ROM
+				ldx #3
 				
-				sta CLR80DISP
-				sta	CLR80STORE
+.2				lda idxl,x
+				pha
+				dex
+				bpl .2
 
+				jsr sysentry
+
+				bit RROMBNK2			enable ROM
+				
+				ldx #0
+				
+.3				pla
+				sta idxl,x
+				inx
+				cpx #4
+				bne .3
+				
+			>DEBUGOA
+
+				bra .1
+
+				.FIN
+*--------------------------------------
+.4				jsr ILDR.EnumInit
+				
+				ldx #S.FI.T.SYS
+				ldy #ILDR.SYSTEMSFX
+				lda /ILDR.SYSTEMSFX
+				jsr ILDR.EnumNext
+				bcs .9
+
+				jsr ILDR.LoadFilePBuf
+				bcs ILDR.MLIERR
+
+				bit RROMBNK2			enable ROM
+
+				bit RDIOUDIS
+				sta SETIOUDIS
+				sta CLRDHIRES
+				bmi .5
+
+				sta CLRIOUDIS
+
+.5				sta CLR80DISP
+				sta	CLR80STORE
+				sta SETTEXT
+				sta CLRMIXED
 				jsr init
 				jsr setvid
 				jsr setkbd
@@ -140,94 +91,265 @@ H24C8  			jsr MLI	  				close interpreter file
 
 				jmp sysentry			go run interpreter
 
-nointrp			jsr MLI	  				no interpreter found,so quit.
-				.DA #$65
-				.DA quitparm
-
-badatinit		ldy #6
-
-.1				lda atinitname,y
-				sta pbuf,y
-				dey
-				bpl .1
-
-badlod			ldx #ILDR.MSG.SYSLOADERR-ILDR.MSG
-				.HS 2C					BIT ABS
-				
-toolong  		ldx #ILDR.MSG.SYSTOOLARG-ILDR.MSG
-				jsr ILDR.PrintX
-
-				ldy #0
-				
-.1				iny
-				lda pbuf,y
-				jsr COUT
-				cpy pbuf
+.9				jsr MLI	  				no .SYSTEM found, so quit.
+				.DA #MLIQUIT
+				.DA ILDR.QUIT
+*--------------------------------------
+ILDR.MLIERR		cmp #MLI.E.BADBUF
 				bne .1
 
-				bra *
-*--------------------------------------
-ILDR.PrintX		bit RROMBNK2
-				lda INVFLG
-				pha
+				ldx #ILDR.MSG.SYSTOOLARG-ILDR.MSG
+
+				.HS 2C					BIT ABS
+.1				ldx #ILDR.MSG.SYSLOADERR-ILDR.MSG
+
+				bit RROMBNK2
 				jsr SETINV
 
-.1				lda ILDR.MSG,x
+.2				lda ILDR.MSG,x
 				pha
 				ora #$80
 				jsr COUT
 				inx
 				pla
-				bpl .1
-				
+				bpl .2
+
 				lda #$A0
 				jsr COUT
-				
-				pla
-				sta INVFLG
+
+				ldy #0
+
+.3				iny
+				lda pbuf,y
+				jsr COUT
+				cpy pbuf
+				bne .3
+
+				bra *
+*--------------------------------------
+ILDR.EnumInit	lda /dbuf				search directory buffer
+				sta idxl+1
+				lda #dbuf+4				skip Prev/next Block Ptr
+				sta idxl
+
+				lda dbuf+35	  			EL
+				sta ILDR.EL
+
+				lda dbuf+36	  			EPB
+				sta ILDR.EPB
+				sta ILDR.EITB
+
+				lda dbuf+37	  			FCLO
+				eor #$ff
+				sta ILDR.nFC
+
+				lda dbuf+38	  			FCHI
+				eor #$ff
+				sta ILDR.nFC+1
+
+ILDR.EnumInit.RTS
 				rts
 *--------------------------------------
-ILDR.MSG		.EQ * 
+* X = expected FileType
+* Y,A = expected suffix
+*--------------------------------------
+ILDR.EnumNext	stx ILDR.FT
+				sty src
+				sta src+1
+
+.1				inc ILDR.nFC
+				bne .2
+
+				inc ILDR.nFC+1
+				sec
+				beq ILDR.EnumInit.RTS
+
+.2				dec	ILDR.EITB
+				beq .3
+
+				lda idxl
+				clc
+				adc ILDR.EL
+				sta idxl
+				bcc .4					same page
+
+				inc idxl+1				512b block, 2nd page
+				bra .4
+
+.3				inc idxl+1
+				lda idxl+1
+				cmp #$14				last block read at $0C00-$13FF
+				bcs ILDR.EnumInit.RTS
+				
+				lda #4
+				sta idxl
+
+				lda ILDR.EPB
+				sta ILDR.EITB
+
+.4				lda (idxl)
+				beq .2					deleted / empty
+
+				bmi .1					$D, $E, or $F...
+
+				and #$0F
+				sta pbuf				filename Len
+
+				tay
+
+.5				lda (idxl),y
+				sta pbuf,y
+				dey
+				bne .5
+
+				ldy #16
+				lda (idxl),y
+
+				cmp ILDR.FT				expected file type
+				bne .1
+
+				lda (src)				expected suffix len
+				cmp pbuf
+				bcs .1					filename LE suffix
+
+				tay
+				ldx pbuf
+
+.11				lda pbuf,x
+				eor (src),y
+				asl
+				bne .1
+
+				dex
+				dey
+				bne .11
+
+				ldy #$1D				MIN_VERSION
+				lda (idxl),y
+				bpl .10					no lowercase information
+				
+				ldx pbuf
+
+.6				cpx #8					CS if MIN_VERSION to use
+				bcs .7
+
+				ldy #$1D				MIN_VERSION
+				lda (idxl),y
+				and ILDR.LCBits,x
+				bne .8
+				
+				bra .9
+				
+.7				ldy #$1C				VERSION
+				lda (idxl),y
+				
+				and ILDR.LCBits-8,x
+				beq .9
+
+.8				lda pbuf,x
+				eor #$20				to lowercase
+				sta pbuf,x
+				
+.9				dex
+				bne .6
+				
+.10				clc
+				rts
+*--------------------------------------
+ILDR.LoadFilePBuf
+				ldy #pbuf
+				lda /pbuf
+
+ILDR.LoadFile	sty ILDR.OPEN+1		Filename
+				sta ILDR.OPEN+2
+
+				jsr MLI
+				.DA #MLIOPEN
+				.DA ILDR.OPEN
+				bcs .9
+
+				jsr MLI
+				.DA #MLIGETEOF
+				.DA ILDR.GETEOF
+				bcs .9
+
+				lda ILDR.GETEOF+4
+				bne .99
+
+				lda ILDR.GETEOF+3
+				cmp #$9F
+				bcc .1
+
+				bne .99					more than $9Fxx
+
+				lda ILDR.GETEOF+2
+				bne .99					more than $9F00
+
+.1				jsr MLI
+				.DA #MLIREAD
+				.DA ILDR.READ
+				bcs .9
+
+				jsr MLI
+				.DA #MLICLOSE
+				.DA ILDR.CLOSE
+
+.9				rts
+
+.99				lda #MLI.E.BADBUF
+				sec
+				rts
+*--------------------------------------
+ILDR.MSG		.EQ *
 ILDR.MSG.SYSLOADERR	.AT "Unable to load"
 ILDR.MSG.SYSTOOLARG	.AT "Too Large"
+ILDR.LCBits		.HS 8040201008040201
 *--------------------------------------
-gfi_list 		.DA #$0A
-				.DA atinitname
-				.HS 00
-gfi_type 		.HS 00000000
-				.HS 0000000000000000
-				.HS 0000
+ILDR.GFINFO		.DA #10					PARAM CNT
+				.DA ILDR.ATINIT
+				.BS	S.FI-3
 *--------------------------------------
-atopen			.HS 03
-				.DA atinitname
+ILDR.OPEN		.DA #3					PARAM CNT
+				.BS 2					Filename
 				.DA iobuf				i/o buffer
-				.HS 01					ref# hard coded since no other files
+				.HS 01					REF
 *--------------------------------------
-atinitname 		.DA #06					length of name
-				.AS "ATINIT"	  		name of appletalk config file
+ILDR.GETEOF		.DA #2					PARAM CNT
+				.DA #01					REF
+				.HS 000000
 *--------------------------------------
-opparm			.HS 03
-				.DA pbuf
-				.DA iobuf
-				.HS 01
-efparm			.HS 02
-				.DA #01
-eof				.HS 000000				length of file.
-rdparm			.HS 04
-				.HS 01
+ILDR.READ		.DA #4					PARAM CNT
+				.HS 01					REF
 				.DA sysentry
-rdlen			.HS 0000
+				.DA $9F00				Max file size
 				.HS 0000
-clparm			.HS 01
-				.HS 00
-quitparm		.HS 04
+*--------------------------------------
+ILDR.CLOSE		.DA #1					PARAM CNT
+				.HS 01					REF
+*--------------------------------------
+ILDR.QUIT		.DA #4					PARAM CNT
 				.HS 00
 				.HS 0000
 				.HS 00
 				.HS 0000
-iterp			.AS ".SYSTEM"			interpreter suffix that is required
+*--------------------------------------
+ILDR.ATINIT		.DA #6
+				.AS "ATINIT"
+ILDR.KMSFX		.DA #3
+				.AS ".PM"
+ILDR.SYSTEMSFX	.DA #7
+				.AS ".SYSTEM"
 *--------------------------------------
 ILDR.LEN		.EQ *-ILDR.START
+*--------------------------------------
+				.DUMMY
+ILDR.EPB		.BS 1
+ILDR.EL			.BS 1
+ILDR.nFC		.BS 2
+ILDR.FT			.BS 1
+ILDR.EITB		.BS 1
+				.ED
+*--------------------------------------
 MAN
 SAVE usr/src/prodos.fx/prodos.s.ildr
 LOAD usr/src/prodos.fx/prodos.s
