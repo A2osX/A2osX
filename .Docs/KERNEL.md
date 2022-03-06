@@ -79,15 +79,15 @@ CC = OK, CS = ERROR
 Y,A = FD  
 X = hFD  
 
-# GetDevStatus  
+# MkFD  
 
 ## C  
-`int getdevstatus(short int DevID, S.DIB *dstat);`  
+`short int mkfd(short int type, );`  
 
 ## ASM  
 `>PUSHB DevID`  
 `>PUSHW S.DIB`  
-`>SYSCALL GetDevStatus`  
+`>SYSCALL MkFD`  
 
 ## RETURN VALUE  
 
@@ -317,7 +317,7 @@ CC
 Initialize a MD5 computation  
 
 # C  
-`hMD5 md5init ();`  
+`short int md5init();`  
 
 # ASM  
 `>SYSCALL MD5Init`  
@@ -430,10 +430,49 @@ Y,A = PTR to MemBlock
  CS : error  
   A = EC  
 
+# ChTyp  
+Change The type of a ProDOS File  
+
+## C  
+`int chtyp(const char *filepath, short int filetype);`  
+
+## ASM  
+`>PUSHW filepath`  
+`>PUSHB filetype`  
+`>SYSCALL ChTyp`  
+
+## RETURN VALUE  
+
+# ChAux  
+Change The type of a ProDOS File  
+
+## C  
+`int chaux(const char *filepath, int auxtype);`  
+
+## ASM  
+`>PUSHW filepath`  
+`>PUSHB filetype`  
+`>SYSCALL ChAux`  
+
+## RETURN VALUE  
+
+# SetAttr  
+Change Attributes of a ProDOS File  
+
+## C  
+`int setattr(const char *filepath, short int attributes);`  
+
+## ASM  
+`>PUSHW filepath`  
+`>PUSHB attributes`  
+`>SYSCALL setattr`  
+
+## RETURN VALUE  
+
 # ExecL  
 
 ## C / CSH  
-`int execl(const char *cmdline, short int flags);`  
+`short int execl(const char *cmdline, short int flags);`  
 
 ## ASM  
 `>PUSHW cmdline`  
@@ -446,7 +485,7 @@ A = Child PSID
 # ExecV  
 
 ## C / CSH  
-`int execv(const char* argv[], short int flags);`  
+`short int execv(const char* argv[], short int flags);`  
 
 ## ASM  
 `>PUSHW argv`  
@@ -729,29 +768,29 @@ CS : not found
 ## RETURN VALUE  
 A=hSList  
 
-# ChTyp  
-Change The type of a ProDOS File  
+# ChMod  
+change permissions of a file  
 
 ## C  
-`int chtyp(const char *filepath, short int filetype);`  
+`int chmod(const char *pathname, int mode);`  
 
 ## ASM  
-`>PUSHW filepath`  
-`>PUSHB filetype`  
-`>SYSCALL chtyp`  
+`>PUSHW pathname`  
+`>PUSHW mode`  
+`>SYSCALL chmod`  
 
 ## RETURN VALUE  
 
-# SetAttr  
-Change Attributes of a ProDOS File  
+# FStat  
+Return information about a hFILE  
 
 ## C  
-`int setattr(const char *filepath, short int attributes);`  
+`int fstat(short int hFILE, struct stat *statbuf);`  
 
 ## ASM  
-`>PUSHW filepath`  
-`>PUSHB attributes`  
-`>SYSCALL setattr`  
+`>PUSHB hFILE`  
+`>PUSHW statbuf`  
+`>SYSCALL fstat`  
 
 ## RETURN VALUE  
 

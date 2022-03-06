@@ -1,0 +1,562 @@
+NEW
+  AUTO 3,1
+*--------------------------------------
+       .DA COMMAND.TABLE needed for HELP command
+*--------------------------------
+*   PARSE COMMAND LINE
+*--------------------------------
+PARSE.COMMAND
+       JSR SCAN.COMMAND.TABLE
+       BCS SYNERR2  ...SYNTAX ERROR
+       LDA #0
+       STA FBITS
+       STA FBITS+1
+       STA PATHNAME.TWO.BUFFER
+       STA PATHNAME.ONE.BUFFER+1
+       LDA D.SLOT
+       STA VAL.S
+       LDA D.DRIV
+       STA VAL.D
+*---Handle special cases---------
+       BIT PBITS         Check for PR# or IN#
+       BVS PARSE.INPR    PR# & IN# commands
+       BPL .1       ...not CAT(ALOG) or PREFIX
+       JSR MLI.C7   ...CAT, CATALOG, or PREFIX
+*---TEST CHAR AFTER COMMAND------
+.1     JSR GET.NEXT.NONBLANK
+       BNE .2       ...not comma or <CR>
+       BCC .5       ...<CR> already
+       JMP GET.ANOTHER.PARM
+*---Get a pathname---------------
+.2     CMP #'/'     MUST START WITH "/" OR LETTER
+       BEQ .3
+       CMP #'A'
+       BCC SYNERR2   ...SYNTAX ERROR
+.3     DEX          RE-SCAN THE FIRST CHAR OF PATH
+       LDY #0
+.4     JSR GET.NEXT.CHAR.FROM.WBUF
+       STA PATHNAME.ONE.BUFFER+1,Y
+       JSR STORE.PATH.TWO.AND.TEST
+       BCC .4
+       DEY
+       STY PATHNAME.ONE.BUFFER
+       STY PATHNAME.TWO.BUFFER
+       LDA #$01     TELL THE WORLD ABOUT IT
+       STA FBITS
+*--------------------------------
+       DEX          RE-SCAN CHAR AFTER PATHNAME
+       JSR GET.NEXT.NONBLANK
+       BNE SYNERR2         ...NOT COMMA OR <CR>
+       BCS MORE.PARMS      ...COMMA
+.5     JMP NO.MORE.PARMS   ...<CR>
+SYNERR2
+       JMP ERR.SYNTAX
+*--------------------------------
+*   PR# or IN# commands
+*--------------------------------
+PARSE.INPR
+       JSR GET.NEXT.NONBLANK     CHAR AFTER COMMAND
+       BEQ SYNERR2       ...comma or <CR>
+       DEX          ...IN CASE IT IS "Axxx"
+       CMP #'A'
+       BEQ GET.ANOTHER.PARM   ...HANDLE PR#Axxx or IN#Axxx
+       INX          RESTORE X
+       JSR ZERO.ACCUM
+       STY PARM.LENM1    Y=0, 1 BYTE PARM
+       LDY #VAL.LB-VAL.A    PARM OFFSET FROM VAL.A
+       STY PARM.OFFSET
+       LDY #$40
+       STY FBITS
+       JSR CONVERT.DECIMAL.NUMBER
+       BCS RTS4
+       LDA VAL.LB
+       CMP #$08
+       BCC TEST.IF.MORE.PARMS
+SCI.ERR.RANGE
+       LDA #$02
+       SEC
+RTS4   RTS
+*--------------------------------
+MORE.PARMS
+       LDA PBITS
+       LSR          TEST BIT 0
+       BCC SYNERR2  ...NO PATHNAME EXPECTED
+       LSR          TEST BIT 1
+       BCC GET.ANOTHER.PARM   ...NO PATH-TWO EXPECTED
+*---Get second pathname----------
+       JSR GET.NEXT.NONBLANK
+       BEQ SYNERR2  ...COMMA OR <CR>
+       DEX          RE-SCAN FIRST CHAR OF PATHNAME
+       LDY #0
+.1     JSR GET.NEXT.CHAR.FROM.WBUF
+       JSR STORE.PATH.TWO.AND.TEST
+       BCC .1
+       DEY
+       STY PATHNAME.TWO.BUFFER
+       LDA #$03     WE GOT TWO PATHNAMES, SO
+       STA FBITS         MARK THE BITS
+       DEX          RE-SCAN TERM. CHAR
+*--------------------------------
+TEST.IF.MORE.PARMS
+       JSR GET.NEXT.NONBLANK
+       BNE SYNERR2
+       BCC NO.MORE.PARMS
+GET.ANOTHER.PARM
+       JSR GET.NEXT.NONBLANK
+       BEQ SYNERR2       ...NULL PARAMETER
+       JSR PARSE.PARAMETER
+       BCC TEST.IF.MORE.PARMS
+       RTS          ...error return
+*--------------------------------
+NO.MORE.PARMS
+       LDA VAL.S    CHECK RANGE OF S AND D
+       BEQ SCI.ERR.RANGE
+       CMP #$08
+       BCS SCI.ERR.RANGE
+       LDA VAL.D
+       BEQ SCI.ERR.RANGE
+       CMP #$03
+       BCS SCI.ERR.RANGE
+*---CHECK IF DEFERRED COMMAND----
+       LDA PBITS    (only OPEN and WRITE are deferred)
+       AND #$21
+       LSR
+       BEQ .1       ...NOT DEFERRED
+       LDA STATE    ...ARE WE IN DIRECT MODE?
+       BEQ .6       ...YES, DEFERRED IS ILLEGAL
+*---CHECK PATHNAME---------------
+.1     BCC .5       ...NO PATH PERMITTED
+       LDA PBITS+1
+       AND #$04     S OR D OK?
+       BEQ .5       ...NO
+       LDA FBITS
+       LSR          HAVE WE A PATHNAME?
+       BCS .2       ...YES
+       LDA PBITS    ...NO, IS PATH NEEDED
+       AND #$90
+       BEQ ERR.SYNTAX   ...YES
+       BPL .5
+*---NEED PREFIX OR S,D-----------
+.2     LDA PATHNAME.ONE.BUFFER+1
+       EOR #'/'     SLASH
+       BEQ .3       ...EXPLICIT PREFIX
+       LDA PREFIX.FLAG   MLI's flag
+       BEQ .4       ...NO PREFIX IS SET
+.3     LDA FBITS+1  DID WE GET S,D?
+       AND #$04
+       BEQ .5       ...NO
+       BCS .4       ...YES, AND THERE IS A PATHNAME
+       LDA #0       ...YES, BUT NO PATHNAME
+       STA PATHNAME.ONE.BUFFER
+       STA PATHNAME.ONE.BUFFER+1
+       LDA #$01     SIGNAL WE GOT PATHNAME AFTER ALL
+       ORA FBITS
+       STA FBITS
+.4     JSR INSERT.VOLUME.NAME
+       BCS .7
+*---BRANCH TO COMMAND------------
+.5     CLC          SIGNAL NO ERROR
+       LDA COMMAND.NUMBER
+       BEQ EXTERNAL      ...USER'S COMMAND
+       EOR #CN.PREFIX
+       BEQ INTERNAL      ...PREFIX COMMAND
+       LDA PBITS+1       ARE S/D VALID?
+       AND #$04
+       BEQ INTERNAL      ...NO
+       LDA FBITS         ANY PATHNAME SPECIFIED?
+       LSR
+       BCC INTERNAL      ...NO
+       JSR GET.FILE.INFO   ...YES
+       BCC INTERNAL      ...NO ERROR
+       ORA #0            ...ERROR, WAS IT "FILE NOT FOUND"?
+       BPL .7            ...NO, REAL ERROR
+       LDA PBITS         OKAY TO CREATE PATHNAME?
+       AND #$08
+       BNE INTERNAL      ...YES
+       LDA #$06          "PATH NOT FOUND"
+       .HS 2C
+.6     LDA #$0F          "NOT DIRECT COMMAND"
+       SEC
+.7     RTS
+*--------------------------------
+INTERNAL   JMP (COMMAND.ADDR)
+EXTERNAL   JMP (EXTERNAL.COMMAND.HANDLER)
+*--------------------------------
+ERR.SYNTAX
+       LDA #$10     SYNTAX ERROR
+ERRR   SEC
+       RTS
+*--------------------------------
+*   INSERT PREFIX BEFORE PATHNAME
+*--------------------------------
+INSERT.VOLUME.NAME
+       LDA VAL.S    BUILD UNIT # FROM SLOT,DRIVE
+       TAY          SAVE VAL.S
+       LSR          0000.00SS S
+       ROR          S000.000S S
+       ROR          SS00.0000 S
+       ROR          SSS0.0000 0
+       LDX VAL.D
+       CPX #2       .CS. if 2, .CC. if 1
+       ROR          DSSS.0000
+       STA MISC.PARMS+1
+       LDA #WBUF+1
+       STA MISC.PARMS+2
+       LDA /WBUF+1
+       STA MISC.PARMS+3
+       JSR MLI.C5   ONLINE -- READ VOLUME NAME
+       BCS .4       NO SUCH SLOT AND DRIVE
+       STX D.DRIV   UPDATE DEFAULT S AND D
+       STY D.SLOT
+*--------------------------------
+       LDA PATHNAME.ONE.BUFFER+1
+       EOR #'/'     ALREADY HAVE VOLUME NAME?
+       BEQ .4       ...YES, DON'T NEED ANOTHER
+*---ISOLATE VOLNAME LENGTH-------
+       LDA WBUF+1   DSSSLLLL
+       AND #$0F     0000LLLL
+       STA WBUF+1
+*---MOVE PATHNAMES OVER L+2------
+       LDY #62
+       TYA
+       SEC
+       SBC WBUF+1
+       TAX
+.1     LDA PATHNAME.ONE.BUFFER,X
+       STA PATHNAME.ONE.BUFFER+2,Y
+       LDA PATHNAME.TWO.BUFFER,X
+       STA PATHNAME.TWO.BUFFER+2,Y
+       DEY
+       DEX
+       BNE .1
+*---INSERT VOLUME SLASHES--------
+       LDA #'/'
+       STA PATHNAME.ONE.BUFFER+2,Y
+       STA PATHNAME.ONE.BUFFER+1
+       STA PATHNAME.TWO.BUFFER+2,Y
+       STA PATHNAME.TWO.BUFFER+1
+*---COPY VOLUME NAME-------------
+.2     LDA WBUF+1,Y
+       STA PATHNAME.ONE.BUFFER+1,Y
+       STA PATHNAME.TWO.BUFFER+1,Y
+       DEY
+       BNE .2
+*---UPDATE PATH LENGTHS----------
+       CLC
+       LDA WBUF+1
+       ADC #2       INCLUDE SLASHES
+       TAY
+       ADC PATHNAME.ONE.BUFFER
+       CMP #64
+.3     BCS ERR.SYNTAX
+       STA PATHNAME.ONE.BUFFER
+       TYA
+       ADC PATHNAME.TWO.BUFFER
+       STA PATHNAME.TWO.BUFFER
+       CMP #64
+       BCS .3       ...BRIDGE TO SYNTAX ERROR
+*--------------------------------
+.4     RTS
+*--------------------------------
+SCAN.COMMAND.TABLE
+       LDY #0       PNTR INTO COMMAND TABLE
+       STY COMMAND.NUMBER
+       DEY
+*---COMPARE COMMAND NAME---------
+.1     INC COMMAND.NUMBER
+       LDX #0       PNTR INTO WBUF
+.2     INY          next byte in command table
+       JSR GET.NEXT.NONBLANK
+       BEQ .4       ...end of WBUF contents
+       EOR COMMAND.TABLE,Y
+       BEQ .2       ...same so far
+       ASL          Might be last char
+       BNE .4       ...No, try next command
+*---We found the command---------
+       LDA COMMAND.TABLE+1,Y
+       STA COMMAND.ADDR
+       LDA COMMAND.TABLE+2,Y
+       STA COMMAND.ADDR+1
+       LDA COMMAND.TABLE+3,Y
+       STA PBITS
+       LDA COMMAND.TABLE+4,Y
+       STA PBITS+1
+       CLC
+       RTS
+*---SKIP TO NEXT COMMAND---------
+.3     INY
+.4     LDA COMMAND.TABLE,Y
+       BPL .3       ...NOT LAST CHAR YET
+       INY          SKIP OVER ADDRESS
+       INY
+       INY          SKIP OVER PBITS
+       INY
+       LDA COMMAND.TABLE+1,Y
+       BNE .1       ...more commands in table
+*---TRY EXTERNAL COMMAND---------
+       LDA #$FF
+       STA COMMAND.NUMBER
+       SEC
+       JMP SCI.USER.CMD
+*--------------------------------
+SYNERR1 JMP ERR.SYNTAX
+*--------------------------------
+PARSE.PARAMETER
+       JSR ZERO.ACCUM
+       LDY #NO.PARM.NAMES-1
+.1     CMP PARM.NAMES,Y
+       BEQ FOUND.PARM
+       DEY
+       BPL .1
+       CMP #'T'
+       BNE SYNERR1   ...SYNTAX ERROR
+*---PARSE T PARAMETER------------
+       LDA #$04
+       AND PBITS
+       BEQ ERR.BADPARM
+       ORA FBITS
+       STA FBITS
+       LDA #0            SINGLE BLYTE
+       STA PARM.LENM1
+       LDA #VAL.T-VAL.A    PARM OFFSET FROM VAL.A
+       STA PARM.OFFSET
+       JSR GET.NEXT.NONBLANK
+       BEQ SYNERR1
+       CMP #'$'
+       BEQ CONVERT.HEX.NUMBER
+       CMP #'A'
+       BCC CONVERT.DECIMAL.NUMBER
+       JMP CONVERT.FILE.TYPE
+*--------------------------------
+ERR.BADPARM
+       SEC          "INVALID PARAMETER"
+       LDA #$0B
+       RTS
+*--------------------------------
+FOUND.PARM
+       LDA PARM.MASKS,Y
+       BEQ .2
+       AND PBITS+1
+       BEQ ERR.BADPARM
+       CMP #$04     IS IT S OR D
+       BNE .1       ...NO
+       AND FBITS+1  ...YES, DID WE ALREADY HAVE S OR D
+       BNE .2       ...YES
+       LDA #1       ...NO, SET D=1
+       STA VAL.D
+       LDA #$04
+.1     ORA FBITS+1
+       STA FBITS+1
+.2     LDA PARM.VARIABLES,Y
+       AND #$03
+       STA PARM.LENM1
+       LDA PARM.VARIABLES,Y
+       LSR
+       LSR
+       STA PARM.OFFSET
+       JSR GET.NEXT.NONBLANK
+       BEQ GO.ERR.SYNTAX.1
+       CMP #'$'
+       BEQ CONVERT.HEX.NUMBER
+*--------------------------------
+CONVERT.DECIMAL.NUMBER
+       STX COMMAND.LINE.LENGTH
+       JSR ACCUMULATE.DECIMAL.DIGIT
+       BCC .1
+       BMI GO.ERR.RANGE.1
+       BCS GO.ERR.SYNTAX.1
+.1     LDX COMMAND.LINE.LENGTH
+       JSR GET.NEXT.NONBLANK
+       BNE CONVERT.DECIMAL.NUMBER
+       BEQ CHECK.PARAMETER.RANGE
+*--------------------------------
+CONVERT.HEX.NUMBER
+       JSR GET.NEXT.NONBLANK
+       BEQ GO.ERR.SYNTAX.1
+.1     STX COMMAND.LINE.LENGTH
+       JSR ACCUMULATE.HEX.DIGIT
+       BCC .2
+       BMI GO.ERR.RANGE.1
+       BCS GO.ERR.SYNTAX.1
+.2     LDX COMMAND.LINE.LENGTH
+       JSR GET.NEXT.NONBLANK
+       BNE .1
+*--------------------------------
+CHECK.PARAMETER.RANGE
+       LDX #$02
+.1     CPX PARM.LENM1
+       BEQ .2
+       LDA ACCUM,X
+       BNE GO.ERR.RANGE.1
+       DEX
+       BNE .1
+.2     LDY PARM.OFFSET
+.3     LDA ACCUM,X
+       STA VAL.A,Y
+       DEY
+       DEX
+       BPL .3
+       LDX COMMAND.LINE.LENGTH
+       CLC
+       RTS
+*--------------------------------
+GO.ERR.SYNTAX.1 JMP ERR.SYNTAX
+*--------------------------------
+GO.ERR.RANGE.1  JMP SCI.ERR.RANGE
+*--------------------------------
+CONVERT.FILE.TYPE
+       STA ACCUM+2       1ST LETTER
+       LDY #2            GET 2ND AND 3RD
+.1     JSR GET.NEXT.NONBLANK
+       BEQ GO.ERR.SYNTAX.1
+       STA ACCUM-1,Y     STORE THEM BACKWARDS
+       DEY
+       BNE .1            ...UNTIL Y=0
+       STX COMMAND.LINE.LENGTH  SAVE X-REG
+.2     LDX #2       COMPARE NEXT ENTRY
+.3     LDA ACCUM,X
+       EOR FILE.TYPES,Y
+       INY
+       ASL          IGNORE BIT 7
+       BNE .4       ...NOT THE SAME
+       DEX          NEXT CHAR
+       BPL .3
+       LDA FILE.TYPES,Y
+       STA VAL.T
+       LDX COMMAND.LINE.LENGTH  RESTORE X-REG
+       CLC
+       RTS
+.4     INY
+       DEX
+       BPL .4
+       CPY #LAST.FILE.TYPE
+       BCC .2
+       BCS GO.ERR.SYNTAX.1
+*--------------------------------
+*    GET NEXT NON-BLANK CHAR FROM WBUF
+*      CHAR   Z   C
+*      <CR>  YES CLR
+*      COMMA YES SET
+*      OTHER  NO  ?
+*--------------------------------
+GET.NEXT.NONBLANK
+.1     JSR GET.NEXT.CHAR.FROM.WBUF
+       CMP #' '
+       BEQ .1       IGNORE BLANKS
+       CMP #','
+       BEQ .2       .CS. and .EQ.
+       CMP #$0D     .EQ. if <CR>
+       CLC          .CC.
+.2     RTS
+*--------------------------------
+GET.NEXT.CHAR.FROM.WBUF
+       LDA WBUF,X
+       BNE .1       MAKE 00==8D
+       LDA #$0D
+.1     AND #$7F
+       CMP #$60     CONVERT LOWER CASE TO UPPER
+       BCC .2
+       AND #$5F
+.2     INX
+       RTS
+*--------------------------------
+ACCUMULATE.DECIMAL.DIGIT
+       CMP #$30
+       BCC .1
+       CMP #$3A
+       BCC .2
+.1     SEC
+       ORA #0
+       RTS
+*--------------------------------
+.2     AND #$0F
+       PHA
+       LDA ACCUM+2
+       CMP #$1A
+       BCS .5
+       LDX #$02
+.3     LDA ACCUM,X
+       PHA
+       DEX
+       BPL .3
+       JSR SHIFT.ACCUM.LEFT
+       JSR SHIFT.ACCUM.LEFT
+       LDX #0
+       CLC
+.4     PLA
+       ADC ACCUM,X
+       STA ACCUM,X
+       INX
+       TXA
+       EOR #$03
+       BNE .4
+       JSR SHIFT.ACCUM.LEFT
+.5     PLA
+       BCS TOOBIG
+       ADC ACCUM
+       STA ACCUM
+       BCC RTS1
+       CLC
+       INC ACCUM+1
+       BNE RTS1
+       INC ACCUM+2
+       BNE RTS1
+TOOBIG LDA #$FF
+       SEC
+RTS1   RTS
+*--------------------------------
+ACCUMULATE.HEX.DIGIT
+       CMP #'0'
+       BCC .1
+       CMP #'9'+1
+       BCC .3
+       CMP #'A'
+       BCC .1
+       CMP #'F'+1
+       BCC .2
+.1     SEC
+       ORA #0
+       RTS
+.2     SBC #$06
+.3     AND #$0F
+       LDX #$03
+.4     JSR SHIFT.ACCUM.LEFT
+       BCS TOOBIG
+       DEX
+       BPL .4
+       ORA ACCUM
+       STA ACCUM
+       RTS
+*--------------------------------
+SHIFT.ACCUM.LEFT
+       ASL ACCUM
+       ROL ACCUM+1
+       ROL ACCUM+2
+       RTS
+*--------------------------------
+ZERO.ACCUM
+       LDY #0
+       STY ACCUM
+       STY ACCUM+1
+       STY ACCUM+2
+       RTS
+*--------------------------------
+*      RETURN .CC. IF NOT END OF PATHNAME YET
+*        ELSE .CS.
+*--------------------------------
+STORE.PATH.TWO.AND.TEST
+       STA PATHNAME.TWO.BUFFER+1,Y
+       INY
+       CMP #','
+       BEQ .1
+       CMP #' '
+       BEQ .1
+       CMP #$0D
+       BEQ .1
+       CPY #65
+.1     RTS
+*--------------------------------------
+MAN
+SAVE usr/src/scmasm.30/sci.s.cpar
+LOAD usr/src/scmasm.30/scmasm.s
+ASM

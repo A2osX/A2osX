@@ -1,0 +1,321 @@
+NEW
+  AUTO 3,1
+*--------------------------------------
+*      EDIT ONE LINE
+*          TEXT OF LINE ALREADY IN WBUF
+*          (A1L,A1H) POINT AT LINE IN SOURCE AREA
+*--------------------------------
+EDIT.ONE.LINE
+       LDA BOTTOM.OF.SCREEN
+       STA ED.BEGLIN
+       JSR IO.VTAB
+       JSR E.BEG    Start edit 2 columns after line #
+.1     STX ED.PNTR
+       JSR E.DISPLAY.LINE  Put line on screen
+       LDX ED.PNTR  Restore PNTR in X
+       JSR E.PROCESS.CHAR
+       BCC .1       Not control-L, -M, or -Q
+       JSR E.DISPLAY.LINE  ...One last time
+       JSR CRLF
+       JMP NML      Submit line and return
+*--------------------------------
+*      DISPLAY LINE FROM WBUF
+*--------------------------------
+E.DISPLAY.LINE
+       LDA ED.BEGLIN
+       JSR IO.VTAB
+       LDA #0
+       JSR IO.HTAB
+       JSR SPC      One space
+       LDX #0
+.1     LDA WBUF,X
+       BEQ .4       End of line
+       ORA #$80
+       CMP #$A0     Control char?
+       BCS .2       No
+       AND #$3F     ...YES, MAKE IT INVERSE
+.2     PHA
+       JSR GET.HORIZ.POSN
+       TAY
+       PLA
+       INY
+       CPY SCREEN.WIDTH
+       BCC .3       No
+       LDY CV       Last line on screen?
+       CPY BOTTOM.OF.SCREEN
+       BCC .3       No
+       DEC ED.BEGLIN  Yes, it will scroll
+.3     JSR IO.COUT
+       INX
+       BNE .1       ...Always
+.4     JMP IO.CLREOP
+*--------------------------------
+*      PROCESS EDITING CHARACTER
+*--------------------------------
+E.PROCESS.CHAR
+EPC.1  JSR E.INPUT  Get char from keyboard
+EPC.2  CMP #$A0     Control char?
+       BCC E.PROCESS.CNTRL
+*--------------------------------
+*      PUT CHARACTER INTO LINE
+*--------------------------------
+E.PUT.CHARACTER
+       LDA WBUF,X   At end of line?
+       BNE .1       No
+       CPX #WBUF.MAX  Line too long?
+       BCS .2       Yes
+       STA WBUF+1,X Put new <EOL>
+.1     LDA CURRENT.CHAR
+       STA WBUF,X
+       INX
+.2     CLC
+       RTS
+*--------------------------------
+*      PROCESS CONTROL CHAR
+*--------------------------------
+E.PROCESS.CNTRL
+       LDY #CHARS.FOR.EDIT
+       JMP SEARCH.CHAR.TABLES
+*--------------------------------
+E.ILLCHAR
+       JSR MON.BELL
+       LDX ED.PNTR  Restore X-reg
+       JMP EPC.1
+*--------------------------------
+*      CONTROL-R:  RESTORE ORIGINAL LINE
+*--------------------------------
+E.RESTORE
+       LDA A1L      Set line pointer back
+       STA SRCP
+       LDA A1H
+       STA SRCP+1
+       JSR GET.LINE.TO.WBUF
+*--------------------------------
+*      CONTROL-B:  BEGINNING OF LINE
+*--------------------------------
+FIND.START.OF.LINE.IN.WBUF
+E.BEG  LDY #0       Find 1st column after line number
+.1     JSR GNC2
+       BCS .2       End of line
+       JSR CHECK.DIGIT
+       BCS .1       Yes
+       INY
+.2     TYA          Get column # into X
+       TAX
+       DEX
+       CLC
+       RTS
+*--------------------------------
+*      CONTROL-D:  DELETE CHARACTER
+*--------------------------------
+E.DEL  LDX ED.PNTR
+.1     LDA WBUF,X   Are we at the end?
+       BEQ .3       Yes
+.2     INX          ADVANCE PNTR
+       LDA WBUF,X   SLIDE REST OF LINE LEFT
+       STA WBUF-1,X   ...to delete char
+       BNE .2       ...UNTIL END OF LINE
+.3     LDX ED.PNTR
+       CLC
+       RTS          Return with Carry clear
+*--------------------------------
+*      CONTROL-N:  END OF LINE
+*--------------------------------
+E.END  LDX ED.PNTR
+       DEX
+.1     INX
+       LDA WBUF,X   End of buffer?
+       BNE .1       ...KEEP LOOKING
+       CLC
+       RTS          Carry clear
+*--------------------------------
+*      CONTROL-F:  FIND NEXT OCCURRENCE
+*--------------------------------
+E.FIND LDX ED.PNTR
+       LDA WBUF,X   End of buffer?
+       BEQ .3       Yes
+       JSR E.INPUT  Get 1 char
+       STX ED.FCOL  Save beg col
+       STA ED.FKEY  Save key to locate
+.1     INX
+       LDA WBUF,X   Text buffer
+       BEQ .2       End of buffer
+       ORA #$80
+       CMP ED.FKEY  No, see if key
+       BNE .1       No, go forward
+       STX ED.FCOL  Save this col
+       JSR E.INPUT  Try another key
+       CMP ED.FKEY  Same char
+       BEQ .1       Yes, search again
+       STX ED.PNTR    No, exit pointing here
+       JMP EPC.2
+.2     LDX ED.FCOL  Restore col
+.3     JSR MON.BELL Beep
+       CLC
+       RTS
+*--------------------------------
+*      CONTROL-H:  BACKSPACE
+*--------------------------------
+E.BKSP LDX ED.PNTR
+       TXA          At beginning already?
+       BEQ .1       Yes, stay there
+       DEX          Backup
+.1     CLC
+       RTS
+*--------------------------------
+*      CONTROL-O:  ALLOW INSERTION OF CONTROL CHAR
+*--------------------------------
+E.OVR  LDX ED.PNTR
+       JSR E.INPUT  Read char
+       JMP E.INS1   Skip control check
+*--------------------------------
+*      CONTROL-I:  INSERT CHARACTERS
+*--------------------------------
+E.INS  LDX ED.PNTR
+       JSR E.INPUT  Read char
+       CMP #$A0     Control char pops user out
+       BCS E.INS1
+       JMP E.PROCESS.CNTRL
+E.INS1 CPX #WBUF.MAX     End of block
+       BEQ .1       Yes, stay there
+       INC ED.PNTR
+.1     PHA          Char to insert
+       LDA WBUF,X   Save char to move
+       TAY
+       PLA
+       STA WBUF,X   Put over saved char
+       INX
+       TYA          Insert saved char
+       BNE .1       If not buffer end
+       CPX #WBUF.MAX     At end?
+       BCC .2       Not yet
+       LDX #WBUF.MAX     Yes
+.2     STA WBUF,X   Store end char
+       JSR E.DISPLAY.LINE
+       LDX ED.PNTR
+       BNE E.INS    ...Always
+*--------------------------------
+*      CONTROL-Q:  QUIT, DROPPING REST OF LINE
+*--------------------------------
+E.RETQ JSR E.ZAP    Clear rest of line
+*--------------------------------
+*      CONTROL-M:  QUIT, SUBMITTING WHOLE LINE
+*--------------------------------
+E.RET  SEC
+       RTS
+*--------------------------------
+*      CONTROL-L:  SUBMIT THIS LINE, EDIT NEXT LINE
+*--------------------------------
+E.DOWN LDA ENDP     See if at HI.MEM already
+       CMP HI.MEM
+       LDA ENDP+1
+       SBC HI.MEM+1
+       BCS .1       Yes, no need to move ENDP
+       JSR CMP.SRCP.ENDP     End of range yet?
+       BCC .1                ...NO
+       CLC          Move ENDP one line
+       LDY #0
+       LDA (SRCP),Y Line length of next line
+       ADC ENDP
+       STA ENDP
+       BCC .1
+       INC ENDP+1
+.1     SEC          Signal submit line
+       RTS
+*--------------------------------
+*      CONTROL-T:  SKIP TO NEXT TAB STOP
+*--------------------------------
+E.TAB  LDX ED.PNTR
+.1     JSR E.CHECK.TAB
+       BCS E.RIT1   MOVE ONE MORE COLUMN
+       JSR E.RIT1   Move one column right
+       BCC .1       ...ALWAYS
+*--------------------------------
+*      CONTROL-U:  RIGHT ARROW
+*--------------------------------
+E.RIT  LDX ED.PNTR
+E.RIT1 LDA WBUF,X   End of buffer?
+       BNE .1       No
+       CPX #WBUF.MAX
+       BCS .2
+       STA WBUF+1,X
+       LDA #$A0     Put a blank
+       STA WBUF,X   To extend line
+.1     INX          Move ahead
+.2     CLC          Return
+       RTS
+*--------------------------------
+*      CONTROL-X:  ABORT EDIT COMMAND
+*--------------------------------
+E.ABORT
+       JSR E.DISPLAY.LINE
+       LDA #$DC     Backslash
+       JSR MY.COUT
+       JMP GNL      Get next command
+*--------------------------------
+*      CONTROL-@:  CLEAR TO EOL
+*--------------------------------
+E.ZAP  LDA #0       EOL mark
+       LDX ED.PNTR
+       STA WBUF,X
+       CLC
+       RTS          Carry clear
+*--------------------------------
+*      INPUT CHAR WHERE CURSOR SHOULD BE
+*--------------------------------
+E.INPUT
+       LDY ED.BEGLIN
+       INX
+       TXA
+       DEX
+       DEY
+       SEC
+.1     INY
+       SBC SCREEN.WIDTH
+       BCS .1
+       ADC SCREEN.WIDTH
+       JSR IO.HTAB  HTAB (A)
+       TYA
+       JSR IO.VTAB
+       JSR READ.KEY.WITH.CASE
+       STA CURRENT.CHAR
+       RTS
+*--------------------------------
+*      DETERMINE IF AT TAB STOP YET
+*      RETURN .EQ. IF AT A TAB STOP
+*             .CS. IF PAST LAST TAB STOP
+*             .CC. IF BEFORE A TAB STOP
+*--------------------------------
+E.CHECK.TAB
+       TXA          Column position
+       CLC
+       ADC #3
+       LDY #0
+.1     CMP TAB.SETTINGS,Y
+       BCC .2
+       BEQ .2
+       INY
+       CPY #5
+       BCC .1
+.2     RTS
+*--------------------------------
+*      CONTROL-I -- CLEAR TO TAB STOP
+*--------------------------------
+E.TABI LDX ED.PNTR
+       LDA #" "
+       STA CURRENT.CHAR
+.1     JSR E.CHECK.TAB
+       BCS .2       ...REACHED TAB STOP
+       JSR E.PUT.CHARACTER
+       BCC .1       ...ALWAYS
+.2     JMP E.PUT.CHARACTER One more space
+*--------------------------------
+E.TOGGLE
+       JSR IO.CASE.TOGGLE
+       CLC
+       RTS
+*--------------------------------------
+MAN
+SAVE usr/src/scmasm.30/scmasm.s.elines
+LOAD usr/src/scmasm.30/scmasm.s
+ASM

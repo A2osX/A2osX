@@ -1,0 +1,414 @@
+NEW
+  AUTO 3,1
+*--------------------------------------
+*    EXPRESSION CRACKER
+*-------------------------------
+EXPR.DEFINED
+       JSR EXPR
+       BMI .1
+       RTS
+.1     JMP UNDF
+*--------------------------------
+OPERATOR.CHARS
+       .AS "^!|&<=>/*)], "
+OPERATOR.CHARS.SIZE .EQ *-OPERATOR.CHARS
+*--------------------------------
+OPERATOR.INDEX
+       .HS 0C.0A.0A.08.0E.10.12.06.04.FF.FF.FF.FF
+*          ^  !  |  &  <  =  >  /  *  )  ]  ,  SPC
+*--------------------------------
+OPERATOR.TABLE
+       .DA EXP.SUBTRACT-1   0 FOR -<=>
+       .DA EXP.ADD-1        2 FOR +
+       .DA EXP.MULTIPLY-1   4 FOR *
+       .DA EXP.DIVIDE-1     6 FOR /
+       .DA EXP.AND-1        8 FOR &
+       .DA EXP.ORA-1        A FOR !|
+       .DA EXP.EOR-1        C FOR ^
+       .DA EXP.LESS-1       E FOR <
+       .DA EXP.EQUAL-1     10 FOR =
+       .DA EXP.GREATER-1   12 FOR >
+*--------------------------------
+ERBA3  JMP ERBA
+*--------------------------------
+EXPR   JSR GNNB      GET NEXT NON-BLANK
+       BCS ERBA3     NO EXPRESSION ON LINE
+       JSR BACKUP.CHAR.PNTR
+*--------------------------------
+EXP1   JSR ZERO.EXP.VALUE
+       STA EXP.NEW   NEW EXPRESSION FLAG = 0
+       STA EXP.UNDEF ZERO UNDEF FLAG
+       LDX #$40     INIT FWD REF FLAG
+       STX EXP.FWDREF
+*--------------------------------
+EXP2   LDX #0        SET OPERATOR=0 FOR +
+       JSR GNC.UC
+       BCS .3        END OF LINE
+       CMP #'-      MINUS
+       BEQ .6       X=0 FOR MINUS OR RELOPS
+       LDX #2       X=2 FOR ADDITION
+       CMP #'+      ADD
+       BEQ .6
+       LDY EXP.NEW   NOT + OR -
+       BEQ .7        BUT IT IS NEW EXPR
+       LDX #OPERATOR.CHARS.SIZE-1
+.1     LDA OPERATOR.CHARS,X
+       CMP CURRENT.CHAR
+       BEQ .2
+       DEX
+       BPL .1
+       JMP ERBA
+*---FOUND OP OR TERM CHAR--------
+.2     LDA OPERATOR.INDEX,X
+       BPL .5       ...OPERATOR
+*---END OF EXPRESSION-----------
+       JSR BACKUP.CHAR.PNTR
+.3     LDY EXP.UNDEF UNDEF FLAG
+       BPL .4
+       JSR ZERO.EXP.VALUE
+       TYA          RECOVER UNDEF STATUS
+.4     RTS
+*--------------------------------
+.5     TAX
+.6     JSR GNC.UC
+.7     INC EXP.NEW  NOT A NEW EXPRESSION ANYMORE
+       LDA OPERATOR.TABLE+1,X
+       PHA
+       LDA OPERATOR.TABLE,X
+       PHA
+*-------------------------------
+*      GET OPERAND
+*-------------------------------
+GET.OPERAND
+       JSR ZERO.SYM.VALUE
+       LDA CURRENT.CHAR
+       CMP #$30     FIRST CHAR OF OPERAND
+       BCC .3       PUNCTUATION
+       CMP #$3A
+       BCS .2       MIGHT BE LETTER, TRY LABEL
+       JSR DECN     CONVERT DECIMAL NUMBER
+.15    JMP BACKUP.CHAR.PNTR
+*---TRY A LABEL------------------
+.2     JSR PACK     TRY LABEL
+       BCC .4       NO GOOD
+       JSR STSRCH   LOOK UP THE VALUE
+       LDY #6       UPDATE FWD REF FLAG
+       >SYM LDA,STPNTR
+       AND EXP.FWDREF
+       STA EXP.FWDREF
+       BCC .1       DEFINED LABEL
+       ROR EXP.UNDEF  UNDEFINED, MAKE FLAG NEGATIVE
+.1     RTS
+*---TRY LOCAL LABEL--------------
+.3     CMP #'.
+       BEQ .2       LOCAL LABEL
+*---TRY CONSTANTS----------------
+       LDX #3       3-->HEX CONSTANT
+       CMP #'$
+       BEQ .5       HEX CONSTANT
+       DEX          2-->OCT CONSTANT
+       CMP #'&'
+       BEQ .5       ...OCTAL
+       LDX #0       0-->BIN CONSTANT
+       CMP #'%      BINARY CONSTANT
+       BEQ .5       ...BINARY
+*---TRY LITERALS-----------------
+       CMP #''      (X = 0)
+       BEQ .6       LITERAL
+       CMP #'"      LITERAL WITH HIGH BIT SET
+       BEQ .9
+*---TRY STAR---------------------
+       CMP #'*
+       BNE .4       ...NONE OF THE ABOVE, ERROR
+       LDX #3       VALUE IS CURRENT LOCATION
+.7     LDA ORGN,X
+       STA SYM.VALUE,X
+       DEX
+       BPL .7
+       RTS
+*---INVALID OPERAND--------------
+.4     JMP ERBA     BAD ADDRESS ERROR
+*---HEX/OCT/BIN CONSTANT--------
+.5     JSR HEX.OCT.BIN.DGT     $ABCD, &777, %1010
+       BCC .4       NO, ERROR BAD ADDRESS
+.8     JSR HEX.OCT.BIN.DGT.1   GET ANOTHER DIGIT
+       BCS .8
+       BCC .15      ...ALWAYS
+*---TICK & QUOTE LITERALS-------
+.9     LDX #$80     HIBIT=1
+.6     STX SYM.VALUE
+       STA DGTCNT   SAVE ' OR " FOR OPTIONAL TERMCHAR
+       JSR GNC      GET FOLLOWING CHAR
+       BCS .4       END OF LINE
+       ORA SYM.VALUE     SET HIGH BIT
+       STA SYM.VALUE
+       JSR GNC         SEE IF CLOSING QUOTE
+       CMP DGTCNT   (IT IS OPTIONAL)
+       BNE .15      NO, BACK UP CHAR PNTR
+       RTS
+*-------------------------------
+*    IF NEXT CHAR IS VALID DIGIT,
+*    APPEND IT TO CURRENT VALUE
+*
+*      (X) DETERMINES BASE:  0-->2, 2-->8, 3-->16
+*-------------------------------
+HEX.DIGIT
+       LDX #3
+HEX.OCT.BIN.DGT
+       STX BASE.INDEX
+HEX.OCT.BIN.DGT.1
+.1     JSR GNC.UC   IGNORE CASE
+       CMP #'.'     ALLOW PERIODS
+       BEQ .1       ...BUT IGNORE THEM
+       EOR #$30
+       CMP #$0A
+       BCC .3       ...0-9, TEXT VALIDITY
+       ADC #$88     ...MIGHT BE A...F
+.2     CMP #$FA
+       BCC .5       NOT A-F EITHER, RETURN CARRY CLEAR
+       AND #$0F     TRIM HEX A...F
+.3     LDX BASE.INDEX
+       CMP BASE.TABLE,X  CHECK REAL RANGE
+       BCS .2       ...NOT VALID, CLR CARRY WITH 'CMP #$FA'
+       PHA          SAVE DIGIT
+.4     JSR ASL.SYM.VALUE
+       DEX          MAKE ROOM FOR DIGIT
+       BPL .4
+       PLA          GET DIGIT
+       ORA SYM.VALUE     MERGE WITH PREVIOUS
+       STA SYM.VALUE
+       SEC          FLAG GOT A DIGIT
+.5     RTS
+*--------------------------------
+BASE.TABLE
+       .DA #2,#2,#8,#16
+ASL.SYM.VALUE
+       CLC
+ROL.SYM.VALUE
+       ROL SYM.VALUE
+       ROL SYM.VALUE+1
+       ROL SYM.VALUE+2
+       ROL SYM.VALUE+3
+       RTS
+*--------------------------------
+ZERO.EXP.VALUE
+       LDA #0
+       STA EXP.VALUE
+       STA EXP.VALUE+1
+       STA EXP.VALUE+2
+       STA EXP.VALUE+3
+       RTS
+*--------------------------------
+ZERO.EXP.VALUE64
+       LDA #0
+       STA EXP.VALUE64
+       STA EXP.VALUE64+1
+       STA EXP.VALUE64+2
+       STA EXP.VALUE64+3
+       RTS
+*--------------------------------
+ZERO.SYM.VALUE
+       LDA #0
+       STA SYM.VALUE
+       STA SYM.VALUE+1
+       STA SYM.VALUE+2
+       STA SYM.VALUE+3
+       RTS
+*--------------------------------
+EXP.AND
+       LDX #3
+.1     LDA EXP.VALUE,X
+       AND SYM.VALUE,X
+       STA EXP.VALUE,X
+       DEX
+       BPL .1
+       JMP EXP2
+*--------------------------------
+EXP.ORA
+       LDX #3
+.1     LDA EXP.VALUE,X
+       ORA SYM.VALUE,X
+       STA EXP.VALUE,X
+       DEX
+       BPL .1
+       JMP EXP2
+*--------------------------------
+EXP.EOR
+       LDX #3
+.1     LDA EXP.VALUE,X
+       EOR SYM.VALUE,X
+       STA EXP.VALUE,X
+       DEX
+       BPL .1
+       JMP EXP2
+*--------------------------------
+EXP.ADD
+       CLC           PLUS
+       LDX #-4
+.1     LDA EXP.VALUE+4,X
+       ADC SYM.VALUE+4,X
+       STA EXP.VALUE+4,X
+       INX
+       BNE .1
+       JMP EXP2
+*--------------------------------
+EXP.SUBTRACT
+       JSR EXP.SUBTRACTION
+       JMP EXP2
+*--------------------------------
+EXP.SUBTRACTION
+       SEC
+       LDX #-4
+.7     LDA EXP.VALUE+4,X
+       SBC SYM.VALUE+4,X
+       STA EXP.VALUE+4,X
+       INX
+       BNE .7
+       RTS
+*--------------------------------
+EXP.LESS
+       JSR EXP.SUBTRACTION
+       LDA EXP.VALUE+3
+       BMI EXP.TRUE
+EXP.FALSE
+       CLC
+EXP.TRUE.OR.FALSE
+       JSR ZERO.EXP.VALUE
+       ROL EXP.VALUE
+       JMP EXP2
+*--------------------------------
+EXP.EQUAL
+       JSR EXP.SUBTRACTION
+       JSR TEST.EXP.VALUE
+       BNE EXP.FALSE
+EXP.TRUE
+       SEC
+       BCS EXP.TRUE.OR.FALSE
+*--------------------------------
+TEST.EXP.VALUE.ZP
+       LDA #0
+       .HS 2C
+TEST.EXP.VALUE
+       LDA EXP.VALUE
+       ORA EXP.VALUE+1
+       ORA EXP.VALUE+2
+       ORA EXP.VALUE+3
+       RTS
+*--------------------------------
+EXP.GREATER
+       JSR EXP.SUBTRACTION
+       JSR TEST.EXP.VALUE
+       BEQ EXP.FALSE
+       LDA EXP.VALUE+3   LOOK AT SIGN BIT
+       BMI EXP.FALSE
+       BPL EXP.TRUE
+*-------------------------------
+EXP.DIVIDE
+       JSR EXP.DIVISION
+       JMP EXP2
+*--------------------------------
+EXP.DIVISION
+       JSR ZERO.EXP.VALUE64
+       LDY #32      32 BITS
+.1     ASL EXP.VALUE SHIFT DIVIDEND/QUOTIENT LEFT
+       ROL EXP.VALUE+1
+       ROL EXP.VALUE+2
+       ROL EXP.VALUE+3
+       ROL EXP.VALUE64  SHIFT PARTIAL DIVIDEND LEFT
+       ROL EXP.VALUE64+1
+       ROL EXP.VALUE64+2
+       ROL EXP.VALUE64+3
+       SEC          SUBTRACT DIVISOR FROM PARTIAL DIVIDEND
+       LDA EXP.VALUE64
+       SBC SYM.VALUE
+       PHA          SAVE LO-BYTE OF DIFFERENCE ON STACK
+       LDA EXP.VALUE64+1
+       SBC SYM.VALUE+1
+       PHA
+       LDA EXP.VALUE64+2
+       SBC SYM.VALUE+2
+       PHA
+       LDA EXP.VALUE64+3
+       SBC SYM.VALUE+3
+       BCC .2       REMAINDER TOO SMALL
+       INC EXP.VALUE SET BIT IN QUOTIENT
+       STA EXP.VALUE64+3  HI-BYTE OF REMAINDER
+       PLA          RETRIEVE NEXT BYTE OF REMAINDER
+       STA EXP.VALUE64+2
+       PLA
+       STA EXP.VALUE64+1
+       PLA
+       STA EXP.VALUE64
+       BCS .3
+.2     PLA          STACK BACK TO NORMAL
+       PLA
+       PLA
+.3     DEY          NEXT BIT
+       BNE .1
+       RTS
+*--------------------------------
+EXP.MULTIPLY
+       JSR ZERO.EXP.VALUE64
+       LDY #32      32-BIT MULTIPLY
+.1     LDA EXP.VALUE CHECK LSB OF MULTIPLIER
+       LSR
+       BCC .2       IF 0, DON'T ADD MULTIPLICAND
+       CLC          ADD MULTIPLICAND
+       LDA EXP.VALUE64
+       ADC SYM.VALUE
+       STA EXP.VALUE64
+       LDA EXP.VALUE64+1
+       ADC SYM.VALUE+1
+       STA EXP.VALUE64+1
+       LDA EXP.VALUE64+2
+       ADC SYM.VALUE+2
+       STA EXP.VALUE64+2
+       LDA EXP.VALUE64+3
+       ADC SYM.VALUE+3
+       STA EXP.VALUE64+3
+.2     ROR EXP.VALUE64+3
+       ROR EXP.VALUE64+2
+       ROR EXP.VALUE64+1
+       ROR EXP.VALUE64
+       ROR EXP.VALUE+3
+       ROR EXP.VALUE+2
+       ROR EXP.VALUE+1
+       ROR EXP.VALUE
+       DEY
+       BNE .1
+       JMP EXP2
+*-------------------------------
+*    MGO COMMAND
+*-------------------------------
+MGO    JSR EXPR.DEFINED     CRACK EXPRESSION
+       JMP (EXP.VALUE)  ENTER USER'S PROGRAM
+*--------------------------------
+*      VAL COMMAND
+*--------------------------------
+VAL    JSR EXPR.DEFINED     GET VALUE OF EXPRESSION
+       LDA #'$'
+       JSR CHO
+       JSR P.EXP.VALUE
+       LDA #'='
+       JSR CHO
+       JSR ZERO.SYM.VALUE
+       TAX          X=0
+       LDA #10
+       STA SYM.VALUE
+.1     JSR EXP.DIVISION
+       LDA EXP.VALUE64   REMAINDER
+       PHA
+       INX
+       JSR TEST.EXP.VALUE
+       BNE .1
+.2     PLA
+       ORA #'0'
+       JSR CHO
+       DEX
+       BNE .2
+       JMP CRLF
+*--------------------------------------
+MAN
+SAVE usr/src/scmasm.31/scmasm.s.exp
+LOAD usr/src/scmasm.31/scmasm.s
+ASM

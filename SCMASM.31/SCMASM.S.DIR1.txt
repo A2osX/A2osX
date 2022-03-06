@@ -1,0 +1,308 @@
+NEW
+  AUTO 3,1
+*--------------------------------------
+*      DIRECTIVES
+*--------------------------------
+*      .DUMMY -- START DUMMY SECTION
+*--------------------------------
+D.DUMMY
+       LDA DUMMY.FLAG    DO NOTHING IF ALREADY IN DUMMY
+       BMI .2
+       LDX #3
+.1     LDA ORGN,X
+       STA DUMMY.ORGN,X
+       DEX
+       BPL .1
+       STX DUMMY.FLAG    SET FLAG NEGATIVE
+.2     RTS
+*--------------------------------
+*      .ED -- END DUMMY SECTION
+*--------------------------------
+D.END.DUMMY
+       LDA DUMMY.FLAG
+       BPL .2       DO NOTHING IF NOT IN .DUMMY
+       LDX #3
+       STX DUMMY.FLAG    SET FLAG POSITIVE
+.1     LDA DUMMY.ORGN,X
+       STA ORGN,X
+       DEX
+       BPL .1
+.2     RTS         RETURN TO MAIN LEVEL OF ASM
+*---------------------------------
+*      .PH -- START PHASE
+*--------------------------------
+D.PHASE
+       JSR D.END.PHASE
+       JSR EXPR.DEFINED  GET PHASE ORIGIN
+       LDX #3
+.1     LDA ORGN,X   SAVE ORIGIN
+       STA ORIGIN.SAVE,X
+       LDA EXP.VALUE,X
+       STA ORGN,X   SET PHASE ORIGIN
+       DEX
+       BPL .1
+       SEC          SET FLAG TO $80
+       ROR PHASE.FLAG
+       RTS         RETURN TO MAIN LEVEL OF ASM
+*--------------------------------
+*      .EP -- END PHASE
+*--------------------------------
+D.END.PHASE
+       ASL PHASE.FLAG    TEST AND CLEAR FLAG
+       BCC .2            IT WAS ALREADY CLEAR
+       LDX #3
+.1     LDA ORIGIN.SAVE,X
+       STA ORGN,X
+       DEX
+       BPL .1
+.2     RTS
+*---------------------------------
+*   .OR -- SET ORIGIN
+*---------------------------------
+PSOR   JSR EXPR.DEFINED  GET ORIGIN VALUE
+       LDX #3
+.1     LDA EXP.VALUE,X   STORE IT IN
+       STA ORGN,X        LOCATION
+       DEX               COUNTER
+       BPL .1
+       LDA DUMMY.FLAG    IF IN DUMMY SECTION, DON'T
+       BMI RTS.1         ...IN DUMMY
+NEW.TARGET
+       JSR TFEND         END .TF IF DOING ONE
+       LDA EXP.VALUE     STORE VALUE IN
+       STA TRGT          TARGET ADDRESS
+       LDA EXP.VALUE+1
+       STA TRGT+1
+RTS.1  RTS
+*---------------------------------
+*    .TA -- SET TARGET ADDRESS
+*---------------------------------
+PSTA   JSR EXPR.DEFINED  GET EXPR VALUE
+       LDA EXP.VALUE+2
+       ORA EXP.VALUE+3
+       BEQ NEW.TARGET
+       JMP RAER
+*--------------------------------
+*   .AT -- ASCII STRING WITH LAST BYTE FLAGGED
+*   .AS -- ASCII STRING WITH ALL BYTES SAME
+*   .AZ -- Same as .AS, but with 00 terminator byte.
+*--------------------------------
+PSAZ   JSR PSAS
+       JMP EMIT.ZERO
+PSAT   LDA #$80     LAST BYTE HAS OPPOSITE BIT 7
+       .HS 2C       ...SKIP OVER 2 BYTES
+PSAS   LDA #0       ALL BYTES GET SAME BIT 7
+       STA AT.HIBIT
+       JSR GNNB     Scan to next non-blank
+       BCS ERBA2     END OF LINE
+       DEC CHAR.PNTR     BACK UP
+.1     JSR TRY.HEX.STRING
+       BEQ .5       ...END OF LINE
+       LDY #0
+       STY AS.HIBIT ...assume hibit is 0
+       CMP #'-'      1ST NON-BLANK A MINUS?
+       BNE .15      ...no, hibit is 0
+       ROR AS.HIBIT ...yes, hibit is 1
+       JSR GNC.UC
+.15    STA DLIM     SAVE DELIMITER
+       JSR GNC.UC   GET NEXT CHAR
+       BCS ERBA2    END OF LINE IS BAD NEWS
+       CMP DLIM     CHK IF DELIMITER
+       BEQ .4       YES, NO STRING IN BETWEEN
+.2     JSR GNC.UC   GET NEXT CHAR
+       BCS ERBA2    END OF LINE IS BAD NEWS
+       CMP DLIM     CHK IF DELIMITER
+       BEQ .3       YES, FINISH UP AND RETURN
+       LDA WBUF-2,Y ...NO, GET PREVIOUS CHAR
+       ORA AS.HIBIT MERGE WITH TOP BIT
+       JSR EMIT
+       JMP .2       GO FOR ANOTHER ONE
+.3     LDA WBUF-2,Y GET PREVIOUS CHAR
+       ORA AS.HIBIT MERGE WITH SELECTED BIT 7
+       EOR AT.HIBIT TOGGLE BIT 7 IF IN .AT
+       JSR EMIT     EMIT THE BYTE
+.4     JSR GNC      CHECK IF MORE IN LIST
+       BEQ .5
+       CMP #','
+       BEQ .1
+.5     RTS
+*---------------------------------
+*   .HS -- HEX STRING
+*---------------------------------
+PSHS   JSR GNNB     GET NEXT NON-BLANK CHAR
+       BCS ERBA2    END OF LINE
+       JSR BACKUP.CHAR.PNTR
+       JSR TRY.HEX.STRING
+       BNE ERBA2    ...ERROR, BAD ADDRESS
+       RTS
+*--------------------------------
+THX1   JSR HEX.DIGIT  GET NEXT HEX DIGIT
+       BCC ERBA2    ERROR, ODD DIGITS
+       LDA SYM.VALUE    GET CONVERTED VALUE
+       JSR EMIT
+TRY.HEX.STRING
+.1     JSR HEX.DIGIT
+       BCS THX1
+       LDA CURRENT.CHAR
+       BEQ .2       ...END OF LINE
+       CMP #','     IF COMMA, GO GET MORE BYTES
+       BEQ .1       ...OKAY
+       CMP #' '     IF BLANK, VALID END OF STRING
+.2     RTS
+*--------------------------------
+ERBA2  JMP ERBA     ERROR: BAD ADDRESS
+GT255ERR LDY #QER8  VALUE > 255 ERROR
+       .HS 2C       LONG "BIT" TO SKIP NEXT TWO BYTES
+NOLBLERR LDY #QER1  "NO LABEL"
+       .HS 2C       LONG "BIT" TO SKIP NEXT TWO BYTES
+UNDF   LDY #QER6     "UNDEF"
+       JMP SOFT.ERROR
+*---------------------------------
+*   .EQ -- EQUATE
+*---------------------------------
+PSEQ   LDY WBUF     SEE IF ANY LABEL
+       CPY #$20
+       BEQ NOLBLERR   NO LABEL ON LINE
+       LDA STPNTR   SAVE STPNTR WHILE CALLING EXPR
+       PHA
+       LDA STPNTR+1
+       PHA
+       JSR EXPR.DEFINED  GET VALUE
+       PLA          RESTORE STPNTR
+       STA STPNTR+1
+       PLA
+       STA STPNTR
+       LDA PASS       WHICH PASS
+       BNE .5         PASS 2, PRINT VALUE
+*---PASS 1:  DEFINE VALUE--------
+       LDY WBUF     COLUMN 1 AGAIN
+       CPY #':      PRIVATE LABEL?
+       BCC .4       ...LOCAL LABEL
+       BEQ .2       ...PRIVATE LABEL
+*---NORMAL LABEL-----------------
+       LDY #2
+.1     LDA EXP.VALUE-2,Y   REDEFINE SYMBOL
+       >SYM STA,PNTR
+       INY
+       CPY #6
+       BCC .1
+       RTS
+*---PRIVATE LABEL----------------
+.2     LDY #0
+.3     LDA EXP.VALUE,Y
+       >SYM STA,STPNTR
+       INY
+       CPY #4
+       BCC .3
+       RTS
+*---LOCAL LABEL------------------
+.4     LDY #2       COMPUTE LOCAL OFFSET
+       SEC
+       LDA EXP.VALUE
+       >SYM SBC,STPNTR
+       DEY
+       >SYM STA,PNTR
+       LDY #3
+       LDA EXP.VALUE+1
+       >SYM SBC,STPNTR
+       BNE GT255ERR    VALUE > 255
+       RTS         RETURN TO MAIN LEVEL OF ASM
+*---PASS 2:  PRINT VALUE---------
+.5     JMP P.EXP.VALUE.DASH
+*---------------------------------
+*   .DA -- DATA VALUE (8- OR 16-BITS)
+*---------------------------------
+PSDA   LDA #0       UNDEF FLAG FOR LINE
+       PHA
+.1     JSR GNNB     GET NEXT NON-BLANK CHAR
+       BCS ERBA2    END OF LINE
+       STA DLIM
+*---Could be $$dstringd----------
+       CMP #'$'     $$dstringd value?
+       BNE .2       ...NO
+       LDA WBUF,Y   Look for second $
+       CMP #'$'
+       BNE .25      ...NO, MUST BE SIMPLE HEX WORD
+       JSR GNC      SKIP OVER SECOND '$'
+       JSR PSAS     GET dstringd
+       JMP .5
+*---Look for size char-----------
+.2     LDY #1       ASSUME 1-BYTE DATA
+       CMP #'#'
+       BEQ .3
+       CMP #'/'
+       BEQ .3
+       LDY #3       ASSUME 3-BYTE DATA
+       CMP #'<'     24-BIT SIGNAL
+       BEQ .3       ...3-BYTE DATA
+       INY          ASSUME 4-BYTE DATA
+       CMP #'>'     32-BIT SIGNAL
+       BEQ .3
+*---Size is two bytes------------
+.25    JSR BACKUP.CHAR.PNTR
+       LDY #2       2-BYTE DATA
+*---Get expression, emit value---
+.3     STY ADDR.LENGTH
+       JSR EXPR     CRACK EXPRESSION
+       LDY DLIM     If preceded by /, shift over
+       CPY #'/'
+       BNE .4       ...NOT /
+       JSR EXP.OVER.256
+.4     JSR EMIT.VALUE  ACCORDING TO ADDR.LENGTH
+*---Update UNDEF flag------------
+       PLA          .DA'S UNDEF FLAG
+       ORA EXP.UNDEF
+       PHA
+*---Next item in list------------
+.5     JSR GNC.UC   LOOK FOR ANOTHER ITEM
+       CMP #',      COMMA?
+       BEQ .1       YES, GET ANOTHER ONE
+       PLA          GET .DA'S UNDEF FLAG
+       STA EXP.UNDEF     MERGED VALUE
+       RTS          LIST LINE OR REPORT UNDEF ERROR
+*--------------------------------
+*      DO/ELSE/FIN
+*--------------------------------
+PSDO   JSR EXPR.DEFINED    GET VALUE
+       LDX DO.INDEX        0 IF EMPTY, ELSE 1-63
+       INX
+       CPX #64
+       BCC .2
+       LDY #QERDO2  ".DO NEST TOO DEEP"
+       JMP SOFT.ERROR
+.2     LDA EXP.VALUE
+       ORA EXP.VALUE+1  TEST FOR ZERO
+       ORA EXP.VALUE+2
+       ORA EXP.VALUE+3
+       BEQ .3       ZERO, FALSE
+       SEC          NONZERO, TRUE
+.3     STX DO.INDEX
+       LDX #-8
+.4     ROR DO.STACK+8,X
+       INX
+       BNE .4
+       RTS          LIST THE LINE
+*--------------------------------
+PSEL   LDX DO.INDEX
+       BEQ ERR.DO   ERROR, NOT BTWN .DO AND .FIN
+       LDA DO.STACK
+       EOR #$80     TOGGLE CURRENT LOGIC LEVEL
+       STA DO.STACK
+       RTS         RETURN TO MAIN LEVEL OF ASM
+*--------------------------------
+ERR.DO LDY #QERDO   "MISSING .DO"
+       JMP SOFT.ERROR
+*--------------------------------
+PSFI   LDX DO.INDEX
+       BEQ ERR.DO   ERROR, NOT AFTER .DO
+       DEC DO.INDEX POP THIS DO
+       LDX #7
+.1     ROL DO.STACK,X
+       DEX
+       BPL .1
+       RTS         RETURN TO MAIN LEVEL OF ASM
+*--------------------------------------
+MAN
+SAVE usr/src/scmasm.31/scmasm.s.dir1
+LOAD usr/src/scmasm.31/scmasm.s
+ASM

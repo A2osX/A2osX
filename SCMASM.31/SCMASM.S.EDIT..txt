@@ -1,0 +1,509 @@
+NEW
+  AUTO 3,1
+*--------------------------------------
+*    SOFT INITIALIZATION
+*--------------------------------
+SOFT   LDA /$1000   START SYMBOL TABLE AT $1000
+SYMBOL.BASE .EQ *-1
+       STA LO.MEM+1
+       LDA #0
+       STA LO.MEM
+       STA AUTOLN.FLAG  TURN OFF AUTOMATIC LINE NUMBERS
+       JSR IO.WARM  INIT SCREEN, CONNECT DOS
+       JSR CLOSE.FILES
+*--------------------------------
+FAST   CLC          SET TO FAST LISTING SPEED
+       .HS 24       (SKIP OVER SEC)
+SLOW   SEC          SET TO SLOW LISTING SPEED
+       ROR FLAG.SPEED    SET/CLEAR SIGN BIT
+*--------------------------------
+*    GET NEXT LINE
+*--------------------------------
+GNL
+       LDX #$FF     INIT STACK
+       TXS
+       STX PASS     PASS=-1 IF NOT ASSEMBLING
+       INX          MAKE X=0
+       STX SCI.STATE    GET INTO "IMMEDIATE" STATE
+       STX RPTCNT   CLEAR REPEAT COUNT
+       STX MACRO.LEVEL
+       STX PARAM.PNTR
+       STX CHAR.PNTR
+       STX PAGE.LENGTH  TURN OFF TITLING
+       JSR READ.LINE
+       JSR GNC.UC.START  GET FIRST CHAR OF LINE
+       BEQ GNL        EMPTY LINE OR 1ST CHAR IS BLANK
+       JSR CHECK.LETTER
+       BCC .1       NOT A LETTER
+       JSR SEARCH.COMMAND.TABLE
+       JMP GNL
+*---Test for single char cmds----
+.1     LDY #CHARS.FOR.COMMANDS
+       JSR SEARCH.CHAR.TABLES
+       JMP GNL
+*---" LINE, ECHO ALL CHARS-------
+ECHO1  JSR CHO      SEND CHARACTER
+ECHO.LINE
+       JSR GNC      GET NEXT CHAR
+       BCC ECHO1    NOT END YET
+       RTS
+*--------------------------------
+*    SYNTAX ERROR
+*--------------------------------
+SYNX   LDY #QSYNX
+       JMP HARD.ERROR
+*--------------------------------
+*    NUMBERED LINE
+*--------------------------------
+NML    JSR GNC.START  GET FIRST CHAR
+       JSR DECN     CONVERT LINE NUMBER
+       LDA DGTCNT   MUST BE 1 TO 5 DIGITS
+       BEQ SYNX
+       LDA SYM.VALUE+2
+       ORA SYM.VALUE+3
+       BNE SYNX     > 65535
+*---Compact the numbered line----
+       DEY          Backup to previous character
+       JSR COMPACT.LINE
+*--------------------------------
+       LDX #1       COPY IN BINARY LINE #
+.51    LDA SYM.VALUE,X
+       STA CURLNO,X   SAVE HERE TOO, FOR AUTO-NUMBER
+       STA WBUF+1,X
+       DEX
+       BPL .51
+*--------------------------------
+*    FIND LINE, OR PLACE WHERE IT SHOULD GO
+*      LINE.START --> BEGINNING OF THIS LINE
+*      LINE.END   --> BEGINNING OF NEXT LINE
+*--------------------------------
+       LDX #SYM.VALUE   POINT AT LINE NUMBER
+       JSR SERTXT    FIND IT IF THERE
+       SEC          GET LENGTH OF HOLE
+       LDA LINE.END  WILL ALWAYS BE LESS THAN 256
+       SBC LINE.START
+       SEC          SUBTRACT LENGTH OF NEW LINE
+       SBC WBUF     LINE SIZE
+       BEQ .11      SAME SIZE EXACTLY
+       STA MOVE.DISTANCE
+       LDA #0
+       SBC #0
+       STA MOVE.DISTANCE+1
+       BCC .6       NEW LINE LONGER THAN HOLE
+*--------------------------------
+*      NEW LINE SHORTER THAN HOLE
+*--------------------------------
+       CLC          COMPUTE TARGET TO MOVE UP TO
+       LDA LINE.START
+       ADC MOVE.DISTANCE
+       STA A4L
+       LDA LINE.START+1
+       ADC MOVE.DISTANCE+1
+       STA A4H
+       JSR MOVE.TEXT.UP
+       JMP .10      NOW HOLE IS RIGHT SIZE
+*--------------------------------
+*      ENLARGE HOLE TO MAKE ROOM
+*--------------------------------
+.6     CLC          (MOVE.DISTANCE) = -<#BYTES TO EXPAND>
+       LDA PP       COMPUTE TARGET ADDRESS
+       ADC MOVE.DISTANCE
+       STA A4L
+       LDA PP+1
+       ADC MOVE.DISTANCE+1
+       STA A4H
+       LDA A4L       BE SURE THERE IS ROOM
+       CMP LO.MEM
+       LDA A4H
+       SBC LO.MEM+1
+       BCC MFER      NO ROOM!
+       JSR MOVE.TEXT.DOWN
+*---Adjust SRCP if needed--------
+.10    LDA SRCP     If hole is above (SRCP),
+       CMP LINE.END      then need to add MOVE.DISTANCE
+       LDA SRCP+1
+       SBC LINE.END+1
+       BCS .11
+       LDA SRCP
+       ADC MOVE.DISTANCE
+       STA SRCP
+       LDA SRCP+1
+       ADC MOVE.DISTANCE+1
+       STA SRCP+1
+*--------------------------------
+*    COPY NEW LINE INTO THE HOLE
+*--------------------------------
+.11    LDX WBUF     LINE SIZE
+       BEQ .14      NO NEW LINE TO COPY
+       LDY #0
+.12    LDA LINE.END   BACK UP POINTER TO END OF HOLE
+       BNE .13
+       DEC LINE.END+1
+.13    DEC LINE.END
+       DEX
+       LDA WBUF,X
+       STA (LINE.END),Y
+       TXA
+       BNE .12
+.14    RTS
+*--------------------------------
+MFER LDY #QMEMFL        MEM FULL ERROR
+     JMP HARD.ERROR
+*--------------------------------
+COMPACT.LINE
+       LDX #4       Start storing at WBUF+3
+       LDA #-1      Prime RPT pump
+       STA RPTCNT
+.1     STA RPTCHR
+.2     INY          advance input pointer
+       INC RPTCNT   (first time makes it = 0)
+       LDA WBUF,Y   get next char
+       AND #$7F     be sure its low ascii
+       CMP RPTCHR   save as previous char?
+       BEQ .2       ...yes, just count it
+       PHA          save new character
+*--------------------------------
+       LDA RPTCNT
+       BEQ .3
+       JSR PROCESS.REPEAT.COUNT
+*--------------------------------
+.3     PLA          get new character
+       BNE .1       ...not 00 terminator
+       STA WBUF-1,X store terminator
+       CPX #5       If only line number, make length 00
+       BCS .4
+       LDX #0
+.4     STX WBUF
+       RTS
+*--------------------------------
+PROCESS.REPEAT.COUNT 
+       LDA RPTCHR
+       CMP #' '
+       BEQ .5       ...compress blanks in special way
+       LDA RPTCNT
+       CMP COMPRESSION.LIMIT
+       BCS .2       ...enough to compress to 3 bytes
+.1     LDA RPTCHR   spit out uncompressed chars
+       STA WBUF-1,X
+       INX
+       DEC RPTCNT
+       BNE .1
+       RTS
+*---Compress $C0 cnt char--------
+.2     STA WBUF,X   store count
+       LDA #$C0     Compression token
+       STA WBUF-1,X
+       INX
+       INX
+       LDA RPTCHR   repeated char
+.3     STA WBUF-1,X
+       INX
+       LDA #0
+       STA RPTCNT
+       RTS
+*---Compress blanks--------------
+.4     SBC #$3F     Maximum blanks in one token
+       STA RPTCNT
+       LDA #$BF     $3F blanks
+       STA WBUF-1,X
+       INX
+.5     LDA RPTCNT   Number of blanks left
+       CMP #$40
+       BCS .4       ...too many for one token
+       ORA #$80     make into blank token + count
+       BNE .3       ...always
+*--------------------------------
+SCAN.3.DECIMAL.NUMBERS
+       LDX #6       FIRST CLEAR TO ZERO
+       LDA #0
+.1     STA A0L-1,X
+       DEX
+       BNE .1
+       JSR SCAN.1.DECIMAL.NUMBER
+       JSR SCAN.1.DECIMAL.NUMBER
+***    JMP SCAN.1.DECIMAL.NUMBER
+*--------------------------------
+SCAN.1.DECIMAL.NUMBER
+.1     JSR GNC
+       BCS .2       END OF LINE
+       EOR #$30     IS THIS A DIGIT?
+       CMP #10
+       BCS .1       NO
+       TXA          SAVE X-REG
+       PHA
+       JSR DECN     CONVERT NUMBER
+       PLA          RESTORE X-REG
+       TAX
+       LDA SYM.VALUE  STACK NUMBER
+       STA A0L,X
+       INX
+       LDA SYM.VALUE+1
+       STA A0L,X
+       INX
+.2     RTS
+*--------------------------------
+*    DECIMAL NUMBER INPUT
+*--------------------------------
+DECN   JSR BACKUP.CHAR.PNTR
+       JSR ZERO.SYM.VALUE    CLEAR ACCUMULATOR
+       STA DGTCNT
+.1     JSR GNC       GET NEXT CHAR
+       EOR #$30      CHECK IF DIGIT
+       CMP #10
+       BCS .5        NOT A DIGIT
+       PHA          SAVE THE DIGIT
+*---ACCUMULATOR * TEN------------
+       JSR ASL.SYM.VALUE
+       BCS .6       OVERFLOW ERROR
+       LDX #3
+.2     LDA SYM.VALUE,X   HI- TO LO-
+       PHA
+       DEX
+       BPL .2       
+.3     JSR ASL.SYM.VALUE
+       BCS .6       OVERFLOW ERROR
+       INX
+       BEQ .3       DO IT TWICE
+       PLA
+       ADC SYM.VALUE
+       STA SYM.VALUE
+       PLA
+       ADC SYM.VALUE+1
+       STA SYM.VALUE+1
+       PLA
+       ADC SYM.VALUE+2
+       STA SYM.VALUE+2
+       PLA
+       ADC SYM.VALUE+3
+       STA SYM.VALUE+3
+       BCS .6       OVERFLOW ERROR
+*---ADD CURRENT DIGIT------------
+       PLA
+       ADC SYM.VALUE
+       STA SYM.VALUE
+       BCC .4
+       INC SYM.VALUE+1
+       BNE .4
+       INC SYM.VALUE+2
+       BNE .4
+       INC SYM.VALUE+3
+       BEQ .6       OVERFLOW ERROR
+.4     INC DGTCNT   COUNT THE DIGIT
+       BNE .1       ...ALWAYS
+.5     RTS
+.6     LDY #QER3    RANGE ERROR
+       JMP SOFT.ERROR
+*--------------------------------
+*    GET NEXT NON-BLANK CHAR
+*--------------------------------
+GNNB JSR GNC.UC    GET NEXT CHAR IN UPPER CASE
+     BCS .1        END OF LINE
+     BEQ GNNB      BLANK
+.1   RTS           RETURN
+*--------------------------------
+*      GET NEXT CHAR IN UPPER CASE
+*--------------------------------
+GNC.UC.START
+       LDY #0
+       STY CHAR.PNTR
+GNC.UC JSR GNC      GET NEXT CHAR ANY CASE
+       BEQ .1       SPACE OR <EOL>
+       JSR ELIMINATE.CASE    MAP LOWER CASE TO UPPER CASE
+       STA CURRENT.CHAR
+       CMP #$FF     CLEAR CARRY, SET .NE.
+.1     RTS
+*--------------------------------
+*    GET NEXT CHAR
+*--------------------------------
+GNC.START
+       LDY #0       BEGINNING OF LINE
+       .HS 2C       SKIP NEXT TWO BYTES
+GNC  LDY CHAR.PNTR
+GNC2 LDA WBUF,Y    GET CHAR
+     AND #$7F
+     STA CURRENT.CHAR
+     BEQ .1        END OF LINE
+     INY           BUMP POINTER
+     STY CHAR.PNTR
+     CMP #$20      SEE IF BLANK
+     CLC           CARRY CLEAR SINCE NOT AT END
+     RTS
+.1   LDA #$20      RETURN BLANK
+     CMP #$20      SET CARRY AND EQUAL STATUS
+     RTS
+*--------------------------------
+*      BACK UP CHARACTER POINTER
+*--------------------------------
+BACKUP.CHAR.PNTR
+       PHA          SAVE A-REG
+       LDA CURRENT.CHAR
+       BEQ .1       DO NOT BACK OFF THE END
+       LDA CHAR.PNTR
+       BEQ .1       DO NOT BACK BEYOND THE BEGINNING
+       DEC CHAR.PNTR
+.1     PLA
+       RTS
+*--------------------------------
+*    GET NEXT TOKEN FROM SOURCE LINE
+*--------------------------------
+NTKN
+       LDA RPTCNT
+       BNE .3       IN A REPEATED CHAR LOOP
+       JSR GNB      GET NEXT CHAR FROM SOURCE
+       ASL          ...WEIRD WAY TO TEST SIGN BIT
+       ROR          ...AND AS WELL AS 00
+       BPL .4       ...NORMAL CHARACTER
+       CMP #$C0     SEE IF BLANKS
+       BCC .1       ...YES
+       JSR GNBI     REPEAT TOKEN $C0 XX YY, GET XX
+       STA RPTCNT
+       JSR GNBI     GET YY (CHAR TO BE REPEATED)
+       JMP .2       ...ALWAYS
+.1     AND #$3F     BLANK COUNT
+       STA RPTCNT
+       LDA #$20     BLANK
+.2     STA RPTCHR
+.3     DEC RPTCNT
+       LDA RPTCHR
+.4     RTS
+*--------------------------------
+*    GET NEXT BYTE FROM SOURCE
+*--------------------------------
+GNB    LDY #0
+GNBI
+  .DO AUXMEM
+       LDA MACRO.LEVEL
+       BEQ .0       ...NOT IN A SKELETON
+       >SYM LDA,SRCP
+       .HS 2C       SKIP OVER LDA (SRCP),Y
+  .FIN
+.0     LDA (SRCP),Y
+      >INCD SRCP
+       BIT INFLAG   INSIDE BLOCKED .IN?
+       BVC .3       ...NO
+       PHA
+       LDA MACRO.LEVEL
+       BNE .25           INSIDE A SKELETON
+       LDA INSAVE+4      REMAINING BYTES IN THIS BLOCK
+       BNE .2            ...THERE ARE MORE
+       ORA INSAVE+5
+       BEQ .4            ...NO MORE IN THIS BLOCK
+       DEC INSAVE+5
+.2     DEC INSAVE+4
+.25    PLA
+.3     RTS
+*---TRY TO READ ANOTHER BLOCK----
+.4     PLA
+       LDA INSAVE+6      REFNUM OF INB FILE
+       STA SCI.IOB.RW+1
+       LDA PP            STARTING ADDRESS
+       STA SRCP
+       STA SCI.IOB.RW+2
+       LDA PP+1
+       STA SRCP+1
+       STA SCI.IOB.RW+3
+       SEC
+       LDA HI.MEM+1       NUMBER OF PAGES
+       SBC PP+1
+       STA SCI.IOB.RW+5
+       LDA #0
+       STA SCI.IOB.RW+4
+       LDA #$CA          READ
+       JSR SCI.MLI
+       BCC .5            ...NO ERRORS
+       CMP #5            END OF DATA?
+       BNE PRODOS.ERROR  ...ERROR
+.5     LDA SCI.IOB.RW+6
+       STA INSAVE+4      # BYTES ACTUALLY READ
+       LDA SCI.IOB.RW+7
+       STA INSAVE+5
+       BCC GNB           ...NOT END OF DATA
+       LDA INSAVE+6      REFNUM
+       STA SCI.IOB.CLOSE+1    FOR CLOSE CALL
+       LDA #$CC
+       JSR SCI.MLI
+       BCS PRODOS.ERROR
+       JSR RESTORE       END OF THE INBx FILE
+       JMP ASM2
+*--------------------------------
+PRODOS.ERROR
+       PHA
+       JSR RESTORE.IF.IN.INBX
+       PLA
+       JMP SCI.ERROR
+*--------------------------------
+*      RETURN .CS. IF VALID CHAR
+*             .CC. IF INVALID CHAR
+*--------------------------------
+CHECK.DOT.DIGIT.OR.LETTER
+       CMP #'.
+       BEQ CHECKS.OK
+       CMP #'_'     allow underline in symbols too
+       BEQ CHECKS.OK
+CHECK.DIGIT.OR.LETTER
+       JSR CHECK.DIGIT
+       BCS CHECKS.OK
+CHECK.LETTER
+       CMP #'A
+       BCC CHECKS.NOT.OK
+       CMP #'Z+1
+       BCC CHECKS.OK
+CHECKS.NOT.OK
+       CLC
+       RTS
+CHECK.DIGIT
+       CMP #'0
+       BCC CHECKS.NOT.OK
+       CMP #'9+1
+       BCS CHECKS.NOT.OK
+CHECKS.OK
+       SEC
+       RTS
+*--------------------------------
+CHECK.COMMENT.CHAR
+       CMP #'*      STAR?
+       BEQ .1       YES
+       CMP #';      SEMI-COLON?
+.1     RTS
+*--------------------------------
+*    INITIALIZE FOR HARD ENTRY
+*--------------------------------
+HARD.INIT
+       CLD
+*---Establish LO.MEM & HI.MEM------
+       LDA SYMBOL.BASE   SET UP LO.MEM
+       STA LO.MEM+1
+       LDA SCI.HIMEM.PAGE
+       STA HI.MEM+1
+       LDA #0
+       STA LO.MEM
+       STA HI.MEM
+*---Init other parameters--------
+       STA INCREMENT.VALUE+1
+       STA PROMPT.FLAG
+       STA INFLAG
+       JSR STINIT     INITIALIZE SYMBOL TABLE
+       LDA #10      SET AUTO-LINE-NUMBERING INCREMENT
+       STA INCREMENT.VALUE
+       LDA #990     SET AUTO-LINE-NUMBERING
+       STA CURLNO   INITIAL VALUE
+       LDA /990
+       STA CURLNO+1
+*---Print Heading----------------
+       JSR IO.INIT   INIT TEXT, FULL WINDOW, ETC.
+       JSR VERSION  Print Version Number
+*--------------------------------
+EMPTY.SOURCE.AREA
+       LDA HI.MEM
+       STA PP       EMPTY SOURCE AREA
+       LDA HI.MEM+1
+       STA PP+1
+       RTS
+*--------------------------------
+Q.VERSION
+          .DA #VERSION.LO+"0",#".",#VERSION.HI+"0"
+*--------------------------------------
+MAN
+SAVE usr/src/scmasm.31/scmasm.s.edit
+LOAD usr/src/scmasm.31/scmasm.s
+ASM

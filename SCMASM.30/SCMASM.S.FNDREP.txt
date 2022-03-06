@@ -1,0 +1,407 @@
+NEW
+  AUTO 3,1
+*--------------------------------------
+*      FIND AND LIST COMMANDS
+*--------------------------------
+LIST
+FIND   JSR GET.KEY.STRING
+       JSR PARSE.LINE.RANGE
+       JSR HANDLE.REPLACE.OPTIONS
+.1     JSR GET.LINE.TO.WBUF
+       BCC .2
+       RTS
+.2     JSR FIND.KEY.IN.WBUF
+       BCC .1       KEY NOT IN WBUF
+       LDA A1L      SET UP POINTER FOR LIST
+       LDX A1H
+       JSR LIST.LINE.AX
+       JMP .1
+*--------------------------------
+*      PARSE <D><STRING><D> INTO FREE MEMORY
+*--------------------------------
+GET.KEY.STRING
+       LDA #KBUF
+       STA KEY.ADDR
+       LDA /KBUF
+       STA KEY.ADDR+1
+GET.KEY2
+       JSR GNNB     GET NEXT NON-BLANK
+       STA DLIM     FOR DELIMITER
+       BCS .4       EOL
+       CMP #',
+       BEQ .4       COMMA
+       CMP #'.      PERIOD
+       BEQ .4
+       EOR #$30
+       CMP #10
+       BCC .4       DIGIT
+       LDY #0
+.1     STY PNTR
+       JSR GNC      MOVE STRING
+       BCS .2       END OF LINE
+       CMP DLIM
+       BEQ .2       END OF STRING
+       LDY PNTR
+       STA (KEY.ADDR),Y
+       INY
+       CPY #39      SEE IF STRING FITS
+       BCC .1       YES, KEEP GOING
+       LDY #QSTRLNG NO, STRING TOO LONG
+       JMP HARD.ERROR
+.2     LDY PNTR
+       LDA #0
+       STA (KEY.ADDR),Y
+       SEC          WE FOUND IT
+       RTS
+.4     LDA #0
+       STA PNTR
+       CLC          DIDN'T FIND IT
+       JMP BACKUP.CHAR.PNTR
+*--------------------------------
+*      GET NEXT LINE INTO WBUF
+*      RETURN CARRY CLEAR IF SUCCESSFUL
+*             CARRY SET IF BEYOND <ENDP>
+*             X = LENGTH OF LINE
+*--------------------------------
+GET.LINE.TO.WBUF
+       LDA SRCP
+       STA A1L      SAVE POINTER FOR LIST
+       LDA SRCP+1
+       STA A1H
+       JSR CMP.SRCP.ENDP   END OF RANGE YET?
+       BCS .2              ...YES, FINISHED
+       JSR GET.LINE.NUMBER
+       LDY #0       START AT BEGINNING OF WBUF
+       JSR CONVERT.LINE.NUMBER.STORE  PUT CONVERTED # AT WBUF,Y
+       LDA #$A0     APPEND A SPACE AFTER LINE NUMBER
+       STA WBUF,Y
+       INY
+       TYA
+       TAX
+.1     JSR NTKN     BYTE FROM PROGRAM
+       STA WBUF,X
+       INX
+       TAY          TEST CHAR
+       BNE .1       END OF LINE
+       CLC          FLAG SUCCESSFUL
+.2     RTS
+*--------------------------------
+*      LIST LINE POINTED TO BY <SRCP>
+*--------------------------------
+LIST.LINE.AX
+       STA SRCP
+       STX SRCP+1
+*--------------------------------
+LIST.CURRENT.LINE
+       JSR CRLF      PRINT CARRIAGE RETURN
+       JSR SPC      SPACE
+       LDA PROMPT.FLAG
+       BEQ .1       ...NO SPACE SINCE NOT "H"
+       JSR SPC
+.1     JSR GET.LINE.NUMBER   BODY
+       JSR CONVERT.LINE.NUMBER.PRINT
+       LDA #$20     SPACE
+.2     JSR CHO      PRINT CHAR
+       JSR GET.NEXT.SOURCE.CHAR
+       BNE .2       NOT END YET
+       RTS          FINISHED
+*--------------------------------
+*      FIND KEY IN WBUF
+*      RETURN WITH CARRY CLEAR IF NO MATCH.
+*      RETURN WITH CARRY SET IF MATCH, AND WITH
+*          (PNTR) = INDEX OF START OF MATCH
+*          (X) = INDEX OF LAST CHAR MATCHED + 1
+*--------------------------------
+FIND.KEY.IN.WBUF
+       JSR FIND.START.OF.LINE.IN.WBUF
+       LDA PNTR
+       BNE .1       NON-NULL KEY STRING
+       LDA DLIM     If delimiter is slash, list
+       CMP #'/'          only major labels
+       BEQ .3       ...it is
+       SEC          ...no string, so SIGNAL MATCH
+       RTS
+.3     LDA WBUF,X   GET FIRST CHAR
+       JSR ELIMINATE.CASE
+       JMP CHECK.LETTER
+.1     LDY #39      MAP SEARCH KEY INTO UPPER CASE
+.2     LDA (KEY.ADDR),Y   ...IF LC.FLAG IS ON
+       JSR ELIMINATE.CASE.MAYBE
+       STA (KEY.ADDR),Y
+       DEY
+       BPL .2 
+FIND.KEY.IN.WBUF2
+       LDY #0       START AT FIRST CHAR OF KEY
+.1     STY KEY.PNTR      CURRENT STARTING POINT IN KEY
+.2     STX BUF.PNTR      CURRENT STARTING POINT IN BUFFER
+.3     LDA (KEY.ADDR),Y  NEXT CHAR FROM KEY
+       BEQ .6       END OF KEY, IT MATCHES
+       CMP WILD.CARD  NORMALLY CONTROL-W
+       BEQ .8       YES
+       LDA WBUF,X   NEXT CHAR FROM BUFFER
+       BEQ .5       END OF BUFFER, DID NOT MATCH
+       JSR ELIMINATE.CASE.MAYBE    MAP INTO UPPER CASE IS NEEDED
+       CMP (KEY.ADDR),Y  COMPARE WITH KEY CHAR
+       BNE .4       NO MATCH
+       INY          ADVANCE KEY POINTER
+       INX          ADVANCE BUFFER POINTER
+       BNE .3       ...ALWAYS
+*--------------------------------
+.4     LDY KEY.PNTR      TRY AGAIN FURTHER INTO BUFFER
+       LDX BUF.PNTR
+       INX
+       BNE .2       ...ALWAYS
+*--------------------------------
+.5     LDA $C000
+       CMP #$8D          ALLOW 'ABORT' WITH <RETURN>
+       BEQ .11
+       CLC          SIGNAL NO MATCH
+       RTS
+*--------------------------------
+.6     LDA KEY.PNTR      SEE IF IN FIRST SEGMENT OF KEY
+       BNE .7            NO
+       LDA BUF.PNTR      YES
+       STA PNTR
+.7     SEC          SIGNAL MATCH
+       RTS
+*--------------------------------
+.8     LDA KEY.PNTR      SEE IF IN FIRST SEGMENT OF KEY
+       BNE .9            NO
+       LDA BUF.PNTR      YES
+       STA PNTR
+.9     INY          ADVANCE KEY POINTER
+       LDA (KEY.ADDR),Y  PEEK AT NEXT CHAR OF KEY
+       BNE .1       NOT AT END YET
+.10    LDA WBUF,X   AT END, SO SCAN TO END OF BUFFER
+       BEQ .6       FOUND END, AND ALL MATCHES
+       INX          ADVANCE BUFFER POINTER
+       BNE .10      ...ALWAYS
+*--------------------------------
+.11    JMP SOFT     HE ABORTED
+*--------------------------------
+* REPLACE COMMAND
+*--------------------------------
+REPLACE
+       JSR GET.KEY.STRING
+       BCC R.ERR1   (SYN ERROR)
+       LDA PNTR     NULL SEARCH FAILS
+       BEQ R.ERR1
+       JSR BACKUP.CHAR.PNTR  USE DELIMITER OVER AGAIN
+       LDA #KBUF+40
+       STA KEY.ADDR
+       LDA /KBUF+40
+       STA KEY.ADDR+1 SET UP CALL
+       JSR GET.KEY2
+       BCC R.ERR1   (SYN ERROR)
+       STY REPLACE.LENGTH
+       JSR PARSE.LINE.RANGE
+       JSR HANDLE.REPLACE.OPTIONS
+       LDA #KBUF    FOR SEARCH
+       STA KEY.ADDR
+       LDA /KBUF
+       STA KEY.ADDR+1
+       LDA #1
+       STA PNTR     PNTR MUST BE > 0 FOR SEARCH
+.1     JSR GET.LINE.TO.WBUF
+       BCS .5       FINISHED
+       STX WBUF.LENGTH
+       JSR FIND.KEY.IN.WBUF
+       BCC .1 
+       LDA #0
+       STA CHANGE.CNT (DEF IS EQ)
+.2     TXA          COMPUTE # CHARS IN TARGET FIELD
+       SEC
+       SBC PNTR
+       STA SOURCE.LENGTH
+       STX MATCH.END
+       JSR REPLACE.REPLACE
+       BCS .5       NEITHER "Y" NOR "N"
+       BNE .3       THEY HIT 'N'
+       INC CHANGE.CNT
+       LDX MATCH.END
+       BNE .4       ...ALWAYS
+.3     LDX PNTR     MATCH BEGINNING
+       INX                +1
+.4     JSR FIND.KEY.IN.WBUF2
+       BCS .2       LOOP IF ANOTHER
+       LDA CHANGE.CNT  ANY CHANGES?
+       BEQ .1       NO - TRY NEXT LINE
+       JSR NML      PUT LINE BACK
+       LDA WBUF     If replacement line was null,
+       BEQ .6            then just lshow line number
+       LDA LINE.END   AND LIST
+       LDX LINE.END+1
+       JSR LIST.LINE.AX
+       JMP .1       TRY NEXT LINE
+.5     RTS          FINISHED
+.6     LDA WBUF+1
+       STA CURRENT.LINE.NUMBER
+       LDA WBUF+2
+       STA CURRENT.LINE.NUMBER+1
+       JSR CRLF
+       JSR CONVERT.LINE.NUMBER.PRINT
+       JMP .1
+*--------------------------------
+R.ERR1 JMP SYNX     MISSING STRING
+R.ERR2 LDY #QREPLNG REP STRNG TOO LONG
+       JMP HARD.ERROR
+*--------------------------------
+* A MATCH IS FOUND, MAYBE REPLACE
+*      RETURNS: CARRY  ZERO
+*          Q     CS     NE   QUIT
+*          N     CC     NE   NO CHG
+*          Y     CC     EQ   CHANGE MADE
+*--------------------------------
+REPLACE.REPLACE
+       LDA AUTO.FLAG
+       BMI .40      - = AUTO MODE, + = VERIFY MODE
+       JSR PRINT.AND.PROMPT
+       BNE .99      Q,N EXITS
+.40    SEC
+       LDA REPLACE.LENGTH
+       SBC SOURCE.LENGTH
+       BCC .60      (IF SHORTER)
+       BEQ .50      (IF EQUAL  )
+*--------------------------------
+* REPLACE IS LONGER - MAKE SPACE
+*      ACC IS REP.LEN-SRC.LEN
+*--------------------------------
+       CLC
+       ADC WBUF.LENGTH
+       BCS .45      OVER 256 LEN
+       CMP #WBUF.MAX
+       BCC .51
+.45    JMP R.ERR2   TOO LONG ERR
+.51    TAX
+       LDY WBUF.LENGTH
+       STX WBUF.LENGTH (RESET IT)
+.52    LDA WBUF,Y
+       STA WBUF,X
+       DEX
+       DEY
+       CPY MATCH.END
+       BCS .52
+       INX
+       STX MATCH.END
+*--------------------------------
+*      MOVE STRING INTO GAP
+*--------------------------------
+.50    LDX PNTR     MOVE REPLACEMENT STRING INTO GAP
+       LDY #0       POINT AT REPLACEMENT STRING
+.55    LDA KBUF+40,Y  NEXT CHAR FROM REP. STRING
+       BEQ .57      END OF REP. STRING
+       STA WBUF,X   STORE IN GAP
+       INX
+       INY
+       BNE .55      ...ALWAYS
+.57    CLC          SIGNAL SUCCESS
+       LDA #0        (CC,EQ)
+.99    RTS
+*--------------------------------
+* REPLACE IS SHORTER - REMOVE EXTRA
+*--------------------------------
+.60    LDA PNTR
+       ADC REPLACE.LENGTH
+       TAX
+       LDY MATCH.END
+       STX MATCH.END     (RESET IT)
+.1     LDA WBUF,Y
+       STA WBUF,X
+       INY
+       INX
+       CPX WBUF.LENGTH
+       BCC .1
+       STX WBUF.LENGTH   (RESET THIS TOO)
+       BCS .50      ...ALWAYS
+*--------------------------------
+* PRINT LINE AND GET Y,N,Q
+*      RETURNS:   CARRY ZERO
+*          Q        CS   NE
+*          N        CC   NE
+*          Y        CS   EQ
+*--------------------------------
+PRINT.AND.PROMPT
+       JSR P.RETURN      PRINT <CR>
+       LDX #0
+.1     LDA WBUF,X
+       BEQ .4       EOL?
+       ORA #$80
+       CMP #$A0     SKIP CONTROL
+       BCC .3 
+       CPX PNTR
+       BCC .2 
+       CPX MATCH.END
+       BCS .2 
+       JSR ELIMINATE.CASE
+       AND #$3F     ...DISPLAY IN INVERSE
+.2     JSR IO.COUT
+.3     INX
+       BNE .1       NEXT CHAR
+.4     JSR MON.CLREOL
+       LDY #QREPPRMT     PRINT "REPLACE?  "
+YES.OR.NO
+       JSR QT.OUT
+       JSR READ.KEY.WITH.CASE
+       CMP #$A0     CONTROL CHAR?
+       BCC .2       ...YES, DO NOT ECHO
+       JSR MY.COUT
+       AND #$DF     NOW IGNORE CASE
+.2     CMP #'N+$80  NO:  RETURN CC, NE
+       BEQ .1       ..."N"
+       CMP #'Y+$80  YES: RETURN CS, EQ
+       SEC          NEITHER:  CS, NE
+       RTS
+.1     LSR          WAS = N = $CE, SO CLEAR CARRY, SET NE
+       RTS
+*--------------------------------
+* SET FLAGS FROM CHAR IN ACC
+*      CHAR  FLAG      MEANING
+*      "A"  AUTO.FLAG  +=VERIFY, -=AUTO
+*      "U"  LC.FLAG    +=AS TYPED, -=ACCEPT EITHER CASE
+*
+*     RETURN  CS -> VALID OPTION
+*             CC -> NOT AN OPTION
+*--------------------------------
+HANDLE.REPLACE.OPTIONS
+       LSR AUTO.FLAG +=VERIFY MODE
+       LSR LC.FLAG   +=CASE AS TYPED
+.1     JSR GNNB     GET NEXT BYTE FROM INPUT LINE
+       BCS .3       END OF LINE
+       JSR ELIMINATE.CASE    MAP LOWER TO UPPER
+       CMP #'A      AUTO MODE?
+       BNE .2       NO
+       ROR AUTO.FLAG YES, SET SIGN BIT FROM CARRY
+.2     CMP #'U      ACCEPT BOTH CASES?
+       BNE .1       NO
+       ROR LC.FLAG  YES, SET SIGN BIT FROM CARRY
+       BNE .1       ...ALWAYS
+.3     RTS
+*--------------------------------
+*      MAP LOWER CASE INTO UPPER CASE
+*--------------------------------
+ELIMINATE.CASE.MAYBE
+       BIT LC.FLAG
+       BPL LCUC3    DON'T DO IT
+ELIMINATE.CASE
+       PHA          SAVE ORIGINAL CHAR
+       ORA #$80     MAKE CANONICAL FORM
+       CMP #$E0     IN LOWER CASE REGION?
+       PLA          RESTORE ORIGINAL CHAR
+       BCC LCUC3    ...NOT LOWER CASE REGION
+       AND #$DF     ...LC, MAP TO UPPER CASE
+LCUC3  RTS
+*--------------------------------
+*      LOAD CURRENT LINE NUMBER FROM SRCP
+*--------------------------------
+GET.LINE.NUMBER
+       JSR GNB      SKIP LENGTH
+       JSR GNB      GET LINE NUMBER
+       STA CURRENT.LINE.NUMBER
+       JSR GNB
+       STA CURRENT.LINE.NUMBER+1
+       RTS
+*--------------------------------------
+MAN
+SAVE usr/src/scmasm.30/scmasm.s.fndrep
+LOAD usr/src/scmasm.30/scmasm.s
+ASM

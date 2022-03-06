@@ -1,0 +1,337 @@
+NEW
+  AUTO 3,1								Enable MASM3 auto line num
+				.LIST OFF
+				.OP	65C02				Target CPU, must match CPU level in header
+				.OR	$2000				usualy $2000, but any value > $100 allowed
+				.TF sbin/vedd
+*--------------------------------------
+				.INB inc/macros.i
+				.INB inc/a2osx.i
+				.INB inc/mli.e.i
+				.INB inc/eth.i
+				.INB inc/libtcpip.i
+*--------------------------------------
+ADT.CMD.VSD		.EQ $C5					"E": Virtual Drive Command Envelope
+TIMEOUT.MAX		.EQ 250					25 sec.
+*--------------------------------------
+* Zero Page Segment, up to 32 bytes
+*--------------------------------------
+				.DUMMY
+				.OR ZPBIN
+ZS.START
+ZPIPCfgPtr		.BS 2
+ZPFrameBase		.BS 2
+hSocket			.BS 1
+TimeOut			.BS 1
+hFrame			.BS 1
+ZS.END			.ED
+*--------------------------------------
+*			File Header (16 Bytes)
+*--------------------------------------
+CS.START		cld
+				jmp (.1,x)
+				.DA #$61				6502,Level 1 (65c02)
+				.DA #1					BIN Layout Version 1
+				.DA #S.PS.F.EVENT
+				.DA #0
+				.DA CS.END-CS.START		Code Size (without Constants)
+				.DA DS.END-DS.START		Data SegmentSize
+				.DA #64					Stack Size
+				.DA #ZS.END-ZS.START	Zero Page Size
+				.DA 0
+*--------------------------------------
+* Relocation Table
+*--------------------------------------
+.1				.DA CS.INIT
+				.DA CS.RUN
+				.DA CS.DOEVENT
+				.DA	CS.QUIT
+L.LIBTCPIP		.DA LIBTCPIP
+L.MSG.USAGE		.DA MSG.USAGE
+L.MSG.TCPIPERR	.DA MSG.TCPIPERR
+L.MSG.UNKNOWN	.DA MSG.UNKNOWN
+L.MSG.CONNECTED	.DA MSG.CONNECTED
+L.MSG.NOCONN	.DA MSG.NOCONN
+L.MSG.NOPING	.DA MSG.NOPING
+L.MSG.MOUNTED	.DA MSG.MOUNTED
+L.ADT.REQ		.DA ADT.REQ
+				.DA 0
+*--------------------------------------
+* Called once at process creation
+* Put code for loading LIB here
+*--------------------------------------
+CS.INIT			>LDYA L.LIBTCPIP
+				>SYSCALL LoadLib
+				bcs .9
+
+				sta hLIBTCPIP
+
+*				clc
+.9
+CS.INIT.RTS		rts
+*--------------------------------------
+* Called until exit with CS
+* if RUN exits with CC, RUN entered again
+*--------------------------------------
+CS.RUN			lda hSocket
+				beq .1
+
+				lda #0
+				clc
+				rts
+
+.1				jsr CS.RUN.CheckTCPIP
+				bcs CS.INIT.RTS
+
+				jsr CS.RUN.CheckArgs
+				bcs CS.INIT.RTS
+
+				jsr CS.RUN.Connect
+				bcs CS.INIT.RTS
+
+				>PUSHB hSocket
+				>PUSHW L.ADT.REQ
+				>PUSHWI ADT.REQ.LEN
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Send
+				bcs .9
+
+				jsr CS.RUN.RECV
+				bcc .8
+
+				>PUSHW L.MSG.NOPING
+				lda #1
+				>SYSCALL ArgV
+				>PUSHYA
+				>PUSHBI 2
+				>SYSCALL PrintF
+
+.8
+
+				lda #0
+				sec
+.9				rts
+*--------------------------------------
+CS.RUN.CheckTCPIP
+				>LIBCALL hLIBTCPIP,LIBTCPIP.GETCFG	is TCPIP loaded ?
+				bcs .9
+
+				>STYA ZPIPCfgPtr
+				lda (ZPIPCfgPtr)		Configured ?
+				bmi .1
+
+				>LDYA L.MSG.TCPIPERR
+				>SYSCALL PutS
+
+				lda #E.SYN
+				sec
+.9				rts
+
+.1				lda #AF.INET
+				>STA.G SA.LOCAL
+				>STA.G SA.REMOTE
+
+				ldy #S.IPCFG.IP+3
+
+.3				lda (ZPIPCfgPtr),y
+				pha
+				dey
+				cpy #S.IPCFG.IP-1
+				bne .3
+
+				ldy #SA.LOCAL+S.SOCKADDR.ADDR
+
+.4				pla
+				sta (pData),y
+				iny
+				cpy #SA.LOCAL+S.SOCKADDR.ADDR+4
+				bne .4
+
+				lda #6502
+				>STA.G SA.REMOTE+S.SOCKADDR.PORT
+				iny
+				lda /6502
+				sta (pData),y
+
+				clc
+				rts
+*--------------------------------------
+CS.RUN.CheckArgs
+				ldy #S.PS.ARGC
+				lda (pPS),y
+				bne .1
+
+				>LDYA L.MSG.USAGE
+				>SYSCALL PutS
+				lda #E.SYN
+				sec
+				rts
+
+.1				lda #TIMEOUT.MAX
+				sta TimeOut
+
+.2				>PUSHEA.G SA.REMOTE+S.SOCKADDR.ADDR
+				lda #1
+				>SYSCALL ArgV
+				>PUSHYA
+				>LIBCALL hLIBTCPIP,LIBTCPIP.HST.GetByName
+				bcc .3
+
+				>SLEEP
+				lda TimeOut
+				bne .2
+
+				>PUSHW L.MSG.UNKNOWN
+				lda #1
+				>SYSCALL ArgV
+				>PUSHYA
+				>PUSHBI 2
+				>SYSCALL PrintF
+				lda #ERR.SKT.NOCONN
+				sec
+				rts
+
+.3				lda #2
+				>SYSCALL ArgV
+				bcc .4
+
+
+
+.4
+
+.8				clc
+CS.RUN.CheckArgs.RTS
+				rts
+*--------------------------------------
+CS.RUN.Connect	>PUSHBI S.SOCKET.T.DGRAM
+				>PUSHBI 0				no protocol
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Socket
+				bcs .9
+
+				sta hSocket
+
+				>PUSHA
+				>PUSHEA.G SA.LOCAL
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Bind
+				bcs .9
+
+				lda #TIMEOUT.MAX
+				sta TimeOut
+
+.1				>SLEEP
+
+				>PUSHB hSocket
+				>PUSHEA.G SA.REMOTE
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Connect
+				bcc .8
+
+				ldx TimeOut
+				bne .1
+
+.9				pha
+
+				>PUSHW L.MSG.NOCONN
+				lda #1
+				>SYSCALL ArgV
+				>PUSHYA
+				>PUSHBI 2
+
+				pla
+				sec
+				rts
+
+.8				>PUSHW L.MSG.CONNECTED
+				lda #1
+				>SYSCALL ArgV
+				>PUSHYA
+				>PUSHBI 2
+				>SYSCALL PrintF
+				rts
+*--------------------------------------
+CS.RUN.RECV		lda #TIMEOUT.MAX
+				sta TimeOut
+
+.1				>SLEEP
+
+				lda hSocket
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Recv
+				bcc	.8
+
+				cmp #E.NODATA
+				bne .9
+
+				lda TimeOut
+				bne .1
+
+.9				sec
+				rts
+
+.8				sta hFrame
+
+				>SYSCALL GetMemPtr
+				>STYA ZPFrameBase
+				rts
+*--------------------------------------
+CS.DOEVENT		lda (pEvent)
+				bpl .9					is it a TIMER event?
+
+				lda TimeOut
+				beq .9
+
+				dec TimeOut
+
+.9				sec						do not discard TIMER event
+				rts
+*--------------------------------------
+CS.QUIT			
+
+.1				lda hSocket
+				beq .2
+
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Shutdown
+
+.2
+
+				lda hLIBTCPIP
+.7				beq .8
+
+				>SYSCALL UnloadLib
+
+.8				clc
+				rts
+*--------------------------------------
+CS.END
+*--------------------------------------
+* Initialized DATA
+*--------------------------------------
+LIBTCPIP		.AZ "libtcpip"
+hLIBTCPIP		.BS 1
+*--------------------------------------
+MSG.USAGE		.AZ "Usage : VEDD <ip|host> [port]"
+MSG.TCPIPERR	.AZ "VEDD:TCP/IP Not initialized properly."
+MSG.UNKNOWN		.AZ "VEDD:%s: Unknown host\r\n"
+MSG.NOCONN		.AZ "VEDD:No Connection To %s\r\n"
+MSG.CONNECTED	.AZ "VEDD:Connected To %s\r\n"
+MSG.NOPING		.AZ "VEDD:No response from %s\r\n"
+MSG.MOUNTED		.AZ "VEDD:%s Mounted As %s\r\n"
+*--------------------------------------
+ADT.REQ			.DA #ADT.CMD.VSD
+				.HS 030000C6			READ D1, BLK 0
+ADT.REQ.LEN 	.EQ *-ADT.REQ
+*--------------------------------------
+				.DUMMY
+				.OR 0
+DS.START
+SA.LOCAL		.BS 1					S.SOCKADDR.AF
+				.BS 1
+				.BS 4					S.SOCKADDR.ADDR
+				.BS 2					S.SOCKADDR.PORT
+SA.REMOTE		.BS 1					S.SOCKADDR.AF
+				.BS 1
+				.BS 4					S.SOCKADDR.ADDR
+				.BS 2					S.SOCKADDR.PORT
+DS.END
+				.ED
+*--------------------------------------
+MAN
+SAVE usr/src/sbin/vedd.s
+ASM

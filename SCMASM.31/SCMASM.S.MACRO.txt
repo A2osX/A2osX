@@ -1,0 +1,370 @@
+NEW
+  AUTO 3,1
+*--------------------------------------
+*      .MA DIRECTIVE
+*--------------------------------
+PSMA   LDA PASS     WHICH PASS?
+       BNE .2       PASS 2, SO SET FLAG AND IGNORE
+       LDA #'Z+1    RIGHT BRACKET CODE
+       STA SYMBOL+7
+       LDA #0       CLEAR VALUE BYTES
+       LDX #3
+.1     STA SYMBOL+2,X
+       DEX
+       BPL .1
+       JSR GNNB     GET FIRST CHAR OF MACRO NAME
+       LDX #1
+       JSR PACK.NAME
+       CPX #2       NEED AT LEAST TWO CHARS, COUNTING BRACKET
+       BCC .3       NO MACRO NAME
+       STX SYMBOL+6 LENGTH
+       JSR STSRCH
+       BCC .4       DOUBLE DEFN
+       JSR STADD    ENTER INTO SYMBOL TABLE
+.2     SEC          SET "INSIDE MACRO DEFINITION" FLAG
+       ROR FLAG.MA
+       RTS          RETURN TO MAIN LEVEL OF ASM
+.3     LDY #QNONAM  NO MACRO NAME
+       .HS 2C       SKIP NEXT TWO BYTES
+.4     LDY #QER4    EXTRA DEF'N
+       JMP FIRM.ERROR
+*--------------------------------
+*      PACK MACRO LINE
+*--------------------------------
+PACK.MACRO.LINE
+       JSR SCAN.TO.OPCODE
+       LDX FLAG.MA  IN A MACRO DEF'N?
+       BPL D.SET    ...NO, TRY .SE DIRECTIVE
+       LDX PASS     WHICH PASS?
+       BNE .10      PASS 2
+*---PASS 1-----------------------
+       BCS .4       ...OPCODE IS NOT A DIRECTIVE
+       LDX #DIR.QT.MA
+       JSR DIR.SCAN.OR.FAIL
+       BCC .2       NOT .MA
+.1     LDY #QER2    "BAD OPCODE"
+       JMP SOFT.ERROR
+.2     JSR DIR.SCAN.OR.FAIL
+       BCC .3       NOT .EM
+       LDA #0       TERMINATE THE SKELETON
+       STA CURRENT.MAJOR.LABEL+1  KILL POSSIBILITY OF LOCAL LABELS
+*                               UNTIL ANOTHER MAJOR LABEL
+       JSR ADD.CHAR.TO.SKELETON
+.11    LSR FLAG.MA
+.12    SEC
+       RTS
+*--------------------------------
+.3     JSR DIR.SCAN.OR.FAIL  SEE IF .IN
+       BCS .1       YES, SO ILLEGAL!
+*      FALL INTO ACCEPTABLE LINE CODE
+*--------------------------------
+.4     LDY #0       BACK TO BEGINNING OF LINE
+       BEQ .5       ...ALWAYS
+.55    LDX #$80     COMPRESSED BLANK TOKEN
+.6     INX          COUNT THE BLANK
+       CPX #$BF     MAX BLANK COUNT?
+       BCS .7       YES, OUTPUT TOKEN NOW
+       JSR GNC2     GET NEXT CHARACTER
+       BCS .7       END OF LINE
+       BEQ .6       BLANK, SO COMPRESS IT
+       DEY          NON-BLANK, SO BACK UP PNTR
+.7     TXA          COMPRESSED BLANK TOKEN
+.8     JSR ADD.CHAR.TO.SKELETON
+.5     JSR GNC2     GET NEXT CHARACTER
+       BCS .9       END OF LINE
+       BEQ .55      ...it is a blank
+       CMP #']'     MACRO PARAMETER?
+       BNE .8       ...NO
+       TAX          save ']' in X
+       JSR GNC2     GET PARAMETER CODE
+       BCS .7       ...eol, add ']' and end
+       CMP #']'
+       BEQ .8       ...two makes one
+       CMP #'#'
+       BEQ .81      ...]# is valid parameter
+       CMP #'9'+1   HOW ABOUT 1...9
+       BCS .82      ...not a parameter
+       CMP #'1'
+       BCC .82      ...not a parameter
+.81    LDX #$7F     valid parameter
+.82    DEY          back up char pntr
+       JMP .7       go add $7F or ']'
+*--------------------------------
+.9     LDA #0       TERMINATE THE LINE
+       JSR ADD.CHAR.TO.SKELETON
+       SEC
+       RTS
+*---PASS 2-----------------------
+*      IF NOT ".EM", JUST LIST THE LINE
+.10    BCS .12      ...OPCODE IS NOT A DIRECTIVE
+       LDX #DIR.QT.EM
+       JSR DIR.SCAN.OR.FAIL
+       BCC .12      NOT .EM
+       BCS .11      ...ALWAYS
+*--------------------------------
+*      .SET DIRECTIVE
+*--------------------------------
+D.SET
+       BCS .1            NOT A DIRECTIVE
+       LDX #DIR.QT.SE
+       JSR DIR.SCAN.OR.FAIL
+       BCS .2            FOUND .SE
+.1     CLC
+       RTS
+.2     JSR EXPR.DEFINED  GET VALUE
+       JSR GNC.UC.START  CHECK FOR VALID LABEL
+       BEQ .6            ...NO LABEL ERROR
+       JSR CHECK.LETTER  MUST BE NORMAL LABEL
+       BCC .7            ...DOES NOT START WITH A-Z
+       JSR PACK
+       BCC .7            ...BAD SYMBOL
+       JSR STSRCH
+       BCC .3            ...IN TABLE ALREADY
+       LDA SYMBOL+7
+       ORA #$80
+       STA SYMBOL+7 SET THE .SE FLAG
+       JSR STADD
+       JMP .4
+.3     LDY #7       CK .SE FLAG
+       >SYM LDA,TPTR
+       BPL .9       DOUBLE DEF IF NOT SET!
+       LDA TPTR     USE SAME PTR AS STADD
+       STA PNTR
+       LDA TPTR+1
+       STA PNTR+1
+       LDA PASS     HANDLE FORWARD REFERENCES
+       BEQ .5       ...IN PASS ONE
+       DEY          POINT AT FLAGS
+       >SYM LDA,PNTR
+       ORA #$40
+       >SYM STA,PNTR
+.4     JSR P.EXP.VALUE.DASH     (IF LISTING)
+.5     LDY #2       PUT VALUE IN SYMBOL TABLE
+.8     LDA EXP.VALUE-2,Y
+       >SYM STA,PNTR
+       INY
+       CPY #6
+       BCC .8
+       RTS          RETURN TO ASM WITH .CS.
+.6     JMP NOLBLERR
+.7     JMP ERR.BS
+.9     JMP ERR.DBLDF
+*--------------------------------
+*      ADD CHARACTER TO SKELETON
+*--------------------------------
+ADD.CHAR.TO.SKELETON
+       PHA          SAVE CHAR
+  .DO AUXMEM
+       LDA EOT+1
+       CMP /$C000
+       BCC .1
+       JMP MFER     MEM FULL ERROR
+.1     STA WRAUX
+       LDX #0
+       PLA
+       STA (EOT,X)
+       STA WRMAIN
+  .ELSE
+       LDA EOT
+       CMP PP
+       LDA EOT+1
+       SBC PP+1
+       BCC .1       ROOM
+       JMP MFER     MEM FULL ERROR
+.1     LDX #0
+       PLA
+       STA (EOT,X)
+  .FIN
+      >INCD EOT
+       RTS
+*--------------------------------
+*      SCAN TO OPCODE
+*--------------------------------
+SCAN.TO.OPCODE
+       JSR GNC.START  GET FIRST CHAR
+       BEQ .2       ...BLANK OR END
+       JSR CHECK.COMMENT.CHAR
+       BEQ .3       ...YES, IT IS A COMMENT
+.1     JSR GNC      SCAN TO A BLANK
+       BNE .1       ...NOT BLANK YET
+.2     JSR GNNB     SCAN TO NON-BLANK
+       BCS .3       ...END OF LINE
+       CMP #'.'     DIRECTIVE?
+       BNE .3       ...NO
+       JSR GNC.UC      GET NEXT BYTE
+       CLC          SIGNAL IT IS A DIRECTIVE
+       RTS
+.3     SEC          SIGNAL IT IS NOT A DIRECTIVE
+       RTS
+*--------------------------------
+*      PROCESS MACRO CALL
+*--------------------------------
+MACER1 LDY #QNONAM
+       .HS 2C
+MACER2 LDY #QERR.MACRO
+       JMP SOFT.ERROR
+*--------------------------------
+MACRO.CALL
+       LDA #'Z+1    MACRO KEY IN SYMBOL TABLE
+       STA SYMBOL+7
+       LDX #1
+       JSR GNC.UC      GET FIRST CHAR OF MACRO NAME
+       JSR PACK.NAME
+       CPX #2
+       BCC MACER1   ERROR, NO NAME
+       STX SYMBOL+6 LENGTH OF NAME
+       JSR STSRCH
+       BCS MACER2   ERROR, NO SUCH MACRO
+       JSR P.ORIGIN
+       JSR LIST.SOURCE.IF.LISTING
+       JSR GNNB     SCAN TO PARAMETER LIST
+       JSR BACKUP.CHAR.PNTR
+       LDA MACSTK+1 SAVE PNTR FOR LATER
+       PHA
+       LDA MACSTK
+       PHA
+       LDX #0       PROCESS PARAMETER LIST
+       LDA #9       FIND 9 PARAMETERS
+       STA PARAM.CNT
+.1     JSR GET.ONE.PARAMETER
+       DEC PARAM.CNT
+       BNE .1
+.2     LDA WBUF-1,X
+       JSR PUSH.MACSTK
+       DEX
+       BNE .2
+       PLA          PUT OLD MACSTK PNTR ON MACRO STACK
+       JSR PUSH.MACSTK   (LOW BYTE)
+       PLA
+       JSR PUSH.MACSTK   (HIGH BYTE)
+       LDA SRCP
+       JSR PUSH.MACSTK
+       LDA SRCP+1
+       JSR PUSH.MACSTK
+       LDA LF.ALL   save current list option
+       JSR PUSH.MACSTK
+       LDA CALL.NUM  STACK CURRENT CALL #
+       JSR PUSH.MACSTK
+       LDA CALL.NUM+1
+       JSR PUSH.MACSTK
+       CLC          COMPUTE ADDRESS OF SKELETON
+       LDA #7
+       LDY #6       POINT AT LENGTH OF MACRO NAME
+       >SYM ADC,STPNTR    NAME LENGTH+7
+       ADC STPNTR
+       STA SRCP
+       LDA STPNTR+1
+       ADC #0
+       STA SRCP+1
+       LDA LF.MACRO
+       ORA LF.ALL        DON'T LIST EXPANSION IF NOT LISTING
+       STA LF.ALL
+       INC MACRO.LEVEL
+      >INCD CALL.CNTR     COUNT THIS MACRO CALL
+       LDA CALL.CNTR
+       STA CALL.NUM
+       LDA CALL.CNTR+1
+       STA CALL.NUM+1
+       JMP ASM2
+*--------------------------------
+*      PUSH A BYTE ON MACSTK
+*--------------------------------
+PUSH.MACSTK
+       PHA          SAVE BYTE TO BE PUSHED
+  .DO AUXMEM
+       LDA MACSTK+1
+       CMP /$0800
+       BCS .1
+  .ELSE
+       LDA EOT
+       CMP MACSTK
+       LDA EOT+1
+       SBC MACSTK+1
+       BCC .1       STILL ROOM
+  .FIN
+       JMP MFER     NO ROOM
+.1     LDA MACSTK
+       BNE .2
+       DEC MACSTK+1
+.2     DEC MACSTK
+       PLA          BYTE TO BE PUSHED
+       LDY #0
+       STA (MACSTK),Y
+       RTS
+*--------------------------------
+*      GET ONE PARAMETER FROM MACRO CALL LINE
+*--------------------------------
+GET.ONE.PARAMETER
+       JSR GNC
+       BEQ .2       SPACE OR EOL, NO MORE PARAMETERS
+       CMP #',      COMMA
+       BEQ .3       NULL PARAMETER
+       CMP #'"      QUOTE
+       BEQ .4       QUOTED PARAMETER
+.1     STA WBUF,X   NORMAL PARAMETER
+       INX
+       JSR GNC
+       BEQ .2       END OF PARAMETER
+       CMP #',      COMMA
+       BNE .1       MORE TO PARAMETER
+       BEQ .3       END OF PARAMETER
+.2     JSR BACKUP.CHAR.PNTR
+.3     LDA #0
+       STA WBUF,X
+       INX
+       RTS
+.4     JSR GNC         QUOTED PARAMETER
+       BCS .3       END OF LINE
+       CMP #'"
+       BEQ .5       END OF QUOTED PARAMETER
+.6     STA WBUF,X
+       INX
+       BNE .4       ...ALWAYS
+.5     JSR GNC
+       BEQ .2       END OF PARAMETER LIST
+       CMP #',      COMMA
+       BEQ .3
+       BNE .6       ...ALWAYS
+*--------------------------------
+*      DIRECTIVE SCAN OR FAIL
+*      COMPARE NEXT TWO CHARS WITH TABLE ENTRY
+*      ENTER:  FIRST CHAR SET UP BY GNC.UC
+*              (X)=OFFSET OF TWO-BYTE ENTRY IN DIR.QTS
+*--------------------------------
+DIR.SCAN.OR.FAIL
+       CMP DIR.QTS,X
+       BNE .1       FAIL
+       LDY CHAR.PNTR
+       LDA WBUF,Y   NEXT CHAR
+       AND #$DF     MAP LOWER CASE TO UPPER CASE
+       CMP DIR.QTS+1,X
+       BNE .1       FAIL
+       JSR GNC.UC      SCAN OVER SECOND CHAR
+       SEC          SIGNAL SUCCESS
+       RTS
+.1     CLC          SIGNAL FAILURE
+       LDA CURRENT.CHAR  RESTORE (A)
+       INX               ADVANCE TO NEXT QUOTE
+       INX
+       RTS
+*--------------------------------
+DIR.QTS
+DIR.QT.DO .EQ *-DIR.QTS
+       .AS /DO/
+DIR.QT.EL .EQ *-DIR.QTS
+       .AS /EL/
+DIR.QT.FI .EQ *-DIR.QTS
+       .AS /FI/
+DIR.QT.MA .EQ *-DIR.QTS
+       .AS /MA/
+DIR.QT.EM .EQ *-DIR.QTS
+       .AS /EM/
+DIR.QT.IN .EQ *-DIR.QTS
+       .AS /IN/
+DIR.QT.SE .EQ *-DIR.QTS
+       .AS /SE/
+*--------------------------------------
+MAN
+SAVE usr/src/scmasm.31/scmasm.s.macro
+LOAD usr/src/scmasm.31/scmasm.s
+ASM

@@ -1,0 +1,495 @@
+NEW
+  AUTO 3,1
+*--------------------------------------
+*      INITIALIZE SYMBOL TABLE
+*      1.  SET EOT TO BOT
+*      2.  CLEAR HASH POINTER TABLE
+*--------------------------------
+STINIT LDA LO.MEM    START OF SYMBOL TABLE
+       STA EOT
+       LDA LO.MEM+1
+       STA EOT+1
+       STA MACLBL+1 PRIVATE LABELS GO DOWN FROM THERE
+       LDX #56      # BYTES IN HASH POINTER TABLE
+       LDA #0
+       STA MACLBL
+       STA CURRENT.MAJOR.LABEL+1
+.1     STA HSHTBL-1,X
+       DEX
+       BNE .1
+  .DO AUXMEM
+       LDA RDRAM
+       LDA RDRAM
+       LDX #AUX.IMAGE.LEN-1
+.2     LDA AUX.IMAGE,X
+       STA AUX.CODE,X
+       DEX
+       BPL .2
+BACK.TO.ROM
+       PHA
+       LDA RDROM
+       PLA
+  .FIN
+       RTS          RETURN WITH X=0
+*--------------------------------
+   .DO AUXMEM
+LDA.STPNTR
+       BIT RDRAM
+       JSR LDA.STPNTR.AUX
+       JMP BACK.TO.ROM
+*
+ADC.STPNTR
+       BIT RDRAM
+       JSR ADC.STPNTR.AUX
+       JMP BACK.TO.ROM
+*
+SBC.STPNTR
+       BIT RDRAM
+       JSR SBC.STPNTR.AUX
+       JMP BACK.TO.ROM
+*
+LDA.PNTR
+       BIT RDRAM
+       JSR LDA.PNTR.AUX
+       JMP BACK.TO.ROM
+*
+LDA.TPTR
+       BIT RDRAM
+       JSR LDA.TPTR.AUX
+       JMP BACK.TO.ROM
+*
+LDA.SRCP
+       BIT RDRAM
+       JSR LDA.SRCP.AUX
+       JMP BACK.TO.ROM
+*
+STA.PNTR
+       STA WRAUX
+       STA (PNTR),Y
+       STA WRMAIN
+       RTS
+STA.STPNTR
+       STA WRAUX
+       STA (STPNTR),Y
+       STA WRMAIN
+       RTS
+*--------------------------------
+AUX.IMAGE
+LDA.STPNTR.AUX .EQ *-AUX.IMAGE+AUX.CODE
+       STA RDAUX
+       LDA (STPNTR),Y
+       STA RDMAIN
+       RTS
+ADC.STPNTR.AUX .EQ *-AUX.IMAGE+AUX.CODE
+       STA RDAUX
+       ADC (STPNTR),Y
+       STA RDMAIN
+       RTS
+SBC.STPNTR.AUX .EQ *-AUX.IMAGE+AUX.CODE
+       STA RDAUX
+       SBC (STPNTR),Y
+       STA RDMAIN
+       RTS
+LDA.PNTR.AUX .EQ *-AUX.IMAGE+AUX.CODE
+       STA RDAUX
+       LDA (PNTR),Y
+       STA RDMAIN
+       RTS
+LDA.TPTR.AUX .EQ *-AUX.IMAGE+AUX.CODE
+       STA RDAUX
+       LDA (TPTR),Y
+       STA RDMAIN
+       RTS
+LDA.SRCP.AUX .EQ *-AUX.IMAGE+AUX.CODE
+       STA RDAUX
+       LDA (SRCP),Y
+       STA RDMAIN
+       RTS
+AUX.IMAGE.LEN .EQ *-AUX.IMAGE
+   .FIN
+*--------------------------------
+*      A table of 28 pointers begins at $130, called HSHTBL.
+*      Each pointer points to the beginning of a chain of
+*      symbol entries.  The entries on a chain are kept
+*      in alphabetical order.  If a chain is empty, the
+*      pointer = $0000.
+*
+*      HSHTBL+$00:  Chain for target file entries
+*      HSHTBL+$02:  Chain for labels starting with "A"
+*      HSHTBL+$04:  Chain for labels starting with "B"
+*        - - -
+*      HSHTBL+$34:  Chain for labels starting with "Z"
+*      HSHTBL+$36:  Chain for Macro Names and Skeletons
+*
+*      Format of Target File Entry:
+*          0,1 -- Forward chain pointer (0=end of chain)
+*          2,3 -- Length of target file in bytes
+*          4   -- Length of code name = $02
+*          5,6 -- Target file code name:
+*                 5:  "@" = $40
+*                 6:  $40 + target file number ($00-$1F)
+*
+*      Format of Label Entry:
+*          0,1 -- Forward chain pointer (0=end of chain)
+*          2-5 -- Value of label
+*          6   -- Flags and length of label name:
+*                 Bits 5-0:  length of label name ($01-$20)
+*                 Bit    6:  =1 if forward reference
+*                 Bit    7:  =1 if has local labels
+*          7   -- First character of label name, and flag.
+*                 Bit 7 = 1 if label is .SEt label.
+*     thru 6+n -- The rest of the label name, with bit 7 = 0
+*
+*          If the label has local labels, they follow.
+*          Each local label occupies two bytes:
+*          1   -- Label number (0-99) +128
+*          2   -- Label value (distance from value of
+*                   named label)
+*          The local label list is terminated with a $00
+*                   in the label number position.
+*
+*      Format of Macro Definition Entry:
+*          0,1 -- Chain to next macro name
+*          2,3 -- $0000
+*          4   -- Length of macro name
+*          5   -- "[" + $5B
+*          6-n -- Rest of Macro name
+*          etc.-- The packed skeleton lines, each
+*                   terminated by $00.  A final $00
+*                   terminates the skeleton.
+*
+*      Private Labels are kept in a separate table.
+*      Each label takes 7 bytes.  Bytes 0-3 are the
+*      value, byte 4 is the colon number + $80,
+*      and bytes 5 and 6 are the macro call number.
+*      The Private Label table grows downward from
+*      MACLBL toward $0800.
+*
+*--------------------------------
+*      PACK SYMBOL FROM INPUT LINE
+*      UP TO 32 CHARACTERS PACKED AT SYMBOL+7
+*      AND FOLLOWING.
+*      # CHARS STORED IN SYMBOL+6
+*      RETURN CARRY CLEAR IF NO SYMBOL
+*      RETURN CARRY SET IF GOOD SYMBOL
+*--------------------------------
+PACK   LDX #0       POINT AT 1ST CHAR IN NAME
+       CMP #CHR.PERIOD LOCAL SYMBOL?
+       BEQ .1       YES
+       CMP #':      COLON MEANS MACRO PRIVATE LABEL
+       BNE .3       NO, NORMAL SYMBOL
+.1     STA SYMBOL+7 SAVE PERIOD OR COLON
+       JSR GNC.UC   GET NEXT CHAR
+       JSR CHECK.DIGIT
+       BCC .4       NO, BAD SYMBOL
+       JSR DECN     CONVERT TO BINARY
+       LDX #0       IN CASE BAD SYMBOL...
+       LDA DGTCNT         VALUE MUST BE < 100
+       CMP #3            SO MUST BE 1 OR 2 DIGITS
+       BCS .4       ...TOO MANY DIGITS, BAD SYMBOL
+       LDA SYM.VALUE
+       ORA #$80     BE SURE NOT 00
+       STA SYMBOL+8 SAVE VALUE
+       LDA CALL.NUM JUST IN CASE IT'S A
+       STA SYMBOL+9 MACRO PRIVATE LABEL
+       LDA CALL.NUM+1
+       STA SYMBOL+10
+       INX          SIGNAL GOOD SYMBOL
+       BNE .4       ...ALWAYS
+*--------------------------------
+.3     JSR PACK.NAME
+.4     JSR BACKUP.CHAR.PNTR
+       STX SYMBOL+6 SAVE LENGTH
+       CPX #1       CARRY SET IF AT LEAST ONE CHAR
+       LDX #0       CLEAR X AGAIN
+       RTS
+*--------------------------------
+*      PACK A NAME INTO SYMBOL
+*--------------------------------
+PACK.NAME
+       JSR CHECK.LETTER
+       BCC .4       NOT A LETTER
+.1     CPX #32      SEE IF ALREADY 32 CHARACTERS
+       BEQ .2       YES, IGNORE
+       STA SYMBOL+7,X PUT CHAR IN ENTRY
+       INX          POINT AT NEXT SLOT
+.2     JSR GNC.UC   GET NEXT CHAR FROM LINE
+       JSR CHECK.DOT.DIGIT.OR.LETTER
+       BCS .1       VALID CHAR
+.4     RTS          END OF NAME
+*--------------------------------
+*      SEARCH SYMBOL TABLE
+*      # OF CHARS STORED AT SYMBOL+6
+*      SYMBOL ITSELF AT SYMBOL+7 AND FOLLOWING
+*      JSR STSRCH
+*      IF FOUND: CARRY CLEAR
+*                (STPNTR)=ADDRESS OF ENTRY
+*      IF NOT FOUND: CARRY SET
+*                    (STPNTR)=ADDRESS OF
+*                    POINTER CELL WHICH
+*                    SHOULD POINT AT ENTRY
+*--------------------------------
+STSRCH SEC          CONVERT FIRST CHARACTER
+       LDA SYMBOL+7 OF SYMBOL TO HASH TABLE INDEX
+       CMP #CHR.PERIOD SEE IF LOCAL SYMBOL
+       BEQ .8       YES
+       CMP #':      COLON, THEN PRIVATE LABEL
+       BNE .12      NO, NORMAL LABEL
+       JMP SEARCH.PRIVATE.LABELS
+.12    SBC #$40     AT-SIGN
+       ASL          DOUBLE INDEX, CLEAR CARRY
+       ADC #HSHTBL
+       STA STPNTR
+       LDA /HSHTBL
+       ADC #0
+       STA STPNTR+1
+.1     LDY #0
+       >SYM LDA,STPNTR GET POINTER FROM ENTRY
+       STA TPTR
+       INY
+       >SYM LDA,STPNTR
+       BEQ .4       END OF CHAIN, NOT IN TABLE
+       STA TPTR+1
+       LDX SYMBOL+6 # CHARS IN SYMBOL
+       LDY #6       POINT AT LENGTH
+       >SYM LDA,TPTR USE MINIMUM LENGTH
+       AND #$3F     ISOLATE LENGTH
+       CMP SYMBOL,Y
+       INY
+       BCS .2
+       TAX
+.2     >SYM LDA,TPTR COMPARE BYTES FROM BOTH
+       AND #$7F     ALLOW FLAG BITS IN SYMBOL
+       CMP SYMBOL,Y
+       BCC .3       NOT THIS ONE, BUT KEEP LOOKING
+       BNE .4       NOT IN THIS CHAIN
+       DEX
+       BEQ .5       THE NAME IS THE SAME OR A SUBSET
+       INY          NEXT BYTE PAIR
+       BNE .2       ...ALWAYS
+.3     JSR .7       UPDATE POINTER, CLEAR CARRY
+       BCC .1       ...ALWAYS
+.4     SEC          DID NOT FIND
+       LDX #0       RESTORE X=0
+       RTS
+.5     LDY #6       TEST LENGTHS
+       >SYM LDA,TPTR
+       AND #$3F     ISOLATE LENGTH
+       CMP SYMBOL+6 # CHARS IN SYMBOL IN TABLE
+       BEQ .6       SAME EXACTLY
+       BCS .4       NEW SYMBOL IS SHORTER
+       BCC .3       NEW SYMBOL IS LONGER
+.6     LDY #2       POINT AT VALUE
+.65    >SYM LDA,TPTR SET UP VALUE FOR EXPR SCAN
+       STA SYM.VALUE-2,Y
+       INY
+       CPY #6
+       BCC .65
+.7     LDA TPTR
+       STA STPNTR
+       LDA TPTR+1
+       STA STPNTR+1
+       CLC          SIGNAL DID FIND IT
+       RTS
+*--------------------------------
+.8     LDA CURRENT.MAJOR.LABEL
+       STA STPNTR
+       LDA CURRENT.MAJOR.LABEL+1
+       BEQ .11
+       STA STPNTR+1
+       CLC
+       LDY #6       POINT AT LENGTH
+       >SYM LDA,STPNTR GET LENGTH OF MAJOR SYMBOL
+       BPL .4       NO LOCAL SYMBOLS YET
+       AND #$3F     MASK TO REAL LENGTH
+       ADC #7       POINT AT LOCALS
+       TAY
+.9     >SYM LDA,STPNTR
+       BEQ .4       END OF LOCALS, NOT FOUND
+       CMP SYMBOL+8 COMPARE TO NAME OF LOCAL
+       BEQ .10      FOUND IT!
+       INY          SKIP TO NEXT LOCAL
+       INY
+       BNE .9       ...ALWAYS
+.10    INY          POINT AT VALUE OFFSET
+       >SYM LDA,STPNTR
+       CLC
+       LDY #2       POINT AT MAJOR VALUE
+       >SYM ADC,STPNTR
+       STA SYM.VALUE
+       INY
+       >SYM LDA,STPNTR
+       ADC #0
+       STA SYM.VALUE+1
+       INY
+       >SYM LDA,STPNTR
+       ADC #0
+       STA SYM.VALUE+2
+       INY
+       >SYM LDA,STPNTR
+       ADC #0
+       STA SYM.VALUE+3
+       CLC
+       RTS
+.11    LDY #QER9     NO NORMAL LABEL YET
+       JMP SOFT.ERROR
+*--------------------------------
+*      SEARCH PRIVATE LABEL TABLE
+*--------------------------------
+SEARCH.PRIVATE.LABELS
+       LDA MACLBL
+       STA STPNTR
+       LDA MACLBL+1
+.1     STA STPNTR+1
+       CMP LO.MEM+1       END OF TABLE YET?
+       BCS .3            ...YES, NO MORE LABELS
+       LDY #6
+       >SYM LDA,STPNTR
+       AND #$3F     ISOLATE FROM FLAG BITS
+       CMP SYMBOL+10
+       BNE .2       NO
+       DEY
+       >SYM LDA,STPNTR
+       CMP SYMBOL+9
+       BNE .2       NO
+       DEY
+       >SYM LDA,STPNTR
+       CMP SYMBOL+8
+       BEQ .4       YES, FOUND IT!
+.2     CLC          BUMP PNTR TO NEXT LABEL
+       LDA STPNTR
+       ADC #7
+       STA STPNTR
+       LDA STPNTR+1
+       ADC #0
+       BNE .1       ...ALWAYS
+*--------------------------------
+.3     SEC          SIGNAL NOT FOUND
+       RTS
+*--------------------------------
+.4     DEY
+.5     >SYM LDA,STPNTR
+       STA SYM.VALUE,Y
+       DEY
+       BPL .5
+       CLC
+       RTS
+*--------------------------------
+*      ADD SYMBOL TO TABLE
+*--------------------------------
+STADD  LDA SYMBOL+7 SEE IF LOCAL SYMBOL
+       CMP #CHR.PERIOD
+       BEQ .5       YES
+       CMP #':      COLON, PRIVATE LABEL
+       BNE .11      NO, NORMAL LABEL
+       JMP ADD.PRIVATE.LABEL
+.11    LDY #1       POINT AT POINTER
+.1     >SYM LDA,STPNTR GET CURRENT POINTER
+       STA SYMBOL,Y
+       LDA EOT,Y
+       >SYM STA,STPNTR
+       STA PNTR,Y
+       STA CURRENT.MAJOR.LABEL,Y
+       LDA ORGN,Y   VALUE
+       STA SYMBOL+2,Y
+       LDA ORGN+2,Y
+       STA SYMBOL+4,Y
+       DEY
+       BPL .1
+       CLC          COMPUTE ENTRY SIZE
+       LDA SYMBOL+6 FROM SYMBOL SIZE
+       ADC #7
+.2     PHA          SAVE SIZE
+       LDY EOT+1
+       CLC
+       ADC EOT      SEE IF ROOM FOR NEW ENTRY
+       BCC .10
+       INY
+  .DO AUXMEM
+.10    CPY /$C000
+       BCS .4       MEM FULL ERR
+       STA EOT
+  .ELSE
+.10    CMP MACSTK
+       TAX          SAVE LOW BYTE
+       TYA          GET HIGH BYTE
+       SBC MACSTK+1
+       BCS .4       MEM FULL ERR
+       STX EOT
+  .FIN
+       STY EOT+1
+       PLA          GET SIZE
+       TAY
+       DEY          CORRECT FOR INDEXING
+.3     LDA SYMBOL,Y
+       >SYM STA,PNTR
+       DEY
+       BPL .3
+       RTS
+.4     JMP MFER     MEM FULL ERR
+*--------------------------------
+.5     LDY #6       LENGTH BYTE
+       >SYM LDA,STPNTR
+       BMI .6       ALREADY HAVE SOME LOCAL LABELS
+       ORA #$80     SET LOCAL FLAG
+       >SYM STA,STPNTR
+       BNE .8       ...ALWAYS
+.6     LDA EOT      BACK UP EOT
+       BNE .7       OVER 00 TERMINATOR
+       DEC EOT+1    OF LOCALS
+.7     DEC EOT
+.8     LDA SYMBOL+8 NAME OF LOCAL
+       STA SYMBOL   SET UP TO ADD TO SYMBOL TABLE
+       SEC
+       LDY #1
+       JSR CALC.OFFSET.BYTE
+       JSR CALC.OFFSET.BYTE
+       BNE .9       ERROR > 255
+       JSR CALC.OFFSET.BYTE
+       BNE .9       ERROR > 255
+       JSR CALC.OFFSET.BYTE
+       BNE .9       ERROR > 255
+       LDA EOT
+       STA PNTR
+       LDA EOT+1
+       STA PNTR+1
+       LDA #3       SIZE IS 3 BYTES
+       BNE .2       ...ALWAYS
+.9     JMP GT255ERR  VALUE > 255
+*--------------------------------
+CALC.OFFSET.BYTE
+       INY
+       LDA ORGN-2,Y
+       >SYM SBC,STPNTR
+       STA SYMBOL-1,Y
+       RTS
+*--------------------------------
+*      ADD A PRIVATE LABEL
+*--------------------------------
+ADD.PRIVATE.LABEL
+       SEC
+       LDA MACLBL
+       SBC #7
+       STA MACLBL
+       STA STPNTR
+       LDA MACLBL+1
+       SBC #0
+       STA MACLBL+1
+       STA STPNTR+1
+       CMP #8       BELOW $0800?
+       BCC .3       YES, NO MORE ROOM
+       LDY #6       POINT AT LAST BYTE
+.1     LDA SYMBOL+4,Y
+       CPY #4
+       BCS .2
+       LDA ORGN,Y
+.2     >SYM STA,STPNTR
+       DEY
+       BPL .1
+       RTS
+.3     JMP MFER
+*--------------------------------------
+MAN
+SAVE usr/src/scmasm.31/scmasm.s.symt
+LOAD usr/src/scmasm.31/scmasm.s
+ASM

@@ -1,0 +1,991 @@
+NEW
+  AUTO 3,1
+*--------------------------------------
+       .DUMMY
+       .OR $A700
+ASM65816.SEARCH.TABLE  	.BS 3
+ASM65816.GNC             .BS 3
+ASM65816.GNC.UC          .BS 3
+ASM65816.GNNB            .BS 3
+ASM65816.EXPR            .BS 10
+ASM65816.EXP1            .BS 10
+ASM65816.ASM.ERROR       .BS 3
+ASM65816.EMIT            .BS 10
+*--------------------------------
+       .OR $F0      F0-FF is ASM private ZeroPage
+LEVEL.MASK               .BS 1
+OPBASE                   .BS 1
+MODE.BYTE                .BS 1
+FORCE.ADDR.SIZE          .BS 1
+       .ED
+*--------------------------------
+ERR.BAD.OPCODE      .EQ 0
+ERR.BAD.ADDRESS     .EQ 1
+ERR.RANGE           .EQ 2
+ERR.UNDEFINED       .EQ 3
+*--------------------------------
+       JMP ASM65816.ASM.INIT
+       JMP ASM65816.ASM.LINE
+       JMP ASM65816.EMIT.VALUE
+       JMP DIR.OP
+*--------------------------------
+       .AS -/FOR THE 6502, 65C02, 65R02, 65816/
+       .HS 00
+*--------------------------------
+ASM65816.ASM.INIT
+       LDA #0       MASK FOR 6502
+       STA LEVEL.MASK
+       LDA #15      MARGIN FOR 6502
+       STA EMIT.MARGIN
+       RTS
+*--------------------------------
+ASM65816.ASM.LINE
+       LDA SEARCH.KEY   1ST LETTER
+       CMP #'A'
+       BCC .5       ...NOT A LETTER, SO BADOP
+       CMP #'Z'+1
+       BCS .5       ...NOT A LETTER, SO BADOP
+       AND #$1F     MAKE 01...1A
+       TAX
+       LDA FIRST.LETTER.TABLE-1,X
+       BNE .8       ...UNUSED LETTER
+.5     JMP BADOPERR
+*---BUILD OPTBL.PNTR INTO TABLE--------
+.8     ADC #OPCODE.TABLE     CARRY CLEAR ALREADY
+       STA OPTBL.PNTR
+       LDY /OPCODE.TABLE
+       BCC .1
+       INY
+.1     CPX #'R'-$40  WHICH HALF OF TABLE?
+       BCC .2       ...FIRST HALF
+       INY          ...SECOND HALF
+.2     CLC          INITIAL SEARCH
+.3     JSR ASM65816.SEARCH.TABLE
+       BCC .5       ...NOT FOUND
+*---FOUND IT!--------------------
+       LDA (OPTBL.PNTR),Y
+       STA OPBASE
+       INY
+       LDA (OPTBL.PNTR),Y
+       AND #$E1     ISOLATE LEVEL BITS
+       BEQ .7       ...PLAIN 6502 LEVEL
+       AND LEVEL.MASK
+       BNE .7   ...ALLOWS 'STP' FOR BOTH 65816 & SWEET-16
+       SEC          CONTINUE SEARCH
+       BCS .3       ...ALWAYS
+*---BRANCH TO PROCESS OPCODE-----
+.7     LDA (OPTBL.PNTR),Y
+       AND #$1E
+       TAY
+       LDA OP.MODE+1,Y
+       PHA
+       LDA OP.MODE,Y
+       PHA
+       RTS
+*--------------------------------
+       .MA MODE
+O..]1  .EQ *-OP.MODE
+       .DA OP.]1-1
+       .EM
+*--------------------------------
+OP.MODE
+       >MODE SNGL       0 -- SINGLE BYTE OPCODES
+       >MODE COPS       2 -- LDA GROUP
+       >MODE SHIFTS     4 -- ASL GROUP
+       >MODE REL16      6 -- BRL & PER
+       >MODE REL8       8 -- RELATIVE BRANCHES
+       >MODE BITS       A -- BIT GROUP
+       >MODE MOVES      C -- MVP & MVN
+       >MODE JUMPS      E -- JUMP GROUP
+       >MODE ROCKB     10 -- ROCKWELL BIT OPS
+       >MODE ROCKC     12 -- ROCKWELL BIT OPS
+       >MODE XN        14 -- SWEET 16 REGISTER OPS
+       >MODE POP       16 -- SWEET 16 POP & POPD
+       >MODE SET       18 -- SWEET 16 SET
+       >MODE CRS       1A -- COP, REP, SEP
+*--------------------------------
+OP.SNGL
+EMIT.OPBASE
+       LDA OPBASE
+       JMP ASM65816.EMIT
+*--------------------------------
+OP.CRS JSR ASM65816.GNNB
+       CMP #'#'
+       BNE ERBA.E2
+       JSR ASM65816.EXP1
+       JMP EMIT.OP.AND.EXP.BYTE
+ERBA.E2
+       JMP ERBA.EMIT.TWO
+*--------------------------------
+OP.COPS
+       JSR GENERAL.OPERAND
+       JSR SEE.IF.MODE.LEGAL.AT.LEVEL
+       LDA MODE.BYTE     ALL INDIRECT MODES   <<<12-16-85>>>
+       AND #$04          REQUIRE ZP VALUE     <<<12-16-85>>>
+       BEQ .1            ...NOT INDIRECT      <<<12-16-85>>>
+       CPY #14
+       BCC .4       ...MODES 0...13
+       DEC ADDR.LENGTH   SHORTEN >(ZP) AND >(ZP),Y
+.4     JSR ASM65816.TEST.EXP.VALUE.ZP
+       BNE ERBA.E2       ...MUST BE DIRECT VALUE
+.1     LDA ADDR.MODE.BITS.CLASS.1,Y
+       BPL .2       VALID MODE
+       INC ADDR.LENGTH   ...DIRECT,Y NOT VALID
+       LDA ADDR.MODE.BITS.CLASS.1+1,Y
+.2     EOR OPBASE
+       CMP #$89     STA IMMED?
+       BEQ ERBA.E2       ...YES, NO SUCH ANIMAL
+* FALL INTO EMIT.OP.AND.VALUE ***
+*--------------------------------
+EMIT.OP.AND.VALUE
+       JSR ASM65816.EMIT
+ASM65816.EMIT.VALUE
+       JSR EMIT.EXP.BYTE
+       DEC ADDR.LENGTH
+       BEQ .2
+       LDA EXP.VALUE+1
+       JSR ASM65816.EMIT
+       DEC ADDR.LENGTH
+       BEQ .2
+       LDA EXP.VALUE+2
+       JSR ASM65816.EMIT
+       DEC ADDR.LENGTH
+       BEQ .2
+       LDA EXP.VALUE+3
+       JSR ASM65816.EMIT
+.2     RTS
+*--------------------------------
+OP.BITS
+       JSR GENERAL.OPERAND
+       JSR SEE.IF.MODE.LEGAL.AT.LEVEL
+       CPY #7       ONLY MODES 0...6 LEGAL
+       BCS .2       ...NOT VALID MODE
+       LDX OPBASE
+       BNE .0       ...NOT BIT OPCODE
+       LDA LEVEL.MASK
+       AND #$20
+       BNE .0       ...AT LEAST 65C02
+       LDA #$60     ONLY ZP AND ABS LEGAL
+       BNE .7       ...ALWAYS
+.0     LDA CLASS.5.LEGAL.MODES,X
+.7     AND CLASS.5.MODE.MASKS,Y
+       BNE .4       ...LEGAL
+       LDA PASS
+       BEQ .1       ...IN PASS 1
+       JSR ASM65816.TEST.EXP.VALUE.ZP
+       BNE .2       ...TOO BIG FOR ZP
+.1     DEY          CHANGE ABS TO ZP MODE
+       BMI .2       ...WASN'T ABS
+       TYA
+       LSR
+       BCC .2       ...WASN'T ABS
+       LDA CLASS.5.LEGAL.MODES,X
+       AND CLASS.5.MODE.MASKS,Y
+       BNE .3       ...LEGAL AFTERALL
+.2     JMP ERBA.EMIT.TWO    INVALID ADDRESS MODE
+.3     DEC ADDR.LENGTH
+*---FORM OPCODE------------------
+.4     LDA ADDR.MODE.BITS.CLASS.5,Y
+       EOR CLASS.5.OPS,X
+       LDY #$89
+       CMP #$20
+       BEQ .5
+       LDY #$9C
+       CMP #$6C
+       BEQ .5
+       LDY #$9E
+       CMP #$7C
+       BNE .6
+.5     TYA
+.6     JMP EMIT.OP.AND.VALUE
+*--------------------------------
+OP.SHIFTS
+       JSR ASM65816.GNC      CHECK FOR ACCUMULATOR MODE
+       BNE .2       NOT ACCUM MODE
+       JSR ASM65816.GNC
+       BNE .2       NOT ACCUM MODE
+*---ACCUMULATOR MODE-------------
+       LDA OPBASE
+       EOR #$08     MAKE ACCUM MODE OPCODE
+       BPL .1       NOT INC OR DEC
+       PHA
+       LDA LEVEL.MASK
+       AND #$20     ONLY IN 65C02 AND ABOVE
+       BEQ .5
+       PLA
+       EOR #$F0     CHANGE EA-->1A, CA-->3A
+.1     JMP ASM65816.EMIT
+*---MODES WITH OPERAND FIELD-----
+.2     DEC CHAR.PNTR
+       JSR GENERAL.OPERAND
+       JSR SEE.IF.MODE.LEGAL.AT.LEVEL
+       CPY #5       ONLY MODES 1...4 LEGAL
+       BCS .5
+       TYA
+       BEQ .5       ...NO IMMEDIATE MODE ALLOWED
+       LDA ADDR.MODE.BITS.CLASS.1,Y
+       EOR OPBASE
+       JMP EMIT.OP.AND.VALUE
+.5     JMP ERBA.EMIT.TWO     INVALID ADDRESS MODE
+*--------------------------------
+OP.REL8
+  .DO SWEET.16
+       LDA OPBASE   CHECK FOR 'BNM1' SWEET-16 OP
+       CMP #$09
+       BNE .1       ...NOT 'BNM1'
+       JSR ASM65816.GNC      CHECK FOR '1'
+       CMP #'1'
+       BNE BADOPERR ...NO, SO BAD OP
+  .FIN
+.1     JSR ASM65816.EXPR
+       LDA OPBASE
+OP.REL8.A
+       JSR ASM65816.EMIT     EMIT OPCODE
+       LDA EXP.UNDEF
+       BMI GOEMIT   ...UNDEFINED
+       LDY EXP.VALUE+1
+       CLC          COMPUTE RELATIVE OFFSET
+       LDA EXP.VALUE
+       SBC ORGN
+       STA EXP.VALUE
+       BPL .2
+       INY
+.2     TYA
+       SBC ORGN+1
+       BNE ERR.RANGE.EMIT.ONE
+EMIT.EXP.BYTE
+       LDA EXP.VALUE
+GOEMIT JMP ASM65816.EMIT
+*--------------------------------
+BADOPERR
+       LDA #ERR.BAD.OPCODE
+       JMP ASM65816.ASM.ERROR
+*--------------------------------
+*      BRL & PER, 16-bit relative
+*--------------------------------
+OP.REL16
+       JSR ASM65816.EXPR     Get value of expression
+       JSR EMIT.OPBASE   Emit the opcode, bumping origin once
+       LDA EXP.UNDEF     If undefined, say so
+       BMI .3            (If we didn't, might be RANGE ERR)
+       CLC          ADD 2 MORE TO ORIGIN
+       LDY ORGN+2
+       LDA ORGN
+       ADC #2
+       STA EXP.VALUE+3   (TEMP)
+       LDA ORGN+1
+       ADC #0
+       BCC .2
+       INY               BANK BYTE
+.2     CPY EXP.VALUE+2   IN SAME BANK AS TARGET?
+       BNE ERR.RANGE.EMIT.TWO  ...NO, ERR RANGE
+       STA EXP.VALUE+2   YES, SAVE IN ANOTHER TEMP
+       LDA EXP.VALUE     TARGET-ORGN+3
+       SBC EXP.VALUE+3
+       STA EXP.VALUE
+       LDA EXP.VALUE+1
+       SBC EXP.VALUE+2
+       STA EXP.VALUE+1
+.3     LDA #2
+       STA ADDR.LENGTH
+       JMP ASM65816.EMIT.VALUE
+*--------------------------------
+ERR.RANGE.EMIT.TWO
+       JSR ASM65816.EMIT.ZERO
+ERR.RANGE.EMIT.ONE
+       JSR ASM65816.EMIT.ZERO
+ASM65816.RAER
+		LDA #ERR.RANGE
+       JMP ASM65816.ASM.ERROR
+*--------------------------------
+OP.MOVES
+       JSR EMIT.OPBASE
+       JSR ASM65816.EXPR     GET SOURCE BANK
+       LDA EXP.VALUE+2
+       PHA
+       JSR ASM65816.GNC
+       CMP #','     MUST HAVE COMMA HERE
+       BNE .1       ...ILLEGAL
+       JSR ASM65816.EXP1     GET DESTINATION BANK
+       LDA EXP.VALUE+2
+       JSR ASM65816.EMIT
+       PLA
+       JMP ASM65816.EMIT
+.1     JMP ERBA.EMIT.TWO
+*--------------------------------
+OP.JUMPS
+       JSR GENERAL.OPERAND
+       LDA LEGAL.JUMP.MODES,Y
+       BMI .4       ...ILLEGAL
+       ORA OPBASE
+       TAY
+       LDA LEVEL.MASK
+       BMI .1       65816, ALLOW ALL MODES
+       CPY #5       DISALLOW JML, JSL, AND PEA
+       BCS .4       ...ONE OF THOSE
+       CPY #1       DISALLOW JMP LONG
+       BEQ .4
+       AND #$20     SEE IF 65C02
+       BNE .1       ...YES
+       CPY #3       ...NO, DISALLOW JMP (ABS,X)
+       BEQ .4       ...THAT'S WHAT IT IS...
+.1     LDA JUMP.OPCODES,Y
+       BEQ .4       ...ILLEGAL
+       LDY #2       ASSUME TWO BYTE ADDRESS
+       CMP #$5C     CHECK FOR "JMP LONG"
+       BEQ .2       ...YES, 3 BYTES OF ADDRESS
+       CMP #$22     CHECK FOR "JSL"
+       BNE .3       ...NO, ONLY 2 BYTES OF ADDRESS
+.2     INY          3 BYTE ADDRESS
+.3     STY ADDR.LENGTH
+       JMP EMIT.OP.AND.VALUE
+.4     JMP ERBA.EMIT.TWO
+*--------------------------------
+ASM65816.TEST.EXP.VALUE.ZP
+       LDA EXP.VALUE+1
+       ORA EXP.VALUE+2
+       ORA EXP.VALUE+3
+       RTS
+*--------------------------------
+LONG.INDIRECT
+       JSR ASM65816.EXP1
+       JSR ASM65816.GNC
+       CMP #']'
+       BNE ERBA.EMIT.TWO
+       JSR ASM65816.GNC
+       BEQ .1       ...[EXP]
+       CMP #','
+       BNE ERBA.EMIT.TWO
+       JSR ASM65816.GNC.UC
+       CMP #'Y'
+       BNE ERBA.EMIT.TWO
+       LDA #$47     ...[EXP],Y
+       .HS 2C
+.1     LDA #$44     ...[EXP],Y
+       STA MODE.BYTE
+       LDA #2
+       STA ADDR.LENGTH
+       JMP CHECK.IF.SUFFIX.LEGAL
+*--------------------------------
+IMMEDIATE
+       JSR ASM65816.GNC.UC
+       CMP DLIM     16-BIT IMMEDIATE?
+       BNE .1       ...NO, BACKUP
+       LDA LEVEL.MASK    16-BIT IMMEDIATE OKAY?
+       BPL ERBA.EMIT.TWO ...NOT AT 65816 LEVEL
+       INC ADDR.LENGTH   ...YES, INCREASE LENGTH
+       BNE .2            ...ALWAYS
+.1     DEC CHAR.PNTR
+.2     JSR ASM65816.EXP1
+       JSR ASM65816.GNC
+       BNE ERBA.EMIT.TWO    ILLEGAL
+       LDA DLIM
+       CMP #'/'     #=23, /=2F, ^=5E
+       BCC .4            ...#
+       BEQ .3            .../
+       JSR ASM65816.EXP.OVER.256  ...^
+.3     JSR ASM65816.EXP.OVER.256
+.4     LDY #0       SIGNAL IMMEDIATE MODE
+       STY MODE.BYTE     COPS NEEDS THIS <<<12-16-85>>>
+       RTS
+*--------------------------------
+ERBA.EMIT.THREE
+       JSR ASM65816.EMIT.ZERO
+ERBA.EMIT.TWO
+       JSR ASM65816.EMIT.ZERO
+       JSR ASM65816.EMIT.ZERO
+ASM65816.ERBA
+		LDA #ERR.BAD.ADDRESS
+       JMP ASM65816.ASM.ERROR
+ASM65816.EMIT.ZERO LDA #0
+          JMP ASM65816.EMIT
+*--------------------------------
+*   RETURN:
+*      # BYTES IN ADDRESS IN ADDR.LENGTH
+*      (Y) = INDEX TO ADDR.MODE.BITS
+*--------------------------------
+GENERAL.OPERAND
+       JSR ASM65816.GNNB     GET NEXT NON-BLANK
+       BCS ERBA.EMIT.TWO     ...NO OPERAND
+*---PARSE PREFIX-----------------
+       LDY #1
+       STY ADDR.LENGTH
+       STA DLIM
+       CMP #'('
+       BEQ .3       ...indirect, must be ZP
+       CMP #'['
+       BEQ LONG.INDIRECT
+       CMP #'#'
+       BEQ IMMEDIATE
+       CMP #'/'
+       BEQ IMMEDIATE
+       CMP #'^'
+       BEQ IMMEDIATE
+       CMP #'<'
+       BEQ .3       MAKE FORCE SIZE = 1
+       DEY          Y=0
+       CMP #'>'
+       BNE .2       ...SIZE NOT FORCED
+       JSR ASM65816.GNC
+       LDY #3       Y=3
+       CMP DLIM     IS IT ">>"?
+       BEQ .3       ...YES
+       DEY          Y=2
+       STA DLIM     CHANGE DLIM TO NEW VALUE
+       CMP #'('     IS IT (?
+       BEQ .3       ...YES, >(
+.2     DEC CHAR.PNTR     ...NO, SO BACKUP
+.3     STY FORCE.ADDR.SIZE
+*---PARSE THE EXPRESSION---------
+       JSR ASM65816.EXP1
+*---FIGURE # OF BYTES------------
+       LDX FORCE.ADDR.SIZE
+       BNE .6       ...FORCED WITH <, >, OR >>
+       LDX #2       ASSUME 2-BYTE ADDRESS
+       LDA EXP.UNDEF
+       BMI .6
+       LDA PASS     IGNORE FWD REF FLAG IN PASS 1
+       BEQ .4       ...PASS 1
+       LDA EXP.FWDREF    ...PASS 2, DEFINED
+       BNE .4            ...BUT NOT FWD REF
+       LDA EXP.VALUE+3   ...FWD REF MUST BE ONLY
+       ORA EXP.VALUE+2      16 BITS
+       BEQ .6            ...IT FITS!
+       BNE ERBA.1           ...ALWAYS, ERBA
+.4     LDA EXP.VALUE+3   DO NOT ALLOW 32-BITS
+       BNE ERBA.1           ...BAD ADDR
+       LDA EXP.VALUE+2
+       BNE .5            ...3-BYTE ADDRESS
+       DEX               X=1
+       LDA EXP.VALUE+1
+       BEQ .6            ...ZP
+.5     INX
+.6     STX ADDR.LENGTH
+*---PARSE SUFFIX-----------------
+       DEX          MAKE 0, 1, OR 2
+       STX MODE.BYTE
+       LDX #6
+.7     JSR ASM65816.GNC.UC
+.8     CMP MODE.CHARS,X
+       BEQ .9
+       CLC
+       ROL MODE.BYTE
+       DEX
+       BPL .8
+       BMI ERBA.1 
+.9     CMP #' '     BLANK?
+       BEQ CHECK.IF.SUFFIX.LEGAL    ...YES, END OF OPERAND
+       CMP #')'     RIGHT PAREN?
+       BNE .10      ...NO
+       LDA DLIM     WAS THERE A LEFT PAREN?
+       CMP #'('
+       BNE ERBA.1      ...NO
+.10    SEC
+       ROL MODE.BYTE
+       DEX
+       BPL .7
+ERBA.1 JMP ERBA.EMIT.TWO    ILLEGAL
+*--------------------------------
+CHECK.IF.SUFFIX.LEGAL
+       LDY #0       SEARCH FORWARD FOR VARIOUS REASONS
+       LDA MODE.BYTE
+.13    INY
+       CPY #MODE.TABLE.SIZE+1
+       BCS ERBA.1      ...END OF TABLE
+       CMP MODE.TABLE-1,Y
+       BNE .13      ...KEEP LOOKING
+       RTS
+*--------------------------------
+SEE.IF.MODE.LEGAL.AT.LEVEL
+       LDA LEVEL.MASK
+       BMI .15      ...65816 LEVEL, ALL LEGAL
+       CPY #9
+       BCC .15      ...6502 MODES
+       BEQ .14      ...65C02 MODE
+       CPY #16
+       BNE ERBA.1
+.14    AND #$20     AT C02 LEVEL?
+       BEQ ERBA.1      ...NO
+.15    RTS
+*--------------------------------
+ASM65816.EXP.OVER.256
+       LDA EXP.VALUE+1
+       STA EXP.VALUE
+       LDA EXP.VALUE+2
+       STA EXP.VALUE+1
+       LDA EXP.VALUE+3
+       STA EXP.VALUE+2
+       LDA #0
+       STA EXP.VALUE+3
+       RTS
+  .DO ROCKWELL
+*--------------------------------
+*   ROCKWELL 65C02 EXCLUSIVES
+*
+*      RMB bit#,zp
+*      SMB bit#,zp
+*      BBR bit#,zp,reladdr
+*      BBS bit#,zp,reladdr
+*--------------------------------
+OP.ROCKB
+       JSR OP.ROCKWELL
+       JSR ASM65816.GNC      REQUIRE A COMMA
+       CMP #','
+       BNE .1       ...NO COMMA
+       LDA EXP.VALUE
+       PHA          SAVE ZP VALUE
+       JSR ASM65816.EXP1     GET BRANCH EXPRESSION
+       JSR EMIT.OPBASE           <<<12-16-85>>>
+       PLA
+       JMP OP.REL8.A
+.1     JMP ERBA.EMIT.THREE
+*--------------------------------
+OP.ROCKC
+       JSR OP.ROCKWELL
+  .FIN
+EMIT.OP.AND.EXP.BYTE
+       JSR EMIT.OPBASE           <<<12-16-85>>>
+       JMP EMIT.EXP.BYTE         <<<12-16-85>>>
+*--------------------------------
+  .DO ROCKWELL
+OP.ROCKWELL
+       JSR ASM65816.EXPR     GET BIT #
+       JSR ASM65816.TEST.EXP.VALUE.ZP
+       BNE .1       ...MUST BE SMALL NUMBER!
+       LDA EXP.VALUE
+       CMP #8       MUST BE 0...7
+       BCS .1       ...TOO LARGE
+       ASL
+       ASL
+       ASL
+       ASL
+       ORA OPBASE   MERGE INTO OPCODE
+       STA OPBASE
+       JSR ASM65816.GNC      NEED A COMMA NOW
+       CMP #','
+       BNE .1 
+       JSR ASM65816.EXP1     GET ZP VALUE
+       JSR ASM65816.TEST.EXP.VALUE.ZP
+       BNE .1       MUST BE ZERO PAGE
+       RTS
+.1     JMP ERBA.EMIT.TWO
+*--------------------------------
+  .ELSE
+OP.ROCKB
+OP.ROCKC
+       JMP BADOPERR
+  .FIN
+ 
+  .DO SWEET.16
+*--------------------------------
+*      SWEET-16 OPCODES
+*--------------------------------
+OP.POP
+       JSR ASM65816.GNC.UC   SEE WHICH: POP OR POPD
+       BEQ OP.XN   ...POP
+       CMP #'D'
+       BEQ .1
+       JMP BADOPERR
+.1     LDA #$A2          ...POP
+       STA OPBASE
+*--------------------------------
+OP.XN
+       JSR ASM65816.GNNB
+       BCS SWEET.ERBA
+       CMP #'@'
+       BNE .1       ...NOT '@N'
+       LDA OPBASE   ...'@N', SEE IF LEGAL
+       AND #2
+       BEQ SWEET.ERBA    ...NOT LEGAL WITH THIS OP
+       LDA OPBASE        ...LEGAL, ADD $20
+       ADC #$1F          .CS., SO 1F IS 20
+       BNE .2       ...ALWAYS
+.1     DEC CHAR.PNTR     Backup character pointer
+       LDA OPBASE
+       LSR
+       BCC SWEET.ERBA    'N' NOT LEGAL FOR THIS OP
+       LDA OPBASE
+.2     AND #$F0     CLEAR AWAY LEGALITY FLAGS
+       STA OPBASE
+       JSR ASM65816.EXP1     GET REGISTER NUMBER
+       JSR ASM65816.TEST.EXP.VALUE.ZP
+       BNE SWEET.RAER
+       LDA EXP.VALUE
+       CMP #$10
+       BCS SWEET.RAER
+       ORA OPBASE
+       JMP ASM65816.EMIT
+*--------------------------------
+SWEET.ERBA JMP ASM65816.ERBA
+SWEET.RAER JMP ASM65816.RAER 
+*--------------------------------
+OP.SET
+       JSR OP.XN
+       JSR ASM65816.GNC
+       CMP #','
+       BNE SWEET.ERBA
+       JSR ASM65816.EXP1
+       LDA #2
+       STA ADDR.LENGTH
+       JMP ASM65816.EMIT.VALUE
+*--------------------------------
+  .ELSE
+OP.POP
+OP.XN
+OP.SET
+       JMP BADOPERR
+  .FIN
+*--------------------------------
+LEGAL.JUMP.MODES
+       .HS FF.00.00.FF.FF.FF
+       .HS FF.FF.03.02.FF.FF
+       .HS 01.FF.02.FF.03
+*--------------------------------
+JUMP.OPCODES
+       .HS 4C.5C.6C.7C   JMP
+       .HS 20.22.00.FC   JSR
+       .HS 00.00.DC.00   JML
+       .HS 22.22.00.00   JSL
+       .HS F4.00.00.00   PEA
+*--------------------------------
+MODE.CHARS
+       .AS / Y,)SX,/
+*--------------------------------
+MODE.TABLE
+       .HS 00       1 -- DIRECT
+       .HS 40       2 -- ABSOLUTE
+       .HS 30       3 -- DIRECT,X
+       .HS 70       4 -- ABSOLUTE,X
+       .HS 21       5 -- DIRECT,Y
+       .HS 61       6 -- ABSOLUTE,Y
+       .HS 07       7 -- (DIRECT),Y
+       .HS 34       8 -- (DIRECT,X)
+*---IN 65C02, 802, 816-----------
+       .HS 04       9 -- (DIRECT)
+*---IN 65802, 816----------------
+       .HS 28       A -- ...,S
+       .HS 2F       B -- (...,S),Y
+*---ONLY IN 65816----------------
+       .HS 80       C -- LONG
+       .HS B0       D -- LONG,X
+       .HS 44       E -- >(DIRECT)
+       .HS 47       F -- >(DIRECT),Y
+*---SPECIAL FOR JMP,JSR (A,X)----
+       .HS 74      10 -- (ABSOLUTE,X)
+MODE.TABLE.SIZE .EQ *-MODE.TABLE
+*--------------------------------
+ADDR.MODE.BITS.CLASS.1
+       .HS 08       0 -- IMMEDIATE
+       .HS 04       1 -- DIRECT
+       .HS 0C       2 -- ABSOLUTE
+       .HS 14       3 -- DIRECT,X
+       .HS 1C       4 -- ABSOLUTE,X
+       .HS FF       5 -- DIRECT,Y  <<<NOT LEGAL>>>
+       .HS 18       6 -- ABSOLUTE,Y
+       .HS 10       7 -- (DIRECT),Y
+       .HS 00       8 -- (DIRECT,X)
+*---IN 65C02, 802, 816-----------
+       .HS 13       9 -- (DIRECT)
+*---IN 65802, 816----------------
+       .HS 02       A -- ...,S
+       .HS 12       B -- (...,S),Y
+*---ONLY IN 65816----------------
+       .HS 0E       C -- LONG
+       .HS 1E       D -- LONG,X
+       .HS 06       E -- >(DIRECT)
+       .HS 16       F -- >(DIRECT),Y
+*--------------------------------
+ADDR.MODE.BITS.CLASS.5
+       .HS 00       0 -- IMMEDIATE
+       .HS 04       1 -- DIRECT
+       .HS 0C       2 -- ABSOLUTE
+       .HS 14       3 -- DIRECT,X
+       .HS 1C       4 -- ABSOLUTE,X
+       .HS 14       5 -- DIRECT,Y
+       .HS 1C       6 -- ABSOLUTE,Y
+*--------------------------------
+CLASS.5.MODE.MASKS
+       .HS 80.40.20.10.08.04.02
+*--------------------------------
+FIRST.LETTER.TABLE
+       .DA #LTR.A-OPCODE.TABLE
+       .DA #LTR.B-OPCODE.TABLE
+       .DA #LTR.C-OPCODE.TABLE
+       .DA #LTR.D-OPCODE.TABLE
+       .DA #LTR.E-OPCODE.TABLE
+       .DA #LTR.F-OPCODE.TABLE
+       .DA #LTR.G-OPCODE.TABLE
+       .DA #LTR.H-OPCODE.TABLE
+       .DA #LTR.I-OPCODE.TABLE
+       .DA #LTR.J-OPCODE.TABLE
+       .DA #LTR.K-OPCODE.TABLE
+       .DA #LTR.L-OPCODE.TABLE
+       .DA #LTR.M-OPCODE.TABLE
+       .DA #LTR.N-OPCODE.TABLE
+       .DA #LTR.O-OPCODE.TABLE
+       .DA #LTR.P-OPCODE.TABLE
+       .DA #LTR.Q-OPCODE.TABLE
+       .DA #LTR.R-OPCODE.TABLE
+       .DA #LTR.S-OPCODE.TABLE
+       .DA #LTR.T-OPCODE.TABLE
+       .DA #LTR.U-OPCODE.TABLE
+       .DA #LTR.V-OPCODE.TABLE
+       .DA #LTR.W-OPCODE.TABLE
+       .DA #LTR.X-OPCODE.TABLE
+       .DA #LTR.Y-OPCODE.TABLE
+       .DA #LTR.Z-OPCODE.TABLE
+*--------------------------------
+*   TWO KINDS OF ENTRIES, DISTINGUISHED BY FIRST BIT:
+*      8-BIT ENTRIES:  FIRST BIT = 0
+*     24-BIT ENTRIES:  FIRST BIT = 1
+*
+*      FIRST ENTRY AT EACH LETTER IS AN 8-BIT ENTRY.
+*      EACH 8-BIT ENTRY IS FOLLOWED BY ONE OR MORE
+*      24-BIT ENTRIES.
+*      THE SUB-LIST OF 24-BIT ENTRIES IS TERMINATED
+*          BY THE NEXT 8-BIT ENTRY.
+*      THE LIST OF 8-BIT ENTRIES IS TERMINATED BY
+*          AN 8-BIT ENTRY WITH BIT 6 = 1.
+*
+*      THE VALUE OF BITS 5-0 IN AN 8-BIT ENTRY
+*          IS THE DIMINISHED ASCII CODE FOR THE
+*          SECOND LETTER OF AN OPCODE.
+*      THE VALUE OF BITS 5-0 OF A 24-BIT ENTRY
+*          IS THE DIMINISHED ASCII CODE FOR THE
+*          THIRD LETTER OF AN OPCODE.
+*                   A...Z = $81...9A
+*                   BLANK = $E0
+*                   '1'   = $F1
+*      THE VALUE OF THE SECOND BYTE OF A 24-BIT
+*          ENTRY IS AN OPCODE BASE.
+*      THE THIRD BYTE OF A 24-BIT ENTRY HAS TWO PARTS:
+*          BITS 4-1 ARE AN INDEX TO THE OP.MODE
+*              JUMP TABLE IN ASM.65816
+*          BITS 7-5 AND 0 ARE LEVEL MASK BITS.
+*               000XXXX0 = 6502 OPCODE
+*               000XXXX1 = SWEET-16
+*               001XXXX0 = 65C02
+*               010XXXX0 = ROCKWELL SPECIALS
+*               100XXXX0 = 65816
+*
+*          LEVEL.MASK = $00 FOR 6502
+*                     = $20 FOR 65C02
+*                     = $60 FOR ROCKWELL C02
+*                     = $A0 FOR 65816
+*--------------------------------
+OP..1  .SE 0
+OP..2  .SE 0
+       .MA OP
+       .DO "]1"=OP..1=0
+LTR.]1  .DA #"]2"-$80    bits 76 = 01
+OP..1  .SE "]1"
+OP..2  .SE "]2"
+       .ELSE
+       .DO "]2"=OP..2=0
+       .DA #"]2"-$C0      bits 76 = 00
+OP..2  .SE "]2"
+       .FIN
+       .FIN
+       .DA #"]3"^$40,#$]4,#O..]5!O..]6   bits 76 = 10 or 11
+       .EM
+*--------------------------------
+O..65816  .EQ $80
+O..65R02  .EQ $40
+O..65C02  .EQ $20
+O..SWEET  .EQ $01
+O..       .EQ $00
+*--------------------------------
+OPCODE.TABLE
+LTR.F
+LTR.G
+LTR.H
+LTR.K
+LTR.Q
+LTR.U
+LTR.V
+LTR.Y
+LTR.Z  .HS 00
+*--------------------------------
+       >OP A,D,C,61,COPS
+       >OP A,D,D,A1,XN,SWEET
+       >OP A,N,D,21,COPS
+       >OP A,S,L,02,SHIFTS
+       >OP B,C,C,90,REL8
+       >OP B,C,S,B0,REL8
+       >OP B,C," ",03,REL8,SWEET
+       >OP B,E,Q,F0,REL8
+       >OP B,G,E,B0,REL8
+       >OP B,I,T,00,BITS
+       >OP B,L,T,90,REL8
+       >OP B,M,I,30,REL8
+       >OP B,M," ",05,REL8,SWEET
+       >OP B,M,1,08,REL8,SWEET
+       >OP B,N,E,D0,REL8
+       >OP B,N,C,02,REL8,SWEET
+       >OP B,N,M,09,REL8,SWEET   (BNM1)
+       >OP B,N,Z,07,REL8,SWEET
+       >OP B,P,L,10,REL8
+       >OP B,P," ",04,REL8,SWEET
+       >OP B,R,A,80,REL8,65C02
+       >OP B,R,K,00,SNGL
+       >OP B,R,L,82,REL16,65816
+       >OP B,R," ",01,REL8,SWEET
+       >OP B,V,C,50,REL8
+       >OP B,V,S,70,REL8
+       >OP B,B,R,0F,ROCKB,65R02
+       >OP B,B,S,8F,ROCKB,65R02
+       >OP B,K," ",0A,SNGL,SWEET
+       >OP B,S," ",0C,REL8,SWEET
+       >OP B,Z," ",06,REL8,SWEET
+       >OP C,L,C,18,SNGL
+       >OP C,L,D,D8,SNGL
+       >OP C,L,I,58,SNGL
+       >OP C,L,V,B8,SNGL
+       >OP C,M,P,C1,COPS
+       >OP C,O,P,02,CRS,65816
+       >OP C,P,X,04,BITS
+       >OP C,P,Y,03,BITS
+       >OP C,P,R,D1,XN,SWEET
+       >OP D,E,C,C2,SHIFTS
+       >OP D,E,X,CA,SNGL
+       >OP D,E,Y,88,SNGL
+       >OP D,C,R,F1,XN,SWEET
+       >OP E,O,R,41,COPS
+       >OP I,N,C,E2,SHIFTS
+       >OP I,N,X,E8,SNGL
+       >OP I,N,Y,C8,SNGL
+       >OP I,N,R,E1,XN,SWEET
+       >OP J,M,L,08,JUMPS,65816
+       >OP J,M,P,00,JUMPS
+       >OP J,S,L,0C,JUMPS,65816
+       >OP J,S,R,04,JUMPS
+       >OP L,D,A,A1,COPS
+       >OP L,D,X,02,BITS
+       >OP L,D,Y,01,BITS
+       >OP L,D," ",23,XN,SWEET
+       >OP L,D,D,42,XN,SWEET
+       >OP L,S,R,42,SHIFTS
+       >OP M,V,N,54,MOVES,65816
+       >OP M,V,P,44,MOVES,65816
+       >OP N,O,P,EA,SNGL
+       >OP O,R,A,01,COPS
+       >OP P,E,A,10,JUMPS,65816
+       >OP P,E,I,0A,BITS,65816
+       >OP P,E,R,62,REL16,65816
+       >OP P,H,A,48,SNGL
+       >OP P,H,B,8B,SNGL,65816
+       >OP P,H,D,0B,SNGL,65816
+       >OP P,H,K,4B,SNGL,65816
+       >OP P,H,P,08,SNGL
+       >OP P,H,X,DA,SNGL,65C02
+       >OP P,H,Y,5A,SNGL,65C02
+       >OP P,L,A,68,SNGL
+       >OP P,L,B,AB,SNGL,65816
+       >OP P,L,D,2B,SNGL,65816
+       >OP P,L,P,28,SNGL
+       >OP P,L,X,FA,SNGL,65C02
+       >OP P,L,Y,7A,SNGL,65C02
+       >OP P,O,P,62,POP,SWEET    (POP,POPD)
+       >OP R,E,P,C2,CRS,65816
+       >OP R,O,L,22,SHIFTS
+       >OP R,O,R,62,SHIFTS
+       >OP R,T,I,40,SNGL
+       >OP R,T,L,6B,SNGL,65816
+       >OP R,T,S,60,SNGL
+       >OP R,T,N,00,SNGL,SWEET
+       >OP R,M,B,07,ROCKC,65R02
+       >OP R,S," ",0B,SNGL,SWEET
+       >OP S,B,C,E1,COPS
+       >OP S,E,C,38,SNGL
+       >OP S,E,D,F8,SNGL
+       >OP S,E,I,78,SNGL
+       >OP S,E,P,E2,CRS,65816
+       >OP S,E,T,11,SET,SWEET
+       >OP S,T,A,81,COPS
+       >OP S,T,P,DB,SNGL,65816
+       >OP S,T,P,72,XN,SWEET
+       >OP S,T,X,06,BITS
+       >OP S,T,Y,05,BITS
+       >OP S,T,Z,07,BITS,65C02
+       >OP S,T," ",33,XN,SWEET
+       >OP S,T,D,52,XN,SWEET
+       >OP S,U,B,B1,XN,SWEET
+       >OP S,M,B,87,ROCKC,65R02
+       >OP T,A,X,AA,SNGL
+       >OP T,A,Y,A8,SNGL
+       >OP T,C,D,5B,SNGL,65816
+       >OP T,C,S,1B,SNGL,65816
+       >OP T,D,C,7B,SNGL,65816
+       >OP T,R,B,09,BITS,65C02
+       >OP T,S,B,08,BITS,65C02
+       >OP T,S,C,3B,SNGL,65816
+       >OP T,S,X,BA,SNGL
+       >OP T,X,A,8A,SNGL
+       >OP T,X,S,9A,SNGL
+       >OP T,X,Y,9B,SNGL,65816
+       >OP T,Y,A,98,SNGL
+       >OP T,Y,X,BB,SNGL,65816
+       >OP W,A,I,CB,SNGL,65816
+       >OP W,D,M,42,SNGL,65816
+       >OP X,B,A,EB,SNGL,65816
+       >OP X,C,E,FB,SNGL,65816
+       .HS 40     <<<TERMINATOR>>>
+*--------------------------------
+CLASS.5.OPS
+*          BIT LDY LDX CPY CPX STY STX STZ
+       .HS 20..A0..A2..C0..E0..80..82..60
+*
+*          TSB TRB PEI
+       .HS 00..10..D0
+*
+CLASS.5.LEGAL.MODES
+       .HS F8..F8..E6..E0..E0..70..64..78
+       .HS 60..60..40
+*
+*      80 -- IMMEDIATE
+*      40 -- DIRECT
+*      20 -- ABSOLUTE
+*      10 -- DIRECT,X
+*      08 -- ABSOLUTE,X
+*      04 -- DIRECT,Y
+*      02 -- ABSOLUTE,Y
+*      01 -- <<<NOT USED>>>
+*--------------------------------
+*      OPCODE TABLE SELECTION
+*      .OP 6502/65C02/R65C02/65816/SWEET16,...
+*--------------------------------
+DIR.OP LDA #0
+       STA LEVEL.MASK
+       LDA #15
+       STA EMIT.MARGIN
+.1     JSR ASM65816.GNC.UC   GET NEXT CHARACTER
+       BCS .5       END
+       LDY #-2
+.2     INY
+       INY
+       LDA PSOP.TABLE,Y
+       BEQ .1       ...END OF TABLE, TRY NEXT CHARACTER
+       CMP CURRENT.CHAR
+       BNE .2       ...NOT THIS ONE
+.3     LDA PSOP.TABLE+1,Y
+       STA LEVEL.MASK
+       BPL .5
+       LDA #18
+       STA EMIT.MARGIN
+.5     RTS          RETURN TO ASSEMBLER
+*--------------------------------
+PSOP.TABLE
+       .DA #'8',#$A0     65816 = $A0
+       .DA #'C',#$20     65C02 = $20
+  .DO ROCKWELL
+       .DA #'R',#$60   ROCKWELL= $60
+  .FIN
+  .DO SWEET.16
+       .DA #'S',#$01   SWEET-16= $01
+  .FIN
+       .DA #0
+*--------------------------------------
+MAN
+SAVE usr/src/scmasm.31/asm65816.s
+LOAD usr/src/scmasm.31/scmasm.s
+ASM

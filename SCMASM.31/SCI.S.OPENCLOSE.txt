@@ -1,0 +1,321 @@
+NEW
+  AUTO 3,1
+*--------------------------------------
+*      FOLLOWING USE "BIT" TO SKIP OVER TWO BYTES,
+*      SO CANNOT HAVE THE SECOND OF THE TWO =$CX.
+*--------------------------------
+MLI.C0 LDA #$00     CREATE
+       .HS 2C
+MLI.C1 LDA #$01     DESTROY
+       .HS 2C
+MLI.C2 LDA #$02     RENAME
+       .HS 2C
+MLI.C3 LDA #$03     SET FILE INFO
+       .HS 2C
+MLI.C4 LDA #$04     GET FILE INFO
+       .HS 2C
+MLI.C5 LDA #$05     ONLINE
+       .HS 2C
+MLI.C6 LDA #$06     SET PREFIX
+       .HS 2C
+MLI.C7 LDA #$07     GET PREFIX
+       .HS 2C
+MLI.C8 LDA #$08     OPEN
+       .HS 2C
+MLI.C9 LDA #$09     NEWLINE
+       .HS 2C
+MLI.CA LDA #$0A     READ
+       .HS 2C
+MLI.CB LDA #$0B     WRITE
+       .HS 2C
+MLI.CC LDA #$0C     CLOSE
+       .HS 2C
+MLI.CD LDA #$0D     FLUSH
+       .HS 2C
+MLI.CE LDA #$0E     SET MARK
+       .HS 2C
+MLI.CF LDA #$0F     GET MARK
+       .HS 2C
+MLI.D0 LDA #$D0     SET EOF
+       .HS 2C
+MLI.D1 LDA #$D1     GET EOF
+       ORA #$C0     MAKE INTO MLI CALL CODE
+       JMP MLI.CALLER
+*--------------------------------
+GET.FILE.INFO
+       LDA #10
+       STA GET.SET.PARMS
+       BNE MLI.C4   GET FILE INFO
+*--------------------------------
+SET.FILE.INFO
+       LDA #7
+       STA GET.SET.PARMS
+       BNE MLI.C3   SET FILE INFO
+*--------------------------------
+BYE
+       JSR CLOSE.ALL.FILES
+       JSR CLOSE.EXEC.FILE
+       JSR GP.MLI
+       .DA #$65,READ.WRITE.PARMS
+*--------------------------------
+OPEN.A.FILE
+       PHA
+       LDA FBITS
+       AND #$04
+       BEQ .1
+       LDX VAL.T
+.1     PLA
+ 
+OPEN.DIRECTORY
+       CPX GET.SET.PARMS+4
+       BNE TYPERR
+       AND GET.SET.PARMS+3
+       BEQ .3
+       LDA ALLOCATED.BUFFER.PAGE
+       STA OPEN.PARMS+4
+       LDA #$0F
+       STA LEVEL
+       JSR MLI.C8   OPEN
+       BCS .1
+       LDA OPEN.PARMS+5
+       STA READ.WRITE.PARMS+1
+       STA CLOSE.FLUSH.PARMS+1
+       STA MISC.PARMS+1
+.1     RTS
+*--------------------------------
+.3     LDA #$0A     "FILE LOCKED"
+       SEC
+       RTS
+*--------------------------------
+VERIFY
+       LDA #$06   "PATH NOT FOUND"
+       RTS        ALREADY .CS. IF ERROR
+*--------------------------------
+TYPERR LDA #$0D
+       SEC
+       RTS
+*--------------------------------
+*   OPEN -- ONLY USED BY SCASM FOR OPENING
+*           .TF AND "TEXT" FILES
+*           THE FILES MAY BE TXT OR BIN FILE TYPE
+*--------------------------------
+OPEN
+       PHP
+       JSR GET.REFNUM.OF.OPEN.FILE
+       BCC .9       ...ALREADY OPEN, ERROR
+       PLP          ...GET SAVED STATUS
+       BCC .3       ...FILE ALREADY EXISTS
+*---MAKE A NEW FILE--------------
+       LDA FBITS    WAS T SPECIFIED?
+       AND #$04
+       BEQ .1       ...NO
+       LDA VAL.T    WHAT WAS SPEC?
+       BCS .2       ...always, use spec'd type
+.1     LDA #$06     ...new file, type not spec'd, T=BIN
+       BIT PASS     $FF if command level, 0 or 1 if assembling
+       BPL .4       ...assembling, make BIN file
+       LDA #$04     ...command, make TXT file
+.4     STA VAL.T
+.2     STA GET.SET.PARMS+4
+       LDA #$C3     FULL ACCESS PRIVILEGES
+       STA GET.SET.PARMS+3
+       LDA #0       RECORD LENGTH = 0000
+       STA CREATE.PARMS+5
+       STA CREATE.PARMS+6
+       STA GET.SET.PARMS+5
+       STA GET.SET.PARMS+6
+       JSR MAKE.A.FILE   CREATE THE FILE
+       BCS .8       ...ERROR
+*---NOW THE FILE EXISTS----------
+*---OPEN THE FILE----------------
+.3     JSR ALLOCATE.LOWER.BUFFER
+       STA OPEN.PARMS+4 STARTING PAGE OF BUFFER
+       LDA #$07     LEVEL #
+       STA LEVEL
+       JSR MLI.C8   OPEN
+       BCS .8       ...ERROR
+*---SAVE NAME, ETC OF OPEN FILE--
+       LDA OPEN.PARMS+4      MARK THE BUFFER IN USE
+       STA FILE.BUFFER.PNTRS,X
+       LDA OPEN.PARMS+5      REFNUM
+       STA FILE.REFNUMS,X
+       JSR SAVE.FILENAME.IN.TABLE
+       CLC
+.8     RTS
+*--------------------------------
+.9     PLP
+       JMP ERR.FILE.BUSY
+*--------------------------------
+SAVE.FILENAME.IN.TABLE
+       TXA
+       ASL          INDEX TIMES 32
+       ASL
+       ASL
+       ASL
+       ASL
+       TAX
+*---FORM NAME LENGTH BYTE--------
+       LDA PATHNAME.TWO.BUFFER
+       STA OPEN.FILE.NAME.BUFFERS,X
+       TAY          SAVE ACTUAL LENGTH
+       CMP #30      ONLY ROOM FOR 29 CHARS
+       BCC .1       ...'TWILL FIT
+       LDA #29      USE LAST 29 CHARS
+.1     STA FNLEN  
+       LDA VAL.L
+       STA OPEN.FILE.NAME.BUFFERS+1,X
+       LDA VAL.L+1
+       STA OPEN.FILE.NAME.BUFFERS+2,X
+.2     INX
+       LDA PATHNAME.TWO.BUFFER,Y
+       STA OPEN.FILE.NAME.BUFFERS+2,X
+       DEY
+       DEC FNLEN  
+       BNE .2
+       CLC
+       RTS
+*--------------------------------
+*   SEARCH OPEN FILE NAME TABLE
+*      RETURN .CS., A=ERRCOD IF NO PATHNAME
+*                            OR IF NOT IN TABLE
+*      RETURN .CC., A=REFNUM IF FOUND IN TABLE
+*--------------------------------
+GET.REFNUM.OF.OPEN.FILE
+       LDA FBITS    WAS PATHNAME GIVEN?
+       LSR
+       BCS .1       ...YES
+       JMP ERR.SYNTAX   ...NO, "SYNTAX ERROR"
+*---CHECK AMONG NON-EXEC FILES---
+.1     LDX #1       MAX # OF FILES IS 2
+       STX EXEC.FILE.CLOSING.FLAG
+.2     LDA FILE.BUFFER.PNTRS,X  SEE IF IN USE
+       BEQ .3       NO
+       JSR COMPARE.TO.FILE.NAME.BUFFER
+       BCC .5       ...FOUND IT
+.3     DEX
+       BPL .2
+*---CHECK EXEC FILE--------------
+       BIT F.EXEC   IS EXEC ON?
+       BPL .4       ...NO, FILE NOT OPEN
+       LDX #2       ...YES
+       JSR COMPARE.TO.FILE.NAME.BUFFER
+       BCS .4       ...NOT THIS ONE EITHER
+       LDA #$FF
+       STA EXEC.FILE.CLOSING.FLAG
+       LDA EXEC.REFNUM
+       RTS          RETURN .CC.
+.4     LDA #$12     "FILE NOT OPEN"
+       SEC
+       RTS          RETURN .CS.
+.5     LDA FILE.REFNUMS,X
+       RTS          RETURN .CC.
+*--------------------------------
+*   COMPARE NAMES
+*      RETURN .CC. IF SAME, ELSE .CS.
+*--------------------------------
+COMPARE.TO.FILE.NAME.BUFFER
+       TXA
+       PHA          SAVE X-REGISTER
+       ASL          INDEX TIMES 32
+       ASL
+       ASL
+       ASL
+       ASL
+       TAX
+       LDA OPEN.FILE.NAME.BUFFERS,X
+       CMP PATHNAME.TWO.BUFFER
+       BNE .3       ...DIFFERENT LENGTHS
+       TAY          POINT TO END OF PATHNAME
+       CMP #30      CHOP AT 29
+       BCC .1
+       LDA #29
+.1     STA FNLEN  
+       LDA OPEN.FILE.NAME.BUFFERS+1,X
+       STA RECORD.LENGTH
+       LDA OPEN.FILE.NAME.BUFFERS+2,X
+       STA RECORD.LENGTH+1
+.2     INX
+       LDA PATHNAME.TWO.BUFFER,Y
+       CMP OPEN.FILE.NAME.BUFFERS+2,X
+       BNE .3       NOT THE SAME NAME
+       DEY
+       DEC FNLEN  
+       BNE .2       MORE TO THE NAME
+       CLC          SIGNAL SAME NAMES
+       .HS B0       "BCS" OPCODE, SKIPS OVER "SEC"
+.3     SEC          SIGNAL DIFFERENT NAMES
+       PLA          RESTORE X-REG
+       TAX
+       RTS
+*--------------------------------
+CLOSE
+       LDA FBITS
+       LSR          ANY PATHNAME GIVEN?
+       BCC CLOSE.ALL.FILES   ...NO
+       JSR GET.REFNUM.OF.OPEN.FILE
+       BCC CLOSE.ONE.FILE   ...OPEN, SO CLOSE IT
+       CLC          ...NOT OPEN, SO FINISHED
+       RTS
+*--------------------------------
+*   CLOSE A FILE ... REFNUM IN A-REG
+*                    INDEX IN X-REG
+*--------------------------------
+CLOSE.ONE.FILE
+       STA CLOSE.FLUSH.PARMS+1      REFNUM
+       LDA #0
+       STA LEVEL        LEVEL 0
+       JSR MLI.CC        CLOSE
+       BCS RTS2          ...ERROR
+       LDA #0
+       BIT EXEC.FILE.CLOSING.FLAG
+       BPL .1
+       STA F.EXEC
+       STA EXEC.FILE.CLOSING.FLAG
+       RTS
+.1     STA FILE.BUFFER.PNTRS,X
+       LDA CLOSE.FLUSH.PARMS+1
+       EOR WRITE.REFNUM  TEST .EQ., LEAVE CARRY CLEAR
+       BNE RTS2          ...NOT SAME AS "WRITE" FILE
+*--------------------------------
+UNHOOK.WRITE
+       BIT F.WRITE
+       BPL RTS2
+       LDA VDOSIO
+       STA CSWL
+       LDA VDOSIO+1
+       STA CSWH
+       LDA #0
+       STA F.WRITE
+RTS2   RTS
+*--------------------------------
+CLOSE.ALL.FILES
+       LDX #1       MAX FILES IS 2
+.1     LDA FILE.BUFFER.PNTRS,X
+       BEQ .2       NOT IN USE
+       LDA FILE.REFNUMS,X
+       JSR CLOSE.ONE.FILE
+       BCS RTS2
+.2     DEX
+       BPL .1
+       INX          X=0
+       STX CLOSE.FLUSH.PARMS+1
+       LDA #$07
+       STA LEVEL
+       JMP MLI.CC   CLOSE
+*--------------------------------
+*   ALLOCATE UPPER/LOWER BUFFER
+*--------------------------------
+ALLOCATE.UPPER.BUFFER
+       LDX #1
+       .HS 2C
+ALLOCATE.LOWER.BUFFER
+       LDX #0
+.2     LDA BUFFER.BASES,X
+       STA ALLOCATED.BUFFER.PAGE
+       CLC
+       RTS
+*--------------------------------------
+MAN
+SAVE usr/src/scmasm.31/sci.s.openclose
+LOAD usr/src/scmasm.31/scmasm.s
+ASM

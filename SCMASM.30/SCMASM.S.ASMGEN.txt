@@ -1,0 +1,369 @@
+NEW
+  AUTO 3,1
+*--------------------------------------
+*    ASSEMBLER MAIN DRIVER
+*--------------------------------
+ASM
+*      LDX #0       X=0 FROM COMMAND DISPATCHER
+       STX PASS     SET TO PASS 1
+       STX ERROR.COUNT
+       STX ERROR.COUNT+1
+*      STX MACRO.LEVEL    ALREADY DONE IN GNL
+*      STX PARAM.PNTR     ALREADY DONE IN GNL
+*      STX PAGE.LENGTH    ALREADY DONE IN GNL
+       STX PAGE.NUMBER
+       STX PAGE.NUMBER+1
+       JSR STINIT   INITIALIZE SYMBOL TABLE
+       JSR RESTORE  IF IN INCLUDE, RESTORE
+*--------------------------------
+*      PERFORM NEXT PASS OF ASSEMBLY
+*--------------------------------
+ASM1   LDA ERROR.COUNT
+       ORA ERROR.COUNT+1
+       BEQ .1
+       JMP ASM.END  PRINT # ERRORS AND ABORT ASSEMBLY
+.1     LDX #1       INIT 2-BYTE VARIABLES
+.2     LDA PP,X     POINT TO BEGINNING OF SOURCE PROGRAM
+       STA SRCP,X
+       STA MACSTK,X
+       LDA #0
+       STA CALL.CNTR,X   TOTAL # MACRO CALLS
+       STA CALL.NUM,X    CURRENT MACRO CALL #
+       STA ORGN+2,X      HIGH 16 OF ORIGIN
+       DEX
+       BPL .2
+*---Following = $FF--------------
+       STX DO.STACK      SET OUTER LEVEL TRUE (=$FF)
+       STX LF.CONDITIONAL   do not list false sets (=$FF)
+*---Following = $00--------------
+       STA DUMMY.FLAG    NOT IN DUMMY SECTION
+       STA PHASE.FLAG    NOT IN PHASE
+       STA DO.INDEX      SET DO.STACK TO EMPTY
+       STA LF.ALL        turn on main listing
+       STA LF.MACRO      list macro expansions too
+       STA LF.XTRA.BYTES list all bytes, use extra lines
+       STA TF.FLAG       not in ".TF"
+       STA DO.SKIP.CNT   not in ".DO"
+       STA FLAG.MA       not in ".MA"
+       STA NYBBLE.FLAG   .AC odd/even
+       STA ORGN          ORIGIN = $0800
+       STA TRGT          TARGET = $0800
+*---Following = $08--------------
+       LDA #$08
+       STA ORGN+1
+       STA TRGT+1
+       JSR ASM.INIT       Initialize for particular assembler
+*--------------------------------
+*    MOVE NEXT LINE INTO WORKING BUFFER
+*--------------------------------
+ASM2   LDA $C000    CHECK FOR ABORT WITHOUT
+       CMP #CHR.RETURN   CLEARING STROBE
+       BNE .1
+       JMP JMP.SOFT     YES, STOP RIGHT NOW
+.1     LDX #$FF       INITIALIZE STACK POINTER
+       TXS
+       INX            MAKE X=0
+       STX EMIT.COLUMN
+       STX EXP.UNDEF     CLEAR UNDEFINED FLAG
+       JSR SETUP.NEXT.LINE
+       BCC .2       GOT A LINE
+       JMP ENDM     NO MORE LINES, ACT LIKE .EN FOUND
+*---CHECK CURRENT CONDITION------
+.2     LDA DO.STACK      CURRENT LEVEL IN SIGN BIT
+       BMI ASSEMBLE.ONE.LINE  TRUE, SO ASSEMBLE
+*--------------------------------
+*      SKIP TO .FIN OR .ELSE
+*--------------------------------
+SKIP.TO.FIN
+       JSR SCAN.TO.OPCODE
+       BCS .3
+       LDX #DIR.QT.DO
+       JSR DIR.SCAN.OR.FAIL
+       BCC .1       NOT .DO
+       INC DO.SKIP.CNT  .DO
+       BNE .3       ...ALWAYS
+.1     LDY DO.SKIP.CNT
+       BNE .2       INSIDE A NESTED .DO, IGNORE .ELSE'S
+       JSR DIR.SCAN.OR.FAIL
+       BCS ASSEMBLE.ONE.LINE  FOUND .ELSE
+.2     LDX #DIR.QT.FI
+       JSR DIR.SCAN.OR.FAIL
+       BCC .3       NOT .FIN
+       LDY DO.SKIP.CNT  .FIN, SEE IF NESTED ONE
+       BEQ ASSEMBLE.ONE.LINE  NO, ASSEMBLE THIS .FIN
+       DEC DO.SKIP.CNT        YES, POP OFF THIS NEST
+.3     BIT LF.CONDITIONAL     LIST CONDITIONAL LINES?
+       BMI ASM2               NO, SKIP IT
+       JSR CRLF.IF.LISTING    YES, NEW LINE
+       JMP CMNT               AND LIST IT
+*--------------------------------
+*    ANALYZE SOURCE LINE
+*--------------------------------
+ASSEMBLE.ONE.LINE
+       JSR CRLF.IF.LISTING
+       JSR PACK.MACRO.LINE
+       BCS CMNT     ...only list if MACRO definition line
+       JSR GNC.UC.START    not MACRO line, get first char
+       BCS CMNT          ...empty line
+       BEQ .3            ...blank, so no label
+       JSR CHECK.COMMENT.CHAR
+       BEQ CMNT          ...comment (* or ;)
+       JSR LABL      PROCESS LABEL DEFINITION
+.3     JSR GNNB      Scan to opcode field
+       BCS CMNT      ...none, only label on this line
+       JSR CHECK.COMMENT.CHAR    might be a comment with no opcode
+       BEQ CMNT     ...yes, there is a comment
+       CMP #'>      CHECK IF MACRO OPCODE
+       BEQ .4       ...YES
+       CMP #'_      CHECK IF MACRO OPCODE
+       BEQ .4       ...YES
+       CMP #'='
+       BEQ .5       '=' is synonym for .EQ
+       STA SEARCH.KEY  FIRST OPCODE CHAR
+       JSR GNC.UC
+       STA SEARCH.KEY+1  2ND OPCODE CHAR
+       JSR GNC.UC
+       STA SEARCH.KEY+2  3RD OPCODE CHAR
+       LDA SEARCH.KEY
+       CMP #'.        IS IT A DIRECTIVE?
+       BNE .6       NO, TRY NORMAL OPCODES
+       LDA #OPTBL.DIR
+       LDY /OPTBL.DIR
+       CLC          INITIAL SEARCH
+       JSR SEARCH.COMPRESSED.TABLE
+       BCC OPER     ...NOT FOUND IN TABLE
+       JSR PERFORM.DIRECTIVE
+       JMP CMNT
+.4     JMP MACRO.CALL
+.5     JSR PSEQ     "=" is synonym for .EQ
+       JMP CMNT
+.6     JSR ASM.PARTICULAR
+*--------------------------------
+CMNT   LDA EXP.UNDEF
+       BPL .1       NO UNDEFINED EXPRESSIONS ON THIS LINE
+       LDA PASS
+       BEQ .1       IF WE GOT THIS FAR, OKAY IN PASS 1
+       JMP UNDF
+.1     JSR LIST.SOURCE.IF.LISTING
+       JMP ASM2      NEXT LINE
+*--------------------------------
+*--------------------------------
+PERFORM.DIRECTIVE
+       INY          POINT AT HIGH BYTE OF ADDRESS
+       LDA (OPTBL.PNTR),Y
+       PHA
+       DEY
+       LDA (OPTBL.PNTR),Y
+       PHA
+       RTS
+*--------------------------------
+OPER   LDY #QER2    ERROR--BAD OPCODE
+       JMP SOFT.ERROR
+*--------------------------------
+*      EMIT ONE BYTE OF OBJECT CODE
+*
+*      IF IN PASS TWO THEN
+*        ! IF LISTING THEN <LIST>
+*        ! IF IN ".TF" THEN
+*        !   ! <WRITE BYTE ON DISK>
+*        ! ELSE IF NOT IN DUMMY SECTION THEN
+*        !   !    ! IF IN PROTECTED AREA THEN
+*        !   !    !   ! <ABORT ASSEMBLY>
+*        !   !    ! ELSE <STORE BYTE IN TARGET>
+*      INCREMENT ORIGIN AND ORIGIN.SAVE
+*      IF NOT IN DUMMY SECTION THEN INCREMENT TARGET
+*--------------------------------
+EMIT.ZERO
+       LDA #0
+EMIT   LDY PASS      CHECK WHICH PASS
+       BEQ .5        PASS 1, JUST INCREMENT LOCATION
+       STA OBJ.BYTE  SAVE OBJECT BYTE
+*---LIST THE BYTE----------------
+       JSR P.EMITTED.BYTE
+*---STORE THE BYTE---------------
+       BIT DUMMY.FLAG    No output inside dummy section
+       BMI .6            ...only increment the origin
+       LDA OBJ.BYTE      GET OUTPUT BYTE
+       BIT TF.FLAG  SEE IF IN ".TF"
+       BMI .4       YES
+       JSR USER.OBJECT.BYTE
+       JMP .5       ...ALWAYS
+.4     JSR DOUT     WRITE ON TARGET FILE
+*---INCREMENT LOCATION-----------
+.5     LDA DUMMY.FLAG  IF IN DUMMY SECTION,
+       BMI .6            THEN ONLY INCREMENT ORGN
+       >INCD TRGT        BUMP TARGET ADDRESS
+       >INCD ORIGIN.SAVE      AND ORIGIN OUTSIDE .PH
+.6     >INCD ORGN        BUMP CURRENT ORIGIN
+       RTS
+*--------------------------------
+STORE.OBJECT.BYTE
+       LDA TRGT+1   TARGET PAGE
+       BNE .1       NOT PAGE ZERO
+       LDA TRGT     ALLOW $00-$1E
+       CMP #$1F
+       BCC .4       SAFE
+       BCS .3       NOT SAFE
+*---ALLOW $300-$3CF--------------
+.1     CMP #$03     IN PAGE 3?
+       BNE .2       NO
+       LDA TRGT     BELOW $3D0?
+       CMP #$D0
+       BCC .4       YES, SAFE
+       BCS .3       NO, NOT SAFE
+  .DO AUXMEM
+*---ALLOW $800-MACSTK------------
+.2     CMP #$08     BELOW PAGE 8?
+       BCC .3       YES, NOT SAFE
+       LDA TRGT
+       CMP MACSTK
+       LDA TRGT+1
+       SBC MACSTK+1
+       BCC .4       BELOW MACSTK, SAFE
+  .ELSE
+*---ALLOW $800-MACLBL------------
+.2     CMP #$08     BELOW PAGE 8?
+       BCC .3       YES, NOT SAFE
+       LDA TRGT     NO, COMPARE TO MACLBL
+       CMP MACLBL
+       LDA TRGT+1
+       SBC MACLBL+1
+       BCC .4       BELOW MACLBL, SO SAFE
+*---ALLOW EOT-MACSTK-------------
+       LDA EOT
+       CMP TRGT
+       LDA EOT+1
+       SBC TRGT+1
+       BCS .3       BELOW EOT, NOT SAFE
+       LDA TRGT
+       CMP MACSTK
+       LDA TRGT+1
+       SBC MACSTK+1
+       BCC .4       BELOW MACSTK, SAFE
+  .FIN
+*---NOT SAFE, CHECK USER RANGE---
+.3     LDA TRGT
+       CMP USER.MEM.LO
+       LDA TRGT+1
+       SBC USER.MEM.LO+1
+       BCC .5       DEFINITELY OUT OF BOUNDS
+       LDA USER.MEM.HI
+       CMP TRGT
+       LDA USER.MEM.HI+1
+       SBC TRGT+1
+       BCC .5       DEFINITELY OUT OF BOUNDS
+.4     LDY #0
+       LDA OBJ.BYTE
+       STA (TRGT),Y
+       RTS
+.5     LDY #QMEMPRO
+       JMP FIRM.ERROR
+*--------------------------------
+*    LIST SOURCE LINE
+*--------------------------------
+LIST.SOURCE.IF.LISTING
+       JSR CHECK.IF.LISTING
+LIST.SOURCE.REGARDLESS
+       JSR P.MARGIN   PRINT BLANKS TILL MARGIN
+LIST.SOURCE.AT.MARGIN
+       JSR CONVERT.LINE.NUMBER.PRINT
+       LDY MACRO.LEVEL
+       BEQ .2
+       LDA #'>'
+.1     JSR CHO
+       DEY
+       BNE .1       ...UNTIL Y=0
+.2     LDA #' '     ...NOW Y=0
+.3     JSR CHO
+       INY
+       LDA WBUF-1,Y
+       BNE .3
+       RTS
+*--------------------------------
+*      PRINT CRLF IF IN PASS 2 AND IF LISTING IS ON
+*--------------------------------
+CRLF.CAUSED.FORM.FEED
+       JSR FORM.FEED
+CRLF.IF.LISTING
+       JSR CHECK.IF.LISTING
+CRLF.WITH.PAGING
+       JSR CRLF
+       INC LINE.COUNT
+       LDA PAGE.LENGTH
+       BEQ .1       ...NOT TITLING
+       CMP LINE.COUNT
+       BCC CRLF.CAUSED.FORM.FEED   ...END OF PAGE
+.1     RTS
+*--------------------------------
+*    PROCESS LABEL DEFINITION
+*--------------------------------
+LABL   JSR PACK     PACK AND CHECK SYMBOL
+       BCC ERR.BS   BAD SYMBOL
+       JSR STSRCH   SEE IF DEFINED
+       BCC ERR.DD   YES, DOUBLE DEFINITION
+       JMP STADD    ADD TO SYMBOL TABLE
+*--------------------------------
+ERR.DD LDY PASS     ERROR IN PASS 1
+       BEQ ERR.DBLDF     OK IN PASS 2
+       LDY #6       SET FLAG FOR TESTING FWD REFS
+       >SYM LDA,STPNTR
+       ORA #$40
+       >SYM STA,STPNTR
+       LDY WBUF     LOOK AT COLUMN 1
+       CPY #':      IF PRIVATE LABEL...
+       BEQ .2       ...THEN DON'T UPDATE C.M.LABEL
+       LDA STPNTR   SAVE POINTER TO THIS MAJOR LABEL
+       STA CURRENT.MAJOR.LABEL
+       LDA STPNTR+1
+       STA CURRENT.MAJOR.LABEL+1
+.2     RTS
+ERR.DBLDF
+       LDY #QER4    DOUBLE DEFN
+       .HS 2C       SKIP 2 BYTES
+ERR.BS LDY #QER7    BAD SYMBOL
+       JMP SOFT.ERROR
+*--------------------------------
+*   Search Compressed Opcode Table
+*      If carry clear, (Y,A) = address of table
+*      If carry set, continue searching same table
+*
+*   Return with carry set if found, else carry clear.
+*      (OPTBL.PNTR),Y points at 16-bit value
+*                     of entry which matched.
+*--------------------------------
+SEARCH.COMPRESSED.TABLE
+       BCS .6       ...Continue searching same table
+       STA OPTBL.PNTR
+       STY OPTBL.PNTR+1
+*---Try matching 2nd letter------
+       LDY #0
+.1     LDA (OPTBL.PNTR),Y      Possible match
+       ORA #$40                Make it ASCII
+       CMP SEARCH.KEY+1        same as 2nd letter?
+       BEQ .6                  ...yes, matched.
+       BNE .3                  ...no
+*---Scan to next 8-bit entry-----
+.2     INY
+       INY
+.3     INY
+       LDA (OPTBL.PNTR),Y
+       BMI .2       ...another 24-bit entry
+       ASL          check if beyond our sub-group
+       BPL .1       ...no, valid 2nd letter option
+.4     CLC          ...no match in table, carry clear
+       RTS
+*---Try matching 3rd letter------
+.5     INY
+.6     INY
+       LDA (OPTBL.PNTR),Y
+       BPL .4            ...no more options, not in table
+       INY               point at data
+       EOR #$C0          make like ASCII
+       CMP SEARCH.KEY+2  compare to 3rd letter
+       BNE .5            ...did not match, try another
+       RTS               ...found it, return carry set
+*--------------------------------------
+MAN
+SAVE usr/src/scmasm.30/scmasm.s.asmgen
+LOAD usr/src/scmasm.30/scmasm.s
+ASM

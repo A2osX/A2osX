@@ -5,11 +5,16 @@ NEW
 				.OR	$2000
 				.TF bin/irc
 *--------------------------------------
+TLS				.EQ 0
+*--------------------------------------
 				.INB inc/macros.i
 				.INB inc/a2osx.i
 				.INB inc/mli.i
 				.INB inc/eth.i
 				.INB inc/libtcpip.i
+				.DO TLS=1
+				.INB inc/net.tls.i
+				.FIN
 *--------------------------------------
 TIMEOUT.MAX		.EQ 250					25 sec.
 MSGSIZE			.EQ 4096
@@ -21,12 +26,11 @@ TEXTMAX			.EQ 240
 				.OR ZPBIN
 ZS.START
 ZPPtr1			.BS 2
+ZPPtr2			.BS 2
 bEscMode		.BS 1
 bJoin			.BS 1
 TimeOut			.BS 1
 hSocket			.BS 1
-TextPtr			.BS 1
-TextLen			.BS 1
 
 ZPRespPtr		.BS 2
 ZPMsg			.BS 2
@@ -41,6 +45,9 @@ ZPMsgExtPtr		.BS 2
 BufPtr			.BS 1
 BufLen			.BS 1
 ZPBufPtr		.BS 2
+
+TextPtr			.BS 1
+TextLen			.BS 1
 
 bPendingMsg		.BS 1
 
@@ -111,6 +118,12 @@ J.ESC			.DA CS.RUN.CHARIN.LEFT
 				.DA CS.RUN.CHARIN.DOWN
 				.DA CS.RUN.CHARIN.UP
 				.DA CS.RUN.CHARIN.RIGHT
+				.DO TLS=1
+L.MSG.TLS		.DA MSG.TLS
+L.MSG.TLS.1		.DA MSG.TLS.1
+L.TLS.CHELLO	.DA TLS.CHELLO
+L.TLS.CHELLO.UT	.DA TLS.CHELLO.UT
+				.FIN
 				.DA 0
 *--------------------------------------
 CS.INIT			>LDYA L.LIBTCPIP
@@ -128,11 +141,16 @@ CS.RUN			jsr CS.RUN.CheckTCPIP
 				jsr CS.RUN.CheckArgs
 				bcs CS.INIT.RTS
 
+				jsr CS.RUN.GetBuffers
+				bcs CS.INIT.RTS
+
 				jsr CS.RUN.Connect
 				bcs CS.INIT.RTS
 
-				jsr CS.RUN.GetBuffers
+				.DO TLS=1
+				jsr CS.RUN.TLS
 				bcs CS.INIT.RTS
+				.FIN
 
 				jsr CS.RUN.SCRSETUP
 				bcs CS.INIT.RTS
@@ -263,6 +281,41 @@ CS.RUN.CheckArgs
 				>SYSCALL PrintF
 				rts
 *--------------------------------------
+CS.RUN.GetBuffers
+				>LDYAI 2048
+				>SYSCALL GetMem
+				bcs .9
+
+				>STYA ZPBufPtr
+				txa
+				>STA.G hBufBuf
+
+				>LDYAI MSGSIZE
+				>SYSCALL GetMem
+				bcs .9
+
+				>STYA ZPMsg
+				txa
+				>STA.G hMsgBuf
+
+				>LDYAI 384
+				>SYSCALL GetMem
+				bcs .9
+
+				>STYA ZPRespPtr
+				txa
+				>STA.G hRespBuf
+
+				>LDYAI 256
+				>SYSCALL GetMem
+				bcs .9
+
+				>STYA ZPOutputBufPtr
+				txa
+				>STA.G hOutputBuf
+
+.9				rts
+*--------------------------------------
 CS.RUN.Connect	>PUSHBI S.SOCKET.T.STREAM
 				>PUSHBI 0				no protocol
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Socket
@@ -300,40 +353,63 @@ CS.RUN.Connect	>PUSHBI S.SOCKET.T.STREAM
 				>SYSCALL PrintF
 				rts
 *--------------------------------------
-CS.RUN.GetBuffers
-				>LDYAI 256
-				>SYSCALL GetMem
+				.DO TLS=1
+CS.RUN.TLS		jsr CS.RUN.TLS.init
+
+				>PUSHB hSocket
+				>PUSHW L.TLS.CHELLO
+				>PUSHWI TLS.CHELLO.L
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Write
 				bcs .9
 
-				>STYA ZPBufPtr
-				txa
-				>STA.G hBufBuf
+.1				>SLEEP
 
-				>LDYAI MSGSIZE
-				>SYSCALL GetMem
+				lda TimeOut
+				bne .1
+
+				>PUSHB hSocket
+				>PUSHW ZPBufPtr
+				>PUSHWI 2048
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Read
 				bcs .9
 
-				>STYA ZPMsg
-				txa
-				>STA.G hMsgBuf
-
-				>LDYAI 384
-				>SYSCALL GetMem
-				bcs .9
-
-				>STYA ZPRespPtr
-				txa
-				>STA.G hRespBuf
-
-				>LDYAI 256
-				>SYSCALL GetMem
-				bcs .9
-
-				>STYA ZPOutputBufPtr
-				txa
-				>STA.G hOutputBuf
-
+				>STYA ZPPtr2			RCVD len
+				>PUSHW L.MSG.TLS.1
+				>PUSHW ZPPtr2
+				>PUSHBI 2
+				>SYSCALL PrintF
+				
+				sec
+				rts
+				
+.8				clc
 .9				rts
+*--------------------------------------
+CS.RUN.TLS.init	>LDYA L.MSG.TLS
+				>SYSCALL PutS
+
+				lda A2osX.RANDOM16
+				sta ZPPtr1
+				lda A2osX.RANDOM16+1
+				and #$7F
+				sta ZPPtr1+1
+
+				>LDYA L.TLS.CHELLO.UT
+				>STYA ZPPtr2
+
+				ldy #31
+
+.10				lda (ZPPtr1),y
+				sta (ZPPtr2),y
+				dey
+				bpl .10
+				
+				lda #50
+				sta TimeOut
+				
+				rts
+
+				.FIN
 *--------------------------------------
 CS.RUN.Register	>LDYA L.MSG.REGISTER
 				jsr CS.RUN.STATUSMSG
@@ -363,7 +439,7 @@ CS.RUN.Register	>LDYA L.MSG.REGISTER
 *--------------------------------------
 CS.RUN.GetMsg	bit bPendingMsg
 				bmi .10
-				
+
 				>LDYA ZPMsg
 				>STYA ZPMsgPtr
 
@@ -391,7 +467,7 @@ CS.RUN.GetMsg	bit bPendingMsg
 				sta (ZPMsgPtr)
 				inc ZPMsgPtr
 				bne .3
-				
+
 				inc ZPMsgPtr+1
 
 .3				inc BufPtr
@@ -593,7 +669,7 @@ CS.RUN.CMD.PING	>PUSHW ZPRespPtr
 *--------------------------------------
 CS.RUN.CMD.JOIN	sec
 				ror bJoin
-				
+
 				>LDYA L.MSG.NULL
 				jsr CS.RUN.STATUSPDATE
 *--------------------------------------
@@ -732,8 +808,7 @@ CS.RUN.TXTCLR.RTS
 CS.RUN.TOPUPDATE
 				>PUSHW ZPOutputBufPtr
 				>PUSHW L.MSG.TOPBAR
-				>PUSHB #K.VER
-				>PUSHB /K.VER
+				>PUSHW A2osX.KVER
 
 				lda #1
 				>SYSCALL ArgV
@@ -978,10 +1053,10 @@ CS.DOEVENT		lda (pEvent)
 *--------------------------------------
 CS.QUIT			ldy #hOutputBuf
 				jsr .7
-				
+
 				ldy #hRespBuf
 				jsr .7
-				
+
 				ldy #hMsgBuf
 				jsr .7
 
@@ -1003,9 +1078,9 @@ CS.QUIT			ldy #hOutputBuf
 
 .7				lda (pData),y
 				beq .8
-				
+
 				>SYSCALL FreeMem
-.8				rts				
+.8				rts
 *--------------------------------------
 CS.END
 LIBTCPIP		.AZ "libtcpip"
@@ -1017,6 +1092,10 @@ MSG.HOSTOK		.AZ "Connecting to %d.%d.%d.%d:%D (%s)..."
 MSG.SKTKO		.AZ "Failed to Open Socket."
 MSG.SKTOK		.AZ "Connected\r\n(Exit key is Ctrl-T)\r\n"
 MSG.SKTERR		.AZ "Socket Error : $%h\r\n"
+				.DO TLS=1
+MSG.TLS			.AZ "TLS:Negociation..."
+MSG.TLS.1		.AZ "TLS:Received %D bytes.\r\n"
+				.FIN
 MSG.REGISTER	.AZ "Registering User..."
 MSG.JOIN		.AZ "Joining Channel..."
 MSG.TOPBAR		.AZ "A2osX IRC %d.%d   Server:%s:%s   Nick:%s"
@@ -1071,6 +1150,30 @@ SA.REMOTE		.DA #AF.INET			S.SOCKADDR.AF
 				.BS 1
 				.BS 4					S.SOCKADDR.ADDR
 				.DA 6667
+*--------------------------------------
+				.DO TLS=1
+TLS.CHELLO		.DA #TLS.CT.HS
+				.DA TLS.LV.TLS10
+				.DA /TLS.CHELLO.L1,#TLS.CHELLO.L1
+TLS.CHELLO.1	.DA #TLS.HS.MT.CH
+				.DA #0,/TLS.CHELLO.L2,#TLS.CHELLO.L2
+TLS.CHELLO.2	.DA TLS.LV.TLS12
+TLS.CHELLO.UT	.BS 4
+TLS.CHELLO.R	.BS 28
+				.DA #0					SID
+				.DA #0,#2				CSL
+				.DA #0,#TLS.HS.CH.CS.RSAAES128GCMSHA256
+				.DA TLS.HS.CH.CM.NONE
+				.DA /TLS.CHELLO.LE,#TLS.CHELLO.LE
+TLS.CHELLO.E	.HS 000D				T=sig alg
+				.HS	0004				sig alg Len
+				.HS 0002				sig hash alg len
+				.HS 0401				RSA PKCS1 SHA256
+TLS.CHELLO.L	.EQ *-TLS.CHELLO
+TLS.CHELLO.L1	.EQ *-TLS.CHELLO.1
+TLS.CHELLO.L2	.EQ *-TLS.CHELLO.2
+TLS.CHELLO.LE	.EQ *-TLS.CHELLO.E
+				.FIN
 *--------------------------------------
 				.DUMMY
 				.OR 0

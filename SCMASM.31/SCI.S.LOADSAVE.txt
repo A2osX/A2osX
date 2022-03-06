@@ -1,0 +1,381 @@
+NEW
+  AUTO 3,1
+*--------------------------------------
+DASH
+       LDA GET.SET.PARMS+4      GET FILE TYPE
+       CMP #$06          BINARY?
+       BEQ .3            ...YES, BRUN
+       CMP #$04          TEXT?
+       BNE .1            ...NO, TRY SYS
+       JMP EXEC          ...YES, EXEC
+*--------------------------------
+.1     CMP #$FF          SYS FILE?
+       BEQ .2            ...YES, BRUN IT
+       LDA #$0D     "FILE TYPE MISMATCH"
+       SEC
+       RTS
+*---RUN SYS FILE-----------------
+.2     JSR CLOSE.ALL.FILES
+       JSR CLOSE.EXEC.FILE
+       LDA #0
+       STA VAL.A
+       LDX #6       RELEASE $8000-$B7FF
+.4     STA BITMAP+16,X
+       DEX
+       BPL .4
+       LDA #$01     RELEASE $B800-$BEFF
+       STA BITMAP+23     B800.BFFF
+       LDA /$2000   A$2000
+       STA VAL.A+1
+       LDA #$FF     T=SYS
+       STA VAL.T
+       LDA #$80     SIGNAL FOUND T,A, AND PATHNAME
+       STA FBITS+1
+       LDA #$05
+       STA FBITS
+.3     JMP BRUN
+*--------------------------------
+WARM.DOS
+       JSR CLOSE.ALL.FILES
+       JSR CROUT
+       JMP SC.SOFT
+*--------------------------------
+*   LOAD A SOURCE PROGRAM
+*--------------------------------
+LOAD
+       JSR ALLOCATE.UPPER.BUFFER
+       BCS .5
+       LDA #$01     READ
+       LDX #$FA     FILE TYPE
+       JSR OPEN.A.FILE
+       BCS .5       ...ERROR
+*---GET LENGTH OF FILE-----------
+       LDA SC.INFLAG
+       ASL
+       BPL .1            ...NOT .INBx
+       AND #$7F
+       STA MISC.PARMS+3
+       LDA #0
+       STA MISC.PARMS+2
+       BEQ .2            ...ALWAYS
+.1     JSR MLI.D1   GET LENGTH OF FILE
+       BCS .5       ...ERROR
+*---FIGURE LOAD ADDRESS----------
+.2     SEC
+       LDA SC.HIMEM
+       SBC MISC.PARMS+2
+       STA READ.WRITE.PARMS+2
+       STA VAL.A
+       TAX
+       LDA SC.HIMEM+1  
+       SBC MISC.PARMS+3
+       STA READ.WRITE.PARMS+3
+       STA VAL.A+1
+       TAY
+*---CHECK FOR ROOM IN RAM--------
+       BMI .6       ADDRESS>$7FFF MEANS NO ROOM
+       TXA
+       CMP SC.LOMEM
+       TYA
+       SBC SC.LOMEM+1
+       BCC .6       ...BELOW LOMEM
+*---READ FILE--------------------
+       LDA MISC.PARMS+2
+       STA READ.WRITE.PARMS+4
+       LDA MISC.PARMS+3
+       STA READ.WRITE.PARMS+5
+       JSR MLI.CA   READ THE FILE
+       BCS .5
+*---CLOSE UNLESS .INBx-----------
+       BIT SC.INFLAG
+       BVS .4            ...IT IS .INBx
+.3     JSR MLI.CC   CLOSE THE FILE
+       BCS .5
+*--------------------------------
+.4     LDX VAL.A+1
+       LDY VAL.A
+       STX SC.PP+1  
+       STY SC.PP  
+.5     RTS
+.6     LDA #$0E     "PROGRAM TOO LARGE"
+       SEC
+       RTS
+*--------------------------------
+*   SAVE SOURCE PROGRAM ON DISK
+*--------------------------------
+SAVE
+       BCC .1       ...FILE ALREADY HERE
+       LDA #$FA     FILE TYPE "INT"
+       STA VAL.T
+       STA GET.SET.PARMS+4
+       LDA #$C3
+       STA GET.SET.PARMS+3
+       LDA SC.PP     START OF PROGRAM
+       STA CREATE.PARMS+5
+       STA GET.SET.PARMS+5
+       LDA SC.PP+1  
+       STA CREATE.PARMS+6
+       STA GET.SET.PARMS+6
+       JSR MAKE.A.FILE   CREATE A NEW FILE
+       BCS .2       ...ERROR
+.1     JSR ALLOCATE.UPPER.BUFFER
+       BCS .2
+       LDA #$02
+       LDX #$FA
+       JSR OPEN.A.FILE
+       BCS .2       ...ERROR
+*---GET LENGTH-------------------
+       SEC          GET LENGTH
+       LDA SC.HIMEM
+       SBC SC.PP  
+       TAX
+       STA MISC.PARMS+2
+       LDA SC.HIMEM+1  
+       SBC SC.PP+1  
+       TAY
+       STA MISC.PARMS+3
+       LDA #0
+       STA MISC.PARMS+4
+*---WRITE THE FILE---------------
+       LDA SC.PP  
+       STA READ.WRITE.PARMS+2
+       LDA SC.PP+1  
+       STA READ.WRITE.PARMS+3
+       STX READ.WRITE.PARMS+4
+       STY READ.WRITE.PARMS+5
+       JSR MLI.CB   WRITE DATA ON FILE
+       BCS .2       ...ERROR
+       JSR MLI.D0   SET EOF (TRUNCATE OLD LONGER FILE)
+       BCS .2       ...ERROR
+       JSR MLI.CC   CLOSE THE FILE
+       BCS .2       ...ERROR
+*---UPDATE FILE INFO-------------
+       LDA SC.PP+1  
+       LDX SC.PP  
+       CMP GET.SET.PARMS+6
+       BNE .3
+       CPX GET.SET.PARMS+5
+       CLC
+       BNE .3
+.2     RTS
+.3     STX GET.SET.PARMS+5
+       STA GET.SET.PARMS+6
+       LDA #0
+       STA GET.SET.PARMS+10
+       STA GET.SET.PARMS+11
+       STA GET.SET.PARMS+12
+       STA GET.SET.PARMS+13
+       JMP SET.FILE.INFO
+*--------------------------------
+CREATE
+       LDX #0
+       LDY #0       AuxType = 0000 unless specified
+       LDA FBITS+1
+       BPL .1       ...no A-value specified
+       LDX VAL.A    use A-value for AuxType
+       LDY VAL.A+1
+.1     STX CREATE.PARMS+5
+       STY CREATE.PARMS+6
+       LDA FBITS
+       AND #$04
+       BNE MAKE.A.FILE
+       LDA #$0F
+       STA VAL.T
+ 
+MAKE.A.FILE
+       LDA VAL.T
+       STA CREATE.PARMS+4
+       LDX #$C3
+       LDY #$01     SEEDLING
+       CMP #$0F
+       BNE .1    
+       LDY #$0D     DIRECTORY
+.1     STX CREATE.PARMS+3 
+       STY CREATE.PARMS+7
+       JMP MLI.C0   CREATE
+*--------------------------------
+RENAME LDA FBITS
+       AND #$02     PATH 2?
+       BEQ .1       ...NO, ERROR
+       JMP MLI.C2   RENAME
+.1     JMP ERR.SYNTAX
+*--------------------------------
+LOCK   JSR GET.FILE.INFO
+       BCS RTS3
+       LDA GET.SET.PARMS+3
+       AND #$3C
+       ORA #$01
+       BNE LKUNLK   ...ALWAYS
+UNLOCK JSR GET.FILE.INFO
+       BCS RTS3
+       LDA #$C3
+       ORA GET.SET.PARMS+3
+LKUNLK STA GET.SET.PARMS+3
+       JMP SET.FILE.INFO
+*--------------------------------
+PREFIX
+       LDX #0
+       LDA FBITS+1
+       AND #$04
+       BNE .1       ...SPECIFIED S/D
+       LDA FBITS    SEE IF SPECIFIED PATHNAME
+       LSR
+       BCC .3       ...NO, SO PRINT CURRENT PREFIX
+.1     JMP MLI.C6   SET PREFIX
+*---PRINT CURRENT PREFIX---------
+.2     LDA PATHNAME.ONE.BUFFER+1,X
+       ORA #$80
+       JSR COUT
+       INX
+.3     CPX PATHNAME.ONE.BUFFER
+       BCC .2
+       JSR CROUT
+       CLC
+RTS3   RTS
+*--------------------------------
+NOPREFIX
+       LDA #0
+       STA PATHNAME.ONE.BUFFER
+       JMP MLI.C6   SET PREFIX
+*--------------------------------
+BSAVE
+       BCC .2       ...EXISTING FILE
+       LDA FBITS+1
+       AND #$B0     A-EL
+       CMP #$90     Require A and either E or L
+       BCC .3       ...Neither E nor L
+       LDA VAL.A
+       STA CREATE.PARMS+5
+       STA GET.SET.PARMS+5
+       LDA VAL.A+1
+       STA CREATE.PARMS+6
+       STA GET.SET.PARMS+6
+*---T=BIN unless specified-------
+       LDA FBITS
+       AND #$04
+       BNE .1       ...TYPE SPECIFIED
+       LDA #$06     ...NO TYPE, ASSUME BINARY
+       STA VAL.T
+.1     LDA VAL.T
+       STA GET.SET.PARMS+4
+*--------------------------------
+       JSR MAKE.A.FILE
+       BCS .4
+       JSR GET.FILE.INFO
+       BCS .4
+.2     LDA #$02
+       BNE B.COMMON ...ALWAYS
+ 
+.3     LDA #$06     "PATH NOT FOUND"
+       SEC
+.4     RTS
+*--------------------------------
+BRUN
+       JSR BLOAD
+       BCS .1
+       JSR .2
+       CLC
+.1     RTS
+.2     JMP (READ.WRITE.PARMS+2)
+*--------------------------------
+BLOAD
+       LDA #$01
+B.COMMON
+       PHA
+       JSR ALLOCATE.UPPER.BUFFER
+       PLA
+       BCS .3
+       LDX #$06
+       JSR OPEN.A.FILE
+       BCS .3
+       LDX VAL.A
+       LDY VAL.A+1
+       LDA FBITS+1
+       BMI .1       ...ADDRESS SPECIFIED
+       LDX GET.SET.PARMS+5
+       LDY GET.SET.PARMS+6
+       LDA FBITS    DON'T ALLOW DEFAULT ADDRESS
+       AND #$04     ON NON-BINARY FILES
+       BEQ .0       ...T not specified, so it is BIN
+       LDA VAL.T    T specified, better be BIN or SYS
+       CMP #$06     is it BIN?
+       BEQ .0       ...yes, use AuxType value
+       CMP #$FF     is it SYS?
+       BNE .4       ...no, error
+       LDX #$2000   ...type SYS, assume A$2000
+       LDY /$2000
+.0     LDA FBITS+1
+.1     STX READ.WRITE.PARMS+2
+       STY READ.WRITE.PARMS+3
+       LDX VAL.L
+       LDY VAL.L+1
+       AND #$30
+       BEQ .5
+       EOR #$30
+       BEQ .4
+       AND #$10
+       BEQ .7
+       LDA VAL.E
+       SEC
+       SBC VAL.A
+       TAX
+       LDA VAL.E+1
+       SBC VAL.A+1
+       TAY
+       INX
+       BNE .2
+       INY
+.2     BCS .7
+       LDA #$02     "RANGE ERROR"
+       SEC
+.3     RTS
+*--------------------------------
+.4     LDA #$0B     "INVALID PARAMETER"
+       SEC
+       RTS
+*--------------------------------
+.5     JSR MLI.D1   GET EOF 
+       BCS .6
+       LDX MISC.PARMS+2
+       LDY MISC.PARMS+3
+       LDA MISC.PARMS+4
+       BEQ .7
+       LDA #$0E     "PROGRAM TOO LARGE"
+.6     SEC
+       RTS
+*--------------------------------
+.7     STX READ.WRITE.PARMS+4
+       STY READ.WRITE.PARMS+5
+       LDA FBITS+1
+       AND #$40
+       BEQ .10
+       LDX #$02
+.8     LDA VAL.B,X
+       STA MISC.PARMS+2,X
+       DEX
+       BPL .8
+.9     JSR MLI.CE   SET MARK
+       LDX COMMAND.NUMBER
+       BCC .10
+       CMP #$02
+       BNE .6
+       CPX #CN.BSAVE
+       BNE .6
+       JSR MLI.D0   SET EOF
+       BCC .9
+       RTS
+*--------------------------------
+.10    LDX COMMAND.NUMBER
+       CPX #CN.BSAVE
+       BNE .12      ...NOT BSAVE
+       JSR MLI.CB   ...BSAVE
+       BCS .13      ...ERROR
+.11    JMP MLI.CC
+.12    JSR MLI.CA   READ
+       BCC .11      ...GOOD, CLOSE
+.13    RTS
+*--------------------------------------
+MAN
+SAVE usr/src/scmasm.31/sci.s.loadsave
+LOAD usr/src/scmasm.31/scmasm.s
+ASM

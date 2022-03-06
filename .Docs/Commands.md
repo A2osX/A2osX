@@ -24,6 +24,45 @@ exists, thus return value is limited to
 whether or not a valid argument was  
 given.   
 
+# SEQ  
+Prints sequences of numbers.  
+*  
+
+## Arguments  
+**<first>**  
+Starting number for the sequence of numbers.  
+*  
+**<incr>**  
+Count in increments of <incr>. Default is 1 if omitted.  
+*  
+**<last>**  
+Last number to count to. If <last> is less than <first>, then the default <incr> is -1.  
+*  
+
+## Return Value  
+N/A  
+*  
+
+### Author  
+2021-11-17, Brian J. Bernstein <brian@dronefone.com>.  
+
+# XMASTREE  
+Displays a Christmas Tree of user defined height. Ho Ho Ho.  
+*  
+
+## Arguments  
+**<height>**  
+Height of the tree. A positive number up to about 41 is realistic, beyond that you're on your own...  
+*  
+
+## Return Value  
+N/A  
+*  
+
+### Author  
+Original algorithm Jan 2012, Brian J. Bernstein.  
+Updated for A2osx 2021-07-02.  
+
 ## License
 A2osX is licensed under the GNU General Public License.
 

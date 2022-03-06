@@ -1,0 +1,262 @@
+NEW
+  AUTO 3,1
+*--------------------------------------
+SCI.TBLADR          .EQ $AA00  Address of Command Table
+SCI.LINBUF          .EQ $BC80
+SCI.STARTUP         .EQ $BE00
+SCI.COMMAND         .EQ $BE03
+SCI.ERROR           .EQ $BE09
+SCI.SLOT            .EQ $BE3C
+SCI.DRIVE           .EQ $BE3D
+SCI.STATE           .EQ $BE42  0=immediate, else deferred
+SCI.MLI             .EQ $BE70  Call MLI, (A)=operation
+SCI.RTS             .EQ $BE9E
+SCI.IOB.GETSET      .EQ $BEB4  Get/Set File Info IOB
+SCI.IOB.MISC        .EQ $BEC6  Misc functions IOB
+SCI.IOB.OPEN        .EQ $BECB  Open IOB
+SCI.IOB.RW          .EQ $BED5  Read/Write IOB
+SCI.IOB.CLOSE       .EQ $BEDD  Close IOB
+SCI.BUFFER.PAGES    .EQ $BEF2,3,4  Buf1, Buf2, Exec
+SCI.HIMEM.PAGE      .EQ $BEFB
+*--------------------------------
+*      LIST SOURCE CODE ON TEXT FILE
+*--------------------------------
+* TEXT.OPTIONS:
+*      TEXT <FILENAME>   NO LINE NUMBERS
+*      TEXT#<FILENAME>   WITH LINE NUMBERS
+*      TEXT%<FILENAME>   WITH TAB.CHAR
+*--------------------------------
+TEXT   LDX #0       00=NO LINE NUMBERS
+       STX TEXT.OPTIONS
+       JSR GNNB     GET NEXT NON-BLANK CHAR
+       CMP #'#      TEXT # MEANS WRITE LINE NUMBERS
+       BEQ .5       USE LINE NUMBERS
+       CMP #'%      TEXT % MEANS WRITE CONTROL-I
+       BNE .6       NEITHER, WRITE TEXT ONLY
+       LDA TAB.CHAR
+       STA TEXT.OPTIONS
+       BNE .7       ...ALWAYS
+.5     INC TEXT.OPTIONS
+       BNE .7       ...ALWAYS
+.6     JSR BACKUP.CHAR.PNTR
+.7     LDA #1       INTO "DEFERRED" STATE
+       STA SCI.STATE
+       JSR SAVE.PATHNAME
+       LDY #PQ.OPN
+       JSR ISSUE.DOS.COMMAND
+       LDY #PQ.WRT
+       JSR ISSUE.DOS.COMMAND
+       JSR SETUP.TEXT.POINTERS (PP --> SRCP, HIMEM --> ENDP)
+.1     JSR CMP.SRCP.ENDP     END OF RANGE YET?
+       BCS .4       ...YES
+       JSR GET.LINE.NUMBER
+       LDA TEXT.OPTIONS
+       BEQ .3       NO LINE #
+       BMI .2       TAB.CHAR
+       JSR CONVERT.LINE.NUMBER.PRINT
+       LDA #$20     SPACE AFTER LINE #
+.2     JSR CHO
+.3     JSR NTKN
+       BNE .2
+       JSR CRLF
+       JMP .1
+.4     LDA #0       TRUNCATE REST OF FILE
+       JSR CHO
+       JMP SOFT
+*--------------------------------
+*      .TF DIRECTIVE
+*--------------------------------
+*    END EXISTING .TF IF ANY
+*    SET .TF FLAG ON
+*
+*    PASS 1:  THAT'S ALL
+*
+*    PASS 2:  OPEN THE FILE, WITH T=BIN
+*             SET MARK=EOF=0
+*             SET STARTING ADDRESS IN FILE-INFO
+*             WRITE START ADDRESS AND LENGTH
+*--------------------------------
+PSTF   JSR TFEND    CLOSE EXISTING TF IF ANY
+       SEC
+       ROR TF.FLAG  SET FLAG ON
+       JSR LIST.LINE.BOTH.PASSES
+       LDA PASS     WHICH PASS?
+       BEQ .9       ...PASS 1, EXIT NOW
+       JSR SAVE.PATHNAME
+       LDY #PQ.OPN
+       JSR ISSUE.DOS.COMMAND
+*---Empty the file now-----------
+       LDA #0
+       STA SCI.IOB.MISC+2
+       STA SCI.IOB.MISC+3
+       STA SCI.IOB.MISC+4
+       LDA SCI.IOB.OPEN+5  REFNUM FOR TARGET FILE
+       STA TF.PRM   TARGET FILE REF. NUM.
+       STA SCI.IOB.MISC+1
+       LDA #$CE     SET MARK
+       JSR SCI.MLI
+       BCS JMP.PRODOS.ERR   ...ERROR 
+       LDA #$D0     SET EOF
+       JSR SCI.MLI
+       BCS JMP.PRODOS.ERR   ...ERROR
+*---Get current file info--------
+       LDA #10
+       STA SCI.IOB.GETSET
+       LDA #$C4     GET FILE INFO
+       JSR SCI.MLI
+       BCS JMP.PRODOS.ERR   ...ERROR
+*---Set proper file info---------
+       LDA #7       change IOB for set.file.info
+       STA SCI.IOB.GETSET
+       LDA SCI.IOB.GETSET+4  current file type
+       CMP #$04     is it type TXT?
+       BEQ .9       ...yes, make no changes
+       LDX #$2000   if type is SYS ($FF), force A=$2000
+       LDY /$2000
+       CMP #$FF     is it type SYS?
+       BEQ .3       ...yes
+       LDX ORGN     all other types, A=origin
+       LDY ORGN+1
+.3     STX SCI.IOB.GETSET+5  new AuxType
+       STY SCI.IOB.GETSET+6
+       LDA #$C3     SET FILE INFO
+       JSR SCI.MLI
+       BCS JMP.PRODOS.ERR   ...ERROR
+.9     JMP ASM2     ...CONTINUE ASSEMBLY
+*--------------------------------
+JMP.PRODOS.ERR JMP PRODOS.ERROR
+*--------------------------------
+* OUTPUT (A) TO ALREADY OPENED DISK FILE
+*--------------------------------
+DOUT   BIT DUMMY.FLAG
+       BMI .3       No output inside DUMMY section
+       STA TF.BUF   Save in buffer outside zero-page
+       STX TF.SVX
+       LDX #4       copy parms to SCI parmblock
+.1     LDA TF.PRM,X
+       STA SCI.IOB.RW+1,X
+       DEX
+       BPL .1       ...until all copied
+       LDA #$CB     Write command code
+       JSR SCI.MLI
+       BCS JMP.PRODOS.ERR
+       LDX TF.SVX
+       LDA OBJ.BYTE
+.3     RTS
+*
+TF.SVX .BS 1
+TF.BUF .BS 1
+TF.PRM .DA #*-*,TF.BUF,1
+*--------------------------------
+* TFEND - FINISH OFF A .TF SECTION
+*  CALLED FROM:  .TF, .TA, .OR, .EN PROCESSORS
+*
+*  IF NOT IN .TF NOW, RETURN IMMEDIATELY
+*  CLEAR .TF FLAG
+*  PASS 1 - THAT'S ALL TO DO
+*  PASS 2 - CLOSE FILE
+*--------------------------------
+TFEND  ASL TF.FLAG  TEST AND CLEAR FLAG SIMULTANEOUSLY
+       BCC .1       ...TF NOT ACTIVE, DO NOTHING
+       LDA PASS
+       BNE CLOSE.FILES   ...PASS 2
+.1     RTS
+*--------------------------------
+CLOSE.FILES
+       LDY #PQ.CLS
+       .HS 2C
+FP     LDY #PQ.FP
+       LDA #0
+       STA PATHNAME
+*--------------------------------
+*      ISSUE DOS COMMAND WITH FILE NAME
+*      (Y)=QUOTE OFFSET FOR COMMAND
+*
+*      SAVES AND RESTORES CHARACTER POINTER
+*      SO THAT FILE NAME CAN BE USED AGAIN.
+*--------------------------------
+ISSUE.DOS.COMMAND
+       LDX #$7F     SAVE WBUF (0-127)
+.1     LDA WBUF,X
+       STA SCI.LINBUF,X
+       DEX
+       BPL .1
+.2     INX          COPY PATHNAME INTO WBUF (5...)
+       LDA PATHNAME,X
+       STA WBUF+5,X
+       BNE .2
+       TAX          X=0
+.3     INX          COPY COMMAND INTO WBUF (0...)
+       INY
+       LDA PQTS-1,Y
+       STA WBUF-1,X
+       BPL .3
+       STX SCI.STATE    ALLOW DEFERRED COMMANDS
+       JSR PASS.CMD.TO.PRODOS
+       LDX #$7F     RESTORE WBUF (0-127)
+.4     LDA SCI.LINBUF,X
+       STA WBUF,X
+       DEX
+       BPL .4
+       RTS
+*--------------------------------
+SAVE.PATHNAME	.DO LOWERCASE=1
+				ldx #0
+
+.1				cpx #49
+				bcs .2
+				
+				jsr .8
+				bcc .3
+
+.2				lda #0
+
+.3				sta PATHNAME,x
+				inx
+				bcc .1
+				
+				rts
+
+.8				jsr GNC					GET NEXT CHAR ANY CASE
+				beq .9					SPACE OR <EOL>
+
+				sta CURRENT.CHAR
+				cmp #$FF				CLEAR CARRY, SET .NE.
+
+.9			    rts
+
+				.ELSE
+				LDX #0
+
+.1				CPX #49
+				BCS .2
+				
+				JSR GNNB
+				BCC .3
+
+.2				LDA #0
+
+.3				STA PATHNAME,X
+				INX
+				BCC .1
+				
+				RTS
+				.FIN
+*--------------------------------
+PQTS   .EQ *
+PQ.CLS .EQ *-PQTS
+       .AT /CLOSE/
+PQ.OPN .EQ *-PQTS
+       .AT /OPEN /
+PQ.WRT .EQ *-PQTS
+       .AT /WRITE/
+PQ.LOD .EQ *-PQTS
+       .AT /LOAD /
+PQ.FP  .EQ *-PQTS
+       .AS /-BASIC.SYSTEM/
+       .HS 00FF
+*--------------------------------------
+MAN
+SAVE usr/src/scmasm.31/scmasm.s.disk
+LOAD usr/src/scmasm.31/scmasm.s
+ASM

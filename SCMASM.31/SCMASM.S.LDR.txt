@@ -1,0 +1,222 @@
+NEW
+  AUTO 3,1
+*--------------------------------------
+SPTR   .EQ $00
+DPTR   .EQ $02
+*--------------------------------
+MLI.UNIT            .EQ $BF30
+MLI.BITMAP          .EQ $BF58
+MLI.PREFIX.FLAG     .EQ $BF9A
+*--------------------------------
+MON.CROUT .EQ $FD8E
+SETNORM .EQ $FE84
+*--------------------------------
+*   sys file   execution
+*   ---------  ---------
+*   2000-21FF             LOADER
+*   2200-4AFF  8000-A8FF  S-C MACRO ASSEMBLER with 40-col driver
+*              A900-A9FF  additional space for longer drivers
+*   4B00-5FFF  AA00-BEFF  S-C ProDOS Interface
+*   6000-60FF  A800-A8FF  //E 80-COLUMN DRIVER
+*   6100-61FF  A800-A8FF  STB80 DRIVER
+*   6200-63FF  A800-A9FF  VIDEX VIDEOTERM DRIVER
+*   6400-65FF  A800-A9FF  VIDEX ULTRATERM DRIVER
+*   6600-71FF  D400-DFFF  ASM PARTICULAR
+*--------------------------------
+*   BLOAD SCASM          (loader and Macro and 40-col driver)
+*   BLOAD B.SCI          (ProDOS Interpreter)
+*   BLOAD B.IO.TWO.E     (//E 80-COLUMN DRIVER)
+*   BLOAD B.IO.STB80
+*   BLOAD B.IO.VIDEX
+*   BLOAD B.IO.ULTRA
+*   BSAVE SCASM.SYS,A$2000,L$4600
+*--------------------------------
+       .MA MOVE
+       LDA /]1      DESTINATION
+       LDY /]2      SOURCE BEGINNING
+       LDX /]3-]2+255   # PAGES
+       JSR MOVE
+       .EM
+*--------------------------------
+STARTUP.SC.MACRO
+       JMP LOAD.SC
+*--------------------------------
+DRIVER.FLAG .HS 00
+*--------------------------------
+LOAD.SC
+       JSR SELECT.DRIVER
+       >MOVE $AA00,$4B00,$5FFF
+       >MOVE $8000,$2200,$4AFF
+       LDA $C083
+       LDA $C083
+       >MOVE $D400,$6600,$71FF
+       LDA $C082
+       JSR LOAD.DRIVER
+*--------------------------------
+*---GET SCREEN TO NORMAL 40------
+*      LDA #$15     CTRL-U, TURNS OFF 80-COLUMN
+*      JSR MON.COUT
+*      JSR SETNORM
+*      JSR MON.INIT
+*      JSR MON.HOME
+*---ESTABLISH RAM BITMAP---------
+       LDX #BITMAP.SIZE-1
+.2     LDA MY.BITMAP,X
+       STA MLI.BITMAP,X
+       DEX
+       BPL .2
+*---BUILD $3D0-3FF---------------
+       LDX #5
+.3     LDA IMAGE.3D0,X
+       STA $3D0,X
+       DEX
+       BPL .3
+       LDX #10
+.4     LDA IMAGE.3F0,X
+       STA $3F0,X
+       DEX
+       BPL .4
+*---Establish HIMEM page---------
+       LDA #$74
+       STA SCI.HIMEM.PAGE
+       STA SCI.BUFFER.PAGES+2   EXEC BUFFER
+       CLC
+       ADC #4
+       STA SCI.BUFFER.PAGES     BUF 0
+       ADC #4
+       STA SCI.BUFFER.PAGES+1   BUF 1
+*---SET A NULL PREFIX------------
+       LDA #0
+       STA MLI.PREFIX.FLAG
+*---SET SLOT/DRIVE DEFAULTS------
+       LDA MLI.UNIT
+       LSR
+       LSR
+       LSR
+       LSR
+       CMP #$08
+       AND #$07
+       STA SCI.SLOT
+       LDA #1
+       ADC #0
+       STA SCI.DRIVE
+*--------------------------------
+IIGS   SEC
+       JSR $FE1F
+       BCS .2       ...NOT IIGS
+*--------------------------------
+       LDY #GS.NUM-1
+.1     LDA GS.NEW,Y
+       STA FAKE.MONITOR,Y
+       DEY
+       BPL .1
+*---START UP ProDOS--------------
+.2     JMP $8000
+*--------------------------------
+GS.NEW LDA #" "     COVER UP THE DOLLAR SIGN
+       STA WBUF
+       LDA WBUF-1,X LOOK FOR "HEXNUM=" COMMAND
+       CMP #"="
+       BEQ .1       ...YES, DON'T APPEND " Q"
+       LDA #" "
+       STA WBUF,X   APPEND " Q"
+       LDA #"Q"
+       STA WBUF+1,X
+.1     JMP $FF70
+GS.NUM .EQ *-GS.NEW
+*--------------------------------
+IMAGE.3D0
+       JMP SCI.STARTUP    $3D0
+       JMP SCI.STARTUP    $3D3
+IMAGE.3F0
+       .DA $FA59             'BRK' VECTOR
+       .DA SCI.STARTUP,#$BE^$A5    RESET VECTOR
+       JMP SCI.RTS             &-VECTOR
+       JMP SCI.RTS             Y-VECTOR
+*--------------------------------
+MY.BITMAP
+       .HS C3.00.00.00.00.00.00.00  0000-3FFF
+       .HS 00.00.00.00.00.00.00.00  4000-7FFF
+       .HS FF.FF.FF.FF.FF.FF.FF.F3  8000-BFFF
+BITMAP.SIZE .EQ *-MY.BITMAP
+*--------------------------------
+SELECT.DRIVER
+       LDY DRIVER.FLAG
+       BNE .3       ...LOAD SPECIFIC DRIVER
+       LDA $FBB3
+       CMP #6
+       BEQ .3       ...//E OR //C, USE //E DRIVER
+*---Display menu-----------------
+       JSR MON.HOME
+       LDY #0
+.1     LDA MENU,Y
+       BEQ .2
+       JSR MON.COUT
+       INY
+       BNE .1
+*---Get choice-------------------
+.2     JSR MON.RDKEY
+       EOR #$B0
+       BEQ .2
+       CMP #5
+       BCS .2
+       TAY
+       ORA #$B0
+       JSR MON.COUT
+       JSR MON.CROUT
+*---(Y) is selected driver-------
+.3     STY DRIVER.FLAG
+       RTS
+*--------------------------------
+LOAD.DRIVER
+       LDY DRIVER.FLAG
+       LDA DRIVER.ADDRS,Y
+       BEQ .4       ...40-COLUMN, RETURN NOW
+       TAY
+       LDA /$A800
+       LDX #2
+       JSR MOVE
+.4     RTS
+*--------------------------------
+*      MOVE (X) PAGES FROM YY00 TO AA00
+*--------------------------------
+MOVE
+       STA DPTR+1
+       STY SPTR+1
+       LDY #0
+       STY DPTR
+       STY SPTR
+.1     LDA (SPTR),Y
+       STA (DPTR),Y
+       INY
+       BNE .1
+       INC SPTR+1  
+       INC DPTR+1  
+       DEX
+       BNE .1
+       RTS
+*--------------------------------
+DRIVER.ADDRS
+       .HS 60...00...62...64...61
+*          //E  40   VID  ULT  STB
+*--------------------------------
+MENU
+       .AS -/S-C MACRO ASSEMBLER 2.0 (PRODOS)/
+       .HS 8D8D
+       .AS -/1 -- STANDARD 40-COLUMN/
+       .HS 8D
+       .AS -/2 -- VIDEX VIDEOTERM/
+       .HS 8D
+       .AS -/3 -- VIDEX ULTRATERM/
+       .HS 8D
+       .AS -/4 -- STB-80/
+       .HS 8D8D
+       .AS -/WHICH?  /
+       .HS 00
+*--------------------------------
+       .AS /<<<COPYRIGHT (C) 1985, S-C SOFTWARE CORPORATION>>>/
+*--------------------------------------
+MAN
+SAVE usr/src/scmasm.31/scmasm.s.ldr
+LOAD usr/src/scmasm.31/scmasm.s
+ASM

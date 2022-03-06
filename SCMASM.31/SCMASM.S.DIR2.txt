@@ -1,0 +1,279 @@
+NEW
+  AUTO 3,1
+*--------------------------------------
+*    .IN -- INCLUDE A SOURCE FILE
+*--------------------------------
+PSIN   LDA INFLAG   SEE IF NESTED .IN
+       BNE .4       ...YES, ERROR
+       SEC
+       ROR INFLAG   TURN ON FLAG (=$80)
+       LDA #'I      PUT "I" IN PROMPT MESSAGE
+       STA PROMPT.FLAG
+       JSR LIST.LINE.BOTH.PASSES
+*---SAVE CURRENT, SET UP NEW-----
+       LDX #1
+.1     LDA HI.MEM,X       SAVE CURRENT SOURCE POINTERS
+       STA INSAVE,X
+       LDA SRCP,X
+       STA INSAVE+2,X
+       LDA PP,X
+       STA HI.MEM,X
+  .DO AUXMEM
+  .ELSE
+       LDA LO.MEM,X  MAKE DOS PROTECT THE SYMBOL TABLE
+       STA INSAVE+6,X    DURING THE LOAD
+       LDA EOT,X
+       STA LO.MEM,X
+  .FIN
+       DEX
+       BPL .1
+*---CHECK FOR .INBx--------------
+       JSR GNC.UC
+       CMP #'B'
+       BNE .2            ...NOT .INBx
+       JSR GNC.UC        GET # OF BLOCKS
+       EOR #'0'
+       BEQ .12           ...NOT 1-9, USE 1
+       CMP #10
+       BCC .14           ...1-9
+.12    LDA #1            USE 1 BLOCK
+.14    ORA #$C0
+       STA INFLAG
+*---LOAD THE FILE----------------
+.2     JSR SAVE.PATHNAME
+       LDY #PQ.LOD  LOAD COMMAND
+       JSR ISSUE.DOS.COMMAND
+*---ASSEMBLE INCLUDED STUFF------
+       LDX #1
+.3     LDA PP,X          MOVE SRCP TO BEGINNING OF INCLUDED FILE
+       STA SRCP,X
+       STA MACSTK,X
+  .DO AUXMEM
+  .ELSE
+       LDA INSAVE+6,X    RESTORE LO.MEM
+       STA LO.MEM,X
+  .FIN
+       LDA SCI.IOB.RW+6,X     # BYTES ACTUALLY RECEIVED
+       STA INSAVE+4,X
+       DEX
+       BPL .3
+       LDA SCI.IOB.RW+1       REFNUM OF INB FILE
+       STA INSAVE+6
+       JMP ASM2      CONTINUE ASSEMBLY
+*---NO NESTING ALLOWED-----------
+.4     LDY #QNIN     "NEST .IN"
+       JMP FIRM.ERROR
+*--------------------------------
+*    .EN -- END OF SOURCE PROGRAM
+*--------------------------------
+PSEN   JSR LIST.SOURCE.IF.LISTING
+ENDM
+       BIT INFLAG    IN A ".IN"?
+       BPL .1         NO
+       BVC .3       ...NOT IN .INBx
+       LDA INSAVE+6 .INBx REFNUM
+       STA SCI.IOB.CLOSE+1
+       LDA #$CC     Close the .INclude file
+       JSR SCI.MLI
+.3     JSR RESTORE  YES, BACK TO ROOT
+       JMP ASM2     CONTINUE ASSEMBLY
+*---END OF ROOT FILE-------------
+.1     JSR TFEND    END .TF IF DOING ONE
+       LDA PASS     WHICH PASS?
+       BNE .2       ...END OF PASS 2
+       INC PASS     END OF PASS 1
+       JMP ASM1
+.2     BIT LF.ALL   Are we listing?
+       BMI ASM.END  ...no, we are finished
+       JSR CRLF.WITH.PAGING
+       JSR CRLF.WITH.PAGING
+       JSR CRLF.WITH.PAGING
+       LDY #QST     "SYMBOL TABLE"
+       JSR QT.OUT
+       JSR CRLF.WITH.PAGING
+       JSR CRLF.WITH.PAGING
+       JSR STPRNT   PRINT THE SYMBOLS
+*--------------------------------
+ASM.END
+       JSR CRLF.WITH.PAGING
+       LDA ERROR.COUNT
+       STA CURRENT.LINE.NUMBER
+       LDA ERROR.COUNT+1
+       STA CURRENT.LINE.NUMBER+1
+       JSR CONVERT.LINE.NUMBER.PRINT
+       LDY #QERRCNT
+       JSR QT.OUT
+       JMP SOFT      END OF ASSEMBLY
+*--------------------------------
+*    RESTORE IF INSIDE AN INCLUDE
+*--------------------------------
+RESTORE
+       LDA INFLAG
+       BEQ .1       RETURN
+       LDX #0       CLEAR PROMPT.FLAG
+       STX PROMPT.FLAG
+       STX INFLAG   CLEAR INFLAG
+       INX          X=1
+.2     LDA HI.MEM,X
+       STA PP,X
+       STA MACSTK,X
+       LDA INSAVE,X
+       STA HI.MEM,X
+       LDA INSAVE+2,X
+       STA SRCP,X
+       DEX
+       BPL .2
+.1     RTS
+*--------------------------------
+*      SET UP TITLE LINE
+*--------------------------------
+PSTI   LDA PASS
+       BEQ PGXIT    DO NOTHING IN PASS ONE
+       JSR EXPR.DEFINED    GET PAGE LENGTH
+       LDA EXP.VALUE  USE MOD 256
+       STA PAGE.LENGTH    NON-ZERO PAGE LENGTH MEANS TITLING IS ON
+       LDX #0       POINT AT TITLE BUFFER
+       JSR GNC
+       CMP #',
+       BNE .2       NO TITLE
+.1     JSR GNC
+       BCS .2       END OF TITLE
+       STA KBUF,X
+       INX
+       CPX #70      MAX TITLE SIZE
+       BCC .1
+.2     LDA #0       TERMINATE TITLE
+       STA KBUF,X
+*---FALL INTO PSPG CODE----------
+*--------------------------------
+*    PAGE EJECT
+*--------------------------------
+PSPG   JSR FORM.FEED
+PGXIT  JMP ASM2
+*--------------------------------
+FORM.FEED
+       JSR CHECK.IF.LISTING
+       LDA #$0C      FORM FEED CHAR
+       JSR CHO
+      >INCD PAGE.NUMBER
+       LDA PAGE.LENGTH
+       CMP #3       PAGE LENGTHS LESS THAN 3 CANNOT BE TITLED
+       BCC .1          EXIT, NOT TITLING NOW
+       LDX #0
+       STX LINE.COUNT
+.3     LDA KBUF,X   PRINT TITLE
+       BEQ .4       END OF TITLE
+       JSR CHO
+       INX
+       BNE .3       ...ALWAYS
+.4     LDY #PAGEQT  " PAGE "
+       JSR QT.OUT
+       LDA CURRENT.LINE.NUMBER   SAVE LINE #
+       PHA
+       LDA CURRENT.LINE.NUMBER+1
+       PHA
+       LDA PAGE.NUMBER           PRINT PAGE #
+       STA CURRENT.LINE.NUMBER
+       LDA PAGE.NUMBER+1
+       STA CURRENT.LINE.NUMBER+1
+       JSR CONVERT.LINE.NUMBER.PRINT
+       JSR CRLF.WITH.PAGING
+       PLA                       RESTORE LINE #
+       STA CURRENT.LINE.NUMBER+1
+       PLA
+       STA CURRENT.LINE.NUMBER
+.1     RTS          RETURN
+*--------------------------------
+*      .BS -- BLOCK STORAGE
+*--------------------------------
+PSBS   JSR EXPR.DEFINED  GET # OF BYTES
+       LDA EXP.VALUE+3
+       ORA EXP.VALUE+2
+       BNE RAER          VALUE >32767
+       LDA EXP.VALUE+1
+       BMI RAER          VALUE >32767
+       STA BS.COUNT+1
+       LDA EXP.VALUE
+       STA BS.COUNT          SAVE COUNT
+       JSR P.ORIGIN      PRINT ADDRESS
+       JSR GNC           GET NEXT CHAR
+       CMP #',           COMMA?
+       BNE .1            NO, NO VALUE PRESENT
+       JSR EXPR          GET FILL VALUE
+       BPL .2            BRANCH IF GOOD EXPRESSION
+.1     JSR ZERO.EXP.VALUE    USE ZERO FOR FILL VALUE
+.2     SEC
+       ROR LF.ALL     TURN OFF LISTING
+.3     LDA BS.COUNT          GET COUNT
+       BNE .4            STILL MORE BYTES
+       DEC BS.COUNT+1
+       BMI .5            ...ALL THRU
+.4     DEC BS.COUNT          COUNT DOWN
+       LDA EXP.VALUE     GET FILL VALUE
+       JSR EMIT          AND EMIT IT
+       JMP .3
+
+.5     ASL LF.ALL     RESTORE LISTING
+       RTS
+
+*--------------------------------
+RAER   LDY #QER3    ERROR -- OUT OF RANGE
+       JMP SOFT.ERROR
+
+*--------------------------------
+*      LISTING CONTROL
+*      .LIST ON/OFF/MON/MOFF/CON/COFF,...
+*--------------------------------
+PSLI   LDY #LI.INDEX-2
+       JSR SET.FLAGS
+       JMP ASM2        DON'T LIST LINE
+*--------------------------------
+*      SWITCH FLAGS ON OR OFF
+*--------------------------------
+SET.FLAGS
+       STY YSAVE
+.1     LDY YSAVE
+.2     INY          Find letter in table
+       INY
+       LDA FLAG.TABLE,Y
+       BEQ .7       ...end of table, get next letter
+       CMP CURRENT.CHAR
+       BNE .2       ...try next entry in table
+*---Found letter in table--------
+       LDX FLAG.TABLE+1,Y
+.3     EOR #'N      'N' means ON
+       BEQ .5       ...set flag to $00
+       EOR #'F^'N   'F' means OFF
+       BEQ .4       ...set flag to $FF
+       EOR #',^'F   comma here is an error
+       BEQ .9       ...oops!
+       JSR GNC.UC   get next char from user
+       BNE .3       ...might be N, F, or comma
+       RTS          ...blank or end of line
+*---Turn flag ON or OFF----------
+.4     LDA #$FF     signal OFF with $FF
+.5     STA 0,X      store $00 or $FF in flag
+*---Scan to a comma or eol-------
+.6     JSR GNC      GET NEXT CHAR
+       BEQ .8       ...blank or end of line
+       CMP #','
+       BNE .6       ...not comma yet
+*---Get next char from user------
+.7     JSR GNC.UC
+       BCC .1       ...not end of line yet
+.8     RTS          RETURN TO CALLER
+.9     JMP ERBA
+*--------------------------------
+FLAG.TABLE
+LI.INDEX  .EQ *-FLAG.TABLE
+       .DA #'N',#LF.ALL
+       .DA #'F',#LF.ALL
+       .DA #'M',#LF.MACRO
+       .DA #'C',#LF.CONDITIONAL
+       .DA #'X',#LF.XTRA.BYTES
+       .HS 00
+*--------------------------------------
+MAN
+SAVE usr/src/scmasm.31/scmasm.s.dir2
+LOAD usr/src/scmasm.31/scmasm.s
+ASM

@@ -1,0 +1,457 @@
+NEW
+  AUTO 3,1
+*--------------------------------------
+*   CATALOG COMMAND
+*--------------------------------
+CAT
+       LDA #39
+       .HS 2C       SKIP OVER TWO BYTES
+CATALOG
+       LDA #79
+       STA CAT.WIDTH
+       LDA #0       CLEAR ACCUMULATED BLOCKS COUNTER
+       STA BLOCKS
+       STA BLOCKS+1
+       LDA FBITS         TEST FOR TYPE AND PATHNAME
+       AND #$05
+       LSR               PATHNAME BIT INTO CARRY
+       BNE .1            ...TYPE STATED
+       STA VAL.T         SET T=0, LIST ALL TYPES
+.1     BCS .2            ...PATH GIVEN
+       JSR GET.FILE.INFO        NONE STATED, GET PREFIX
+       BCS .8            ...ERROR
+*---GET DIRECTORY----------------
+.2     JSR OPEN.READ.DIR.HEADER
+       BCS .8            ...ERROR
+       LDY #0       Print directory pathname
+.15    LDA PATHNAME.ONE.BUFFER+1,Y
+       ORA #$80
+       JSR COUT
+       INY
+       CPY PATHNAME.ONE.BUFFER
+       BCC .15
+       JSR CROUT
+*---PRINT TITLES-----------------
+       LDA #Q.DIRHDR
+       JSR FIND.AND.PUT.MSG.IN.WBUF
+       JSR PRINT.CATALOG.LINE
+*---IF NO MORE FILES, FINISHED---
+.3     LDA FILE.COUNT    ANY FILES LEFT?
+       ORA FILE.COUNT+1
+       BEQ .7            ...NO, FINISHED
+*---NEXT FILE DESCRIPTION--------
+       JSR READ.NEXT.ENTRY
+       BCS .8            ...ERROR
+       LDA VAL.T         CHECK IF WE LIKE THIS TYPE
+       BEQ .4            ...WE LIKE THEM ALL
+       CMP DIRBUF+16     FILE TYPE
+       BNE .5            ...NO, SKIP OVER IT
+.4     JSR FORMAT.CAT.ENTRY
+       JSR PRINT.CATALOG.LINE        PRINT IT
+*---CHECK FOR PAUSE/ABORT--------
+.5     JSR CHECK.KEY     SEE IF KEYPRESS
+       BMI .3            ...NO, CONTINUE CATALOG
+       BEQ .7            ...<CR> or <ESC>, abort
+*---<CR> or <ESC>, so abort------
+.6     JSR CHECK.KEY
+       BMI .6            WAIT FOR KEY
+       BNE .3            ...NOT CR OR ESC, CONTINUE
+*---<CR> or <ESC>, abort---------
+.7     LDX CAT.INDEX
+       LDA FILE.REFNUMS,X
+       JSR CLOSE.ONE.FILE
+       BCS .8       ...ERROR
+       JMP FREE.BLOCKS FORMAT BLOCKS FREE ETC.
+.8     RTS
+*--------------------------------
+CHECK.KEY
+       LDA $C000    SEE IF KEYSTROKE
+       BPL .1       ...NO
+       STA $C010    ...YES, CLEAR STROBE
+.1     EOR #$8D     SET .EQ. IF <RET>
+       BEQ .2       ...YES
+       EOR #$8D^$9B       OR IF <ESC>
+.2     RTS          .MI. IF NO KEY
+*--------------------------------
+*   FORMAT BLOCKS FREE/INUSE
+*--------------------------------
+FREE.BLOCKS
+       JSR ZERO.ACCUM
+       JSR BLANK.WBUF
+       LDA #Q.BLOCKS.ABOVE
+       JSR FIND.AND.PUT.MSG.IN.WBUF
+       LDA BLOCKS
+       LDX BLOCKS+1
+       LDY #24
+       JSR CONVERT.TO.DECIMAL
+       JSR PRINT.MESSAGE
+*--------------------------------
+       LDA #PATHNAME.ONE.BUFFER+1  set up ONLINE call
+       STA MISC.PARMS+2            to read volume name
+       LDA /PATHNAME.ONE.BUFFER+1
+       STA MISC.PARMS+3
+       LDA UNIT
+       STA MISC.PARMS+1
+       JSR MLI.C5   ONLINE
+       BCS .1           ...ERROR
+*---Setup GET FILE INFO call-----
+       LDA PATHNAME.ONE.BUFFER+1
+       AND #$0F
+       TAX
+       INX
+       STX PATHNAME.ONE.BUFFER
+       LDA #"/"
+       STA PATHNAME.ONE.BUFFER+1
+       JSR GET.FILE.INFO
+       BCS .1           ...ERROR
+*---Format the bottom line-------
+       JSR BLANK.WBUF
+       LDA #Q.BLOCKS
+       JSR FIND.AND.PUT.MSG.IN.WBUF
+*---Total Blocks in Volume-------
+       LDA GET.SET.PARMS+5
+       LDX GET.SET.PARMS+6
+       LDY #51
+       JSR CONVERT.TO.DECIMAL
+*---Blocks Used in Volume--------
+       LDA GET.SET.PARMS+8
+       LDX GET.SET.PARMS+9
+       LDY #24
+       JSR CONVERT.TO.DECIMAL
+*---Blocks Free in Volume--------
+       LDA GET.SET.PARMS+5
+       SEC
+       SBC GET.SET.PARMS+8
+       PHA
+       LDA GET.SET.PARMS+6
+       SBC GET.SET.PARMS+9
+       TAX
+       PLA
+       LDY #37
+       JSR CONVERT.TO.DECIMAL
+       JSR PRINT.CATALOG.LINE
+       CLC
+.1     RTS
+*--------------------------------
+*   OPEN/READ DIRECTORY HEADER
+*--------------------------------
+OPEN.READ.DIR.HEADER
+       JSR ALLOCATE.UPPER.BUFFER
+       STX CAT.INDEX
+       LDX #$0F     IS STORAGE TYPE = VOL DIR?
+       CPX GET.SET.PARMS+7
+       BNE .1                ...NO
+       STX GET.SET.PARMS+4   ...YES, MAKE TYPE = DIR
+.1     LDA #$01              FILE MUST BE READABLE
+       JSR OPEN.DIRECTORY
+       BCS .3       ...ERROR
+ 
+       LDX CAT.INDEX
+       STA FILE.REFNUMS,X
+       LDA #DIRBUF
+       STA READ.WRITE.PARMS+2
+       LDA /DIRBUF
+       STA READ.WRITE.PARMS+3
+       LDA #$2B
+       STA READ.WRITE.PARMS+4
+       STA MISC.PARMS+2
+       LDA #0
+       STA READ.WRITE.PARMS+5
+       JSR MLI.CA   READ
+       BCS .3
+       LDX #3
+.2     LDA DIRBUF+35,X    ENTRY LENGTH, ENTRIES/BLOCK,
+       STA ENTRY.LENGTH,X and FILE COUNT
+       DEX
+       BPL .2
+       LDA #1
+       STA ENTRY.COUNTER
+.3     RTS
+*--------------------------------
+*   READ NEXT DIRECTORY ENTRY
+*--------------------------------
+READ.NEXT.ENTRY
+.1     LDY ENTRY.COUNTER
+       CPY ENTRIES.PER.BLOCK
+       BCC .2
+*---Skip ahead remainder bytes---
+       LDA #4
+       SBC MISC.PARMS+2
+       STA READ.WRITE.PARMS+4
+       JSR MLI.CA
+       BCS .4       ...ERROR
+       LDY #0
+       LDA #4
+       STA MISC.PARMS+2
+*---Read a file description------
+.2     INY          NEXT ENTRY
+       STY ENTRY.COUNTER
+       LDA ENTRY.LENGTH
+       STA READ.WRITE.PARMS+4
+       ADC MISC.PARMS+2
+       STA MISC.PARMS+2
+       JSR MLI.CA   READ
+       BCS .4       ...ERROR
+*---Check if deleted file--------
+       LDA DIRBUF
+       AND #$F0
+       BEQ .1       ...deleted
+*---Count the file---------------
+       LDA FILE.COUNT
+       BNE .3
+       DEC FILE.COUNT+1
+.3     DEC FILE.COUNT
+.4     RTS
+*--------------------------------
+*   FORMAT CATALOG ENTRY LINE
+*--------------------------------
+FORMAT.CAT.ENTRY
+       JSR BLANK.WBUF
+       LDA DIRBUF   LENGTH OF FILENAME
+       AND #$0F
+       TAY
+.1     LDA DIRBUF,Y
+       ORA #$80
+       STA WBUF+7,Y
+       DEY
+       BNE .1
+       STY ACCUM+2
+*---GET FILE TYPE----------------
+       LDA DIRBUF+16     FILE TYPE
+       LDX #LAST.FILE.TYPE
+       LDY #3            POINT INTO WBUF
+.2     CMP FILE.TYPES,X
+       BEQ .3            ...MATCH!
+       DEX
+       DEX
+       DEX
+       DEX
+       BPL .2
+       JSR CONVERT.TO.HEX
+       JMP .6
+.3     DEX
+       LDA FILE.TYPES,X
+       JSR STUFF.WBUF.AND.BACKUP
+       BNE .3
+*---SKIP IF 40-COLUMN------------
+       BIT CAT.WIDTH
+       BVC .7
+*---Display AuxType--------------
+       LDY #"R"     Use "R=" if type TXT
+       LDA DIRBUF+16     FILE TYPE
+       CMP #$04
+       BEQ .5       ...it is TXT
+       CMP #$06     Use "A=" if type BIN
+       BNE .6       ...not BIN, just show $xxxx
+       LDY #"A"     ...BIN
+.5     STY WBUF+73
+       LDA #"="
+       STA WBUF+74
+.6     LDY #78
+       LDA DIRBUF+31     AUXTYPE
+       JSR CONVERT.TO.HEX
+       LDA DIRBUF+32       "
+       JSR CONVERT.TO.HEX
+*---Show file length-------------
+       LDA DIRBUF+23     EOF MARK MSB
+       STA ACCUM+2
+       LDA DIRBUF+21     EOF MARK
+       LDX DIRBUF+22      "   "
+       LDY #70
+       JSR CONVERT.TO.DECIMAL
+*---CREATION DATE/TIME-----------
+       LDX #$18     OFFSET IN DIRBUF
+       LDY #61      OFFSET IN WBUF
+       JSR FORMAT.DATE.AND.TIME
+*---Blocks in the file-----------
+.7     LDY #27
+       LDA DIRBUF+19     BLOCKS IN USE
+       LDX DIRBUF+20       "
+       JSR CONVERT.TO.DECIMAL
+       CLC
+       LDA BLOCKS
+       ADC DIRBUF+19
+       STA BLOCKS
+       LDA BLOCKS+1
+       ADC DIRBUF+20
+       STA BLOCKS+1
+*---Access code------------------
+       LDA DIRBUF+30     ACCESS
+       AND #$C2
+       CMP #$C2
+       BEQ .8
+       LDA #"*"     LOCKED
+       STA WBUF+1
+*---Modified Date/Time-----------
+.8     LDX #$21     OFFSET IN DIRBUF
+       LDY #44      OFFSET IN WBUF
+*--------------------------------
+*   FORMAT DATE & TIME
+*      --MSB--- --LSB---
+*      YYYYYYYM MMMDDDDD
+*--------------------------------
+FORMAT.DATE.AND.TIME
+       LDA DIRBUF,X      MMMDDDDD
+       AND #$1F          000DDDDD
+       BEQ .1            ...DAY=0, NO DATE
+       STA DAY
+       LDA DIRBUF+1,X    YYYYYYYM
+       LSR               0YYYYYYY
+       STA YEAR
+       CMP #100
+       BCS .1            ...YEAR>99, NO DATE
+       LDA DIRBUF+1,X    YYYYYYYM
+       LSR               M INTO CARRY
+       LDA DIRBUF,X      MMMDDDDD
+       ROL               MMDDDDDM M
+       ROL               MDDDDDMM M
+       ROL               DDDDDMMM M
+       ROL               DDDDMMMM
+       AND #$0F          0000MMMM
+       BEQ .1            ...MONTH=0, NO DATE
+       CMP #13
+       BCC .3            ...MONTH=1...12, GOOD
+*---Format <NO DATE>-------------
+.1     TYA
+       SEC
+       SBC #6       BACK UP OVER TIME SLOT
+       TAY
+       LDX #8
+.2     LDA NO.DATE.MSG,X
+       JSR STUFF.WBUF.AND.BACKUP
+       DEX
+       BPL .2
+       RTS
+*---Format date, time------------
+.3     STA MONTH
+       LDA DIRBUF+3,X    HOURS
+       PHA
+       LDA DIRBUF+2,X    MINUTES
+       LDX #0            HIGH BYTE
+       CMP #60           IF > 59, USE 0
+       BCC .4            0...59
+       TXA
+.4     JSR CONVERT.DECIMAL.TWO.DIGITS
+       LDA #":"          SEPARATE WITH ":"
+       STA WBUF+2,Y
+       PLA               HOURS
+       LDX #0            HIGH BYTE
+       CMP #24           IF > 24, USE 0
+       BCC .5            0...23
+       TXA
+.5     JSR CONVERT.DECIMAL.TWO.DIGITS
+       LDA YEAR
+       JSR CONVERT.DECIMAL.TWO.DIGITS
+       LDX MONTH
+       LDA MONTH.NAMES-1+24,X
+       JSR STUFF.WBUF.AND.BACKUP
+       LDA MONTH.NAMES-1+12,X
+       JSR STUFF.WBUF.AND.BACKUP
+       LDA MONTH.NAMES-1,X
+       JSR STUFF.WBUF.AND.BACKUP
+       LDA #"-"
+       STA WBUF+5,Y
+       JSR STUFF.WBUF.AND.BACKUP
+       LDA DAY
+       LDX #0       HIGH BYTE
+*      JMP CONVERT.TO.DECIMAL
+*--------------------------------
+*   CONVERT TO DECIMAL
+*--------------------------------
+CONVERT.TO.DECIMAL
+       STX ACCUM+1
+       STA ACCUM
+.1     JSR DIVIDE.ACCUM.BY.TEN
+       ORA #$B0
+       JSR STUFF.WBUF.AND.BACKUP
+       LDA ACCUM
+       ORA ACCUM+1
+       ORA ACCUM+2
+       BNE .1
+       RTS
+*--------------------------------
+*   CONVERT 2 DIGIT NUMBER
+*--------------------------------
+CONVERT.DECIMAL.TWO.DIGITS
+       CLC
+       ADC #100     FORCE TWO DIGITS TO PRINT
+       JSR CONVERT.TO.DECIMAL
+       LDA #" "     COVER UP THE "1"
+       INY
+*--------------------------------
+STUFF.WBUF.AND.BACKUP
+       STA WBUF+1,Y
+       DEY
+       RTS
+*--------------------------------
+*   CONVERT TO HEX
+*--------------------------------
+CONVERT.TO.HEX
+       PHA
+       AND #$0F
+       JSR .1
+       PLA
+       LSR
+       LSR
+       LSR
+       LSR
+.1     ORA #$B0
+       CMP #$BA
+       BCC .2
+       ADC #6
+.2     JSR STUFF.WBUF.AND.BACKUP
+       LDA #"$"
+       STA WBUF+1,Y
+       RTS
+*--------------------------------
+*   DIVIDE ACCUM BY TEN
+*--------------------------------
+*   DIVIDE 24-BIT VALUE IN ACCUM BY TEN
+*      RETURN REMAINDER IN A-REG
+*--------------------------------
+DIVIDE.ACCUM.BY.TEN
+       LDX #24      24 BITS IN DIVIDEND
+       LDA #0       START WITH REM=0
+.1     JSR SHIFT.ACCUM.LEFT
+       ROL
+       CMP #10
+       BCC .2       ...STILL < 10
+       SBC #10
+       INC ACCUM    QUOTIENT BIT
+.2     DEX          NEXT BIT
+       BNE .1
+       RTS
+*--------------------------------
+BLANK.WBUF
+       LDA #" "
+       LDY #79
+.1     JSR STUFF.WBUF.AND.BACKUP
+       BPL .1
+       RTS
+*--------------------------------
+NOW    JSR GP.MLI
+       .DA #$82,0000
+       JSR BLANK.WBUF
+       LDX #4
+.1     LDA GP.DATE-1,X
+       STA DIRBUF-1,X
+       DEX
+       BNE .1
+       LDY #15
+       JSR FORMAT.DATE.AND.TIME
+       LDA #20
+       STA CAT.WIDTH
+***    JMP PRINT.CATALOG.LINE
+*--------------------------------
+PRINT.CATALOG.LINE
+       LDX CAT.WIDTH
+       LDA #$8D
+       STA WBUF+1,X
+       JSR PRINT.MESSAGE
+       CLC          because a SEC would indicate ERROR
+       RTS
+*--------------------------------------
+MAN
+SAVE usr/src/scmasm.30/sci.s.cat
+LOAD usr/src/scmasm.30/scmasm.s
+ASM

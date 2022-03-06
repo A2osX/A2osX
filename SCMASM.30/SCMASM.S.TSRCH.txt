@@ -1,0 +1,291 @@
+NEW
+  AUTO 3,1
+*--------------------------------------
+*      SEARCH TEXT BUFFER FOR LINE
+*
+*      LINE NUMBER TO BE FOUND IS AT 0,X AND 1,X
+*
+*      IF FOUND, RETURN CARRY SET
+*                (LINE.START) = ADDRESS OF LINE
+*                (LINE.END  ) = ADDRESS OF NEXT LINE
+*
+*      IF NOT FOUND, RETURN CARRY CLEAR
+*                (LINE.START) = ADDRESS OF NEXT LINE
+*                (LINE.END  ) = ADDRESS OF NEXT LINE
+*
+*--------------------------------
+SERTXT LDA PP       START AT BEGINNING OF TEXT BUFFER
+       STA LINE.END
+       LDA PP+1
+       STA LINE.END+1
+SERNXT LDA LINE.END+1      CONTINUE SEARCH WITH NEXT LINE
+       STA LINE.START+1
+       LDA LINE.END
+       STA LINE.START
+       CMP HI.MEM
+       LDA LINE.START+1      SEE IF AT END YET
+       SBC HI.MEM+1
+       BCS .3       YES, DID NOT FIND
+       LDY #0       POINT AT LINE LENGTH
+       LDA (LINE.START),Y  GET LINE LENGTH
+       ADC LINE.END      POINT TO NEXT LINE
+       STA LINE.END
+       BCC .1
+       INC LINE.END+1
+.1     INY          POINT AT LINE NUMBER
+       LDA (LINE.START),Y  COMPARE TO DESRIRED LINE NUMBER
+       CMP 0,X
+       INY
+       LDA (LINE.START),Y
+       SBC 1,X
+       BCC SERNXT   NOT THERE YET
+       BNE .2       PASSED IT UP
+       DEY          CHECK LOW BYTE AGAIN
+       LDA (LINE.START),Y
+       CMP 0,X
+       BEQ .4       FOUND IT!
+.2     LDA LINE.START      PASSED IT UP
+       STA LINE.END      MAKE BOTH POINT AT SAME LINE
+       LDA LINE.START+1
+       STA LINE.END+1
+.3     CLC          RETURN CARRY CLEAR
+.4     RTS
+*--------------------------------
+*      DELETE LINES
+*--------------------------------
+DELETE
+       JSR GNNB     GET NEXT NON-BLANK CHAR
+       CMP #'/'
+       BEQ .1       ...PATHNAME
+
+       JSR CHECK.LETTER
+       BCC .2       ...NOT LETTER, PROBABLY LINES
+
+.1     JMP PASS.CMD.TO.PRODOS
+
+.2     JSR BACKUP.CHAR.PNTR
+       JSR PARSE.LINE.RANGE
+       BCS SYNX.3   ...NO NUMBERS, SYNTAX ERROR
+
+DELETE.LINES
+       LDX #-1
+       SEC
+.2     LDA SRCP+1,X SEE IF RANGE EMPTY OR CROSSED
+       STA LINE.START+1,X
+       LDA ENDP+1,X
+       STA A4L+1,X
+       SBC LINE.START+1,X
+       STA MOVE.DISTANCE+1,X
+       INX
+       BEQ .2
+       TAX          TEST HI-BYTE OF MOVE.DISTANCE
+       BPL MOVE.TEXT.UP  ...POSITIVE, RANGE GOOD
+SYNX.3 JMP SYNX
+*--------------------------------
+*      MOVE TEXT FROM <PP> THRU <LINE.START>
+*      UP <MOVE.DISTANCE> BYTES TO <A4L,A4H>
+*--------------------------------
+MOVE.TEXT.UP
+       JSR COMPUTE.BLOCK.SIZE
+       CLC
+       LDA PP
+       ADC MOVE.DISTANCE
+       STA PP
+       LDA PP+1
+       ADC MOVE.DISTANCE+1
+       STA PP+1
+       LDY #0
+       BEQ .3       ...ALWAYS
+*---MOVE A WHOLE BLOCK-----------
+.1     LDA (LINE.START),Y  MOVE BYTES 255 THRU 1 IN BLOCK
+       STA (A4L),Y
+.2     DEY
+       BNE .1
+       LDA (LINE.START),Y  MOVE LOWEST BYTE IN BLOCK
+       STA (A4L),Y
+.3     DEC LINE.START+1      PRIOR BLOCK
+       DEC A4H
+       DEX          ANY MORE BLOCKS?
+       BNE .2       YES
+*---MOVE SHORT BLOCK IF ANY------
+       LDX BLKSIZ   PARTIAL BLOCK SIZE
+       BEQ .5       NONE LEFT
+.4     DEY
+       LDA (LINE.START),Y
+       STA (A4L),Y
+       DEX
+       BNE .4
+.5     RTS
+*--------------------------------
+*      COPY L1,L2,L3
+*          L1 = FIRST LINE OF RANGE TO COPY
+*          L2 = LAST LINE OF RANGE TO COPY
+*          L3 = LINE NUMBER BEFORE WHICH TO INSERT
+*                   THE COPIED LINES
+*--------------------------------
+ERR1   JMP SYNX
+ERR2   .EQ ERR1
+ERR3   JMP MFER
+ERR4   .EQ ERR1
+*--------------------------------
+COPY
+       JSR PARSE.LINE.RANGE
+       JSR GNNB     look for a comma
+       CMP #','
+       BNE ERR1     ...no comma
+       SEC          SAVE POINTER AND COMPUTE LENGTH
+       LDA SRCP     REALLY -(LENGTH)
+       SBC ENDP
+       STA MOVE.DISTANCE
+       LDA SRCP+1
+       SBC ENDP+1
+       STA MOVE.DISTANCE+1
+       BPL ERR2     RANGE BACKWARD OR EMPTY
+*--------------------------------
+       CLC
+       LDA PP       COMPUTE NEW PP POINTER
+       ADC MOVE.DISTANCE
+       STA A4L
+       LDA PP+1
+       ADC MOVE.DISTANCE+1
+       STA A4H
+*--------------------------------
+       LDA A4L      SEE IF ROOM FOR THIS
+       CMP LO.MEM
+       LDA A4L+1
+       SBC LO.MEM+1
+       BCC ERR3     MEM FULL ERR
+*---Get Target Line Number-------
+       JSR GNNB     pick up first digit of target line number
+       JSR SCAN.LINE.NUMBER   (or it might be ".")
+       BCS ERR1     ...not a line number of "."
+       LDA 0,X      copy line number to A0L,H
+       STA A0L
+       LDA 1,X
+       STA A0H
+*---Verify valid target line-----
+       LDA SRCP     BE SURE NOT INSIDE SOURCE BLOCK
+       CMP LINE.START
+       LDA SRCP+1
+       SBC LINE.START+1
+       BCS .1       BELOW SOURCE BLOCK
+       LDA LINE.START
+       CMP ENDP
+       LDA LINE.START+1
+       SBC ENDP+1
+       BCC ERR4     INSIDE SOURCE BLOCK
+*--------------------------------
+*   TARGET IS ABOVE SOURCE BLOCK, SO WE HAVE TO
+*   ADJUST SOURCE BLOCK POINTERS.
+*--------------------------------
+       CLC
+       LDA SRCP
+       ADC MOVE.DISTANCE
+       STA SRCP
+       LDA SRCP+1
+       ADC MOVE.DISTANCE+1
+       STA SRCP+1
+       CLC
+       LDA ENDP
+       ADC MOVE.DISTANCE
+       STA ENDP
+       LDA ENDP+1
+       ADC MOVE.DISTANCE+1
+       STA ENDP+1
+*--------------------------------
+.1     JSR MOVE.TEXT.DOWN  MAKE THE HOLE
+*--------------------------------
+       LDA SRCP     SAVE SRCP AT A1
+       STA A1L      (POINTS TO BLOCK TO BE COPIED)
+       LDA SRCP+1
+       STA A1H
+.2     CLC          ADD (Y) TO A4
+       TYA
+       ADC A4L      POINTS TO BEGINNING OF NEXT 
+       STA A4L      LINE IN HOLE
+       BCC .3
+       INC A4H
+.3     LDY #0
+       LDA (A1L),Y  COPY LINE LENGTH
+       STA (A4L),Y
+       INY          INSERT LINE #
+       LDA A0L      OF TARGET LINE
+       STA (A4L),Y
+       INY          INSERT LINE #
+       LDA A0H      OF TARGET LINE
+       STA (A4L),Y
+.4     INY          COPY REST OF LINE
+       LDA (A1L),Y
+       STA (A4L),Y
+       BNE .4       UNTIL <EOL> TOKEN
+       INY
+       CLC
+       TYA
+       ADC A1L      POINT TO NEXT SOURCE LINE
+       STA A1L
+       BCC .5
+       INC A1H
+.5     CMP ENDP
+       LDA A1H
+       SBC ENDP+1
+       BCC .2
+       LDY #QDELOR
+       JSR YES.OR.NO
+       BNE .6
+       JSR DELETE.LINES
+.6     RTS
+*--------------------------------
+*      MOVE TEXT FROM <PP> THRU <LINE.START>
+*      DOWN -<MOVE.DISTANCE> BYTES TO <A4L,A4H>
+*--------------------------------
+MOVE.TEXT.DOWN
+       JSR COMPUTE.BLOCK.SIZE
+       LDA PP
+       STA A2L
+       LDA PP+1
+       STA A2H
+       LDA A4L
+       STA PP
+       LDA A4H
+       STA PP+1
+       LDY #0
+       BEQ .2       ...ALWAYS
+.1     LDA (A2L),Y  YES, MOVE 256 BYTES
+       STA (A4L),Y
+       INY
+       BNE .1
+       INC A2H      POINT AT NEXT BLOCK
+       INC A4H
+.2     DEX          ANY WHOLE BLOCKS LEFT?
+       BNE .1       YES
+*---MOVE PARTIAL BLOCK-----------
+       LDX BLKSIZ   SIZE OF PARTIAL BLOCK
+       BEQ .4       EMPTY
+.3     LDA (A2L),Y
+       STA (A4L),Y
+       INY
+       DEX
+       BNE .3
+.4     RTS
+*--------------------------------
+*      COMPUTE SIZE OF TEXT BLOCK
+*      FROM <PP> TO <LINE.START>
+*
+*      RETURN # WHOLE BLOCKS OF 256 BYTES +1 IN X
+*      RETURN # BYTES IN PARTIAL BLOCK IN <BLKSIZ>
+*--------------------------------
+COMPUTE.BLOCK.SIZE
+       SEC          COMPUTE # OF BYTES TO BE MOVED
+       LDA LINE.START      CURRENT TOP POINTER
+       SBC PP       CURRENT BOTTOM POINTER
+       STA BLKSIZ   SAVE PARTIAL PAGE AMOUNT
+       LDA LINE.START+1
+       SBC PP+1
+       TAX          # OF WHOLE PAGES IN X
+       INX
+       RTS
+*--------------------------------------
+MAN
+SAVE usr/src/scmasm.30/scmasm.s.tsrch
+LOAD usr/src/scmasm.30/scmasm.s
+ASM

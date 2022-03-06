@@ -1,0 +1,361 @@
+NEW
+  AUTO 3,1
+				.LIST OFF
+				.OP	65C02
+				.OR	$2000
+				.TF bin/chaux
+*--------------------------------------
+				.INB inc/macros.i
+				.INB inc/a2osx.i
+				.INB inc/mli.i
+				.INB inc/mli.e.i
+*--------------------------------------
+X.ENTER.SUBDIR	.EQ 0
+X.COPY.TO.DEST	.EQ 0
+X.DELETE.SOURCE	.EQ 0
+*--------------------------------------
+* Zero Page Segment, up to 32 bytes
+*--------------------------------------
+				.DUMMY
+				.OR ZPBIN
+ZS.START
+
+ZPPtr1			.BS 2
+ZPPtr2			.BS 2
+ZPFileName		.BS 2
+ZPFileStat		.BS 2
+
+ZPFullPath		.BS 2
+
+ArgIndex		.BS 1
+bAuxFileType	.BS 1
+AuxFileType		.BS 2
+
+hSrcFullPath	.BS 1
+bPause			.BS 1
+
+bContinue		.BS 1
+bRecurse		.BS 1
+
+ZS.END			.ED
+*--------------------------------------
+*			File Header (16 Bytes)
+*--------------------------------------
+CS.START		cld
+				jmp (.1,x)
+				.DA #$61				6502,Level 1 (65c02)
+				.DA #1					BIN Layout Version 1
+				.DA #0					S.PS.F.EVENT
+				.DA #0
+				.DA CS.END-CS.START		Code Size (without Constants)
+				.DA DS.END-DS.START		Data SegmentSize
+				.DA #16					Stack Size
+				.DA #ZS.END-ZS.START	Zero Page Size
+				.DA 0
+*--------------------------------------
+* Relocation Table
+*--------------------------------------
+.1				.DA CS.INIT
+				.DA CS.RUN
+				.DA CS.DOEVENT		
+				.DA	CS.QUIT
+*--------------------------------------
+L.MSG.USAGE		.DA MSG.USAGE
+L.MSG.FILE		.DA MSG.FILE
+L.MSG.OK		.DA MSG.OK
+L.MSG.ERR		.DA MSG.ERR
+L.SSCANF.D		.DA SSCANF.D
+L.SSCANF.H		.DA SSCANF.H
+				.DA 0
+*--------------------------------------
+CS.INIT			clc
+				rts
+*--------------------------------------
+CS.RUN			inc ArgIndex
+				lda ArgIndex
+				>SYSCALL ArgV
+				bcs .7
+
+				>STYA ZPPtr1
+				lda (ZPPtr1)
+				cmp #'-'
+				bne .4
+
+				ldy #1 
+				lda (ZPPtr1),y
+
+				ldx #OptionVars-OptionList-1
+.2				cmp OptionList,x
+				beq .3
+
+				dex
+				bne .2
+
+.99				>PUSHW L.MSG.USAGE
+				>PUSHBI 0
+				>SYSCALL PrintF
+				lda #E.SYN
+				sec
+				rts
+
+.3				ldy OptionVars,x
+				lda #$80
+				sta $0,y
+				bra CS.RUN
+*--------------------------------------
+.4				bit bAuxFileType
+				bmi .5
+				
+				jsr GetAuxType
+				bcs .99
+				bra CS.RUN
+
+.5				>LDA.G hSrcBasePath
+				bne .99
+
+				>LDYA ZPPtr1
+				jsr InitSrcDirYA
+				bcs .99
+				bra CS.RUN
+*--------------------------------------
+.7				>LDA.G hSrcBasePath
+				beq .99					no src ? ERROR
+
+				bit bAuxFileType
+				bpl .99					we also have a TYPE
+				
+				>LDYAI 256
+				>SYSCALL GetMem
+				bcs .99
+
+				>STYA ZPFullPath
+				stx hSrcFullPath
+*--------------------------------------
+CS.RUN.LOOP		ldy #S.PS.hStdIn
+				lda (pPS),y
+				>SYSCALL FEOF
+				bcs .99
+
+				tay
+				bne .1
+
+				>SYSCALL GetChar
+				bcs .99
+
+				cmp #$03				Ctrl-C
+				beq .99					Abort....
+
+				cmp #$13				Ctrl-S
+				bne .1
+
+				lda bPause
+				eor	#$ff
+				sta bPause
+				bne CS.RUN.LOOP
+
+.1				bit bPause
+				bmi CS.RUN.LOOP			Pause...
+*--------------------------------------
+				jsr GetEntry
+				bcs CS.RUN.LEAVE
+
+				jsr FilterMatch
+				bcs CS.RUN.NEXT			no match, skip....
+
+				ldy #S.STAT.MODE+1
+				lda (ZPFileStat),y
+				and #$70
+				bne .5					REG file ?
+
+				jsr CS.RUN.FILE
+				bcc CS.RUN.NEXT
+				rts
+
+.5				cmp /S.STAT.MODE.DIR	DIR ?
+				bne .6
+
+				jsr CS.RUN.DIR
+				bcc CS.RUN.NEXT
+				rts
+
+.6				lda #MLI.E.UNSUPST
+				sec
+.99				rts
+*--------------------------------------
+CS.RUN.NEXT		jsr GetNextEntry
+				bcc CS.RUN.LOOP
+				
+CS.RUN.LEAVE	jsr LeaveSubDir
+				bcs .90
+
+				jsr BasePath..
+				
+				jmp CS.RUN.NEXT
+
+.90				lda #0
+				sec
+.99				rts
+*--------------------------------------
+CS.RUN.DIR		bit bRecurse
+				bpl .8
+
+				lda (ZPFileName)
+				cmp #'.'
+				bne .1
+				
+				ldy #1
+				lda (ZPFileName),y
+				beq .8
+				
+				cmp #'.'
+				bne .1
+				
+				iny
+				lda (ZPFileName),y
+				beq .8
+				
+.1				jsr CS.RUN.GetFilePath
+				
+				>LDYA ZPFileName
+				jmp EnterSubDirYA
+
+.8				clc
+				rts
+*--------------------------------------
+CS.RUN.FILE		jsr FilterMatch
+				bcs .8					no match, skip....
+				
+				jsr CS.RUN.GetFilePath
+				
+				>PUSHW L.MSG.FILE
+				>PUSHW ZPFullPath
+				>PUSHBI 2
+				>SYSCALL PrintF
+				bcs .9
+				
+				>PUSHW ZPFullPath
+
+				>PUSHW AuxFileType
+
+				>SYSCALL ChAux
+				jsr CS.RUN.CheckErr
+
+.8				clc
+.9				rts
+*--------------------------------------
+CS.RUN.CheckErr	bcs .1
+
+				>LDYA L.MSG.OK
+				>SYSCALL PutS
+				rts
+
+.1				pha
+				>PUSHW L.MSG.ERR
+				pla
+				pha
+				>PUSHA
+				>PUSHBI 1
+				>SYSCALL PrintF
+
+				lda bContinue
+				eor #$80
+				asl
+				pla
+				rts
+*--------------------------------------
+CS.RUN.GetFilePath
+				>PUSHW ZPFullPath
+				>LDA.G hSrcBasePath
+				>SYSCALL GetMemPtr
+				>PUSHYA
+				>SYSCALL StrCpy
+
+				>PUSHW ZPFullPath
+				>PUSHW ZPFileName
+				>SYSCALL StrCat
+				rts
+*--------------------------------------
+CS.DOEVENT		sec
+				rts
+*--------------------------------------
+CS.QUIT			jsr LeaveSubDir
+				bcc CS.QUIT
+
+				>LDA.G hFilter
+				beq .1
+
+				>SYSCALL FreeMem
+
+.1				lda hSrcFullPath
+				beq .8
+
+				>SYSCALL FreeMem
+
+.8				clc
+				rts
+*--------------------------------------
+GetAuxType		lda (ZPPtr1)
+				cmp #'0'
+				bcc .1
+				
+				cmp #'9'+1
+				bcs .1
+				
+				ldx #0
+				bra .7
+				
+.1				cmp #'x'
+				beq .2
+				
+				cmp #'X'
+				bne .9
+				
+				inc ZPPtr1
+				bne .2
+				
+				inc ZPPtr1+1
+				
+.2				ldx #2
+
+.7				>PUSHW ZPPtr1
+				>PUSHW L.SSCANF.D,x
+				>PUSHWI AuxFileType
+				>PUSHBI 2
+				>SYSCALL SScanF
+				bcs .9
+
+				cpy #1
+				bne .9
+				
+				dec bAuxFileType
+				clc
+				rts
+
+.9				sec
+				rts
+*--------------------------------------
+				.INB usr/src/shared/x.fileenum.s
+*--------------------------------------
+CS.END
+*--------------------------------------
+OptionList		.AS "CRcr"
+OptionVars		.DA #bContinue,#bRecurse,#bContinue,#bRecurse
+*--------------------------------------
+MSG.USAGE		.AS "Usage : CHTYP auxtype [File *,? wildcards allowed]\r\n"
+				.AS "              auxtype : 12345 (Decimal word) ,xABCD (Hexadecimal word)\r\n"
+				.AS "   -C : Continue on error\r\n"
+				.AZ "   -R : Recurse subdirectories\r\n"
+MSG.OK			.AZ "[OK]"
+MSG.ERR			.AZ "[%h]\r\n"
+MSG.FILE		.AZ "CHAUX File:%S..."
+SSCANF.D		.AZ "%D"
+SSCANF.H		.AZ "%H"
+*--------------------------------------
+				.DUMMY
+				.OR 0
+DS.START		.INB usr/src/shared/x.fileenum.g
+DS.END			.ED
+*--------------------------------------
+MAN
+SAVE usr/src/bin/chaux.s
+ASM
