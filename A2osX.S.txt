@@ -17,15 +17,16 @@ NEW
 TmpPtr1			.EQ	$0					main & aux ZP
 TmpPtr2			.EQ	$2					main & aux ZP
 *--------------------------------------
-A2osX.KMLOAD	.EQ $2000
+A2osX.PMLOAD	.EQ $2000
 A2osX.LOGOLOAD	.EQ $4000
-A2osX.KMMAXLEN	.EQ $6000
+A2osX.PMMAXLEN	.EQ $6000
 A2osX.OpenBuff1	.EQ $8000				1024 Buffer for MLIOPEN01
 A2osX.OpenBuff2	.EQ $8400				1024 Buffer for MLIOPEN02
 A2osX.ReadBuff	.EQ	$8800				512 Buffer for MLIREAD01
 Boot.Prefix		.EQ $8A00				MLI.MAXPATH
-LOGO.Filename	.EQ $8A80				MLI.MAXPATH
-KM.Filename		.EQ $8B00				MLI.MAXPATH
+Logo.Filename	.EQ $8A80				MLI.MAXPATH
+Sys.Prefix		.EQ $8B00				MLI.MAXPATH
+PM.Filename		.EQ $8B80				MLI.MAXPATH
 MLIONLINE01BUF	.EQ $8C00				256
 *--------------------------------------
 * Kernel Stage 0
@@ -37,12 +38,14 @@ A2osX.Init0		>LDYAI $2000
 				>LDYAI $1000
 				>STYA TmpPtr2
 
-				ldx #$10				reloc $2000-$2FFF to $1000-$1FFF
+				ldx /SYSTEM.END-$1F00
+
 				ldy #0
 .1				lda (TmpPtr1),y
 				sta (TmpPtr2),y
 				iny
 				bne .1
+
 				inc TmpPtr1+1
 				inc TmpPtr2+1
 				dex
@@ -76,6 +79,9 @@ A2osX.Init1.128	jsr MLI
 				ldx Boot.Prefix
 
 .1				lda Boot.Prefix,x
+				sta Logo.Filename,x
+				sta Sys.Prefix,x
+				sta PM.Filename,x
 				sta A2osX.QC.B.BOOT,x
 				sta A2osX.QC.B.ROOT,x
 				dex
@@ -140,15 +146,11 @@ A2osX.RamDrv	>LDYAI MSG.RAMDRV
 
 .8				jsr PrintFYA
 *--------------------------------------
-A2osX.EnumKM	>LDYAI MSG.KMENUM
-				jsr PrintFYA
-				jsr EnumKM
-*--------------------------------------
 A2osX.SetupQC	lda RRAMWRAMBNK2
 				lda RRAMWRAMBNK2
 
 				ldx #0
-.1				lda A2osX.QC.B.Start,x
+.1				lda A2osX.QC.B.Start,x		Still at $2xxx !!! not moved to $1xxx
 				sta $D100,x
 				lda A2osX.QC.B.Start+$100,x
 				sta $D200,x
@@ -158,6 +160,10 @@ A2osX.SetupQC	lda RRAMWRAMBNK2
 				bne .1
 
 				lda RROMBNK1
+*--------------------------------------
+A2osX.EnumPM	>LDYAI MSG.PMENUM		do this After SetupQC, a PM could override QC
+				jsr PrintFYA
+				jsr EnumPM
 *--------------------------------------
 A2osX.MLIQuit	>LDYAI MSG.INIT0OK
 				jsr PrintFYA
@@ -174,23 +180,16 @@ A2osX.Screen80	lda #$8C				Reset 80 col screen ($0C:HOME)
 				jsr $C300
 
 				ldx Boot.Prefix
-
-.1				lda Boot.Prefix,x
-				sta LOGO.Filename,x
-				dex
-				bne .1
-
-				ldx Boot.Prefix
 				ldy #0
 
 .2				inx
 				iny
 				lda A2osX.LOGO,y
-				sta LOGO.Filename,x
+				sta Logo.Filename,x
 				cpy A2osX.LOGO
 				bne .2
 
-				stx LOGO.Filename
+				stx Logo.Filename
 				jsr MLI
 				.DA #MLIOPEN
 				.DA MLIOPEN00
@@ -387,34 +386,42 @@ DisableRamDRV	php
 				sec
 				rts
 *--------------------------------------
-EnumKM.EPB		.EQ $0D
-EnumKM.EL		.EQ $27
+EnumPM.EPB		.EQ $0D
+EnumPM.EL		.EQ $27
 *--------------------------------------
-EnumKM			ldx #0
+EnumPM			ldx #0
 				ldy Boot.Prefix
 
 .1				inx
 				lda SYS,x
-				sta Boot.Prefix+1,y
+				sta Sys.Prefix+1,y
+				sta PM.Filename+1,y
 				iny
 				cpx SYS
 				bne .1
 
-				sty Boot.Prefix
-				lda #Boot.Prefix
+				sty Sys.Prefix
+				sty PM.Filename
+				
+				lda #Sys.Prefix
 				pha
-				lda /Boot.Prefix
+				lda /Sys.Prefix
 				pha
-				>LDYAI MSG.KMSYSDIR
+				>LDYAI MSG.PMSYSDIR
 				jsr PrintFYA
 	
+				jsr MLI
+				.DA #MLISETPREFIX
+				.DA MLISETPREFIX02
+				bcs .19
+
 				jsr MLI
 				.DA #MLIOPEN
 				.DA MLIOPEN01
 				bcc .10
 				
-				pha
-				>LDYAI MSG.KMSYSDIR.KO
+.19				pha
+				>LDYAI MSG.PMSYSDIR.KO
 				jsr PrintFYA
 				sec
 				rts
@@ -428,13 +435,13 @@ EnumKM			ldx #0
 				.DA MLIREAD01
 				bcs .98
 
-				lda #EnumKM.EPB
-				sta EnumKM.EC
+				lda #EnumPM.EPB
+				sta EnumPM.EC
 
 				>LDYAI A2osX.ReadBuff+4
-				>STYA EnumKM.BPTR
+				>STYA EnumPM.BPTR
 
-.3				>LDYA EnumKM.BPTR
+.3				>LDYA EnumPM.BPTR
 				>STYA TmpPtr1
 
 				lda (TmpPtr1)
@@ -446,7 +453,7 @@ EnumKM			ldx #0
 
 				lda (TmpPtr1)
 				and #$0F
-				cmp KM.PREFIX			at least enough chars for KM.*?
+				cmp PM.					at least enough chars for PM.*?
 				bcc .5					no, skip
 
 				ldy #$10				file type
@@ -454,26 +461,26 @@ EnumKM			ldx #0
 				cmp #$06				'BIN'?
 				bne .5					skip
 
-				ldy KM.PREFIX
+				ldy PM.
 
-.4				lda (TmpPtr1),y			KM.* ?
-				cmp KM.PREFIX,y
+.4				lda (TmpPtr1),y			PM.* ?
+				cmp PM.,y
 				bne .5
 
 				dey
 				bne .4
 
-				jsr LoadKM
+				jsr LoadPM
 
-.5				lda EnumKM.BPTR
+.5				lda EnumPM.BPTR
 				clc	
-				adc #EnumKM.EL
-				sta EnumKM.BPTR
+				adc #EnumPM.EL
+				sta EnumPM.BPTR
 				bcc .6
 
-				inc EnumKM.BPTR+1
+				inc EnumPM.BPTR+1
 
-.6				dec EnumKM.EC
+.6				dec EnumPM.EC
 				bne .3
 
 				bra .2
@@ -491,47 +498,46 @@ EnumKM			ldx #0
 .8				jsr MLI
 				.DA #MLICLOSE
 				.DA MLICLOSE01
-				rts
-*--------------------------------------
-EnumKM.EC		.BS 1
-EnumKM.BPTR		.BS 2
-*--------------------------------------
-LoadKM			ldx Boot.Prefix
+				bcs .99
 
-.1				lda Boot.Prefix,x
-				sta KM.Filename,x
-				dex
-				bne .1
-
-				ldy #$1c
+				jsr MLI
+				.DA #MLISETPREFIX
+				.DA MLISETPREFIX01
+				
+.99				rts
+*--------------------------------------
+EnumPM.EC		.BS 1
+EnumPM.BPTR		.BS 2
+*--------------------------------------
+LoadPM			ldy #$1c
 				lda (TmpPtr1),y
-				sta LoadKM.VERSION
+				sta LoadPM.VERSION
 				iny
 				lda (TmpPtr1),y
-				sta LoadKM.MVERSION
+				sta LoadPM.MVERSION
 				
-				ldx Boot.Prefix
+				ldx Sys.Prefix
 				lda (TmpPtr1)
 				and #$0F
 				tay
 				clc
-				adc Boot.Prefix
-				sta KM.Filename
+				adc sys.Prefix
+				sta PM.Filename
 				tax
 
-.2				bit LoadKM.MVERSION
+.2				bit LoadPM.MVERSION
 				bpl .6
 
 				cpy #8
 				bcs .3
 				
-				lda LoadKM.Bits,y
-				bit LoadKM.MVERSION
+				lda LoadPM.Bits,y
+				bit LoadPM.MVERSION
 				beq .6
 				bra .4
 
-.3				lda LoadKM.Bits-8,y
-				bit LoadKM.VERSION
+.3				lda LoadPM.Bits-8,y
+				bit LoadPM.VERSION
 				beq .6
 				
 .4				lda (TmpPtr1),y
@@ -539,17 +545,17 @@ LoadKM			ldx Boot.Prefix
 				.HS 2C					BIT ABS
 
 .6				lda (TmpPtr1),y
-				sta KM.Filename,x
+				sta PM.Filename,x
 				dex
 				dey
 				bne .2
 
-				lda #KM.Filename
+				lda #PM.Filename
 				pha
-				lda /KM.Filename
+				lda /PM.Filename
 				pha
 
-				>LDYAI MSG.KMLOAD
+				>LDYAI MSG.PMLOAD
 				jsr PrintFYA
 
 				jsr MLI
@@ -567,7 +573,7 @@ LoadKM			ldx Boot.Prefix
 				bcs .98
 
 				jsr .9
-				jmp A2osX.KMLOAD
+				jmp A2osX.PMLOAD
 
 .98				pha
 				jsr .9
@@ -581,9 +587,9 @@ LoadKM			ldx Boot.Prefix
 				.DA MLICLOSE02
 .99				rts
 *--------------------------------------
-LoadKM.VERSION	.BS 1
-LoadKM.MVERSION	.BS 1
-LoadKM.Bits		.HS 8040201008040201
+LoadPM.VERSION	.BS 1
+LoadPM.MVERSION	.BS 1
+LoadPM.Bits		.HS 8040201008040201
 *--------------------------------------
 				.INB usr/src/shared/x.printf.s
 *--------------------------------------
@@ -599,18 +605,22 @@ MSG.CPU.KO		.AZ "A2osX Requires At Least A 65C02 CPU.\n"
 MSG.RAMDRV		.AZ "Checking ProDOS RamDrive..."
 MSG.RAMDRV.OK	.AZ "Successfully Disabled.\n"
 MSG.RAMDRV.KO0	.AZ "Not Detected.\n"
-MSG.RAMDRV.KO1	.AZ "Uninstall Failed !!!\n"
+MSG.RAMDRV.KO1	.AZ "Uninstall Failed.\n"
 
 MSG.BOOTPREFIX	.AZ "Boot Prefix:%S\n"
 
-MSG.KMENUM		.AZ "Looking For Kernel Modules...\n"
-MSG.KMSYSDIR	.AZ "SYS dir is %S\n"
-MSG.KMSYSDIR.KO	.AZ "***Error : $%h\n"
-MSG.KMLOAD		.AZ "***Loading KM : %S\n"
+MSG.PMENUM		.AZ "Looking For ProDOS Modules...\n"
+MSG.PMSYSDIR	.AZ "SYS dir is %S\n"
+MSG.PMSYSDIR.KO	.AZ "***Error : $%h\n"
+MSG.PMLOAD		.AZ "***Loading PM : %S\n"
 MSG.INIT0OK		.AZ "A2osX[Stage0]:Complete.\n"
 *--------------------------------------
-MLIGETPREFIX01	.DA #1
+MLIGETPREFIX01
+MLISETPREFIX01	.DA #1
 				.DA Boot.Prefix
+*--------------------------------------
+MLISETPREFIX02	.DA #1
+				.DA Sys.Prefix
 *--------------------------------------
 MLIONLINE01		.DA #2
 *				.DA #0
@@ -618,7 +628,7 @@ MLIONLINE01		.DA #2
 				.DA MLIONLINE01BUF
 *--------------------------------------
 MLIOPEN00		.DA #3					For DIR listing
-				.DA LOGO.Filename
+				.DA Logo.Filename
 				.DA A2osX.OpenBuff1		
 				.BS 1
 MLIREAD00		.DA #4
@@ -630,7 +640,7 @@ MLICLOSE00		.DA #1
 				.BS 1
 *--------------------------------------
 MLIOPEN01		.DA #3					For DIR listing
-				.DA Boot.Prefix
+				.DA Sys.Prefix
 				.DA A2osX.OpenBuff1		
 				.BS 1
 MLIREAD01		.DA #4
@@ -642,13 +652,13 @@ MLICLOSE01		.DA #1
 				.BS 1
 *--------------------------------------
 MLIOPEN02		.DA #3
-				.DA KM.Filename
+				.DA PM.Filename
 				.DA A2osX.OpenBuff2
 				.BS 1
 MLIREAD02		.DA #4
 				.BS 1
-				.DA A2osX.KMLOAD		Load address for KMs
-				.DA A2osX.KMMAXLEN		Maxlen of KM
+				.DA A2osX.PMLOAD		Load address for PMs
+				.DA A2osX.PMMAXLEN		Maxlen of PM
 				.BS 2
 MLICLOSE02		.DA #1
 				.BS 1
@@ -661,7 +671,7 @@ MLIQUIT01		.DA #4
 *--------------------------------------
 A2osX.LOGO		>PSTR "A2osX.logo"
 SYS				>PSTR "sys/"
-KM.PREFIX		>PSTR "KM."
+PM.				>PSTR "PM."
 *--------------------------------------
 SCR.BASEL		.HS	00.80.00.80.00.80.00.80.28.A8.28.A8.28.A8.28.A8.50.D0.50.D0.50.D0.50.D0
 SCR.BASEH		.HS	04.04.05.05.06.06.07.07.04.04.05.05.06.06.07.07.04.04.05.05.06.06.07.07
@@ -672,15 +682,16 @@ PALETTE.AUX		.HS 00.01.02.03.04.05.06.07
 				.HS 08.09.0A.0B.0C.0D.0E.0F
 *--------------------------------------
 				.EP
+
+				.LIST ON
+SYSTEM.END		.EQ *
+				.LIST OFF
 *--------------------------------------
 A2osX.QC.B.Start
 A2osX.QC.B.BOOT	.EQ *+4 
 A2osX.QC.B.ROOT .EQ *+4+64
 				.INB usr/src/a2osx.s.qc
-				.LIST ON
-SYSTEM.END		.EQ *
-				.LIST OFF
 *--------------------------------------
 MAN
-SAVE USR/SRC/A2OSX.S
+SAVE usr/src/a2osx.s
 ASM
