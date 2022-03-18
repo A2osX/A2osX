@@ -430,8 +430,21 @@ Y,A = PTR to MemBlock
  CS : error  
   A = EC  
 
+# Online  
+Get ProDOS Volume Info  
+
+## C  
+`int online(short int volid, void *buf);`  
+
+## ASM  
+`>PUSHB volid`  
+`>PUSHW buf`  
+`>SYSCALL Online`  
+
+## RETURN VALUE  
+
 # ChTyp  
-Change The type of a ProDOS File  
+Change Type of a ProDOS File  
 
 ## C  
 `int chtyp(const char *filepath, short int filetype);`  
@@ -444,14 +457,14 @@ Change The type of a ProDOS File
 ## RETURN VALUE  
 
 # ChAux  
-Change The type of a ProDOS File  
+Change AuxType of a ProDOS File  
 
 ## C  
 `int chaux(const char *filepath, int auxtype);`  
 
 ## ASM  
 `>PUSHW filepath`  
-`>PUSHB filetype`  
+`>PUSHW auxtype`  
 `>SYSCALL ChAux`  
 
 ## RETURN VALUE  
