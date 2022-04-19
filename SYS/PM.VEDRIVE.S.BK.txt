@@ -1,0 +1,408 @@
+NEW
+  AUTO 3,1
+*--------------------------------------
+* Drivers
+*--------------------------------------
+* OP = 2 : Write drv1
+* OP = 3 : Read  drv1
+* OP = 4 : Write drv2
+* OP = 5 : Read  drv2
+* CMD = $C5+OP+BLKLO+BLKHI+CHKSUM
+* DO NOT trash DRV.COMMAND...DRV.BLKNUM as ProDOS
+* reuses them after Block operation
+* A1,A2 are used by Disk II Driver,
+* so we use it safely as Tmp Ptr
+*--------------------------------------
+DRV.A1L			.EQ $3C
+DRV.A1H			.EQ $3D
+DRV.A2L			.EQ $3E
+DRV.A2H			.EQ $3F
+DRV.COMMAND 	.EQ $42
+DRV.UNITNUM		.EQ $43
+DRV.BUFF		.EQ $44
+DRV.BLKNUM		.EQ $46
+*--------------------------------------
+DRV.BLK			.PH	DRV.BLK.START		Main LC Bnk 2 $D001->$DFFF
+
+DRV.BLK.1		lda DRV.COMMAND			S=0,R=1,W=2,F=3
+				bne .1
+
+				bit DRV.UNITNUM			return Status
+				bmi .3
+
+				ldx DRV.D1TotalBlks
+				ldy DRV.D1TotalBlks+1
+				bra .8
+				
+.3				ldx DRV.D2TotalBlks
+				ldy DRV.D2TotalBlks+1
+
+.8				lda #0
+				clc
+				rts
+
+.1				cmp #3
+				beq .8					Format ....
+
+				bcs DRV.BLK.CMD.ERR		more....IO error
+
+				ora	#2					W=2,R=3
+				ldy DRV.UNITNUM
+				bpl .2
+
+				adc #2					CC from bcs
+
+.2				sta DRV.UDPBuf.Cmd		store cmd
+				eor #ADT.CMD.VSD
+				eor DRV.BLKNUM
+				eor DRV.BLKNUM+1
+				sta DRV.UDPBuf.Sum		Compute & store CheckSum
+
+				lda DRV.BLKNUM
+				sta DRV.UDPBuf.BlkL
+				lda DRV.BLKNUM+1
+				sta DRV.UDPBuf.BlkH
+*--------------------------------------
+				lda DRV.COMMAND
+				dec						1-1=0 if read
+				bne DRV.BLK.CMD.W		go write
+*--------------------------------------
+* Read block
+*--------------------------------------
+DRV.BLK.CMD.R	>LDYAI S.UDP+5
+				jsr DRV.NIC.SendUDP
+				bcs DRV.BLK.CMD.ERR
+
+				jsr DRV.BLK.GetFrame
+				bcs .9
+
+				ldy #DRV.R200.L
+		
+.6				lda DRV.R200-1,y
+				sta $200-1,y
+				dey
+				bne .6
+
+				inc DRV.BUFF+1
+
+				jsr $200
+
+				dec DRV.R200.DEC
+				dec DRV.BUFF+1
+
+				jsr $200
+
+
+
+
+
+				clc
+.9				rts
+
+DRV.BLK.CMD.ERR	lda #MLI.E.IO
+				sec
+				rts
+*--------------------------------------
+* Write Block
+*--------------------------------------
+DRV.BLK.CMD.W	ldy #DRV.W200.L
+		
+.1				lda DRV.W200-1,y
+				sta $200-1,y
+				dey
+				bne .1
+
+				inc DRV.BUFF+1
+
+				stz DRV.UDPBuf.Data+512
+
+				jsr $200
+
+				dec DRV.W200.DEC
+				dec DRV.BUFF+1
+
+				jsr $200
+
+				>LDYAI S.UDP+5+512+1
+				jsr DRV.NIC.SendUDP
+
+				bcs DRV.BLK.CMD.ERR
+				
+				jsr DRV.BLK.GetFrame
+				bcs .9
+
+
+
+
+
+
+				clc
+.9				rts
+*--------------------------------------
+DRV.BLK.GetFrame
+				stz DRV.TimeOut
+
+.1				lda VBL
+
+.2				pha
+				jsr DRV.NIC.Rcvd
+				pla
+				bcc .3
+
+				eor VBL
+				bpl .2
+				
+				dec DRV.TimeOut
+				bne .1
+
+				lda #MLI.E.IO
+*				sec
+				rts
+
+.3				jsr DRV.BLK.CheckFrame
+				bcs .1
+
+				rts
+*--------------------------------------
+DRV.BLK.CheckFrame
+				lda DRV.InBuf+S.ETH.EII.TYPE
+				cmp /S.ETH.EII.TYPE.IP
+				bne .9
+
+				lda DRV.InBuf+S.ETH.EII.TYPE+1
+				cmp #S.ETH.EII.TYPE.IP
+				beq .4
+
+				cmp #S.ETH.EII.TYPE.ARP
+				bne .9
+
+				lda DRV.InBuf+S.ARP.OPERATION+1
+
+				cmp #S.ARP.OPERATION.REQ
+				bne .9
+
+				ldx #3
+
+.1				lda DRV.InBuf+S.ARP.SPA,x
+				cmp DRV.UDPBuf+S.IP.DST,x
+				bne .9
+				
+				dex
+				bpl .1
+
+				jsr DRV.NIC.SendARP
+				
+.9				sec
+				rts
+
+.4				lda DRV.InBuf+S.IP.PROTOCOL
+				cmp #S.IP.PROTOCOL.UDP
+				bne .9
+
+				ldx #3
+
+.5				lda DRV.InBuf+S.IP.SRC,x
+				cmp DRV.UDPBuf+S.IP.DST,x
+				bne .9
+
+				lda DRV.InBuf+S.IP.DST,x
+				cmp DRV.UDPBuf+S.IP.SRC,x
+				bne .9
+
+				dex
+				bpl .5
+
+				lda DRV.InBuf+S.TCPUDP.SRCPORT
+				cmp DRV.UDPBuf+S.TCPUDP.DSTPORT
+				bne .9
+				
+				lda DRV.InBuf+S.TCPUDP.SRCPORT+1
+				cmp DRV.UDPBuf+S.TCPUDP.DSTPORT+1
+				bne .9
+
+				clc
+				rts
+*--------------------------------------
+DRV.BLK.IPUDPCheksum
+				stz DRV.UDPBuf+S.IP.HDR.CHECKSUM
+				stz DRV.UDPBuf+S.IP.HDR.CHECKSUM+1
+
+				stz DRV.CheckSum
+				stz DRV.CheckSum+1
+
+				lda DRV.FrameSize
+				sec
+				sbc #S.ETH.EII
+				sta DRV.UDPBuf+S.IP.TOTAL.LENGTH+1
+
+				lda DRV.FrameSize+1
+				sbc /S.ETH.EII
+				sta DRV.UDPBuf+S.IP.TOTAL.LENGTH
+
+				clc
+
+				ldy #S.IP.V.IHL
+
+				ldx #10					10 words for IP Header
+
+.1				lda DRV.UDPBuf,y
+				adc DRV.CheckSum
+				sta DRV.CheckSum
+				iny
+				lda DRV.UDPBuf,y
+				adc DRV.CheckSum+1
+				sta DRV.CheckSum+1
+				iny
+				dex
+				bne .1
+
+				lda DRV.CheckSum
+				adc #0
+				eor #$FF
+				sta DRV.UDPBuf+S.IP.HDR.CHECKSUM
+
+				lda DRV.CheckSum+1
+				adc #0
+				eor #$FF
+				sta DRV.UDPBuf+S.IP.HDR.CHECKSUM+1
+*--------------------------------------
+				stz DRV.UDPBuf+S.UDP.CHECKSUM
+				stz DRV.UDPBuf+S.UDP.CHECKSUM+1
+
+				lda DRV.FrameSize
+				sec
+				sbc #S.IP
+				sta DRV.UDPBuf+S.UDP.LENGTH+1
+
+				pha
+
+				eor #$ff
+				sta DRV.nCnt
+
+				lda DRV.FrameSize+1
+				sbc /S.IP
+				sta DRV.UDPBuf+S.UDP.LENGTH
+
+				tax
+
+				eor #$ff
+				sta DRV.nCnt+1
+
+				clc
+
+				pla						A,X = UDP Len
+				adc #S.IP.PROTOCOL.UDP
+				sta DRV.CheckSum+1
+
+				txa
+				adc /S.IP.PROTOCOL.UDP	(all zero)
+				sta DRV.CheckSum
+
+				ldy #S.IP.SRC
+				ldx #4					4 words for SRC & DST IP
+
+.2				lda DRV.UDPBuf,y
+				adc DRV.CheckSum
+				sta DRV.CheckSum
+				iny
+				lda DRV.UDPBuf,y
+				adc DRV.CheckSum+1
+				sta DRV.CheckSum+1
+				iny
+				dex
+				bne .2
+
+				>LDYAI DRV.UDPBuf
+				>STYA DRV.A1L
+
+				ldy #S.IP
+
+.3				inc DRV.nCnt
+				bne .4
+
+				inc DRV.nCnt+1
+				beq .8
+
+.4				lda (DRV.A1L),y
+				adc DRV.CheckSum
+				sta DRV.CheckSum
+
+				iny
+				bne .5
+
+				inc DRV.A1H
+
+.5				inc DRV.nCnt
+				bne .6
+
+				inc DRV.nCnt+1
+				beq .7
+
+.6				lda (DRV.A1L),y
+				adc DRV.CheckSum+1
+				sta DRV.CheckSum+1
+				iny
+				bne .3
+
+				inc DRV.A1H
+				bra .3
+
+.7				lda #0
+				adc DRV.CheckSum+1
+				sta DRV.CheckSum+1
+
+.8				lda DRV.CheckSum
+				adc #0					Don't forget to add last carry!!!
+				eor #$FF
+				sta DRV.UDPBuf+S.UDP.CHECKSUM
+
+				lda DRV.CheckSum+1
+				adc #0					Don't forget to add last carry!!!
+				eor #$FF
+				sta DRV.UDPBuf+S.UDP.CHECKSUM+1
+				rts
+*--------------------------------------
+DRV.R200		lda	DRV.InBuf+S.UDP+10+256,y
+DRV.R200.DEC	.EQ *-DRV.R200+$1ff
+				bit RRAMWRAMBNK1
+				sta (DRV.BUFF),y
+				bit RRAMWRAMBNK2
+				iny
+				bne DRV.R200
+
+				rts
+
+DRV.R200.L		.EQ *-DRV.R200
+*--------------------------------------
+DRV.W200		bit RRAMWRAMBNK1
+				lda (DRV.BUFF),y
+				bit RRAMWRAMBNK2
+				sta	DRV.UDPBuf.Data+256,y
+DRV.W200.DEC	.EQ *-DRV.W200+$1ff
+				eor DRV.UDPBuf.Data+512
+				sta DRV.UDPBuf.Data+512
+				iny
+				bne DRV.W200
+
+				rts
+
+DRV.W200.L		.EQ *-DRV.W200
+*--------------------------------------
+DRV.D1TotalBlks	.BS 2
+DRV.D2TotalBlks	.BS 2
+DRV.BLK.Slotn0	.BS 1					SELF MODIFIED slot 0n
+DRV.TimeOut		.BS 1
+DRV.FrameSize	.BS 2
+DRV.nCnt		.BS 2
+DRV.CheckSum	.BS 2
+*--------------------------------------
+				.EP
+*--------------------------------------
+				.LIST ON
+DRV.BLK.SIZE	.EQ *-DRV.BLK
+				.LIST OFF
+*--------------------------------------
+MAN
+SAVE usr/src/sys/pm.vedrive.s.bk
+LOAD usr/src/sys/pm.vedrive.s
+ASM

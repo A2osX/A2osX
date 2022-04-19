@@ -12,9 +12,9 @@ NEW
 				.INB inc/mli.i
 				.INB inc/mli.e.i
 				.INB inc/nic.i
+				.INB inc/nic.91c96.i
 				.INB inc/nic.8900a.i
 				.INB inc/nic.w5100.i
-				.INB inc/nic.91c96.i
 				.INB inc/eth.i
 				.INB inc/net.tcpip.i
 				.INB inc/net.dhcp.i
@@ -33,15 +33,32 @@ timerC			.EQ 17
 bRemoteMac		.EQ 18
 Slotn0			.EQ 19
 *--------------------------------------
-ADT.CMD.VSD		.EQ $C5					"E": Virtual Drive Command Envelope
-ADT.CMD.PING	.EQ $D9					"Y": PING
-DRV.EntryPoint	.EQ $BF41
-DRV.NIC.START	.EQ $D500
-*--------------------------------------
 CONF.FBUF		.EQ $4000
 CONF.LBUF		.EQ $4400
 CONF.FILEPATH	.EQ $4500
 FRAMEBUF		.EQ $4600
+*--------------------------------------
+ADT.CMD.VSD		.EQ $C5					"E": Virtual Drive Command Envelope
+ADT.CMD.PING	.EQ $D9					"Y": PING
+DRV.EntryPoint	.EQ $BF41
+*--------------------------------------
+DRV.BLK.START	.EQ $D400
+DRV.NIC.START	.EQ $D800
+*--------------------------------------
+DRV.NIC.SendARP	.EQ DRV.NIC.START
+DRV.NIC.SendUDP	.EQ DRV.NIC.START+3
+DRV.NIC.Rcvd	.EQ DRV.NIC.START+6
+*--------------------------------------
+DRV.ARPBuf		.EQ $DA00-S.UDP-5-S.ARP
+DRV.UDPBuf		.EQ $DA00-S.UDP-5		Frame Buffer = S.UDP+5+512+1 bytes
+DRV.UDPBuf.Env	.EQ DRV.UDPBuf+S.UDP
+DRV.UDPBuf.Cmd	.EQ DRV.UDPBuf+S.UDP+1
+DRV.UDPBuf.BlkL	.EQ DRV.UDPBuf+S.UDP+2
+DRV.UDPBuf.BlkH	.EQ DRV.UDPBuf+S.UDP+3
+DRV.UDPBuf.Sum	.EQ DRV.UDPBuf+S.UDP+4
+DRV.UDPBuf.Data	.EQ DRV.UDPBuf+S.UDP+5
+*--------------------------------------
+DRV.InBuf		.EQ $DA00				Frame Buffer = 1536 bytes
 *--------------------------------------
 VEDRIVE.Init	>LDYAI VEDRIVE.MSG0
 				jsr PrintFYA
@@ -111,8 +128,7 @@ VEDRIVE.Init	>LDYAI VEDRIVE.MSG0
 .7				>LDYAI VEDRIVE.SRVOK
 				jsr PrintFYA
 
-*				jsr VEDRIVE.SetSlot
-			sec
+				jsr VEDRIVE.SetSlot
 				bcc .8
 
 				>LDYAI VEDRIVE.NOSLOT
@@ -124,7 +140,7 @@ VEDRIVE.Init	>LDYAI VEDRIVE.MSG0
 				>LDYAI VEDRIVE.DEVOK
 				jsr PrintFYA
 
-*				jsr VEDRIVE.Install
+				jsr VEDRIVE.Install
 				bcc .9
 
 				>LDYAI VEDRIVE.DRVIKO
@@ -133,6 +149,7 @@ VEDRIVE.Init	>LDYAI VEDRIVE.MSG0
 
 .9				>LDYAI VEDRIVE.DRVIOK
 				jsr PrintFYA
+
 				rts
 *--------------------------------------
 VEDRIVE.CheckDRV
@@ -177,11 +194,17 @@ VEDRIVE.Ping	lda CONF.PORT
 
 .4				jsr VEDRIVE.CheckADTRep
 				bcc .8
-				
+
 				jsr VEDRIVE.CheckARPFrame
 				bra .3
 
-.8
+.8				ldy #S.UDP+$29
+				lda (ZPBufPtr),y
+				sta CONF.D1TOTALBLK
+				iny
+				lda (ZPBufPtr),y
+				sta CONF.D1TOTALBLK+1
+				
 *				clc
 .9				rts
 *--------------------------------------
@@ -198,7 +221,7 @@ VEDRIVE.SendUDP	jsr VEDRIVE.IPChecksum
 VEDRIVE.SendARP	ldx CONF.NIC
 				jmp (.1,x)
 
-.1				.DA U1.WRITE
+.1				.DA GS.WRITE
 				.DA U1.WRITE
 				.DA U2.WRITE
 *--------------------------------------
@@ -208,7 +231,7 @@ VEDRIVE.READ	>LDYAI FRAMEBUF
 				ldx CONF.NIC
 				jmp (.1,x)
 
-.1				.DA U1.READ
+.1				.DA GS.READ
 				.DA U1.READ
 				.DA U2.READ
 *--------------------------------------
@@ -294,22 +317,26 @@ VEDRIVE.Install	ldx #PATCH.SIZE
 				bit RRAMWRAMBNK2
 				bit RRAMWRAMBNK2
 
-				ldy #DRV.SIZE-1
+				>LDYAI DRV.BLK
+				>STYA ZPPtr1
 
-.2				lda DRV,y
-				sta DRV.START,y
-				dey
-				bne .2
+				lda #DRV.BLK.START
+				sta ZPPtr2
+				lda /DRV.BLK.START
+				sta ZPPtr2+1
+
+				lda #DRV.BLK.SIZE
+				eor #$ff
+				sta ZPnCnt
+				
+				lda /DRV.BLK.SIZE
+				eor #$ff
+				sta ZPnCnt+1
+
+				jsr VEDRIVE.Move
 
 				lda Slotn0
-				sta DRV.START
-
-				ldy #DRV.IP.SIZE-1
-				
-.3				lda DRV.IP,y
-				sta DRV.IP.START,y
-				dey
-				bne .3
+				sta DRV.BLK.Slotn0
 
 				ldx CONF.NIC
 				lda .10,x
@@ -317,7 +344,7 @@ VEDRIVE.Install	ldx #PATCH.SIZE
 
 				lda .10+1,x
 				sta ZPPtr1+1
-				
+
 				lda .20,x
 				eor #$ff
 				sta ZPnCnt
@@ -325,49 +352,68 @@ VEDRIVE.Install	ldx #PATCH.SIZE
 				lda .20+1,x
 				eor #$ff
 				sta ZPnCnt+1
-				
+
 				lda #DRV.NIC.START
 				sta ZPPtr2
 				lda /DRV.NIC.START
 				sta ZPPtr2+1
-	
-				ldy #0
-				
-.4				inc ZPnCnt
-				bne .5
-				
-				inc ZPnCnt+1
-				beq .6
-				
-.5				lda (ZPPtr1),y
-				sta (ZPPtr2),y
-				iny
-				bne .4
-				
-				inc ZPPtr1+1
-				inc ZPPtr2+1
-				bra .4
 
-.6				ldy #S.UDP
+				jsr VEDRIVE.Move
 
-.7				lda ADT.REQ-1,y
-				sta DRV.OutBuf-1,y
-				dey
+				ldx #S.ARP
+
+.7				lda ARP.REP-1,x
+				sta DRV.ARPBuf-1,x
+				dex
 				bne .7
+
+				ldx #S.UDP
+
+.8				lda ADT.REQ-1,x
+				sta DRV.UDPBuf-1,x
+				dex
+				bne .8
+
+				lda #ADT.CMD.VSD
+				sta DRV.UDPBuf.Env
+
+				ldx #3
 				
+.80				lda CONF.D1TOTALBLK,x
+				sta DRV.D1TotalBlks,x
+				dex
+				bpl .80
+
 				bit RROMBNK1
 				clc
 				rts
 *--------------------------------------
-.10				.DA DRV.U2
-				.DA DRV.U2
+.10				.DA DRV.GS
+				.DA DRV.U1
 				.DA DRV.U2
 *--------------------------------------
-.20				.DA DRV.U2.SIZE
-				.DA DRV.U2.SIZE
+.20				.DA DRV.GS.SIZE
+				.DA DRV.U1.SIZE
 				.DA DRV.U2.SIZE
 *--------------------------------------
-				.INB usr/src/shared/x.printf.s
+VEDRIVE.Move	ldy #0
+
+.1				inc ZPnCnt
+				bne .2
+
+				inc ZPnCnt+1
+				beq .8
+
+.2				lda (ZPPtr1),y
+				sta (ZPPtr2),y
+				iny
+				bne .1
+
+				inc ZPPtr1+1
+				inc ZPPtr2+1
+				bra .1
+				
+.8				rts				
 *--------------------------------------
 * ProDOS $BE41->$BE4B Patch for switching to BANK2 (10 bytes)
 *--------------------------------------
@@ -375,287 +421,20 @@ COPYRIGHT		.AS "(C)APPLE  "
 COPYRIGHT.LEN	.EQ *-COPYRIGHT
 PATCH			.PH DRV.EntryPoint
 				bit RRAMWRAMBNK2
-				jsr $D002
+				jsr DRV.BLK.START
 				bit RRAMWRAMBNK1
 				rts
 				.EP
 PATCH.SIZE		.EQ *-PATCH
 *--------------------------------------
-* Drivers
-*--------------------------------------
-* OP = 2 : Write drv1
-* OP = 3 : Read  drv1
-* OP = 4 : Write drv2
-* OP = 5 : Read  drv2
-* CMD = $C5+OP+BLKLO+BLKHI+CHKSUM
-* DO NOT trash DRV.COMMAND...DRV.BLKNUM as ProDOS
-* reuses them after Block operation
-* A1,A2 are used by Disk II Driver,
-* so we use it safely as Tmp Ptr
-*--------------------------------------
-DRV.A1L			.EQ $3C
-DRV.A1H			.EQ $3D
-DRV.A2L			.EQ $3E
-DRV.A2H			.EQ $3F
-DRV.COMMAND 	.EQ $42
-DRV.UNITNUM		.EQ $43
-DRV.BUFF		.EQ $44
-DRV.BLKNUM		.EQ $46
-*--------------------------------------
-DRV.Write		.EQ DRV.NIC.START
-DRV.Read		.EQ DRV.NIC.START+3
-*--------------------------------------
-DRV.OutBuf		.EQ $D800-S.UDP-6		Frame Buffer = S.UDP+5+512+1 bytes
-DRV.OutBuf.Env	.EQ DRV.OutBuf+S.UDP
-DRV.OutBuf.Cmd	.EQ DRV.OutBuf+S.UDP+1
-DRV.OutBuf.BlkL	.EQ DRV.OutBuf+S.UDP+2
-DRV.OutBuf.BlkH	.EQ DRV.OutBuf+S.UDP+3
-DRV.OutBuf.Sum	.EQ DRV.OutBuf+S.UDP+4
-DRV.OutBuf.Data	.EQ DRV.OutBuf+S.UDP+5
-*--------------------------------------
-DRV.InBuf		.EQ $DA00				Frame Buffer = 1536 bytes
-*--------------------------------------
-DRV				.PH	$D001				Main LC Bnk 2 $D001->$DFFF
-
-DRV.START		.BS 1					SELF MODIFIED slot 0n
-			>DEBUG
-				lda DRV.COMMAND			S=0,R=1,W=2,F=3
-				bne .1
-
-				ldx #$ff				return Status
-				ldy #$ff
-
-.8				lda #0
-				clc
-				rts
-
-.1				cmp #3
-				beq .8					Format ....
-
-				bcs DRV.DO.CMD.ERR		more....IO error
-
-				ora	#2					W=2,R=3
-				ldy DRV.UNITNUM		
-				bpl .2
-
-				adc #2					CC from bcs
-
-.2				sta DRV.OutBuf.Cmd		store cmd
-				eor #ADT.CMD.VSD
-				eor DRV.BLKNUM
-				eor DRV.BLKNUM+1
-				sta DRV.OutBuf.Sum		Compute & store CheckSum
-
-				lda DRV.BLKNUM
-				sta DRV.OutBuf.BlkL
-				lda DRV.BLKNUM+1
-				sta DRV.OutBuf.BlkH
-*--------------------------------------
-				lda DRV.COMMAND
-				dec						1-1=0 if read
-				bne DRV.DO.CMD.W		go write
-*--------------------------------------
-* Read block
-*--------------------------------------
-DRV.DO.CMD.R	ldy #S.UDP+5
-				lda /S.UDP+5
-
-				jsr DRV.Write
-				
-
-
-DRV.DO.CMD.ERR
-				lda #MLI.E.IO	
-				sec
-				rts
-*--------------------------------------
-* Write Block
-*--------------------------------------
-DRV.DO.CMD.W	lda #$B1				lda (),y
-				
-				lda #MLI.E.IO	
-				sec
-				rts
-*--------------------------------------
-DRV.RWBYTE		bit RRAMWRAMBNK1
-				sta (DRV.BUFF),y
-				bit RRAMWRAMBNK2
-				rts 
-*--------------------------------------
-				.EP
-*--------------------------------------
-				.LIST ON
-DRV.SIZE		.EQ *-DRV
-				.LIST OFF
-*--------------------------------------
-DRV.IP			.PH $D400
-
-DRV.IP.START	ldy #S.IP.TOTAL.LENGTH+1
-				lda ZPBufCnt
-				sec
-				sbc #S.ETH.EII
-				sta (ZPBufPtr),y
-				dey
-				lda ZPBufCnt+1
-				sbc /S.ETH.EII
-				sta (ZPBufPtr),y
-				lda #0
-				ldy #S.IP.HDR.CHECKSUM
-				sta (ZPBufPtr),y
-				iny
-				sta (ZPBufPtr),y
-
-				stz ZPCheckSum			RESET IP CHECKSUM
-				stz ZPCheckSum+1
-
-				clc
-
-				ldy #S.IP.V.IHL
-
-				ldx #10					10 words for IP Header
-
-.1				lda (ZPBufPtr),y
-				adc ZPCheckSum
-				sta ZPCheckSum
-				iny
-				lda (ZPBufPtr),y
-				adc ZPCheckSum+1
-				sta ZPCheckSum+1
-				iny
-				dex
-				bne .1
-
-				ldy #S.IP.HDR.CHECKSUM
-				lda ZPCheckSum
-				adc #0
-				eor #$FF
-				sta (ZPBufPtr),y
-				iny
-				lda ZPCheckSum+1
-				adc #0
-				eor #$FF
-				sta (ZPBufPtr),y
-				rts
-*--------------------------------------
-				clc
-
-				ldy #S.UDP.LENGTH+1
-				lda (ZPBufPtr),y
-				adc #S.IP.PROTOCOL.UDP
-				sta ZPCheckSum+1
-
-				dey
-				lda (ZPBufPtr),y
-				adc /S.IP.PROTOCOL.UDP	 	(all zero)
-				sta ZPCheckSum
-
-				ldy #S.IP.SRC
-				ldx #4					4 words for SRC & DST IP
-
-.2				lda (ZPBufPtr),y
-				adc ZPCheckSum
-				sta ZPCheckSum
-				iny
-				lda (ZPBufPtr),y
-				adc ZPCheckSum+1
-				sta ZPCheckSum+1
-				iny
-				dex
-				bne .2
-
-				ldy #S.UDP.LENGTH+1
-				lda (ZPBufPtr),y
-				eor #$ff
-				tax
-
-				dey
-				lda (ZPBufPtr),y
-				eor #$ff
-				ldy #S.UDP.CHECKSUM
-
-				phy						Save Offset
-				pha						Save !ByteCount.HI
-
-				lda #0					Reset Checksum
-				sta (ZPBufPtr),y
-				iny
-				sta (ZPBufPtr),y
-
-				>LDYA ZPBufPtr
-				>STYA ZPPtr1
-
-				ldy #S.IP
-
-.3				inx
-				bne .4
-
-				pla
-				inc
-				beq .8
-
-				pha
-.4				lda (ZPPtr1),y
-				adc ZPCheckSum
-				sta ZPCheckSum
-
-				iny
-				bne .5
-
-				inc ZPPtr1+1
-.5				inx
-				bne .6
-
-				pla
-				inc
-				beq .7
-
-				pha
-
-.6				lda (ZPPtr1),y
-
-				adc ZPCheckSum+1
-				sta ZPCheckSum+1
-				iny
-				bne .3
-
-				inc ZPPtr1+1
-				bra .3
-
-.7				adc ZPCheckSum+1		A=0 from beq .7
-				sta ZPCheckSum+1
-
-.8				ply
-				lda ZPCheckSum
-				adc #0					Don't forget to add last carry!!!
-				eor #$FF
-				sta (ZPBufPtr),y
-				iny
-				lda ZPCheckSum+1
-				adc #0					Don't forget to add last carry!!!
-				eor #$FF
-				sta (ZPBufPtr),y
-				rts
-*--------------------------------------
-				.EP
-*--------------------------------------
-				.LIST ON
-DRV.IP.SIZE		.EQ *-DRV.IP
-				.LIST OFF
-*--------------------------------------
-* CONTROL SECTION :
-*--------------------------------------
-				.DO DRV.SIZE>255
-				ERROR:DRV.SIZE too big
-				.FIN
-*--------------------------------------
-
-
+				.INB usr/src/shared/x.printf.s
 *--------------------------------------
 				.INB usr/src/sys/pm.vedrive.s.cf
+				.INB usr/src/sys/pm.vedrive.s.bk
 				.INB usr/src/sys/pm.vedrive.s.ip
+				.INB usr/src/sys/pm.vedrive.s.gs
 				.INB usr/src/sys/pm.vedrive.s.u1
 				.INB usr/src/sys/pm.vedrive.s.u2
-				.INB usr/src/sys/pm.vedrive.s.gs
 *--------------------------------------
 VEDRIVE.MSG0	.AZ "VEDRIVE (ADTPro Virtual Ethernet HD) Driver\n"
 VEDRIVE.DRVKO	.AZ "VEDRIVE (Or other custom Driver) Already Installed.\n"
@@ -703,6 +482,8 @@ CONF.MASK		.HS 00000000
 CONF.GATEWAY	.HS 00000000
 CONF.SERVER		.HS 00000000
 CONF.PORT		.DA /1977,#1977
+CONF.D1TOTALBLK	.DA $FFFF
+CONF.D2TOTALBLK .DA $FFFF
 *--------------------------------------
 MLIGETPREFIX.P	.DA #1
 				.DA CONF.FILEPATH
@@ -829,7 +610,7 @@ DHCP.REQ.OPT.SVRIP	.BS 4
 DHCP.REQ.END	.EQ *
 DHCP.REQ.LEN 	.EQ *-DHCP.REQ
 *--------------------------------------
-ADT.REQ			
+ADT.REQ
 ADT.REQ.DSTMAC	.BS 6					DST MAC
 ADT.REQ.SRCMAC	.BS 6
 				.DA /S.ETH.EII.TYPE.IP
