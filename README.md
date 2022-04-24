@@ -71,7 +71,7 @@ A2osX is licensed under the GNU General Public License.
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
     GNU General Public License for more details.
 
-The full A2osX license can be found **[Here](../LICENSE)**.
+The full A2osX license can be found **[Here](LICENSE)**.
 
 ## Copyright
 
