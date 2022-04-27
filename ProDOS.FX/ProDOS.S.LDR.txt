@@ -26,20 +26,16 @@ LDR.MSG.IIgs	.AT "IIgs"
 LDR.MSG.Unknown	.AT "Unknown"
 LDR.MSG.CLK		.AT "?Clk"
 LDR.MSG.RAM		.AT "/RAM"
-LDR.MSG.ROOTERR	.AT "ERR reading CATALOG"
+LDR.MSG.PFXERR	.AT "ERR setting prefix"
 *--------------------------------------
 p16start 		inc LDR.BootFlag		set = 2 for GQuit rts
 atalkset 		inc LDR.BootFlag		set = 1 for appletalk rts
 prostart 		lda unitnum
 				sta LDR.MLIOL.P+1
 
-				.DO READCAT=1
-				sta LDR.MLIRB.P+1
-				.FIN
-
 				cld
 				bit RROMBNK2
-
+				
 				sta CLR80DISP
 				sta	CLR80STORE
 
@@ -157,11 +153,6 @@ m128k  			sta idapple				Save MACHID in temp location
 				lda #$01				patch for the gs rom
 				trb statereg			to force off intcxrom
 
-				ldx #PAKME.ILDR-PAKME.Table
-				ldy #ILDR.START
-				lda /ILDR.START
-				jsr X.Unpak.XatYA
-
 				ldx #PAKME.GP-PAKME.Table
 				ldy #MLI
 				lda /MLI
@@ -271,22 +262,47 @@ LDR.Common		jsr LDR.BlkDevScan
 
 				jsr LDR.SetupRAM
 *--------------------------------------
+				lda LDR.MLIOL.P+1		Boot unitnum
+				sta DEVNUM
+
+				ldx DEVCNT
+
+.1				lda DEVLST,x
+				eor DEVNUM
+				and #$f0
+				beq .2
+
+				dex
+				bpl .1
+
+				brk
+
+.2				lda DEVLST,x
+				pha
+
+.3				lda DEVLST+1,x
+				sta DEVLST,x
+				cpx DEVCNT
+				inx
+				bcc .3
+
+				pla
+				ldx DEVCNT
+				sta DEVLST,x
+
 				lda LDR.BootFlag		get setup entry point flag
-				beq LDR.ReadRoot		taken if normal boot.
+				beq LDR.SetPrefix		taken if normal boot.
 
 				bit RROMBNK2
 				rts		  				return to caller at setup entry point.
 *--------------------------------------
-LDR.ReadRoot	lda LDR.MLIOL.P+1		place boot devnum in globals
-				sta devnum	   			last device used
-
-				jsr MLI
+LDR.SetPrefix	jsr MLI
 				.DA #MLIONLINE
 				.DA LDR.MLIOL.P
 				bcs .9
 
 				lda pbuf+1				get volume name length.
-				and #$0F	   			strip devnum
+				and #$0F	   			strip SDDDxxxx
 				beq .9
 
 				inc						add 1 for leading '/'
@@ -299,42 +315,16 @@ LDR.ReadRoot	lda LDR.MLIOL.P+1		place boot devnum in globals
 				.DA LDR.MLISETP.P
 				bcs .9
 
-				.DO READCAT=1
-				stz dst
-				lda /dbuf
-				ldy #$02	  			read directory into buffer
-				ldx #0
+				jsr CROUT
 
-.1  			sta dst+1
-				sta LDR.MLIRB.P+3		Data buf HI
-				sty LDR.MLIRB.P+4		Blk Num LO
-				stx LDR.MLIRB.P+5		Blk Num HI
-				jsr MLI
-				.DA #MLIREADBLOCK
-				.DA LDR.MLIRB.P
-				bcs .9
-
-				ldy #$03				get next block# from link
-				lda (dst),y
-				tax
-				dey
-				ora (dst),y				00 00 -> Last Block
-				beq .8
-
-				lda (dst),y
-				tay
-				lda dst+1
-				inc
-				inc						add $200 to buffer pointer
-				cmp /dbuf+$800	  		until it points past end of buffer.
-				bcc .1					if ok, read next block.
-				.FIN
-
-.8  			jsr CROUT
+				ldx #PAKME.ILDR-PAKME.Table
+				ldy #ILDR.START
+				lda /ILDR.START
+				jsr X.Unpak.XatYA
 
 				jmp ILDR.START
 
-.9		 		ldx #LDR.MSG.ROOTERR
+.9		 		ldx #LDR.MSG.PFXERR
 				jsr LDR.PrintX
 				bra *
 *--------------------------------------
@@ -576,16 +566,13 @@ LDR.ClkDevXCLK	bit RROMBNK2
 
 				lda $DFFF
 				cmp #$CD
-				bne .9
-
-				lda $D8F0
-				bit $F851
-				cmp #$AD
 				beq .1
 
-.9				rts
+.9				bit $F851
+				rts
 
-.1				lda #'X'
+.1				bit $F851
+				lda #'X'
 				ldx PAKME.XCLK
 				ldy PAKME.XCLK+1
 *--------------------------------------
@@ -624,14 +611,38 @@ LDR.SetupRAM	lda DEVCNT
 				lda /$FF00
 				jsr X.Unpak.XatYA
 
+				lda RAMX.PAK
+				bne .1
+
 				sta SETWRITEAUX
 
 				ldx #PAKME.RAMX-PAKME.Table
 				ldy #$0200
 				lda /$0200
 				jsr X.Unpak.XatYA
+				bra .7
+				
+.1				ldx #PAKME.RAMX-PAKME.Table
+				ldy #$0800
+				lda /$0800
+				jsr X.Unpak.XatYA
+				
+				sta SETWRITEAUX
 
-				sta CLRWRITEAUX
+				ldx	#$FE
+				
+.2				lda $900,x
+				sta $300,x
+				dex
+				txa
+				bne .2
+				
+.3				lda $800,x
+				sta $200,x
+				inx
+				bne .3
+				
+.7				sta CLRWRITEAUX
 
 				lda #RAMDRV				put driver address into
 				sta	DEVPTRS3D2
@@ -1303,13 +1314,6 @@ LDR.MLIOL.P		.DA #2
 
 LDR.MLISETP.P	.DA #1
 				.DA pbuf
-
-				.DO READCAT=1
-LDR.MLIRB.P		.DA #3
-				.DA #0	  				unit number
-				.DA 0					2 byte data buffer
-				.DA 0		 			2 byte block number
-				.FIN
 
 LDR.SPStatus.P	.DA #$03				# of parms
 LDR.SPStatus.U	.DA #$00				unit number (code for smartport stat)

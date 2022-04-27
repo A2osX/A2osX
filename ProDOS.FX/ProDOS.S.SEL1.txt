@@ -1,58 +1,61 @@
 NEW
   AUTO 3,1
+*--------------------------------------
 * object code = sel_1
 * Bird's Better Bye at org = dispadr
 *--------------------------------------
-SEL1.START
-birdbye			cld
-				lda RROMBNK2			read ROM
+SEL1.START		cld
+				bit RROMBNK2			read ROM
+
 				stz softev
 				lda #$10				set reset vector to 'dispadr'
 				sta softev+1
 				jsr setpwrc				create power-up byte
+
 				lda #$A0
 				jsr $C300			 	initialize 80 column text card
-				ldx #$17
 
 * set up memory bitmap in global page
 
-L5D16  			stz MEMTABL,x			P8 memory bitmap
-				dex
-				bpl L5D16
-				inc MEMTABL+$17			protect global page
-				lda #$CF				protect zero page, stack and page 1
-				sta MEMTABL
+				ldx #0
+				jsr GP.TOOLBOX			reset MEMTABL
+
 				lda #$02
 				sta smparms				init set mark parms pcount.
-
+*--------------------------------------
 * drive selector
-
+*--------------------------------------
 				ldx DEVCNT				get device count and
-				stx lstpntr				store in zero page.
-				lda devnum			 	get last slot/drive
-				bne volname
+				
+.1				lda DEVLST,x
+				and #$F0
+				cmp DEVNUM
+				beq SEL1.VolName
+				
+				dex
+				bra .1
 
-ds2				ldx lstpntr				get device list pointer.
-				lda DEVLST,x			get unit number from list.
-				cpx #$01			 	make sure it's real.
-				bcs L5D3F			  	if so, change list pointer.
+SEL1.NextVol	ldx lstpntr				get device list pointer.
+				bne .1
+
 				ldx DEVCNT				get device count.
 				inx
-L5D3F  			dex		 				decrement list pointer and restore.
-				stx lstpntr
+				
+.1				dex
+				lda DEVLST,x			get unit number from list.
 
-* get and store volume name
-
-volname			sta ol_unit				store unit number for online.
+SEL1.VolName	stx lstpntr
+				sta ol_unit				store unit number for online.
 				jsr MLI
 				.DA #MLIONLINE
 				.DA ol_parms
-				bcs ds2				  	error check.
+				bcs SEL1.NextVol	  	error check.
 
 				stz dlevel			 	haven't read root directory yet.
 				lda pbuf+1				load description byte.
 				and #$0F			 	mask for name length.
-				beq ds2				  	if 0, then try next unit.
+				beq SEL1.NextVol	  	if 0, then try next unit.
+
 				adc #$02			 	add 2 to length.
 				tax		 				name length in x.
 
@@ -64,13 +67,14 @@ vnam1			stx pbuf				save the name length
 
 * open and read directory
 
-				jsr MLI			
+				jsr MLI
 			   .DA #MLIOPEN
 			   .DA op_parms
 				bcc L5D7F				good open.
 
 				lda dlevel			 	trying to open root directory ?
-				beq ds2				  	yes, just move to next volume.
+				beq SEL1.NextVol	  	yes, just move to next volume.
+
 				jsr bell1			  	no, generate bell tone
 				jsr popdir				and stay at same level.
 				stx pbuf
@@ -82,9 +86,9 @@ L5D7F  			inc dlevel
 				sta rd_refn				store in read
 				sta sm_refn				and setmark parm lists.
 				lda #$2B			 	set read parm list for
-				sta dhdr_len			directory header length.
-				stz dhdr_len+1
-				jsr doread				read directory
+				sta rd_reqlen			directory header length.
+				stz rd_reqlen+1
+				jsr SEL1.ReadEntry		read directory
 				bcs L5DB3
 
 				ldx #$03
@@ -94,7 +98,7 @@ L5D9A  			lda sysentry+$23,x		copy directory info
 				dex
 				bpl L5D9A
 
-				sta dhdr_len			put entry length in read parm list.
+				sta rd_reqlen			put entry length in read parm list.
 				lda #$01			 	set block file counter to 1.
 				sta blkfl
 				stz fpos_mid			zero out msb's of file position
@@ -102,6 +106,7 @@ L5D9A  			lda sysentry+$23,x		copy directory info
 				lda filecnt				any files in directory ?
 				ora filecnt+1
 				bne L5DB5			  	if so, continue
+
 L5DB3  			bra L5E29			  	else go close directory file.
 
 L5DB5  			bit filecnt+1			check msb of file count.
@@ -114,6 +119,7 @@ L5DB9  			lda fpos_mid			get mid byte of setmark file position.
 				lda #$00
 				cpy entblk			 	have we read all entries in this block ?
 				bcc L5DCE				if not, continue.
+
 				tay		 				if so, zero y-reg and
 				sty blkfl			  	reset block counter / flag
 				inc fpos_mid
@@ -122,6 +128,7 @@ L5DB9  			lda fpos_mid			get mid byte of setmark file position.
 * if transfer to second sector, handle it.
 
 L5DCC  			inc fpos_mid
+
 L5DCE  			dey						decrement file block counter
 				clc
 				bmi L5DD8
@@ -133,33 +140,38 @@ L5DCE  			dey						decrement file block counter
 L5DD8  			adc #$04				add 4 and put in
 				sta fpos_lo				low byte of setmark.
 				jsr MLI					call mli
-			   .DA #MLISETMARK
-			   .DA #smparms				parameters address = $0060
+				.DA #MLISETMARK
+				.DA #smparms			parameters address = $0060
 				.HS 00
 				bcs L5DB3				error
 
-				jsr doread
+				jsr SEL1.ReadEntry
 				bcs L5DB3			  	error.
 
 				inc blkfl			  	increase count of files read.
 				lda sysentry			file type/length.
 				and #$F0			 	mask off high nibble.
 				beq L5DB9			  	deleted file, try next one.
+
 				dec filecnt				decrement low file count.
 				bne L5DF8
+
 				dec filecnt+1			and high if necessary.
 
 L5DF8  			ror sysentry+$1E		check access bit.
 				bcc L5DB5			  	if no read, try next file.
+
 				lda sysentry+$10		get file type.
 				cmp #$0F			 	directory file ?
 				beq L5E08			  	then continue.
+
 				cmp #$FF			 	system file ?
 				bne L5DB5			  	no, read next file.
 
 L5E08  			ldx filecount			get valid files read.
 				cpx #$80			 	if greater than size of filename buffer
 				bcs L5E29			  	then close directory
+
 				sta filetyps,x			else store filetype in zero page
 				jsr namecalc			and go set up storage area.
 				ldy #$0F
@@ -175,7 +187,7 @@ L5E15  			lda sysentry,y			get byte of filename
 				inc filecount			increment valid file counter
 				bne L5DB5			  	get next file (branch always)
 
-L5E26  			jmp ds2			  		error. try next unit.
+L5E26  			jmp SEL1.NextVol  		error. try next unit.
 
 L5E29  			jsr MLI					close directory file
 			   .DA #MLICLOSE
@@ -195,6 +207,7 @@ L5E29  			jsr MLI					close directory file
 
 L5E48  			lda pbuf+1,x
 				beq showfiles
+
 				jsr output
 				inx
 				bne L5E48
@@ -203,9 +216,12 @@ showfiles 		stz	valcnt
 				stz topname				init top filename index.
 				lda filecount			# of valid files.
 				beq keyloop			  	if no files.
+
 				cmp #$15			 	more than what will fit on screen ?
 				bcc L5E61			  	no.
+
 				lda #$14			 	limit to 20 files on the screen.
+
 L5E61  			sta gp_cnt
 				lda #$02				set window dimensions
 				sta wndtop
@@ -213,50 +229,66 @@ L5E61  			sta gp_cnt
 				lda #$16
 				sta wndwdth
 				sta wndbot
+
 L5E6F  			jsr nameprnt			output filename to screen
 				inc valcnt
 				dec gp_cnt			 	file counter.
 				bne L5E6F			  	continue printing names.
+
 				stz valcnt
 				beq L5EAA			  	if last file, it needs to be inverse.
+
 uparrow			jsr	nameprnt			print old name in normal.
 				ldx valcnt			 	get old name number.
 				beq L5EAA			 	if already at the top name
+
 				dec valcnt			 	else fix index.
 				lda cv			   		current cursor line.
 				cmp #$02			 	at top line of window ?
 				bne L5EAA			  	no, move up normally.
+
 				dec topname				fix offset index
 				lda #$16			 	else sroll windows down a line.
 				bne L5EA7			  	branch always.
+
 dnarrow			jsr	nameprnt			print old name in normal.
 				ldx valcnt			 	get old name number.
 				inx		 				add one.
 				cpx filecount
 				bcs L5EAA			  	if already at last filename
+
 				stx valcnt			 	else update index.
 				lda cv			   		current cursor line.
 				cmp #$15			 	at bottom line of window ?
 				bne L5EAA			  	no, move cursor normally.
+
 				inc topname				update offset index
 				lda #$17			 	else scroll up a line.
+
 L5EA7  			jsr cout
 L5EAA  			jsr setinv			 	set inverse text mode.
 				jsr nameprnt			output last filename.
+
 keyloop			lda kbd			  		get keyboard input.
 				bpl keyloop			  	loop until key pressed.
+
 				sta KBDSTROBE			clear strobe.
 				jsr setnorm				set normal text mode.
 				ldx filecount			are any files displayed ?
 				beq L5ECB			  	no, don't accept arrow keys or return.
+
 				cmp #$8D			 	return ?
 				beq L5EF4			  	then run selected file.
+
 				cmp #$8A			 	down ?
 				beq dnarrow				move down a name.
+
 				cmp #$8B			 	up ?
 				beq uparrow				move up a name.
+
 L5ECB  			cmp #$89			 	tab ?
 				beq L5EED			  	new volume.
+
 				cmp #$9B			 	esc ?
 				bne keyloop			  	no, try again else pop up a directory.
 
@@ -279,7 +311,7 @@ L5EDD  			dex
 				ldx pbuf
 L5EEC  			rts
 
-L5EED  			jmp ds2					set up new unit number.
+L5EED  			jmp SEL1.NextVol		set up new unit number.
 
 L5EF0  			inx
 
@@ -287,7 +319,7 @@ L5EF1  			jmp vnam1			  	get new directory info.
 
 * run selected file
 
-L5EF4  			jsr MLI	
+L5EF4  			jsr MLI
 			   .DA #MLISETPREFIX
 			   .DA pf_parms
 				bcs L5EED				error.
@@ -321,10 +353,14 @@ L5F04  			iny		 				start at y = 1.
 
 				lda op_refn				move reference number
 				sta rd_refn				for read.
-				lda #$FF			 	read the entire file.
-				sta dhdr_len
-				sta dhdr_len+1
-				jsr doread			 	read selected file.
+
+*				lda #$FF			 	read the entire file.
+*				sta rd_reqlen
+*				sta rd_reqlen+1
+
+				dec rd_reqlen+1			was $002B, now $FF2B
+
+				jsr SEL1.Read		 	read selected file.
 				php		 				save possible error.
 				jsr MLI					close file. ignore any error from close
 			   .DA #MLICLOSE
@@ -337,11 +373,14 @@ L5F04  			iny		 				start at y = 1.
 * y = index to message teminated by 0.
 
 sethorz			sta ch
+
 msgout			lda dsp2msg,y
 				beq L5F57
+
 				jsr cout
 				iny
 				bne msgout
+
 L5F57  			rts
 
 * name pointer calculator for name storage area
@@ -361,6 +400,7 @@ namecalc 		stz fnstore+1			init high byte of 16-bit shift
 				clc
 				adc fnstore+1
 				sta fnstore+1
+
 				ldy #$00
 				lda (fnstore),y			file name length
 				sta namelen
@@ -379,6 +419,7 @@ nameprnt 		lda #$02
 				jsr TABV				set vertical position.
 				lda filetyps,x			get filetype (x is unchanged by tabv).
 				bmi L5F99			  	branch if system file.
+
 				stz ch80col				adjust cursor position.
 				lda invflg				ave current inverse setting
 				pha
@@ -397,31 +438,39 @@ L5F9F  			iny		 				y = 1 (first time).
 				bcc L5F9F			  	no.
 
 outsp			lda #$A0
-				bne L5FB1			  	branch always.
+				.HS 2C					BIT ABS
 
 homecurs 		lda #$99
-output			ora #$80			 	set high bit.
-L5FB1  			jmp cout			 	output to screen.
 
-doread			jsr MLI					mli read call
+output			ora #$80			 	set high bit.
+				jmp cout			 	output to screen.
+
+SEL1.ReadEntry	jsr SEL1.Read
+				bcs SEL1.Read.RTS
+
+				ldy #sysentry
+				lda /sysentry
+				ldx #2
+				jmp GP.TOOLBOX
+
+SEL1.Read		jsr MLI					mli read call
 			   .DA #MLIREAD
 			   .DA rd_parms
-				rts
-
+SEL1.Read.RTS	rts
+*--------------------------------------
 * data area
+*--------------------------------------
+dsp2msg			.AS -"RETURN: Select | TAB: Chg Vol | ESC: Back"
+				.HS 00
 
-dsp2msg			.AS -"RETURN: Select | TAB: Chg Vol | "
-				.AS -"ESC: Back"
-				.DA #$00
-
-fldrmsg			.DA #$0F				inverse control code
+fldrmsg			.HS 0F					inverse control code
 				.HS 1B			 		enable mousetext
 				.AS -"XY"				folder characters
 				.HS 18			  		disable mousetext
 				.HS 0E			  		normal control code
 				.HS 00
-
-op_parms 		.DA #$03			  	3 parms
+*--------------------------------------
+op_parms 		.DA #3				  	3 parms
 				.DA pbuf				pathname
 				.DA op_buf				file buffer
 op_refn			.HS 00					reference number
@@ -439,17 +488,20 @@ pf_parms 		.DA #01		  			one parm
 rd_parms 		.DA #04			  		4 parms
 rd_refn			.HS 01					reference number
 				.DA sysentry			data buffer
-
+*--------------------------------------
+				.LIST ON
+SEL1.LEN		.EQ *-SEL1.START
+				.LIST OFF
+*--------------------------------------
 * these last 2 parms (4 bytes) may extend past $300 length limit since
 * the request count is set prior to using the parm block and the transfer
 * count isn't used at all (except by prodos)
+*--------------------------------------
 				.DUMMY
-				.BS 2					requested length
+rd_reqlen		.BS 2					requested length
 				.BS 2					actual length
-dhdr_len 		.BS 1					directory header length (actually uses 2 bytes)
 				.ED
 *--------------------------------------
-SEL1.LEN		.EQ *-SEL1.START
 MAN
 SAVE usr/src/prodos.fx/prodos.s.sel1
 LOAD usr/src/prodos.fx/prodos.s
