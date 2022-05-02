@@ -6,7 +6,7 @@ This Guide provides information on all the A2osX commands and utilities.  It hel
 
 A2osX comes with a variety of system, file, network and data utilities -- what we refer to as external commands.  This just means that each of the following commands or utilities is built as a separate BIN or executable file that runs under A2osX.  The source for all of these external commands is readily available, so you can make your own or modify these as your needs dictate.
 
->Note: there are some **internal** commands built into the shell (the interactive prompt) such as CD (change directory) or PWD (print working directory).  Those commands are discussed in-depth in the **[Shell Developers Guide](.Docs/Shell%20Developers%20Guide.md).**  
+>Note: there are some **internal** commands built into the shell (the interactive prompt) such as CD (change directory) or PWD (print working directory).  Those commands are discussed in-depth in the **[Shell Developers Guide](Shell%20Developers%20Guide.md).**  
 
 ## System Commands
 

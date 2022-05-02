@@ -331,7 +331,7 @@ Consult the subsection below on Advanced Display Techniques for more examples of
 
 #### Advanced Display Techniques
 
-A2osX provides advanced screen handling capabilities for the Apple console (keyboard/screen) as well as terminals connected directly (via Super Serial Cards) or remotely (via Telnet using a supported network card and the **telnetd** server daemon).  These features are based on the VT100 Terminal definition and scripts you develop can pass VT100 codes (via the **echo** command) to enhance the appearance of your scripts.  In addition to VT100 codes, **echo** has been augmented with some short codes to perform the more common and to help display special characters.  The examples below will help you understand what is possible with **echo**.  For a fuller listing of the available VT100 Terminal Codes, consult the **[A2osX Terminal Codes Guide](.Docs/TERM.md).**
+A2osX provides advanced screen handling capabilities for the Apple console (keyboard/screen) as well as terminals connected directly (via Super Serial Cards) or remotely (via Telnet using a supported network card and the **telnetd** server daemon).  These features are based on the VT100 Terminal definition and scripts you develop can pass VT100 codes (via the **echo** command) to enhance the appearance of your scripts.  In addition to VT100 codes, **echo** has been augmented with some short codes to perform the more common and to help display special characters.  The examples below will help you understand what is possible with **echo**.  For a fuller listing of the available VT100 Terminal Codes, consult the **[A2osX Terminal Codes Guide](TERM.md).**
 
 	#!/bin/sh
 	#	ECHO / Advanced Display Techniques Examples
