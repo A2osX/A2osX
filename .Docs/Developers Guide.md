@@ -66,7 +66,7 @@ Basically you are going to have to use *regedit* to create the following keys:
 
 ### AppleWin
 
-If you use AppleWin and want to enable support for networking (AW supports the UtherNet I network card protocol) you must install a network shim that enables AppleWin to talk to the Internet.  You can search with Google how to do this, but basically you need to install WinPcap 4.1.3.  See the **[Users Guide](.Docs/User%20Guide.md)** for more information on running A2osX on the AppleWin Emulator.
+If you use AppleWin and want to enable support for networking (AW supports the UtherNet I network card protocol) you must install a network shim that enables AppleWin to talk to the Internet.  You can search with Google how to do this, but basically you need to install WinPcap 4.1.3.  See the **[Users Guide](User%20Guide.md)** for more information on running A2osX on the AppleWin Emulator.
 
 ### CiderPress 4.0.3
 
@@ -74,7 +74,7 @@ CiderPress is a nice utility for inspecting disk images on a Windows PC such as 
 
 ### PuTTY
 
-A2osX supports additional connected users via either Super Serial Cards or the provided TELNETD daemon process.  For Telnet sessions of for connecting via the serial interface on A2osX running on AppleWin, you may find PuTTY for Windows to be readily available and compatible option.  See the **[Users Guide](.Docs/User%20Guide.md)** for more information on both SSC and TELNETD connected users.
+A2osX supports additional connected users via either Super Serial Cards or the provided TELNETD daemon process.  For Telnet sessions of for connecting via the serial interface on A2osX running on AppleWin, you may find PuTTY for Windows to be readily available and compatible option.  See the **[Users Guide](User%20Guide.md)** for more information on both SSC and TELNETD connected users.
 
 ### Notepad++
 

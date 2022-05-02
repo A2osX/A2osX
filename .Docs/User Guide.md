@@ -18,7 +18,7 @@ The core of A2osX is written entirely in 65C02 Assembly and built using the S-C 
 
 ## Developing for A2osX
 
-There has been a significant uptick in interest in A2osX and its development.  That's great!  Along with that has come a lot of questions and requests for documentation.  Besides this new user guide, which we hope will answer many of your questions, we have also written an extensive  **[Developers Guide](.Docs/Developers%20Guide.md).**  That guide explains our current development process (GitHub to delivery media) as well as our future plans.
+There has been a significant uptick in interest in A2osX and its development.  That's great!  Along with that has come a lot of questions and requests for documentation.  Besides this new user guide, which we hope will answer many of your questions, we have also written an extensive  **[Developers Guide](Developers%20Guide.md).**  That guide explains our current development process (GitHub to delivery media) as well as our future plans.
 
 The Developers Guide is all about developing the core of A2osX, its drivers, utilities, libraries, etc. that is all done in Assembly.  There is another aspect of A2osX that will interest many developers and users alike and that is its significant scripting engine or Shell (*./bin/sh*).
 
@@ -34,7 +34,7 @@ for file in `ls -c ct*`; cat ${file}; next
 
 In this example, the system will generate a list of files found in the current directory that match the CT* wildcard and perform the **cat** operation on each.  The semicolons act as a line separator allowing you to type in multiple commands, or short scripts, to execute as an inline script.
 
-An entire Shell Developers Guide is being written to help you with both using and writing scripts for the A2osX Shell.  It can be found **[Here](.Docs/Shell%20Developers%20Guide.md).**
+An entire Shell Developers Guide is being written to help you with both using and writing scripts for the A2osX Shell.  It can be found **[Here](Shell%20Developers%20Guide.md).**
 
 ## File System Layout of A2osX
 
@@ -229,7 +229,7 @@ While A2osX supports many Apple II hardware devices, it is possible a conflict w
 
 ## Getting Started
 
-To get started with A2osX, the very first thing you need to do is download a disk image from GitHub.  Images are available in multiple versions from cutting edge developer seeds to release candidates as well as in multiple sizes suitable for placing on Disk II drives, 3.5 drives or hard drives of for use with emulators.  Please consult the **[A2osX Media Guide](.Docs/Media%20Guide.md).** for detailed information on the available images. 
+To get started with A2osX, the very first thing you need to do is download a disk image from GitHub.  Images are available in multiple versions from cutting edge developer seeds to release candidates as well as in multiple sizes suitable for placing on Disk II drives, 3.5 drives or hard drives of for use with emulators.  Please consult the **[A2osX Media Guide](Media%20Guide.md).** for detailed information on the available images. 
 
 ### Using AppleWin
 
