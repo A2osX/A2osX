@@ -1,0 +1,571 @@
+NEW
+  AUTO 3,1
+*--------------------------------------
+* 0, 2, 4, 6, 8, 10, 12, 14, 1, 3, 5, 7, 9, 11, 13, 15
+*
+* $0800 : Block 00 ProDOS	(sect 0,2)
+* $0A00 : Block 01 SOS		(sect 4,6)
+* $0C00 : Block 02 Cat		(sect 8,10)
+* $0E00 : Block 03 Cat		(sect 12,14)
+* $1000 : Block 04 Cat		(sect 1,3)
+* $1200 : Block 05 Cat		(sect 5,7)
+*--------------------------------------
+ROM.D2.DataBuf	.EQ $26
+ROM.D2.Slotn0 	.EQ $2b
+ROM.D2.oddbits 	.EQ $3c
+ROM.D2.ReqSect	.EQ $3d
+
+BB.RetryCnt		.EQ $40
+BB.TargetTrk	.EQ $41
+
+ZP.BLK.CMD		.EQ $42
+ZP.BLK.UNIT		.EQ $43
+ZP.BLK.BUFPTR	.EQ $44
+ZP.BLK.BLKNUM	.EQ $46
+
+ZP.FX2.GoROM	.EQ $48 				device call entry address
+ZP.FX2.iBLKLO 	.EQ $4a 				pointer to low page of index block
+ZP.FX2.iBLKHI 	.EQ $4c 				pointer to high page of index block
+ZP.FX2.iBLKPtr 	.EQ $4e 				index byte pointer
+
+BB.CurrentQTrack	.EQ $50
+BB.TargetQTrack		.EQ $51
+BB.tmpTrk		.EQ $52
+BB.FX2.AddrField	.EQ $53
+BB.FX2.AddrField.S	.EQ $54
+BB.FX2.AddrField.T	.EQ $55
+BB.FX2.AddrField.V	.EQ $56
+*--------------------------------------
+iobuff 			.EQ $60
+
+nbuf1 			.EQ $300
+dnib 			.EQ $2d6
+
+clrscrn 		.EQ $fc58
+
+BB.FX2.CATBLK1	.EQ $c00
+*--------------------------------------
+*
+*	BLOCK 0
+*
+*--------------------------------------
+				.PH $800
+BB.FX2.Boot 	.DA #1
+				sec 					Apple /// enters $800 'ora $38'
+				bcs BB.FX2.Apple2		branch if not apple iii native mode
+*--------------------------------------
+BB.FX2.Apple3	lda #$9f 				make Apple /// boot using block 1
+				pha 					the return address is $a000
+				lda #$ff
+				pha
+
+				inc
+				tax						ldx #0
+
+				inc 					lda #1 (read block 1)
+
+				jmp $f479
+*--------------------------------------
+BB.FX2.Apple2	stx ZP.BLK.UNIT			save unit number
+				cmp #3
+				php
+				
+				txa 					find out if disk ii
+				and #$70 				strip drive # if any
+				lsr
+				lsr						get slot address
+				lsr
+				lsr
+				ora #$c0
+				sta ZP.FX2.GoROM+1
+				ldy #0
+				sty ZP.FX2.GoROM
+
+				plp
+
+				dey						Y=#$ff
+				lda (ZP.FX2.GoROM),y 	get device entry addr
+				bne BB.FX2.BDEV			branch if not disk ii (16 sector)
+
+				bcs BB.FX2.BDEV			2 sectors read
+
+				lda #3 					make rom read only sector 2
+				sta BB.FX2.Boot			to complete block 0
+				inc ROM.D2.ReqSect 		was = 1
+
+				lda ZP.FX2.GoROM+1
+				pha
+				lda #$5b
+				pha
+				rts
+*--------------------------------------
+BB.FX2.BDEV		sta ZP.FX2.GoROM		save low adr of device call entry.
+
+				ldy #0
+				
+				sty iobuff				$0A00
+				sty ZP.BLK.BLKNUM+1		$0001
+
+				sty BB.FX2.AddrField.V	tell BB.FX2.SeekReadD2 vol 00
+				sty BB.FX2.AddrField.T	tell BB.FX2.SeekReadD2 we are on track 0
+
+				iny						Y=1
+				sty ZP.BLK.CMD			set read command.
+
+				sty ZP.BLK.BLKNUM 		to read SOS+directory blocks
+
+				lda #$0A 				1-5 at $A00
+				sta iobuff+1			$0A00
+
+.1	 			jsr BB.FX2.ReadBLK
+				bcs .9	 				give up on error.
+
+				inc ZP.BLK.BLKNUM
+				lda ZP.BLK.BLKNUM		have all directory blocks been read?
+				cmp #6
+				bcc .1	 				loop if not.
+				
+				jmp BB.FX2.ScanCat
+				
+.9				jmp BB.FX2.BootErr				
+*--------------------------------------
+BB.FX2.ReadBLK	lda iobuff
+				sta ZP.BLK.BUFPTR
+				lda iobuff+1
+				sta ZP.BLK.BUFPTR+1
+
+				inc iobuff+1
+				inc iobuff+1
+
+				lda ZP.FX2.GoROM
+				beq BB.FX2.ReadD2
+
+				jmp (ZP.FX2.GoROM)
+*--------------------------------------
+BB.FX2.ReadD2	lda ZP.BLK.BLKNUM		figure out track & sector.
+				and #7 					strip track for now.
+				cmp #4
+				and #3
+				php
+				asl
+				plp
+				rol						now we have the first sector of block.
+				sta ROM.D2.ReqSect
+
+				lda ZP.BLK.BLKNUM+1 	get high block #
+				lsr 					shift hi addr to carry.
+				lda ZP.BLK.BLKNUM 		now figure track #
+				ror
+				lsr
+				lsr
+				sta BB.TargetTrk
+*--------------------------------------
+				lda ZP.BLK.BUFPTR+1
+				sta ROM.D2.DataBuf+1
+
+				ldx ROM.D2.Slotn0
+				lda IO.D2.DrvOn,x
+
+				jsr BB.FX2.SeekReadD2
+
+				inc ROM.D2.DataBuf+1 	bump address
+				inc ROM.D2.ReqSect
+				inc ROM.D2.ReqSect		and sector #
+				bcs .9	 				branch if error.
+
+				jsr BB.FX2.ReadSectD2
+
+.9	 			ldx ROM.D2.Slotn0
+				ldy IO.D2.DrvOff,x
+				rts 					return error status in carry.
+*--------------------------------------
+BB.FX2.HeadSelect
+				lda BB.FX2.AddrField.V
+				beq .8					VOL = 00
+				
+				asl
+				bcc .8					single sided
+				
+				bmi .8					> 192
+				
+				lda BB.TargetTrk
+				and #1
+				lsr
+				php
+
+				rol
+				rol						A = 0/2
+				
+				ora ROM.D2.Slotn0
+				tay						y = n0/n2
+				
+				lda IO.D2.Ph0On,y
+				lda IO.D2.Ph0On+4,y
+				
+				lda #1
+				jsr BB.Wait100usecA
+
+				lda IO.D2.Ph0Off,y
+				lda IO.D2.Ph0Off+4,y 
+				
+				lsr BB.FX2.AddrField.T
+				plp
+				rol BB.FX2.AddrField.T
+				
+.8				rts				
+*--------------------------------------
+BB.FX2.Trk2Qtrk
+				ldy BB.FX2.AddrField.V
+				beq .5
+				
+				cpy #$85
+				bcs .5					> 192 ? must be a buggy 254
+
+				sta BB.tmpTrk
+
+				tya
+				and #%00000111			stepping
+				tay
+				
+				lda #0
+				clc
+				
+.2				adc BB.tmpTrk
+				dey
+				bne .2
+				
+				rts
+
+.5				asl						X4 standard stepping
+				asl
+				
+BB.Trk2Qtrk.RTS rts
+*--------------------------------------
+BB.FX2.SeekReadD2
+				jsr BB.FX2.HeadSelect
+				
+				lda BB.TargetTrk
+				jsr BB.FX2.Trk2Qtrk
+				sta BB.TargetQTrack
+
+				lda BB.FX2.AddrField.T
+				jsr BB.FX2.Trk2Qtrk
+				sta BB.CurrentQTrack
+
+				cmp	BB.TargetQTrack
+				beq BB.FX2.ReadSectD2
+
+				bit #1
+				bne .1
+
+				jsr .20					we are on 0/4 or 2/4 track
+
+				bra .10					no wait, next operation will be phy/plx/Ph0On,y
+
+.1				cmp	BB.TargetQTrack		we are on 1/4 or 3/4
+				bcs .2					if CS, C > T, must move out
+
+				inc						CC: C < T, ON next PH
+
+				.HS B0					BCS
+
+.2				dec						CS: C > T, ON prev PH
+
+				sta BB.CurrentQTrack
+
+				bra .6					Ph ON to go to 0/4 or 2/4, then wait
+*--------------------------------------
+.20				and #6
+				ora ROM.D2.Slotn0
+				tay
+				lda IO.D2.Ph0On,y
+				rts
+*--------------------------------------
+.3				bcs	.4					if CS, C > T, must move out
+
+				inc						CC: C < T, ON next PH
+
+				.HS B0					BCS
+
+.4				dec						CS: C > T, ON prev PH
+
+				sta BB.CurrentQTrack
+
+				bit #1
+				bne .5					we must go to 1/4 or 3/4
+
+				lda IO.D2.Ph0Off,x		we must go to 0/4 or 2/4 : Off Prev Ph
+				bra .8					go wait....
+
+.5				phy						we must go on 1/4 or 3/4
+				plx						Y already ON, -> X for Ph0Off,x
+
+				bcs	.6					if CS, C > T, must move out
+
+				inc						CC: C < T, ON next PH
+
+.6				jsr .20					now X and Y on
+
+.8				lda #IO.D2.SeekTimeB
+
+.9				jsr BB.Wait100usecA		...wait...
+
+.10				lda BB.CurrentQTrack
+				cmp	BB.TargetQTrack
+				bne .3
+
+				lsr						CS if X,Y on
+
+				lda #0
+				jsr BB.Wait100usecA
+
+				lda IO.D2.Ph0Off,y
+				bcc .11
+
+				lda IO.D2.Ph0Off,x
+
+.11				
+*--------------------------------------
+BB.FX2.ReadSectD2
+				ldx ROM.D2.Slotn0
+
+				stz BB.RetryCnt
+				php
+
+tryread 		plp 					fix stack.
+
+rdhead 			sec 					anticipate error.
+				inc BB.RetryCnt			if = 0 then give up!
+				beq BB.Trk2Qtrk.RTS		branch if can't fine/read sector.
+
+				clc 					indicate reading header.
+
+				ldy #0					Retry cnt waiting D5
+
+rddata 			php 					carry set if reading DATA.
+
+rd0 			iny
+				beq tryread
+
+rd1 			lda IO.D2.RData,x		read a byte from the state machine.
+				bpl rd1 				loop until ready.
+
+rd1a 			eor #$d5 				mark 1?
+				bne rd0 				branch if not.
+
+rd2 			lda IO.D2.RData,x
+				bpl rd2
+
+				cmp #$aa 				mark 2?
+				bne rd1a
+				nop 					waste a little time.
+
+rd3 			lda IO.D2.RData,x
+				bpl rd3
+
+				cmp #$96 				header mark 3?
+				beq rdhd1 				branch if it is.
+
+				plp 					were we looking for data mark 3?
+				bcc rdhead 				branch if not.
+
+				eor #$ad 				data mark 3?
+				beq rddt1 				go read data field if true...
+
+rdhd0 			bne rdhead 				otherwise, start over.
+
+rdhd1 			ldy #3 					read volume,trk,sect
+
+rdhd2 			lda IO.D2.RData,x
+				bpl rdhd2
+
+				rol
+				sta ROM.D2.oddbits 		save odd bits (7,5,3,1)
+
+rdhd4 			lda IO.D2.RData,x
+				bpl rdhd4
+
+				and ROM.D2.oddbits 		combine even and odd to form value.
+				sta BB.FX2.AddrField,y
+				dey
+				bne rdhd2 				ignore Checksum, A=sector
+
+				plp
+				cmp ROM.D2.ReqSect		last byte formed is sector#
+				bne rdhead 				branch if target sector not found.
+
+				lda BB.FX2.AddrField.T	previous result is track #
+				cmp BB.TargetTrk		is desired track found?
+				bne goseek 				re-seek if mismatch.
+
+				bcs rddata 				branch if proper track always.
+*--------------------------------------
+rddt1 			ldy #$56 				read 2 bit groupings first.
+rddt1a 			sty ROM.D2.oddbits
+
+rddt2 			ldy IO.D2.RData,x
+				bpl rddt2
+
+				eor dnib,y 				denibblize using table left from boot rom.
+				ldy ROM.D2.oddbits 		save in nbuf1
+				dey
+				sta nbuf1,y
+				bne rddt1a 				loop until all 86 groups are read.
+
+rddt3 			sty ROM.D2.oddbits 		now count up for 6-bit groups.
+
+rddt4 			ldy IO.D2.RData,x
+				bpl rddt4
+
+				eor dnib,y
+				ldy ROM.D2.oddbits 		save result to specified buffer.
+				sta (ROM.D2.DataBuf),y
+				iny
+				bne rddt3 				loop for 256 bytes.
+
+rdchk 			ldy IO.D2.RData,x 		now verify checksum...
+				bpl rdchk
+
+				eor dnib,y 				must be equal...
+				bne rdhd0 				branch if error.
+
+				ldy #0 					make y=0
+
+nxttwo 			ldx #$56 				now combine 2-bit group with 6 bit group
+
+twobit 			dex 					all done with this group?
+				bmi nxttwo 				branch if so.
+
+				lda (ROM.D2.DataBuf),y
+				lsr nbuf1,x
+				rol
+				lsr nbuf1,x
+				rol
+				sta (ROM.D2.DataBuf),y
+				iny
+				bne twobit
+
+				clc
+				rts
+*--------------------------------------
+goseek 			jmp BB.FX2.SeekReadD2
+*--------------------------------------
+BB.Wait100usecA	phx						(3)
+
+.1				ldx #20					(2)
+
+.2 				dex 					(2)
+				bne .2					(3)
+
+				dec						(2)
+				bne .1					(3)
+
+				plx						(4)
+
+				rts						(6)
+*--------------------------------------
+BB.FX2.BootErr	jsr clrscrn 			clear video
+				ldy #BB.MSG.ERR.Len-1
+
+.1	 			lda BB.MSG.ERR,y
+				sta $5b6,y
+				dey
+				bpl .1
+
+				jmp $ff69
+*--------------------------------------
+BB.MSG.ERR		.AS -"BOOT ERROR"
+BB.MSG.ERR.Len	.EQ *-BB.MSG.ERR
+*--------------------------------------
+*
+*	BLOCK 1
+*
+*--------------------------------------
+BB.FX2.ScanCat	ldy #0
+				sty ZP.FX2.iBLKLO
+				sty ZP.FX2.iBLKHI
+				sty ZP.FX2.iBLKPtr
+
+				sta ZP.FX2.iBLKLO+1
+
+				lda #4 					begin look-up with first entry past header.
+				.HS 2C					BIT ABS
+.1	 			lda ZP.FX2.iBLKLO
+		 		clc
+				adc BB.FX2.CATBLK1+$23	ENTRY_LEN : bump to next directory entry.
+				tay 					save in y for now.
+				bcc .2		 			branch if not a page cross.
+
+				inc ZP.FX2.iBLKLO+1
+				lda ZP.FX2.iBLKLO+1 	check for new block.
+				lsr 					if even then new block.
+				bcs .2
+
+				cmp #$a 				have all file names been compared?
+				beq BB.FX2.BootErr		branch if no pro.kernel.
+
+				ldy #4 					else, begin at block beginning.
+
+.2		 		sty ZP.FX2.iBLKLO
+
+				ldy #6
+
+.3		 		lda (ZP.FX2.iBLKLO),y 	look for matching name.
+				cmp BB.FX2.ProDOS,y
+				bne .1	 				branch if no match.
+
+				dey
+				bpl .3
+
+*				ldy #$10 				get file type & index block addr.
+*				lda (ZP.FX2.iBLKLO),y
+*				cmp #S.FI.T.SYS			is it a system file?
+*				bne BB.FX2.BootErr
+*				iny
+
+				ldy #$11
+
+				lda (ZP.FX2.iBLKLO),y
+				sta ZP.BLK.BLKNUM
+				iny
+				lda (ZP.FX2.iBLKLO),y
+				sta ZP.BLK.BLKNUM+1
+
+				stz ZP.FX2.iBLKLO
+				stz ZP.FX2.iBLKHI
+
+				ldy #$1e 				read index block at $1e00 and
+				sty ZP.FX2.iBLKLO+1 	kernel at $2000
+				sty iobuff+1
+				iny
+				sty ZP.FX2.iBLKHI+1
+*--------------------------------------
+BB.FX2.LOADSYS	jsr BB.FX2.ReadBLK		read index block.
+				bcs BB.FX2.BootErr
+
+				ldy ZP.FX2.iBLKPtr 		get index pointer
+				inc ZP.FX2.iBLKPtr 		bump for next time.
+
+				lda (ZP.FX2.iBLKLO),y
+				sta ZP.BLK.BLKNUM
+				lda (ZP.FX2.iBLKHI),y 	high disk addr.
+				sta ZP.BLK.BLKNUM+1
+
+				ora (ZP.FX2.iBLKLO),y 	if both=0 then done.
+				bne BB.FX2.LOADSYS		branch if more to read.
+
+				jmp $2000 				go execute kernel code.
+*--------------------------------------
+BB.FX2.ProDOS 	.DA	#$26				$20 = storage type + 6 = "PRODOS" len
+				.AS "PRODOS"
+*--------------------------------------
+				.LIST ON
+BB.FX2.Free		.EQ $C00-*
+				.BS BB.FX2.Free
+				.LIST OFF
+				.EP
+*--------------------------------------
+MAN
+SAVE usr/src/shared/x.bb.fx2.s
+LOAD usr/src/lib/libblkdev.s
+ASM

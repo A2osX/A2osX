@@ -409,7 +409,7 @@ BS.RAMReset		bit GP.CISPARE1
 
 				lda #$FF
 				sta AUX.RAMSIG
-				dec
+				dec						$FE
 				sta AUX.RAMSIG+1		Set $E000-$FEFF as BLOCK FREE
 
 				sta IO.CLRWRITEAUX
@@ -576,7 +576,7 @@ BS.ReadDirEnt	lda #$59
 				lda $27D
 				sta BS.CAT.EPB
 
-				lda $27C 
+				lda $27C
 				sta BS.CAT.EL
 				sta	GP.MLIRW.COUNT
 
@@ -799,43 +799,44 @@ LB364			lda #$FF
 				rts
 *--------------------------------------
 LB36B			lda GP.EXECACTV
-				bpl	LB37B
+				bpl	.8
 
 				sta	GP.EXECFILE
 				ldx	#$08
 				lda BS.REFNUMs,x
 				jsr	BS.CloseA
 
-LB37B			rts
+.8				rts
 *--------------------------------------
 BS.KW.VERIFY	bcs	LB3B7
 
 				lda GP.FoundBITS
 				and	#CMDBITS1.R
-				bne	LB38D
+				bne	.8
 
 				ldy	#0
 				jsr	BS.GetMSGY
 				jsr	MON.CROUT
 
-LB38D			clc
+.8				clc
 				rts
 
 *				lda #$00
-*				beq	LB39F
+*				beq	LB39F				BS.KW.FLUSH.1
 
+*--------------------------------------
 BS.KW.FLUSH		lda GP.FoundBITS
 				and	#CMDBITS1.R
-				beq	LB39F
+				beq	.1
 
 				jsr	BS.CheckFilename
-				bcs	LB3A7
+				bcs	.9
 
-LB39F			sta	GP.MLICF.REFNUM
+.1				sta	GP.MLICF.REFNUM
 				lda #MLI.C.FLUSH
 				jsr	GP.GOSYSTEM
 
-LB3A7			rts
+.9				rts
 *--------------------------------------
 BS.KW.OPEN		php
 				jsr	BS.CheckFilename
@@ -1583,6 +1584,182 @@ BS.KW.ONLINE	jsr	MON.CROUT
 
 BS.KW.NOMON		clc
 				rts
+*--------------------------------------
+* FORMAT VOLNAME,Sx,Dy
+* ,A<HEADCOUNT>,E<TRACKCOUNT>,F<STEPPING>
+* ,L<CATBLOCK>,B<BLOCK>
+*
+* d   : 1,2 heads
+* sss : 4,3,2,1 steppings
+* => T : dev type, 0 = BLK, 255 = D2
+* => V : d0000sss
+*--------------------------------------
+BS.KW.FORMAT	ldx #BSX.FMT.CheckP.X
+				jsr BS.ToAUX
+				bcs .99
+				
+				bit GP.ParamT
+				bmi .5
+*--------------------------------------
+* Format BLK dev
+*--------------------------------------
+				lda #10
+				sta ZP.BUFPTR+1			fake Buffer for status & format
+				stz ZP.BUFPTR
+
+				lda GP.FoundBITS+1
+				and #CMDBITS1.B
+				bne .1
+
+				jsr .2					A = cmd = 0 = status
+				bcs .19
+				
+				stx GP.ParamB
+				sty GP.ParamB+1
+				stz GP.ParamB+2
+
+.1				lda #3					cmd = 3 = format
+
+				jsr .2
+
+				bcc BS.KW.FORMAT.CAT
+
+.19				lda #BS.E.IO
+				rts
+
+.2				sta ZP.CMD
+
+				lda BS.WBlock.P.NUM		unitnum : DSSS0000
+				sta ZP.UNITNUM
+
+				lsr
+				lsr
+				lsr
+				tax						000DSSS0
+				jmp (MLI.DEVPTRS,x)
+*--------------------------------------
+* Format Disk II
+*--------------------------------------
+.5				stz GP.ParamB+1			Total Block Count
+				
+				ldx #3
+
+				bit GP.ParamV
+				bpl .6
+				
+				inx						2 heads....
+				
+.6				lda GP.ParamE
+				
+.7				asl
+				rol GP.ParamB+1
+				dex
+				bne .7
+				
+				sta GP.ParamB
+
+				ldx #BSX.FMT.D2.X
+				jsr BS.ToAUX
+				bcs .99
+
+				bra BS.KW.FORMAT.CAT
+
+.99				rts
+*--------------------------------------
+BS.KW.FORMAT.CAT
+				lda #2					512 bytes buffers
+				jsr BS.GETBUFR
+				bcs .99
+				
+				sta BS.WBlock.P.PTR+1
+
+				ldx GP.ParamV
+				bne .10
+				
+				lda #0					BB.ProDOS
+				ldx #BSX.FMT.GetCatBlk.X
+				jsr BS.ToAUX
+
+				jsr BS.WBlock
+				bcs .9
+
+				ldx #BSX.FMT.GetCatBlk.X
+				lda #1					BB.SOS
+				jsr BS.ToAUX
+
+				jsr BS.WBlock
+				bcs .9
+
+				bra .11
+
+.10				ldx #BSX.FMT.GetCatBlk.X
+				lda #2					BB.FX 1/2
+				jsr BS.ToAUX
+
+				jsr BS.WBlock
+				bcs .9
+
+				ldx #BSX.FMT.GetCatBlk.X
+				lda #3					BB.FX 2/2
+				jsr BS.ToAUX
+
+				jsr BS.WBlock
+				bcs .9
+
+.11				ldx #BSX.FMT.GetCatBlk.X
+				lda #4					Ist CAT block
+				jsr BS.ToAUX
+
+				jsr BS.WBlock
+				bcs .9
+
+.1				ldx #BSX.FMT.GetCatBlk.X
+				lda #5					Next CAT block
+				jsr BS.ToAUX
+				bcs .2
+
+				jsr BS.WBlock
+				bcs .9
+				
+				bra .1
+
+.2				ldx #BSX.FMT.GetCatBlk.X
+				lda #6					BM blocks
+				jsr BS.ToAUX
+				bcs .3
+
+				jsr BS.WBlock
+				bcs .9
+
+				bra .2
+
+.3
+
+
+				clc
+
+.9				php
+				jsr BS.FREEBUFR
+				lda #BS.E.IO
+				plp
+.99				rts
+*--------------------------------------
+BS.WBlock		jsr MLI
+				.DA #MLI.C.WRITEBLOCK
+				.DA BS.WBlock.P
+				bcs .9
+
+				inc BS.WBlock.P.BLK
+				rts
+
+.9				lda #BS.E.IO
+				
+				rts
+*--------------------------------------
+BS.WBlock.P		.DA #3
+BS.WBlock.P.NUM	.BS 1
+BS.WBlock.P.PTR	.BS 2
+BS.WBlock.P.BLK	.BS 2
 *--------------------------------------
 BS.Expand2.P	.DA #1
 				.DA MLI.PATHBUF
