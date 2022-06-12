@@ -40,18 +40,34 @@ SYM.SC.AUTO			.EQ 2
 SYM.SC.REGISTER		.EQ 4
 SYM.SC.EXTERN		.EQ 6
 SYM.SC.TYPEDEF		.EQ 8
+SYM.SC.DEFINE		.EQ 10
+SYM.SC.TAG			.EQ 12
 *
 SYM.SizeOf		.EQ 4
 SYM.Addr		.EQ 6
-*				.EQ 8
+SYM.Def			.EQ 8
 *
-SYM.Def			.EQ 10
+SYM				.EQ 10
+*--------------------------------------
+CPS.ParentID	.EQ 0
+CPS.hSYM		.EQ 2
+*
+CPS.Cont		.EQ 4
+CPS.Break		.EQ 6
+*
+CPS				.EQ 8
 *--------------------------------------
 * Zero Page Segment, up to 32 bytes
 *--------------------------------------
 				.DUMMY
 				.OR ZPBIN
 ZS.START
+ZPPtr1			.BS 2
+ZPPtr2			.BS 2
+ZPPtr3			.BS 2
+ArgIndex		.BS 1
+bPass2			.BS 1
+
 ZPCCCode		.BS 2
 ZPCCConst		.BS 2
 ZPCCData		.BS 2
@@ -66,17 +82,12 @@ LocalPtr		.BS 1
 ScopePtr		.BS 1
 ScopenCnt		.BS 1
 
-ZPSymID			.BS 2
-hSymScope		.BS 1
-hSymBuf			.BS 1
+*				.BS 1
+*				.BS 1
 ZPSymSize		.BS 2
 ZPSymBufPtr		.BS 2
 
-ZPPtr1			.BS 2
-ZPPtr2			.BS 2
-ZPPtr3			.BS 2
-ArgIndex		.BS 1
-hDefineBuf		.BS 1
+ZPLookupSymPtr	.BS 2
 
 ZS.END			.ED
 *--------------------------------------
@@ -104,10 +115,14 @@ CS.START		cld
 L.MSG.GREETINGS	.DA MSG.GREETINGS
 L.MSG.USAGE		.DA MSG.USAGE
 L.MSG.COMPILING	.DA MSG.COMPILING
+L.MSG.LINKING	.DA MSG.LINKING
+L.MSG.LINKING2	.DA MSG.LINKING2
+L.MSG.GENERATING .DA MSG.GENERATING
 L.MSG.DEBUG		.DA MSG.DEBUG
 L.MSG.TRACE		.DA MSG.TRACE
 L.MSG.RTSTK		.DA MSG.RTSTK
 L.MSG.ERROR		.DA MSG.ERROR
+L.MSG.SUMMARY	.DA MSG.SUMMARY
 L.MSG.NOMAIN	.DA MSG.NOMAIN
 L.ENV.INCLUDE	.DA ENV.INCLUDE
 *--------------------------------------
@@ -207,6 +222,7 @@ J.CC.STYPES		.DA CC.TYPE.SCHAR
 *--------------------------------------
 L.CC.MAIN		.DA CC.MAIN
 L.CC.LIBC		.DA CC.LIBC
+L.PCC.FH		.DA PCC.FH
 				.DA 0
 *--------------------------------------
 * Called once at process creation
@@ -243,21 +259,48 @@ CS.RUN			>PUSHW L.MSG.GREETINGS
 
 				jsr CC.Init
 				bcs CS.INIT.RTS
+
+				jsr CODE.Init
+
+				jsr CS.RUN.FOpen1st
+				bcs CS.INIT.RTS
 *--------------------------------------
-CS.RUN.LOOP		jsr CC.CompileFile
+CS.RUN.CLOOP	jsr CC.CompileFile
 
 				cmp #MLI.E.EOF
 				bne .9
 
 				jsr CS.RUN.FClose
-				bne CS.RUN.LOOP
+				bne CS.RUN.CLOOP
 *--------------------------------------
-				jsr CC.MainExec
-				bcc .8
+				jsr PrintSummary
+				bcs .99
 
-				>LDYA L.MSG.NOMAIN
-				>SYSCALL puts
+				jsr CC.Link
+				bcs .99
 
+				jsr CheckMain
+				bcs .99
+
+				dec bPass2
+
+				jsr CS.RUN.FCreate
+				bcs .99
+
+				jsr CODE.Init
+				bcs .99
+
+				jsr CS.RUN.FOpen1st
+				bcs .99
+*--------------------------------------
+.2				jsr CC.CompileFile
+
+				cmp #MLI.E.EOF
+				bne .9
+
+				jsr CS.RUN.FClose
+				bne .2
+*--------------------------------------
 .8				lda #0					Exit Code = Success
 				sec
 				rts
@@ -266,13 +309,13 @@ CS.RUN.LOOP		jsr CC.CompileFile
 				jsr PrintErrorMsg
 				pla
 				sec
-				rts
+.99				rts
 *--------------------------------------
 CS.RUN.ARGS		inc ArgIndex
 
 				lda ArgIndex
 				>SYSCALL ArgV
-				bcs .7
+				bcs .8
 
 				>STYA ZPPtr1
 				lda (ZPPtr1)
@@ -297,18 +340,24 @@ CS.RUN.ARGS		inc ArgIndex
 				sta (pData),y
 				bra CS.RUN.ARGS
 
-.4				>LDA.G hFilePtr
-				cmp #hFilePtr
+.4				>LDA.G CC.InFileArg
+				bne .5
+
+				lda ArgIndex
+				>STA.G CC.InFileArg
+				bra CS.RUN.ARGS
+
+.5				>LDA.G CC.OutFileArg
 				bne .90
 
-				>LDYA ZPPtr1
-				jsr CS.RUN.FOpen
-				bcc CS.RUN.ARGS
+				lda ArgIndex
+				>STA.G CC.OutFileArg
+				bra CS.RUN.ARGS
 
-				rts
+.8				>LDA.G CC.InFileArg
+				beq .90
 
-.7				>LDA.G hFilePtr
-				cmp #hFilePtr
+				>LDA.G CC.OutFileArg
 				beq .90
 
 				clc
@@ -322,7 +371,22 @@ CS.RUN.ARGS		inc ArgIndex
 				sec
 				rts
 *--------------------------------------
-CS.RUN.FOpen	>PUSHYA
+CS.RUN.FOpen1st	>LDA.G CC.InFileArg
+				>SYSCALL ArgV
+
+CS.RUN.FOpen	phy
+				pha
+
+				>PUSHW L.MSG.COMPILING
+				pla
+				pha
+				>PUSHYA
+				>PUSHBI 2
+				>SYSCALL PrintF
+
+				pla
+				ply
+				>PUSHYA
 				>PUSHBI	O.RDONLY
 				>PUSHBI S.FI.T.TXT
 				>PUSHWZ					Aux type
@@ -406,10 +470,36 @@ CS.RUN.FClose	>LDA.G hFilePtr
 
 .8				rts
 *--------------------------------------
+CS.RUN.FCreate	>LDA.G CC.OutFileArg
+				>SYSCALL ArgV
+				>STYA ZPPtr1
+
+				>PUSHW L.MSG.GENERATING
+				>PUSHW ZPPtr1
+				>PUSHBI 2
+				>SYSCALL PrintF
+
+				>PUSHW ZPPtr1
+				>PUSHBI	O.WRONLY+O.CREATE
+				>PUSHBI S.FI.T.BIN
+				>PUSHWI	$2000			Aux type
+				>SYSCALL FOpen
+				bcs .9
+
+				>STA.G CC.hOutFile
+
+				>PUSHA					A = CC.hOutFile
+				>PUSHW L.PCC.FH
+				>PUSHWI PCC.FH.L
+				>SYSCALL FWrite
+
+.9				rts
+*--------------------------------------
 CS.DOEVENT		sec
 				rts
 *--------------------------------------
-CS.QUIT			jsr CC.Quit
+CS.QUIT			jsr CODE.Quit
+				jsr CC.Quit
 
 				>LDA.G hLineBuf
 				beq .8
@@ -458,7 +548,7 @@ PrintDebugMsg	>PUSHW L.MSG.DEBUG
 				>PUSHB LocalPtr
 
 				>PUSHW ZPCCStack
-				
+
 				>PUSHB CStackPtr
 				tay
 				beq .1
@@ -471,44 +561,17 @@ PrintDebugMsg	>PUSHW L.MSG.DEBUG
 
 .1				>PUSHYA
 
-				>PUSHBI 14
+				lda ScopePtr
+				sec
+				sbc #CC.hSymbols
+				>PUSHA 
+
+				>PUSHBI 15
 				>SYSCALL PrintF
-			>DEBUGOA
+			>DEBUG
 				rts
 *--------------------------------------
-PrintRTStackTrace
-				pha
-				phx
-				phy
-				
-				>PUSHW L.MSG.RTSTK
-				>PUSHW pBase
-
-				>PUSHW ZPPtr1
-
-				ldy #1
-				>PUSHB (ZPPtr1),y
-				>PUSHB (ZPPtr1)
-
-				lda pStack
-				clc
-				adc #8
-				pha
-				lda pStack+1
-				adc #0
-				>PUSHA
-				pla
-				>PUSHA
-				
-				>PUSHBI 8
-				>SYSCALL PrintF
-
-				ply
-				plx
-				pla
-				rts
-*--------------------------------------
-PrintErrorMsg	lda hDefineBuf
+PrintErrorMsg	>LDA.G CC.hDefineBuf
 				beq .10
 
 				>LDYA.G CC.SaveDefine
@@ -552,6 +615,78 @@ PrintErrorMsg	lda hDefineBuf
 				>SYSCALL FPrintF
 				rts
 *--------------------------------------
+PrintSummary	lda ZPCCCode+1
+				sta PCC.FH+PCC.FH.IDATA+1
+				sec
+				sbc #$20
+				sta PCC.FH+PCC.FH.CSSIZE+1
+
+				lda ZPCCCode
+				sta PCC.FH+PCC.FH.CSSIZE
+				sta PCC.FH+PCC.FH.IDATA
+
+				>PUSHW L.MSG.SUMMARY
+
+				>PUSHW PCC.FH+PCC.FH.CSSIZE
+
+				>PUSHW ZPCCConst
+
+				lda ZPCCData+1
+				>PUSHA
+				sta PCC.FH+PCC.FH.DSSIZE+1
+				lda ZPCCData
+				>PUSHA
+				sta PCC.FH+PCC.FH.DSSIZE
+
+				>PUSHBI 6
+				>SYSCALL PrintF
+				rts
+*--------------------------------------
+CheckMain		>PUSHB.G CC.hSymbols
+
+				>PUSHW L.CC.MAIN
+				>SYSCALL SListLookup
+				bcs .9
+
+				>STYA ZPPtr1			SymID
+
+				>PUSHB.G CC.hSymbols
+
+				>PUSHW ZPPtr1			SymID
+				>PUSHWZ					allocate
+				>PUSHWI 65535			all
+				>PUSHWZ					From Start
+				>SYSCALL SListGetData
+.9				bcs .99
+
+				>STYA ZPPtr2
+
+				ldy #SYM.Addr
+				lda (ZPPtr2),y
+				iny
+				ora (ZPPtr2),y
+				beq .90
+
+				lda (ZPPtr2),y
+				sta PCC.FH+PCC.FH.MAIN+1
+				dey
+				lda (ZPPtr2),y
+				sta PCC.FH+PCC.FH.MAIN
+
+				txa
+				>SYSCALL FreeMem
+
+				rts
+
+.90				txa
+				>SYSCALL FreeMem
+
+.99				>LDYA L.MSG.NOMAIN
+				>SYSCALL puts
+				lda #E.CSYN
+				sec
+				rts
+*--------------------------------------
 				.INB usr/src/bin/cc.s.code
 				.INB usr/src/bin/cc.s.core
 				.INB usr/src/bin/cc.s.dir
@@ -562,65 +697,72 @@ PrintErrorMsg	lda hDefineBuf
 				.INB usr/src/bin/cc.s.f
 				.INB usr/src/bin/cc.s.exp
 				.INB usr/src/bin/cc.s.sym
+				.INB usr/src/bin/cc.s.link
 				.INB usr/src/bin/cc.s.exec
 *--------------------------------------
-PCC.DEBUG
-			jsr PrintRTStackTrace
-				>DEBUG
+CS.END
+*--------------------------------------
+* Initialized DATA
+*--------------------------------------
+MSG.GREETINGS	.AZ "\r\nA2osX C Compiler %d.%d\r\n\r\n"
+MSG.USAGE		.AS "Usage : CC <option> srcfile.c dstfile\r\n"
+				.AS "   -D : Debug Mode\r\n"
+				.AS "   -T : Trace On"
+				.AZ "\r\n"
+MSG.COMPILING	.AZ "*** Compiling file: %s\r\n"
+MSG.LINKING		.AZ "*** Linking..."
+MSG.LINKING2	.AZ "***  %18s T=%h, Q=%b, SC=%h, SizeOf=%H, @=%H\r\n"
+MSG.GENERATING	.AZ "*** Generating: %s\r\n"
+MSG.DEBUG		.AS "*** pCode=%H, pConst=%H, pData=%H, pStack=%H\r\n"
+				.AZ "    LSP=%h, CSP=%H:%h>%h:%h, ScopePtr=%h\r\n"
+MSG.TRACE		.AZ "%5D> %s\r\n"
+MSG.RTSTK		.AZ "<pBase=%H, pVar=%H, (pVar)=%H, pStack=%H>\r\n"
+MSG.ERROR		.AZ "       %s^\r\n"
+MSG.SUMMARY		.AZ "\r\n*** Compilation OK : Code size=%5D, iData size=%5D, uData size=%5D\r\n\r\n"
+MSG.NOMAIN		.AZ "*** No 'main()' function defined."
+*--------------------------------------
+ENV.INCLUDE		.AZ "INCLUDE"
+ENV.LIB			.AZ "LIB"
+*--------------------------------------
+OptionList		.AS "DdTt"
+OptionVars		.DA #bDebug,#bDebug,#bTrace,#bTrace
+*--------------------------------------
+PCC.DEBUG		>DEBUG
 PCC.DEBUG.L		.EQ *-PCC.DEBUG
 *--------------------------------------
-PCC.ENTER
-*			jsr PrintRTStackTrace
-			
-				ldx pBase
+PCC.SLEEP		>SLEEP
+PCC.SLEEP.L		.EQ *-PCC.SLEEP
+*--------------------------------------
+PCC.ENTER		ldx pBase
 				phx
 				clc
 				adc pStack				A = Local Size
 				sta pBase
 
-*			jsr PrintRTStackTrace
-*			>DEBUG
-			
 PCC.ENTER.L		.EQ *-PCC.ENTER
 *--------------------------------------
-PCC.LEAVE	
-*			jsr PrintRTStackTrace
-
-				lda pBase
+PCC.LEAVE		lda pBase
 				sta pStack
 				pla
 				sta pBase
-
-*			jsr PrintRTStackTrace
-*			>DEBUG
-
 				rts
+
 PCC.LEAVE.L		.EQ *-PCC.LEAVE
 *--------------------------------------
-PCC.ADDLOCAL	
-*			jsr PrintRTStackTrace
-*			>DEBUG
-				clc
+PCC.ADDLOCAL	clc
 				adc pStack
 				sta pStack
 
-*			jsr PrintRTStackTrace
-*			>DEBUG
-			
 PCC.ADDLOCAL.L	.EQ *-PCC.ADDLOCAL
 *--------------------------------------
 PCC.GETLOCAL	clc
 				adc pBase
 				tay
 				lda pBase+1
-				
+
 PCC.GETLOCAL.L	.EQ *-PCC.GETLOCAL
 *--------------------------------------
 PCC.SETRETVALUE	ldy #0
-
-*			jsr PrintRTStackTrace
-*			>DEBUG
-
 .1				>PULLA
 				sta (pBase),y
 				iny
@@ -629,92 +771,41 @@ PCC.SETRETVALUE	ldy #0
 
 PCC.SETRETVALUE.L	.EQ *-PCC.SETRETVALUE
 *--------------------------------------
-PCC.PushXFromYA	>STYA ZPPtr1
-
-*			jsr PrintRTStackTrace
-*			>DEBUG
-
+PCC.PushXFromYA	>STYA ZS.RT.Ptr1
 				txa
 				dec
 				tay
 
-.1				lda (ZPPtr1),y
+.1				lda (ZS.RT.Ptr1),y
 				>PUSHA
 				dey
 				bpl .1
 
 PCC.PushXFromYA.L	.EQ *-PCC.PushXFromYA
 *--------------------------------------
-PCC.PopXToYA	>STYA ZPPtr1
-
-*			jsr PrintRTStackTrace
-*			>DEBUG
+PCC.PopXToYA	>STYA ZS.RT.Ptr1
 
 				ldy #0
 
 .1				>PULLA
-				sta (ZPPtr1),y
+				sta (ZS.RT.Ptr1),y
 				iny
 				dex
 				bne .1
 
 PCC.PopXToYA.L	.EQ *-PCC.PopXToYA
 *--------------------------------------
-PCC.SetXToYA	>STYA ZPPtr1
-
-*			jsr PrintRTStackTrace
-*			>DEBUG
+PCC.SetXToYA	>STYA ZS.RT.Ptr1
 
 				ldy #0
 
 .1				lda (pStack),y
-				sta (ZPPtr1),y
+				sta (ZS.RT.Ptr1),y
 				iny
 				dex
 				bne .1
 
 PCC.SetXToYA.L	.EQ *-PCC.SetXToYA
-*--------------------------------------
-CS.END
-*--------------------------------------
-* Initialized DATA
-*--------------------------------------
-MSG.GREETINGS	.AZ "\r\nA2osX C Compiler %d.%d\r\n\r\n"
-MSG.USAGE		.AS "Usage : CC <option> srcfile\r\n"
-				.AS "   -D : Debug Mode\r\n"
-				.AS "   -T : Trace On"
-				.AZ "\r\n"
-MSG.COMPILING	.AZ "***Compiling : %s...\r\n"
-MSG.DEBUG		.AZ "***pCode=%H, pConst=%H, pData=%H, pStack=%H, LSP=%h, CSP=%H:%h>%h:%h\r\n"
-MSG.TRACE		.AZ "%5D> %s\r\n"
-MSG.RTSTK		.AZ "<pBase=%H, pVar=%H, (pVar)=%H, pStack=%H>\r\n"
-MSG.ERROR		.AZ "       %s^\r\n"
-MSG.NOMAIN		.AZ "***No 'main()' function defined."
-*--------------------------------------
-ENV.INCLUDE		.AZ "INCLUDE"
-ENV.LIB			.AZ "LIB"
-*--------------------------------------
-OptionList		.AS "DdTt"
-OptionVars		.DA #bDebug,#bDebug,#bTrace,#bTrace
-*--------------------------------------
-PCC.SLEEP		>SLEEP
-PCC.SLEEP.L		.EQ *-PCC.SLEEP
-*--------------------------------------
-*PCC.HEADER		cld
-*				jmp (.1,x)
-*				.DA #$61				6502,Level 1 (65c02)
-*				.DA #1					BIN Layout Version 1
-*				.DA #0					S.PS.F.EVENT
-*				.DA #0
-*				.DA CS.END-CS.START		Code Size (without Constants)
-*				.DA DS.END-DS.START		Data Size
-*				.DA #256				Stack Size
-*				.DA #ZS.END-ZS.START	Zero Page Size
-*				.DA 0
-*.1				.DA CS.INIT
-*				.DA CS.RUN
-*				.DA CS.DOEVENT
-*				.DA	CS.QUIT
 *--------------------------------------
 PCC.Test0X		lda #0
 
@@ -730,34 +821,152 @@ PCC.Test0X		lda #0
 PCC.Test0X.L	.EQ *-PCC.Test0X
 *--------------------------------------
 PCC.SETpBASEp1	lda pBase+1
-				sta ZPPtr1+1
+				sta ZS.RT.Ptr1+1
+
 PCC.SETpBASEp1.L	.EQ *-PCC.SETpBASEp1
 *--------------------------------------
 PCC.SETpBASEpA	clc
 				adc pBase
-				sta ZPPtr1
+				sta ZS.RT.Ptr1
 				ldy #1
+
 PCC.SETpBASEpA.L	.EQ *-PCC.SETpBASEpA
 *--------------------------------------
-PCC.Deref		>PUSHB (ZPPtr1),y
-				>PUSHB (ZPPtr1)
-PCC.Deref.L		.EQ *-PCC.Deref				
+PCC.Deref		>PUSHB (ZS.RT.Ptr1),y
+				>PUSHB (ZS.RT.Ptr1)
+
+PCC.Deref.L		.EQ *-PCC.Deref
 *--------------------------------------
 PCC.PUSHpBASEp1	>PUSHB pBase+1
+
 PCC.PUSHpBASEp1.L	.EQ *-PCC.PUSHpBASEp1
 *--------------------------------------
 PCC.PUSHpBASEpA	clc
 				adc pBase
 				>PUSHA
+
 PCC.PUSHpBASEpA.L	.EQ *-PCC.PUSHpBASEpA
 *--------------------------------------
-PCC.PushFromPtr	>PULLW ZPPtr1
+PCC.PushFromPtr	>PULLW ZS.RT.Ptr1
 
-.1				lda (ZPPtr1),y
+.1				lda (ZS.RT.Ptr1),y
 				>PUSHA
 				dey
 				bpl .1
+
 PCC.PushFromPtr.L	.EQ *-PCC.PushFromPtr
+*--------------------------------------
+PCC.PushConstPAX
+				clc
+				adc PCC.FH.IDATA
+				tay
+				txa
+				adc PCC.FH.IDATA+1
+				>PUSHA
+				tya
+				>PUSHA
+
+PCC.PushConstPAX.L	.EQ *-PCC.PushConstPAX
+*--------------------------------------
+				.DUMMY
+				.OR ZPBIN
+ZS.RT.START
+ZS.RT.Ptr1		.BS 2
+
+ZS.RT.END		.ED
+*--------------------------------------
+PCC.FH			.PH $2000
+PCC.FH.2000		cld
+				jmp (PCC.FH.JMP,x)
+				.DA #$61				6502,Level 1 (65c02)
+				.DA #1					BIN Layout Version 1
+				.DA #0					S.PS.F.EVENT
+				.DA #0
+PCC.FH.CSSIZE	.EQ *-PCC.FH.2000
+			.DA $FFFF					* Code Size (without Constants)
+PCC.FH.DSSIZE	.EQ *-PCC.FH.2000
+			.DA $FFFF					* Data Size
+				.DA #256				Stack Size
+				.DA #ZS.RT.END-ZS.RT.START  ZP Size
+				.DA 0
+
+PCC.FH.JMP		.DA PCC.FH.INIT
+				.DA PCC.FH.RUN
+				.DA PCC.FH.DOEVENT
+				.DA	PCC.FH.QUIT
+PCC.FH.IDATA 	.EQ *-PCC.FH.2000
+			.DA $FFFF
+				.DA 0
+
+PCC.FH.INIT
+* TODO : LoadLib code
+PCC.FH.QUIT
+* TODO : UnloadLib code
+PCC.FH.DOEVENT
+				clc
+				rts
+
+* int main(int argc, char *argv[]) ;
+
+PCC.FH.RUN		ldy #S.PS.ARGC
+				lda (pPS),y
+
+.1				pha
+				>SYSCALL ArgV
+				bcs .2
+
+				>STYA ZS.RT.Ptr1
+
+				pla
+				pha
+				asl
+				tay
+
+				lda ZS.RT.Ptr1
+				sta (pData),y
+
+				lda ZS.RT.Ptr1+1
+				iny
+				sta (pData),y
+
+				pla
+				inc
+				bra .1
+
+.2				pla
+
+				>PUSHWI 0				returned int
+
+				lda #0
+				>PUSHA
+				ldy #S.PS.ARGC
+				lda (pPS),y
+				>PUSHA					int ARGC
+				>PUSHW pData			*char[] ARGV
+			>DEBUG
+PCC.FH.MAIN		.EQ *-PCC.FH.2000+1
+			jsr $FFFF					* jsr main
+				>PULLA
+				inc pStack				pull returned int
+				sec
+				rts
+
+PCC.FH.SYSCALL	jsr A2osX.SYSCALL
+				bcc .8
+
+				inc pStack
+				eor #$ff
+				inc
+				>PUSHA					int -ERROR code...
+				ldy #1
+				lda #$FF
+				sta (pStack),y			on stack
+				rts
+
+.8
+
+PCC.FH.CS		.EP
+PCC.FH.L		.EQ *-PCC.FH
 *--------------------------------------
 CC.OPChars		.AS "!~+-*/%=&|^<>["
 CC.OPChars.Cnt	.EQ *-CC.OPChars
@@ -1151,6 +1360,8 @@ CC.LIBC			>PSTR "chtyp"
 				.DA #2,#2,#FPU.TAN
 				>PSTR "atan"
 				.DA #2,#2,#FPU.ATAN
+				>PSTR "lrintf"
+				.DA #2,#2,#FPU.QINT
 				.HS 00
 *--------------------------------------
 				.DUMMY
@@ -1166,26 +1377,32 @@ hFiles			.BS FILES.MAX
 
 LineCntPtr		.BS 1
 				.BS 1					for inc inc
-LineCnts		.BS FILES.MAX+2
+LineCnts		.BS FILES.MAX*2
 
 hLineBuf		.BS 1
 LineBufPtr		.BS 2
 
 CC.CmdSave		.BS 1
 
+CC.hDefineBuf	.BS 1
+
 CC.hDefines		.BS 1
+CC.SaveDefine	.BS 2
+
 CC.hTags		.BS 1
-CC.hSymbols		.BS SCOPE.MAX
-
-CC.hCode		.BS 1
-CC.hConst		.BS 1
-CC.ConstCnt		.BS 2
-CC.hData		.BS 1
-CC.hLocal		.BS 1
-
 CC.hStack		.BS 1
 
-CC.SaveDefine	.BS 2
+CC.hSymbols		.BS SCOPE.MAX+1			1 Global+ MAX locals
+*--------------------------------------
+CC.SymID		.BS 2
+CC.hSymBuf		.BS 1
+*--------------------------------------
+CC.hLookupSymBuf	.BS 1
+CC.LookupSymSize	.BS 2
+*--------------------------------------
+CC.InFileArg	.BS 1
+CC.OutFileArg	.BS 1
+CC.hOutFile		.BS 1
 
 DS.END			.ED
 *--------------------------------------
