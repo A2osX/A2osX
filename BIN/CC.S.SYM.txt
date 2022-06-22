@@ -7,21 +7,47 @@ NEW
 CC.SYM.New		>STYA ZPPtr2			T/Q
 				stx ZPPtr3				SC
 
-				ldy ScopePtr
+				bit bPass2
+				bpl CC.SYM.New1
+
+				bit bLocalScope
+				bmi CC.SYM.New1
+
+				>PUSHB.G CC.hScopes		Global Scope
+				>PUSHW ZPLineBufPtr
+
+				>SYSCALL SListLookup
+				bcs .9
+
+				>STYA.G CC.SymID		Y,A = KeyID
+
+				jsr CC.SkipX			X = KeyLen
+
+				>PUSHB.G CC.hScopes
+				>PUSHW.G CC.SymID
+				>PUSHW ZPSymBufPtr
+				>PUSHWI 65535			all
+				>PUSHWZ					From Start
+				>SYSCALL SListGetData
+				bcs .9
+
+				jsr CC.GetCharNB
+				cmp #'('
+				bne .8
+
+				jmp CC.F.Decl
+
+.8				clc
+.9				rts						Y,A = SymSize
+*--------------------------------------
+CC.SYM.New1		ldy ScopeIdx
 				lda (pData),y
 				jsr CC.SYM.NewKey
 				bcs .9
 
 				>STYA.G CC.SymID		Y,A = KeyID
-				stx ZPPtr3+1			X = KeyLen
 
-				>LDYAI 256
-				>SYSCALL GetMem
-				bcs .9
-
-				>STYA ZPSymBufPtr
-				txa
-				>STA.G CC.hSymBuf
+				jsr CC.SkipX			X = KeyLen
 
 				lda ZPPtr2
 				sta (ZPSymBufPtr)		#SYM.T
@@ -41,18 +67,21 @@ CC.SYM.New		>STYA ZPPtr2			T/Q
 				iny
 				cpy #SYM.Def
 				bne .1
-				
-				sty ZPSymSize
-				stz ZPSymSize+1
 
-				ldx ZPPtr3+1			Key Len
-				jsr CC.SkipX
+				tya
+				ldy #SYM.DefSize
+				sta (ZPSymBufPtr),y
 
 				jsr CC.GetCharNB
 				bcs CC.SYM.SetAddr
 
 				cmp #'('
 				bne CC.SYM.NewV
+
+				ldy #SYM.Q
+				lda #SYM.Q.FUNC
+				ora (ZPSymBufPtr),y
+				sta (ZPSymBufPtr),y
 
 				jmp CC.F.Decl
 
@@ -187,68 +216,57 @@ CC.SYM.SetAddrL	jsr CC.SYM.GetSymSizeOfInAXC
 *--------------------------------------
 CC.SYM.NewKey	>PUSHA
 				>PUSHW ZPLineBufPtr
+				>SYSCALL SListNewKey
+				bcs .9
+
+
+
+.9				rts						Y,A = KeyID, X = KeyLen
+*--------------------------------------
+CC.SYM.StoreF	>LDA.G CC.hScopes
 
 				bit bPass2
-				bpl .1
+				bpl CC.SYM.Store.1
+				
+				clc
+				rts
+*--------------------------------------
+CC.SYM.Store	bit bPass2
+				bpl CC.SYM.StoreL		Store Global & Local at Pass 1
 
-				txa
-				bne .1
+				bit bLocalScope			Store  Local at Pass 2
+				bmi CC.SYM.StoreL
 
-				>SYSCALL SListLookup
-
-*				clc
-
+				clc
 				rts
 
-.1				>SYSCALL SListNewKey
-
-				rts						Y,A = KeyID, X = KeyLen
-*--------------------------------------
-CC.SYM.Store	ldy ScopePtr
+CC.SYM.StoreL	ldy ScopeIdx
 				lda (pData),y
-				>PUSHA
+
+CC.SYM.Store.1	>PUSHA
 				>PUSHW.G CC.SymID
 				>PUSHW ZPSymBufPtr
-				>PUSHW ZPSymSize
+				>PUSHBI 0
+				ldy #SYM.DefSize
+				lda (ZPSymBufPtr),y
+				>PUSHA
 
-				bit bPass2
-				bpl .1
-
-				bit ScopenCnt
-				bmi .1
-
-				>SYSCALL SListSetData
-				rts
-
-.1				>SYSCALL SListAddData
+				>SYSCALL SListAddData
 
 				rts
 *--------------------------------------
-CC.SYM.Free		>LDA.G CC.hSymBuf
-				beq .8
-				
-				>SYSCALL FreeMem
-				bcs .99
-
-				>STZ.G CC.hSymBuf
-				
-.99				rts
-				
-.8				clc
-				rts
-*--------------------------------------
-CC.SYM.NewScope	ldy ScopePtr
-				cpy #CC.hSymbols+SCOPE.MAX
+CC.SYM.NewScope	ldy ScopeIdx
+				cpy #CC.hScopes+SCOPE.MAX
 				bcs .9
 
 				>SYSCALL SListNew
 				bcs .99
 
-				inc ScopePtr
-				ldy ScopePtr
+				inc ScopeIdx
+				ldy ScopeIdx
 				sta (pData),y
 
-				dec ScopenCnt
+				dec bLocalScope
 				clc
 				rts
 
@@ -257,19 +275,23 @@ CC.SYM.NewScope	ldy ScopePtr
 .99				rts
 *--------------------------------------
 CC.SYM.FreeScope
-				ldy ScopePtr
-				cpy #CC.hSymbols
+				ldy ScopeIdx
+				cpy #CC.hScopes
 				beq *
 
 				lda (pData),y
 				>SYSCALL SListFree
 
-				dec ScopePtr
-				inc ScopenCnt
+				dec ScopeIdx
+				inc bLocalScope
 
-				rts		
+				rts
 *--------------------------------------
-CC.SYM.Lookup	>PUSHB ScopePtr
+CC.SYM.Lookup	>LDA.G CC.LookupIdx
+				cmp #CC.LookupIdx+LOOKUP.MAX
+				beq .99
+
+				>PUSHB ScopeIdx
 
 .1				tay
 				lda (pData),y
@@ -277,7 +299,7 @@ CC.SYM.Lookup	>PUSHB ScopePtr
 				bcc .8
 
 				lda (pstack)
-				cmp #CC.hSymbols
+				cmp #CC.hScopes
 				beq .9
 
 				dec
@@ -291,22 +313,59 @@ CC.SYM.Lookup	>PUSHB ScopePtr
 				rts
 
 .8				inc pStack
-				
+
+				>STYA.G CC.LookupSymSize
+
+				>INC.G CC.LookupIdx
+				tay
+
+				txa
+				sta (pdata),y
+
+				>SYSCALL GetMemPtr
 				>STYA ZPLookupSymPtr
+
+*				clc
+				rts
+
+.99				lda #E.OOH
+*				sec
+				rts
+*--------------------------------------
+CC.SYM.LookupFree
+				>LDA.G CC.LookupIdx
+				cmp #CC.LookupIdx
+				beq .9
+
+				tay
+				lda (pdata),y
+				>SYSCALL FreeMem
+				bcs .99
+
+				>DEC.G CC.LookupIdx
+				cmp #CC.LookupIdx
+				beq .8
+
+				tay
+				lda (pdata),y
+				>SYSCALL GetMemPtr
+				>STYA ZPLookupSymPtr
+
+.8				clc
+				rts
+
+.9				lda E.INVH
+*				sec
 
 .99				rts
 *--------------------------------------
-CC.SYM.LookupFree
-				>LDA.G CC.hLookupSymBuf
-				>SYSCALL FreeMem
-				bcs .99
-				
-				>STZ.G CC.hLookupSymBuf
+CC.SYM.LookupFreeAll
+
+.1				jsr CC.SYM.LookupFree
+				bcc .1
+
+				clc
 				rts
-				
-				
-.99				>DEBUG
-				rts					
 *--------------------------------------
 * Y,A = value T/Q
 *--------------------------------------

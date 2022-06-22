@@ -1,7 +1,7 @@
 NEW
   AUTO 3,1
 *--------------------------------------
-CC.Init			>SYSCALL SListNew
+CC.CORE.Init	>SYSCALL SListNew
 				bcs .9
 
 				>STA.G CC.hDefines
@@ -14,8 +14,16 @@ CC.Init			>SYSCALL SListNew
 				>SYSCALL SListNew
 				bcs .9
 
-				>STA.G CC.hSymbols
-				sty ScopePtr
+				>STA.G CC.hScopes
+				sty ScopeIdx
+
+				>LDYAI 256
+				>SYSCALL GetMem
+				bcs .9
+
+				>STYA ZPSymBufPtr
+				txa
+				>STA.G CC.hSymBuf
 
 				>LDYAI 256
 				>SYSCALL GetMem
@@ -25,21 +33,28 @@ CC.Init			>SYSCALL SListNew
 				txa
 				>STA.G CC.hStack
 
+				lda #CC.LookupIdx
+				tay
+				sta (pData),y
+
 *				clc
 .9				rts
 *--------------------------------------
-CC.Quit			ldy ScopePtr
+CC.CORE.Quit	jsr CS.RUN.FClose
+				bne CC.CORE.Quit
+
+				ldy ScopeIdx
 				beq .1
 
 .10				lda (pData),y
 
 				>SYSCALL SListFree
 
-				ldy ScopePtr
-				cpy #CC.hSymbols
+				ldy ScopeIdx
+				cpy #CC.hScopes
 				beq .1
 
-				dec ScopePtr
+				dec ScopeIdx
 				dey
 				bra .10
 
@@ -55,15 +70,11 @@ CC.Quit			ldy ScopePtr
 
 .4				>LDA.G CC.hDefineBuf
 				jsr .7
-				
-				>LDA.G CC.hLookupSymBuf
-				jsr .7
-
-.5				jsr CS.RUN.FClose
-				bne .5
 
 				>LDA.G CC.hSymBuf
 				jsr .7
+
+				jsr CC.SYM.LookupFreeAll
 
 				>LDA.G CC.hStack
 
@@ -144,7 +155,7 @@ CC.CompileLine.1
 				bcs .59
 
 				ldx #SYM.SC.STATIC		Y,A = Type/Qual
-				bit ScopenCnt
+				bit bLocalScope
 				bpl .25
 
 				bit #SYM.Q.FUNC			someone wants to add a local f() ?
@@ -168,10 +179,7 @@ CC.CompileLine.1
 				jsr CC.GetNextCharNB	skip '{'
 				bcs .69
 
-				jsr CC.SYM.Store
-				bcs .29
-
-				jmp CC.SYM.Free
+				jmp CC.SYM.StoreF
 *--------------------------------------
 
 * TODO: AOPS
@@ -194,7 +202,7 @@ CC.CompileLine.1
 .28				jsr CC.SYM.Store
 				bcs .9
 
-				jsr CC.SYM.Free
+
 
 				bra .68
 *--------------------------------------
@@ -210,7 +218,7 @@ CC.CompileLine.1
 				jsr CC.GetNextCharNB	skip '{'
 				bcs .99
 
-				jmp  CC.CompileLine.1
+				jmp CC.CompileLine.1
 *--------------------------------------
 .50				>LDYA L.CC.KW
 				jsr CC.LookupID
@@ -352,36 +360,20 @@ CC.SListLookup	>PUSHA					hSList
 				>SYSCALL SListLookup
 				bcs .99
 
-*				pha						save KeyID
-*				phy
-
 				>PUSHA					KeyID.HI
 				tya
 				>PUSHA					KeyID.LO
 
 				jsr CC.SkipX
 
-.1				>PUSHWZ					allocate
+				>PUSHWZ					allocate
 				>PUSHWI 65535			all
 				>PUSHWZ					From Start
 				>SYSCALL SListGetData
-				bcs .9
 
-				>STYA.G CC.LookupSymSize
-				
-				txa
-				>STA.G CC.hLookupSymBuf
-				>SYSCALL GetMemPtr
-				
-*				clc						Y,A = SymPtr, X = hSymBuf
+.9				rts						Y,A = SymSize, X = hSymBuf
 
-				rts
-
-.9				plx
-				plx
-				rts
-
-.99				inc pStack
+.99				inc pStack				discard extra hSList
 				rts
 *--------------------------------------
 CC.ZPLookupPtrAddAp1
@@ -393,16 +385,18 @@ CC.ZPLookupPtrAddAp1
 				inc ZPLookupPtr+1
 .1				rts
 *--------------------------------------
-CC.GetDefine	>LDYA ZPLineBufPtr
-				>STYA.G CC.SaveDefine
-
-				>LDA.G CC.hDefines
+CC.GetDefine	>LDA.G CC.hDefines
 				jsr CC.SListLookup
 				bcs .9
-				
-				>STYA ZPLineBufPtr
+
+				>LDYA ZPLineBufPtr
+				>STYA.G CC.SaveDefine
+
 				txa
 				>STA.G CC.hDefineBuf
+
+				>SYSCALL GetMemPtr
+				>STYA ZPLineBufPtr
 
 .9				rts
 *--------------------------------------
@@ -410,6 +404,7 @@ CC.GetDefine	>LDYA ZPLineBufPtr
 *--------------------------------------
 CC.PushTQ		ldy #SYM.Q
 				lda (ZPSymBufPtr),y
+				and #$FC				ignore SYM.Q.FUNC+SYM.Q.FASTCALL
 				jsr CC.Push
 				bcs CC.Push.RTS
 
@@ -449,16 +444,16 @@ CC.PopYA		ldy CStackPtr
 
 				iny
 				sty CStackPtr
-				
+
 				ply
-				
+
 				clc
 				rts
 
 .90				pla
 .9				lda #E.STACKERROR
 				sec
-				rts				
+				rts
 *--------------------------------------
 CC.Pop			ldy CStackPtr
 				beq .9
