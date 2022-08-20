@@ -7,7 +7,7 @@ CC.F.Decl		stz LocalPtr
 				bcs .99
 
 				ldx #$80				CPStmt.fDef	state
-				jsr CC.STMT.CPStmt
+				jsr CC.STMT.CPStmt.NEW
 				bcs .99
 
 				jsr CC.SYM.NewScope
@@ -24,7 +24,7 @@ CC.F.Decl		stz LocalPtr
 
 				>STYA ZPPtr2			Save T/Q
 
-				jsr CC.F.AddTQ
+				jsr CC.SYM.AddWord
 
 				jsr CC.GetCharNB
 				bcs .9
@@ -53,9 +53,9 @@ CC.F.Decl		stz LocalPtr
 *--------------------------------------
 .6				ldy #0
 				lda #0
-				jsr CC.F.AddTQ
+				jsr CC.SYM.AddWord		definition End
 
-				jsr CC.GetNextCharNB	Skip )
+				jsr CC.GetNextCharNBNL	Skip )
 				bcs .9
 
 				cmp #';'
@@ -65,8 +65,8 @@ CC.F.Decl		stz LocalPtr
 
 				lda CStackPtr
 				clc
-				adc #6
-				sta CStackPtr			discard this CPStmt
+				adc #8
+				sta CStackPtr			discard this CPStmt + T/Q
 
 				stz LocalPtr			reset for DEBUG Message
 
@@ -76,15 +76,25 @@ CC.F.Decl		stz LocalPtr
 .7				cmp #'{'
 				bne .9
 
-				>LDYA ZPCCCode			f() Code starts HERE
+				bit bInitCode
+				bmi .8
+
+				dec bInitCode
+
+				lda #$60				RTS
+				jsr CODE.EmitByte		Close INIT code
+				bcs .99
+
+
+.8				>LDYA ZPCCCode			f() Code starts HERE
 				jsr CC.SYM.SetAddrYA
 
 				lda LocalPtr
 				jsr CODE.LDAI			A = f() ARGS size
-				jsr CODE.Enter
+				bcs .99
 
-				clc						Store f() Declaration / Start Definition
-				rts
+				>LDYA L.PCC.ENTER
+				jmp CODE.EmitPCC		Store f() Declaration / Start Definition
 *--------------------------------------
 CC.F.DeclGetTQ	lda (ZPLineBufPtr)
 				cmp #'.'
@@ -130,7 +140,7 @@ CC.F.DeclGetTQ	lda (ZPLineBufPtr)
 *--------------------------------------
 CC.F.NewArg		>LDYA.G CC.SymID
 				>STYA.G CC.SymIDSave
-				
+
 				>LEA.G CC.ArgBuf
 				>STYA ZPSymBufPtr
 
@@ -145,49 +155,33 @@ CC.F.NewArg		>LDYA.G CC.SymID
 				>LDA.G CC.hSymBuf
 				>SYSCALL GetMemPtr
 				>STYA ZPSymBufPtr
-				
+
 				>LDYA.G CC.SymIDSave
 				>STYA.G CC.SymID
-				
+
 .9				rts
 *--------------------------------------
-CC.F.Def.END	jsr CODE.Leave
+CC.F.Def.END	>LDYA L.PCC.LEAVE
+				jsr CODE.EmitPCC
+				bcs .9
 
 				jsr CC.Pop				T
 				jsr CC.Pop				Q
 
 				jsr CC.SYM.FreeScope
-				
+
 				stz LocalPtr			back to global
 
+				clv						pop context
 				clc
-				rts
-*--------------------------------------
-CC.F.AddTQ		pha
-				phy
-				
-				ldy #SYM.DefSize
-				lda (ZPSymBufPtr),y
-				pha 
-
-				inc
-				inc
-				sta (ZPSymBufPtr),y
-				
-				ply
-				
-				pla
-				sta (ZPSymBufPtr),y
-				iny
-				pla
-				sta (ZPSymBufPtr),y
-				
-				rts
+.9				rts
 *--------------------------------------
 * in : ZPSymPtr
 *      Y,A = Expected T/Q
 *--------------------------------------
-CC.F.CallNoRetV	clc
+CC.F.CallNoRetV	ldy #0					no expected T/Q
+				tya
+				clc
 				.HS B0					BCS
 CC.F.CallRetV	sec
 
@@ -204,44 +198,51 @@ CC.F.CallRetV	sec
 				>STYA ZPPtr2
 
 				ror ZPPtr1+1			bRetV
-				bpl .20					no return value on stack
-	
-				ldy #SYM.Addr+1
-				lda (ZPLookupSymPtr),y
-				beq .20					SYS/LIB/FPU call, no ret value space
-				
-				jsr CC.SYM.GetSymSizeOfInAXC
-				jsr CODE.nAddLocal
-				
-.20				stz ZPPtr1				Reset VARIADIC byte count
+*				bpl .20					no return value on stack
 
-				jsr CC.GetNextCharNB	skip '('
+*				ldy #SYM.Addr+1
+*				lda (ZPLookupSymPtr),y
+*				beq .20					SYS/LIB/FPU call, no ret value space
+
+				jsr CC.EXP.GetSymSizeOfInAXC
+				jsr CODE.nAddLocal
+
+.20				jsr CC.GetNextCharNB	skip '('
 				bcs .10
 
-				jsr CC.SYM.GetTypeInYA	Y,A = f() Return value T/Q
+				ldy #SYM.Q
+*			>DEBUG
+				lda ZPPtr2				expected T
+				bne .1
 
-				ldx ZPPtr2				expected T
-				beq .1					no check required
+				lda (ZPLookupSymPtr)	no check required
+				sta ZPPtr2
 
-				cpy ZPPtr2
-				bne .24
-
-				tax						save full Q
-
+				lda (ZPLookupSymPtr),y
 				and #$fC				ignore SYM.Q.FUNC,SYM.Q.FASTCALL
-				cmp ZPPtr2+1
-.24				bne .91
+				bra .2
 
-				txa
+.1				cmp #SYM.T.VOID
+				beq .11
 
-.1				>STYA ZPPtr2			save full T/Q for later
+				cmp (ZPLookupSymPtr)
+				bne .91
+
+.11				lda (ZPLookupSymPtr),y
+				and #$fC				ignore SYM.Q.FUNC,SYM.Q.FASTCALL
+				cmp ZPPtr2+1			expected Q
+				bne .91
+*--------------------------------------
+.2				sta ZPPtr2+1
+
+				stz ZPPtr1				Reset VARIADIC byte count
 
 				lda #SYM.Def
 				>STA.G CC.LookupSymPtr
 
 				jsr CC.F.GetTQ			get First Arg T/Q
 				beq .7					end of list, go check ending ')'
-*--------------------------------------
+
 .3				cpy #SYM.T.VARIADIC
 				bne .4
 
@@ -253,7 +254,7 @@ CC.F.CallRetV	sec
 				jsr CC.EXP.Eval
 				bcs .93
 
-				jsr CC.SYM.GetYASizeOfInAXC
+				jsr CC.EXP.GetYASizeOfInAXC
 				tax						save Sizeof in X
 
 				jsr CC.F.GetTQ
@@ -295,7 +296,6 @@ CC.F.CallRetV	sec
 				bne .90					missing arg
 
 				lda ZPPtr1				push VARIADIC byte count
-
 				jsr CODE.PUSHI
 
 .7				jsr CC.GetCharNB
@@ -330,8 +330,9 @@ CC.F.CallRetV	sec
 *--------------------------------------
 * X = last var size
 *--------------------------------------
-CC.F.Call2		lda ZPPtr2+1
-				bit #SYM.Q.FASTCALL
+CC.F.Call2		ldy #SYM.Q
+				lda (ZPLookupSymPtr),y
+				and #SYM.Q.FASTCALL
 				beq .1
 
 				ldy #SYM.Def			Get first (only) argument
@@ -371,11 +372,12 @@ CC.F.Call2		lda ZPPtr2+1
 
 * Return Value : call & put result on stack if in Y,A
 
-.5				ldy #SYM.Addr+1
+.5
+				ldy #SYM.Addr+1
 				lda (ZPLookupSymPtr),y
-				cmp #2
+				cmp #3
 				bcs .8					not a SYS/FPU call...Ret value on stack
-				
+
 				>LDYA ZPPtr2			function T/Q
 				jsr CC.TYPE.SizeOf
 				cpx #3
@@ -384,13 +386,13 @@ CC.F.Call2		lda ZPPtr2+1
 				dex
 				bne .60
 
-				jsr CODE.PUSHA			push ONE byte one stack
+				jsr CODE.PUSHA			push ONE byte on stack
 				bra .8
 
-.60				jsr CODE.PUSHYA			push TWO bytes one stack
+.60				jsr CODE.PUSHYA			push TWO bytes on stack
 
 .8				>LDYA ZPPtr2			T/Q
-				and #$FC				ignore SYM.Q.FUNC+SYM.Q.FASTCALL
+
 				clc
 				rts
 *--------------------------------------
@@ -405,50 +407,47 @@ CC.F.Call3		ldy #SYM.Addr+1
 				lda (ZPLookupSymPtr),y
 				tax
 
-				ply
+				ply						Y=HI,X=LO
 
 				cpy #1
 				bne .1
 
-				jsr CODE.SYSCALL
-				clc
-				rts
+				jmp CODE.SYSCALL
 
 .1				cpy #2
 				bne .2
 
-				jsr CODE.FPUCALL
-				clc
-				rts
+				jmp CODE.FPUCALL
 
-.2				lda #$EA
+.2				lda #$EA				NOP
 				jsr CODE.EmitByte
-				lda #$EA
+				bcs .99
+
+				lda #$EA				NOP
 				jsr CODE.EmitByte
-				
+				bcs .99
+
 				lda #$20				JSR abs
-				jsr CODE.TOABSYX		Y=HI,X=LO
-				clc
-				rts
+				jmp CODE.TOABSYX
 
 .9				bit bPass2
-				bmi .99
-				
+				bmi .91
+
 				lda #5					leave room for LDX #imm, JSR abs
 				clc
 				adc ZPCCCode
 				sta ZPCCCode
-				
+
 				bcc .90
-			
+
 				inc ZPCCCode+1
-				
+
 .90				clc
 				rts
-				
-.99				lda #E.FUNDEF
+
+.91				lda #E.FUNDEF
 				sec
-				rts
+.99				rts
 *--------------------------------------
 CC.F.GetTQ		>LDA.G CC.LookupSymPtr
 				tay

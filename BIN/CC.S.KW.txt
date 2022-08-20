@@ -3,14 +3,107 @@ NEW
 *--------------------------------------
 * Built in Keywords
 *--------------------------------------
-CC.KW.JMP		txa
-				>STA.G CC.CmdSave
-				jmp (J.CC.KW,x)
+CC.KW.IF		jsr CC.KW.BEGIN
+				bcs .99
+
+				jsr CC.GetCharNB
+				bcs .9
+
+				cmp #'('
+				bne .9
+
+				jsr CC.GetNextCharNB
+				bcs .9
+
+				jsr CC.EXP.Eval00		Any var type
+				bcs .99
+
+				jsr CC.KW.TestZero		Y,A=T/Q
+
+				lda #'E'
+				jsr CC.SYM.LookupA
+				bcs .99
+
+				lda #$4C				emit JMP else
+				jsr CODE.TOABSYX
+				bcs .99
+
+				jsr CC.GetCharNB
+				bcs .99
+
+				cmp #')'
+				bne .9
+
+				jmp CC.KW.STMT
+
+.9				lda #E.CSYN
+				sec
+.99				rts
 *--------------------------------------
-CC.KW.WHILE		jsr CC.PushCS			push cont: for WHILE loop
-				bcs CC.KW.IF.RTS
+CC.KW.IF.END	jsr CC.GetCharNBNL
+				bcs .1
+
+				cmp #';'
+				beq .1
+
+				>LDYA L.CC.KW2.IF		Check allowed KW for IF....
+				jsr CC.LookupID
+				bcc .2
+
+.1				lda #'E'				define ELSE Label
+				jsr CC.KW.NewLabel
+				bcs .99
+				
+				clv						pop context
+				rts
 *--------------------------------------
-CC.KW.IF		jsr CC.GetCharNB
+.2				lda #'X'
+				jsr CC.SYM.LookupA
+				bcs .99
+
+				lda #$4C				emit JMP exit
+				jsr CODE.TOABSYX
+				bcs .99
+
+				lda #'E'				define ELSE Label
+				jsr CC.KW.NewLabel
+				bcs .99
+
+				inc CStackPtr			pop ; or }
+
+				lda #4					replace IF by ELSE keyword
+				ldy CStackPtr
+				sta (ZPCCStack),y
+
+				jsr CC.KW.STMT
+				bcs .99
+
+				bit .99					set V : DONT pop context
+				rts
+
+.9				lda #E.CSYN
+				sec
+.99				rts
+*--------------------------------------
+CC.KW.ELSE		lda #E.CSYN				illegal
+				sec
+				rts
+*--------------------------------------
+CC.KW.ELSE.END	lda #'X'				define EXIT Label
+				jsr CC.KW.NewLabel
+				bcs .99
+
+				clv						pop context
+.99				rts
+*--------------------------------------
+CC.KW.WHILE		jsr CC.KW.BEGIN
+				bcs .99
+
+				lda #'C'				define CONT Label
+				jsr CC.SYM.NewA
+				bcs .99
+
+				jsr CC.GetCharNB
 				bcs .9
 
 				cmp #'('
@@ -24,10 +117,13 @@ CC.KW.IF		jsr CC.GetCharNB
 
 				jsr CC.KW.TestZero
 
-				jsr CC.PushCS			push place to set JMP false
+				lda #'B'
+				jsr CC.SYM.LookupA
 				bcs .99
 
-				jsr CC.KW.ZPCCCodeAdd2
+				lda #$4C				emit JMP break:
+				jsr CODE.TOABSYX
+				bcs .99
 
 				jsr CC.GetCharNB
 				bcs .99
@@ -35,89 +131,44 @@ CC.KW.IF		jsr CC.GetCharNB
 				cmp #')'
 				bne .9
 
-				jmp CC.KW.BEGIN
+				jmp CC.KW.STMT
 
 .9				lda #E.CSYN
 				sec
-.99
-CC.KW.IF.RTS	rts
+.99				rts
 *--------------------------------------
-CC.KW.IF.END	jsr CC.PopYA
+CC.KW.WHILE.END	lda #'C'
+				jsr CC.KW.GetLabel
+				bcs .99
+
+				lda #$4C
+				jsr CODE.TOABSYX		emit JMP cont:
+				bcs .99
+
+				lda #'B'				define BREAK Label
+				jsr CC.KW.NewLabel
+				bcs .99
+
+				clv						pop context
+
+.99				rts
+*--------------------------------------
+CC.KW.DO		jsr CC.KW.BEGIN
+				bcs .99
+
+				lda #'C'				define CONT Label
+				jsr CC.SYM.NewA
+				bcs .99
+				
+				jmp CC.KW.STMT
+
+.99				rts
+*--------------------------------------
+CC.KW.DO.END	>LDYA L.CC.KW2.DO		Check allowed KW for DO....
+				jsr CC.LookupID
 				bcs .9
 
-				>STYA ZPPtr1			set JMP false
-
-				lda ZPCCCode
-*				sta (ZPPtr1)
-
-				ldy #1
-				lda ZPCCCode+1
-*				sta (ZPPtr1),y
-
-*				clc
-
-.9				rts
-*--------------------------------------
-CC.KW.ELSE
-
-				clc
-				rts
-*--------------------------------------
-CC.KW.ELSE.END
-
-				clc
-				rts
-*--------------------------------------
-CC.KW.WHILE.END	jsr CC.PopYA			Get JMP false location
-				bcs .9
-
-				>STYA ZPPtr1
-
-				jsr CC.PopYA			Get cont: address
-				bcs .9
-
-				phy
-				tay						HI byte
-				plx
-
-				lda #$4C				JMP cont:
-				jsr CODE.TOABSYX
-
-				lda ZPCCCode
-*				sta (ZPPtr1)
-
-				ldy #1
-				lda ZPCCCode+1
-*				sta (ZPPtr1),y
-
-				clc
-
-.9				rts
-*--------------------------------------
-CC.KW.DO
-				lda #E.CSYN
-				sec
-				rts
-*--------------------------------------
-CC.KW.DO.END
-				clc
-				rts
-*--------------------------------------
-* for (e1;e2;e3) s;
-*
-* {				<- new scope : allows for(int i=1; ....)
-* 	e1;
-*	loop:
-* 	while (e2)
-* 	{
-* 	   s;
-* 	cont:
-* 	   e3;
-* 	}
-* 	break:
-* }
-*--------------------------------------
-CC.KW.FOR		jsr CC.GetCharNB
+				jsr CC.GetCharNB
 				bcs .9
 
 				cmp #'('
@@ -126,12 +177,83 @@ CC.KW.FOR		jsr CC.GetCharNB
 				jsr CC.GetNextCharNB
 				bcs .9
 
-				jsr CC.EXP.Eval00		get e1
-				bcs .9
+				jsr CC.EXP.Eval00		Any var type
+				bcs .99
 
-				jsr CC.KW.StackDiscard
+				jsr CC.KW.TestnZero
+
+				lda #'C'
+				jsr CC.KW.GetLabel
+				bcs .99
+
+				lda #$4C				emit JMP cont
+				jsr CODE.TOABSYX
+				bcs .99
+
+				lda #'B'				define BREAK Label
+				jsr CC.KW.NewLabel
+				bcs .99
 
 				jsr CC.GetCharNB
+				bcs .99
+
+				cmp #')'
+				bne .9
+				
+				jsr CC.GetNextCharNB
+				bcs .9
+
+				clv						pop context
+				clc
+				rts
+				
+.9				lda #E.CSYN
+				sec
+.99				rts
+*--------------------------------------
+* for (s1;e2;s3) s;
+*
+* {				<- new scope : allows for(int i=1; ....)
+* 	s1;
+*	loop:
+* 	while (e2)	jmp break:
+* 	{
+* 	   s;		jsr s:
+* 	cont:
+* 	   s3;		jmp loop:
+* 	}
+* s:
+* <s>;
+* break:
+* }
+*--------------------------------------
+CC.KW.FOR		jsr CC.GetCharNB
+				bcs .29
+
+				cmp #'('
+				bne .29
+
+				jsr CC.KW.BEGIN
+				bcs .29
+
+				jsr CC.GetNextCharNB	skip '('
+				bcs .29
+
+				>LDYA L.CC.TYPEQUAL
+				jsr CC.LookupID
+				bcs .1
+
+				jsr CC.DECL
+				bcc .2
+
+.19				rts
+
+.1				jsr CC.STMT				get s1
+				bcs .19
+
+*				jsr CC.KW.StackDiscard
+
+.2				jsr CC.GetCharNB
 				bcs .9
 
 				cmp #';'
@@ -140,26 +262,29 @@ CC.KW.FOR		jsr CC.GetCharNB
 				jsr CC.GetNextCharNB	skip ';'
 				bcs .9
 *--------------------------------------
-				>LDYA ZPCCCode
-				>STYA ZPPtr2			save LOOP address
+				lda #'L'				LOOP Label
+				jsr CC.SYM.NewA
+				bcs .99
 
 				jsr CC.EXP.Eval00		get e2
 .29				bcs .99
 
 				jsr CC.KW.TestZero
-
-				jsr CC.PushCS			push place to set JMP break:
 				bcs .99
 
-				jsr CC.KW.ZPCCCodeAdd2
+				lda #'B'
+				jsr CC.SYM.LookupA
+				bcs .99
 
-				lda #$20				emit JSR s;
-				jsr CODE.EmitByte
+				lda #$4C				emit JMP break:
+				jsr CODE.TOABSYX
 
-				>LDYA ZPCCCode
-				>STYA ZPPtr3			save place to set JSR s
+				lda #'S'
+				jsr CC.SYM.LookupA
+				bcs .99
 
-				jsr CC.KW.ZPCCCodeAdd2	space for 2-bytes address
+				lda #$20				emit JSR s:
+				jsr CODE.TOABSYX
 
 				jsr CC.GetCharNB
 				bcs .9
@@ -170,12 +295,14 @@ CC.KW.FOR		jsr CC.GetCharNB
 				jsr CC.GetNextCharNB	skip ';'
 				bcs .9
 *--------------------------------------
-				jsr CC.PushCS			push cont: address
-
-				jsr CC.EXP.Eval00		get e3
+				lda #'C'				CONT Label
+				jsr CC.SYM.NewA
 				bcs .99
 
-				jsr CC.KW.StackDiscard
+				jsr CC.STMT				get s3
+				bcs .99
+
+*				jsr CC.KW.StackDiscard
 
 				jsr CC.GetCharNB
 				bcs .9
@@ -183,19 +310,18 @@ CC.KW.FOR		jsr CC.GetCharNB
 				cmp #')'
 				bne .9
 
+				lda #'L'
+				jsr CC.SYM.LookupA
+				bcs .99
+
 				lda #$4C
-				ldx ZPPtr2
-				ldy ZPPtr2+1
-				jsr CODE.TOABSYX		JMP e2
+				jsr CODE.TOABSYX		emit JMP loop
 
-				lda ZPCCCode			setup JSR s;
-*				sta (ZPPtr3)
+				lda #'S'				S Label
+				jsr CC.SYM.NewA
+				bcs .99
 
-				lda ZPCCCode+1
-				ldy #1
-*				sta (ZPPtr3),y
-
-				jmp CC.KW.BEGIN
+				jmp CC.KW.STMT
 
 .9				lda #E.CSYN
 				sec
@@ -203,43 +329,45 @@ CC.KW.FOR		jsr CC.GetCharNB
 *--------------------------------------
 CC.KW.FOR.END	lda #$60
 
-				jsr CODE.EmitByte		set RTS for JSR s;
+				jsr CODE.EmitByte		set RTS for JSR code;
+				bcs .99
 
-				jsr CC.Pop
-				bcs .9
+				lda #'B'				define BREAK Label
+				jsr CC.KW.NewLabel
+				bcs .99
 
-				jsr CC.Pop				discard cont: location
-				bcs .9
+				clv						pop context
 
-				jsr CC.PopYA
-				bcs .9
-
-				>STYA ZPPtr1			get JMP break: location
-
-				lda ZPCCCode
-*				sta (ZPPtr1)
-
-				ldy #1
-				lda ZPCCCode+1
-*				sta (ZPPtr1),y
-
-				clc
-
-.9				rts
+.99				rts
 *--------------------------------------
 CC.KW.SWITCH
 CC.KW.CASE
+CC.KW.DEFAULT
 				lda #E.CSYN
 				sec
 				rts
 *--------------------------------------
-CC.KW.BREAK
-				lda #E.CSYN
+CC.KW.BREAK		lda #'B'
+
+				jsr CC.KW.LookupLabel
+				bcs .9
+				
+				lda #$4C				emit JMP break
+				jmp CODE.TOABSYX
+				
+.9				lda #E.CSYN
 				sec
 				rts
 *--------------------------------------
-CC.KW.CONTINUE
-				lda #E.CSYN
+CC.KW.CONTINUE	lda #'C'
+
+				jsr CC.KW.LookupLabel
+				bcs .9
+				
+				lda #$4C				emit JMP cont
+				jmp CODE.TOABSYX
+				
+.9				lda #E.CSYN
 				sec
 				rts
 *--------------------------------------
@@ -254,7 +382,7 @@ CC.KW.RETURN	ldy CStackPtr
 
 				tya
 				clc
-				adc #3					skip CPStmt (4 bytes)
+				adc #5					skip CPStmt (6 bytes)
 				tay
 				bcc .1
 
@@ -264,6 +392,9 @@ CC.KW.RETURN	ldy CStackPtr
 
 .7				iny						skip bState
 				iny						skip Locals
+
+				iny
+				iny						skip CPSID
 
 				iny						get SYM.T
 				lda (ZPCCStack),y
@@ -281,11 +412,10 @@ CC.KW.RETURN	ldy CStackPtr
 				jsr CC.SYM.GetYASizeOfInAXC		Y,A=T/Q
 				tax						X = sizeof
 				jsr CODE.SetRetValue
+				bcs .99
 
-				jsr CODE.Leave
-
-				clc
-				rts
+				>LDYA L.PCC.LEAVE
+				jmp CODE.EmitPCC
 *--------------------------------------
 CC.KW.SIZEOF
 				lda #E.CSYN
@@ -321,66 +451,178 @@ CC.KW.STRUCT	>ENTER 4
 				cmp #'}'
 				bne .1
 
-				jsr CC.GetNextCharNB	skip }
+				jsr CC.GetNextCharNB	skip '}'
 
 				clc
 .99				>LEAVE
 				rts
 *--------------------------------------
-CC.KW.BEGIN		jsr CC.GetNextCharNB
-				bcs .9
+CC.KW.BEGIN		jsr CC.SYM.NewCPSID
+				bcs .99
 
-				cmp #'{'
-				bne .7
-
-				>LDA.G CC.CmdSave
-				tax
-				jmp CC.STMT.CPStmt
-
-.7				>LDA.G CC.CmdSave
+				>LDA.G CC.CPSPFX+3
 				jsr CC.Push
 				bcs .99
 
-				lda #';'
+				>LDA.G CC.CPSPFX+2
+				jsr CC.Push
+				bcs .99
+
+				lda LocalPtr			Locals
+				jsr CC.Push
+				bcs .99
+
+				lda #0					bState
+				jsr CC.Push
+				bcs .99
+
+				>LDA.G CC.CmdSave
+				jmp CC.Push
+
+.99				rts
+*--------------------------------------
+CC.KW.STMT		jsr CC.GetNextCharNBNL
+				bcs .9
+
+				cmp #'{'
+				bne .1
+
+				jsr CC.GetNextCharNB	skip '{'
+				bcs .99
+
+				lda #'}'
+				jmp CC.Push
+
+.1				lda #';'
 				jmp CC.Push
 
 .9				lda #E.CSYN
 				sec
 .99				rts
 *--------------------------------------
-* Input : Value on Stack, Y,A = Type/Qual
-* Output : CC = true, CS = false
-*--------------------------------------
-CC.KW.TestZero	jsr CC.SYM.GetYASizeOfInAXC
-				tax
+CC.KW.NewLabel	pha
 
-.6				lda #$A2				LDX #imm
-				jsr CODE.EmitByte
-				txa
-				jsr CODE.EmitByte
+				lda CStackPtr
+				clc
+				adc #4
+				tay
 
-				ldx #PCC.Test0X.L
-				ldy #0
-
-.7				lda PCC.Test0X,y
-				jsr CODE.EmitByte
+				lda (ZPCCStack),y
+				pha
 				iny
-				dex
-				bne .7
+				lda (ZPCCStack),y
+				ply
+				>STYA.G CC.CPSPFX+2
 
-				clc
-				rts
+				pla
+				jmp CC.SYM.NewA
 *--------------------------------------
-CC.KW.ZPCCCodeAdd2
-				lda ZPCCCode
+CC.KW.GetLabel	pha
+
+				lda CStackPtr
 				clc
-				adc #2
-				sta ZPCCCode
-				bcc .8
+				adc #4
+				tay
 
-				inc ZPCCCode+1
+				lda (ZPCCStack),y
+				pha
+				iny
+				lda (ZPCCStack),y
+				ply
+				>STYA.G CC.CPSPFX+2
 
+				pla
+				jmp CC.SYM.LookupA
+*--------------------------------------
+CC.KW.LookupLabel
+				pha
+
+				ldy CStackPtr
+				sty ArgIndex
+
+.1				ldy ArgIndex
+				beq .9
+
+				iny 					skip ; or }
+
+				lda (ZPCCStack),y
+				bmi .9					f()
+				
+				iny
+				iny
+				iny
+
+				lda (ZPCCStack),y
+				pha
+				iny
+				lda (ZPCCStack),y
+				iny
+				
+				sty ArgIndex
+				
+				ply
+				>STYA.G CC.CPSPFX+2
+
+				pla
+				pha
+				jsr CC.SYM.LookupA
+				bcs .1
+				
+				pla
 .8				rts
+				
+.9				pla
+				lda #E.CSYN
+				sec
+.99				rts
+*--------------------------------------
+* Input : Value on Stack, Y,A = Type/Qual
+*--------------------------------------
+CC.KW.TestZero	jsr CC.EXP.GetYASizeOfInAXC
+				tax
+				cpx #1
+				bne .1
+
+				>LDYA L.PCC.TestZero1
+				jmp CODE.EmitPCC
+
+.1				cpx #2
+				bne .2
+
+				>LDYA L.PCC.TestZero2
+				jmp CODE.EmitPCC
+
+.2				jsr CODE.LDXI
+				bcs .9
+
+				>LDYA L.PCC.TestZeroX
+				jmp CODE.EmitPCC
+
+.9				rts
+*--------------------------------------
+* Input : Value on Stack, Y,A = Type/Qual
+*--------------------------------------
+CC.KW.TestnZero	jsr CC.EXP.GetYASizeOfInAXC
+				tax
+				cpx #1
+				bne .1
+
+				>LDYA L.PCC.TestnZero1
+				jmp CODE.EmitPCC
+
+.1				cpx #2
+				bne .2
+
+				>LDYA L.PCC.TestnZero2
+				jmp CODE.EmitPCC
+
+.2				jsr CODE.LDXI
+				bcs .9
+
+				>LDYA L.PCC.TestnZeroX
+				jmp CODE.EmitPCC
+
+.9				rts
 *--------------------------------------
 * Input : Value on Stack, Y,A = Type/Qual
 *--------------------------------------

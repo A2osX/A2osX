@@ -40,7 +40,7 @@ CC.CORE.Init	>SYSCALL SListNew
 *				clc
 .9				rts
 *--------------------------------------
-CC.CORE.Quit	jsr CS.RUN.FClose
+CC.CORE.Quit	jsr CC.FIO.FClose
 				bne CC.CORE.Quit
 
 				ldy ScopeIdx
@@ -78,9 +78,11 @@ CC.CORE.Quit	jsr CS.RUN.FClose
 
 				>LDA.G CC.hStack
 
-.7				beq CC.Quit.RTS
+.7				beq .8
+
 				>SYSCALL FreeMem
-CC.Quit.RTS		rts
+
+.8				rts
 *--------------------------------------
 CC.CompileFile	>SLEEP
 
@@ -98,7 +100,7 @@ CC.CompileFile	>SLEEP
 				cmp #3					Ctrl-C
 				beq .9
 
-.1				jsr CS.RUN.FGetS
+.1				jsr CC.FIO.FGetS
 				bcs .9
 
 				jsr CC.CompileLine
@@ -114,176 +116,143 @@ CC.CompileFile	>SLEEP
 .9				rts
 *--------------------------------------
 CC.CompileLine	jsr CC.GetCharNB
-				bcs CC.Quit.RTS
+				bcs .9
 
-CC.CompileLine.1
-				cmp #C.CR				empty line....
-				beq .2
+				cmp #C.CR				EOL....
+				beq .8
 
-				cmp #'/'
-				bne .3					comments ...
-
-				jmp CC.Comments
-
-.2				clc
-				rts
-
-.3				cmp #'#'				directive ?
-				bne .4
+				cmp #'#'				directive ?
+				bne .1
 
 				jmp CC.DIR
 
-.4				cmp #'}'				End of CPStmt ?
-				bne .10
+.1				cmp #'/'
+				bne .2					comments ...
+
+				jmp CC.Comments
+
+.2				cmp #'}'				End of CPStmt ?
+				bne .3
 
 				jsr CC.GetNextCharNB	Skip '}'
 
-				jmp CC.STMT.CPStmt.END
-*--------------------------------------
-.10				jsr CC.IsLetter
-				bcc .20
+				jsr CC.STMT.CPStmt.END
+				bcs .9
 
-* TODO: PREOPS ++ --.....
+				bra CC.CompileLine
 
-				bcs .29
+.3				cmp #';'				End of Stmt ?
+				bne .4
+
+				jsr CC.GetNextCharNB	Skip ';'
+
+				jsr CC.STMT.Stmt.END
+				bcs .9
+
+				bra CC.CompileLine
+
+.4				jsr CC.CompileStmt
+				bcs .9
+
+				bra CC.CompileLine
+
+.8				clc
+.9				rts
 *--------------------------------------
-.20				>LDYA L.CC.TYPEQUAL
+* keyword : for, while ....
+*--------------------------------------
+CC.CompileStmt	>LDYA L.CC.KW
 				jsr CC.LookupID
-				bcs .50
+				bcs .10					not an internal CC keyword....
 
-				jsr CC.TYPE.Decl
-				bcs .59
-
-				ldx #SYM.SC.STATIC		Y,A = Type/Qual
-				bit bLocalScope
-				bpl .25
-
-				bit #SYM.Q.FUNC			someone wants to add a local f() ?
-				sec
-				bne .29
-
-				ldx #SYM.SC.AUTO
-
-.25				jsr CC.SYM.New			Y,A=T/Q, add with undef value...
-				bcs .29					OOM or DUP
-
-				jsr CC.GetCharNB
-				bcs .69
-
-				cmp #';'
-				beq .28
-
-				cmp #'{'
-				bne .26
-
-				jsr CC.GetNextCharNB	skip '{'
-				bcs .69
-
-				jmp CC.SYM.StoreF
+				txa
+				>STA.G CC.CmdSave
+				jmp (J.CC.KW,x)
 *--------------------------------------
-
-* TODO: AOPS
-
+* Declaration : int var or int func()
 *--------------------------------------
-.26				cmp #'='
-				sec
-				bne .69
-*--------------------------------------
-				jsr CC.GetNextCharNB	skip '='
-				bcs .69
-
-				jsr CC.SYM.GetTypeInYA	expected T/Q
-				jsr CC.EXP.Eval
-				bcs .59
-
-				jsr CC.SYM.PopValue		Y,A = T/Q, Set value to this var
-.29				bcs .9
-
-.28				jsr CC.SYM.Store
-				bcs .9
-
-
-
-				bra .68
-*--------------------------------------
-.21				jsr CC.GetCharNB
-				bcs .99
-
-				cmp #';'
-				beq .8
-
-				cmp #'{'
-				bne .99
-
-				jsr CC.GetNextCharNB	skip '{'
-				bcs .99
-
-				jmp CC.CompileLine.1
-*--------------------------------------
-.50				>LDYA L.CC.KW
+.10				>LDYA L.CC.TYPEQUAL
 				jsr CC.LookupID
-				bcs .6					not an internal CC keyword....
+				bcs .6
 
-				jsr CC.KW.JMP
-.59				bcs .9
-
-				bra .8
+				jmp CC.DECL
 *--------------------------------------
-.6				jsr CC.SYM.Lookup		var= or func() ?
-.69				bcs .99
-
-				ldy #SYM.Q
-				lda (ZPLookupSymPtr),y
-				bit #SYM.Q.FUNC
-				beq .60
-
-				ldy #0					func( ... );
-				lda #0
-				jsr CC.F.CallNoRetV
-				bcs .9
-
-				jsr CC.SYM.LookupFree
-
-				bra .8
+* Statement : ++var, var=, func();
 *--------------------------------------
-.60				jsr CC.GetCharNB		var = ?
-				bcs .99
-
-				cmp #'='				TODO: all AOPS
-				bne .99
-
-				jsr CC.GetNextChar		Skip =
-				bcs .99
-
-				jsr CC.SYM.GetTypeInYA
-				jsr CC.EXP.Eval
-				bcs .9
-
-				jsr CC.SYM.PopValue
-				bcs .9
-
-				jsr CC.SYM.LookupFree
+.6				jmp CC.STMT
 *--------------------------------------
-.68				jsr CC.GetCharNB
-				cmp #';'
-				beq .8
-
 .99				lda #E.CSYN
 				sec
 .9				rts
 *--------------------------------------
-.8				jsr CC.GetNextCharNB	Skip ;
-				bcs .9
+CC.CORE.SetVar	stz ExpState
 
-				cmp #C.CR
-				beq .80
+				jsr CC.EXP.POSTOPS		var++, var[0]... ?
+				bcs .99
 
-				jmp CC.CompileLine.1
+				ldx StmtPreOp
+				jsr CC.EXP.PREOPS		apply ++var, ....
+				bcs .99
 
-.80				clc
+				jsr CC.GetCharNB
+				bcs .90
+
+				jsr CC.IsEndArg			var++; or ++var; ?
+				bcc .8
+
+				jsr CC.LookupAOP		var=, var+= ... ?
+				bcs .90
+
+			cpx #0						TOTO : all AOPS
+			bne *
+
+				lda ExpState
+				bmi .90					VonStack
+
+				asl
+
+				bmi .7					AinPTR
+
+				asl
+				bmi .6					AonStack
+
+				jsr CC.EXP.GetAddr1
+				bcc .7
+
 				rts
-*--------------------------------------
-CC.Comments		jsr CC.GetNextChar
+
+.6				>LDYA L.PCC.PopAddr1
+				jsr CODE.EmitPCC
+				bcs .99
+
+.7				ldy #SYM.Q
+				lda (ZPLookupSymPtr),y
+				pha
+				lda (ZPLookupSymPtr)
+				tay
+				pla						get expected T/Q
+
+				jsr CC.EXP.Eval
+				bcs .99
+
+				jsr CC.EXP.GetSymSizeOfInAXC
+				tay
+				dey
+				jsr CODE.LDYI
+				bcs .99
+
+				>LDYA L.PCC.SetValue
+				jmp CODE.EmitPCC
+
+.8				clc
+				rts
+
+.90				lda #E.CSYN
+				sec
+
+.99				rts
+**--------------------------------------
+CC.Comments		jsr CC.GetNextChar		TODO : /* ... */
 				cmp #'/'
 				bne .90
 
@@ -304,9 +273,31 @@ CC.SkipLine		jsr CC.GetNextChar
 .9				rts
 *--------------------------------------
 CC.LookupID		>STYA ZPLookupPtr
-
 				jsr CC.GetIDLen
 				bra CC.Lookup
+
+CC.LookupAOP	>LDYA L.CC.AOPS
+				>STYA ZPLookupPtr
+
+				ldy #$ff
+
+.1				iny
+				lda (ZPLineBufPtr),y
+				sec
+				beq .9
+
+				jsr CC.IsOPChar
+				bcs .9
+
+				cmp #'='
+				bne .1
+
+				iny
+
+.8				tya
+				bra CC.Lookup
+
+.9				rts
 
 CC.LookupOP		>STYA ZPLookupPtr
 				jsr CC.GetOPLen
@@ -342,7 +333,7 @@ CC.Lookup		phy						Y = len
 				lda ZPLookupPtr+1
 				adc #0
 				clc						Y,A = F() def, X = F() index
-.8				rts
+				rts
 
 .4				inx
 				inx
@@ -350,30 +341,9 @@ CC.Lookup		phy						Y = len
 				jsr CC.ZPLookupPtrAddAp1
 				bra .1
 
-.9				pla
+.9				ldx #$FF
+				pla
 				sec
-				rts
-*--------------------------------------
-CC.SListLookup	>PUSHA					hSList
-				>PUSHA					...for SListGetData
-				>PUSHW ZPLineBufPtr
-				>SYSCALL SListLookup
-				bcs .99
-
-				>PUSHA					KeyID.HI
-				tya
-				>PUSHA					KeyID.LO
-
-				jsr CC.SkipX
-
-				>PUSHWZ					allocate
-				>PUSHWI 65535			all
-				>PUSHWZ					From Start
-				>SYSCALL SListGetData
-
-.9				rts						Y,A = SymSize, X = hSymBuf
-
-.99				inc pStack				discard extra hSList
 				rts
 *--------------------------------------
 CC.ZPLookupPtrAddAp1
@@ -399,6 +369,28 @@ CC.GetDefine	>LDA.G CC.hDefines
 				>STYA ZPLineBufPtr
 
 .9				rts
+*--------------------------------------
+CC.SListLookup	>PUSHA					hSList
+				>PUSHA					...for SListGetData
+				>PUSHW ZPLineBufPtr
+				>SYSCALL SListLookup
+				bcs .99
+
+				>PUSHA					KeyID.HI
+				tya
+				>PUSHA					KeyID.LO
+
+				jsr CC.SkipX
+
+				>PUSHWZ					allocate
+				>PUSHWI 65535			all
+				>PUSHWZ					From Start
+				>SYSCALL SListGetData
+
+.9				rts						Y,A = SymSize, X = hSymBuf
+
+.99				inc pStack				discard extra hSList
+				rts
 *--------------------------------------
 * CT Stack
 *--------------------------------------
@@ -455,12 +447,18 @@ CC.PopYA		ldy CStackPtr
 				sec
 				rts
 *--------------------------------------
-CC.Pop			ldy CStackPtr
+CC.Pop			jsr CC.Get
+
+				inc CStackPtr
+
+*				clc
+
+.9				rts
+*--------------------------------------
+CC.Get			ldy CStackPtr
 				beq .9
 
 				lda (ZPCCStack),y
-
-				inc CStackPtr
 
 				clc
 				rts
@@ -521,6 +519,32 @@ CC.GetNextCharNB
 CC.GetNextCharNB.RTS
 				rts
 *--------------------------------------
+CC.GetCharNBNL	jsr CC.GetChar
+				bcs CC.GetNextCharNB.RTS
+
+				jsr CC.CheckCharNB
+				bcs CC.GetNextCharNBNL
+
+				cmp #C.CR
+				clc
+				bne CC.GetNextCharNB.RTS
+
+				jsr CC.FIO.FGetS
+				bcs CC.GetNextCharNB.RTS
+*--------------------------------------
+CC.GetNextCharNBNL
+				jsr CC.GetNextCharNB
+				bcs CC.GetNextCharNB.RTS
+
+				cmp #C.CR
+				clc
+				bne .9
+
+				jsr CC.FIO.FGetS
+				bcc CC.GetNextCharNBNL
+
+.9				rts
+*--------------------------------------
 CC.CheckSpace	jsr CC.GetChar
 				bcs .90
 
@@ -578,10 +602,10 @@ CC.GetChar		lda (ZPLineBufPtr)
 CC.IsEndArg		cmp #']'
 				beq .8
 
-				cmp #';'
+				cmp #','
 				beq .8
 
-				cmp #','
+				cmp #';'
 				beq .8
 
 				cmp #')'

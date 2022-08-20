@@ -17,7 +17,7 @@ CC.SYM.New		>STYA ZPPtr2			T/Q
 				>PUSHW ZPLineBufPtr
 
 				>SYSCALL SListLookup
-				bcs .9
+				bcs CC.SYM.New.9
 
 				>STYA.G CC.SymID		Y,A = KeyID
 
@@ -29,21 +29,14 @@ CC.SYM.New		>STYA ZPPtr2			T/Q
 				>PUSHWI 65535			all
 				>PUSHWZ					From Start
 				>SYSCALL SListGetData
-				bcs .9
+				bcc CC.SYM.New2
 
-				jsr CC.GetCharNB
-				cmp #'('
-				bne .8
-
-				jmp CC.F.Decl
-
-.8				clc
-.9				rts						Y,A = SymSize
+CC.SYM.New.9	rts						Y,A = SymSize
 *--------------------------------------
 CC.SYM.New1		ldy ScopeIdx
 				lda (pData),y
 				jsr CC.SYM.NewKey
-				bcs .9
+				bcs CC.SYM.New.9
 
 				>STYA.G CC.SymID		Y,A = KeyID
 
@@ -71,8 +64,8 @@ CC.SYM.New1		ldy ScopeIdx
 				tya
 				ldy #SYM.DefSize
 				sta (ZPSymBufPtr),y
-
-				jsr CC.GetCharNB
+*--------------------------------------
+CC.SYM.New2		jsr CC.GetCharNB
 				bcs CC.SYM.SetAddr
 
 				cmp #'('
@@ -84,45 +77,45 @@ CC.SYM.New1		ldy ScopeIdx
 				sta (ZPSymBufPtr),y
 
 				jmp CC.F.Decl
-
-.9				rts
 *--------------------------------------
 CC.SYM.NewV		cmp #'['
 				bne CC.SYM.SetAddr
+
+				ldy #SYM.Q
+				lda (ZPSymBufPtr),y
+				and #%11001111
+				sta (ZPSymBufPtr),y
+
+				lda #SYM.Def
+				ldy #SYM.DefSize
+				sta (ZPSymBufPtr),y
+
+				ldy #SYM.Q
+
+.1				lda (ZPSymBufPtr),y
+				clc
+				adc #SYM.Q.ARRAY
+				sta (ZPSymBufPtr),y
 
 				jsr CC.GetNextCharNB	Skip [
 				bcs .99
 
 				cmp #']'
-				bne .3
+				bne .2
 
-.2				ldy #SYM.Q
+				ldy #SYM.Q
 				lda (ZPSymBufPtr),y
-				bit #SYM.Q.PPPOINTER
-				beq .99
+				and #SYM.Q.PPPOINTER
+				beq .99					[] only allowed for *
 
-				and #SYM.Q.AAARRAY
-				cmp #SYM.Q.AAARRAY
+				>LDYAI 0				set as [0] (deref)
+				jsr CC.SYM.AddWord
+				bra .3
+
+.2				jsr CC.EXP.IntConst
 				bcs .99
 
-*				ldy #SYM.Q
-				lda (ZPSymBufPtr),y
-*				clc
-				adc #SYM.Q.ARRAY
-				sta (ZPSymBufPtr),y
-
-				jsr CC.GetNextCharNB	Skip ]
-				bcs CC.SYM.SetAddr
-
-				cmp #'['
-				beq .2
-
-				bra CC.SYM.SetAddr
-*--------------------------------------
-.3				jsr CC.EXP.IntConst
-				bcs .9
-
-				jsr CC.SYM.SetSizeOf
+				jsr CC.SYM.AddWord
 
 				jsr CC.GetCharNB
 				bcs .99
@@ -130,17 +123,22 @@ CC.SYM.NewV		cmp #'['
 				cmp #']'
 				bne .99
 
-				jsr CC.GetNextCharNB	Skip ]
+.3				jsr CC.GetNextCharNB	Skip ]
 				bcs CC.SYM.SetAddr
 
-*				cmp #'['
-*				bne CC.SYM.SetAddr
+				cmp #'['
+				bne CC.SYM.SetAddr
 
-				bra CC.SYM.SetAddr
+				ldy #SYM.Q
+				lda (ZPSymBufPtr),y
+				and #SYM.Q.AAARRAY
+				cmp #SYM.Q.AAARRAY
+				beq .99					already [][][]
+
+				bra .1
 
 .99				lda #E.CSYN
 				sec
-
 .9				rts
 *--------------------------------------
 CC.SYM.SetAddr	ldy #SYM.Q
@@ -164,18 +162,22 @@ CC.SYM.SetAddrG	jsr CC.SYM.GetSymSizeOfInAXC
 
 *				clc / sec				A,X=Size, CS if pointer
 
+				pha
+
 				ldy #SYM.Addr
 
 				lda ZPCCData
 				sta (ZPSymBufPtr),y
 
-				adc ZPCCData
-				sta ZPCCData
-
 				iny
 
 				lda ZPCCData+1
 				sta (ZPSymBufPtr),y
+
+				pla
+				clc
+				adc ZPCCData
+				sta ZPCCData
 
 				txa
 				adc ZPCCData+1
@@ -214,6 +216,125 @@ CC.SYM.SetAddrL	jsr CC.SYM.GetSymSizeOfInAXC
 				sec
 				rts
 *--------------------------------------
+CC.SYM.PushAddr	ldy #SYM.SC
+				lda (ZPSymBufPtr),y
+				beq .1					SYM.SC.STATIC
+* LOCAL
+				>LDYA L.PCC.PushLAddrH
+				jsr CODE.EmitPCC
+				bcs .9
+
+				ldy #SYM.Addr
+				lda (ZPSymBufPtr),y
+				eor #$FF
+				inc
+				jsr CODE.LDAI
+				bcs .9
+
+				>LDYA L.PCC.PushLAddrL
+				jmp CODE.EmitPCC
+
+* GLOBAL
+
+.1				ldy #SYM.Addr+1
+				lda (ZPSymBufPtr),y
+				tax
+
+				dey
+				lda (ZPSymBufPtr),y
+
+				jsr CODE.LDAXI
+				bcs .9
+
+				ldy #SYM.Q
+				lda (ZPSymBufPtr),y
+				and #SYM.Q.CONST
+				beq .2
+
+				>LDYA L.PCC.PushIAddr
+				jmp CODE.EmitPCC
+
+.2				>LDYA L.PCC.PushUAddr
+				jmp CODE.EmitPCC
+
+.9				rts
+*--------------------------------------
+CC.SYM.GetAddr1	ldy #SYM.SC
+				lda (ZPSymBufPtr),y
+				beq .1					SYM.SC.STATIC
+* LOCAL
+				ldy #SYM.Addr
+				lda (ZPSymBufPtr),y
+				eor #$FF
+				inc
+				jsr CODE.LDAI
+				bcs .9
+
+				>LDYA L.PCC.GetLAddr1
+				jmp CODE.EmitPCC
+* GLOBAL
+
+.1				ldy #SYM.Addr+1
+				lda (ZPSymBufPtr),y
+				tax
+
+				dey
+				lda (ZPSymBufPtr),y
+
+				jsr CODE.LDAXI
+				bcs .9
+
+				ldy #SYM.Q
+				lda (ZPSymBufPtr),y
+				and #SYM.Q.CONST
+				beq .2
+
+				>LDYA L.PCC.GetIAddr1
+				jmp CODE.EmitPCC
+				
+.2				>LDYA L.PCC.GetUAddr1
+				jmp CODE.EmitPCC
+
+.9				rts
+*--------------------------------------
+CC.SYM.GetAddr2	ldy #SYM.SC
+				lda (ZPSymBufPtr),y
+				beq .1					SYM.SC.STATIC
+* LOCAL
+				ldy #SYM.Addr
+				lda (ZPSymBufPtr),y
+				eor #$FF
+				inc
+				jsr CODE.LDAI
+				bcs .9
+
+				>LDYA L.PCC.GetLAddr2
+				jmp CODE.EmitPCC
+* GLOBAL
+
+.1				ldy #SYM.Addr+1
+				lda (ZPSymBufPtr),y
+				tax
+
+				dey
+				lda (ZPSymBufPtr),y
+
+				jsr CODE.LDAXI
+				bcs .9
+
+				ldy #SYM.Q
+				lda (ZPSymBufPtr),y
+				and #SYM.Q.CONST
+				beq .2
+
+				>LDYA L.PCC.GetIAddr2
+				jmp CODE.EmitPCC
+
+.2				>LDYA L.PCC.GetUAddr2
+				jmp CODE.EmitPCC
+
+.9				rts
+*--------------------------------------
 CC.SYM.NewKey	>PUSHA
 				>PUSHW ZPLineBufPtr
 				>SYSCALL SListNewKey
@@ -223,11 +344,106 @@ CC.SYM.NewKey	>PUSHA
 
 .9				rts						Y,A = KeyID, X = KeyLen
 *--------------------------------------
+CC.SYM.AddWord	pha
+				phy
+
+				ldy #SYM.DefSize
+				lda (ZPSymBufPtr),y
+				pha
+
+				inc
+				inc
+				sta (ZPSymBufPtr),y
+
+				ply
+
+				pla
+				sta (ZPSymBufPtr),y
+				iny
+				pla
+				sta (ZPSymBufPtr),y
+CC.SYM.AddWord.RTS
+				rts
+*--------------------------------------
+CC.SYM.NewCPSID	>LDYA.G CC.CPSID
+				>STYA.G CC.CPSPFX+2
+
+				>LDA.G CC.CPSID+1
+				inc
+				cmp #'Z'+1
+				bne .1
+				
+				dey						CC.CPSID
+				lda (pData),y
+				inc
+				cmp #'Z'+1
+				beq .9
+				
+				sta (pData),y
+
+				lda #'A'
+				iny						CC.CPSID+1
+				
+.1				sta (pData),y				
+
+				clc
+				rts
+
+.9				lda #E.OOH
+*				sec
+				rts
+*--------------------------------------
+CC.SYM.NewA		bit bPass2
+				bmi .8
+
+				>STA.G CC.CPSPFX		A = "B"reak, "C"ontinue...
+
+				>PUSHB.G CC.hScopes		Global Scope
+				>PUSHEA.G CC.CPSPFX
+
+				>SYSCALL SListNewKey
+				bcs CC.SYM.AddWord.RTS
+
+				>STYA.G CC.SymID		Y,A = KeyID
+
+				lda #SYM.T.VOID
+				sta (ZPSymBufPtr)		#SYM.T
+
+				lda #SYM.Q.POINTER
+				ldy #SYM.Q
+				sta (ZPSymBufPtr),y
+
+				lda #SYM.SC.STATIC
+				iny						#SYM.SC
+				sta (ZPSymBufPtr),y
+
+				iny
+				lda #0
+
+.1				sta (ZPSymBufPtr),y
+				iny
+				cpy #SYM.Def
+				bne .1
+
+				tya
+				ldy #SYM.DefSize
+				sta (ZPSymBufPtr),y
+
+				>LDYA ZPCCCode
+				jsr CC.SYM.SetAddrYA
+
+				>LDA.G CC.hScopes		Global Scope
+				jmp CC.SYM.Store.1
+
+.8				clc
+
+.99				rts
+*--------------------------------------
 CC.SYM.StoreF	>LDA.G CC.hScopes
 
 				bit bPass2
 				bpl CC.SYM.Store.1
-				
+
 				clc
 				rts
 *--------------------------------------
@@ -332,6 +548,44 @@ CC.SYM.Lookup	>LDA.G CC.LookupIdx
 *				sec
 				rts
 *--------------------------------------
+CC.SYM.LookupA	bit bPass2
+				bmi .1
+
+				ldx #0
+				ldy #0
+				clc
+				rts
+
+.1				>STA.G CC.CPSPFX		A = "B"reak, "C"ontinue...
+
+				>PUSHB.G CC.hScopes		Global Scope
+				>PUSHEA.G CC.CPSPFX
+				>SYSCALL SListLookup
+				bcs .99
+
+				>STYA.G CC.SymID		Y,A = KeyID
+
+				>PUSHB.G CC.hScopes
+				>PUSHW.G CC.SymID
+				>PUSHW ZPSymBufPtr
+				>PUSHWI 65535			all
+				>PUSHWZ					From Start
+				>SYSCALL SListGetData
+				bcs .99
+
+				ldy #SYM.Addr
+				lda (ZPSymBufPtr),y
+
+				tax
+
+				iny
+				lda (ZPSymBufPtr),y
+				tay
+
+*				clc
+
+.99				rts
+*--------------------------------------
 CC.SYM.LookupFree
 				>LDA.G CC.LookupIdx
 				cmp #CC.LookupIdx
@@ -367,92 +621,35 @@ CC.SYM.LookupFreeAll
 				clc
 				rts
 *--------------------------------------
-* Y,A = value T/Q
+* on RT stack : Addr,value
 *--------------------------------------
-CC.SYM.PushValue
-				jsr CC.SYM.CheckTypeYA
+CC.SYM.SetValue	jsr CC.SYM.GetSymSizeOfInAXC
+				tay
+				dey
+				jsr CODE.LDYI
 				bcs .9
 
-				jsr CC.SYM.GetSymSizeOfInAXC
-				tax
-				jsr CODE.LDXI
+				>LDYA L.PCC.SetValue
+				jmp CODE.EmitPCC
 
-				jsr CC.SYM.GetAddrInYA
-				beq .1
-
-				jsr CODE.LDYAI
-				jsr CODE.PushXFromYA
-
-				clc
-				rts
-
-.1				jsr CODE.GetLocal		Y = local address
-				jsr CODE.PushXFromYA
-
-				clc
-.9				rts
-*--------------------------------------
-CC.SYM.PopValue	jsr CC.SYM.CheckTypeYA
-				bcs .9
-
-				jsr CC.SYM.GetSymSizeOfInAXC
-				tax
-				jsr CODE.LDXI
-
-				jsr CC.SYM.GetAddrInYA
-				beq .1
-
-				jsr CODE.LDYAI
-				jsr CODE.PopXToYA
-
-				clc
-				rts
-
-.1				jsr CODE.GetLocal		Y = local address
-				jsr CODE.PopXToYA
-
-				clc
-.9				rts
-*--------------------------------------
-CC.SYM.SetValue	jsr CC.SYM.CheckTypeYA
-				bcs .9
-
-				jsr CC.SYM.GetSymSizeOfInAXC
-				tax
-				jsr CODE.LDXI
-
-				jsr CC.SYM.GetAddrInYA
-				beq .1
-
-				jsr CODE.LDYAI
-				jsr CODE.SetXToYA
-
-				clc
-				rts
-
-.1				jsr CODE.GetLocal		Y = local address
-				jsr CODE.SetXToYA
-
-				clc
 .9				rts
 *--------------------------------------
 * in : Y,A = T/Q
 * out : CC
 *		CS, A = E.TMISMATCH
 *--------------------------------------
-CC.SYM.CheckTypeYA
+CC.SYM.CheckTypeYA.OLD
 				pha
 				tya
 				cmp (ZPSymBufPtr)
 				bne .9
 
 				pla
-				phy
-				ldy #SYM.Q
-				cmp (ZPSymBufPtr),y
-				bne .9
 
-				ply
+				ldy #SYM.Q
+				eor (ZPSymBufPtr),y
+				and #$FC				ignore SYM.Q.FUNC+SYM.Q.FASTCALL
+				bne .9
 
 				clc
 				rts
@@ -476,7 +673,7 @@ CC.SYM.GetTypeInYA
 *--------------------------------------
 * in : Y,A = T/Q
 *--------------------------------------
-CC.SYM.SetTypeYA
+CC.SYM.SetTypeYA.OLD
 				phy
 				ldy #SYM.Q
 				sta (ZPSymBufPtr),y
@@ -497,7 +694,16 @@ CC.SYM.GetSymSizeOfInAXC
 CC.SYM.GetYASizeOfInAXC
 
 				bit #SYM.Q.PPPOINTER
-				bne .1
+				beq .1
+
+				lda #2					pointer
+				ldx #0
+
+				sec						+1 for hMem Storage
+				rts
+
+.1				bit #SYM.Q.AAARRAY
+				bne .2
 
 				lda CC.TYPESIZE-1,y
 				ldx #0
@@ -505,10 +711,36 @@ CC.SYM.GetYASizeOfInAXC
 				clc
 				rts
 
-.1				lda #2					pointer
-				ldx #0
+.2				ldx CC.TYPESIZE-1,y
 
-				sec						+1 for hMem Storage
+				ldy #SYM.Def
+				lda (ZPSymBufPtr),y
+				>PUSHA
+				iny
+				lda (ZPSymBufPtr),y
+				>PUSHA
+
+				ldy #1
+
+.3				dex
+				beq .5
+
+.4				lda (pStack),y
+				clc
+				adc (pStack),y
+				sta (pStack),y
+
+				lda (pStack)
+				adc (pStack)
+				sta (pStack)
+				dex
+				bne .4
+
+.5				>PULLA
+				tax
+				>PULLA
+
+				clc
 				rts
 *--------------------------------------
 * in/out : A,X,C = size
@@ -524,19 +756,6 @@ CC.SYM.SetSizeOf
 				sta (ZPSymBufPtr),y
 
 				pla
-				rts
-*--------------------------------------
-CC.SYM.GetAddrInYA
-				ldy #SYM.Addr+1
-				lda (ZPSymBufPtr),y
-				pha
-
-				dey
-				lda (ZPSymBufPtr),y
-				tay
-
-				pla						Z if Local
-
 				rts
 *--------------------------------------
 CC.SYM.SetAddrYA
