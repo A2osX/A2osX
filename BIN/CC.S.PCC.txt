@@ -7,16 +7,16 @@ ZS.RT.Ptr1		.EQ ZPBIN
 ZS.RT.Ptr2		.EQ ZPBIN+2
 *--------------------------------------
 PCC.FH			.PH $2000
-PCC.FH.2000		cld
+PCC.FH.ORG		cld
 				jmp (PCC.FH.JMP,x)
 				.DA #$61				6502,Level 1 (65c02)
 				.DA #1					BIN Layout Version 1
 				.DA #0					S.PS.F.EVENT
 				.DA #0
-PCC.FH.CSSIZE	.EQ *-PCC.FH.2000
-			.DA $FFFF					* Code Size (without Constants)
-PCC.FH.DSSIZE	.EQ *-PCC.FH.2000
-			.DA $FFFF					* Data Size
+PCC.FH.CSSIZE	.EQ *-PCC.FH.ORG
+			.DA $FFFF					Code Size (without Constants)
+PCC.FH.DSSIZE	.EQ *-PCC.FH.ORG
+			.DA $FFFF					Data Size
 				.DA #256				Stack Size
 				.DA #4					ZP Size
 				.DA 0
@@ -25,15 +25,83 @@ PCC.FH.JMP		.DA PCC.FH.INIT
 				.DA PCC.FH.RUN
 				.DA PCC.FH.DOEVENT
 				.DA	PCC.FH.QUIT
-PCC.FH.IDATA 	.EQ *-PCC.FH.2000
+PCC.FH.CONST 	.EQ *-PCC.FH.ORG
+			.DA $FFFF
+PCC.FH.LIBS 	.EQ *-PCC.FH.ORG
 			.DA $FFFF
 				.DA 0
 
-PCC.FH.INIT
-* TODO : LoadLib code
-PCC.FH.QUIT
-* TODO : UnloadLib code
-PCC.FH.DOEVENT	clc
+PCC.FH.INIT		>LDYA PCC.FH.ORG+PCC.FH.LIBS
+				>STYA ZS.RT.Ptr1
+			
+				ldx #0
+
+.1				lda (ZS.RT.Ptr1)
+				beq .8
+				
+				phx
+				
+				>LDYA ZS.RT.Ptr1
+				>SYSCALL LoadLib
+				plx
+				bcs .9
+				
+				sta PCC.PH.hLIBs,x
+				phx
+				>SYSCALL GetMemPtr
+				plx
+				>STYA PCC.PH.JMPLIBs+1,x
+				inx
+				inx
+				inx
+				inx
+
+				ldy #0
+				
+.2				iny
+				lda (ZS.RT.Ptr1),y
+				bne .2
+				
+				tya
+				sec
+				adc ZS.RT.Ptr1
+				sta ZS.RT.Ptr1
+				bcc .1
+				
+				inc ZS.RT.Ptr1+1
+				bra .1
+				
+.8				clc
+.9				rts
+				
+PCC.FH.QUIT		ldx #12
+
+.1				lda PCC.PH.hLIBs,x
+				beq .2
+				
+				phx
+				>SYSCALL UnloadLib
+				plx
+				
+.2				dex
+				dex
+				dex
+				dex
+				bpl .1
+
+				clc
+				rts
+
+PCC.PH.hLIBs	.DA #0
+PCC.PH.JMPLIBs	jmp $FFFF			
+				.DA #0
+				jmp $FFFF
+				.DA #0
+				jmp $FFFF
+				.DA #0
+				jmp $FFFF
+
+PCC.FH.DOEVENT	sec						do not discard TIMER event
 				rts
 
 * int main(int argc, char *argv[]) ;
@@ -66,17 +134,20 @@ PCC.FH.RUN		lda #0
 
 				jsr PCC.FH.CS			Execute INIT code
 
-				>PUSHWZ					returned int=0
-
 				lda #0
+				>PUSHA					returned int=0
 				>PUSHA
+
+				>PUSHA					int ARGC (hi byte)
+				
 				ldy #S.PS.ARGC
 				lda (pPS),y
-				>PUSHA					int ARGC
+				>PUSHA					int ARGC (lo byte)
+
 				>PUSHW pData			*char[] ARGV
 *			>DEBUG
-PCC.FH.MAIN		.EQ *-PCC.FH.2000+1
-			jsr $FFFF					* jsr main
+PCC.FH.MAIN		.EQ *-PCC.FH.ORG+1
+			jsr $FFFF					jsr main
 				>PULLA
 				inc pStack				pull returned int
 				sec
@@ -213,12 +284,12 @@ PCC.PushLAddrL.L	.EQ *-PCC.PushLAddrL
 *--------------------------------------
 PCC.PushIAddr	.DA #PCC.PushIAddr.L
 				clc
-				adc PCC.FH.2000+PCC.FH.IDATA
+				adc PCC.FH.ORG+PCC.FH.CONST
 				dec pStack
 				>PUSHA
 
 				txa
-				adc PCC.FH.2000+PCC.FH.IDATA+1
+				adc PCC.FH.ORG+PCC.FH.CONST+1
 				ldy #1
 				sta (pStack),y
 
@@ -248,10 +319,10 @@ PCC.GetLAddr1.L	.EQ *-PCC.GetLAddr1
 *--------------------------------------
 PCC.GetIAddr1	.DA #PCC.GetIAddr1.L
 				clc
-				adc PCC.FH.2000+PCC.FH.IDATA
+				adc PCC.FH.ORG+PCC.FH.CONST
 				sta ZS.RT.Ptr1
 				txa
-				adc PCC.FH.2000+PCC.FH.IDATA+1
+				adc PCC.FH.ORG+PCC.FH.CONST+1
 				sta ZS.RT.Ptr1+1
 
 PCC.GetIAddr1.L	.EQ *-PCC.GetIAddr1
@@ -274,13 +345,32 @@ PCC.PopAddr1	.DA #PCC.PopAddr1.L
 
 PCC.PopAddr1.L	.EQ *-PCC.PopAddr1
 *--------------------------------------
-PCC.SetValue	.DA #PCC.SetValue.L
-.1				lda (pStack),y
+PCC.PopValue1	.DA #PCC.PopValue1.L
+				>PULLA
+				sta (ZS.RT.Ptr1)
+
+PCC.PopValue1.L	.EQ *-PCC.PopValue1
+*--------------------------------------
+PCC.PopValue2	.DA #PCC.PopValue2.L
+				>PULLA
+				sta (ZS.RT.Ptr1)
+				>PULLA
+				ldy #1
 				sta (ZS.RT.Ptr1),y
-				dey
+
+PCC.PopValue2.L	.EQ *-PCC.PopValue2
+*--------------------------------------
+PCC.PopValueX	.DA #PCC.PopValueX.L
+
+				ldy #0
+
+.1				>PULLA
+				sta (ZS.RT.Ptr1),y
+				iny
+				dex
 				bpl .1
 
-PCC.SetValue.L	.EQ *-PCC.SetValue
+PCC.PopValueX.L	.EQ *-PCC.PopValueX
 *--------------------------------------
 PCC.GetLAddr2	.DA #PCC.GetLAddr2.L
 				clc
@@ -293,10 +383,10 @@ PCC.GetLAddr2.L	.EQ *-PCC.GetLAddr2
 *--------------------------------------
 PCC.GetIAddr2	.DA #PCC.GetIAddr2.L
 				clc
-				adc PCC.FH.2000+PCC.FH.IDATA
+				adc PCC.FH.ORG+PCC.FH.CONST
 				sta ZS.RT.Ptr2
 				txa
-				adc PCC.FH.2000+PCC.FH.IDATA+1
+				adc PCC.FH.ORG+PCC.FH.CONST+1
 				sta ZS.RT.Ptr2+1
 
 PCC.GetIAddr2.L	.EQ *-PCC.GetIAddr2
@@ -337,14 +427,31 @@ PCC.PushDeref2	.DA #PCC.PushDeref2.L
 
 PCC.PushDeref2.L	.EQ *-PCC.PushDeref2
 *--------------------------------------
-PCC.PushValue	.DA #PCC.PushValue.L
+PCC.PushValue1	.DA #PCC.PushValue1.L
+
+				lda (ZS.RT.Ptr2)
+				>PUSHA
+
+PCC.PushValue1.L	.EQ *-PCC.PushValue1
+*--------------------------------------
+PCC.PushValue2	.DA #PCC.PushValue2.L
+
+				ldy #1
+				lda (ZS.RT.Ptr2),y
+				>PUSHA
+				lda (ZS.RT.Ptr2)
+				>PUSHA
+
+PCC.PushValue2.L	.EQ *-PCC.PushValue2
+*--------------------------------------
+PCC.PushValueY	.DA #PCC.PushValueY.L
 
 .1				lda (ZS.RT.Ptr2),y
 				>PUSHA
 				dey
 				bpl .1
 
-PCC.PushValue.L	.EQ *-PCC.PushValue
+PCC.PushValueY.L	.EQ *-PCC.PushValueY
 *--------------------------------------
 PCC.Inc1		.DA #PCC.Inc1.L
 				lda (ZS.RT.Ptr2)
@@ -433,7 +540,33 @@ PCC.Dec4		.DA #PCC.Dec4.L
 				
 PCC.Dec4.L		.EQ *-PCC.Dec4
 *--------------------------------------
-PCC.BOPS.bMUL
+PCC.BOPS.bMUL	.DA #PCC.BOPS.bMUL.L
+				ldx #0					result
+				
+				>PULLA
+				tay						b2
+				
+.1				tya
+				beq .8
+				
+				lsr
+				tay
+				bcc .2
+
+				clc
+				txa
+				adc (pStack)			b1
+				tax
+				
+.2				lda (pStack)			b1*2
+				asl
+				sta (pStack)
+				bne .1
+
+.8				txa
+				sta (pStack)
+				
+PCC.BOPS.bMUL.L	.EQ *-PCC.BOPS.bMUL
 *--------------------------------------
 PCC.BOPS.cMUL
 *--------------------------------------

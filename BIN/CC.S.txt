@@ -11,6 +11,7 @@ NEW
 				.INB inc/mli.e.i
 *--------------------------------------
 FILES.MAX		.EQ 4
+LIBS.MAX		.EQ 4
 SCOPE.MAX		.EQ 16
 LOOKUP.MAX		.EQ 16
 *--------------------------------------
@@ -23,6 +24,9 @@ SYM.T.SINT			.EQ 5
 SYM.T.ULONG			.EQ 6
 SYM.T.SLONG			.EQ 7
 SYM.T.FLOAT			.EQ 8
+SYM.T.STRUCT		.EQ 9
+SYM.T.UNION			.EQ 10
+SYM.T.ENUM			.EQ 11
 SYM.T.VARIADIC		.EQ $FF
 SYM.Q			.EQ 1
 SYM.Q.POINTER		.EQ %01000000
@@ -49,6 +53,12 @@ SYM.Addr		.EQ 6
 SYM.Def			.EQ 8					Funtions : fTQ,a1TQ,a2TQ....
 *
 SYM				.EQ 10
+*--------------------------------------
+STRUCTF.T		.EQ 0
+STRUCTF.Q		.EQ 1
+STRUCTF.BitOfs	.EQ 2
+STRUCTF.BitWidth	.EQ 3
+STRUCTF.Name	.EQ 4
 *--------------------------------------
 * Zero Page Segment, up to 32 bytes
 *--------------------------------------
@@ -120,6 +130,8 @@ L.MSG.ERROR		.DA MSG.ERROR
 L.MSG.SUMMARY	.DA MSG.SUMMARY
 L.MSG.NOMAIN	.DA MSG.NOMAIN
 L.ENV.INCLUDE	.DA ENV.INCLUDE
+L.ENV.LIB		.DA ENV.LIB
+L.LIB.O			.DA LIB.O
 *--------------------------------------
 L.CC.AOPS		.DA CC.AOPS
 L.CC.PREOPS		.DA CC.PREOPS
@@ -134,7 +146,7 @@ J.CC.PREOPS		.DA CC.EXP.Ref
 L.CC.POSTOPS	.DA CC.POSTOPS
 J.CC.POSTOPS	.DA CC.EXP.postinc
 				.DA CC.EXP.postdec
-				.DA CC.EXP.array
+				.DA CC.EXP.idx
 				.DA CC.EXP.Struct
 				.DA CC.EXP.pStruct
 L.CC.BOPS		.DA CC.BOPS
@@ -164,12 +176,15 @@ J.CC.KW			.DA CC.KW.IF
 *--------------------------------------
 				.DA CC.KW.SIZEOF
 				.DA CC.KW.STRUCT
+				.DA CC.KW.UNION
+				.DA CC.KW.ENUM
 *--------------------------------------
 J.CC.KW.END		.DA CC.KW.IF.END
 				.DA CC.KW.WHILE.END
 				.DA CC.KW.ELSE.END
 				.DA CC.KW.DO.END
 				.DA CC.KW.FOR.END
+				.DA CC.KW.SWITCH.END
 *--------------------------------------
 J.CC.SCSPEC		.DA CC.SCSPEC.AUTO
 				.DA CC.SCSPEC.REGISTER
@@ -194,7 +209,8 @@ J.CC.STYPES		.DA CC.TYPE.SCHAR
 				.DA CC.TYPE.SLONG
 *--------------------------------------
 L.CC.MAIN		.DA CC.MAIN
-L.CC.LIBC		.DA CC.LIBC
+L.CC.SYSCALL	.DA CC.SYSCALL
+L.CC.FPUCALL	.DA CC.FPUCALL
 L.PCC.FH		.DA PCC.FH
 *--------------------------------------
 L.PCC.DEBUG		.DA PCC.DEBUG
@@ -217,14 +233,18 @@ L.PCC.GetLAddr1	.DA PCC.GetLAddr1
 L.PCC.GetIAddr1	.DA PCC.GetIAddr1
 L.PCC.GetUAddr1	.DA PCC.GetUAddr1
 L.PCC.PopAddr1	.DA PCC.PopAddr1
-L.PCC.SetValue	.DA PCC.SetValue
+L.PCC.PopValue1	.DA PCC.PopValue1
+L.PCC.PopValue2	.DA PCC.PopValue2
+L.PCC.PopValueX	.DA PCC.PopValueX
 L.PCC.GetLAddr2	.DA PCC.GetLAddr2
 L.PCC.GetIAddr2	.DA PCC.GetIAddr2
 L.PCC.GetUAddr2	.DA PCC.GetUAddr2
 L.PCC.PopAddr2	.DA PCC.PopAddr2
 L.PCC.Deref2	.DA PCC.Deref2
 L.PCC.PushDeref2	.DA PCC.PushDeref2
-L.PCC.PushValue	.DA PCC.PushValue
+L.PCC.PushValue1	.DA PCC.PushValue1
+L.PCC.PushValue2	.DA PCC.PushValue2
+L.PCC.PushValueY	.DA PCC.PushValueY
 L.PCC.Inc1		.DA PCC.Inc1
 L.PCC.Inc2		.DA PCC.Inc2
 L.PCC.Inc4		.DA PCC.Inc4
@@ -304,10 +324,11 @@ CS.RUN			>PUSHW L.MSG.GREETINGS
 				jsr CS.RUN.ARGS
 				bcs CS.INIT.RTS
 
-				jsr CC.CORE.Init
+				jsr CORE.Init
 				bcs CS.INIT.RTS
 
 				jsr CODE.Init
+				bcs CS.INIT.RTS
 
 				jsr CC.FIO.FOpen1st
 				bcs CS.INIT.RTS
@@ -344,6 +365,9 @@ CS.RUN.CLOOP	jsr CC.CompileFile
 
 				cmp #MLI.E.EOF
 				bne .9
+				
+				jsr CODE.EmitTail
+				bcs .9
 
 				jsr CC.FIO.FClose
 				bne .2
@@ -371,6 +395,7 @@ CS.RUN.ARGS		inc ArgIndex
 
 				ldy #1
 				lda (ZPPtr1),y
+				beq .90
 
 				ldx #OptionVars-OptionList-1
 
@@ -382,7 +407,21 @@ CS.RUN.ARGS		inc ArgIndex
 
 				bra .90
 
-.2				ldy OptionVars,x
+.2				cpx #4
+				bcc .3
+				
+				inc ArgIndex
+
+				lda ArgIndex
+				>SYSCALL ArgV
+				bcs .90
+				
+				jsr CC.FIO.LoadLIB.o
+				bcc CS.RUN.ARGS
+
+				rts
+
+.3				ldy OptionVars,x
 				lda #$ff
 				sta (pData),y
 				bra CS.RUN.ARGS
@@ -422,9 +461,22 @@ CS.DOEVENT		sec
 				rts
 *--------------------------------------
 CS.QUIT			jsr CODE.Quit
-				jsr CC.CORE.Quit
+				jsr CORE.Quit
+				
+.1				>LDA.G LibCount
+				beq .6
+				
+				dec 
+				sta (pData),y
 
-				>LDA.G hLineBuf
+				clc
+				adc #hLibOs
+				tay
+				lda (pData),y
+				>SYSCALL FreeMem
+				bra .1
+
+.6				>LDA.G hLineBuf
 				beq .8
 
 				>SYSCALL FreeMem
@@ -540,29 +592,14 @@ PrintErrorMsg	>LDA.G CC.hDefineBuf
 				>SYSCALL FPrintF
 				rts
 *--------------------------------------
-PrintSummary	lda ZPCCCode+1
-				sta PCC.FH+PCC.FH.IDATA+1
+PrintSummary	>PUSHW L.MSG.SUMMARY
+				lda ZPCCCode+1
 				sec
 				sbc #$20
-				sta PCC.FH+PCC.FH.CSSIZE+1
-
-				lda ZPCCCode
-				sta PCC.FH+PCC.FH.CSSIZE
-				sta PCC.FH+PCC.FH.IDATA
-
-				>PUSHW L.MSG.SUMMARY
-
-				>PUSHW PCC.FH+PCC.FH.CSSIZE
-
+				>PUSHA
+				>PUSHB ZPCCCode
 				>PUSHW ZPCCConst
-
-				lda ZPCCData+1
-				>PUSHA
-				sta PCC.FH+PCC.FH.DSSIZE+1
-				lda ZPCCData
-				>PUSHA
-				sta PCC.FH+PCC.FH.DSSIZE
-
+				>PUSHW ZPCCData
 				>PUSHBI 6
 				>SYSCALL PrintF
 *			>DEBUG
@@ -588,8 +625,8 @@ CS.END
 MSG.GREETINGS	.AZ "\r\nA2osX C Compiler %d.%d\r\n\r\n"
 MSG.USAGE		.AS "Usage : CC <option> srcfile.c dstfile\r\n"
 				.AS "   -D : Debug Mode\r\n"
-				.AS "   -T : Trace On"
-				.AZ "\r\n"
+				.AS "   -T : Trace On\r\n"
+				.AZ "   -L Libname1 -O Libname2 ...\r\n"
 MSG.READING		.AZ "*** Reading file: %s\r\n"
 MSG.LINKING		.AZ "*** Linking..."
 MSG.LINKING2	.AZ "*** %H:%18s T/Q=%h/%h, SC=%h, Def=%h, SizeOf=%H, @=%H\r\n"
@@ -599,14 +636,21 @@ MSG.DEBUG		.AS "*** pCode=%H, pConst=%H, pData=%H, pStack=%H\r\n"
 MSG.TRACE		.AZ "%5D> %s\r\n"
 MSG.RTSTK		.AZ "<pBase=%H, pVar=%H, (pVar)=%H, pStack=%H>\r\n"
 MSG.ERROR		.AZ "       %s^\r\n"
-MSG.SUMMARY		.AZ "*** Compilation OK : Code size=%5D, iData size=%5D, uData size=%5D\r\n"
+MSG.SUMMARY		.AZ "*** Compilation OK : Code size=%5D, Const size=%5D, uData size=%5D\r\n"
 MSG.NOMAIN		.AZ "*** No 'main()' function defined."
 *--------------------------------------
-OptionList		.AS "DdTt"
+OptionList		.AS "DdTtLl"
 OptionVars		.DA #bDebug,#bDebug,#bTrace,#bTrace
 *--------------------------------------
 ENV.INCLUDE		.AZ "INCLUDE"
 ENV.LIB			.AZ "LIB"
+LIB.O			.AZ ".o"
+*--------------------------------------
+CC.EscChars		.AS "abefnrtv"
+				.HS 5C27223F
+CC.EscChars.Cnt	.EQ *-CC.EscChars
+CC.EscCodes		.HS 07081B0C0A0D090B
+				.HS 5C27223F
 *--------------------------------------
 CC.OPChars		.AS "!~+-*/%=&|^<>["
 CC.OPChars.Cnt	.EQ *-CC.OPChars
@@ -695,6 +739,8 @@ CC.KW			>PSTR "if"
 				>PSTR "return"
 				>PSTR "sizeof"
 				>PSTR "struct"
+				>PSTR "union"
+				>PSTR "enum"
 				.HS 00
 CC.KW2.IF		>PSTR "else"
 				.HS 00
@@ -732,282 +778,283 @@ CC.MAIN			.AZ "main"
 CC.MAIN.DEF		.DA #SYM.T.SINT,#0,#SYM.T.SINT,#0,#SYM.T.UCHAR,#SYM.Q.PPOINTER,0
 CC.MAIN.DEF.LEN	.EQ *-CC.MAIN.DEF
 *--------------------------------------
-CC.LIBC			>PSTR "chtyp"
-				.DA #2,#1,#SYS.ChTyp
+CC.SYSCALL		>PSTR "chtyp"
+				.DA #SYS.ChTyp
 				>PSTR "chmod"
-				.DA #2,#1,#SYS.ChMod
+				.DA #SYS.ChMod
 				>PSTR "fstat"
-				.DA #2,#1,#SYS.FStat
+				.DA #SYS.FStat
 				>PSTR "stat"
-				.DA #2,#1,#SYS.Stat
+				.DA #SYS.Stat
 				>PSTR "mkdir"
-				.DA #2,#1,#SYS.MKDir
+				.DA #SYS.MKDir
 				>PSTR "mknod"
-				.DA #2,#1,#SYS.MKNod
+				.DA #SYS.MKNod
 				>PSTR "mkfifo"
-				.DA #2,#1,#SYS.MKFIFO
+				.DA #SYS.MKFIFO
 				>PSTR "pipe"
-				.DA #2,#1,#SYS.Pipe
+				.DA #SYS.Pipe
 				>PSTR "opendir"
-				.DA #2,#1,#SYS.OpenDir
+				.DA #SYS.OpenDir
 				>PSTR "readdir"
-				.DA #2,#1,#SYS.ReadDir
+				.DA #SYS.ReadDir
 				>PSTR "closedir"
-				.DA #2,#1,#SYS.CloseDir
+				.DA #SYS.CloseDir
 				>PSTR "open"
-				.DA #2,#1,#SYS.Open
+				.DA #SYS.Open
 				>PSTR "close"
-				.DA #2,#1,#SYS.Close
+				.DA #SYS.Close
 				>PSTR "read"
-				.DA #2,#1,#SYS.Read
+				.DA #SYS.Read
 				>PSTR "write"
-				.DA #2,#1,#SYS.Write
+				.DA #SYS.Write
 				>PSTR "chown"
-				.DA #2,#1,#SYS.ChOwn
+				.DA #SYS.ChOwn
 				>PSTR "fputc"
-				.DA #2,#1,#SYS.FPutC
+				.DA #SYS.FPutC
 				>PSTR "putchar"
-				.DA #2,#1,#SYS.PutChar
+				.DA #SYS.PutChar
 				>PSTR "getc"
-				.DA #2,#1,#SYS.GetC
+				.DA #SYS.GetC
 				>PSTR "getchar"
-				.DA #2,#1,#SYS.GetChar
+				.DA #SYS.GetChar
 				>PSTR "fputs"
-				.DA #2,#1,#SYS.FPutS
+				.DA #SYS.FPutS
 				>PSTR "puts"
-				.DA #2,#1,#SYS.PutS
+				.DA #SYS.PutS
 				>PSTR "fgets"
-				.DA #2,#1,#SYS.FGetS
+				.DA #SYS.FGetS
 				>PSTR "ungetc"
-				.DA #2,#1,#SYS.UngetC
+				.DA #SYS.UngetC
 				>PSTR "fopen"
-				.DA #2,#1,#SYS.FOpen
+				.DA #SYS.FOpen
 				>PSTR "fclose"
-				.DA #2,#1,#SYS.FClose
+				.DA #SYS.FClose
 				>PSTR "fread"
-				.DA #2,#1,#SYS.FRead
+				.DA #SYS.FRead
 				>PSTR "fwrite"
-				.DA #2,#1,#SYS.FWrite
+				.DA #SYS.FWrite
 				>PSTR "fflush"
-				.DA #2,#1,#SYS.FFlush
+				.DA #SYS.FFlush
 				>PSTR "fseek"
-				.DA #2,#1,#SYS.FSeek
+				.DA #SYS.FSeek
 				>PSTR "ftell"
-				.DA #2,#1,#SYS.FTell
+				.DA #SYS.FTell
 				>PSTR "feof"
-				.DA #2,#1,#SYS.FEOF
+				.DA #SYS.FEOF
 				>PSTR "remove"
-				.DA #2,#1,#SYS.Remove
+				.DA #SYS.Remove
 				>PSTR "rename"
-				.DA #2,#1,#SYS.Rename
+				.DA #SYS.Rename
 				>PSTR "printf"
-				.DA #2,#1,#SYS.PrintF
+				.DA #SYS.PrintF
 				>PSTR "fprintf"
-				.DA #2,#1,#SYS.FPrintF
+				.DA #SYS.FPrintF
 				>PSTR "sprintf"
-				.DA #2,#1,#SYS.SPrintF
+				.DA #SYS.SPrintF
 				>PSTR "scanf"
-				.DA #2,#1,#SYS.ScanF
+				.DA #SYS.ScanF
 				>PSTR "fscanf"
-				.DA #2,#1,#SYS.FScanF
+				.DA #SYS.FScanF
 				>PSTR "sscanf"
-				.DA #2,#1,#SYS.SScanF
+				.DA #SYS.SScanF
 *				>PSTR "$50"
-*				.DA #2,#1,#0
+*				.DA #0
 *				>PSTR "$52"
-*				.DA #2,#1,#0
+*				.DA #0
 *				>PSTR "$54"
-*				.DA #2,#1,#0
+*				.DA #0
 *				>PSTR "$56"
-*				.DA #2,#1,#0
+*				.DA #0
 *				>PSTR "$58"
-*				.DA #2,#1,#0
+*				.DA #0
 *				>PSTR "$5A"
-*				.DA #2,#1,#0
+*				.DA #0
 *				>PSTR "$5C"
-*				.DA #2,#1,#0
+*				.DA #0
 				>PSTR "setattr"
-				.DA #2,#1,#SYS.SetAttr
+				.DA #SYS.SetAttr
 *				>PSTR "mount"
-*				.DA #2,#1,#0
+*				.DA #0
 *				>PSTR "umount"
-*				.DA #2,#1,#0
+*				.DA #0
 *				>PSTR "online"
-*				.DA #2,#1,#0
+*				.DA #0
 *				>PSTR "getstkobj"
-*				.DA #2,#1,#0
+*				.DA #0
 *				>PSTR "shift"
-*				.DA #2,#1,#0
+*				.DA #0
 *				>PSTR "argv"
-*				.DA #2,#1,#0
+*				.DA #0
 *				>PSTR "argvDup"
-*				.DA #2,#1,#0
+*				.DA #0
 *				>PSTR "geterrmsg"
-*				.DA #2,#1,#0
+*				.DA #0
 				>PSTR "atof"
-				.DA #2,#1,#SYS.AToF
+				.DA #SYS.AToF
 				>PSTR "atoi"
-				.DA #2,#1,#SYS.AToI
+				.DA #SYS.AToI
 				>PSTR "atol"
-				.DA #2,#1,#SYS.AToL
+				.DA #SYS.AToL
 				>PSTR "strtof"
-				.DA #2,#1,#SYS.StrToF
+				.DA #SYS.StrToF
 				>PSTR "strtol"
-				.DA #2,#1,#SYS.StrToL
+				.DA #SYS.StrToL
 				>PSTR "strtoul"
-				.DA #2,#1,#SYS.StrToUL
+				.DA #SYS.StrToUL
 				>PSTR "realpath"
-				.DA #2,#1,#SYS.RealPath
+				.DA #SYS.RealPath
 				>PSTR "expand"
-				.DA #2,#1,#SYS.Expand
+				.DA #SYS.Expand
 				>PSTR "strlen"
-				.DA #2,#1,#SYS.StrLen
+				.DA #SYS.StrLen
 				>PSTR "strcpy"
-				.DA #2,#1,#SYS.StrCpy
+				.DA #SYS.StrCpy
 				>PSTR "strcat"
-				.DA #2,#1,#SYS.StrCat
+				.DA #SYS.StrCat
 				>PSTR "strdup"
-				.DA #2,#1,#SYS.StrDup
+				.DA #SYS.StrDup
 				>PSTR "strupr"
-				.DA #2,#1,#SYS.StrUpr
+				.DA #SYS.StrUpr
 				>PSTR "strlwr"
-				.DA #2,#1,#SYS.StrLwr
+				.DA #SYS.StrLwr
 				>PSTR "strcmp"
-				.DA #2,#1,#SYS.StrCmp
+				.DA #SYS.StrCmp
 				>PSTR "strcasecmp"
-				.DA #2,#1,#SYS.StrCaseCmp
+				.DA #SYS.StrCaseCmp
 *				>PSTR "getdevbyname"
-*				.DA #2,#1,#0
+*				.DA #0
 *				>PSTR "getdevstatus"
-*				.DA #2,#1,#0
+*				.DA #0
 *				>PSTR "mkdev"
-*				.DA #2,#1,#0
+*				.DA #0
 *				>PSTR "ioctl"
-*				.DA #2,#1,#0
+*				.DA #0
 *				>PSTR "loadlib"
-*				.DA #2,#1,#0
+*				.DA #0
 *				>PSTR "unloadlib"
-*				.DA #2,#1,#0
+*				.DA #0
 *				>PSTR "loaddrv"
-*				.DA #2,#1,#0
+*				.DA #0
 *				>PSTR "insdrv"
-*				.DA #2,#1,#0
+*				.DA #0
 				>PSTR "execl"
-				.DA #2,#1,#SYS.ExecL
+				.DA #SYS.ExecL
 *				>PSTR "execv"
-*				.DA #2,#1,#0
+*				.DA #0
 				>PSTR "fork"
-				.DA #2,#1,#SYS.Fork
+				.DA #SYS.Fork
 				>PSTR "kill"
-				.DA #2,#1,#SYS.Kill
+				.DA #SYS.Kill
 *				>PSTR "loadfile"
-*				.DA #2,#1,#0
+*				.DA #0
 *				>PSTR "loadtxtfile"
-*				.DA #2,#1,#0
+*				.DA #0
 *				>PSTR "filesearch"
-*				.DA #2,#1,#0
+*				.DA #0
 *				>PSTR "getmemstat"
-*				.DA #2,#1,#0
+*				.DA #0
 *				>PSTR "strvnew"
-*				.DA #2,#1,#0
+*				.DA #0
 *				>PSTR "strvset"
-*				.DA #2,#1,#0
+*				.DA #0
 *				>PSTR "strvget"
-*				.DA #2,#1,#0
+*				.DA #0
 *				>PSTR "strvfree"
-*				.DA #2,#1,#0
+*				.DA #0
 				>PSTR "putenv"
-				.DA #2,#1,#SYS.PutEnv
+				.DA #SYS.PutEnv
 				>PSTR "setenv"
-				.DA #2,#1,#SYS.SetEnv
+				.DA #SYS.SetEnv
 				>PSTR "getenv"
-				.DA #2,#1,#SYS.GetEnv
+				.DA #SYS.GetEnv
 				>PSTR "unsetenv"
-				.DA #2,#1,#SYS.UnsetEnv
+				.DA #SYS.UnsetEnv
 				>PSTR "time"
-				.DA #2,#1,#SYS.Time
+				.DA #SYS.Time
 				>PSTR "strftime"
-				.DA #2,#1,#SYS.StrFTime
+				.DA #SYS.StrFTime
 *				>PSTR "ptime2time"
-*				.DA #2,#1,#0
+*				.DA #0
 				>PSTR "ctime2time"
-				.DA #2,#1,#SYS.CTime2Time
+				.DA #SYS.CTime2Time
 				>PSTR "md5"
-				.DA #2,#1,#SYS.MD5
+				.DA #SYS.MD5
 				>PSTR "md5init"
-				.DA #2,#1,#SYS.MD5Init
+				.DA #SYS.MD5Init
 				>PSTR "md5update"
-				.DA #2,#1,#SYS.MD5Update
+				.DA #SYS.MD5Update
 				>PSTR "md5finalize"
-				.DA #2,#1,#SYS.MD5Finalize
+				.DA #SYS.MD5Finalize
 				>PSTR "getpwuid"
-				.DA #2,#1,#SYS.GetPWUID
+				.DA #SYS.GetPWUID
 				>PSTR "getpwname"
-				.DA #2,#1,#SYS.GetPWName
+				.DA #SYS.GetPWName
 				>PSTR "putpw"
-				.DA #2,#1,#SYS.PutPW
+				.DA #SYS.PutPW
 				>PSTR "getgrpgid"
-				.DA #2,#1,#SYS.GetGRGID
+				.DA #SYS.GetGRGID
 				>PSTR "getgrpname"
-				.DA #2,#1,#SYS.GetGRName
+				.DA #SYS.GetGRName
 				>PSTR "putgr"
-				.DA #2,#1,#SYS.PutGR
+				.DA #SYS.PutGR
 *				>PSTR "opensession"
-*				.DA #2,#1,#0
+*				.DA #0
 *				>PSTR "closesession"
-*				.DA #2,#1,#0
+*				.DA #0
 *				>PSTR "slistgetdata"
-*				.DA #2,#1,#0
+*				.DA #0
 *				>PSTR "slistadddata"
-*				.DA #2,#1,#0
+*				.DA #0
 *				>PSTR "slistsetdata"
-*				.DA #2,#1,#0
+*				.DA #0
 *				>PSTR "slistgetbyid"
-*				.DA #2,#1,#0
+*				.DA #0
 *				>PSTR "slistnewkey"
-*				.DA #2,#1,#0
+*				.DA #0
 *				>PSTR "slistlookup"
-*				.DA #2,#1,#0
+*				.DA #0
 *				>PSTR "slistfree"
-*				.DA #2,#1,#0
+*				.DA #0
 *				>PSTR "slistnew"
-*				.DA #2,#1,#0
+*				.DA #0
 				>PSTR "malloc"
-				.DA #2,#1,#SYS.GetMem
+				.DA #SYS.GetMem
 				>PSTR "realloc"
-				.DA #2,#1,#SYS.Realloc
+				.DA #SYS.Realloc
 *				>PSTR "getmemptr"
-*				.DA #2,#1,#0
+*				.DA #0
 				>PSTR "free"
-				.DA #2,#1,#SYS.FreeMem
+				.DA #SYS.FreeMem
 *				>PSTR "newstkobj"
-*				.DA #2,#1,#0
+*				.DA #0
 *				>PSTR "loadstkobj"
-*				.DA #2,#1,#0
+*				.DA #0
 *				>PSTR "getstkobjptr"
-*				.DA #2,#1,#0
+*				.DA #0
 *				>PSTR "freestkobj"
-*				.DA #2,#1,#0
+*				.DA #0
+				.DA #0
 *--------------------------------------
-				>PSTR "pwr"
-				.DA #2,#2,#FPU.PWR
+CC.FPUCALL		>PSTR "pwr"
+				.DA #FPU.PWR
 				>PSTR "log"
-				.DA #2,#2,#FPU.LOG
+				.DA #FPU.LOG
 				>PSTR "sqr"
-				.DA #2,#2,#FPU.SQR
+				.DA #FPU.SQR
 				>PSTR "exp"
-				.DA #2,#2,#FPU.EXP
+				.DA #FPU.EXP
 				>PSTR "cos"
-				.DA #2,#2,#FPU.COS
+				.DA #FPU.COS
 				>PSTR "sin"
-				.DA #2,#2,#FPU.SIN
+				.DA #FPU.SIN
 				>PSTR "tan"
-				.DA #2,#2,#FPU.TAN
+				.DA #FPU.TAN
 				>PSTR "atan"
-				.DA #2,#2,#FPU.ATAN
+				.DA #FPU.ATAN
 				>PSTR "lrintf"
-				.DA #2,#2,#FPU.QINT
-				.HS 00
+				.DA #FPU.QINT
+				.DA #0
 *--------------------------------------
 				.INB usr/src/bin/cc.s.pcc
 *--------------------------------------
@@ -1018,6 +1065,10 @@ PathBuf			.BS MLI.MAXPATH+1
 
 bDebug			.BS 1
 bTrace			.BS 1
+
+LibCount		.BS 1
+hLibNs			.BS LIBS.MAX
+hLibOs			.BS LIBS.MAX
 
 CC.InFileArg	.BS 1
 CC.OutFileArg	.BS 1

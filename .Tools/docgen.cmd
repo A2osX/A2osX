@@ -9,7 +9,7 @@ for /f %%a in ('copy /Z "%~f0" nul') do set "CR=%%a"
 mode con:cols=80 lines=24
 
 cls
-echo                                   Apple //e
+echo                                    Apple //e
 
 set /a c=0
 
@@ -23,6 +23,11 @@ Call :SCAN
 set DOCFILE=%~dp0..\.Docs\LIBBLKDEV.md
 set SRCDIR=%~dp0..\LIB
 set FILTER=LIBBLKDEV.S*.txt
+Call :SCAN
+
+set DOCFILE=%~dp0..\.Docs\LIBTUI.md
+set SRCDIR=%~dp0..\LIB
+set FILTER=LIBTUI.S*.txt
 Call :SCAN
 
 set DOCFILE=%~dp0..\.Docs\LIBGUI.md
