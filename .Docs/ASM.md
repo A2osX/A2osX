@@ -16,8 +16,10 @@ no .AC support
 | .AC  | Ascii Compressed string| S-C           | NOT IMPL.   |             | As strings are supposed to be printed with A2osX API, Printf cannot handle 'AC' compressed strings |
 | .AS  | Ascii String | S-C,A2osX     | Working     |  `.AS dTEXTd`  where d is any delimiter  `.AS -"TEXT"`produce ascii code with b7=1             | |
 | .AT  | Ascii string Terminated | S-C,A2osX     | Working     | (same as above) | |
-| .AZ  | Ascii string Zero terminated (C String) | S-C,A2osX     | Working     | (same as above) | |
+| .AZ  | Ascii string Zero terminated | S-C,A2osX     | Working     | (same as above) | |
 | .BS  | Block (Byte) Storage | S-C,A2osX     | Working     | `.BS count[,value]` | Reserves `count` bytes in output and sets them to `value` (or zero if omitted) |
+| .CS  | C-string | S-C 3.1,A2osX     | Working     |  | |
+| .CZ  | C-String Zero terminated| S-C 3.1,A2osX     | Working     |  | |
 | .DA  | DAta value | S-C,A2osX     | Working | `.DA value` | 2-byte address: `.DA $1234` only high byte: `.DA /$1234` only low byte: `.DA #$1234` |
 | .DO  | conditional start | S-C,A2osX     | Working |             | |
 | .DU,.DUMMY | begin DUmmy section | S-C,A2osX     | Working |             | |
@@ -36,6 +38,7 @@ no .AC support
 | .OR  | ORigin | S-C,A2osX     | Working | `.OR address` | Set initial output address (only one allowed per assembly) |
 | .PG  | PaGe control | S-C,A2osX     | IGNORED |             | |
 | .PH  | PHase start | S-C,A2osX     | Working |  `.PH address` | Start a temporary addressing range |
+| .CS  | Pascal-string | S-C 3.1,A2osX     | Working     |  | |
 | .SE  | | S-C,A2osX     | Working |             | |
 | .TA  | Target Address| S-C,A2osX     | IGNORED |             | |
 | .TF  | Target File | S-C,A2osX     | Working | `.TF TargetFile[,Txxx]` | only ,TSYS supported  |

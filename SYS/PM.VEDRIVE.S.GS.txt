@@ -1,13 +1,108 @@
 NEW
   AUTO 3,1
 *--------------------------------------
-GS.Init			sec
+GS.Init			lda CONF.SLOT
+				asl
+				asl
+				asl
+				asl
+				sta Slotn0
+				tax
+				
+				lda #L91C96.0.TCR.FDSE+L91C96.0.TCR.FUDPLX+L91C96.0.TCR.PADEN+L91C96.0.TCR.TXENA
+				sta L91C96.0.TCR,x
+				lda /L91C96.0.TCR.FDSE+L91C96.0.TCR.FUDPLX+L91C96.0.TCR.PADEN+L91C96.0.TCR.TXENA
+				sta L91C96.0.TCR+1,x
+				lda #L91C96.0.RCR.NOCRC+L91C96.0.RCR.RXENA+L91C96.0.RCR.ALLMUL
+				sta L91C96.0.RCR,x
+				lda /L91C96.0.RCR.NOCRC+L91C96.0.RCR.RXENA+L91C96.0.RCR.ALLMUL
+				sta L91C96.0.RCR+1,x
+
+				lda #1
+				sta L91C96.BSR,x
+
+				lda #L91C96.1.CR.NOWAIT
+				sta L91C96.1.CR,x
+				lda /L91C96.1.CR.NOWAIT
+				sta L91C96.1.CR+1,x
+
+				ldy #0
+
+.2				lda CONF.SRCMAC,y
+				sta L91C96.1.IAR,x
+				inx
+				iny
+				cpy #6
+				bne .2
+
+.3				ldx Slotn0
+
+				lda #L91C96.1.CTR.DEFAULT+L91C96.1.CTR.AUTOREL
+				sta L91C96.1.CTR,x
+				lda /L91C96.1.CTR.DEFAULT+L91C96.1.CTR.AUTOREL
+				sta L91C96.1.CTR+1,x
+				clc
 				rts
 *--------------------------------------
 GS.Read			php
 				sei
 
 				ldx Slotn0
+				
+				lda #2
+				sta L91C96.BSR,x
+
+				lda L91C96.2.IST,x
+				and #L91C96.2.IST.RCV
+				beq GS.READWRITE.9
+
+.1				lda #L91C96.2.PTR.RCVD+L91C96.2.PTR.AUTOI+L91C96.2.PTR.READ
+				sta L91C96.2.PTR,x
+				lda /L91C96.2.PTR.RCVD+L91C96.2.PTR.AUTOI+L91C96.2.PTR.READ
+				sta L91C96.2.PTR+1,x 
+
+				lda L91C96.2.DATA,x		Get Frame Status Word (lo)
+				lda L91C96.2.DATA,x		Get Frame Status Word (HI)
+				asl
+				asl
+				asl 					#$10 = odd?
+				asl						if odd, CS
+				lda L91C96.2.DATA,x		get lo byte count
+				sbc	#5					compute Size
+
+				sta ZPBufCnt
+				eor #$ff
+				sta ZPnCnt
+
+				lda L91C96.2.DATA,x		get hi byte count
+				sbc #0
+
+				sta ZPBufCnt+1
+				eor #$ff
+				sta ZPnCnt+1
+
+				ldy #0
+				
+.2				inc ZPnCnt
+				bne .3
+
+				inc ZPnCnt+1
+				beq .4
+
+.3				lda L91C96.2.DATA,x
+				sta (ZPBufPtr),y
+				iny
+				bne .2
+
+				inc ZPBufPtr+1
+				bra .2
+
+.4				lda #L91C96.2.MMUCR.REMREL
+				sta L91C96.2.MMUCR,x
+
+				plp
+				clc
+				rts				
 *--------------------------------------
 GS.READWRITE.9	plp
 				sec
@@ -18,33 +113,324 @@ GS.Write		php
 
 				ldx Slotn0
 
+				lda #2
+				sta L91C96.BSR,x
+			
+				lda ZPBufCnt
+				eor #$ff
+				sta ZPnCnt
+				eor #$ff
+				clc
+				adc #6					3 WORDs more Status, len & Control
+
+				bne .10
+
+				clc						LO byte is 0, no need for an extra empty page
+
+.10				lda ZPBufCnt+1
+				eor #$ff
+				sta ZPnCnt+1
+				eor #$ff
+
+				adc #0
+
+.1				ora #L91C96.2.MMUCR.ALLOC
+				sta L91C96.2.MMUCR,x
+
+				ldy #0
+
+.2				lda L91C96.2.IST,x
+				and #L91C96.2.IST.ALLOC
+				bne .3
+
+				dey
+				bne .2
+
+				bra GS.READWRITE.9
+
+.3				lda L91C96.2.AAR,x
+				sta L91C96.2.PNR,x
+				lda #L91C96.2.PTR.AUTOI
+				sta L91C96.2.PTR,x
+				lda /L91C96.2.PTR.AUTOI
+				sta L91C96.2.PTR+1,x
+
+				ldy #S.ETH.SRCMAC+5		Add Src MAC Address
+				ldx #5
+
+.4				lda CONF.SRCMAC,x
+				sta (ZPBufPtr),y
+				dey
+				dex
+				bpl .4
+
+				ldx Slotn0
+
+				stz L91C96.2.DATA,x		write fake status word
+				stz L91C96.2.DATA,x
+
+				lda ZPBufCnt
+				pha
+				eor #$01
+				lsr
+				pla
+
+				adc #$05				add 5 if odd, 6 if even
+				sta L91C96.2.DATA,x
+
+				lda ZPBufCnt+1
+				adc #$00
+				sta L91C96.2.DATA,x
+
+				ldy #0
+
+.5				inc ZPnCnt
+				bne .51
+
+				inc ZPnCnt+1
+				beq .70
+
+.51				lda (ZPBufPtr),y
+				iny
+				bne .6
+
+				inc ZPBufPtr+1
+
+.6				inc ZPnCnt
+				bne .61
+
+				inc ZPnCnt+1
+				beq .71
+
+.61				sta L91C96.2.DATA,x
+				lda (ZPBufPtr),y
+				sta L91C96.2.DATA,x
+				iny
+				bne .5
+
+				inc ZPBufPtr+1
+				bra .5
+
+.70				lda #0
+				sta L91C96.2.DATA,x
+				sta L91C96.2.DATA,x
+				bra .8
+
+.71				sta L91C96.2.DATA,x
+				lda #%00100000			signal an extra (odd) byte
+				sta L91C96.2.DATA,x
+
+.8				lda #L91C96.2.MMUCR.NQPKT
+				sta L91C96.2.MMUCR,x
+
 				plp
-				sec
+				clc
 				rts
 *--------------------------------------
 GS.Name			>PSTR "LanCEgs"
 *--------------------------------------
 DRV.GS			.PH	DRV.NIC.START
 
-				jmp DRV.GS.Write
+				jmp DRV.GS.SendARP
+				jmp DRV.GS.SendUDP
 
-DRV.GS.Read		php
+DRV.GS.Rcvd		php
 				sei
 				
-				
-				
+				ldx DRV.BLK.Slotn0			
 
+				lda #2
+				sta L91C96.BSR,x
+
+				lda L91C96.2.IST,x
+				and #L91C96.2.IST.RCV
+				beq DRV.GS.9
+
+.1				lda #L91C96.2.PTR.RCVD+L91C96.2.PTR.AUTOI+L91C96.2.PTR.READ
+				sta L91C96.2.PTR,x
+				lda /L91C96.2.PTR.RCVD+L91C96.2.PTR.AUTOI+L91C96.2.PTR.READ
+				sta L91C96.2.PTR+1,x 
+
+				lda L91C96.2.DATA,x		Get Frame Status Word (lo)
+				lda L91C96.2.DATA,x		Get Frame Status Word (HI)
+				asl
+				asl
+				asl 					#$10 = odd?
+				asl						if odd, CS
+				lda L91C96.2.DATA,x		get lo byte count
+				sbc	#5					compute Size
+
+				sta DRV.FrameSize
+				eor #$ff
+				sta DRV.nCnt
+
+				lda L91C96.2.DATA,x		get hi byte count
+				sbc #0
+
+				sta DRV.FrameSize+1
+				eor #$ff
+				sta DRV.nCnt+1
+
+				>LDYAI DRV.InBuf
+				>STYA DRV.A1L
+
+				ldy #0
+				
+.2				inc DRV.nCnt
+				bne .3
+
+				inc DRV.nCnt+1
+				beq .4
+
+.3				lda L91C96.2.DATA,x
+				sta (DRV.A1L),y
+				iny
+				bne .2
+
+				inc DRV.A1L+1
+				bra .2
+
+.4				lda #L91C96.2.MMUCR.REMREL
+				sta L91C96.2.MMUCR,x
+				
+				plp
+				clc
+				rts	
 *--------------------------------------
 DRV.GS.9		plp
 				sec
 				rts
 *--------------------------------------
-DRV.GS.Write	php
+DRV.GS.SendARP	>LDYAI S.ARP
+				>STYA DRV.FrameSize
+				>LDYAI DRV.ARPBuf
+				bra DRV.GS.Send
+*--------------------------------------
+DRV.GS.SendUDP	>STYA DRV.FrameSize
+
+				jsr DRV.BLK.IPUDPCheksum
+
+				>LDYAI DRV.UDPBuf
+				
+DRV.GS.Send		>STYA DRV.A1L
+
+				php
 				sei
 
+				ldx DRV.BLK.Slotn0
+
+				lda #2
+				sta L91C96.BSR,x
+			
+				lda DRV.FrameSize
+				eor #$ff
+				sta DRV.nCnt
+				eor #$ff
+				clc
+				adc #6					3 WORDs more Status, len & Control
+
+				bne .10
+
+				clc						LO byte is 0, no need for an extra empty page
+
+.10				lda DRV.FrameSize+1
+				eor #$ff
+				sta DRV.nCnt+1
+				eor #$ff
+
+				adc #0
+
+.1				ora #L91C96.2.MMUCR.ALLOC
+				sta L91C96.2.MMUCR,x
+
+				ldy #0
+
+.2				lda L91C96.2.IST,x
+				and #L91C96.2.IST.ALLOC
+				bne .3
+
+				dey
+				bne .2
+
+				bra DRV.GS.9
+
+.3				lda L91C96.2.AAR,x
+				sta L91C96.2.PNR,x
+				lda #L91C96.2.PTR.AUTOI
+				sta L91C96.2.PTR,x
+				lda /L91C96.2.PTR.AUTOI
+				sta L91C96.2.PTR+1,x
+
+*				ldy #S.ETH.SRCMAC+5		Add Src MAC Address
+*				ldx #5
+
+*.4				lda CONF.SRCMAC,x
+*				sta (DRV.A1L),y
+*				dey
+*				dex
+*				bpl .4
+
+				ldx DRV.BLK.Slotn0
+
+				stz L91C96.2.DATA,x		write fake status word
+				stz L91C96.2.DATA,x
+
+				lda DRV.FrameSize
+				pha
+				eor #$01
+				lsr
+				pla
+
+				adc #$05				add 5 if odd, 6 if even
+				sta L91C96.2.DATA,x
+
+				lda DRV.FrameSize+1
+				adc #$00
+				sta L91C96.2.DATA,x
+
+				ldy #0
+
+.5				inc DRV.nCnt
+				bne .51
+
+				inc DRV.nCnt+1
+				beq .70
+
+.51				lda (DRV.A1L),y
+				iny
+				bne .6
+
+				inc DRV.A1L+1
+
+.6				inc DRV.nCnt
+				bne .61
+
+				inc DRV.nCnt+1
+				beq .71
+
+.61				sta L91C96.2.DATA,x
+				lda (DRV.A1L),y
+				sta L91C96.2.DATA,x
+				iny
+				bne .5
+
+				inc DRV.A1L+1
+				bra .5
+
+.70				lda #0
+				sta L91C96.2.DATA,x
+				sta L91C96.2.DATA,x
+				bra .8
+
+.71				sta L91C96.2.DATA,x
+				lda #%00100000			signal an extra (odd) byte
+				sta L91C96.2.DATA,x
+
+.8				lda #L91C96.2.MMUCR.NQPKT
+				sta L91C96.2.MMUCR,x
 
 				plp
-				sec
+				clc
 				rts
 *--------------------------------------
 				.EP
