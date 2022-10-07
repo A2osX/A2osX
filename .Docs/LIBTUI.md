@@ -16,7 +16,7 @@ Initialize screen & create a new context
 CC = success, A = hCTX  
 
 # tuiClose  
-destroy context and all sub objects  
+destroy context  
 
 ## C  
 `void fastcall tuiClose(short int hCTX);`  

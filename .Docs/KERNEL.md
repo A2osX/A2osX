@@ -375,6 +375,13 @@ Add Data to MD5 computation
  CS :  
   A = EC  
 
+# Free  
+ Y,A = Ptr To Free  
+
+## RETURN VALUE  
+ none.  
+ (X unmodified)  
+
 # FreeMem  
  A = hMem To Free  
 
@@ -413,22 +420,6 @@ Y,A = PTR to MemBlock
 ## RETURN VALUE  
  none.  
  (X,Y unmodified)  
-
-# GetStkObj  
-
-## C  
-`int *ptr getstkobj (short int hStkObj);`  
-
-## ASM  
-`lda hStkObj`  
-`>SYSCALL GetStkObj`  
-
-## RETURN VALUE  
- CC : success  
-  X = hMem  
-  Y,A = ptr  
- CS : error  
-  A = EC  
 
 # Online  
 Get ProDOS Volume Info  
@@ -530,17 +521,6 @@ A = Child PSID
 `>SYSCALL kill`  
 
 ## RETURN VALUE  
-
-# LoadStkObj  
-Load a file in AUX memory (Stock Objects)  
- PUSHW = PATH (Handled by....  
- PUSHB = MODE  ...  
- PUSHB = TYPE  ...  
- PUSHW = AUXTYPE ...FOpen)  
-
-## RETURN VALUE  
- Y,A = File Length  
- X = hMem of Loaded Object in AUX mem  
 
 # LoadTxtFile  
 Load TXT a file in memory (with ending 0)  
@@ -716,7 +696,7 @@ CS : not found
 `>PUSHB hSList`  
 `>PUSHW KeyID`  
 `>PUSHW DataPtr`  
-`>PUSHW DataLen`  
+`>PUSHW DataLen` (Data bytes to add, 0 if String mode)  
 `>SYSCALL SListAddData`  
 
 ## RETURN VALUE  
@@ -727,7 +707,7 @@ CS : not found
 `>PUSHB hSList`  
 `>PUSHW KeyID`  
 `>PUSHW DataPtr`  
-`>PUSHW DataLen`  
+`>PUSHW DataLen` (Data bytes to set, 0 if String mode)  
 `>SYSCALL SListSetData`  
 
 ## RETURN VALUE  
@@ -776,6 +756,7 @@ CS : not found
 # SListNew  
 
 ## ASM  
+`lda Opt`  
 `>SYSCALL SListNew`  
 
 ## RETURN VALUE  
@@ -1392,6 +1373,33 @@ if expanded == null
 if expanded = null  
  Y,A = strlen  
 
+# LoadStkObj  
+Load a file in AUX memory (Stock Objects)  
+ PUSHW = PATH (Handled by....  
+ PUSHB = MODE  ...  
+ PUSHB = TYPE  ...  
+ PUSHW = AUXTYPE ...FOpen)  
+
+## RETURN VALUE  
+ Y,A = File Length  
+ X = hMem of Loaded Object in AUX mem  
+
+# GetStkObj  
+
+## C  
+`int *ptr getstkobj (short int hStkObj);`  
+
+## ASM  
+`lda hStkObj`  
+`>SYSCALL GetStkObj`  
+
+## RETURN VALUE  
+ CC : success  
+  X = hMem  
+  Y,A = ptr  
+ CS : error  
+  A = EC  
+
 # StrLen  
 Returns Length of C-String  
 
@@ -1544,7 +1552,7 @@ CS : no match
 Get System Time in Buffer  
 
 ## C  
-`int time (S.TIME* timer);`  
+`void time (struct tm* timeptr);`  
 
 ## ASM  
 `>PUSHW timer`  
@@ -1557,7 +1565,7 @@ S.TIME filled with System date/time
 
 ## C  
 Convert S.TIME struct to CSTR  
-`void strftime (char* str, const char* format, const struct S.TIME* timeptr );`  
+`void strftime (char* str, const char* format, const struct tm* timeptr );`  
 
 ## ASM  
 `>PUSHW str`  
@@ -1587,7 +1595,7 @@ Convert S.TIME struct to CSTR
  Convert ProDOS Time To S.TIME  
 
 ## C  
-`int PTime2Time (long* ptime, S.TIME* timer);`  
+`void PTime2Time (long* ptime, const struct tm* timeptr );`  
 
 ## ASM  
 `>PUSHW ptime`  
@@ -1600,7 +1608,7 @@ Convert S.TIME struct to CSTR
  Convert CTime Time To S.TIME  
 
 ## C  
-`int CTime2Time (long* ctime, S.TIME* timer);`  
+`void CTime2Time (long* ctime, const struct tm* timeptr );`  
 
 ## ASM  
 `>PUSHW ctime`  

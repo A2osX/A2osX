@@ -1,7 +1,7 @@
 NEW
   AUTO 3,1
 *--------------------------------------
-CC.TYPE.Decl	>ENTER 2
+TYPE.GetTQInYA	>ENTER 2
 				lda #0
 				sta (pStack)			Type
 				ldy #1
@@ -24,15 +24,40 @@ CC.TYPE.Decl	>ENTER 2
 
 .8				jmp (J.CC.TYPEQUAL,x)
 *--------------------------------------
+TYPE.GetTQInYA2	>ENTER 2
+				lda (ZPLookupSymPtr)
+				sta (pStack)			Type
+				
+				ldy #SYM.Q
+				lda (ZPLookupSymPtr),y
+				
+*				ldy #1
+				sta (pStack),y			Qual
+
+				jsr TYPE.GetQ2
+				bcs .99
+
+				jsr SYM.LookupFree
+
+				ldy #1
+				lda (pStack),y
+				pha
+				lda (pStack)
+				tay						Y = Type
+				pla						A = Qual
+
+				clc
+
+.99				>LEAVE
+				rts				
+*--------------------------------------
 * Type Declaration keywords
 *--------------------------------------
-CC.TYPE.CONST	lda #SYM.Q.CONST
-				bra CC.TYPE.VOLATILE.1
+TYPE.CONST		lda #SYM.Q.CONST
+				bra TYPE.VOLATILE.1
 *--------------------------------------
-CC.TYPE.VOLATILE
-				lda #SYM.Q.VOLATILE
-CC.TYPE.VOLATILE.1
-				ldy #1
+TYPE.VOLATILE	lda #SYM.Q.VOLATILE
+TYPE.VOLATILE.1	ldy #1
 				ora (pStack),y
 				sta (pStack),y
 
@@ -49,11 +74,225 @@ CC.TYPE.VOLATILE.1
 				sec
 				rts
 *--------------------------------------
-CC.TYPE.SIGNED	sec
+TYPE.STRUCT		clc
+				.HS B0					BCS
+*--------------------------------------
+TYPE.UNION		sec
+				ror ZPPtr2+1			bStrucUnion
+
+				stz ZPPtr2				bNewTagDef
+				
+				bit bPass2
+				bpl TYPE.SU.1			Pass 1: create def
+*--------------------------------------
+TYPE.SU.2		jsr CORE.GetCharNBNL
+				bcs .98
+
+				cmp #'{'
+				beq .1					no TAG
+
+				jsr TYPE.GetTag
+				bcs .99
+
+				jsr CORE.GetNCharNBNL
+				bcs .98
+
+				cmp #'{'
+				bne .8
+
+.1				jsr CORE.GetNCharNBNL	skip '{'
+
+				cmp #'}'
+				bne .1					skip definition
+
+				jsr CORE.GetNCharNB	skip '}'
+
+.8				lda #SYM.T.SU
+				jmp TYPE.GetQ
+
+.98				lda #E.CSYN
+				sec
+.99				rts
+*--------------------------------------
+TYPE.SU.1		ldy #SYM.T.SU
+				lda #0
+				ldx #SYM.SC.TAG
+				sec						reset buffer
+				jsr SYM.BufInitYAXC
+
+				jsr CORE.GetCharNBNL
+				bcs .98
+
+				cmp #'{'
+				beq .30					no TAG
+
+				jsr TYPE.GetTag
+				bcc .20
+
+				jsr TYPE.NewTag
+				bcs .99
+				
+				sec
+				ror ZPPtr2				bNewTagDef
+*--------------------------------------
+.20				jsr CORE.GetCharNBNL
+				bcs .98
+
+				cmp #'{'
+				beq .30
+				
+				bit ZPPtr2				bNewTagDef
+				bmi .98
+
+				bra .38
+*--------------------------------------
+.30				jsr CORE.GetNCharNBNL	skip '{' of ';'
+				bcs .98
+
+				cmp #'}'
+				beq .37
+
+				>LDYA L.CC.TYPEQUAL
+				jsr CC.LookupID
+				bcs .98
+
+				cpx #4					no const nor volatile
+				bcc .98
+
+				jsr TYPE.GetTQInYA
+				bcs .99
+
+				jsr TYPE.SizeOf			get sizeof in X
+
+				jsr TYPE.SU.AddYAX
+				bcs .99
+
+				jsr SYM.Add0000			TODO: bitO & bitW
+				bcs .99
+
+				jsr SYM.AddName
+				bcs .99
+
+				jsr CC.GetCharNB
+				cmp #';'
+				bne .98
+
+				bra .30
+*--------------------------------------
+.37				jsr CORE.GetNCharNB	skip '}'
+				bcs .98
+
+				jsr SYM.Add0000			Close F definition
+				bcs .99
+
+				bit ZPPtr2				bNewTagDef
+				bpl .38
+
+				jsr TYPE.StoreTag
+				bcs .99
+*--------------------------------------				
+.38				lda #SYM.T.SU
+				jmp TYPE.GetQ
+
+.98				lda #E.CSYN
+				sec
+.99				rts
+*--------------------------------------
+TYPE.SU.AddYAX	jsr SYM.AddWord			add T/Q
+				bcs .99
+
+				bit ZPPtr2+1			bStrucUnion
+				bmi .1
+
+				ldy #SYM.SizeOf
+				lda (ZPSymBufPtr),y
+				pha
+				iny
+				lda (ZPSymBufPtr),y
+				ply
+				
+				jsr SYM.AddWord			Add Y/A Offset
+				bcs .99
+				
+				txa
+				
+				ldy #SYM.SizeOf
+*				clc
+				adc (ZPSymBufPtr),y
+				sta (ZPSymBufPtr),y
+				bcc .99
+				
+				iny
+				lda #0
+				adc (ZPSymBufPtr),y
+				sta (ZPSymBufPtr),y
+				
+*				clc				
+				
+.99				rts
+
+.1				txa
+				ldy #SYM.SizeOf
+				cmp (ZPSymBufPtr),y
+				bcs .2
+				
+				sta (ZPSymBufPtr),y
+				
+.2				jmp SYM.Add0000			Add Y/A Offset (always 0 for union)
+*--------------------------------------
+TYPE.ENUM
+				lda #E.CSYN
+				sec
+				rts
+*--------------------------------------
+TYPE.NewTag		>LDA.G CC.hTags
+				jsr SYM.NewKey
+				bcs .9
+
+				>STYA ZPPtr1			TagID
+				dec ZPPtr2				bNewTagDef = true
+
+				jsr CC.SkipX
+
+.9				rts				
+*--------------------------------------
+TYPE.GetTag		>PUSHB.G CC.hTags
+				>PUSHW ZPLineBufPtr
+
+				>SYSCALL SListLookup
+				bcs .9
+
+				phy						Y,A = KeyID
+				pha
+
+				jsr CC.SkipX			X = KeyLen
+
+				>PUSHB.G CC.hTags
+				pla
+				>PUSHA
+				pla
+				>PUSHA
+				>PUSHW ZPSymBufPtr
+				>PUSHWI 65535			all
+				>PUSHWZ					From Start
+				>SYSCALL SListGetData
+.9				rts
+*--------------------------------------
+TYPE.StoreTag	>PUSHB.G CC.hTags
+				>PUSHW ZPPtr1
+				>PUSHW ZPSymBufPtr
+				>PUSHBI 0
+				ldy #SYM.DefSize
+				lda (ZPSymBufPtr),y
+				>PUSHA
+
+				>SYSCALL SListAddData
+				rts
+*--------------------------------------
+TYPE.SIGNED		sec
 				.HS 90					BCC
 *--------------------------------------
-CC.TYPE.UNSIGNED
-				clc
+TYPE.UNSIGNED	clc
 				php
 
 				jsr CC.CheckSpace
@@ -61,7 +300,6 @@ CC.TYPE.UNSIGNED
 
 				>LDYA L.CC.TYPES
 				jsr CC.LookupID
-
 				bcs .9
 
 				cpx #SYM.T.UCHAR
@@ -83,50 +321,50 @@ CC.TYPE.UNSIGNED
 				sec
 				rts
 *--------------------------------------
-CC.TYPE.SHORT	jsr CC.CheckSpace
+TYPE.SHORT		jsr CC.CheckSpace
 				bcs .9
 				
 				>LDYA L.CC.TYPES
 				jsr CC.LookupID
 
-				bcs CC.TYPE.UCHAR
+				bcs TYPE.UCHAR
 				
 				cpx #4					only int allowed
-				beq CC.TYPE.SCHAR
+				beq TYPE.SCHAR
 				
 .9				lda #E.CSYN
 				sec
 				rts				
 *--------------------------------------
-CC.TYPE.VOID	lda #SYM.T.VOID
-				bra CC.TYPE
+TYPE.VOID		lda #SYM.T.VOID
+				bra TYPE.GetQ
 
-CC.TYPE.CHAR
-CC.TYPE.UCHAR	lda #SYM.T.UCHAR
-				bra CC.TYPE
+TYPE.CHAR
+TYPE.UCHAR		lda #SYM.T.UCHAR
+				bra TYPE.GetQ
 
-CC.TYPE.SCHAR	lda #SYM.T.SCHAR
-				bra CC.TYPE
+TYPE.SCHAR		lda #SYM.T.SCHAR
+				bra TYPE.GetQ
 
-CC.TYPE.UINT	lda #SYM.T.UINT
-				bra CC.TYPE
+TYPE.UINT		lda #SYM.T.UINT
+				bra TYPE.GetQ
 
-CC.TYPE.INT
-CC.TYPE.SINT	lda #SYM.T.SINT
-				bra CC.TYPE
+TYPE.INT
+TYPE.SINT		lda #SYM.T.SINT
+				bra TYPE.GetQ
 
-CC.TYPE.ULONG	lda #SYM.T.ULONG
-				bra CC.TYPE
+TYPE.ULONG		lda #SYM.T.ULONG
+				bra TYPE.GetQ
 
-CC.TYPE.LONG
-CC.TYPE.SLONG	lda #SYM.T.SLONG
-				bra CC.TYPE
+TYPE.LONG
+TYPE.SLONG		lda #SYM.T.SLONG
+				bra TYPE.GetQ
 
-CC.TYPE.FLOAT	lda #SYM.T.FLOAT
+TYPE.FLOAT		lda #SYM.T.FLOAT
 
-CC.TYPE			sta (pStack)			T
+TYPE.GetQ		sta (pStack)			T
 
-				jsr CC.GetCharNB
+TYPE.GetQ2		jsr CC.GetCharNB
 				bcs .9
 
 .1				cmp #'*'
@@ -140,13 +378,13 @@ CC.TYPE			sta (pStack)			T
 
 				sta (pStack),y
 				
-				jsr CC.GetNextCharNB
+				jsr CORE.GetNCharNB
 				bcc .1
 				
 .9				lda #E.CSYN
 				sec
 .99				rts
-
+*--------------------------------------
 .10				jsr CC.IsLetter
 				bcs .8
 
@@ -159,7 +397,7 @@ CC.TYPE			sta (pStack)			T
 				ora #SYM.Q.FUNC+SYM.Q.FASTCALL
 				sta (pStack),y
 
-				jsr CC.GetNextCharNB
+				jsr CORE.GetNCharNB
 				bcs .9					next char is an identifier, ",", "(",")"
 				
 .8				clc
@@ -168,7 +406,7 @@ CC.TYPE			sta (pStack)			T
 * in : Y,A = type/qual
 * out : X = size
 *--------------------------------------
-CC.TYPE.SizeOf	bit #SYM.Q.PPPOINTER
+TYPE.SizeOf		bit #SYM.Q.PPPOINTER
 				bne .2
 
 				ldx CC.TYPESIZE-1,y

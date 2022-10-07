@@ -24,6 +24,23 @@ exists, thus return value is limited to
 whether or not a valid argument was  
 given.   
 
+# MKDIR  
+Create directories  
+*  
+
+## Arguments  
+**-M mode**  
+Apply specified mode to created directories  
+*  
+**-P**  
+Create parent directories if required  
+*  
+**-V**  
+Verbose mode  
+*  
+
+## Return Value  
+
 # SEQ  
 Prints sequences of numbers.  
 *  
