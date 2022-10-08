@@ -26,18 +26,28 @@ given.
 
 # MKDIR  
 Create directories  
-*  
 
 ## Arguments  
 **-M mode**  
 Apply specified mode to created directories  
-*  
 **-P**  
 Create parent directories if required  
-*  
 **-V**  
 Verbose mode  
-*  
+
+## Return Value  
+
+# MORE  
+Displays content of specified file  
+Input pipe allowed  
+
+## Arguments  
+**-H**  
+Displays help screen  
+**-N**  
+Number all output lines  
+**-P**  
+Page mode, no scroll  
 
 ## Return Value  
 
