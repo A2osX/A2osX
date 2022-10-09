@@ -1,6 +1,5 @@
 NEW
   AUTO 3,1
-				.LIST OFF
 *--------------------------------------
 CORE.Init		lda #PUSHD.STACK
 				tay
@@ -20,8 +19,8 @@ CORE.FUNCRESET	>LDA.G hFunctions
 
 .8				rts
 *--------------------------------------
-* stack-6,7		InputBuf
-* stack-4,5		InputBufPtr
+* stack-6,7		old InputBuf
+* stack-4,5		old InputBufPtr
 * stack-3		old ARGC
 * stack-2       old ARGV
 * stack-1		new hCode
@@ -131,7 +130,8 @@ CORE.Run	 	jsr IO.Reset
 				txa
 				>STA.G CORE.hArgVBuf
 
-				>STZ.G CORE.bPipeIn
+				lda #bState.PipeIn
+				trb bState
 
 CORE.Run.1		>LDYA ZPInputBufPtr		Save Actual ptr for looping
 				>STYA ZPInputCmdPtr
@@ -178,13 +178,8 @@ CORE.Run.3		>LDA.G hAliases
 				txa
 				jsr CORE.SkipCharsA
 
-				>PUSHB.G hAliases
-				>PUSHW ZPTmpW			KeyID
-				>PUSHWZ					Allocate..
-				>PUSHWI $ffff			all
-				>PUSHWZ					From Start
-
-				>SYSCALL SListGetData	X = hMem
+				ldy #hAliases
+				jsr CORE.SListGetData
 				bcs .9
 
 				jsr CORE.PushBufX
@@ -236,7 +231,7 @@ CORE.Run.4		>LDYA L.CMD				internal command ?
 				jmp CORE.Run.Exit
 *--------------------------------------
 CORE.Run.5		jsr CORE.GetCharNB
-				bcs CORE.Run.NOPIPE		Nothing to skip
+				bcs .8					Nothing to skip
 
 				jsr CORE.IsEndCmd
 				bcc .3
@@ -264,56 +259,57 @@ CORE.Run.5		jsr CORE.GetCharNB
 
 				cmp #';'
 				beq .7
-			
+
 				cmp #'|'
 				bne .5
-				
+
 				jsr CORE.GetNextCharNB	'|'
-				bra CORE.Run.PIPE
-				
+
+				lda #bState.PipeOut
+				tsb bState
+				bra CORE.Run.6
+
 .5				cmp #'&'
 				bne .9
-				
+
 				jsr CORE.GetNextChar	Skip '&'
 				bcs .50
-				
+
 				cmp #'&'
 				beq .6					&&
-				
+
 .50				lda #S.PS.F.HOLD		Run in the background...
 				trb CORE.PSFlags
-				bra CORE.Run.NOPIPE
-				
+				bra .8
+
 .6				jsr CORE.GetNextChar	Skip '&&'
 
 				jsr CORE.ExecCmd
 				bcc .60
-				
+
 				jsr CORE.SkipLine
 				clc
 				lda #0
 				jmp CORE.Run.Exit
-				
-.60				jmp CORE.Run.1				
+
+.60				jmp CORE.Run.1
 
 .7				jsr CORE.GetNextCharNB	Skip EoL char
 
-.8				bra CORE.Run.NOPIPE
+.8				lda #bState.PipeOut
+				trb bState
 *--------------------------------------
-CORE.Run.NOPIPE	clc						no pipe
-				.HS B0					BCS
-CORE.Run.PIPE	sec
-				ror
-				>STA.G CORE.bPipeOut
-
-				>LDA.G CORE.bPipeIn
-				bpl .1
+CORE.Run.6		lda bState
+				bit #bState.PipeIn
+				beq .1
 
 				jsr IO.Pipe.In
 				bcs CORE.Run.Exit
 
-.1				>LDA.G CORE.bPipeOut
-				bpl .7
+				lda bState
+
+.1				bit #bState.PipeOut
+				beq .7
 
 				jsr IO.Pipe.Out
 				bcs CORE.Run.Exit
@@ -335,8 +331,9 @@ CORE.Run.PIPE	sec
 
 				jsr IO.Reset.OutC		restore Output, NO close if EXTERNAL
 
-				>LDA.G CORE.bPipeIn
-				bpl .6
+				lda bState
+				and #bState.PipeIn
+				beq .6
 
 				jsr IO.Pop.In			restore Input
 
@@ -344,8 +341,8 @@ CORE.Run.PIPE	sec
 				plp
 				bcs CORE.Run.Exit
 
-				lda #$FF
-				>STA.G CORE.bPipeIn
+				lda #bState.PipeIn
+				tsb bState
 
 				jmp CORE.Run.1			Loop with Pipe IN
 
@@ -389,8 +386,9 @@ CORE.ExecExtCmd	>PUSHW ZPArgVBuf
 				and #S.PS.F.HOLD
 				bne .4
 
-				>LDA.G CORE.bPipeOut
-				bmi .4
+				lda bState
+				bit #bState.PipeOut
+				bne .4
 
 				ldy #S.PS.hStdErr
 				lda (pPS),y
@@ -725,11 +723,11 @@ CORE.PushBufX	>LDA.G CODE.STACK
 
 				ldx #0
 
-.1				lda ZPInputBuf,x
+.1				lda ZPInputBuf,x		ZPInputBuf
 				sta (pData),y
-				inx
+				inx						ZPInputBufPtr
 				iny
-				cpx #6
+				cpx #6					ZPInputCmdPtr
 				bne .1
 
 				pla
@@ -766,11 +764,11 @@ CORE.PopBuf		phy
 				ldx #5
 				dey
 
-.1				lda (pData),y
+.1				lda (pData),y			ZPInputBuf
 				sta ZPInputBuf,x
-				dey
+				dey                     ZPInputBufPtr
 				dex
-				bpl .1
+				bpl .1                  ZPInputCmdPtr
 
 				tya
 				>STA.G CODE.STACK
@@ -784,6 +782,15 @@ CORE.PopBuf		phy
 
 				lda #E.STACKERROR
 *				sec
+				rts
+*--------------------------------------
+CORE.SListGetData
+				>PUSHB (pData),y
+				>PUSHW ZPTmpW			KeyID
+				>PUSHWZ					Allocate
+				>PUSHWI $ffff			All
+				>PUSHWZ					from Start
+				>SYSCALL SListGetData	X = hMem
 				rts
 *--------------------------------------
 * Stack
