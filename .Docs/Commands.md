@@ -24,6 +24,27 @@ exists, thus return value is limited to
 whether or not a valid argument was  
 given.   
 
+# GREP  
+Print lines that match patterns  
+
+## Arguments  
+**-H**  
+Help screen  
+**-I**  
+Ignoce case  
+**-N**  
+Print line number  
+**-Q**  
+Quiet mode  
+**-S**  
+Silent mode  
+**-V**  
+Invert match  
+
+## Return Value  
+if **-Q** specified, always 0  
+otherwise, 0 if a match found, E.NOKEY if not  
+
 # MKDIR  
 Create directories  
 
