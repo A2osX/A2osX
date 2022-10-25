@@ -11,14 +11,19 @@ NEW
 				.INB inc/libgui.i
 				.INB inc/fnt.i
 *--------------------------------------
-ZPPTR1			.EQ ZPBIN
-ZPInputBufPtr	.EQ ZPBIN+2
-ZPInputTblPtr	.EQ ZPBIN+4
-ZPInputBMPtr	.EQ ZPBIN+6
-ZPCharBufPtr	.EQ ZPBIN+8
-ZPOutPutTblPtr	.EQ ZPBIN+10
-ZPOutPutCharOfs	.EQ ZPBIN+12
-ZPOutPutBufPtr	.EQ ZPBIN+14
+				.DUMMY
+				.OR ZPBIN
+ZS.START
+ZPPTR1			.BS 2
+ZPInputBufPtr	.BS 2
+ZPInputTblPtr	.BS 2
+ZPInputBMPtr	.BS 2
+ZPCharBufPtr	.BS 2
+ZPOutPutTblPtr	.BS 2
+ZPOutPutCharOfs	.BS 2
+ZPOutPutBufPtr	.BS 2
+TmpWord			.BS 2
+ZS.END			.ED
 *--------------------------------------
 *			File Header (16 Bytes)
 *--------------------------------------
@@ -26,11 +31,12 @@ CS.START		cld
 				jmp (.1,x)
 				.DA #$61				6502,Level 1 (65c02)
 				.DA #1					BIN Layout Version 1
-				.DA 0
-				.DA CS.END-CS.START		CS
-				.DA DS.END-DS.START		DS
-				.DA #64					SS
-				.DA #16					ZP
+				.DA #0					S.PS.F.EVENT
+				.DA #0
+				.DA CS.END-CS.START		Code Size (without Constants)
+				.DA DS.END-DS.START		Data Size
+				.DA #64					Stack Size
+				.DA #ZS.END-ZS.START	Zero Page Size
 				.DA 0
 *--------------------------------------
 * Relocation Table
@@ -116,13 +122,17 @@ CS.INIT.OPENINPUT
 				>SYSCALL LoadFile
 				bcs CS.INIT.RTS
 
-				>PUSHYA
+				>STYA TmpWord
 				txa
 				>STA.G hInputBuf
 				>SYSCALL GetMemPtr
 				>STYA ZPInputBufPtr
-				>LDYA L.MSG.FILE.OK
-				>SYSCALL PutS
+
+				>PUSHW L.MSG.FILE.OK
+				>PUSHW TmpWord
+				>PUSHBI 2
+				>SYSCALL Printf
+
 				ldy #S.FNT.dfVersion
 				lda (ZPInputBufPtr),y
 				bne .99
@@ -134,28 +144,32 @@ CS.INIT.OPENINPUT
 
 				cmp #3
 				bne .99
-
+*--------------------------------------
 .1				asl						*2 = Entry Len in Tbl
 				>STA.G FNT.Version
 				pha
-				ldy #S.FNT.dfAscent
-				lda (ZPInputBufPtr),y
-				>STA.G FON.Header+S.FON.Ascent
+				
+				>PUSHW L.MSG.HEADER.OK
+				
+				pla
 				>PUSHA
+				
+				ldy #S.FNT.dfPixWidth
+				lda (ZPInputBufPtr),y
+				>STA.G FON.Header+S.FON.PixW
+				>PUSHA		
 
 				ldy #S.FNT.dfPixHeight
 				lda (ZPInputBufPtr),y
 				>STA.G FON.Header+S.FON.PixH
 				>PUSHA
 
-				ldy #S.FNT.dfPixWidth
+				ldy #S.FNT.dfAscent
 				lda (ZPInputBufPtr),y
-				>STA.G FON.Header+S.FON.PixW
-				>PUSHA		
-
-				pla
+				>STA.G FON.Header+S.FON.Ascent
 				>PUSHA
-				>LDYA L.MSG.HEADER.OK
+				
+				>PUSHBI 4
 				>SYSCALL PrintF
 				clc
 				rts
@@ -185,9 +199,17 @@ CS.INIT.CREATEOUTPUT
 
 .9				rts
 *--------------------------------------
-CS.RUN			ldy #S.FNT.dfBreakChar
+CS.RUN			>PUSHW L.MSG.RANGE
+				
+				ldy #S.FNT.dfFirstChar
 				lda (ZPInputBufPtr),y
-				>STA.G FON.Header+S.FON.Break
+				>STA.G FON.Header+S.FON.First
+				>STA.G CharIndex
+				>PUSHA
+				
+				ldy #S.FNT.dfLastChar
+				lda (ZPInputBufPtr),y
+				>STA.G FON.Header+S.FON.Last
 				>PUSHA
 
 				ldy #S.FNT.dfDefaultChar
@@ -195,17 +217,12 @@ CS.RUN			ldy #S.FNT.dfBreakChar
 				>STA.G FON.Header+S.FON.Default
 				>PUSHA
 
-				ldy #S.FNT.dfLastChar
+				ldy #S.FNT.dfBreakChar
 				lda (ZPInputBufPtr),y
-				>STA.G FON.Header+S.FON.Last
+				>STA.G FON.Header+S.FON.Break
 				>PUSHA
 
-				ldy #S.FNT.dfFirstChar
-				lda (ZPInputBufPtr),y
-				>STA.G FON.Header+S.FON.First
-				>STA.G CharIndex
-				>PUSHA
-				>LDYA L.MSG.RANGE
+				>PUSHBI 4
 				>SYSCALL PrintF
 
 				>LDA.G FON.Header+S.FON.Last
@@ -239,10 +256,10 @@ CS.RUN			ldy #S.FNT.dfBreakChar
 				adc (pData),y
 				sta (pData),y
 				sta ZPOutPutCharOfs+1
-				>LEA.G FileOffset
-				>PUSHYA
-				>PUSHBI SYS.FSeek.SET
-				>LDA.G hOutputFile
+
+				>PUSHB.G hOutputFile
+				>PUSHL.G FileOffset
+				>PUSHBI SEEK.SET
 				>SYSCALL FSeek
 				bcc .1
 
@@ -317,7 +334,7 @@ CS.RUN.LOOP		>SLEEP
 				bcs .9
 
 				>LDYA L.MSG.DONE
-				>SYSCALL PrintF
+				>SYSCALL PutS
 				lda #0
 				sec
 .9				rts
@@ -386,15 +403,13 @@ CS.RUN.GetChar	lda (ZPInputTblPtr)		Get Char PixW
 *--------------------------------------
 * Dump ZPCharBufPtr : CharByteW x FON.Header+S.FON.PixH
 *--------------------------------------
-CS.RUN.DumpChar	>LDA.G CharOutByteW
-				>PUSHA
-				>LDA.G CharOutPixW
-				>PUSHA
-				>LDA.G CharIndex
-				>PUSHA
-				>PUSHA
-				>LDYA L.MSG.DUMP
+CS.RUN.DumpChar	>PUSHW L.MSG.DUMP
+				>PUSHB.G CharIndex
+				>PUSHB.G CharOutPixW
+				>PUSHB.G CharOutByteW
+				>PUSHBI 3
 				>SYSCALL PrintF
+
 				lda ZPCharBufPtr
 				sta ZPPTR1
 				lda ZPCharBufPtr+1
@@ -683,9 +698,9 @@ CS.RUN.WriteByte
 				clc
 				bne .8
 
-				>PUSHWI 256
+				>PUSHB.G hOutputFile
 				>PUSHW ZPOutPutBufPtr
-				>LDA.G hOutputFile
+				>PUSHWI 256
 				>SYSCALL FWrite
 				bcs .9
 
@@ -703,11 +718,10 @@ CS.RUN.FlushOutPutBuf
 				>LDA.G OutPutPtr
 				beq .8
 
-				tay
-				lda #0
-				>PUSHYA
+				>PUSHB.G hOutputFile
 				>PUSHW ZPOutPutBufPtr
-				>LDA.G hOutputFile
+				>PUSHBI 0
+				>PUSHB.G OutPutPtr
 				>SYSCALL FWrite
 .8				rts
 *--------------------------------------
@@ -715,24 +729,30 @@ CS.RUN.WriteBMAndTbl
 				ldy #FileOffset
 				ldx #4
 				lda #0
+
 .1				sta (pData),y
 				iny
 				dex
 				bne .1
 
-				>LEA.G FileOffset
-				>PUSHYA
-				>PUSHBI SYS.FSeek.SET
-				>LDA.G hOutputFile			
+				>PUSHB.G hOutputFile			
+				>PUSHL.G FileOffset
+				>PUSHBI SEEK.SET
 				>SYSCALL FSeek
 				bcs .9
 
-				>PUSHWI S.FON
+				>PUSHB.G hOutputFile
 				>PUSHEA.G FON.Header
-				>LDA.G hOutputFile
+				>PUSHWI S.FON
 				>SYSCALL FWrite
 				bcs .9
 
+				>PUSHB.G hOutputFile
+				
+				>LDA.G hTblBuf
+				>SYSCALL GetMemPtr
+				>PUSHYA
+				
 				>LDA.G FON.Header+S.FON.Last
 				sec
 				>SBC.G FON.Header+S.FON.First
@@ -744,11 +764,6 @@ CS.RUN.WriteBMAndTbl
 				ply
 				>PUSHYA
 
-				>LDA.G hTblBuf
-				>SYSCALL GetMemPtr
-				>PUSHYA
-
-				>LDA.G hOutputFile
 				>SYSCALL FWrite
 				clc
 .9				rts
