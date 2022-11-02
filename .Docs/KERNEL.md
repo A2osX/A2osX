@@ -728,6 +728,7 @@ CS : not found
 ## ASM  
 `>PUSHB hSList`  
 `>PUSHW KeyPtr`  
+`>PUSHW ScopeID`  
 `>SYSCALL SListNewKey`  
 
 ## RETURN VALUE  
@@ -739,6 +740,7 @@ CS : not found
 ## ASM  
 `>PUSHB hSList`  
 `>PUSHW KeyPtr`  
+`>PUSHW ScopeID`  
 `>SYSCALL SListLookup`  
 
 ## RETURN VALUE  
