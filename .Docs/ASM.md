@@ -44,6 +44,7 @@ Table-driven, add your favorite CPU creating a new CPU asm.xxxx file.
 | .EQ  | EQuate | S-C, A2osX     | Working |             | |
 | .FIN | conditional end| S-C, A2osX     | Working |             | |
 | .HS  | Hex String storage | S-C, A2osX     | Working | `HS FE1A78`     delimiter allowed : `HS 00.11,22`            | |
+| .HX  | Hex Nibble storage | S-C, A2osX     | Working | `HX EFA187`     delimiter allowed : `HS 00.11,22`            | |
 | .IN,.INB,.INBx | INline source | S-C, A2osX     | Working | `.INB MYFILE`  | `.IN` inlines full text, `.INB` inlines 1 block at a time during assembly |
 | .LI,.LIST  | | S-C, A2osX     | Working | `.LIST ON/OFF CON/COFF MON/MOFF XON/XOFF`  | |
 | .MA  | MAcro deffinition | S-C, A2osX | Working | `.MA >MYMACRO`  | |

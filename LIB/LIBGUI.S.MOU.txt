@@ -19,19 +19,24 @@ MOU.Init		>PUSHW L.DEVNAME.MOUSE
 				clc
 				rts
 *--------------------------------------
-MOU.Setup		lda DCB.GFX+S.DCB.GFX.W+1
+* make sure mouse X,Y always in Screen
+*--------------------------------------
+MOU.Setup		lda CLIP.Screen+S.RECT.X2+1
 				sta MouseClamp+3
 				lsr
 				sta PTR.Pos+S.POINT.X+1
-				lda DCB.GFX+S.DCB.GFX.W
+
+				lda CLIP.Screen+S.RECT.X2
 				sta MouseClamp+2
 				ror
 				sta PTR.Pos+S.POINT.X
-				lda DCB.GFX+S.DCB.GFX.H+1
+
+				lda CLIP.Screen+S.RECT.Y2+1
 				sta MouseClamp+7
 				lsr
 				sta PTR.Pos+S.POINT.Y+1
-				lda DCB.GFX+S.DCB.GFX.H
+
+				lda CLIP.Screen+S.RECT.Y2
 				sta MouseClamp+6
 				ror
 				sta PTR.Pos+S.POINT.Y
@@ -68,25 +73,25 @@ MOU.CheckOverMenu
 				lda MENU.Stack,x
 
 				>SYSCALL2 GetMemPtr
-				>STYA ZPMENUPtr
-				pha
-				tya
-				clc
-				adc #S.OBJ.X1
-				tay
-				pla
-				adc /S.OBJ.X1
-				jsr MOU.InRectYA
+				>STYA ZPObjPtr
+
+				jsr MOU.InObj
 				bcs .3
 
-				jsr MENU.Enter
+				lda #PTR.T.ARROW
+				jsr PTR.Set
 				
-				clc
-				rts
+				jmp MENU.Enter
 
 .3				ldx MENU.Stack.Idx
 				bne .2
-				
+
+				lda	MSG+S.MSG.S
+				bit #S.XY.S.CLK
+				beq .9
+
+				jsr MENU.DestroyAll
+
 .9				sec
 				rts
 *--------------------------------------
@@ -111,76 +116,71 @@ MOU.CheckOverWND
 				lda WND.Stack-1,x
 				jsr OBJ.GetHWNDA
 
-				ldy #S.OBJ.F
-				lda (ZPWNDPtr),y
-				and #S.OBJ.F.BORDER
-				beq .2
-
 				jsr MOU.ChkWNDBorders
-				bcc .99
+				bcc MOU.CheckOverSysBut.RTS
 
-.2				lda ZPWNDPtr
+				lda ZPWNDPtr
 				clc
 				adc #S.OBJ.X1
 				tay
 				lda ZPWNDPtr+1
-				adc #0
-
+				adc /S.OBJ.X1
 				jsr MOU.InRectYA
 				bcs .7					not over this WND
 
 				lda	MSG+S.MSG.S
-				bit #S.MSG.S.CLK
-				beq .22
+				bit #S.XY.S.CLK
+				beq .2
 
 				jsr WND.Bring2Front
 
-.22				ldy #S.WND.TBarY2
+.2				lda ZPWNDPtr
+				clc
+				adc #S.WND.InnerX1
+				tay
+				lda ZPWNDPtr+1
+				adc /S.WND.InnerX1
+				jsr MOU.InRectYA
+				bcc .8					in Inner Space
+
+				ldy #S.OBJ.S
 				lda (ZPWNDPtr),y
-				cmp MSG+S.MSG.Y1
-				iny
-				lda (ZPWNDPtr),y
-				sbc MSG+S.MSG.Y1+1
+				and #S.WND.S.HASTBAR
+				beq .3
+				
+				ldy #S.WND.TBarY2
+				jsr MOU.WNDCmpY
 				bcc .3					not in TBAR
 
+				jmp MOU.MoveWND
 
-				bra .5
-
-.3				ldy	#S.WND.MBarY2
-
+.3				ldy #S.OBJ.S
 				lda (ZPWNDPtr),y
-				cmp MSG+S.MSG.Y1
-				iny
-				lda (ZPWNDPtr),y
-				sbc MSG+S.MSG.Y1+1
+				and #S.WND.S.HASMBAR
+				beq .4
+				
+				ldy	#S.WND.MBarY2
+				jsr MOU.WNDCmpY
 				bcc .4					not in MBAR
 
 				jsr MBAR.Enter
 
 				bra .5
 
-.4				ldy #S.WND.SBarY1
+.4				ldy #S.OBJ.S
+				lda (ZPWNDPtr),y
+				and #S.WND.S.HASSBAR
+				beq .5
 
-				lda (ZPWNDPtr),y
-				cmp MSG+S.MSG.Y1
-				iny
-				lda (ZPWNDPtr),y
-				sbc MSG+S.MSG.Y1+1
-				bcs .6					not in SBAR
+				ldy #S.WND.SBarY1
+				jsr MOU.WNDCmpY
+				bcs .5					not in SBAR
 
 
 
 .5				lda #PTR.T.ARROW
-				jsr PTR.Set
-				clc
-				rts
 
-
-.6				lda #PTR.T.WAIT
-				jsr PTR.Set
-
-				clc
-				rts
+.6				jmp PTR.Set
 
 .7				ldx WND.Stack.Idx
 
@@ -191,9 +191,63 @@ MOU.CheckOverWND
 				jsr PTR.Set
 
 .9				sec
+				rts
+*--------------------------------------
+.8				ldy #S.WND.hPTR
+				lda (ZPWNDPtr),y
+				jsr PTR.Set
+
+				jsr MOU.ToLocal
+				
+				jsr MOU.ChkWNDChilds
+				bcc .99
+			
+				clc
 .99				rts
 *--------------------------------------
+MOU.MoveWND		lda	MSG+S.MSG.S
+				bit #S.XY.S.DRAGSTART
+				beq .8
+
+				lda ZPWNDPtr
+				clc
+				adc #S.OBJ.X1
+				tay
+				lda ZPWNDPtr+1
+				adc /S.OBJ.X1
+	
+				jmp PTR.SetRect
+
+.8				lda #PTR.T.MOVE
+				jmp PTR.Set
+*--------------------------------------
+MOU.ChkWNDChilds
+
+				jsr WND.GetChilds
+				beq .9
+
+.1				jsr MOU.InObj
+				bcs .7					not over this Child
+
+				jsr OBJ.Enter
+				bra .8
+
+.7				jsr OBJ.Leave
+
+.8				jsr OBJ.GetNext
+				bne .1
+
+.9
+MOU.ChkWNDChilds.9
+				sec
+				rts
+*--------------------------------------
 MOU.ChkWNDBorders
+				ldy #S.OBJ.F
+				lda (ZPWNDPtr),y
+				and #S.OBJ.F.BORDER
+				beq MOU.ChkWNDChilds.9
+
 				stz IY
 
 				ldy #S.OBJ.X1
@@ -238,13 +292,13 @@ MOU.ChkWNDBorders
 				lda (ZPWNDPtr),y
 				clc
 				adc #1
-				eor MSG+S.MSG.X2
+				eor MSG+S.MSG.X1
 				bne .5
 
 				iny
 				lda (ZPWNDPtr),y
 				adc #0
-				eor MSG+S.MSG.X2+1
+				eor MSG+S.MSG.X1+1
 				bne .5
 
 				lda IY
@@ -260,13 +314,13 @@ MOU.ChkWNDBorders
 				lda (ZPWNDPtr),y
 				clc
 				adc #1
-				eor MSG+S.MSG.Y2
+				eor MSG+S.MSG.Y1
 				bne .7
 
 				iny
 				lda (ZPWNDPtr),y
 				adc #0
-				eor MSG+S.MSG.Y2+1
+				eor MSG+S.MSG.Y1+1
 				bne .7
 
 				lda #PTR.T.RESIZEXY1
@@ -275,9 +329,16 @@ MOU.ChkWNDBorders
 .7				lda IY
 				bne .6
 
-				sec
+.9				sec
 				rts
 *--------------------------------------
+MOU.InObj		lda ZPObjPtr
+				clc
+				adc #S.OBJ.X1
+				tay
+				lda ZPObjPtr+1
+				adc /S.OBJ.X1
+*--------------------------------------			
 MOU.InRectYA	>STYA ZPRECTPtr
 
 				ldy #S.RECT.X1
@@ -321,6 +382,41 @@ MOU.InRectYA	>STYA ZPRECTPtr
 
 .9				sec
 .99				rts
+*--------------------------------------
+MOU.WNDCmpY		lda (ZPWNDPtr),y
+				cmp MSG+S.MSG.Y1
+				iny
+				lda (ZPWNDPtr),y
+				sbc MSG+S.MSG.Y1+1
+				rts
+*--------------------------------------
+MOU.ToLocal		ldy #S.WND.InnerX1
+
+				lda MSG+S.MSG.X1
+				sec
+				sbc (ZPWNDPtr),y
+				sta MSG+S.MSG.X1
+				
+				iny
+
+				lda MSG+S.MSG.X1+1
+				sbc (ZPWNDPtr),y
+				sta MSG+S.MSG.X1+1
+				
+				iny						#S.WND.InnerY1
+
+				lda MSG+S.MSG.Y1
+				sec
+				sbc (ZPWNDPtr),y
+				sta MSG+S.MSG.Y1
+				
+				iny
+
+				lda MSG+S.MSG.Y1+1
+				sbc (ZPWNDPtr),y
+				sta MSG+S.MSG.Y1+1
+				
+				rts
 *--------------------------------------
 MAN
 SAVE usr/src/lib/libgui.s.mou

@@ -98,7 +98,7 @@ CMD..EXEC.YAX	jsr CORE.Load.YAX		Y,A = Args, X = Code
 				bcs CMD.SHIFTA.RTS
 
 				lda #$C0+C..
-				jmp CORE.StkPush
+				jmp STK.Push
 
 CMD...9			jmp CMD.E.CSYN
 *--------------------------------------
@@ -189,6 +189,7 @@ CMD.CD.YA		>PUSHYA
 				beq .11
 
 				lda #MLI.E.INVPATH
+
 .19				pha
 				lda ZPTmpW
 				>SYSCALL FreeMem
@@ -607,7 +608,7 @@ CMD.REN			lda (ZPArgVBufPtr)
 *--------------------------------------
 CMD.FUNCTION	lda (ZPArgVBufPtr)
 				beq .9
-				jsr CORE.StkGetCtx
+				jsr STK.GetCtx
 				bcc .9					No context allowed
 
 				>LDA.G hFunctions
@@ -713,7 +714,7 @@ CMD.CALL		jsr CMD.CALL.GETFUNC
 				bcs CMD.CALL.RTS
 
 				lda #$C0+C.CALL
-				jmp CORE.StkPush
+				jmp STK.Push
 *--------------------------------------
 CMD.CALL.GETFUNC
 				>LDA.G hFunctions
@@ -738,7 +739,7 @@ CMD.EXIT		lda (ZPArgVBufPtr)
 .1				ldy #S.PS.RC
 				sta (pPS),y
 
-.2				jsr CORE.StkPull		Pull everything until CALL . CL...
+.2				jsr STK.Pull		Pull everything until CALL . CL...
 				bcs .9
 
 				cmp #$C0+C..			in CALL, "." or CL context ?
@@ -750,7 +751,7 @@ CMD.EXIT		lda (ZPArgVBufPtr)
 				cmp #$C0+C.CLEXEC
 				beq .8
 
-				jsr CORE.StkPopCtxA
+				jsr STK.PopCtxA
 				bcc .2
 				rts
 
@@ -761,25 +762,25 @@ CMD.EXIT		lda (ZPArgVBufPtr)
 				clc
 .9				rts
 *--------------------------------------
-CMD.EXIT.FILE	jsr CORE.StkPullFree	Code buffer
+CMD.EXIT.FILE	jsr STK.PullFree		Code buffer
 
 				ldy #S.PS.hARGV
 				lda (pPS),y
 				>SYSCALL FreeMem		ArgV buffer
 
-				jsr CORE.StkPull
+				jsr STK.Pull
 				ldy #S.PS.hARGV
 				sta (pPS),y
 
-				jsr CORE.StkPull
+				jsr STK.Pull
 				ldy #S.PS.ARGC
 				sta (pPS),y
 
-				jsr CORE.StkPullInputBufPtr
+				jsr STK.PullInputBufPtr
 
-				jsr CORE.StkPull
+				jsr STK.Pull
 				sta ZPInputBuf
-				jsr CORE.StkPull
+				jsr STK.Pull
 				sta ZPInputBuf+1
 
 				ldy #S.PS.RC
@@ -788,19 +789,44 @@ CMD.EXIT.FILE	jsr CORE.StkPullFree	Code buffer
 				clc
 				rts
 *--------------------------------------
-CMD.BREAK		jsr CORE.StkGetCtx		Get context in CORE.TestResult
+CMD.BREAK		jsr STK.GetCtx			Get context in CORE.TestResult
 				bcs .9
+
 				tax
 				and #$3F
-				cmp #C.CASE
-				bne .9
-				txa
-				bpl .8
-				jsr CORE.StkPull		remove C.CASE
-				jsr CORE.StkGet
-				and #$7F
 
-				sta (pData),y
+				cmp #C.CASE
+				bne .1
+				
+				txa
+				bpl .8					already FALSE
+
+				jsr STK.Pull			remove C.CASE
+				jsr STK.Get				get SWITCH
+				bra .7
+*--------------------------------------
+.1				cmp #C.IF
+				bne .2
+
+				sta (pData),y			IF=false to skip until FI
+				
+				dey						get parent context
+				beq .9
+				
+				lda (pData),y
+				and #$3F
+
+.2				cmp #C.WHILE
+				beq .6
+
+.3				cmp #C.FOR
+				bne .9
+				
+.6				lda (pData),y
+
+.7				and #%01111111
+				sta (pData),y			WHILE/FOR=false, Parent=unchanged
+
 .8				clc
 				rts
 
@@ -809,41 +835,51 @@ CMD.BREAK		jsr CORE.StkGetCtx		Get context in CORE.TestResult
 * stack-1		hVALUE
 * stack			SWITCH TOKEN
 *--------------------------------------
-CMD.SWITCH		jsr CORE.StkGetCtx
+CMD.SWITCH		jsr STK.GetCtx
 
 				lda #2
-				jsr CORE.StkCheck
+				jsr STK.Check
 				bcs .9
+
 				jsr EXP.GET
 				bcs .9
+
 				>SYSCALL StrDup
 				bcs .9
 
 				txa
-				jsr CORE.StkPush		Push EXP hVALUE
+				jsr STK.Push			Push EXP hVALUE
 
 				lda CORE.TestResult
 				beq .1
+
 				ora #$80
+
 .1				ora #C.SWITCH
-				jmp CORE.StkPush
+				jmp STK.Push
+
 .9				rts
 *--------------------------------------
-CMD.CASE		jsr CORE.StkGetCtx		Get context in CORE.TestResult
-
+CMD.CASE		jsr STK.GetCtx			Get context in CORE.TestResult
 				bcs .9
+
 				tax
 				and #$3F
 				cmp #C.SWITCH
 				beq .1
+
 				cmp #C.CASE
 				bne .9
+
 				txa						previous case was true ?
 				bpl .10
+
 				jsr EXP.GET				skip expression
 				bcs .9
+
 				rts						keep existing context
-.10				jsr CORE.StkPull		remove previous C.CASE
+
+.10				jsr STK.Pull			remove previous C.CASE
 				bra CMD.CASE
 
 .1				jsr EXP.GET
@@ -862,13 +898,13 @@ CMD.CASE		jsr CORE.StkGetCtx		Get context in CORE.TestResult
 				eor #$80
 				ora CORE.TestResult
 				ora #C.CASE
-				jmp CORE.StkPush
+				jmp STK.Push
 .9
 CMD.E.CSYN		lda #E.CSYN
 				sec
 				rts
 *--------------------------------------
-CMD.DEFAULT		jsr CORE.StkGetCtx		Get context in CORE.TestResult
+CMD.DEFAULT		jsr STK.GetCtx			Get context in CORE.TestResult
 				bcs CMD.E.CSYN
 
 				and #$3F
@@ -879,14 +915,14 @@ CMD.DEFAULT		jsr CORE.StkGetCtx		Get context in CORE.TestResult
 				cmp #C.CASE
 				bne CMD.E.CSYN
 
-				jsr CORE.StkPull		remove C.CASE
+				jsr STK.Pull			remove C.CASE
 
-.1				jsr CORE.StkGet
+.1				jsr STK.Get
 				and #$C0
 				ora #C.DEFAULT
-				jmp CORE.StkPush
+				jmp STK.Push
 *--------------------------------------
-CMD.END			jsr CORE.StkGetCtx		Get context in CORE.TestResult
+CMD.END			jsr STK.GetCtx			Get context in CORE.TestResult
 				bcs CMD.E.CSYN
 
 				and #$3F
@@ -900,9 +936,9 @@ CMD.END			jsr CORE.StkGetCtx		Get context in CORE.TestResult
 				cmp #C.DEFAULT
 				bne CMD.E.CSYN
 
-.8				jmp CORE.StkPopCtx
+.8				jmp STK.PopCtx
 *--------------------------------------
-CMD.FOR			jsr CORE.StkGetCtx
+CMD.FOR			jsr STK.GetCtx
 
 				lda (ZPArgVBufPtr)
 				beq CMD.E.CSYN
@@ -922,7 +958,7 @@ CMD.FOR			jsr CORE.StkGetCtx
 				beq CMD.E.CSYN
 
 				lda #8					Make sure 8 bytes free on stack
-				jsr CORE.StkCheck
+				jsr STK.Check
 				bcs FOR.FILE.9
 
 				lda (ZPArgVBufPtr)
@@ -939,19 +975,19 @@ CMD.FOR.LIST	>LDYA ZPArgVBufPtr
 				phy
 				pha
 
-				jsr CORE.StkPushInputBufPtr  Push CmdPtr AFTER FOR
+				jsr STK.PushInputBufPtr  Push CmdPtr AFTER FOR
 
 				pla
 				ply
 
-				jsr CORE.StkPushYAX		Push listPtr,hList
+				jsr STK.PushYAX			Push listPtr,hList
 
 				jsr CORE.PushVarName	Push hVARNAME
 
 				lda #C.FOR.LIST
-				jsr CORE.StkPush
+				jsr STK.Push
 				lda #C.FOR
-				jsr CORE.StkPush
+				jsr STK.Push
 
 				jsr CMD.NEXT.LIST.TOKEN
 				bcc CMD.FOR.LOOP
@@ -981,18 +1017,18 @@ CMD.FOR.EXEC	jsr CORE.ArgV.NextChar	skip "`"
 
 CMD.FOR.PUSH	pha						save hFILE/hPIPE
 
-				jsr CORE.StkPushInputBufPtr		Push CmdPtr AFTER FOR
+				jsr STK.PushInputBufPtr		Push CmdPtr AFTER FOR
 
 				pla
 
-				jsr CORE.StkPush		push hPIPE for read
+				jsr STK.Push			push hPIPE for read
 				jsr CORE.PushVarName	Push hVARNAME
 *				bcs FOR.FILE.9
 
 				lda #C.FOR.FILEEXEC
-				jsr CORE.StkPush
+				jsr STK.Push
 				lda #C.FOR
-				jsr CORE.StkPush
+				jsr STK.Push
 
 				jsr CMD.NEXT.LINE
 				bcs FOR.FILE.9
@@ -1008,7 +1044,7 @@ CMD.FOR.LOOP	ora CORE.TestResult
 *				clc
 				rts
 *--------------------------------------
-CMD.NEXT		jsr CORE.StkGet			Y = StkPtr
+CMD.NEXT		jsr STK.Get				Y = StkPtr
 				bcs .9
 
 				and #$3F
@@ -1204,7 +1240,7 @@ CMD.NEXT.GetVarNamePtr
 				rts
 *--------------------------------------
 CMD.WHILE
-CMD.IF			jsr CORE.StkGetCtx
+CMD.IF			jsr STK.GetCtx
 
 				bit #$40				Parent is true ?
 				beq .3
@@ -1217,35 +1253,36 @@ CMD.IF			jsr CORE.StkGetCtx
 				bne .8
 
 				lda #3
-				jsr CORE.StkCheck
+				jsr STK.Check
 				bcs CMD.NEXT.LINE.RTS
 
 				>LDYA ZPInputCmdPtr
-				jsr CORE.StkPushYA		Push BEFORE WHILE/IF
+				jsr STK.PushYA			Push BEFORE WHILE/IF
 
 .8				lda CORE.TestResult
 				ora CORE.IntCmd
-				jmp CORE.StkPush
+				jmp STK.Push
 *--------------------------------------
-CMD.LOOP		jsr CORE.StkPull
+CMD.LOOP		jsr STK.Pull
 				bcs .9
 
 				tax
 				and #$3F
 				cmp #C.WHILE
 				bne .9
+
 				txa
 				bmi .8					true, loop
 
-				jmp CORE.StkPopCtxA		false, Discard loop Ptr
+				jmp STK.PopCtxA			false, Discard loop Ptr
 
-.8 				jmp CORE.StkPullInputBufPtr
+.8 				jmp STK.PullInputBufPtr
 
 .9				lda #E.NOWHILE
 				sec
 				rts
 *--------------------------------------
-CMD.ELSE		jsr CORE.StkGet
+CMD.ELSE		jsr STK.Get
 				bcs .9
 
 				bit #$40				parent is true ?
@@ -1255,9 +1292,11 @@ CMD.ELSE		jsr CORE.StkGet
 				and #$3F
 				cmp #C.IF
 				bne .9
+
 				txa
 				eor #$80				toggle and store at stack ptr
 				sta (pData),y
+
 .8				clc
 				rts
 .9
@@ -1265,7 +1304,7 @@ CMD.ELSE.NOIF	lda #E.NOIF
 				sec
 				rts
 *--------------------------------------
-CMD.FI			jsr CORE.StkPull
+CMD.FI			jsr STK.Pull
 				bcs CMD.ELSE.NOIF
 
 				and #$3F

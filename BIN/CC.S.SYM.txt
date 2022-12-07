@@ -12,12 +12,9 @@ SYM.New			>STYA ZPPtr2			T/Q
 				bit bPass2
 				bpl SYM.New.1
 
-				bit bLocalScope
-				bmi SYM.New.1
-
-				>PUSHB.G CC.hScopes		Global Scope
+				>PUSHB.G CC.hSyms
 				>PUSHW ZPLineBufPtr
-				>PUSHWI 0				ScopeID
+				jsr SCOPE.Push
 				>SYSCALL SListLookup
 				bcs SYM.New.9
 
@@ -25,7 +22,7 @@ SYM.New			>STYA ZPPtr2			T/Q
 
 				jsr CC.SkipX			X = KeyLen
 
-				>PUSHB.G CC.hScopes
+				>PUSHB.G CC.hSyms
 				>PUSHW.G CC.SymID
 				>PUSHW ZPSymBufPtr
 				>PUSHWI 65535			all
@@ -33,18 +30,22 @@ SYM.New			>STYA ZPPtr2			T/Q
 				>SYSCALL SListGetData
 				bcc SYM.New.2
 
-SYM.New.9		rts						Y,A = SymSize
+SYM.New.9		rts
 *--------------------------------------
 SYM.New.1		jsr SYM.BufInitYAXC		set buf according C
 
-				ldy ScopeIdx
-				lda (pData),y
-				jsr SYM.NewKey
+				>PUSHB.G CC.hSyms
+				>PUSHW ZPLineBufPtr
+				jsr SCOPE.Push
+				>SYSCALL SListNewKey
 				bcs SYM.New.9
 
 				>STYA.G CC.SymID		Y,A = KeyID
 
 				jsr CC.SkipX			X = KeyLen
+				.DO DBG_SYM=1
+			jsr SYM.DEBUG0
+				.FIN
 *--------------------------------------
 SYM.New.2		jsr CC.GetCharNB
 				bcs .98
@@ -61,11 +62,6 @@ SYM.New.2		jsr CC.GetCharNB
 
 .1				cmp #'('
 				bne SYM.NewV
-
-				ldy #SYM.Q
-				lda #SYM.Q.FUNC
-				ora (ZPSymBufPtr),y
-				sta (ZPSymBufPtr),y
 
 				jmp F.Decl
 
@@ -362,11 +358,7 @@ SYM.NewKey		>PUSHA
 				>PUSHW ZPLineBufPtr
 				>PUSHWI 0				ScopeID
 				>SYSCALL SListNewKey
-				bcs .9
-
-
-
-.9				rts						Y,A = KeyID, X = KeyLen
+				rts						Y,A = KeyID, X = KeyLen
 *--------------------------------------
 SYM.Add0000		>LDYAI 0
 *--------------------------------------
@@ -461,14 +453,14 @@ SYM.AddByte		pha
 				sec
 				rts
 *--------------------------------------
-SYM.NewA		bit bPass2
+SYM.NewLabelA	bit bPass2
 				bmi .8
 
-				>STA.G CC.CPSPFX		A = "B"reak, "C"ontinue...
+				>STA.G CC.Label+1		_A = "B"reak, "C"ontinue...
 
-				>PUSHB.G CC.hScopes		Global Scope
-				>PUSHEA.G CC.CPSPFX
-				>PUSHWI 0				ScopeID
+				>PUSHB.G CC.hSyms
+				>PUSHEA.G CC.Label
+				jsr SCOPE.Push
 				>SYSCALL SListNewKey
 				bcs .99
 
@@ -498,104 +490,114 @@ SYM.NewA		bit bPass2
 
 				>LDYA ZPCCCode
 				jsr SYM.SetAddrYA
-
-				>LDA.G CC.hScopes		Global Scope
-				jmp SYM.Store.1
+				.DO DBG_SYM=1
+			jsr SYM.DEBUG0
+				.FIN
+				jmp SYM.Store
 
 .8				clc
 
 .99				rts
 *--------------------------------------
-SYM.StoreF		>LDA.G CC.hScopes
-
-				bit bPass2
-				bpl SYM.Store.1
-
-				clc
-				rts
+SYM.Update		sec
+				.HS 90					BCC
 *--------------------------------------
-SYM.Store		bit bPass2
-				bpl SYM.StoreL			Store Global & Local at Pass 1
+SYM.Store		clc
+				bit bPass2
+				bmi .8
 
-				bit bLocalScope			Store  Local at Pass 2
-				bmi SYM.StoreL
 
-				clc
-				rts
+				php
+				.DO DBG_SYM=1
+				bcc .10
 
-SYM.StoreL		ldy ScopeIdx
-				lda (pData),y
+			jsr SYM.DEBUG1
 
-SYM.Store.1		>PUSHA
+				bra .11
+
+.10
+			jsr SYM.DEBUG2
+
+.11				.FIN
+				>PUSHB.G CC.hSyms
 				>PUSHW.G CC.SymID
 				>PUSHW ZPSymBufPtr
 				>PUSHBI 0
+
+				ldy #SYM.Q
+				lda (ZPSymBufPtr),y
+				and #SYM.Q.FUNC
+				bne .1
+
 				ldy #SYM.DefSize
 				lda (ZPSymBufPtr),y
-				>PUSHA
+				bra .2
+
+.1				lda #SYM.F.MAX
+
+.2				>PUSHA
+
+				plp
+				bcs .3
 
 				>SYSCALL SListAddData
-
-				rts
-*--------------------------------------
-SYM.NewScope	ldy ScopeIdx
-				cpy #CC.hScopes+SCOPE.MAX
-				bcs .9
-
-				lda #SL._
-				>SYSCALL SListNew
-				bcs .99
-
-				inc ScopeIdx
-				ldy ScopeIdx
-				sta (pData),y
-
-				dec bLocalScope
-				clc
 				rts
 
-.9				lda #E.OOH
-				sec
-.99				rts
-*--------------------------------------
-SYM.FreeScope	ldy ScopeIdx
-				cpy #CC.hScopes
-				beq *
+.3				>SYSCALL SListSetData
+				rts
 
-				lda (pData),y
-				>SYSCALL SListFree
-
-				dec ScopeIdx
-				inc bLocalScope
-
+.8				clc
 				rts
 *--------------------------------------
 SYM.Lookup		>LDA.G CC.LookupIdx
+
 				cmp #CC.LookupIdx+LOOKUP.MAX
 				beq .99
 
-				>PUSHB ScopeIdx
+				>PUSHB.G CC.hSyms	...for SListGetData
 
-.1				tay
-				lda (pData),y
-				jsr CC.SListLookup
+				lda ScopeIdx
+
+.1				pha
+				>PUSHB.G CC.hSyms
+				>PUSHW ZPLineBufPtr
+				ply
+				phy
+				jsr SCOPE.PushY
+				>SYSCALL SListLookup
 				bcc .8
 
-				lda (pstack)
-				cmp #CC.hScopes
+				pla
+				cmp #CC.ScopeIDs
 				beq .9
 
 				dec
-				sta (pstack)
+				dec
 				bra .1
 
-.9				inc pStack
+
+.99				lda #E.OOH
+*				sec
+				rts
+
+.9				inc pStack				discard CC.hSyms
 
 				lda #E.NOKEY
 				sec
 				rts
 
-.8				inc pStack
+.8				>PUSHA					KeyID.HI
+				tya
+				>PUSHA					KeyID.LO
+
+				pla						discard ScopeIdx
+
+				jsr CC.SkipX
+
+				>PUSHWZ					allocate
+				>PUSHWI 65535			all
+				>PUSHWZ					From Start
+				>SYSCALL SListGetData
 
 				>STYA.G CC.LookupSymSize
 
@@ -610,12 +612,9 @@ SYM.Lookup		>LDA.G CC.LookupIdx
 
 *				clc
 				rts
-
-.99				lda #E.OOH
-*				sec
-				rts
 *--------------------------------------
-SYM.LookupA		bit bPass2
+SYM.LookupLabelA
+				bit bPass2
 				bmi .1
 
 				ldx #0
@@ -623,18 +622,39 @@ SYM.LookupA		bit bPass2
 				clc
 				rts
 
-.1				>STA.G CC.CPSPFX		A = "B"reak, "C"ontinue...
+.1				>STA.G CC.Label+1		A = "B"reak, "C"ontinue...
 
-				>PUSHB.G CC.hScopes		Global Scope
-				>PUSHEA.G CC.CPSPFX
-				>PUSHWI 0				ScopeID
+				>PUSHB.G CC.hSyms	...for SListGetData
+
+				lda ScopeIdx
+
+.2				pha
+				>PUSHB.G CC.hSyms
+				>PUSHEA.G CC.Label
+				ply
+				phy
+				jsr SCOPE.PushY
 				>SYSCALL SListLookup
-				bcs .99
+				bcc .8
 
-				>STYA.G CC.SymID		Y,A = KeyID
+				pla
+				cmp #CC.ScopeIDs
+				beq .9
 
-				>PUSHB.G CC.hScopes
-				>PUSHW.G CC.SymID
+				dec
+				dec
+				bra .2
+
+.9				inc pStack				discard CC.hSyms
+
+				lda #E.NOKEY
+				sec
+				rts
+
+.8				>PUSHA					KeyID.HI
+				tya
+				>PUSHA					KeyID.LO
+
 				>PUSHW ZPSymBufPtr
 				>PUSHWI 65535			all
 				>PUSHWZ					From Start
@@ -850,6 +870,32 @@ SYM.SetAddrYA	phy
 				sta (ZPSymBufPtr),y
 
 				rts
+*--------------------------------------
+			.DO DBG_SYM=1
+SYM.DEBUG0	>PUSHW L.MSG.DEBUG.SYM0
+			>PUSHW.G CC.SymID
+			jsr SCOPE.Push
+			lda (ZPSymBufPtr)
+			>PUSHA
+			ldy #1
+			lda (ZPSymBufPtr),y
+			>PUSHA
+			>PUSHBI 6
+			>SYSCALL Printf
+			rts
+
+SYM.DEBUG1	>PUSHW L.MSG.DEBUG.SYM1
+			>PUSHW.G CC.SymID
+			>PUSHBI 2
+			>SYSCALL Printf
+			rts
+
+SYM.DEBUG2	>PUSHW L.MSG.DEBUG.SYM2
+			>PUSHW.G CC.SymID
+			>PUSHBI 2
+			>SYSCALL Printf
+			rts
+			.FIN
 *--------------------------------------
 MAN
 SAVE usr/src/bin/cc.s.sym
