@@ -15,19 +15,26 @@ X.ENTER.SUBDIR   .EQ 1
 X.COPY.TO.DEST   .EQ 0
 X.DELETE.SOURCE  .EQ 0
 *--------------------------------------
-                 .DUMMY
-                 .OR ZPBIN
+                .DUMMY
+                .OR ZPBIN
 ZS.START
-ZPPtr1           .BS 2
-ZPPtr2           .BS 2
-ZPFileName       .BS 2
-ZPFileStat       .BS 2
-ZPPW             .BS 2
-hLineBuf         .BS 1
-ZPLineBuf        .BS 2
-bPass2           .BS 1
-bDirLevel        .BS 1
-bIsTTY           .BS 1
+ZPPtr1          .BS 2
+ZPPtr2          .BS 2
+ZPFileName      .BS 2
+ZPFileStat      .BS 2
+
+bPass2          .BS 1
+
+bDirLevel       .BS 1
+bCRLF			.BS 1
+
+bPause          .BS 1
+bSummary        .BS 1
+bAllFiles       .BS 1
+
+ArgCount        .BS 1
+ArgDir			.BS 1
+
 ZS.END
                  .ED
 *--------------------------------------
@@ -35,14 +42,14 @@ ZS.END
 *--------------------------------------
 CS.START        cld
                 jmp (.1,x)
-                .DA #$61    6502,Level 1 (65c02)
-                .DA #1     BIN Layout Version 1
-                .DA #0     S.PS.F.EVENT
+                .DA #$61				6502,Level 1 (65c02)
+                .DA #1					BIN Layout Version 1
+                .DA #0					S.PS.F.EVENT
                 .DA #0
-                .DA CS.END-CS.START  Code Size (without Constants)
-                .DA DS.END-DS.START  Data SegmentSize
-                .DA #64     Stack Size
-                .DA #ZS.END-ZS.START Zero Page Size
+                .DA CS.END-CS.START		Code Size (without Constants)
+                .DA DS.END-DS.START		Data SegmentSize
+                .DA #64					Stack Size
+                .DA #ZS.END-ZS.START	Zero Page Size
                 .DA 0
 *--------------------------------------
 * Relocation Table
@@ -71,65 +78,66 @@ J.CS.RUN.PRINT  .DA CS.RUN.PRINT.REG
 CS.INIT         clc
                 rts
 *--------------------------------------
-CS.RUN          stz bIsTTY
-                jsr CS.RUN.ISATTY
+CS.RUN          jsr CS.RUN.SetCRLF
 
-.1              stz bDirLevel
-                >INC.G ArgCount
+.1              inc ArgCount
+				lda ArgCount
                 >SYSCALL ArgV
                 bcs .6
-                >STYA ZPPtr1
+
+				>STYA ZPPtr1
                 lda (ZPPtr1)
                 cmp #'-'
                 bne .4
-                ldy #1
+
+				ldy #1
                 lda (ZPPtr1),y
+				beq .9
 
-                ldx #OptionVars-OptionList-1
+                ldy #OptionVars-OptionList-1
 
-.2              cmp OptionList,x
+.2              cmp OptionList,y
                 beq .3
-                dex
+
+				dey
                 bpl .2
 
-                >PUSHW L.MSG.USAGE
-                >PUSHBI 0
-                >SYSCALL PrintF
-                lda #E.SYN
-                sec
-                rts
+.9				>LDYA L.MSG.USAGE
+				>SYSCALL PutS
 
-.3              ldy OptionVars,x
-                lda #$80
-                sta (pData),y
+				lda #E.SYN
+				sec
+.99				rts
+
+.3              ldx OptionVars,y
+
+				sec
+				ror $0,x
                 bra .1
-.4              >LDYA ZPPtr1
+
+.4              lda ArgDir
+				bne .9
+
+				lda ArgCount
+				sta ArgDir
+				
+				>LDYA ZPPtr1
                 jsr InitSrcDirYA
-                bcc .1              scan for any other args
-.9              rts
-.6              >LDA.G index        do we have a Source dir ?
+                bcc .1					scan for any other args
+				
+				rts
+*--------------------------------------
+.6              lda ArgDir		        do we have a Source dir ?
                 bne .8
+
                 ldy #S.PS.hCWD
                 lda (pPS),y
                 >SYSCALL GetMemPtr
                 jsr InitSrcDirYA
-                bcs .9
+                bcs .99
 
 .8              >PUSHEA.G TIME.SysTime
                 >SYSCALL Time
-
-                >LDYAI S.PW
-                >SYSCALL GetMem
-                bcs .9
-                >STYA ZPPW
-                txa
-                >STA.G hPW
-
-                >LDYAI 256
-                >SYSCALL GetMem
-                bcs .9
-                >STYA ZPLineBuf
-                stx hLineBuf
 *--------------------------------------
 CS.RUN.LOOP     stz bPass2
 
@@ -149,13 +157,13 @@ CS.RUN.LOOP     stz bPass2
                 cmp #$13                Ctrl-S
                 bne .3
 
-                >LDA.G bPause
+                lda bPause
                 eor #$ff
-                sta (pData),y
+                sta bPause
                 bne .1
 
-.3              >LDA.G bPause
-                bne .1
+.3              bit bPause
+                bmi .1
 
                 jsr GetEntry            First entry
                 bcs .9
@@ -190,8 +198,8 @@ CS.RUN.LOOP     stz bPass2
                 dec bPass2
                 bra .1
 
-.9              >LDA.G bSummary
-                bne .91
+.9              bit bSummary
+                bmi .91
 
                 jsr CS.RUN.PrintDirSumm
                 jsr CS.RUN.PrintCwd
@@ -206,12 +214,14 @@ CS.RUN.LOOP     stz bPass2
                 jsr GetNextEntry       Get next entry
                 jmp CS.RUN.LOOP        Go again
 
-.97             >LDA.G bSummary
-                beq .98
+.97				bit bSummary
+                bpl .98
+
                 inc bDirLevel
                 jsr CS.RUN.PrintDirSumm
-                jsr CS.RUN.PrintCwd
+                jsr CS.RUN.PrintBaseDir
                 jsr CS.RUN.NewLine
+
 .98             lda #0
                 sec
 .99             rts
@@ -221,69 +231,75 @@ CS.RUN.PRINT.JMP
 *--------------------------------------
 CS.RUN.PRINT.REG
 				bit bPass2
-                bmi .1
-                clc
-                rts
+				bmi .1
 
-.1              ldx bDirLevel         X is loop ctr bDirLevel..0
+				clc
+				rts
+
+.1				ldx bDirLevel         X is loop ctr bDirLevel..0
+
 .2              >LEA.G BlkCounters
-                >STYA ZPPtr1
-                ldy #S.STAT.BLOCKS+3  Read 32-bit number of blocks
-                lda (ZPFileStat),y
-                pha                   And push to stack
-                dey
-                lda (ZPFileStat),y
-                pha
-                dey
-                lda (ZPFileStat),y
-                pha
-                dey
-                lda (ZPFileStat),y
-                pha
-                txa                   Get loop counter
-                asl                   x2
-                asl                   x2 again
-                tay
-                pla                   Do 32-bit add
-                clc
-                adc (ZPPtr1),y        LSB
-                sta (ZPPtr1),y
-                pla
-                iny
-                adc (ZPPtr1),y
-                sta (ZPPtr1),y
-                pla
-                iny
-                adc (ZPPtr1),y
-                sta (ZPPtr1),y
-                pla
-                iny
-                adc (ZPPtr1),y        MSB
-                sta (ZPPtr1),y
-                dex                   Decrement loop counter
-                cpx #$ff              Stop if -1
-                bne .2
+				>STYA ZPPtr1
+				ldy #S.STAT.BLOCKS+3  Read 32-bit number of blocks
+				lda (ZPFileStat),y
+				pha                   And push to stack
+				dey
+				lda (ZPFileStat),y
+				pha
+				dey
+				lda (ZPFileStat),y
+				pha
+				dey
+				lda (ZPFileStat),y
+				pha
+				txa                   Get loop counter
+				asl                   x2
+				asl                   x2 again
+				tay
+				pla                   Do 32-bit add
+				clc
+				adc (ZPPtr1),y        LSB
+				sta (ZPPtr1),y
+				pla
+				iny
+				adc (ZPPtr1),y
+				sta (ZPPtr1),y
+				pla
+				iny
+				adc (ZPPtr1),y
+				sta (ZPPtr1),y
+				pla
+				iny
+				adc (ZPPtr1),y        MSB
+				sta (ZPPtr1),y
+				dex                   Decrement loop counter
+				cpx #$ff              Stop if -1
+				bne .2
 
-                >LDA.G bAllFiles
-                beq .8
+				bit bAllFiles
+				bpl .8
 
-                >PUSHW L.MSG.REG1
-                ldy #S.STAT.BLOCKS+3
-                ldx #4
+				>PUSHW L.MSG.REG1
+				ldy #S.STAT.BLOCKS+3
+				ldx #4
+
 .3              lda (ZPFileStat),y
                 >PUSHA
                 dey
                 dex
-                bne .3     (4)
+                bne .3
+
                 >PUSHBI 4
                 >SYSCALL PrintF
                 bcs .9
+
                 jsr CS.RUN.PrintCwd
                 >PUSHW L.MSG.REG2
-                >PUSHW ZPFileName  (2)
+                >PUSHW ZPFileName
                 >PUSHBI 2
                 >SYSCALL PrintF
                 bcs .9
+
                 jmp CS.RUN.NewLine
 
 .8              clc
@@ -344,45 +360,44 @@ CS.RUN.PRINT.BDEV
 .8              clc
 .9              rts
 *--------------------------------------
-CS.RUN.PrintDirSumm 
-				>LEA.G BlkCounters
-                >STYA ZPPtr1
+CS.RUN.PrintDirSumm
+                >PUSHW L.MSG.DIRSUMM
+
                 lda bDirLevel
                 asl
                 asl
+				ora #3
                 clc
-                adc ZPPtr1
-                sta ZPPtr1
-                lda #$00
-                adc ZPPtr1+1
-                sta ZPPtr1+1
-                >PUSHW L.MSG.DIRSUMM
-                ldy #$03
-                lda (ZPPtr1),y
-                >PUSHA
-                dey
-                lda (ZPPtr1),y
-                >PUSHA
-                dey
-                lda (ZPPtr1),y
-                >PUSHA
-                dey
-                lda (ZPPtr1),y
-                >PUSHA
+                adc #BlkCounters
+				tay
+
+				ldx #3
+
+.1				>PUSHB (pData),y
+				lda #0
+				sta (pData),y
+				dey
+				dex
+				bpl .1
+
                 >PUSHBI 4
                 >SYSCALL PrintF
 
-                ldy #$03
-                lda #$00
-                sta (ZPPtr1),y
-                dey
-                sta (ZPPtr1),y
-                dey
-                sta (ZPPtr1),y
-                dey
-                sta (ZPPtr1),y
-
                 rts
+*--------------------------------------
+CS.RUN.PrintBaseDir
+				lda ArgDir
+				beq .1
+
+				>SYSCALL ArgV
+				>SYSCALL PutS
+				rts
+
+.1				ldy #S.PS.hCWD
+                lda (pPS),y
+                >SYSCALL GetMemPtr
+				>SYSCALL PutS
+				rts
 *--------------------------------------
 CS.RUN.PrintCwd >PUSHW L.MSG.CWD
                 ldy #hSrcBasePath
@@ -395,39 +410,38 @@ CS.RUN.PrintCwd >PUSHW L.MSG.CWD
 *--------------------------------------
 CS.RUN.NewLine  lda #C.CR
                 >SYSCALL PutChar
-                lda bIsTTY
+                lda bCRLF
                 beq .9
+
                 lda #C.LF
                 >SYSCALL PutChar
 .9              rts
 *--------------------------------------
-CS.RUN.ISATTY   ldy #S.PS.hStdOut
-                lda (pPS),y
-                tax
-                lda hFDs-1,x
-                >SYSCALL GetMemPtr
-                >STYA ZPPtr1
-                lda (ZPPtr1)
-                beq .9
-                inc bIsTTY
-.9              rts
+CS.RUN.SetCRLF	ldy #S.PS.hStdOut
+				lda (pPS),y
+				tax
+				lda hFDs-1,x
+				>SYSCALL GetMemPtr
+				>STYA ZPPtr1
+				lda (ZPPtr1)			#S.FD.T.REG ?
+				beq .9					no CRLF if REG 
+
+				inc bCRLF
+
+.9				rts
 *--------------------------------------
 CS.DOEVENT      sec
                 rts
 *--------------------------------------
-CS.QUIT         jsr LeaveSubDir
-                bcc CS.QUIT
-                >LDA.G hFilter
-                beq .3
-                >SYSCALL FreeMem
-.3              >LDA.G hPW
-                beq .4
-                >SYSCALL FreeMem
-.4              lda hLineBuf
-                beq .8
-                >SYSCALL FreeMem
+CS.QUIT        	jsr LeaveSubDir
+				bcc CS.QUIT
 
-.8              clc
+				>LDA.G hFilter
+				beq .8
+
+				>SYSCALL FreeMem
+
+.8             	clc
 				rts
 *--------------------------------------
                  .INB usr/src/shared/x.fileenum.s
@@ -450,12 +464,7 @@ MSG.BDEV        .CZ "\e[32m%s/\e[0m"
                  .DUMMY
                  .OR 0
 DS.START
-ArgCount         .BS 1
 TIME.SysTime     .BS S.TIME
-bPause           .BS 1
-bSummary         .BS 1
-bAllFiles        .BS 1
-hPW              .BS 1
 BlkCounters      .BS 64           		Array of 32 bit integers, size 16
                  .INB usr/src/shared/x.fileenum.g
 DS.END           .ED
