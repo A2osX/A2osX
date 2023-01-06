@@ -16,7 +16,7 @@ TCP.IN			jsr FRM.GetTargetSKT.TCPUDP
 				tax
 				jmp (J.TCP.IN,x)
 *--------------------------------------
-TCP.IN.RST		lda #S.SOCKET.TCP.S.CLOSING
+TCP.IN.RST		lda #S.SOCKET.TCP.S.TIMEWT
 				ldy #S.SOCKET.TCP.S
 				sta (ZPPtrSKT),y
 *--------------------------------------
@@ -105,6 +105,7 @@ TCP.IN.JMP.SYNRCVD
 				lda (ZPFrameInPtr),y
 				cmp #S.TCP.OPTIONS.ACK
 				bne .8
+
 				jsr SKT.GetTCB
 
 				ldx #3
@@ -236,7 +237,6 @@ TCP.IN.JMP.ESTBLSH
 				and #S.TCP.OPTIONS.FIN
 				beq .8
 
-				jsr TCP.IN.ACKTheFIN
 				jsr SKT.StoreTCB		update socket
 
 				lda #S.TCP.OPTIONS.FIN+S.TCP.OPTIONS.ACK
@@ -271,7 +271,7 @@ TCP.IN.JMP.LASTACK
 *				jsr TCP.OUT.SendACK
 
 				ldy #S.SOCKET.TCP.S
-				lda #S.SOCKET.TCP.S.CLOSING
+				lda #S.SOCKET.TCP.S.TIMEWT
 				sta (ZPPtrSKT),y
 .8
 *--------------------------------------
@@ -280,59 +280,50 @@ TCP.IN.JMP.CLWAIT
 				rts
 *--------------------------------------
 TCP.IN.JMP.FINWT1
-				jsr SKT.GetTCB
 				ldy #S.TCP.OPTIONS		FIN sent, accept ACK or FIN/ACK packet
 				lda (ZPFrameInPtr),y
 				bit #S.TCP.OPTIONS.FIN
-				bne .1
+				bne TCP.IN.2TIMEWT		FIN/ACK
 
-				lda #S.TCP.OPTIONS.FIN+S.TCP.OPTIONS.ACK
-				jsr TCP.OUT.SendOptA	Send FIN.ACK
-				bcs TCP.IN.JMP.TIMEWT.RTS
-
+				jsr SKT.GetTCB
 				lda #S.SOCKET.TCP.S.FINWT2
-				jmp SKT.StoreTCB.S
-
-.1				jsr TCP.IN.ACKTheFIN	FIN/ACK
-
-*				lda #S.TCP.OPTIONS.FIN+S.TCP.OPTIONS.ACK
-
-				jsr TCP.OUT.SendACK		FIN received, Send ACK
-				bcs TCP.IN.JMP.TIMEWT.RTS
-
-				lda #S.SOCKET.TCP.S.LASTACK
 				jmp SKT.StoreTCB.S
 *--------------------------------------
 TCP.IN.JMP.FINWT2
-				ldy #S.TCP.OPTIONS		only accept ACK packet
+				ldy #S.TCP.OPTIONS		FIN sent & ACKed, awaiting FIN
 				lda (ZPFrameInPtr),y
 
-				bit #S.TCP.OPTIONS.ACK
+				bit #S.TCP.OPTIONS.FIN
 				beq TCP.IN.JMP.TIMEWT
-				jsr SKT.GetTCB
 
-				jsr TCP.IN.ACKTheFIN
+TCP.IN.2TIMEWT	jsr SKT.GetTCB
 
-				jsr TCP.OUT.SendACK		FIN received, Send ACK
+				ldx #3
+
+.1				inc	SKT.Cache+S.SOCKET.TCP.INSEQNUM,x
+				bne .2
+
+				dex
+				bpl .1
+
+.2				ldx #3
+
+.3				inc	SKT.Cache+S.SOCKET.TCP.OUTNEXTSEQ,x
+				bne .4
+
+				dex
+				bpl .3
+
+.4				jsr TCP.OUT.SendACK		FIN received, Send ACK
 				bcs TCP.IN.JMP.TIMEWT.RTS
 
-				lda #S.SOCKET.TCP.S.CLOSING
+				lda #S.SOCKET.TCP.S.TIMEWT
 				jmp SKT.StoreTCB.S
 *--------------------------------------
 TCP.IN.JMP.CLOSING
-*										Wait for SKT.Shutdown
-*				ldy #S.TCP.OPTIONS		only accept ACK packet
-*				lda (ZPFrameInPtr),y
-*				bit #S.TCP.OPTIONS.ACK
-*				beq .1
 
-*				ldy #S.SOCKET.TCP.S
-*				lda #S.SOCKET.TCP.S.TIMEWT
-*				sta (ZPPtrSKT),y
-*.1
-*				clc
-*				rts
-*--------------------------------------
+* Wait for SKT.Shutdown
+
 TCP.IN.JMP.TIMEWT
 				clc						Wait for TCP.SendClose
 TCP.IN.JMP.TIMEWT.RTS
@@ -352,17 +343,6 @@ TCP.IN.ACKTheSYN
 				bpl .3
 
 				rts
-*--------------------------------------
-TCP.IN.ACKTheFIN
-				ldx #3
-
-.1				inc	SKT.Cache+S.SOCKET.TCP.INSEQNUM,x
-				bne .8
-
-				dex
-				bpl .1
-
-.8				rts
 *--------------------------------------
 TCP.IN.SetDataInPtrAndLen
 				ldy #S.IP.TOTAL.LENGTH+1
@@ -508,6 +488,7 @@ TCP.OUT			lda SKT.Cache+S.SOCKET.TCP.OUTTOSEND+1
 				ldy #S.SOCKET.TCP.O
 				lda (ZPPtrSKT),y
 				bne TCP.OUT.SendOptA	a least an option...
+
 				clc						No data, no flag....exit
 .9				rts
 

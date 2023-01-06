@@ -1,0 +1,503 @@
+NEW
+  AUTO 3,1
+				.LIST OFF
+				.OP	65C02
+				.OR	$2000
+				.TF drv/dan2eth.drv
+*--------------------------------------
+				.INB inc/macros.i
+				.INB inc/a2osx.i
+				.INB inc/mli.e.i
+				.INB inc/nic.i
+				.INB inc/eth.i
+*--------------------------------------
+IO.8255.Cmd.PFX		.EQ $AC
+
+IO.8255.Cmd.INIT	.EQ $10
+IO.8255.Cmd.POLL	.EQ $11
+IO.8255.Cmd.SEND	.EQ $12
+
+IO.8255.Data	.EQ $C080-$88
+
+* IO.6255.PortB	.EQ $C081-$88			Unused
+
+IO.8255.S		.EQ $C082-$88
+IO.8255.S.ByteSent	.EQ %10000000
+IO.8255.S.ByteRcvd	.EQ %00100000
+
+IO.8255.Mode	.EQ $C083-$88
+*--------------------------------------
+				.MA READBYTE
+				lda #IO.8255.S.ByteRcvd
+:1				bit IO.8255.S,x
+				bne :1
+				lda IO.8255.Data,x
+				.EM
+
+				.MA WRITEBYTE
+				sta IO.8255.Data,x
+*				lda #IO.8255.S.ByteSent
+:1				bit IO.8255.S,x
+				bpl :1
+				
+				.EM
+*--------------------------------------
+				.DUMMY
+				.OR ZPBIN
+ZS.START
+ZPPtr1			.BS 2
+ZPArgPtr		.BS 2
+DEVSLOT0x		.BS 1
+ZS.END			.ED
+*--------------------------------------
+*			File Header (16 Bytes)
+*--------------------------------------
+CS.START		cld
+				jmp Dev.Detect			cld,jmp abs=DRV
+				.DA #$61				6502,Level 1 (65c02)
+				.DA #1					DRV Layout Version 1
+				.DA 0
+				.DA CS.END-CS.START			Code Length
+				.DA 0
+				.DA 0
+				.DA 0
+*--------------------------------------
+* Relocation Table
+*--------------------------------------
+L.MSG.DETECT	.DA MSG.DETECT
+L.MSG.DETECT.OK	.DA MSG.DETECT.OK
+L.MSG.DETECT.KO	.DA MSG.DETECT.KO
+L.DRV.CS.START	.DA DRV.CS.START
+L.FD.DEV		.DA FD.DEV
+L.FD.DEV.NAME	.DA FD.DEV.NAME
+L.SSCANF.MAC	.DA SSCANF.MAC
+L.MAC0			.DA DCB+S.DCB.NIC.MAC
+				.DA DCB+S.DCB.NIC.MAC+1
+				.DA DCB+S.DCB.NIC.MAC+2
+				.DA DCB+S.DCB.NIC.MAC+3
+				.DA DCB+S.DCB.NIC.MAC+4
+				.DA DCB+S.DCB.NIC.MAC+5
+				.DA 0					End Of Reloc Table
+*--------------------------------------
+Dev.Detect		>STYA ZPArgPtr
+
+				>LDYA L.MSG.DETECT
+				>SYSCALL PutS
+
+				stz ZPPtr1
+				lda #$C7
+
+.1				sta ZPPtr1+1
+				
+				ldy #ROM.SIG.L-1
+				
+.10				lda (ZPPtr1),y
+				cmp ROM.SIG,y
+				bne	.2
+
+				dey
+				bpl .10
+
+				lda ZPPtr1+1
+				and #$0F
+				tay
+				asl
+				asl
+				asl
+				asl
+				ora #$88
+				tax 
+
+				lda #$fa
+				sta IO.8255.Mode,x
+				cmp IO.8255.Mode,x
+				beq	.3
+
+.2				dec FD.DEV.NAME+3
+				lda ZPPtr1+1
+				dec
+				cmp #$C0
+				bne .1
+
+				>LDYA L.MSG.DETECT.KO
+				>SYSCALL PutS
+
+				lda #MLI.E.NODEV
+				sec
+.99				rts
+
+.3				stx DEVSLOTx0
+				sty DEVSLOT0x
+
+
+
+
+
+*				sta DIB+S.DIB.VERSION+1
+*				sta DIB+S.DIB.VERSION
+
+				jsr Dev.ParseArgs
+				bcs .99
+				
+.8				>PUSHW L.MSG.DETECT.OK
+				>PUSHW L.FD.DEV.NAME
+				>PUSHBI 2
+				>SYSCALL PrintF
+				
+				>PUSHWI DRV.END
+				>PUSHWI DRV.CS.END-DRV.CS.START
+				>PUSHWI DRV.CS.START
+				>LDYA L.DRV.CS.START
+				>SYSCALL InsDrv
+				bcs .9
+
+				>STYA FD.DEV+S.FD.DEV.DRVPTR
+
+				>PUSHW L.FD.DEV
+				>PUSHW L.FD.DEV.NAME
+				>SYSCALL MKDev
+				bcs .9
+
+				ldx DEVSLOT0x
+				lda #A2osX.S.NIC
+				sta A2osX.S,x
+*				clc
+.9				rts
+*--------------------------------------
+Dev.ParseArgs	lda (ZPArgPtr)
+				bne .1
+
+				lda A2osX.RANDOM16
+				eor A2osX.TIMER16
+				sta DCB+S.DCB.NIC.MAC+3
+				eor A2osX.RANDOM16+1
+				sta DCB+S.DCB.NIC.MAC+4
+				eor A2osX.TIMER16+1
+				sta DCB+S.DCB.NIC.MAC+5
+				clc
+				rts
+
+.1				>PUSHW ZPArgPtr
+				>PUSHW L.SSCANF.MAC
+	
+				ldx #0
+
+.2				>PUSHW L.MAC0,x
+				inx
+				inx
+				cpx #12
+				bne .2
+
+				>PUSHBI 12				6 x byte PTRs
+				>SYSCALL SScanF
+				bcc .8
+				
+				lda #E.SYN
+*				sec
+.8				rts
+*--------------------------------------
+CS.END
+MSG.DETECT		.CZ "dan2eth/W5500 Driver."
+MSG.DETECT.OK	.CZ "dan2eth/W5500 Installed As Device : %s\r\n"
+MSG.DETECT.KO	.CZ "Hardware Not Found."
+SSCANF.MAC		.CZ "%h:%h:%h:%h:%h:%h"
+ROM.SIG			.HS E0.20.A0.00.E0.03.A2.3C.D0.05.A9.01.9D.FB.BF.A0
+ROM.SIG.L		.EQ *-ROM.SIG
+*--------------------------------------
+FD.DEV			.DA #S.FD.T.CDEV
+				.DA #0					HANDLER
+				.DA #0					BUSID
+				.DA #0					DEVID
+				.DA 0					BUSPTR
+				.BS 2					DRVPTR
+				.DA 0					DCBPTR
+				.DA 0					BUFPTR
+FD.DEV.NAME		.AZ "eth7"
+*--------------------------------------
+*			Driver Code
+*--------------------------------------
+ZPIOCTL			.EQ ZPDRV
+ZPBufPtr		.EQ ZPDRV+2
+Counter			.EQ ZPDRV+4
+*--------------------------------------
+DRV.CS.START	cld
+				jmp (.1,x)
+.1				.DA STATUS
+				.DA A2osX.BADCALL
+				.DA A2osX.BADCALL
+				.DA A2osX.BADCALL
+				.DA A2osX.BADCALL
+				.DA A2osX.BADCALL
+				.DA OPEN
+				.DA CLOSE
+				.DA READ
+				.DA WRITE
+				.DA 0					end or relocation
+*--------------------------------------
+STATUS			>STYA ZPIOCTL
+
+				ldy #S.IOCTL.S
+				lda (ZPIOCTL),y
+				beq .1
+
+				cmp #S.IOCTL.S.GETDIB
+				bne STATUS.DCB
+
+				ldx #S.DIB-1
+
+				.HS 2C					bit abs
+
+.1				ldx #3
+
+				ldy #S.IOCTL.BUFPTR
+				lda (ZPIOCTL),y
+				sta .3+1
+				iny
+				lda (ZPIOCTL),y
+				sta .3+2
+
+.2				lda DIB,x
+
+.3				sta $ffff,x				SELF MODIFIED
+				dex
+				bpl .2
+
+				clc
+				rts
+
+STATUS.DCB		cmp #S.IOCTL.S.GETDCB
+				bne STATUS.9
+
+				stz DCB+S.DCB.NIC.LINK
+
+
+				lda #S.DCB.NIC.LINK.OK
+				tsb DCB+S.DCB.NIC.LINK
+	
+
+				lda #S.DCB.NIC.LINK.FD
+				tsb DCB+S.DCB.NIC.LINK
+
+.1				ldy #S.IOCTL.BUFPTR
+				lda (ZPIOCTL),y
+				sta .3+1
+				iny
+				lda (ZPIOCTL),y
+				sta .3+2
+				ldx #S.DCB.NIC-1
+
+.2				lda DCB,x
+
+.3				sta $ffff,x				SELF MODIFIED
+				dex
+				bpl .2
+
+				clc
+				rts
+
+STATUS.9		lda #MLI.E.BADCTL
+				sec
+				rts
+*--------------------------------------
+OPEN			lda #S.DIB.S.OPENED
+				bit DIB+S.DIB.S
+				bne .9
+
+				jsr CLOSE
+
+*				ldx DEVSLOTx0			Done by CLOSE
+
+				lda #$FA
+				sta IO.8255.Mode,x
+
+
+				lda #IO.8255.Cmd.PFX
+				>WRITEBYTE
+				lda #IO.8255.Cmd.INIT
+				>WRITEBYTE
+
+				ldy #0
+
+.1				lda DCB+S.DCB.NIC.MAC+0,y
+				>WRITEBYTE
+				iny
+				
+				cpy #6
+				bcc .1
+
+				>READBYTE
+				beq .8
+				
+				lda #MLI.E.IO
+				sec
+				rts
+
+.8				lda #S.DIB.S.OPENED
+				tsb DIB+S.DIB.S
+				clc
+				rts
+
+.9				lda #MLI.E.OPEN
+				sec
+				rts
+*--------------------------------------
+CLOSE			ldx DEVSLOTx0
+
+
+
+
+
+
+.8				lda #S.DIB.S.OPENED
+				trb DIB+S.DIB.S
+				clc
+				rts
+*--------------------------------------
+READ			php
+				sei
+
+				>STYA ZPIOCTL
+				
+				ldx DEVSLOTx0
+
+				lda #IO.8255.Cmd.PFX
+				>WRITEBYTE
+				lda #IO.8255.Cmd.POLL
+				>WRITEBYTE
+				lda #2048
+				>WRITEBYTE
+				lda /2048
+				>WRITEBYTE
+
+				>READBYTE
+				ldy #S.IOCTL.BYTECNT
+				sta (ZPIOCTL),y
+				pha
+				eor #$ff
+				sta Counter
+				>READBYTE
+				sta (ZPIOCTL),y
+				pha
+				eor #$ff
+				sta Counter+1
+
+				pla
+				ply
+				bne .1
+				
+				tax
+				beq READWRITE.9
+				
+.1				>SYSCALL2 GetMem
+				bcs READWRITE.99
+
+				>STYA ZPBufPtr
+				phx
+				phy
+				ldy #S.IOCTL.BUFPTR+1
+				sta (ZPIOCTL),y
+				dey
+				pla
+				sta (ZPIOCTL),y
+				ldx DEVSLOTx0
+
+				ldy #0
+
+.2				inc Counter
+				bne .3
+
+				inc Counter+1
+				beq .8
+
+.3				>READBYTE
+				sta	(ZPBufPtr),y
+				iny
+				bne .2
+
+				inc ZPBufPtr+1
+				bra .2
+
+.8				pla						hMem
+
+				plp
+				clc
+				rts
+*--------------------------------------
+READWRITE.9		lda #E.NODATA
+
+READWRITE.99	plp
+				sec
+				rts
+*--------------------------------------
+WRITE			php
+				sei
+				>STYA ZPIOCTL
+
+				ldx DEVSLOTx0
+
+				lda #IO.8255.Cmd.PFX
+				>WRITEBYTE
+				lda #IO.8255.Cmd.POLL
+				>WRITEBYTE
+				ldy #S.IOCTL.BYTECNT
+				lda (ZPIOCTL),y
+				>WRITEBYTE
+				eor #$ff
+				sta Counter
+				iny
+				lda (ZPIOCTL),y
+				>WRITEBYTE
+				eor #$ff
+				sta Counter+1
+
+				ldy #S.IOCTL.BUFPTR
+				lda (ZPIOCTL),y
+				sta ZPBufPtr
+				iny
+				lda (ZPIOCTL),y
+				sta ZPBufPtr+1
+
+				ldy #0
+
+.1				inc Counter
+				bne .2
+
+				inc Counter+1
+				beq .8
+
+.2				lda	(ZPBufPtr),y
+				>WRITEBYTE
+				iny
+				bne .1
+
+				inc ZPBufPtr+1
+				bne .1
+
+.8				>READBYTE
+				bne READWRITE.9
+
+				plp
+				clc
+				rts
+*--------------------------------------
+DRV.CS.END
+DEVSLOTx0		.BS 1
+*--------------------------------------
+DIB				.DA #0
+				.DA #0,#0,#0			size
+				.PS "dan2eth/W5500   "
+				.DA #S.DIB.T.NIC
+				.BS 1					Subtype
+				.BS 2					Version
+*--------------------------------------
+DCB				.DA #S.DCB.T.NIC
+				.BS 1					FLAGS
+				.BS 1					LINK
+				.DA #S.DCB.NIC.SPEED.10
+				.HS 0008DC123456		MAC
+				.BS 12					IP/MASK/GW
+*--------------------------------------
+DRV.END
+MAN
+SAVE usr/src/drv/dan2eth.drv.s
+ASM
