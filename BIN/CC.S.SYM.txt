@@ -204,10 +204,13 @@ SYM.SetAddrL	ldy #SYM.SizeOf+1
 
 				lda (ZPSymBufPtr),y
 				clc
-				>ADC.G CC.LocalPtr
+				ldy ScopePtr
+				iny
+				iny
+				adc (ScopeStk),y
 				bcs .9
 
-				sta (pData),y
+				sta (ScopeStk),y
 
 				ldy #SYM.Addr
 				sta (ZPSymBufPtr),y
@@ -216,8 +219,12 @@ SYM.SetAddrL	ldy #SYM.SizeOf+1
 				lda (ZPSymBufPtr),y
 
 				clc
-				>ADC.G CC.FrameSize
-				sta (pData),y
+				ldy ScopePtr
+				iny
+				iny
+				iny
+				adc (ScopeStk),y
+				sta (ScopeStk),y
 
 				clc
 				rts
@@ -544,20 +551,18 @@ SYM.Lookup		>LDA.G CC.LookupIdx
 .1				pha
 				>PUSHB.G CC.hSyms
 				>PUSHW ZPLineBufPtr
-				ply
-				phy
-				jsr SCOPE.PushY
+				pla
+				pha
+				jsr SCOPE.PushA
 				>SYSCALL SListLookup
 				bcc .8
 
 				pla
-				cmp #CC.ScopeIDs
 				beq .9
 
-				dec
-				dec
+*				sec
+				sbc #SCOPE
 				bra .1
-
 
 .99				lda #E.OOH
 *				sec
@@ -600,9 +605,10 @@ SYM.Lookup		>LDA.G CC.LookupIdx
 * "_C"ontinue
 * "_D"efault
 * "_E"lse
-* "_F"rameSize
+* "_F"rame Size
 * "_J"umpTable
 * "_L"oop
+* "_R"eturn value
 * "_S"statement
 * e"_X"it
 *--------------------------------------
@@ -622,12 +628,6 @@ SYM.NewLabelA	bit bPass2
 
 				>STYA.G CC.LabelID
 			
-				lda #SYM.T.VOID
-				>STA.G CC.LabelBuf
-				lda #SYM.Q.POINTER
-				iny
-				sta (pData),y
-				
 				ldy #CC.LabelBuf+SYM.DefSize
 				lda #SYM.Def
 				sta (pData),y
@@ -636,16 +636,22 @@ SYM.NewLabelA	bit bPass2
 				cmp #'F'
 				bne .1
 
-				ldy #CC.LabelBuf+SYM.SC
-				lda #SYM.SC.AUTO
-				sta (pData),y
+				jsr SYM.NewLabelF
+				bra .7
 
-				>LDA.G CC.FrameSize
-				ldy #CC.LabelBuf+SYM.Addr
-				sta (pData),y
-				bra .2
+.1				cmp #'R'
+				bne .6
 
-.1				ldy #CC.LabelBuf+SYM.SC
+				jsr SYM.NewLabelR
+				bra .7
+
+.6				lda #SYM.T.VOID
+				>STA.G CC.LabelBuf
+				lda #SYM.Q.POINTER
+				iny
+				sta (pData),y
+				
+				iny
 				lda #SYM.SC.STATIC
 				sta (pData),y
 				
@@ -656,7 +662,7 @@ SYM.NewLabelA	bit bPass2
 				lda ZPCCCode+1
 				sta (pData),y
 
-.2				.DO _DBG_SYM=1
+.7				.DO _DBG_SYM=1
 			jsr SYM.DEBUGNL
 				.FIN
 
@@ -675,7 +681,46 @@ SYM.NewLabelA	bit bPass2
 				.FIN
 .99				rts
 *--------------------------------------
+SYM.NewLabelF	lda #SYM.T.UCHAR
+				>STA.G CC.LabelBuf
+				lda #0
+				iny
+				sta (pData),y
+				
+				iny
+				lda #SYM.SC.AUTO
+				sta (pData),y
+
+				ldy ScopePtr
+				iny
+				iny
+				iny
+				lda (ScopeStk),y		#SCOPE.FrameSize
+				
+				ldy #CC.LabelBuf+SYM.Addr
+				sta (pData),y
+				rts
+*--------------------------------------
+SYM.NewLabelR	ldy #SYM.Q
+				lda (ZPSymBufPtr),y
+				and #$F8				strip off SYM.Q.FUNC...
+				pha
+				
+				lda (ZPSymBufPtr)
+				>STA.G CC.LabelBuf
+				pla
+				iny
+				sta (pData),y
+				
+				iny
+				lda #SYM.SC.AUTO
+				sta (pData),y
+				rts
+*--------------------------------------
 SYM.LookupLabelA
+				cmp #'R'
+				beq .1
+				
 				bit bPass2
 				bmi .1
 
@@ -688,23 +733,22 @@ SYM.LookupLabelA
 
 				>PUSHB.G CC.hSyms	...for SListGetData
 
-				ldy ScopePtr
+				lda ScopePtr
 
-.2				phy
+.2				pha
 				>PUSHB.G CC.hSyms
 				>PUSHEA.G CC.Label
-				ply
-				phy
-				jsr SCOPE.PushY
+				pla
+				pha
+				jsr SCOPE.PushA
 				>SYSCALL SListLookup
-				bcc .8
+				bcc .3
 
-				ply
-				cpy #CC.ScopeIDs
+				pla
 				beq .9
 
-				dey
-				dey
+*				sec
+				sbc #SCOPE
 				bra .2
 
 .9				inc pStack				discard CC.hSyms
@@ -713,7 +757,7 @@ SYM.LookupLabelA
 				sec
 				rts
 
-.8				plx
+.3				plx
 
 				>PUSHA					KeyID.HI
 				tya
@@ -733,8 +777,14 @@ SYM.LookupLabelA
 
 				plx
 
+				>LDA.G CC.Label+1
+				ldy #SYM.T				return T/Q
+				cmp #'R'
+				beq .4
+
 				ldy #SYM.Addr
-				lda (ZPLookupPtr),y
+
+.4				lda (ZPLookupPtr),y
 
 				pha
 
@@ -773,7 +823,7 @@ SYM.LookupFree	>LDA.G CC.LookupIdx
 .8				clc
 				rts
 
-.9				lda E.INVH
+.9				lda #E.INVH
 *				sec
 
 .99				rts
@@ -962,7 +1012,6 @@ SYM.DEBUGN	>PUSHW L.MSG.DEBUG.SYMN
 			>PUSHA
 			>PUSHBI 7
 			>SYSCALL Printf
-*		>DEBUG
 			rts
 
 SYM.DEBUGU	>PUSHW L.MSG.DEBUG.SYMU
@@ -975,7 +1024,15 @@ SYM.DEBUGU	>PUSHW L.MSG.DEBUG.SYMU
 			iny
 			lda (ZPSymBufPtr),y
 			>PUSHA
-			>PUSHBI 5
+			
+			ldy #SYM.Addr+1
+			lda (ZPSymBufPtr),y
+			>PUSHA
+			dey
+			lda (ZPSymBufPtr),y
+			>PUSHA
+			
+			>PUSHBI 7
 			>SYSCALL Printf
 			rts
 
@@ -989,8 +1046,17 @@ SYM.DEBUGS	>PUSHW L.MSG.DEBUG.SYMS
 			iny
 			lda (ZPSymBufPtr),y
 			>PUSHA
-			>PUSHBI 5
+
+			ldy #SYM.Addr+1
+			lda (ZPSymBufPtr),y
+			>PUSHA
+			dey
+			lda (ZPSymBufPtr),y
+			>PUSHA
+			
+			>PUSHBI 7
 			>SYSCALL Printf
+		>DEBUG
 			rts
 
 SYM.DEBUGG	>PUSHW L.MSG.DEBUG.SYMG
