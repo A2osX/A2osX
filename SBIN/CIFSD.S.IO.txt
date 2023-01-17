@@ -1,0 +1,1547 @@
+NEW
+  AUTO 3,1
+*--------------------------------------
+IO.CallBack		>STYA SaveYA
+
+				bit CIFS.Status
+				bmi .1					Busy....
+
+				jsr IO.SaveZP
+
+				jmp (J.IO.Q,x)
+
+.1				ldy #S.PS.PID
+				lda (pPS),y
+				cmp CIFS.PID
+				bne .2
+
+				jsr IO.SaveZP
+
+				jmp (J.IO.R,x)
+
+.2				lda #0
+				sec
+				rts
+*--------------------------------------
+IO.SaveZP		ldy #ZS.END-ZS.START-1
+
+.1				lda ZS.START,y
+				sta SaveZP,y
+				dey
+				bpl .1
+
+				>LDYA SaveYA
+
+				rts
+*--------------------------------------
+IO.Sleep		ldy #S.PS.PID
+				lda (pPS),y
+				sta CIFS.PID
+
+				dec CIFS.Status
+				
+				stz CIFS.Cnt
+				stz CIFS.Cnt+1
+
+IO.SleepContZ	lda #TIMEOUT.MAX
+				sta TimeOut
+
+IO.SleepCont	lda #0
+				sec
+				bra IO.RestoreZP
+*--------------------------------------
+IO.Exit			stz CIFS.Status
+*--------------------------------------
+IO.RestoreZP	php
+				pha
+				phx
+				phy
+
+				lda hResp
+				beq .1
+
+				stz hResp
+
+				>SYSCALL2 FreeMem
+
+.1				ldy #ZS.END-ZS.START-1
+
+.2				lda SaveZP,y
+				sta ZS.START,y
+				dey
+				bpl .2
+
+				ply
+				plx
+				pla
+				plp
+				rts
+*--------------------------------------
+IO.Q.ChOwn
+IO.R.ChOwn
+*--------------------------------------
+IO.Q.ChTyp
+IO.R.ChTyp
+*--------------------------------------
+IO.Q.ChAux
+IO.R.ChAux
+*--------------------------------------
+IO.Q.SetAttr
+IO.R.SetAttr
+*--------------------------------------
+IO.Q.ChMod
+IO.R.ChMod
+*--------------------------------------
+IO.Q.FStat
+*--------------------------------------
+IO.R.FStat		lda #MLI.E.BADCALL
+				sec
+				rts
+*--------------------------------------
+IO.Q.Stat		>STYA pPath				resolved path
+
+				jsr CORE.ReqT2SetupX
+
+				ldx #0
+
+.1				lda SMB.QueryPathInfo,x
+				sta (ZPReqPtr),y
+				iny
+				inx
+				cpx #SMB.QueryPathInfo.Len
+				bne .1
+
+				jsr CORE.ReqT2SetupPtr2
+
+				jsr CORE.AppendPathPtr2
+
+				jsr CORE.AddYReqLenPtr2
+
+				jsr CORE.SetT2ReqLen
+
+				jsr IO.WriteSocket
+				bcs .9
+
+				jmp IO.Sleep
+
+.9				>POP 4
+
+				jmp IO.Exit
+*--------------------------------------
+IO.R.Stat		jsr IO.ReadSocket
+				bvs .99
+
+				bcs .98
+
+				jsr CORE.CheckSMBStatus
+
+				lda #MLI.E.INVPATH		Return this for stat() match ProDOS Behavior
+				bcs .98
+
+				jsr CORE.GetRespDataPtr1
+				jsr IO.FileInfo2StatBuf
+
+				>PULLW ZPPtr2			Stat Buffer
+
+				inc pStack				Skip Filename
+				inc pStack
+
+				jsr IO.StatBuf2Ptr2
+
+				clc
+
+				jmp IO.Exit
+
+.98				>POP 4
+
+				jmp IO.Exit
+
+.99				jmp IO.SleepCont
+*--------------------------------------
+IO.Q.MKDir		>STYA pPath				resolved path
+
+				jsr CORE.ReqT2SetupX
+
+				ldx #0
+
+.1				lda SMB.CreateDirectory,x
+				sta (ZPReqPtr),y
+				iny
+				inx
+				cpx #SMB.CreateDirectory.Len
+				bne .1
+
+				jsr CORE.AppendPath
+
+				lda #0
+				sta (ZPReqPtr),y
+				iny
+
+				jsr CORE.SetT2ReqLenYA
+
+				jsr IO.WriteSocket
+				bcs .99
+
+				jmp IO.Sleep
+
+.99				>POP 4
+
+				jmp IO.Exit
+*--------------------------------------
+IO.R.MKDir		jsr IO.ReadSocket
+				bvs .99
+
+				bcs .98
+
+				jsr CORE.CheckSMBStatus
+*				bcs .98
+
+.98				>POP 4
+
+				jmp IO.Exit
+
+.99				jmp IO.SleepCont
+*--------------------------------------
+IO.Q.OpenDir	>STYA pPath				resolved path
+
+				jsr IO.NewFD
+				bcs .98
+
+				lda #S.FD.T.DIR
+				sta (pFD)
+
+				lda #0
+				ldy #S.FD.DIR.EPB
+				sta (pFD),y				EOF Flag
+				iny
+				sta (pFD),y
+				iny
+				sta (pFD),y
+
+				>PUSHW pPath
+				>PUSHWZ
+				>PUSHB hFD
+				>SYSCALL2 mknod
+				bcc .98
+
+				pha
+				jsr IO.FreeFD
+				pla
+				sec
+
+.98				jmp IO.Exit
+*--------------------------------------
+* IO.R.OpenDir	
+*--------------------------------------
+* A = hDIR
+*--------------------------------------
+IO.Q.ReadDir	jsr IO.GetFD
+
+				ldy #S.FD.DIR.EPB
+				lda (pFD),y
+				beq .1
+
+				lda #MLI.E.EOF
+				sec
+				jmp IO.Exit
+
+.1				iny						#S.FD.DIR.FC
+				lda (pFD),y
+				iny						#S.FD.DIR.FC+1
+				ora (pFD),y
+				bne IO.Q.ReadDir.Next
+
+				jsr CORE.ReqT2SetupX
+
+				ldx #0
+
+.2				lda SMB.FindFirst2,x
+				sta (ZPReqPtr),y
+				iny
+				inx
+				cpx #SMB.FindFirst2.Len
+				bne .2
+
+				bra IO.Q.ReadDir.Send
+
+IO.Q.ReadDir.Next
+				jsr CORE.ReqT2SetupX
+
+				ldx #0
+
+.2				lda SMB.FindNext2,x
+				sta (ZPReqPtr),y
+				iny
+				inx
+				cpx #SMB.FindNext2.Len
+				bne .2
+
+				phy
+
+				ldy #S.FD.DIR.FC+1
+				lda (pFD),y
+				tax
+				dey
+				lda (pFD),y
+
+				ldy #S.NETBIOS+S.SMB.H+SMB.Trans2.H.Len+7	Search ID
+				sta (ZPReqPtr),y
+				txa
+				iny
+				sta (ZPReqPtr),y
+
+				ply
+
+IO.Q.ReadDir.Send
+				lda (pPath)
+				beq .1
+
+				jsr CORE.AppendPath
+
+				lda #'\'
+				sta (ZPReqPtr),y
+				iny
+
+.1				lda #'*'
+				sta (ZPReqPtr),y
+				iny
+
+				lda #0
+				sta (ZPReqPtr),y
+				iny
+
+				jsr CORE.SetT2ReqLenYA
+				jsr IO.WriteSocket
+				bcs .99
+
+				jmp IO.Sleep
+
+.99				jmp IO.Exit
+*--------------------------------------
+IO.R.ReadDir	jsr IO.GetFD
+
+				jsr IO.ReadSocket
+				bvs .99
+
+				bcs .98
+
+				jsr CORE.CheckSMBStatus
+				bcs .98
+
+				ldy #S.FD.DIR.FC
+				lda (pFD),y
+				iny
+				ora (pFD),y
+				sta bFlag
+				bne .2
+
+				ldy #S.NETBIOS+S.SMB.H+S.TRANS2.H+1		Search ID
+				lda (ZPRespPtr),y
+				tax
+				dey
+				ora (ZPRespPtr),y
+				beq .97
+
+				lda (ZPRespPtr),y
+
+				ldy #S.FD.DIR.FC
+				sta (pFD),y
+				iny
+				txa
+				sta (pFD),y
+
+.2				jsr CORE.GetRespDataPtr1
+				jsr IO.R.ReadDir.GetBuf
+				bcs .98
+
+				jsr CORE.GetRespDataPtr1
+				jsr IO.R.ReadDir.FillBuf
+
+				lda hBuf
+				>SYSCALL2 GetMemPtr
+				ldx hBuf
+
+*				clc
+
+				jmp IO.Exit
+
+.97				lda #MLI.E.IO
+
+				sec
+
+.98				jmp IO.Exit
+
+.99				jmp IO.SleepCont
+*--------------------------------------
+IO.R.ReadDir.GetBuf
+				ldy #S.NETBIOS+S.SMB.H+S.TRANS2.H		Search Count
+				lda bFlag
+				bne .10
+
+				iny
+				iny
+
+.10				iny
+				iny
+				lda (ZPRespPtr),y		End Of Search
+				phy
+				ldy #S.FD.DIR.EPB
+				sta (pFD),y
+				ply
+
+				dey
+				dey
+
+				lda (ZPRespPtr),y		Search Count
+				beq .98
+
+				tax
+
+				lda #1					+Ending 0
+				sta ZPPtr2
+				stz ZPPtr2+1
+
+.1				jsr IO.AddSTAT2Ptr2
+
+				lda #22
+				clc
+				jsr IO.AddA2Ptr1
+
+				lda (ZPPtr1)			Filename Len
+				sec						+\0
+				jsr IO.AddA2Ptr2
+
+				lda (ZPPtr1)			Filename Len
+				inc						+1 skip Filename Len
+				sec						+\0
+				jsr IO.AddA2Ptr1
+
+				dex
+				bne .1
+
+				>LDYA ZPPtr2
+				>SYSCALL2 GetMem
+				bcs .99
+
+				>STYA ZPPtr2
+				stx hBuf
+
+*				clc
+
+				rts
+
+.98				lda #MLI.E.EOF
+				sec
+.99				rts
+*--------------------------------------
+IO.R.ReadDir.FillBuf
+				ldy #S.NETBIOS+S.SMB.H+S.TRANS2.H		Search Count
+				lda bFlag
+				bne .10
+
+				iny
+				iny
+
+.10				lda (ZPRespPtr),y
+				tax
+
+.1				phx
+
+				jsr IO.FileInfo2StatBuf
+
+				lda #22
+				clc
+				jsr IO.AddA2Ptr1
+
+				lda (ZPPtr1)
+				tax						Save Filename Len
+
+				inc ZPPtr1				Skip Filename Len
+				bne .2
+
+				inc ZPPtr1+1
+
+.2				ldy #$ff
+
+.3				iny
+				lda (ZPPtr1),y
+				sta (ZPPtr2),y
+				bne .3
+
+				txa
+				sec
+				jsr IO.AddA2Ptr1
+
+				txa
+				sec
+				sbc #4					"x.EXT" ?
+				bcc .7
+
+				tay
+
+				lda (ZPPtr2),y
+				cmp #'.'
+				bne .7
+
+				ldx #0
+
+.4				phy						Y = '.' offset
+
+				phx
+
+.5				iny
+				lda (ZPPtr2),y
+				beq .51
+
+				cmp #'A'
+				bcc .50
+
+				cmp #'Z'+1
+				bcs .50
+
+				eor #$20
+
+.50				cmp PRODOS.FT.TXT,x
+				bne .6
+
+				inx
+				bra .5
+
+.51				pla
+				lsr
+				lsr
+				tax
+				lda PRODOS.FT.HEX,x
+				sta StatBuf+S.STAT.P.TYPE
+
+				ply
+				lda #0
+				sta (ZPPtr2),y
+
+				tya
+				bra .70
+
+.6				pla
+				clc
+				adc #4
+				tax
+
+				ply
+
+				cpx #PRODOS.FT.END
+				bne .4
+
+				tya
+*				sec
+				adc #3
+				bra .70
+
+.7				txa
+.70				sec						+\0
+				jsr IO.AddA2Ptr2
+
+				jsr IO.StatBuf2Ptr2
+
+				jsr IO.AddSTAT2Ptr2
+
+.8				plx
+				dex
+				bne .1
+
+				lda #0
+				sta (ZPPtr2)
+
+				rts
+*--------------------------------------
+IO.Q.CloseReg
+IO.Q.CloseDir	tax
+
+				lda hFDs.hName-1,x
+				beq .1
+
+				phx
+
+				stz hFDs.hName-1,x
+				>SYSCALL2 FreeMem
+
+				plx
+
+.1				lda hFDs-1,x
+				stz hFDs-1,x
+				>SYSCALL2 FreeMem
+
+*				clc
+
+				jmp IO.Exit
+*--------------------------------------
+* IO.R.CloseDir	
+*--------------------------------------
+* short int fopen ( const char *filename, short int flags, short int ftype, int auxtype );
+*--------------------------------------
+IO.Q.FOpen		>STYA pPath				resolved path
+
+				ldx #S.SMB.H.CMD.NT.CREATE.ANDX
+				jsr CORE.ReqSetupX
+
+				ldx #0
+
+.1				lda SMB.ComCreate.H,x
+				sta (ZPReqPtr),y
+				iny
+				inx
+				cpx #SMB.ComCreate.H.Len
+				bne .1
+
+				jsr CORE.ReqSetupPtr2
+
+				ldy #2
+				lda (pStack),y			TYPE
+				pha
+
+				jsr CORE.AppendPathPtr2
+
+				pla
+				beq .2
+
+				jsr CORE.AppendTypePtr2
+
+.2				jsr CORE.AddYReqLen
+
+				tya
+
+				ldy #S.NETBIOS+S.SMB.H+6	NameLength
+				sta (ZPReqPtr),y
+
+				inc						+1 for \0
+				jsr CORE.Add2ByteCount
+
+				ldx #1					FILE_OPEN
+
+				ldy #3					fopen flags
+				lda (pStack),y
+				bit #O.WRONLY
+				beq .8
+
+				bit #O.CREATE
+				bne .3
+
+				ldx #3					FILE_OPEN_IF
+
+.3				bit #O.APPEND
+				bne .8
+
+				ldx #5					FILE_OVERWRITE_IF
+
+.8				txa
+
+				ldy #S.NETBIOS+S.SMB.H+SMB.Trans2.H.Len+7	CreateDisposition
+				sta (ZPReqPtr),y
+
+				jsr CORE.SetReqLen
+				jsr IO.WriteSocket
+				bcs .99
+
+				jmp IO.Sleep
+
+.99				>POP 6
+
+				jmp IO.Exit
+*--------------------------------------
+IO.R.FOpen		jsr IO.ReadSocket
+				bvs .99
+
+				bcs .98
+
+				jsr CORE.CheckSMBStatus
+				bcs .98
+
+				jsr IO.NewFD
+				bcs .98
+
+				jsr IO.R.FOpen.SetFD
+
+				ldy #4					path
+
+				lda (pStack),y
+				>PUSHA
+				lda (pStack),y
+				>PUSHA
+
+				>PUSHWZ					mod
+				>PUSHB hFD
+				>SYSCALL2 mknod
+				bcc .98
+
+				pha
+
+				jsr IO.FreeFD
+
+				pla
+				sec
+
+.98				>POP 6
+
+				jmp IO.Exit
+
+.99				jmp IO.SleepCont
+*--------------------------------------
+IO.R.FOpen.SetFD
+				lda #S.FD.T.REG
+				sta (pFD)
+
+				ldy #S.NETBIOS+S.SMB.H+6	FileID
+				lda (ZPRespPtr),y
+				pha
+				iny
+				lda (ZPRespPtr),y
+
+				ldy #S.FD.REG.REF+1
+				sta (pFD),y
+				dey
+				pla
+				sta (pFD),y
+
+				ldy #3						fopen flags
+				lda (pStack),y
+				bit #O.APPEND
+				beq .3
+
+				ldy #S.NETBIOS+S.SMB.H+56+3	EOF
+				ldx #4
+
+.1				lda (ZPRespPtr),y
+				pha
+				dey
+				dex
+				bne .1
+
+				ldx #4
+				ldy #S.FD.REG.FPOS
+
+.2				pla
+				sta (pFD),y
+				iny
+				dex
+				bne .2
+
+				rts
+
+.3				jmp IO.Seek0
+*--------------------------------------
+IO.Q.FClose		jsr IO.GetFD
+
+				ldx #S.SMB.H.CMD.CLOSE
+				jsr CORE.ReqSetupX
+
+				ldx #0
+
+.1				lda SMB.ComClose.H,x
+				sta (ZPReqPtr),y
+				iny
+				inx
+				cpx #SMB.ComClose.H.Len
+				bne .1
+
+				sty ZPReqLen
+				stz ZPReqLen+1
+
+				ldy #S.FD.REG.REF
+				lda (pFD),y
+				pha
+				iny
+				lda (pFD),y
+
+				ldy #S.NETBIOS+S.SMB.H+2	FileID
+				sta (ZPReqPtr),y
+				pla
+				dey
+				sta (ZPReqPtr),y
+
+				jsr CORE.SetReqLen
+				jsr IO.WriteSocket
+				bcs .99
+
+				jmp IO.Sleep
+
+.99				jmp IO.Exit
+*--------------------------------------
+IO.R.FClose		sta hFILE
+
+				jsr IO.ReadSocket
+				bvs .99
+
+				bcs .98
+
+				jsr CORE.CheckSMBStatus
+				bcs .98
+
+				lda hFILE
+				jsr IO.Q.CloseReg
+
+				clc
+
+.98				jmp IO.Exit
+
+.99				jmp IO.SleepCont
+*--------------------------------------
+* 
+*--------------------------------------
+IO.Q.FRead		ldy #4					hFILE
+				lda (pStack),y
+
+				jsr IO.GetFD
+
+				ldx #S.SMB.H.CMD.READ.ANDX
+				jsr CORE.ReqSetupX
+
+				ldx #0
+
+.1				lda SMB.ComRead.H,x
+				sta (ZPReqPtr),y
+				iny
+				inx
+				cpx #SMB.ComRead.H.Len
+				bne .1
+
+				jsr CORE.ReqSetupPtr2
+
+				jsr IO.RWGetFidOfs
+
+				ldy #1					DataLen HI
+				lda (pStack),y
+				beq .2
+
+				lda #0
+				ldx #1					256 bytes to read
+				bra .3
+
+.2				lda (pStack)			DataLen LO
+				ldx #0
+
+.3				ldy #S.NETBIOS+S.SMB.H+11 MaxCountOfBytesToReturn
+				sta (ZPReqPtr),y
+				iny
+				txa
+				sta (ZPReqPtr),y
+
+				jsr CORE.SetReqLen
+				jsr IO.WriteSocket
+				bcs .99
+
+				jmp IO.Sleep
+
+.99				>POP 5
+
+				jmp IO.Exit
+*--------------------------------------
+IO.R.FRead		jsr IO.ReadSocket
+				bvs .99
+
+				bcs .98
+
+				jsr CORE.CheckSMBStatus
+				bcs .98
+
+				ldy #S.NETBIOS+S.SMB.H+11	DataLength LO
+				lda (ZPRespPtr),y
+				iny
+				ora (ZPRespPtr),y
+				bne .10
+
+				lda #MLI.E.EOF
+				sec
+				bra .98
+
+.10				ldy #S.NETBIOS+S.SMB.H+13	DataOffset LO
+
+				lda (ZPRespPtr),y
+*				clc
+				adc #4						S.NETBIOS
+*				clc
+				adc ZPRespPtr
+				sta ZPPtr1
+
+				lda #0
+				adc ZPRespPtr+1
+				sta ZPPtr1+1
+
+				ldy #3					DataPtr HI
+				lda (pStack),y
+				sta ZPPtr2+1
+
+				dey						DataPtr LO
+				lda (pStack),y
+				sta ZPPtr2
+
+				ldy #S.NETBIOS+S.SMB.H+11	DataLength LO
+				lda (ZPRespPtr),y
+				tax
+
+				jsr IO.CopyXPtr1Ptr2
+
+				ldy #S.NETBIOS+S.SMB.H+11
+				jsr IO.RWSetPFosY
+
+				ldy #S.NETBIOS+S.SMB.H+12	DataLength HI
+				lda (ZPRespPtr),y
+				beq .2					less than 256
+
+				inc CIFS.Cnt+1
+
+				ldy #1					DataLen HI
+				lda (pStack),y
+				dec
+				sta (pStack),y
+
+				ldy #3					DataPtr HI
+				lda (pStack),y
+				inc
+				sta (pStack),y
+				bra .7
+
+.2				dey						DataLength LO
+				lda (ZPRespPtr),y
+
+				sta CIFS.Cnt
+
+				lda #0
+				sta (pStack)			DataLen LO
+
+.7				ldy #1					DataLen HI
+				lda (pStack),y
+				ora (pStack)			DataLen LO
+				bne .80
+
+				>LDYA CIFS.Cnt
+
+				clc
+				
+.98				>POP 5
+
+				jmp IO.Exit
+
+.99				jmp IO.SleepCont
+
+.80				stz CIFS.Status			back to Q
+
+				jmp IO.SleepContZ		Back to CIFS.FRead for next chunk
+*--------------------------------------
+* int fwrite ( short int stream, const void * ptr, int count );
+*--------------------------------------
+IO.Q.FWrite		ldy #4					hFILE
+				lda (pStack),y
+
+				jsr IO.GetFD
+
+				ldx #S.SMB.H.CMD.WRITE.ANDX
+				jsr CORE.ReqSetupX
+
+				ldx #0
+
+.1				lda SMB.ComWrite.H,x
+				sta (ZPReqPtr),y
+				iny
+				inx
+				cpx #SMB.ComWrite.H.Len
+				bne .1
+
+				jsr CORE.ReqSetupPtr2
+
+				jsr IO.RWGetFidOfs
+
+				ldy #3					DataPtr HI
+				lda (pStack),y
+				sta ZPPtr1+1
+
+				dey						DataPtr LO
+				lda (pStack),y
+				sta ZPPtr1
+
+				dey						DataLen HI
+				lda (pStack),y
+				beq .5
+
+				lda #0
+				ldx #1					write $100
+
+				bra .6
+
+.5				dey						DataLen LO
+				lda (pStack),y
+				ldx #0					write $0xx
+
+.6				pha
+				ldy #S.NETBIOS+S.SMB.H+21	DataLength
+				sta (ZPReqPtr),y
+
+				iny
+
+				txa
+				sta (ZPReqPtr),y
+
+				pla
+				pha
+				clc
+				adc ZPReqLen
+				sta ZPReqLen
+
+				txa
+				adc ZPReqLen+1
+				sta ZPReqLen+1
+
+				pla
+				pha
+				ldy ByteCountOfs
+				sta (ZPReqPtr),y
+
+				txa
+				iny
+				sta (ZPReqPtr),y
+
+				plx
+
+				jsr IO.CopyXPtr1Ptr2
+
+				jsr CORE.SetReqLen
+				jsr IO.WriteSocket
+				bcs .99
+
+				ldy #1					DataLen HI
+				lda (pStack),y
+				beq .7
+
+				dec						DataLen - $100
+				sta (pStack),y
+
+				ldy #3					DataPtr HI
+				lda (pStack),y
+				inc						DataPtr + $100
+				sta (pStack),y
+
+				jmp IO.Sleep
+
+.7				lda #0
+				sta (pStack)			DataLen = 0
+
+				jmp IO.Sleep
+
+.99				>POP 5
+
+				jmp IO.Exit
+*--------------------------------------
+IO.R.FWrite		jsr IO.ReadSocket
+				bvs .99
+
+				bcs .98
+
+				jsr CORE.CheckSMBStatus
+				bcs .98
+
+				ldy #S.NETBIOS+S.SMB.H+5	Count LO
+				jsr IO.RWSetPFosY
+
+				ldy #S.NETBIOS+S.SMB.H+5	Count LO
+				lda (ZPRespPtr),y
+				bne .1
+
+				inc CIFS.Cnt+1
+				bra .7
+
+.1				sta CIFS.Cnt
+
+				lda #0
+				sta (pStack)			DataLen LO
+
+.7				ldy #1					DataLen HI
+				lda (pStack),y
+				ora (pStack)			DataLen LO
+				bne .80
+
+				>LDYA CIFS.Cnt
+
+				clc
+
+.98				>POP 5
+
+				jmp IO.Exit
+
+.99				jmp IO.SleepCont
+
+.80				stz CIFS.Status			back to Q
+
+				jmp IO.SleepContZ
+*--------------------------------------
+IO.Q.FFlush
+IO.R.FFlush		clc						Nothing to do
+				rts
+*--------------------------------------
+* int fseek( short int stream, long offset, short int whence );
+*--------------------------------------
+IO.Q.FSeek		ldy #5					hFILE
+				lda (pStack),y
+
+				jsr IO.GetFD
+				>PULLA
+				tax						whence
+
+				>PULLL ZPPtr1			ZPPtr2
+				inc pStack
+
+				>POP 6
+
+				clc
+
+				jmp IO.Exit
+*--------------------------------------
+* IO.R.FSeek
+*--------------------------------------
+* long ftell( short int stream );
+*--------------------------------------
+IO.Q.FTell		jsr IO.GetFD
+
+				ldy #S.FD.REG.FPOS+3
+
+.1				lda (pFD),y
+				>PUSHA
+				dey
+				cpy #S.FD.REG.FPOS-1
+				bne .1
+				
+				clc
+				
+				jmp IO.Exit
+*--------------------------------------
+* IO.R.FTell
+*--------------------------------------
+IO.Q.FEOF
+*--------------------------------------
+IO.R.FEOF		lda #MLI.E.BADCALL
+				sec
+				rts
+*--------------------------------------
+IO.Q.Remove		>STYA pPath				resolved path
+
+				ldx #S.SMB.H.CMD.DELETE
+				jsr CORE.ReqSetupX
+
+				ldx #0
+
+.1				lda SMB.ComDelete.H,x
+				sta (ZPReqPtr),y
+				iny
+				inx
+				cpx #SMB.ComDelete.H.Len
+				bne .1
+
+				jsr CORE.ReqSetupPtr2
+
+				jsr CORE.AppendPathPtr2BF4
+				jsr CORE.AddYReqLen
+
+				tya
+				inc						+1 for BufferFormat
+				inc						+1 for \0
+
+				ldy ByteCountOfs
+				sta (ZPReqPtr),y
+
+				jsr CORE.SetReqLen
+				jsr IO.WriteSocket
+				bcs .99
+
+				jmp IO.Sleep
+
+.99				jmp IO.Exit
+*--------------------------------------
+IO.R.Remove		jsr IO.ReadSocket
+				bvs .99
+
+				bcs .98
+
+				jsr CORE.CheckSMBStatus
+*				bcs .98
+
+.98				jmp IO.Exit
+
+.99				jmp IO.SleepCont
+*--------------------------------------
+IO.Q.Rename		>STYA pPath				resolved src path
+
+				ldx #S.SMB.H.CMD.RENAME
+				jsr CORE.ReqSetupX
+
+				ldx #0
+
+.1				lda SMB.ComRename.H,x
+				sta (ZPReqPtr),y
+				iny
+				inx
+				cpx #SMB.ComRename.H.Len
+				bne .1
+
+				jsr CORE.ReqSetupPtr2
+
+				jsr CORE.AppendPathPtr2BF4
+
+				tya
+				inc						+1 for BufferFormat
+				inc						+1 for \0
+				jsr CORE.Add2ByteCount
+
+				lda (pStack)
+				sta pPath
+
+				ldy #1
+				lda (pStack),y
+				sta pPath+1
+
+.2				inc pPath				skip /mount
+				bne .3
+
+				inc pPath+1
+
+.3				lda (pPath)
+				cmp #'/'
+				bne .2
+
+				jsr CORE.AppendPathPtr2
+
+				tya
+				inc						+1 for BufferFormat
+				inc						+1 for \0
+
+				ldy ByteCountOfs
+				sta (ZPReqPtr),y
+
+				jsr CORE.SetReqLen
+				jsr IO.WriteSocket
+				bcs .99
+
+				jmp IO.Sleep
+
+.99				>POP 4
+
+				jmp IO.Exit
+*--------------------------------------
+IO.R.Rename		jsr IO.ReadSocket
+				bvs .99
+
+				bcs .98
+
+				jsr CORE.CheckSMBStatus
+*				bcs .98
+
+.98				>POP 4
+
+				jmp IO.Exit
+
+.99				jmp IO.SleepCont
+*--------------------------------------
+IO.NewFD		ldx #1
+
+.1				lda hFDs-1,x
+				beq .2
+
+				inx
+				cpx #K.hFD.MAX+1
+				bne .1
+
+				lda #E.OOH
+*				sec
+				rts
+
+.2				stx hFILE
+
+				>LDYAI 16				S.FD.REG = S.FD.DIR = 16
+				>SYSCALL2 GetMem
+				bcs .9
+
+				>STYA pFD
+				stx hFD
+
+				txa
+				ldx hFILE
+
+				sta hFDs-1,x
+				stz hFDs.hName-1,x
+
+				lda hHandler
+				ldy #S.FD.PFT
+				sta (pFD),y
+
+*				clc
+
+.9				rts
+*--------------------------------------
+IO.GetFD		sta hFILE
+
+				tax
+				phx
+
+				lda hFDs.hName-1,x
+				>SYSCALL2 GetMemPtr
+				>STYA pPath
+
+				plx
+				lda hFDs-1,x
+				>SYSCALL2 GetMemPtr
+				>STYA pFD
+				rts
+*--------------------------------------
+IO.FreeFD		pha
+				lda hFD
+				>SYSCALL2 FreeMem
+
+				ldx hFILE
+				stz hFDs-1,x
+
+				pla
+				rts
+*--------------------------------------
+IO.RWGetFidOfs	ldx #6
+				ldy #S.FD.REG.REF
+
+.1				lda (pFD),y
+				pha
+				iny
+				dex
+				bne .1
+
+				ldx #6
+				ldy #S.NETBIOS+S.SMB.H+5+5
+
+.2				pla
+				sta (ZPReqPtr),y
+				dey
+				dex
+				bne .2
+
+				rts
+*--------------------------------------
+IO.RWSetPFosY	phy
+
+				ldy #4					hFILE
+				lda (pStack),y
+
+				jsr IO.GetFD
+
+				ply						Count LO
+				phy
+				lda (ZPRespPtr),y
+
+				ldy #S.FD.REG.FPOS
+				clc
+				adc (pFD),y
+				sta (pFD),y
+
+				ply
+				iny						Count HI
+				lda (ZPRespPtr),y
+
+				ldy #S.FD.REG.FPOS+1
+				adc (pFD),y
+				sta (pFD),y
+				bcc .8
+
+				iny
+				lda (pFD),y
+				inc
+				sta (pFD),y
+				bne .8
+
+				iny
+				lda (pFD),y
+				inc
+				sta (pFD),y
+
+.8				rts
+*--------------------------------------
+IO.CopyXPtr1Ptr2
+				ldy #0
+
+.1				lda (ZPPtr1),y
+				sta (ZPPtr2),y
+				iny
+				dex
+				bne .1
+
+				rts
+*--------------------------------------
+IO.AddA2Ptr1	adc ZPPtr1
+				sta ZPPtr1
+				bcc .8
+
+				inc ZPPtr1+1
+
+.8				rts
+*--------------------------------------
+IO.StatBuf2Ptr2	ldy #S.STAT-1
+
+.1				lda StatBuf,y
+				sta (ZPPtr2),y
+				dey
+				bpl .1
+
+				rts
+*--------------------------------------
+IO.AddSTAT2Ptr2	lda #S.STAT
+				clc
+*--------------------------------------
+IO.AddA2Ptr2	adc ZPPtr2
+				sta ZPPtr2
+				bcc .8
+
+				inc ZPPtr2+1
+
+.8				rts
+*--------------------------------------
+IO.Seek0		ldy #S.FD.REG.FPOS+3
+
+				lda #0
+
+.1				sta (pFD),y
+				dey
+				cpy #S.FD.REG.FPOS-1
+				bne .1
+
+				rts
+*--------------------------------------
+IO.ReadSocket	stz hResp
+
+				lda hSocket
+				ldx #LIBTCPIP.Recv
+				jsr IO.GoLIBTCPIP
+				clv
+
+				bcc .8
+
+				cmp #E.NODATA
+				bne .99
+
+				lda TimeOut
+				beq .98
+
+				bit .99					set V
+
+				lda #0
+				sec
+				rts
+
+.98				lda #MLI.E.OFFLINE
+				sec
+.99				rts
+
+.8				jmp CORE.GetRespData
+*--------------------------------------
+IO.WriteSocket	>PUSHB hSocket
+				>PUSHW ZPReqPtr
+				>PUSHW ZPReqLen
+				ldx #LIBTCPIP.Send
+*--------------------------------------
+IO.GoLIBTCPIP	jmp (pLIBTCPIP)
+*--------------------------------------
+IO.FileInfo2StatBuf
+				ldx #S.STAT-1
+
+.1				stz StatBuf,x
+				dex
+				bpl .1
+
+				ldy #0					Creation Date/Time
+				ldx #S.STAT.CTIME
+
+				jsr IO.FileInfo2StatBufDT
+
+				ldy #4					Last Access Date/Time
+				ldx #S.STAT.ATIME
+
+				jsr IO.FileInfo2StatBufDT
+
+				ldy #8					Last Write Date/Time
+				ldx #S.STAT.MTIME
+
+				jsr IO.FileInfo2StatBufDT
+
+				ldy #12+3				Data Size
+				ldx #3
+
+.7				lda (ZPPtr1),y
+				sta StatBuf+S.STAT.SIZE,x
+				dey
+				dex
+				bpl .7
+
+				ldy #20					File Attribute
+				lda (ZPPtr1),y
+				and #$10
+				beq .8
+
+				lda /S.STAT.MODE.DIR
+				sta StatBuf+S.STAT.MODE+1
+
+.8				rts
+*--------------------------------------
+* YYYYYYYM MMM DDDDD
+* HHHHHmmm mmm SSSSS
+*--------------------------------------
+IO.FileInfo2StatBufDT
+				iny
+				lda (ZPPtr1),y
+				lsr
+
+				php
+
+				clc
+				adc #80
+				sta StatBuf+S.TIME.YEAR,x
+				lda #19
+				adc #0
+				sta StatBuf+S.TIME.CENTURY,x
+
+				dey
+
+				plp
+				lda (ZPPtr1),y
+				ror
+				lsr
+				lsr
+				lsr
+				lsr
+				sta StatBuf+S.TIME.MONTH,x
+
+				lda (ZPPtr1),y
+				and #$1F
+				sta StatBuf+S.TIME.DAY,x
+
+				iny
+				iny
+
+				lda (ZPPtr1),y
+				and #$1F
+				asl
+				sta StatBuf+S.TIME.SECOND,x
+
+				lda (ZPPtr1),y
+				and #$E0
+				sta StatBuf+S.TIME.MINUTE,x
+
+				lda (ZPPtr1),y
+				lsr
+				ror StatBuf+S.TIME.MINUTE,x
+				lsr
+				ror StatBuf+S.TIME.MINUTE,x
+				lsr
+				ror StatBuf+S.TIME.MINUTE,x
+				lsr StatBuf+S.TIME.MINUTE,x
+				lsr StatBuf+S.TIME.MINUTE,x
+
+				sta StatBuf+S.TIME.HOUR,x
+
+* TODO : S.TIME.WDAY
+
+				rts
+*--------------------------------------
+MAN
+SAVE usr/src/sbin/cifsd.s.io
+LOAD usr/src/sbin/cifsd.s
+ASM

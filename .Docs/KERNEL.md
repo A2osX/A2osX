@@ -137,10 +137,9 @@ Create a hDEV
 # ReadDir  
 
 ## C  
-`int readdir (int hDIR, S.DIRENT * dirent);`  
+`struct dirent *readdir (short int hDIR);`  
 
 ## ASM  
-`>PUSHW dirent`  
 `lda hDIR`  
 `>SYSCALL readdir`  
 

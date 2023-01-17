@@ -1,0 +1,255 @@
+NEW
+  AUTO 3,1
+*--------------------------------------
+INIT.Setup		>LDYAI 512
+				>SYSCALL GetMem
+				bcs .9
+
+				stx hReq
+
+				jsr INIT.Negotiate
+				bcs .9
+
+				jsr INIT.SessionSetup
+				bcs .9
+
+				lda #2
+				>SYSCALL ArgV
+				>STYA pPath
+				jsr INIT.TreeConnect
+				bcs .9
+
+				lda #3
+				>SYSCALL ArgV
+				>PUSHYA
+				>PUSHW L.IO.CallBack
+				>SYSCALL Mount
+				bcs .9
+
+				sta hMount
+
+*				clc
+
+.9				rts
+*--------------------------------------
+INIT.Negotiate	>PUSHB hSocket
+				>PUSHW L.NETBIOS.H
+				>PUSHWI SMB.NegReq.end-NETBIOS.H
+
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Send
+				bcs .99
+
+				jsr INIT.ReadSocket
+				bcs .99
+
+				jsr CORE.GetRespData
+
+				ldy #S.NETBIOS+S.SMB.H.STATUS
+				lda (ZPRespPtr),y
+				bne .97
+
+				ldy #S.NETBIOS.LEN+2
+				lda (ZPRespPtr),y
+
+				clc
+				adc #S.NETBIOS
+				sta ZPPtr1
+				tay
+				lda #0
+
+				>SYSCALL GetMem
+				bcs .99
+
+				>STYA ZPCtxPtr
+				stx hSMBContext
+
+				ldy ZPPtr1
+
+.4				dey
+				lda (ZPRespPtr),y
+				sta (ZPCtxPtr),y
+				tya
+				bne .4
+
+				ldy #S.NETBIOS+S.SMB.H.FLAGS
+				sta (ZPCtxPtr),y
+
+				jsr CORE.FreeRespData
+
+				clc
+				rts
+
+.97				jsr CORE.FreeRespData
+
+				lda #MLI.E.INVPARAM
+				sec
+.99				rts
+*--------------------------------------
+INIT.SessionSetup
+				ldx #S.SMB.H.CMD.SESSION.SETUP.ANDX
+				jsr CORE.ReqSetupX
+
+				ldx #0
+
+.2				lda SMB.SessionSetup.H,x
+				sta (ZPReqPtr),y
+				iny
+				inx
+				cpx #SMB.SessionSetup.H.Len
+				bne .2
+
+				jsr CORE.ReqSetupPtr2
+
+				ldy #0
+
+				ldx #0
+
+.3				lda SMB.SessionSetup.Guest,x
+				jsr CORE.PutBytePtr2
+				iny
+				inx
+				cpx #SMB.SessionSetup.Guest.Len
+				bne .3
+
+				ldx #0
+
+.4				lda SMB.SessionSetup.T,x
+				jsr CORE.PutBytePtr2
+				iny
+				inx
+				cpx #SMB.SessionSetup.T.Len
+				bne .4
+
+				tya
+				ldy ByteCountOfs
+				sta (ZPReqPtr),y
+
+				jsr CORE.SetReqLen
+				jsr INIT.WriteSocket
+				bcs .99
+
+				jsr INIT.ReadSocket
+				bcs .99
+
+				jsr CORE.GetRespData
+
+				ldy #S.NETBIOS+S.SMB.H.STATUS
+				lda (ZPRespPtr),y
+				bne .97
+
+				ldy #S.NETBIOS+S.SMB.H.UID
+				lda (ZPRespPtr),y
+				sta (ZPCtxPtr),y
+				iny
+				lda (ZPRespPtr),y
+				sta (ZPCtxPtr),y
+
+				jsr CORE.FreeRespData
+
+				clc
+				rts
+
+.97				jsr CORE.FreeRespData
+
+.98				lda #MLI.E.LOCKED
+				sec
+.99				rts
+*--------------------------------------
+INIT.TreeConnect
+				ldx #S.SMB.H.CMD.TREE.CONNECT.ANDX
+				jsr CORE.ReqSetupX
+
+				ldx #0
+
+.1				lda SMB.TreeConnect.H,x
+				sta (ZPReqPtr),y
+				iny
+				inx
+				cpx #SMB.TreeConnect.H.Len
+				bne .1
+
+				jsr CORE.ReqSetupPtr2
+
+				lda #0
+				jsr CORE.PutBytePtr2	PASSWORD = "\0"
+
+				jsr CORE.AppendPathPtr2
+				jsr CORE.AddYReqLenPtr2
+
+				iny						+ \0 from password
+
+				ldx #0
+
+.4				lda SMB.TreeConnect.T,x
+				jsr CORE.PutBytePtr2
+				iny
+				inx
+				cpx #SMB.TreeConnect.T.Len
+				bne .4
+
+				tya
+				ldy ByteCountOfs
+				sta (ZPReqPtr),y
+
+				jsr CORE.SetReqLen
+				jsr INIT.WriteSocket
+				bcs .99
+
+				jsr INIT.ReadSocket
+				bcs .99
+
+				jsr CORE.GetRespData
+
+				ldy #S.NETBIOS+S.SMB.H.STATUS
+				lda (ZPRespPtr),y
+				bne .97
+
+				ldy #S.NETBIOS+S.SMB.H.TID
+				lda (ZPRespPtr),y
+				sta (ZPCtxPtr),y
+				iny
+				lda (ZPRespPtr),y
+				sta (ZPCtxPtr),y
+
+.8				jsr CORE.FreeRespData
+
+				clc
+				rts
+
+.97				jsr CORE.FreeRespData
+
+.98				lda #MLI.E.IO
+				sec
+.99				rts
+*--------------------------------------
+INIT.ReadSocket	lda #TIMEOUT.MAX
+				sta TimeOut
+
+.1				>SLEEP
+
+				lda hSocket
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Recv
+				bcc .99
+
+				cmp #E.NODATA
+				sec
+				bne .99
+
+				lda TimeOut
+				bne .1
+
+				lda #MLI.E.OFFLINE
+
+.99				rts
+*--------------------------------------
+INIT.WriteSocket
+				>PUSHB hSocket
+				>PUSHW ZPReqPtr
+				>PUSHW ZPReqLen
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Send
+				rts
+*--------------------------------------
+MAN
+SAVE usr/src/sbin/cifsd.s.init
+LOAD usr/src/sbin/cifsd.s
+ASM
