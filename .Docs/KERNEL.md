@@ -1089,7 +1089,7 @@ Set the file-position indicator for hFILE
 Test the end-of-file indicator for hFILE  
 
 ## C  
-`int feof( short int stream );`  
+`short int feof( short int stream );`  
 
 ## ASM  
 **In:**  
