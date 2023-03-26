@@ -15,7 +15,7 @@ NEW
 				.INB inc/libtcpip.i
 				.INB inc/libtui.i
 *--------------------------------------
-TIMEOUT.MAX		.EQ 200					20 sec.
+TIMEOUT.MAX		.EQ 250					25 sec.
 BUFSIZE			.EQ 4096
 *--------------------------------------
 				.DUMMY
@@ -25,6 +25,7 @@ ZPIPCfgPtr		.BS 2
 ZPBufPtr		.BS 2
 ZPLinePtr		.BS 2
 ZPFramePtr		.BS 2
+
 ZPnFrameLen		.BS 2
 
 hBuf			.BS 1
@@ -41,6 +42,7 @@ hTBOX			.BS 1
 TargetHost		.BS 2
 TargetPort		.BS 2
 TargetSelector	.BS 2
+ZPPtr1			.BS 2
 ZS.END			.ED
 *--------------------------------------
 *			File Header (16 Bytes)
@@ -63,23 +65,30 @@ CS.START		cld
 				.DA	CS.QUIT
 L.LIBTCPIP		.DA LIBTCPIP
 L.LIBTUI		.DA LIBTUI
-L.SA.LOCAL		.DA SA.LOCAL
 
+L.MSG.ScrTitle0	.DA MSG.ScrTitle0
 L.MSG.ScrTitle	.DA MSG.ScrTitle
+
 L.MSG.IPKO		.DA MSG.IPKO
 L.MSG.USAGE		.DA MSG.USAGE
-L.MSG.IOERR		.DA MSG.IOERR
 L.MSG.CRLF		.DA MSG.CRLF
+L.MSG.NULL		.DA MSG.NULL
 
-L.MSG.CONNECTING	.DA MSG.CONNECTING
-L.MSG.UNKNOWN	.DA MSG.UNKNOWN
+L.MSG.CONNECT	.DA MSG.CONNECT
+L.MSG.GETTING	.DA MSG.GETTING
+L.MSG.OK		.DA MSG.OK
 L.MSG.ERROR		.DA MSG.ERROR
-L.MSG.CONNECTED	.DA MSG.CONNECTED
+L.MSG.GOTO		.DA MSG.GOTO
 
-J.ITEMTYPES		.DA CS.Net.File
-				.DA CS.Net.Dir
-				.DA CS.Net.Search
-				.DA CS.Net.Info
+J.items2Buf		.DA CS.Net.File2Buf
+				.DA CS.Net.Dir2Buf
+				.DA CS.Net.Search2Buf
+				.DA CS.Net.Info2Buf
+				
+J.items2HL		.DA CS.Net.File2HL
+				.DA CS.Net.Dir2HL
+				.DA CS.Net.Search2HL
+				.DA CS.Net.Info2HL				
 				.DA 0
 *--------------------------------------
 CS.INIT			>LDYA L.LIBTCPIP
@@ -87,7 +96,7 @@ CS.INIT			>LDYA L.LIBTCPIP
 				bcs .9
 
 				sta hLIBTCPIP
-				
+
 				>LDYA L.LIBTUI
                 >SYSCALL LoadLib
                 bcs .9
@@ -97,50 +106,93 @@ CS.INIT			>LDYA L.LIBTCPIP
 .9
 CS.INIT.RTS		rts
 *--------------------------------------
+CS.RUN.USAGE	>LDYA L.MSG.USAGE
+				>SYSCALL PutS
+				lda #E.SYN
+				sec
+				rts
+*--------------------------------------
 CS.RUN			jsr CS.Net.Init
 				bcs CS.INIT.RTS
-				
-				jsr CS.Scr.Init
-				bcs CS.INIT.RTS
+
+				lda #1
+				>SYSCALL ArgV
+				bcs CS.RUN.USAGE
+
+				phy
+				pha
+
+				>PUSHEA.G NET.HyperLink+1
+
+				pla
+				>PUSHA
+				pla
+				>PUSHA
+				>SYSCALL strcpy
 
 				>LDYAI BUFSIZE
 				>SYSCALL GetMem
 				bcs CS.INIT.RTS
 
 				stx hBuf
-				
+
 				>LDYAI 256
 				>SYSCALL GetMem
 				bcs CS.INIT.RTS
-				
+
 				>STYA ZPLinePtr
 				stx hLine
-				
-				jsr CS.Net.Connect
-				bcs CS.INIT.RTS
-				
-				>LDYA L.MSG.CRLF
-				jsr CS.Net.Get
+
+				jsr CS.Scr.Init
 				bcs CS.INIT.RTS
 *--------------------------------------
+CS.RUN.LOOP0	jsr CS.Scr.SetStatusConn
+				bcs CS.RUN.LOOP.9
+
+				jsr CS.Net.ParseHL
+				jsr CS.Scr.SetStatusOkErr
+				bcs CS.RUN.LOOP
+
+				jsr CS.Net.Connect
+				jsr CS.Scr.SetStatusOkErr
+				bcs CS.RUN.LOOP
+
+				jsr CS.Net.Get
+				jsr CS.Scr.SetStatusOkErr
+				bcs CS.RUN.LOOP
+
+				jsr CS.Scr.SetTitle
 				jsr CS.Scr.SetBuf
+				jsr CS.Scr.SetStatusOkErr
 *--------------------------------------
 CS.RUN.LOOP		lda hSCR
                 >LIBCALL hLIBTUI,LIBTUI.Exec
-                bcs .99					Error
+                bcs CS.RUN.LOOP.9
 
 				tay
 				beq CS.RUN.LOOP			No Event
 
 				cmp #3
-				beq .99
+				beq CS.RUN.LOOP.9
 
+				cmp #EV.HL.SELECTED
+				bne .1
 
+				jsr CS.Scr.SetStatusGoto
+				bcc CS.RUN.LOOP
 
+				rts
 
-				bra CS.RUN.LOOP
+.1				cmp #EV.HL.PRESSED
+				bne CS.RUN.LOOP
+				
+				jsr CS.Net.GetHL
+				bcc CS.RUN.LOOP0
 
-.99				rts
+				tay
+				beq CS.RUN.LOOP
+
+CS.RUN.LOOP.9	rts
 *--------------------------------------
 CS.DOEVENT		lda (pEvent)
 				bpl .9					is it a TIMER event?
@@ -155,14 +207,14 @@ CS.DOEVENT		lda (pEvent)
 *--------------------------------------
 CS.QUIT			lda hCTX
 				beq .10
-				
+
 				>LIBCALL hLIBTUI,LIBTUI.Close
 
 .10				lda hLIBTUI
                 beq .1
 
                 >SYSCALL UnloadLib
-				
+
 .1				lda hSocket
 				beq .2
 
@@ -192,80 +244,142 @@ CS.Net.Init		>LIBCALL hLIBTCPIP,LIBTCPIP.GETCFG	is TCPIP loaded ?
 				bpl .97
 
 				ldy #S.IPCFG.IP+3
-				ldx #3
+				ldx #4
 
 .1				lda (ZPIPCfgPtr),y
-				sta SA.LOCAL+S.SOCKADDR.ADDR,x
+				pha
 				dey
 				dex
-				bpl .1
+				bne .1
 
-				lda #1
-				>SYSCALL ArgV
-				bcs .96
-				
-				>STYA TargetHost
+				ldy #SA.LOCAL+S.SOCKADDR.ADDR
+				ldx #4
 
-				lda #2
-				>SYSCALL ArgV
-				bcs .7
-				
-				>SYSCALL AToI
-				bra .8
-
-.7				>LDYAI 70
-
-.8				>STYA TargetPort
+.2				pla
+				sta (pData),y
+				iny
+				dex
+				bne .2
 
 				lda #AF.INET
+				>STA.G SA.LOCAL+S.SOCKADDR.AF
 				>STA.G SA.REMOTE+S.SOCKADDR.AF
 
 				clc
 				rts
-				
-.96				>LDYA L.MSG.USAGE
-				bra .98
-				
-.97				>LDYA L.MSG.IPKO
 
-.98				>SYSCALL PutS
+.97				>LDYA L.MSG.IPKO
+				>SYSCALL PutS
 				lda #E.SYN
 				sec
-
 .99				rts
 *--------------------------------------
-CS.Net.Connect	>PUSHEA.G SCR.StatusBuf
-				>PUSHW L.MSG.CONNECTING
-				>PUSHW TargetHost
-				>PUSHW TargetPort
-				>PUSHBI 4
-				>SYSCALL SPrintF
-				jsr CS.Scr.SetStatus
-				
-				lda #TIMEOUT.MAX
+CS.Net.ParseHL	>LEA.G NET.HyperLink+1
+				>STYA ZPPtr1
+				>STYA TargetHost
+
+				lda (ZPPtr1)
+				beq .9
+
+				cmp #'/'
+				beq .50
+
+				ldy #$ff
+
+.1				iny
+				lda (ZPPtr1),y
+				bne .2
+
+				jsr CS.Net.Resolve		host\0
+				bcs .99
+
+				>LDYAI 70
+				>STYA TargetPort
+				bra .7
+
+.9				lda #E.SYN
+				sec
+.99				rts
+
+.2				eor #':'
+				beq .3
+
+				eor #'/'
+				bne .1
+
+				lda #70
+				sta TargetPort			Default PORT
+				lda /70
+				sta TargetPort+1
+				bra .5
+
+.3				lda #0					host:Port, stop HOST here
+				sta (ZPPtr1),y
+
+				jsr CS.Net.AddYp1Ptr1
+
+				jsr CS.Net.Resolve
+				bcs .99
+
+				>LDYA ZPPtr1
+				>SYSCALL AToI
+				>STYA TargetPort
+
+				ldy #$ff
+
+.4				iny
+				lda (ZPPtr1),y
+				beq .7
+
+				eor #'/'
+				bne .4
+
+.5				jsr CS.Net.AddYp1Ptr1
+				bra .6
+
+.50				>LDYA L.MSG.NULL
+				>STYA TargetHost
+
+.6				>LDYA ZPPtr1
+				>STYA TargetSelector
+
+				clc
+				rts
+
+.7				>LDYA L.MSG.NULL
+				>STYA TargetSelector
+
+.8				clc
+				rts
+*--------------------------------------
+CS.Net.AddYp1Ptr1
+				tya
+				sec						skip :
+				adc ZPPtr1
+				sta ZPPtr1
+				tay
+				lda ZPPtr1+1
+				clc
+				adc #0
+				sta ZPPtr1+1
+				rts
+*--------------------------------------
+CS.Net.Resolve	lda #TIMEOUT.MAX
 				sta TimeOut
 
 .1				>SLEEP
 
 				>PUSHEA.G SA.REMOTE+S.SOCKADDR.ADDR
-				>PUSHW TargetHost
+				>PUSHEA.G NET.HyperLink+1
 				>LIBCALL hLIBTCPIP,LIBTCPIP.HST.GetByName
-				bcc CS.Net.Connect1
+				bcc .9
 
-				lda TimeOut
+				ldx TimeOut
 				bne .1
 
-				>PUSHEA.G SCR.StatusBuf
-				>PUSHW L.MSG.UNKNOWN
-				>PUSHW TargetHost
-				>PUSHBI 2
-				>SYSCALL SPrintF
-				jsr CS.Scr.SetStatus
-
-				sec
-				rts
-
-CS.Net.Connect1	>PUSHBI S.SOCKET.T.SEQPKT
+.9				rts
+*--------------------------------------
+CS.Net.Connect	>PUSHBI S.SOCKET.T.SEQPKT
 				>PUSHBI 0
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Socket
 				bcs .9
@@ -273,7 +387,7 @@ CS.Net.Connect1	>PUSHBI S.SOCKET.T.SEQPKT
 				sta hSocket
 
 				>PUSHA
-				>PUSHW L.SA.LOCAL
+				>PUSHEA.G SA.LOCAL
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Bind
 				bcs .9
 
@@ -288,76 +402,70 @@ CS.Net.Connect1	>PUSHBI S.SOCKET.T.SEQPKT
 				>PUSHB hSocket
 				>PUSHEA.G SA.REMOTE
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Connect
-				bcc .8
+				bcc .9
 
-				cmp #ERR.SKT.NOCONN
-				sec
-				bne .9
-
-				lda TimeOut
+				ldx TimeOut
 				bne .1
 
-				lda #ERR.SKT.NOCONN
-				sec
 .9				rts
-
-.8				>PUSHEA.G SCR.StatusBuf
-				>PUSHW L.MSG.CONNECTED
-				
-				ldy #SA.REMOTE+S.SOCKADDR.ADDR
-				
-.80				>PUSHB (pData),y
-				iny
-				cpy #SA.REMOTE+S.SOCKADDR.PORT
-				bcc .80
-				
-				iny
-				>PUSHB (pData),y
-				dey
-				>PUSHB (pData),y
-				
-				>PUSHBI 6
+*--------------------------------------
+CS.Net.Get		>PUSHEA.G SCR.StatusBuf
+				>PUSHW L.MSG.GETTING
+				>PUSHW TargetSelector
+				>PUSHBI 2
 				>SYSCALL SPrintF
 				jsr CS.Scr.SetStatus
-				clc
-				rts
-*--------------------------------------
-CS.Net.Get		>STYA TargetSelector
-				
+
 				lda hBuf
 				>SYSCALL GetMemPtr
 				>STYA ZPBufPtr
-				
-				lda #0
+
+				lda #0					Reset Buffer
 				sta (ZPBufPtr)
-				sta (ZPLinePtr)
-				
+
 				>PUSHB hSocket
-				>PUSHW TargetSelector
-				
+				>PUSHW ZPLinePtr
+
 				ldy #$ff
-				
+
 .1				iny
 				lda (TargetSelector),y
+				sta (ZPLinePtr),y
 				bne .1
-				
+
+				lda #C.CR
+				sta (ZPLinePtr),y
+				iny
+
+				lda #C.LF
+				sta (ZPLinePtr),y
+				iny
+
+				lda #0
+				sta (ZPLinePtr),y
+				iny
+
 				>PUSHYA
-				
+
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Send
 				bcs .9
-				
+
+				lda #0
+				sta (ZPLinePtr)
+
 .2				>SLEEP
 
 				lda hSocket
 				>LIBCALL hLIBTCPIP,LIBTCPIP.Recv
 				bcc .3
-				
+
 				cmp #E.NODATA
 				beq .2
-				
-				
-*				lda hSocket
-*				>LIBCALL hLIBTCPIP,LIBTCPIP.Shutdown
+
+				lda hSocket
+				>LIBCALL hLIBTCPIP,LIBTCPIP.Shutdown
+
+				stz hSocket
 				
 				clc
 				rts
@@ -369,15 +477,15 @@ CS.Net.Get		>STYA TargetSelector
 
 				lda hFrame
 				>SYSCALL FreeMem
-				
+
 				bra .2
-				
+
 .9				rts
 *--------------------------------------
 CS.Net.GetFrame	sta hFrame
 				>SYSCALL GetMemPtr
 				>STYA ZPFramePtr
-				
+
 				ldy #S.IP.TOTAL.LENGTH+1
 				lda (ZPFramePtr),y
 				sec
@@ -410,43 +518,45 @@ CS.Net.GetLines	ldy #$ff
 
 .2				jsr CS.Net.GetChar
 				bcs .8
-				
+
 				cmp #C.LF
 				beq .3
-				
+
 				sta (ZPLinePtr),y
 				iny
 				bra .2
-				
+
 .3				lda #0
 				sta (ZPLinePtr),y
-				
+
 				jsr CS.Net.Line2Buf
-				
+
 				lda #0
 				sta (ZPLinePtr)
 				tay
 				bra .2
-				
-.8				clc
+
+.8				lda #0
+				sta (ZPLinePtr),y
+				clc
 				rts
 *--------------------------------------
 CS.Net.Line2Buf	lda (ZPLinePtr)
 
-				ldx #ITEMTYPES.L-1
+				ldx #ITEMTYPES.L
 
-.1				cmp ITEMTYPES,x
+.1				cmp ITEMTYPES-1,x
 				beq .2
 
 				dex
-				bpl .1
-				
+				bne .1
+
 				bra .6
 
 .2				txa
 				asl
 				tax
-				jmp (J.ITEMTYPES,x)
+				jmp (J.items2Buf-2,x)
 
 .6				ldy #$ff
 
@@ -454,7 +564,7 @@ CS.Net.Line2Buf	lda (ZPLinePtr)
 				lda (ZPLinePtr),y
 				sta (ZPBufPtr),y
 				bne .7
-				
+
 				tya
 				clc
 				adc ZPBufPtr
@@ -465,11 +575,11 @@ CS.Net.Line2Buf	lda (ZPLinePtr)
 
 .8				rts
 *--------------------------------------
-* hyperlinks: [[text to show|targetUrl]]
+* hyperlinks: [[text to show]targetUrl]
 *--------------------------------------
-CS.Net.File
-CS.Net.Dir
-CS.Net.Search
+CS.Net.File2Buf
+CS.Net.Dir2Buf
+CS.Net.Search2Buf
 				lda #'['
 				jsr CS.Net.Char2Buf
 				jsr CS.Net.Char2Buf
@@ -478,46 +588,48 @@ CS.Net.Search
 
 				jsr CS.Net.Token2Buf
 
-				lda #'|'
+				lda #']'
 				jsr CS.Net.Char2Buf
 
 				phy						save Selector pos
-				
+
+				txa
+				jsr CS.Net.Char2Buf		Type
+
 				jsr CS.Net.SkipToken
-				
+
 				jsr CS.Net.Token2Buf	address
-				
+
 				lda #':'
 				jsr CS.Net.Char2Buf
 
 				jsr CS.Net.Token2Buf	port
 
 				ply
-				
+
 				jsr CS.Net.Token2Buf	selector
 
 				lda #']'
 				jsr CS.Net.Char2Buf
+
+				lda #C.CR
 				jsr CS.Net.Char2Buf
 
-.8				lda #C.CR
-				jsr CS.Net.Char2Buf
-				
 				lda #0
 				sta (ZPBufPtr)
-				
+
 				rts
 *--------------------------------------
-CS.Net.Info		ldy #0
+CS.Net.Info2Buf	ldy #0
 
 				jsr CS.Net.Token2Buf
 
 				lda #C.CR
 				jsr CS.Net.Char2Buf
-				
+
 				lda #0
 				sta (ZPBufPtr)
-				
+
 				rts
 *--------------------------------------
 CS.Net.Token2Buf
@@ -525,68 +637,81 @@ CS.Net.Token2Buf
 				lda (ZPLinePtr),y
 				cmp #C.TAB
 				beq .8
-				
+
 				cmp #C.CR
 				beq .8
-				
+
 				jsr CS.Net.Char2Buf
 				bra CS.Net.Token2Buf
-				
-.8				rts				
+
+.8				rts
 *--------------------------------------
 CS.Net.SkipToken
 				iny
 				lda (ZPLinePtr),y
 				cmp #C.TAB
 				beq .8
-				
+
 				cmp #C.CR
 				beq .8
-				
+
 				bra CS.Net.SkipToken
-				
-.8				rts				
+
+.8				rts
 *--------------------------------------
 CS.Net.Char2Buf	sta (ZPBufPtr)
 
 				inc ZPBufPtr
 				bne .8
-				
+
 				inc ZPBufPtr+1
-				
-.8				rts				
+
+.8				rts
 *--------------------------------------
 CS.Net.GetChar	inc ZPnFrameLen
 				bne .1
-				
+
 				inc ZPnFrameLen+1
 				beq .9
-				
+
 .1				lda (ZPFramePtr)
 				inc ZPFramePtr
 				bne .8
-				
+
 				inc ZPFramePtr+1
-				
-.8				clc				
+
+.8				clc
 				rts
 
 .9				sec
 				rts
 *--------------------------------------
+CS.Net.GetHL	>LDA.G NET.HyperLink
+				tax
+				jmp (J.items2HL-2,x)
+*--------------------------------------
+
+CS.Net.Search2HL
+
+*--------------------------------------
+CS.Net.File2HL
+CS.Net.Dir2HL
+CS.Net.Info2HL	clc
+				rts
+*--------------------------------------
 CS.Scr.Init		>LIBCALL hLIBTUI,LIBTUI.Init
-                bcs .9
+                bcs .99
 
                 sta hCTX
-				
+
 				>PUSHA					hCTX
                 >PUSHBI S.OBJ.F.bTitle+S.OBJ.F.bStatus
                 >LIBCALL hLIBTUI,LIBTUI.NewScrn
-                bcs .9
+                bcs .99
 
                 sta hSCR
-                jsr CS.Scr.SetTitle
 
+				jsr CS.Scr.SetTitle0
                 jsr CS.Scr.SetStatus
 
 				>PUSHB hSCR
@@ -600,18 +725,31 @@ CS.Scr.Init		>LIBCALL hLIBTUI,LIBTUI.Init
                 >PUSHYA
                 >PUSHWI BUFSIZE
                 >LIBCALL hLIBTUI,LIBTUI.NewTBox
-                bcs .9
- 
+.99             bcs .9
+
 				sta hTBOX
-				
+
                 >LIBCALL hLIBTUI,LIBTUI.Activate
- 
-.9              rts				
+				bcs .9
+
+				>PUSHB hTBOX
+                >PUSHBI S.OBJ.pVar
+                >PUSHEA.G NET.HyperLink
+                >LIBCALL hLIBTUI,LIBTUI.SetProp
+
+.9              rts
+*--------------------------------------
+CS.Scr.SetTitle0
+				>PUSHB hSCR
+                >PUSHBI S.OBJ.pTITLE
+                >PUSHW L.MSG.ScrTitle0
+                >LIBCALL hLIBTUI,LIBTUI.SetProp
+				rts
 *--------------------------------------
 CS.Scr.SetTitle	>PUSHEA.G SCR.TitleBuf
 				>PUSHW L.MSG.ScrTitle
-				>PUSHW TargetHost		
-				>PUSHW TargetPort		
+				>PUSHW TargetHost
+				>PUSHW TargetPort
 				>PUSHW TargetSelector
 				>PUSHBI 6
 				>SYSCALL SPrintF
@@ -630,6 +768,43 @@ CS.Scr.SetBuf	>PUSHB hTBOX
                 >LIBCALL hLIBTUI,LIBTUI.SetProp
 				rts
 *--------------------------------------
+CS.Scr.SetStatusConn
+				>PUSHEA.G SCR.StatusBuf
+				>PUSHW L.MSG.CONNECT
+				>PUSHEA.G NET.HyperLink+1
+				>PUSHBI 2
+				>SYSCALL SPrintF
+				jmp CS.Scr.SetStatus
+*--------------------------------------
+CS.Scr.SetStatusGoto
+				>PUSHEA.G SCR.StatusBuf	skip type
+				>PUSHW L.MSG.GOTO
+				>PUSHEA.G NET.HyperLink+1
+				>PUSHBI 2
+				>SYSCALL SPrintF
+				bra CS.Scr.SetStatus
+*--------------------------------------
+CS.Scr.SetStatusOkErr
+				bcc .1
+
+				pha
+				>PUSHEA.G SCR.StatusBuf
+				>PUSHW L.MSG.ERROR
+				pla
+				pha
+				>PUSHA
+				>PUSHBI 1
+				>SYSCALL SPrintF
+				jsr CS.Scr.SetStatus
+				pla
+				sec
+				rts
+
+.1				>PUSHEA.G SCR.StatusBuf
+				>PUSHW L.MSG.OK
+				>PUSHBI 0
+				>SYSCALL SPrintF
+*--------------------------------------
 CS.Scr.SetStatus
 				>PUSHB hSCR
                 >PUSHBI S.OBJ.pSTATUS
@@ -643,34 +818,32 @@ hLIBTCPIP		.BS 1
 LIBTUI          .AZ "libtui"
 hLIBTUI         .BS 1
 *--------------------------------------
-MSG.ScrTitle	.CZ "A2osX-GOPHER %s:%D/%s <Ctrl-Q> : Quit"
+MSG.ScrTitle0	.CZ "A2osX-GOPHER - <Ctrl-Q>uit"
+MSG.ScrTitle	.CZ "A2osX-GOPHER %s:%D/%s - <Ctrl-Q>uit"
 *--------------------------------------
 MSG.IPKO		.CZ "TCP/IP Not Loaded/Configured.\r\n"
-MSG.USAGE		.CZ "Usage : GOPHER <ip|host> [port]\r\n"
-MSG.IOERR		.CS "I/O Error."
+MSG.USAGE		.CS "Usage : GOPHER <ip|host[:port][/selector]"
 MSG.CRLF		.CS "\r\n"
 MSG.NULL		.HS 00
-*--------------------------------------
-MSG.CONNECTING	.CZ "Connecting to %s:%D..."
-MSG.UNKNOWN		.CZ "%s: Unknown host"
-MSG.ERROR		.CZ "Error : $%h"
-MSG.CONNECTED	.CZ "Connected to %d.%d.%d.%d:%D."
+MSG.CONNECT		.CZ "Connect: %s..."
+MSG.GETTING		.CZ "Getting: /%s..."
+MSG.OK			.CZ "Ok"
+MSG.ERROR		.CZ "Error: $%h"
+MSG.GOTO		.CZ "Goto: %s"
 *--------------------------------------
 ITEMTYPES		.AS "017i"
 ITEMTYPES.L		.EQ *-ITEMTYPES
 *--------------------------------------
-SA.LOCAL		.DA #AF.INET			S.SOCKADDR.AF
-				.BS 1
-				.BS 4					S.SOCKADDR.ADDR
-				.BS 2					S.SOCKADDR.PORT
-*--------------------------------------
 				.DUMMY
 				.OR 0
-DS.START		
+DS.START
+SA.LOCAL		.BS S.SOCKADDR
 SA.REMOTE		.BS S.SOCKADDR
 
 SCR.TitleBuf	.BS 80
 SCR.StatusBuf	.BS 80
+
+NET.HyperLink	.BS 80
 DS.END			.ED
 *--------------------------------------
 MAN
