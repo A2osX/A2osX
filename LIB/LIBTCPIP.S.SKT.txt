@@ -333,16 +333,16 @@ SKT.shutdown	pha
 
 				ldy #S.SOCKET.TCP.S
 				lda (ZPPtrSKT),y
-				cmp #S.SOCKET.TCP.S.CLOSING
+				cmp #S.SOCKET.TCP.S.CLWAIT
 				bne .10
 
-				inc						S.SOCKET.TCP.S.TIMEWT
+				lda	#S.SOCKET.TCP.S.TIMEWT
 
 				sta (ZPPtrSKT),y
 				pla
 				clc
 				rts
-
+*--------------------------------------
 .10				pla
 				jsr SKT.GetTCB
 				ldy #S.SOCKET.TCP.S
@@ -350,15 +350,15 @@ SKT.shutdown	pha
 				cmp #S.SOCKET.TCP.S.ESTBLSH
 				bne .1
 
-				jsr SKT.SendOptFIN
+				jsr SKT.OUT.SendFINACK
 
 				lda #S.SOCKET.TCP.S.FINWT1
 				jmp SKT.StoreTCB.S
 
-.1				cmp #S.SOCKET.TCP.S.CLWAIT
+.1				cmp #S.SOCKET.TCP.S.FINWT2
 				bne .2
 
-				jsr SKT.SendOptFIN
+				jsr SKT.OUT.SendFINACK
 
 				lda #S.SOCKET.TCP.S.LASTACK
 				jmp SKT.StoreTCB.S
@@ -390,19 +390,6 @@ SKT.shutdown.HQ	jsr SKT.GetFromQueue
 				>SYSCALL2 freemem
 *				clc
 				rts
-*--------------------------------------
-SKT.SendOptFIN	lda #S.TCP.OPTIONS.FIN+S.TCP.OPTIONS.ACK
-				jsr TCP.OUT.SendOptA	Send FIN/ACK
-
-				ldx #3
-
-.1				inc	SKT.Cache+S.SOCKET.TCP.OUTNEXTSEQ,x
-				bne .8
-
-				dex
-				bpl .1
-
-.8				rts
 */--------------------------------------
 * # Read (STREAM)
 * ## C
@@ -419,12 +406,14 @@ SKT.SendOptFIN	lda #S.TCP.OPTIONS.FIN+S.TCP.OPTIONS.ACK
 *\--------------------------------------
 SKT.Read 		jsr SKT.PullhFDDataInPtrLen
 
+				jsr SKT.GetTCB
+
 				ldy #S.SOCKET.TCP.INUSED
 				lda (ZPPtrSKT),y
 				tax
 				iny
 				ora (ZPPtrSKT),y
-				beq .7					no data, go check SKT status
+				beq .8					no data, go check SKT status
 
 				cpx ZPDataInLen			XA = Data in pipe
 				lda (ZPPtrSKT),y
@@ -435,13 +424,6 @@ SKT.Read 		jsr SKT.PullhFDDataInPtrLen
 				lda (ZPPtrSKT),y
 				sta ZPDataInLen+1
 				bra SKT.GetDataFromSktIn
-
-.7				ldy #S.SOCKET.TCP.O
-				lda (ZPPtrSKT),y
-				and #S.TCP.OPTIONS.ACK
-				beq .8
-
-				jmp TCP.OUT.SendOptA
 
 .8				jsr SKT.CheckStream
 				bcs .99					I/O error
@@ -457,7 +439,6 @@ SKT.Read 		jsr SKT.PullhFDDataInPtrLen
 *  Y,A = bytes read
 *--------------------------------------
 SKT.GetDataFromSktIn
-				jsr SKT.GetTCB
 				ldy #S.SOCKET.SQ.hInMem
 				lda (ZPPtrSKT),y
 				.DO AUXPIPE=1
@@ -473,6 +454,7 @@ SKT.GetDataFromSktIn
 
 				jsr SKT.GetNotDataInLen
 				pha
+
 				.DO AUXPIPE=1
 				jsr SKT.SetupZPCode
 				.FIN
@@ -525,11 +507,15 @@ SKT.GetDataFromSktIn
 				ldx #S.SOCKET.TCP.INUSED
 				jsr SKT.SubDataInLenAtSktX
 
-				jsr SKT.StoreTCB
-				jsr TCP.SetSocketTCPO.ACK 	ACK=1 -> send WSIZE
+				lda ZPDataInLen
+				ldy ZPDataInLen+1
+				ldx #S.SOCKET.TCP.INACKNUM
+				jsr TCP.AddAYToSktCacheAtX
 
-*				lda #S.TCP.OPTIONS.ACK
-*				jsr TCP.OUT.SendOptA
+				jsr SKT.StoreTCB
+
+				lda #S.TCP.OPTIONS.ACK
+				jsr TCP.SetSocketTCPO
 
 				>LDYA ZPDataInLen
 				clc
@@ -576,6 +562,7 @@ SKT.AddDataToSktIn
 
 .2				inx
 				bne .3
+
 				pla
 				inc
 				beq .8
@@ -586,10 +573,12 @@ SKT.AddDataToSktIn
 				sta (ZPTmpPtr1),y
 				inc ZPDataInPtr
 				bne .4
+
 				inc ZPDataInPtr+1
 
 .4				iny
 				bne .2
+
 				.DO AUXPIPE=1
 				sta CLRWRITEAUX
 				.FIN
@@ -676,6 +665,7 @@ SKT.AddDataToSktOut
 
 				jsr SKT.GetNotDataInLen
 				pha
+				
 .1				.DO AUXPIPE=1
 				sta SETWRITEAUX
 				.FIN
@@ -694,6 +684,7 @@ SKT.AddDataToSktOut
 
 				inc ZPDataInPtr
 				bne .4
+
 				inc ZPDataInPtr+1
 
 .4				iny
@@ -816,6 +807,7 @@ SKT.GetDataFromSktOut
 
 .3				iny
 				bne .1
+
 				inc ZPTmpPtr1+1
 				inc SKT.Cache+S.SOCKET.TCP.OUTTAILSENT+1
 				lda SKT.Cache+S.SOCKET.TCP.OUTTAILSENT+1
@@ -837,7 +829,7 @@ SKT.GetDataFromSktOut
 				clc
 				rts
 */--------------------------------------
-* # RecvFrom (RAW,DGRAM,SEQPKT)
+* # RecvFrom (RAW,DGRAM)
 * ## C
 * `hMem recvfrom(hFD fd, struct sockaddr *addr);`
 * ## ASM
@@ -874,12 +866,36 @@ SKT.Recv		clc
 				cmp #S.SOCKET.T.SEQPKT
 				bcc .10					RAW,DGRAM
 
-				bne .99					STREAM
+				bne .98					STREAM
 
 				jsr SKT.GetFromQueue	SEQPKT
-				bcc .1
+				bcs .1
 
-				jsr SKT.CheckTCP
+				pha
+				>SYSCALL2 GetMemPtr
+				>STYA ZPFrameInPtr
+
+				jsr TCP.IN.SetDataInPtrAndLen
+
+				jsr SKT.GetTCB
+
+				lda ZPDataInLen
+				ldy ZPDataInLen+1
+				ldx #S.SOCKET.TCP.INACKNUM
+				jsr TCP.AddAYToSktCacheAtX
+
+				jsr SKT.StoreTCB
+				
+				lda #S.TCP.OPTIONS.ACK
+*				jsr TCP.OUT.SendOptA
+				jsr TCP.SetSocketTCPO
+				
+				pla
+				plp
+				clc
+				rts
+
+.1				jsr SKT.CheckTCP
 				bcs .91
 
 .90				lda #E.NODATA
@@ -887,10 +903,15 @@ SKT.Recv		clc
 				sec
 				rts
 
+.98				plp
+.99				lda #ERR.SKT.BAD
+				sec
+				rts
+*--------------------------------------
 .10				jsr SKT.GetFromQueue
 				bcs .90
 
-.1				plp						if CS, RecvFrom
+				plp						if CS, RecvFrom
 				bcc .9					CC, Recv : Exit with CC and A=hFrame
 
 				pha
@@ -937,11 +958,6 @@ SKT.Recv		clc
 				pla
 				clc
 .9				rts
-
-.99				lda #ERR.SKT.BAD
-				plp
-				sec
-				rts
 */--------------------------------------
 * # SendTo (RAW,DGRAM,SEQPKT)
 * ## C
@@ -976,6 +992,8 @@ SKT.Send		jsr SKT.PullhFDDataInPtrLen
 
 				ldy #S.SOCKET.T
 				lda (ZPPtrSKT),y
+				cmp #S.SOCKET.T.STREAM
+			bcs *	
 				tax
 				jmp (J.SKT.send,x)
 *--------------------------------------
@@ -985,12 +1003,14 @@ SKT.Send.RAW	ldy #S.SOCKET.PROTO
 				>LDYA ZPDataInLen
 				jsr FRM.NewIP
 				bcc SKT.Send.8
+
 				rts
 *--------------------------------------
 SKT.Send.DGRAM	ldx #S.IP.PROTOCOL.UDP
 				>LDYA ZPDataInLen
 				jsr FRM.NewIP
 				bcs SKT.Send.9
+
 				jsr SKT.SetFrameOutTCPUDPPorts
 
 SKT.Send.8		jsr SKT.SetFrameOutDstIP
@@ -1478,6 +1498,7 @@ SKT.CopyDataInToOut
 				sta (ZPDataOutPtr),y
 				iny
 				bne .1
+
 				inc ZPDataInPtr+1
 				inc ZPDataOutPtr+1
 				bne .1

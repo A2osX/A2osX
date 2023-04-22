@@ -97,7 +97,7 @@ TCP.IN.JMP.SYNSENT
 
 .9				lda #S.TCP.OPTIONS.RST
 				jsr TCP.OUT.SendOptA	Send RST
-				
+
 				jmp TCP.IN.RST
 *--------------------------------------
 TCP.IN.JMP.SYNRCVD
@@ -137,7 +137,9 @@ TCP.IN.JMP.ESTBLSH
 				lda (ZPFrameInPtr),y
 				and #S.TCP.OPTIONS.ACK	Remote side ACKed data ?
 				beq .4
+*--------------------------------------
 * Ack sent data
+*--------------------------------------
 				ldy #S.TCP.ACKNUM+3		Get new ACK number from FrameIn...
 				ldx #3					Substract old ACK from socket
 
@@ -153,7 +155,7 @@ TCP.IN.JMP.ESTBLSH
 				dex
 				bpl .1
 
-				bcc .70					ACK > SENT SEQ ????
+				bcc .7					ACK > SENT SEQ ????
 
 				lda TmpDWord+3
 				ldx TmpDWord+2
@@ -189,7 +191,9 @@ TCP.IN.JMP.ESTBLSH
 				sta SKT.Cache+S.SOCKET.TCP.OUTUSED+1
 
 				jsr SKT.StoreTCB
+*--------------------------------------
 * Store incoming data
+*--------------------------------------
 .4				jsr TCP.IN.SetDataInPtrAndLen
 				lda ZPDataInLen			Incoming Data in this frame ?
 				ora ZPDataInLen+1
@@ -228,9 +232,6 @@ TCP.IN.JMP.ESTBLSH
 				jsr TCP.AddAYToSktCacheAtX
 
 				jsr SKT.StoreTCB		update socket
-*				bra .7
-				
-.70				jsr TCP.SetSocketTCPO.ACK	...and ack data
 
 .7				ldy #S.TCP.OPTIONS
 				lda (ZPFrameInPtr),y
@@ -238,8 +239,10 @@ TCP.IN.JMP.ESTBLSH
 				beq .8
 
 				jsr TCP.IN.ACKTheFIN
-				
-				lda #S.SOCKET.TCP.S.CLWAIT
+
+				jsr SKT.OUT.SendFINACK
+
+				lda #S.SOCKET.TCP.S.LASTACK
 				jmp SKT.StoreTCB.S
 
 .8				ldy #S.SOCKET.TCP.O
@@ -267,16 +270,14 @@ TCP.IN.JMP.LASTACK
 				ldy #S.TCP.OPTIONS		only accept ACK packet
 				lda (ZPFrameInPtr),y
 				bit #S.TCP.OPTIONS.ACK
-				beq .8
+				beq TCP.IN.JMP.CLWAIT
+
+				jsr SKT.GetTCB
 
 *				jsr TCP.OUT.SendACK
 
-				ldy #S.SOCKET.TCP.S
-				lda #S.SOCKET.TCP.S.TIMEWT
-				sta (ZPPtrSKT),y
-
-.8				clc
-				rts
+				lda #S.SOCKET.TCP.S.CLWAIT
+				jmp SKT.StoreTCB.S
 *--------------------------------------
 TCP.IN.JMP.FINWT1
 				ldy #S.TCP.OPTIONS		FIN sent, accept ACK or FIN/ACK packet
@@ -323,6 +324,7 @@ TCP.IN.ACKTheSYN
 .3				lda (ZPFrameInPtr),y	Set OUTACK=SEQ+1 for new socket...
 				adc #0
 				sta SKT.Cache+S.SOCKET.TCP.INSEQNUM,x
+				sta SKT.Cache+S.SOCKET.TCP.INACKNUM,x
 				dey
 				dex
 				bpl .3
@@ -332,24 +334,13 @@ TCP.IN.ACKTheSYN
 TCP.IN.ACKTheFIN
 				ldx #3
 
-.1				inc	SKT.Cache+S.SOCKET.TCP.INSEQNUM,x
+.1				inc	SKT.Cache+S.SOCKET.TCP.INACKNUM,x
 				bne .2
 
 				dex
 				bpl .1
 
 .2				rts
-
-
-*				ldx #3
-
-*.3				inc	SKT.Cache+S.SOCKET.TCP.OUTNEXTSEQ,x
-*				bne .4
-
-*				dex
-*				bpl .3
-
-*.4				rts
 *--------------------------------------
 TCP.IN.SetDataInPtrAndLen
 				ldy #S.IP.TOTAL.LENGTH+1
@@ -421,16 +412,24 @@ TCP.SENDCLOSE	ldx #0
 				beq .4
 
 				cmp #S.SOCKET.TCP.S.ESTBLSH
-				bne .2
+				bne .3
 
 				cpx #S.SOCKET.T.SEQPKT
-				beq .8
+				beq .2
 
-				jsr SKT.GetTCB
 				jsr TCP.OUT
 				bra .8
+				
+.2				ldy #S.SOCKET.TCP.O
+				lda (ZPPtrSKT),y
+				and #S.TCP.OPTIONS.ACK
+				beq .8
+				
+				jsr SKT.GetTCB
+				jsr TCP.OUT.SendOpt
+				bra .8
 
-.2				cmp #S.SOCKET.TCP.S.OPENED
+.3				cmp #S.SOCKET.TCP.S.OPENED
 				bne .8
 
 				jsr SKT.GetTCB
@@ -484,17 +483,20 @@ TCP.SENDCLOSE.PIPE
 				.FIN
 .8				rts
 *--------------------------------------
-TCP.OUT			lda SKT.Cache+S.SOCKET.TCP.OUTTOSEND+1
+TCP.OUT			jsr SKT.GetTCB
+
+				lda SKT.Cache+S.SOCKET.TCP.OUTTOSEND+1
 				ldy SKT.Cache+S.SOCKET.TCP.OUTTOSEND
 				bne .1
 
 				tax
 				bne .1
+
 *	Y,A=0 : no data to send
 
 				ldy #S.SOCKET.TCP.O
 				lda (ZPPtrSKT),y
-				bne TCP.OUT.SendOptA	a least an option...
+				bne TCP.OUT.SendOpt		a least an option...
 
 				clc						No data, no flag....exit
 .9				rts
@@ -529,12 +531,27 @@ TCP.OUT.SEQSEND	ldy #S.TCP.WINDOW
 
 				jmp SKT.StoreTCB		exits with CC
 *--------------------------------------
+SKT.OUT.SendFINACK
+				lda #S.TCP.OPTIONS.FIN+S.TCP.OPTIONS.ACK
+				jsr TCP.OUT.SendOptA	Send FIN/ACK
+				bcs .9
+
+				ldx #3
+
+.1				inc	SKT.Cache+S.SOCKET.TCP.OUTNEXTSEQ,x
+				bne .9
+
+				dex
+				bpl .1
+
+.9				rts
+*--------------------------------------
 TCP.OUT.SendACK	lda #S.TCP.OPTIONS.ACK
 
 TCP.OUT.SendOptA
 				jsr TCP.SetSocketTCPO
 
-				>LDYAI 0
+TCP.OUT.SendOpt	>LDYAI 0
 				jsr TCP.NewFrame
 				bcs TCP.OUT.Send.RTS
 
@@ -552,15 +569,22 @@ TCP.OUT.SendOptA
 				ldy #S.SOCKET.TCP.O
 				lda (ZPPtrSKT),y
 
-TCP.OUT.Send	ldy #S.TCP.OPTIONS
+				sec						DONT Queue if fail
+				.HS 90					BCC
+
+TCP.OUT.Send	clc						Queue if fail
+
+				php
+
+				ldy #S.TCP.OPTIONS
 				sta (ZPFrameOutPtr),y
-				bit #S.TCP.OPTIONS.ACK
-				beq .2
+*				bit #S.TCP.OPTIONS.ACK
+*				beq .2
 
 				ldx #3
 				ldy #S.TCP.ACKNUM+3
 
-.1				lda SKT.Cache+S.SOCKET.TCP.INSEQNUM,x
+.1				lda SKT.Cache+S.SOCKET.TCP.INACKNUM,x
 				sta (ZPFrameOutPtr),y
 				dey
 				dex
@@ -575,11 +599,11 @@ TCP.OUT.Send	ldy #S.TCP.OPTIONS
 				dex
 				bpl .3
 
-				clc
-*				sec						DONT Queue if fail
+				plp						Get back Queue status
 
 				jsr FRM.SendIP
 				bcs TCP.OUT.Send.RTS
+
 				ldy #S.SOCKET.TCP.O
 				lda #0
 				sta (ZPPtrSKT),y
@@ -588,8 +612,6 @@ TCP.OUT.Send	ldy #S.TCP.OPTIONS
 TCP.OUT.Send.RTS
 				rts
 *--------------------------------------
-TCP.SetSocketTCPO.ACK
-				lda #S.TCP.OPTIONS.ACK
 TCP.SetSocketTCPO
 				ldy #S.SOCKET.TCP.O
 				ora (ZPPtrSKT),y
