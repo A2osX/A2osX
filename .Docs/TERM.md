@@ -1,6 +1,6 @@
 # A2osX Terminal Codes Guide
 
-### Updated Apr. 15, 2023
+### Updated May. 14, 2023
 
 A2osX terminal capabilities are based off of the standard VT-100 Terminal.  This applies to users connected via Super Serial Cards, Telnet (via TelnetD server daemon) and the Apple console (physical keyboard/screen).  All programs can use this facility to create rich interactive text mode applications.  This includes both programs written in Assembly or Scripts written for the Shell (SH).  The table below lists the codes you can use in your applications and their function.  Consult the A2osX Shell Developers Guide for information on using these codes in scripts.  Note, the Apple Console implementation only supports a subset of the VT-100 codes, these are noted in the last column as OK.
 
@@ -15,6 +15,7 @@ A2osX terminal capabilities are based off of the standard VT-100 Terminal.  This
 |Esc[?7h 	   	|Set auto-wrap mode|DECAWM|OK|  |
 |Esc[?8h 	   	|Set auto-repeat mode|DECARM||  |
 |Esc[?9h 	   	|Set interlacing mode|DECINLM||  |
+|Esc[?25h 	   	|Show cursor| 	DECTCEM  |OK||
 |Esc[20l 	   	|Reset line feed mode|LMN|OK|  |
 |Esc[?1l       	|Reset cursor key to cursor|DECCKM||  |
 |Esc[?2l 	   	|Reset VT52 (versus ANSI) 	|DECANM||  |
@@ -25,6 +26,7 @@ A2osX terminal capabilities are based off of the standard VT-100 Terminal.  This
 |Esc[?7l 	   	|Reset auto-wrap mode| 	DECAWM  |OK||
 |Esc[?8l 	   	|Reset auto-repeat mode| 	DECARM  || |
 |Esc[?9l 	   	|Reset interlacing mode| 	DECINLM  |||
+|Esc[?25l 	   	|Hide cursor| 	DECTCEM  |OK||
 |Esc= 			|Set alternate keypad mode| 	DECKPAM  |||
 |Esc> 			|Set numeric keypad mode| 	DECKPNM  |||
 |Esc(A 			|Set United Kingdom G0 character set| 	setukg0  |OK||

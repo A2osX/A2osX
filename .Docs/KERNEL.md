@@ -1195,16 +1195,6 @@ Specifiers :
 + %L : pull 4 bytes signed DEC -2147483648..2147483647  
 + %s : pull 2 bytes ptr to C-Style String  
 + %S : pull 2 bytes ptr to P-Style String  
-+ \b : Print 'BS' (08)  
-+ \e : Print 'ESC' ($1B,27)  
-+ \f : Print 'FF' ($0C,12)  
-+ \n : Print 'LF' ($0A,10)  
-+ \r : Print 'CR' ($0D,13)  
-+ \t : Print 'TAB' ($09,09)  
-+ \v : Print 'VT' ($0B,11)  
-+ \xHH : Print byte with hexadecimal value HH (1 to 2 digits)  
-+ \\\\ : Print \  
-+ \\% : Print %  
 
 Modifiers for len and padding :  
 + %d	  : '9'  '12'  

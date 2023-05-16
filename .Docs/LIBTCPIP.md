@@ -182,7 +182,7 @@ CS: A = EC
 CC: Y,A = bytes written  
 CS: A = EC  
 
-# RecvFrom (RAW,DGRAM,SEQPKT)  
+# RecvFrom (RAW,DGRAM)  
 
 ## C  
 `hMem recvfrom(hFD fd, struct sockaddr *addr);`  

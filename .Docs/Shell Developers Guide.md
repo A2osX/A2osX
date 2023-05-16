@@ -301,13 +301,15 @@ The **default** commands is used to select the block of commands to execute for 
 
 ### ECHO
 
-	echo [-n] <value>...
+	echo [-e] [-n] <value>...
 
+The **echo** command optional switch **-e** causes **echo** to process escape **\\**  caracters.
 The **echo** command is used to print <values> to an output device, by default the screen.  The **echo** command optional switch **-n** causes **echo** to suppress output of the carriage return that normally occurs.  Technically the format of the **echo** command is **echo [-n] [\<value\> ...]**.  This means that the **echo** command can be followed by the optional switch **-n** and one or more optional \<values\>.  In the case of **echo**, it is these \<values\> that are output by the command.  Here, values are separated by spaces, so you can do ECHO $A HELLO $B and echo will output the value stored in the variable A and then the world HELLO and then the value stored in B.  Please see \<values> for more information on how values are processed, especially in the handling of variables ($VAR) contained in a \<value>.
-
 A word about values, command lines and spaces: **echo Hello World** is not the same as **echo "Hello World"**.  In the first case **echo** treats Hello and World as separate values and in the second, "Hello World" as one value.  Since **echo** takes multiple values, you might not notice the difference, but in the case of **if [ $A = "Hello World" ]** if you omitted the quotes you would get a syntax error because the = operator only accepts one value on each side.  In addition, when not enclosed in quotes, extra spaces are removed so **echo Hello&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;World** would be output as **Hello World** as **echo** would treat Hello and World as values and output value space value. 
 
-In addition to the usual variable substitution that occurs with \<values> (see \<value> above), the **echo** command performs some special character substitutions while sending output to the screen or terminal.  If placed inside a value like a string, **echo** will automatically substitute a backspace for the sequence **\b**, substitute an escape for **\e**, clear the screen for **\f**, send a newline for **\n**, send a \ for **\\\\** and send a % for **\\%**.  The **\e** (escape) code is useful for sending VT100 escape sequences to the screen/terminal (see the VT100 example script).  The **\\\\** and **\\%** are necessary to send those chars to the screen since normally those characters are interpreted as special command line arguments. There is also a special **\xHH** option, that will send explicitly the char represented by the HEX value HH to the output device (screen or file).
+supported escaped chars : **\\a**,**\\b**,**\\e**,**\\f**,**\\n**,**\\r**,**\\t**,**\\v**,**\\\\**,**\\'**,**\\"**,**\\?**
+
+In addition to the usual variable substitution that occurs with \<values> (see \<value> above), the **echo** command performs some special character substitutions while sending output to the screen or terminal.  If placed inside a value like a string, **echo** will automatically substitute a backspace for the sequence **\b**, substitute an escape for **\e**, clear the screen for **\f**, send a newline for **\n**, send a \ for **\\\\** and send a % for **\\%**.  The **\e** (escape) code is useful for sending VT100 escape sequences to the screen/terminal (see the VT100 example script).  The **\\\\** and **\\%** are necessary to send those chars to the screen since normally those characters are interpreted as special command line arguments. There is also special **\xHH** and **\OOO** options, that will send explicitly the char represented by the HEX value HH or OCT value OOO to the output device (screen or file).
 
     #!/bin/sh
 	#
