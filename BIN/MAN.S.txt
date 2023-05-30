@@ -10,13 +10,11 @@ NEW
 				.INB inc/a2osx.i
 				.INB inc/libtui.i
 *--------------------------------------
-TIMEOUT.MAX		.EQ 250					25 sec.
-BUFSIZE			.EQ 4096
-*--------------------------------------
 				.DUMMY
 				.OR ZPBIN
 ZS.START
-hBuf			.BS 1
+hFileBuf		.BS 1
+hLineBuf		.BS 1
 
 TimeOut			.BS 1
 
@@ -24,7 +22,11 @@ hCTX			.BS 1
 hSCR			.BS 1
 hTBOX			.BS 1
 
+BufSize			.BS 2
+ZPLinePtr		.BS 2
 ZPPtr1			.BS 2
+ZPPtr2			.BS 2
+ZPPtr3			.BS 2
 ZS.END			.ED
 *--------------------------------------
 *			File Header (16 Bytes)
@@ -48,6 +50,8 @@ CS.START		cld
 
 L.LIBTUI		.DA LIBTUI
 
+L.ENV.MANPATH	.DA ENV.MANPATH
+L.FILE.INDEX	.DA FILE.INDEX
 L.MSG.ScrTitle	.DA MSG.ScrTitle
 
 L.MSG.USAGE		.DA MSG.USAGE
@@ -73,39 +77,29 @@ CS.RUN.USAGE	>LDYA L.MSG.USAGE
 				sec
 				rts
 *--------------------------------------
-CS.RUN			lda #1
-				>SYSCALL ArgV
-				bcs CS.RUN.USAGE
-
-				phy
-				pha
-
-				>PUSHEA.G NET.HyperLink+1
-
-				pla
-				>PUSHA
-				pla
-				>PUSHA
-				>SYSCALL strcpy
-
-				>LDYAI BUFSIZE
-				>SYSCALL GetMem
-				bcs CS.INIT.RTS
-
-				stx hBuf
-
-				>LDYAI 256
+CS.RUN			>LDYAI 256
 				>SYSCALL GetMem
 				bcs CS.INIT.RTS
 
 				>STYA ZPLinePtr
-				stx hLine
+				stx hLineBuf
+				
+				lda #1
+				>SYSCALL ArgV
+				bcc .1
+				
+				>LDYA L.FILE.INDEX
+
+.1				jsr CS.GetLink
+				bcs CS.RUN.USAGE
+				
+				jsr CS.GetFile
+				bcs CS.INIT.RTS
 
 				jsr CS.Scr.Init
 				bcs CS.INIT.RTS
 *--------------------------------------
-CS.RUN.LOOP0	jsr CS.Scr.SetTitle
-				jsr CS.Scr.SetBuf
+CS.RUN.LOOP0	jsr CS.Scr.SetBuf
 				jsr CS.Scr.SetStatusOkErr
 *--------------------------------------
 CS.RUN.LOOP		>SLEEP 
@@ -123,6 +117,9 @@ CS.RUN.LOOP		>SLEEP
 				cmp #EV.HL.SELECTED
 				bne .1
 
+				>LEA.G LinkBuf
+				jsr CS.GetLink
+				
 				jsr CS.Scr.SetStatusGoto
 				bcc CS.RUN.LOOP
 
@@ -131,11 +128,9 @@ CS.RUN.LOOP		>SLEEP
 .1				cmp #EV.HL.PRESSED
 				bne CS.RUN.LOOP
 				
-				jsr CS.Net.GetHL
+				jsr CS.GetFile
+				jsr CS.Scr.SetStatusOkErr
 				bcc CS.RUN.LOOP0
-
-				tay
-				beq CS.RUN.LOOP
 
 CS.RUN.LOOP.9	rts
 *--------------------------------------
@@ -150,18 +145,30 @@ CS.DOEVENT		lda (pEvent)
 .9				sec						do not discard TIMER event
 				rts
 *--------------------------------------
-CS.QUIT			lda hCTX
+CS.QUIT			lda hLineBuf
+				jsr .7
+				
+				lda hFileBuf
+				jsr .7
+				
+				lda hCTX
 				beq .1
-
+				
 				>LIBCALL hLIBTUI,LIBTUI.Close
 
 .1				lda hLIBTUI
-                beq .8
+                beq .2
 
                 >SYSCALL UnloadLib
 
-.8				clc
+.2				clc
 				rts
+
+.7				beq .8
+
+				>SYSCALL Freemem
+				
+.8				rts
 *--------------------------------------
 CS.Scr.Init		>LIBCALL hLIBTUI,LIBTUI.Init
                 bcs .99
@@ -175,8 +182,8 @@ CS.Scr.Init		>LIBCALL hLIBTUI,LIBTUI.Init
 
                 sta hSCR
 
-				jsr CS.Scr.SetTitle0
-                jsr CS.Scr.SetStatus
+				jsr CS.Scr.SetTitle
+				jsr CS.Scr.SetStatus
 
 				>PUSHB hSCR
                 >PUSHBI 0    			X1
@@ -184,10 +191,10 @@ CS.Scr.Init		>LIBCALL hLIBTUI,LIBTUI.Init
                 >PUSHBI 80    			W
                 >PUSHBI 22    			H
                 >PUSHBI 0				F
-                lda hBuf
+                lda hFileBuf
                 >SYSCALL GetMemPtr
                 >PUSHYA
-                >PUSHWI BUFSIZE
+                >PUSHW BufSize
                 >LIBCALL hLIBTUI,LIBTUI.NewTBox
 .99             bcs .9
 
@@ -198,7 +205,7 @@ CS.Scr.Init		>LIBCALL hLIBTUI,LIBTUI.Init
 
 				>PUSHB hTBOX
                 >PUSHBI S.OBJ.pVar
-                >PUSHEA.G NET.HyperLink
+                >PUSHEA.G LinkBuf
                 >LIBCALL hLIBTUI,LIBTUI.SetProp
 
 .9              rts
@@ -211,17 +218,25 @@ CS.Scr.SetTitle	>PUSHB hSCR
 *--------------------------------------
 CS.Scr.SetBuf	>PUSHB hTBOX
 				>PUSHBI S.OBJ.pBuf
-                lda hBuf
+                lda hFileBuf
 				>SYSCALL GetMemPtr
 				>PUSHYA
                 >LIBCALL hLIBTUI,LIBTUI.SetProp
-				rts
+				bcs .9
+				
+				>PUSHB hTBOX
+				>PUSHBI S.OBJ.BufSize
+				>PUSHW BufSize
+                >LIBCALL hLIBTUI,LIBTUI.SetProp
+				
+.9				rts
 *--------------------------------------
 CS.Scr.SetStatusGoto
 				>PUSHEA.G SCR.StatusBuf	skip type
 				>PUSHW L.MSG.GOTO
-				>PUSHEA.G NET.HyperLink+1
-				>PUSHBI 2
+				>PUSHEA.G PathBuf
+				>PUSHEA.G HtagBuf
+				>PUSHBI 4
 				>SYSCALL SPrintF
 				bra CS.Scr.SetStatus
 *--------------------------------------
@@ -254,33 +269,99 @@ CS.Scr.SetStatus
 				rts
 *--------------------------------------
 * [[text]host:port/path#htag]
+* [#htag]text]
 *--------------------------------------
-CS.GetHLink
+CS.GetLink		>STYA ZPPtr1
 
-CS.SplitLink
+				>LEA.G PathBuf
+				>STYA ZPPtr2
+				
+				>LEA.G HTagBuf
+				>STYA ZPPtr3
+
+				lda #0
+				sta (ZPPtr2)
+				
+				>PUSHW L.ENV.MANPATH
+				>PUSHW ZPPtr2
+				>SYSCALL GetEnv
+				
+				ldy #$ff
+				
+.1				iny
+				lda (ZPPtr2),y
+				bne .1
+				
+.2				jsr CS.GetCharPtr1
+				beq .4
+				
+				cmp #'#'
+				beq .3
+				
+				sta (ZPPtr2),y
+				iny
+				bra .2
+				
+.3				lda #0
+
+.4				sta (ZPPtr2),y
+
+				ldy #$ff
+
+.5				iny
+				jsr CS.GetCharPtr1
+				sta (ZPPtr3),y
+				bne .5
+
+				clc
+
+.9				rts
+*--------------------------------------
+CS.GetCharPtr1	lda (ZPPtr1)
+				beq .8
+				
+				inc ZPPtr1
+				bne .8
+				
+				inc ZPPtr1+1
+				
+.8				rts
+*--------------------------------------
+CS.GetFile		>LEA.G PathBuf
+				>SYSCALL LoadTxtFile
+				bcs .9
+		
+				stx hFileBuf
+				iny
+				bne .1
+				
+				inc
+				
+.1				>STYA BufSize
+
+.9				rts
 *--------------------------------------
 CS.END
 LIBTUI          .AZ "libtui"
 hLIBTUI         .BS 1
-ENV.MANPATH		.AZ "${MANPATH}"
+ENV.MANPATH		.AZ "MANPATH"
+FILE.INDEX		.AZ "index"
 *--------------------------------------
 MSG.ScrTitle	.CZ "A2osX-MAN - <Ctrl-Q>uit"
 *--------------------------------------
 MSG.USAGE		.CS "Usage : MAN <manfile>[#htag]"
 MSG.CRLF		.CS "\r\n"
 MSG.NULL		.HS 00
-MSG.GOTO		.CZ "Goto: %s"
+MSG.GOTO		.CZ "Goto: %s#%s"
 MSG.OK			.CZ "Ok"
 MSG.ERROR		.CZ "Error: $%h"
 *--------------------------------------
 				.DUMMY
 				.OR 0
 DS.START
-TextBuf			.BS 32
-HostBuf			.BS 32
-PortBuf			.BS 2
+LinkBuf			.BS 32
 PathBuf			.BS MLI.MAXPATH+1
-HTagBuf			.BS 80
+HTagBuf			.BS 32
 SCR.StatusBuf	.BS 80
 DS.END			.ED
 *--------------------------------------
