@@ -5,50 +5,40 @@ VolListPtr		.EQ	$65
 *
 SelectedIndex	.EQ	$67					name counter
 filecount 		.EQ	$68					# of displayable files in directory
-FilenameLen		.EQ	$69					length of filename
 
 bInSubDir		.EQ	$6B					directory level
 FilenamePtr		.EQ	$6C					filename storage pointer (16 bit)
-*
-DirEntLen		.EQ	$6E					directory entry length
-DirEntPerBlk	.EQ	$6F					directory entries/block
-FileCntInDir	.EQ	$70					directory file count (16 bit)
-*
-blkfl			.EQ	$72					block flag / file counter
+
 ScrollIndex		.EQ	$73					index # of top name in display
 *--------------------------------------
+SEL1.PathBuf	.EQ $280
+SEL1.BSPathBuf	.EQ $2C0
+*--------------------------------------
 SEL1.FileBuf	.EQ	$1800				1k
-SEL1.DirEntry	.EQ	$1C00				512b
+SEL1.DirBlk		.EQ	$1C00				512b
 SEL1.filetypes	.EQ	$1F00
 SEL1.Filenames	.EQ $2000
 *--------------------------------------
 SEL1.START		cld
 				bit RROMBNK2			read ROM
 
-* Already done before jmp $1000
-*				stz softev
-*				lda #$10				set reset vector to 'dispadr'
-*				sta softev+1
-*				jsr setpwrc				create power-up byte
-
 				lda #$A0
 				jsr $C300			 	initialize 80 column text card
 
 * set up memory bitmap in global page
 
-				ldx #0
-				jsr GP.TOOLBOX			reset MEMTABL
+				ldx #TBX.MemReset
+				jsr GP.TOOLBOX
 
-				lda #$02
-				sta SEL1.SetMarkP		init set mark parms pcount.
+				stz SEL1.BSPathBuf
 *--------------------------------------
 				ldx DEVCNT
-				
+
 .1				lda DEVLST,x
 				and #$F0
 				cmp DEVNUM
 				beq SEL1.GetVol
-				
+
 				dex
 				bra .1
 *--------------------------------------
@@ -57,7 +47,7 @@ SEL1.NextVol	ldx VolListPtr			get device list pointer.
 
 				ldx DEVCNT				get device count.
 				inx
-				
+
 .1				dex
 				lda DEVLST,x			get unit number from list.
 *--------------------------------------
@@ -69,20 +59,18 @@ SEL1.GetVol		stx VolListPtr
 				bcs SEL1.NextVol	  	error check.
 
 				stz bInSubDir		 	haven't read root directory yet.
-				lda pbuf+1				load description byte.
+				lda SEL1.PathBuf+1		load description byte.
 				and #$0F			 	mask for name length.
 				beq SEL1.NextVol	  	if 0, then try next unit.
 
-*				clc
+				tax
+				inx					 	add 2 to length.
+SEL1.OpenDir1	inx		 				name length in x.
 
-				adc #$02			 	add 2 to length.
-				tax		 				name length in x.
-
-SEL1.OpenDir	stx pbuf				save the name length
+SEL1.OpenDir	stx SEL1.PathBuf		save the name length
 				lda #'/'
-				sta pbuf+1			 	slash before and
-				sta pbuf,x			 	after name.
-				stz pbuf+1,x			now "/VOLNAME/0
+				sta SEL1.PathBuf+1		slash before and
+				sta SEL1.PathBuf,x		after name.
 
 				jsr MLI
 			   .DA #MLIOPEN
@@ -94,149 +82,103 @@ SEL1.OpenDir	stx pbuf				save the name length
 
 				jsr bell1			  	no, generate bell tone
 				jsr SEL1.FullPath..		and stay at same level.
-				stx pbuf
-				jmp keyloop
+				stx SEL1.PathBuf
+				jmp SEL1.KeyLoop
 *--------------------------------------
 SEL1.EnumDir	stz filecount			zero file count.
-
-				lda #1					File Ref Num=1
-				sta SEL1.ReadP+1		store in read
-				sta SEL1.SetMarkP+1		and setmark parm lists.
 				
+				jsr SEL1.SetFNPtr
+
 				stz SEL1.ReadP+2
-				lda /SEL1.DirEntry
+				lda /SEL1.DirBlk
 				sta SEL1.ReadP+3
-				
-				lda #$2B			 	set read parm list for
-				sta SEL1.ReadP+4		directory header length.
-				stz SEL1.ReadP+5
 
-				jsr SEL1.ReadEntry		read directory
-				bcs SEL1.CloseDir1
+				stz SEL1.ReadP+4		512 bytes
+				lda #2
+				sta SEL1.ReadP+5
 
-				ldx #$03
-
-.1  			lda SEL1.DirEntry+$23,x	copy directory info
-				sta DirEntLen,x			to zero page.
-				dex
-				bpl .1
-
-				sta SEL1.ReadP+4		put entry length in read parm list.
-				lda #$01			 	set block file counter to 1.
-				sta blkfl
-				stz SEL1.SetMarkP+3		zero out msb's of file position
-				stz SEL1.SetMarkP+4		in setmark parm list.
-
-SEL1.EnumDirNext
-				lda FileCntInDir
-				ora FileCntInDir+1
-				beq SEL1.CloseDir
-
-SEL1.EnumDirNext1
-
-.1  			lda #$01			 	reset lsb
-				trb SEL1.SetMarkP+3
-				ldy blkfl			  	block file counter
-				lda #$00
-				cpy DirEntPerBlk	 	have we read all entries in this block ?
-				bcc .3					if not, continue.
-
-				tay		 				if so, zero y-reg and
-				sty blkfl			  	reset block counter / flag
-				inc SEL1.SetMarkP+3
-
-.2  			inc SEL1.SetMarkP+3
-
-.3  			dey						decrement file block counter
-				clc
-				bmi .4
-
-				adc DirEntLen		 	add entry length to acc.
-				bcc .3				  	determine if we flopped into 2nd half of
-				bcs .2					block, if so inc mid byte position.
-
-.4  			adc #$04				add 4 and put in
-				sta SEL1.SetMarkP+2		low byte of setmark.
-				jsr MLI					call mli
-				.DA #MLISETMARK
-				.DA SEL1.SetMarkP
+SEL1.EnumBlk	jsr MLI
+			   .DA #MLIREAD
+			   .DA SEL1.ReadP
 				bcs SEL1.CloseDir
 
-				jsr SEL1.ReadEntry
-SEL1.CloseDir1	bcs SEL1.CloseDir
+				lda /SEL1.DirBlk
+				ldx #TBX.EnumBlk
+				jsr GP.TOOLBOX
+				bcs SEL1.CloseDir
+				
+SEL1.EnumDirNext
+				jsr SEL1.SetFNPtr		Y,A = FilenamePtr
+				ldx #TBX.EnumNext
+				jsr GP.TOOLBOX
+				bcs SEL1.EnumBlk
 
-				inc blkfl			  	increase count of files read.
-				lda SEL1.DirEntry		file type/length.
-				and #$F0			 	mask off high nibble.
-				beq SEL1.EnumDirNext1
-
-				lda FileCntInDir
-				bne .5
-
-				dec FileCntInDir+1
-
-.5				dec FileCntInDir
-
-				ror SEL1.DirEntry+$1E	check access bit.
-				bcc SEL1.EnumDirNext  	if no read, try next file.
-
-				lda SEL1.DirEntry+$10	get file type.
 				ldx filecount			get valid files read.
+				sta SEL1.filetypes,x
+
+				lda (FilenamePtr)
+				eor #SEL1.BS.L
+				bne .8
+				
+				tay						Y = 0
+				ldx SEL1.PathBuf
+				
+.1				iny
+				lda SEL1.BS-1,y
+				cmp (FilenamePtr),y
+				bne .8
+
 				inx
-				beq SEL1.CloseDir
-
-				stx filecount
-
+				sta SEL1.BSPathBuf,x
+				
+				cpy #SEL1.BS.L
+				bne .1
+				
+				stx SEL1.BSPathBuf
+				
+				ldx SEL1.PathBuf
+				
+.2				lda SEL1.PathBuf,x
+				sta SEL1.BSPathBuf,x
 				dex
+				bne .2
 
-				sta SEL1.filetypes,x	else store filetype in zero page
-				jsr SEL1.SetFNPtrX		and go set up storage area.
-
-				ldy #15
-
-.6  			lda SEL1.DirEntry,y		get byte of filename
-				sta (FilenamePtr),y		store in directed area
-				dey
-				bpl .6
-
-				and #$0F			 	mask off low nibble (name length)
-				sta (FilenamePtr)		restore in name buffer
-				bra SEL1.EnumDirNext
-
-L5E26  			jmp SEL1.NextVol  		error. try next unit.
+.8				inc filecount
+				bne SEL1.EnumDirNext
 *--------------------------------------
 SEL1.CloseDir	jsr MLI					close directory file
 			   .DA #MLICLOSE
 			   .DA SEL1.CloseP
-				bcs L5E26				error.
 
 				jsr settxt			 	use full screen for windows
 				jsr home
 
 				lda #$17			 	cursor at bottom of screen.
 				jsr TABV				set vertical position.
-				
-				lda #$14			 	horizontal position.
-				sta ch
 
-				ldy #0					Footer
-				jsr SET1.MsgOutY
+				ldy #SEL1.RetIcon-SEL1.Strings
+				jsr SEL1.IconOutY
+
+				ldy #SEL1.Footer-SEL1.Strings
+				jsr SEL1.MsgOutY
+
 				lda #$99
 				jsr cout				cursor to upper/left.
 
 				ldx #$00
+				ldy SEL1.PathBuf
 
-.1  			lda pbuf+1,x
-				beq .2
+.1  			lda SEL1.PathBuf+1,x
 
 				jsr SEL1.COut
 				inx
+				dey
 				bne .1
 
 .2		 		stz	SelectedIndex
 				stz ScrollIndex			init top filename index.
 				ldx filecount			# of valid files.
-				beq keyloop			  	if no files.
+				beq SEL1.KeyLoop	  	if no files.
 
 				cpx #21				 	more than what will fit on screen ?
 				bcc .3				  	no.
@@ -245,17 +187,15 @@ SEL1.CloseDir	jsr MLI					close directory file
 
 .3  			lda #2					set window dimensions
 				sta wndtop
-				sta wndlft
 
 				lda #22
-				sta wndwdth
 				sta wndbot
 
 .4  			phx
-				
+
 				jsr SEL1.PrintFN
 				inc SelectedIndex
-				
+
 				plx
 				dex
 				bne .4
@@ -263,7 +203,7 @@ SEL1.CloseDir	jsr MLI					close directory file
 				stz SelectedIndex
 				beq L5EAA			  	if last file, it needs to be inverse.
 *--------------------------------------
-uparrow			jsr	SEL1.PrintFN		print old name in normal.
+SEL1.Up			jsr	SEL1.PrintFN		print old name in normal.
 				ldx SelectedIndex
 				beq L5EAA			 	if already at the top name
 
@@ -274,9 +214,9 @@ uparrow			jsr	SEL1.PrintFN		print old name in normal.
 
 				dec ScrollIndex			fix offset index
 				lda #$16			 	else sroll windows down a line.
-				bne L5EA7			  	branch always.
+				bne SEL1.Scroll		  	branch always.
 *--------------------------------------
-dnarrow			jsr	SEL1.PrintFN		print old name in normal.
+SEL1.Down		jsr	SEL1.PrintFN		print old name in normal.
 				ldx SelectedIndex
 				inx		 				add one.
 				cpx filecount
@@ -290,55 +230,62 @@ dnarrow			jsr	SEL1.PrintFN		print old name in normal.
 				inc ScrollIndex			update offset index
 				lda #$17			 	else scroll up a line.
 
-L5EA7  			jsr cout
+SEL1.Scroll		jsr cout
 
-L5EAA  			jsr setinv			 	set inverse text mode.
-				jsr SEL1.PrintFN		output last filename.
+L5EAA  			jsr SEL1.PrintFNInv		output last filename.
 *--------------------------------------
-keyloop			lda kbd			  		get keyboard input.
-				bpl keyloop			  	loop until key pressed.
+SEL1.KeyLoop	lda kbd			  		get keyboard input.
+				bpl SEL1.KeyLoop	  	loop until key pressed.
 
 				sta KBDSTROBE			clear strobe.
-				jsr setnorm				set normal text mode.
+
 				ldx filecount			are any files displayed ?
-				beq L5ECB			  	no, don't accept arrow keys or return.
+				beq .1				  	no, don't accept arrow keys or return.
 
 				cmp #$8D			 	return ?
-				beq L5EF4			  	then run selected file.
+				beq SEL1.CR			  	then run selected file.
 
 				cmp #$8A			 	down ?
-				beq dnarrow				move down a name.
+				beq SEL1.Down
 
 				cmp #$8B			 	up ?
-				beq uparrow				move up a name.
+				beq SEL1.Up
 
-L5ECB  			cmp #$89			 	tab ?
+.1	  			cmp #$89			 	tab ?
 				beq L5EED			  	new volume.
 
 				cmp #$9B			 	esc ?
-				bne keyloop			  	no, try again else pop up a directory.
+				bne SEL1.KeyLoop	  	no, try again else pop up a directory.
 
 				jsr SEL1.FullPath..		CD ..
 				jmp SEL1.OpenDir
 *--------------------------------------
 L5EED  			jmp SEL1.NextVol		set up new unit number.
 *--------------------------------------
-L5EF4  			ldy SelectedIndex
+SEL1.CR			ldy SelectedIndex
 				lda	SEL1.filetypes,y	get file type.
+
+				jsr SEL1.CheckType
+				bmi SEL1.KeyLoop
+
 				cmp #S.FI.T.DIR
-				bne .1				  	branch if directory.
+				bne .1
 
 				jsr SEL1.SetFullPath
 				bcs L5EED
-				
-				inx
 
-				jmp SEL1.OpenDir	  	get new directory info.
+				jmp SEL1.OpenDir1
 
 .1				cmp #S.FI.T.SYS
-				bne keyloop
+				beq .3
 
-				jsr SEL1.SetFullPath
+				lda SEL1.BSPathBuf
+				beq SEL1.KeyLoop
+
+				lda #SEL1.BSPathBuf
+				sta SEL1.OpenP+1		open & read BASIC.SYSTEM
+
+.3				jsr SEL1.SetFullPath
 				bcs L5EED
 
 				jsr MLI					open file
@@ -346,15 +293,15 @@ L5EF4  			ldy SelectedIndex
 			   .DA SEL1.OpenP
 				bcs L5EED
 
-				lda SEL1.OpenP+5		move reference number
-				sta SEL1.ReadP+1		for read.
-
 				lda #$20
 				sta SEL1.ReadP+3		read at $2000
 
-				dec SEL1.ReadP+5		was $002B, now $FF2B
+				lda #$9f
+				sta SEL1.ReadP+5		max $9F00
 
-				jsr SEL1.Read		 	read selected file.
+				jsr MLI
+			   .DA #MLIREAD
+			   .DA SEL1.ReadP
 				php		 				save possible error.
 				jsr MLI					close file. ignore any error from close
 			   .DA #MLICLOSE
@@ -362,23 +309,29 @@ L5EF4  			ldy SelectedIndex
 				plp		 				restore status from read.
 				bcs L5EED			  	if any errors.
 
-				jsr settxt			 	reset to full window.
+				bit SEL1.OpenP+1
+				bvc .8
+
+				ldx SEL1.PathBuf
+				
+.7				lda SEL1.PathBuf,x
+				sta $2006,x
+				dex
+				bpl .7
+
+.8				jsr settxt			 	reset to full window.
 				jsr home			 	makes for no flash.
 				lda #$95			 	ctrl-u
 				jsr cout			 	turn off 80 columns.
 
 				jmp $2000				execute selected system file.
 *--------------------------------------
-SET1.MsgOutY	lda SEL1.Footer,y
-				beq .8
+SEL1.PrintFN	lda #$0E
+				.HS 2C					BIT ABS
+SEL1.PrintFNInv	lda #$0F
+				pha
 
-				jsr cout
-				iny
-				bne SET1.MsgOutY
-
-.8  			rts
-*--------------------------------------
-SEL1.PrintFN	ldx SelectedIndex
+				ldx SelectedIndex
 				txa
 				sec
 				sbc ScrollIndex			calculate line # to display name
@@ -386,49 +339,43 @@ SEL1.PrintFN	ldx SelectedIndex
 				inc
 				jsr TABV				set vertical position.
 
-				lda SEL1.filetypes,x	get filetype (x is unchanged by tabv).
-				cmp #S.FI.T.DIR
-				bne .1				  	branch if not a DIR
-
-				stz ch80col				adjust cursor position.
-				lda invflg				Save current inverse setting
-				pha
-				ldy #SEL1.DirIcon-SEL1.Footer
-				jsr SET1.MsgOutY	 	display the folder.
-				pla		 				restore inverse setting.
-				sta invflg
-
-.1  			lda #$03
+				lda #$01
 				sta ch80col
-				
+
+				lda SEL1.filetypes,x	get filetype (x is unchanged by tabv).
+				jsr SEL1.CheckType
+				bmi .1
+
+				lda SEL1.ValidIcons,y
+				tay
+				jsr SEL1.IconOutY
+
+.1  			jsr SEL1.SetFNPtrX		calc name location.
+
+				lda #$05
+				sta ch80col
+
+				pla						normal / inverse
+				jsr cout
+
 				jsr SEL1.SPOut			output a space.
-				jsr SEL1.SetFNPtrX		calc name location.
 
 				ldy #0
 
 .2  			iny
 				lda (FilenamePtr),y		get name character.
 				jsr SEL1.COut		 	put on screen.
-				cpy FilenameLen			end of name ?
+				tya
+				cmp (FilenamePtr)		end of name ?
 				bcc .2				  	no.
 
-SEL1.SPOut		lda #' '				SPACE
-
-SEL1.COut		ora #$80			 	set high bit.
-				jmp cout			 	output to screen.
-
-SEL1.ReadEntry	jsr SEL1.Read
-				bcs SEL1.Read.RTS
-
-				ldy #SEL1.DirEntry
-				lda /SEL1.DirEntry
-				ldx #2
-				jmp GP.TOOLBOX
-*--------------------------------------
-SEL1.Read		jsr MLI					mli read call
-			   .DA #MLIREAD
-			   .DA SEL1.ReadP
-SEL1.Read.RTS	rts
+*.3				jsr SEL1.SPOut
+*				iny
+*				cpy #16
+*				bne .3
+				
+				jsr SEL1.SPOut
+				jmp setnorm				set normal text mode.
 *--------------------------------------
 SEL1.SetFullPath
 				jsr MLI
@@ -437,101 +384,159 @@ SEL1.SetFullPath
 				bcs .9
 
 				ldx SelectedIndex
-				jsr SEL1.SetFNPtrX		set up name storage area (on return y=0)
+				jsr SEL1.SetFNPtrX
 
-				ldx pbuf			 	get prefix length.
+				ldx SEL1.PathBuf	 	get prefix length.
 				ldy #0
 
 .1  			iny		 				start at y = 1.
 				lda (FilenamePtr),y		get character of name.
 				inx
-				sta pbuf,x			 	store in prefix buffer.
-				cpy FilenameLen			check length of name.
-				bcc .1				  	loop until all transferred.
+				sta SEL1.PathBuf,x		store in prefix buffer.
+				tya
+				eor (FilenamePtr)		check length of name.
+				bne .1				  	loop until all transferred.
 
-				stx pbuf			 	put prefix length into buffer.
+				stx SEL1.PathBuf	 	put prefix length into buffer.
 
 				inc bInSubDir
-				
-				clc
+
+*				clc
 
 .9				rts
 *--------------------------------------
-SEL1.FullPath..	ldx pbuf
+SEL1.FullPath..	ldx SEL1.PathBuf
 
 .1  			dex
-				lda pbuf,x
+				lda SEL1.PathBuf,x
 				cmp #'/'
 				bne .1
 
 				cpx #$01
 				bne .9
 
-				ldx pbuf
+				ldx SEL1.PathBuf
 
 .9  			dec bInSubDir
 
 				rts
 *--------------------------------------
+SEL1.SetFNPtr	ldx filecount
+				
 SEL1.SetFNPtrX	lda /SEL1.Filenames/16
 				sta FilenamePtr+1
 				txa
-				
+
 				ldx #4
 
 .1				asl
 				rol FilenamePtr+1
 				dex
 				bne .1
-				
+
 				sta FilenamePtr
+				tay
+				lda FilenamePtr+1
 				
-				lda (FilenamePtr)
-				sta FilenameLen
 				rts
+*--------------------------------------
+SEL1.CheckType	ldy #SEL1.ValidTypes.L-1
+
+.1				cmp SEL1.ValidTypes,y
+				beq .8
+
+				dey
+				bpl .1
+
+.8				rts
+*--------------------------------------
+SEL1.IconOutY	phx
+
+				ldx #0
+
+.1				lda SEL1.MouseText,x
+
+				jsr cout
+				inx
+				cpx #2
+				bne .2
+
+				jsr SEL1.MsgOutY
+
+.2				cpx #4
+				bcc .1
+
+				plx
+				rts
+*--------------------------------------
+SEL1.MsgOutY	lda SEL1.Strings,y
+				php
+				jsr SEL1.COut
+				iny
+				plp
+				bpl SEL1.MsgOutY
+
+.8  			rts
+*--------------------------------------
+SEL1.SPOut		lda #' '				SPACE
+
+SEL1.COut		ora #$80			 	set high bit.
+				jmp cout			 	output to screen.
 *--------------------------------------
 * data area
 *--------------------------------------
-SEL1.Footer		.AS -"RETURN:Select,TAB:Chg Vol,ESC:Back"
-				.HS 00
-
-SEL1.DirIcon	.HS 0F					inverse control code
-				.HS 1B			 		enable mousetext
-				.AS -"XY"				folder characters
-				.HS 18			  		disable mousetext
-				.HS 0E			  		normal control code
-				.HS 00
+SEL1.BS			.AS	"BASIC.SYSTEM"
+SEL1.BS.L		.EQ *-SEL1.BS
+*--------------------------------------
+SEL1.ValidTypes	.DA #S.FI.T.DIR
+				.DA #S.FI.T.SYS
+				.DA #S.FI.T.BIN
+				.DA #S.FI.T.BAS
+SEL1.ValidTypes.L	.EQ *-SEL1.ValidTypes
+*--------------------------------------
+SEL1.ValidIcons	.DA #SEL1.DirIcon-SEL1.Strings
+				.DA #SEL1.SysIcon-SEL1.Strings
+				.DA #SEL1.BinIcon-SEL1.Strings
+				.DA #SEL1.BasIcon-SEL1.Strings
+*--------------------------------------
+SEL1.MouseText 	.HS 0F1B
+				.HS 180E
+*--------------------------------------
+SEL1.Strings
+*--------------------------------------
+SEL1.Footer		.AT ":Select,TAB:Chg Vol,ESC:Back"
+SEL1.DirIcon	.AT "XY"				"XYI"
+SEL1.SysIcon	.AT "Z\^_"
+SEL1.BinIcon	.AT "Z\\_"
+SEL1.BasIcon	.AT "ZVW_"
+SEL1.RetIcon	.AT "M"
 *--------------------------------------
 SEL1.OpenP		.DA #3				  	Param Count
-				.DA pbuf				pathname
+				.DA SEL1.PathBuf		pathname
 				.DA SEL1.FileBuf		file buffer
 				.HS 01					reference number
 *--------------------------------------
 SEL1.CloseP		.DA #1			  		Param Count
-				.HS 01					reference number.
+				.HS 01					reference number
 *--------------------------------------
 SEL1.OnLineP	.DA #2					Param Count
 				.HS 60					unit number, default = s6, d1
-				.DA pbuf+1				data buffer
+				.DA SEL1.PathBuf+1		data buffer
 *--------------------------------------
 SEL1.SetPrefixP	.DA #1		  			Param Count
-				.DA pbuf				pathname
+				.DA SEL1.PathBuf		pathname
 *--------------------------------------
 SEL1.ReadP 		.DA #4			  		Param Count
+				.HS 01					reference number
 *--------------------------------------
 				.LIST ON
 SEL1.LEN		.EQ *-SEL1.START
 				.LIST OFF
 *--------------------------------------
 				.DUMMY
-				.BS 1					RefNum
 				.BS 2					MemPtr
 				.BS 2					requested length
-				.BS 2					actual length
-
-SEL1.SetMarkP 	.BS 1					Param Count
-				.BS 1					RefNum
-				.BS 3					FPos
+				.BS 2					read length
 				.ED
 *--------------------------------------
 MAN

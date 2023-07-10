@@ -1,160 +1,6 @@
 NEW
   AUTO 3,1
 *--------------------------------------
-XDOS.Destroy	jsr XDOS.FindFile		look for file to be destroyed.
-				bcs L4B66			  	if error.
-
-				jsr tstopen				is it open ?
-				lda totent
-				bne L4B64			  	error if open.
-
-				stz reql			 	force proper free count in volume.
-				stz reqh			 	(no disk access occurs if already
-				jsr tstfrblk			proper)
-				bcc L4B39				no errors.
-
-				cmp #MLI.E.VOLFULL	 	was error a full disk ?
-				bne L4B66			  	no, report error.
-
-L4B39  			lda d_attr			 	make sure ok to destroy file.
-*				and #$80
-*				bne L4B45			  	branch if ok to destroy.
-				bmi L4B45			  	branch if ok to destroy.
-
-				lda #MLI.E.LOCKED	 	access error
-				jsr GP.P8errv
-
-L4B45  			lda DEVNUM			 	last device used.
-				jsr twrprot1			test for write protected hardware
-				bcs L4B66			  	before going thru deallocation.
-
-				lda d_frst			 	'detree' needs first block address
-				sta firstbl
-				lda d_frst+1
-				sta firstbh
-				lda d_stor			 	find out which storage type.
-				and #$F0			 	strip off name length.
-				cmp #$40			 	is it a seed, sapling or tree ?
-				bcc L4B68			  	branch if it is.
-				bra L4BCF			  	otherwise, test for directory destroy.
-
-L4B64  			lda #MLI.E.OPEN			file busy error.
-L4B66  			sec		 				can't be destroyed
-				rts
-
-L4B68  			sta stortyp				destroy a tree file. save storage type.
-
-				ldx #$05
-
-*				lda #$00			 	set 'detree' input variables, must be
-
-L4B6F  			stz stortyp,x		   	in order: deblock, dtree, dsap, dseed.
-				dex
-				bne L4B6F			  	loop until all zero'd.
-
-				lda #$02			 	this avoids an extra file i/o and pre-
-				sta dseed+1				vents destruction of any deleted data.
-				inc delflag				don't allow detree to zero index blocks.
-				jsr detree				make trees and saplings into seeds.
-				dec delflag				reset flag.
-				bcs L4B93			  	(de-evolution)
-
-L4B85  			ldx firstbh
-				lda firstbl				now deallocate seed.
-				jsr XDOS.DeallocAX
-				bcs L4B93
-
-				jsr upbmap
-
-L4B93  			pha		 				save possible error code.
-				lda #$00			 	update directory to free entry space.
-				sta d_stor
-				cmp h_fcnt			 	file entry wrap ?
-				bne L4BA1			 	branch if no carry adjustment.
-
-				dec h_fcnt+1			take carry from hi byte of file entries.
-
-L4BA1  			dec h_fcnt				mark header with one less file.
-				jsr dvcbrev				go update block count in vcb (ignore
-				jsr drevise				error, if any) and update dir last.
-				tax		 				save possible new error code,
-				pla		 				restore possible old error code.
-				bcc L4BAF			  	branch if last call succeeded.
-				txa		 				last call failed, use it's error code.
-
-L4BAF  			cmp #$01			 	adjust carry accordingly
-				rts
-
-dvcbrev			ldx vcbptr			 	update block free count in vcb. point to vcb of correct device.
-				lda deblock				get # of blocks recently freed.
-				adc VCBs+VCB.FBLK,x
-				sta VCBs+VCB.FBLK,x			update current free block count.
-				lda deblock+1
-				adc VCBs+VCB.FBLK+1,x
-				sta VCBs+VCB.FBLK+1,x
-
-				stz VCBs+VCB.BMAPIDX,x			force re-scan from 1st bitmap
-			
-*			lda #0						?????
-
-				rts
-
-L4BCD  			bcc L4B85			  	branch widened (always taken)
-
-L4BCF  			cmp #$D0			 	is this a directory file ?
-				bne L4C1B			  	no, file incompatible.
-
-				jsr fndbmap				make sure a buffer available for bitmap
-				bcs L4C1A			  	if error.
-
-				jsr XDOS.ReadGBuf_d_frst	read 1st block of directory into gbuf
-				bcs L4C1A
-
-				lda gbuf+37				do any files exist in this directory ?
-				ora gbuf+38
-				bne L4C1Abis			if so, access error.
-
-L4BF6  			sta gbuf+4			 	make it an invalid subdirectory
-				.DO LOWERCASE=1
-				jsr XDOS.WriteGBufDir
-				.ELSE
-				jsr XDOS.WriteGBuf
-				.FIN
-				bcs L4C1A
-
-L4BFE  			lda gbuf+2			 	get forward link.
-				cmp #$01			 	test for null block into carry.
-				ldx gbuf+3				get the rest of the block address.
-				bne L4C0A			  	branch if not null.
-				bcc L4BCD			  	was the low part null as well ?
-
-L4C0A  			jsr XDOS.DeallocAX		free this block.
-				bcs L4C1A
-
-				lda gbuf+2
-				ldx gbuf+3
-				jsr XDOS.ReadGBufAX		read next DIR block (no need to unpack)
-				bcc L4BFE			  	loop until all freed
-
-L4C1A  			rts
-
-L4C1Abis		lda #MLI.E.LOCKED	 	access error.
-				.HS 2C					BIT ABS
-L4C1B  			lda #MLI.E.INCFF	 	file incompatible
-				jsr GP.P8errv
-
-fcbused			pha		 				mark fcb as dirty so the directory will be flushed on 'flush'.
-				tya		 				save regs.
-				pha
-				ldy fcbptr
-
-				lda #$80			 	mark fcb as dirty.
-				sta FCBs+FCB.DIRTY,y	save it back
-				pla		 				and restore regs.
-				tay
-				pla
-				rts
-*--------------------------------------
 * 'detree' deallocates blocks from tree files. it is assumed that the device has
 * been pre-selected and the 'gbuf' may be used.
 *
@@ -193,7 +39,7 @@ detree			lda stortyp				which kind of tree ?
 
 L4C46  			lda dsap
 				ora dtree
-				bne L4CC2	
+				bne L4CC2
 
 				jmp seedel0
 
@@ -366,8 +212,7 @@ drdfrst			lda firstbl				read specified 1st block into gbuf
 * locations 46 and 47 which are used to point to the current index block.
 
 shrink			ldx firstbh				first deallocate top index block
-				txa
-				pha
+				phx
 				lda firstbl
 				pha		 				save block address of this index block.
 				jsr XDOS.DeallocAX		free it from the bitmap
@@ -408,12 +253,13 @@ L4DA5  			jsr XDOS.DeallocAX		free it up on volume bitmap.
 
 				ldy saptr			  	get index to sapling level index block.
 
-				jsr swapme			 
+				jsr swapme
 
 L4DB0  			iny		 				next block address.
 				bne L4D96			  	if more to deallocate or test.
 
 				clc		 				no error.
+
 L4DB4  			tax		 				save error code, if any.
 				pla		 				restore blocknm (16 bit)
 				sta bloknml+1
@@ -434,11 +280,11 @@ L4DCB  			sta gbuf+$100,y		   	save index high
 				txa
 				sta gbuf,y			 	save index low
 				rts						done.
-
+*--------------------------------------
 * MEMMGR memory manager
 *
 * allocate buffer in memory tables
-
+*--------------------------------------
 alcbuffr 		ldy #$04				index to user specified buffer.
 alcbufr1 		lda (A3L),y				this buffer must be on a page boundary.
 				tax		 				save for validation.
@@ -591,17 +437,17 @@ XDOS.SetBuf		ldy #$03
 
 				ldy #$00
 				ldx #$03
-				
-L4EB8  			lda (usrbuf),y			move all 4 pages of the buffer to
+
+.1  			lda (usrbuf),y			move all 4 pages of the buffer to
 				sta (datptr),y			new location.
 				iny
-				bne L4EB8
+				bne .1
 
 				inc datptr+1
 				inc usrbuf+1
 				dex
-				bpl L4EB8
-XDOS.SetBuf.CLCRTS			
+				bpl .1
+XDOS.SetBuf.CLCRTS
 				clc		 				no errors
 L4EC7  			rts
 *--------------------------------------
@@ -627,8 +473,8 @@ XDOS.IsValidFirstChar
 				cmp #'z'+1
 				.FIN
 XDOS.IsValidFirstChar.RTS
-				rts				
-		
+				rts
+
 XDOS.IsValidFirstChar.SEC
 				sec
 				rts
@@ -654,7 +500,7 @@ calldisp 		lda RRAMWRAMBNK2		read/write RAM bank 2
 				sta (A2L),y
 				iny
 				bne .1
-				
+
 				inc	A1L+1			  	pointers to next page
 				inc	A2L+1
 				dex		 				move all pages needed
@@ -664,8 +510,8 @@ calldisp 		lda RRAMWRAMBNK2		read/write RAM bank 2
 				lda RRAMWRAMBNK1		swap mli space back in
 
 				stz mliact			 	MLI active flag
-				
-				stz softev			 
+
+				stz softev
 				lda #$10				point RESET to dispatch entry
 				sta softev+1
 				eor #$A5
@@ -700,7 +546,7 @@ XDOS.SPREMAP	ldx #$03				assume 3 parameters.
 
 				lda XDOS.SPUnit-1,x		get the smartport unit number and
 				sta XDOS.SPParams.U		store into smartport parm list.
-				lda XDOS.SPVectLo-1,x	
+				lda XDOS.SPVectLo-1,x
 				sta sp_vector+1			copy smartport entry address
 				lda XDOS.SPVectHi-1,x
 				sta sp_vector+2
@@ -742,14 +588,13 @@ XDOS.SPParams.U	.HS 00			  		unit number
 XDOS.SPParams.B	.HS 0000				data buffer
 				.HS 000000				block number (3 bytes)
 *--------------------------------------
-XDOS.TOOLBOX	jmp (.1,x)
+XDOS.TBX		jmp (.1,x)
 
-.1				.DA XDOS.TOOLBOX.MEMRESET
-				.DA XDOS.TOOLBOX.UnpackYA
-				.DA XDOS.TOOLBOX.EnumBlk
-				.DA XDOS.TOOLBOX.EnumNext
-
-XDOS.TOOLBOX.MEMRESET
+.1				.DA XDOS.TBX.MemReset
+				.DA XDOS.TBX.EnumBlk
+				.DA XDOS.TBX.EnumNext
+*--------------------------------------
+XDOS.TBX.MemReset
 				ldx #$17
 
 .1  			stz MEMTABL,x			P8 memory bitmap
@@ -760,81 +605,149 @@ XDOS.TOOLBOX.MEMRESET
 				lda #$CF				protect zero page, stack and page 1
 				sta MEMTABL
 				rts
-
-XDOS.TOOLBOX.UnpackYA
-				sty zpt
-				sta zpt+1
-				
-				ldx #1
-				jmp XDOS.UnpackZPT
-				
-XDOS.TOOLBOX.EnumBlk
+*--------------------------------------
+XDOS.TBX.EnumBlk
 				jsr XDOS.ZPT.InitA
-				
+
+				ldx h_maxent
+
 				lda (zpt)
-				and #$F0
 				cmp #$E0
-				bcs .8
-				
-				ldy #$1F
+				bcc .2
+
+				ldy #$1F+3
 				ldx #3
-				
+
 .1				lda (zpt),y
 				sta h_entln,x
 				dey
 				dex
 				bpl .1
-				
-				jsr XDOS.ZPT.Next
 
-				lda h_maxent
-				dec						skip header
-				sta cntent
-				
-*				ldy h_fcnt
-*				lda h_fcnt+1
-				
-.8				clc
+				jsr XDOS.ZPT.Next		skip header
+
+				ldx h_maxent
+				dex						skip header
+
+.2				stx cntent
+
+XDOS.TBX.CheckFCnt
+				lda h_fcnt
+				ora h_fcnt+1
+				beq XDOS.TBX.SECRTS
+*				clc
 				rts
-				
-XDOS.TOOLBOX.EnumNext
+*--------------------------------------
+XDOS.TBX.EnumNext
 				sty	sos
 				sta sos+1
-
-				lda cntent
-				beq .9
 				
-.1				lda (zpt)
+				jsr XDOS.TBX.CheckFCnt
+				bcs .9
+
+.1				dec cntent
+				bmi XDOS.TBX.SECRTS
+
+				lda (zpt)
 				and #$0F
 				beq .7
 
 				sta (sos)
-				
+
 				pha
-				
-				ldx #1
-				jsr XDOS.UnpackZPT
-				
+
+				jsr XDOS.ZPT.Unpack
+
 				ply
-				
+
 .2				lda (zpt),y
 				sta (sos),y
 				dey
 				bne .2
-				
+
 				ldy #16					FileType
 				lda (zpt),y
+
+				pha
+				jsr XDOS.ZPT.Next
 				
-				clc
-				rts
+				lda h_fcnt+1
+				bne .3
 				
+				dec h_fcnt+1
+
+.3				dec h_fcnt				
+				
+				pla
+*				clc
+.9				rts
+
 .7				jsr XDOS.ZPT.Next
-				
-				dec cntent
-				bne .1
-				
-.9				sec
-				rts				
+				bra .1
+*--------------------------------------
+XDOS.TBX.SECRTS	sec
+				rts
+*--------------------------------------				
+XDOS.ZPT.InitGBuf
+				lda /gbuf
+
+XDOS.ZPT.InitA	sta zpt+1
+				lda #4
+				sta zpt
+
+				rts
+*--------------------------------------
+XDOS.ZPT.Unpack	ldy #$1D				MIN_VERSION
+				lda (zpt),y
+				bpl .6					no lowercase information
+
+				lda (zpt)
+				and #$0F
+				beq .6					length=0
+
+				tay
+
+.2				cpy #8					CS if MIN_VERSION to use
+				phy
+
+				bcs .3
+
+				ldy #$1D				MIN_VERSION
+				lda (zpt),y
+
+				ply
+				and whichbit,y
+				beq .5
+
+				bra .4
+
+.3				ldy #$1C				VERSION
+				lda (zpt),y
+
+				ply
+				and whichbit-8,y
+				beq .5
+
+.4				lda (zpt),y
+				eor #$20				to lowercase
+				sta (zpt),y
+
+.5				dey
+				bne .2
+
+.6				rts
+*--------------------------------------
+XDOS.ZPT.Next	lda h_entln
+
+XDOS.ZPT.NextA	clc
+				adc zpt
+				sta zpt
+				bcc .8
+
+				inc zpt+1
+				clc
+
+.8				rts
 *--------------------------------------
 * data tables
 *--------------------------------------
@@ -853,7 +766,7 @@ XDOS.ParamCnt	.HS 02020202			parameter counts for the calls
 				.HS 070102070A0201010303040401010202
 				.HS FF
 				.HS 020202
-				
+
 XDOS.CmdFlags	.HS A0A1A2
 				.HS A384
 				.HS 050607
@@ -924,12 +837,9 @@ h_credt			.HS 0000				directory creation date
 				.HS 00			 	 	version under which this dir created
 				.HS 00			 	 	earliest version that it's compatible
 h_attr			.HS 00				 	attributes (protect bit, etc.)
-
-*--------------------------------------
 h_entln			.HS 00				 	length of each entry in this directory
 h_maxent 		.HS 00				 	maximum number of entries per block
 h_fcnt			.HS 0000			 	current # of files in this directory
-*--------------------------------------
 h_bmap			.HS 0000			 	address of first allocation bitmap
 h_tblk			.HS 0000			 	total number of blocks on this unit
 *--------------------------------------
@@ -937,7 +847,6 @@ d_dev			.HS 00				 	device number of this directory entry
 d_head			.HS 0000			 	address of <sub> directory header
 d_entblk 		.HS 0000				address of block which contains entry
 d_entnum 		.HS 00				 	entry number within block
-*--------------------------------------
 d_stor			.BS 16				  	file name
 d_filid			.HS 00				 	user's identification byte
 d_frst			.HS 0000			 	first block of file
@@ -960,7 +869,7 @@ xvcbptr			.HS 00				 	used in 'cmpvcb' as a temp
 vcbptr			.HS 00
 fcbptr			.HS 00
 fcbflg			.HS 00
-reql			.HS 00			  
+reql			.HS 00
 reqh			.HS 00
 levels			.HS 00
 totent			.HS 00
@@ -968,7 +877,7 @@ entcntl			.HS 00
 entcnth			.HS 00
 cntent			.HS 00
 nofree			.HS 00
-bmcnt			.HS 00			  
+bmcnt			.HS 00
 saptr			.HS 00
 pathcnt			.HS 00
 p_dev			.HS 00
@@ -1021,7 +930,7 @@ dealbufl 		.HS 0000000000000000
 dealbufh 		.HS 0000000000000000
 cbytes			.HS 0000
 				.HS 00					cbytes+2 must = 0
-bufaddrl		.HS 00			  
+bufaddrl		.HS 00
 bufaddrh 		.HS 00
 delflag			.HS 00			  		used by 'detree' to know if called from delete (destroy).
 *--------------------------------------
@@ -1029,7 +938,7 @@ delflag			.HS 00			  		used by 'detree' to know if called from delete (destroy).
 *--------------------------------------
 XRW.D2Trk		.EQ *
 XDOS.SPUnit		.HS 00000000000000		14+1 for S0D2
-				.HS	00					
+				.HS	00
 				.HS 00000000000000
 
 XRW.D2VolNum	.EQ *
@@ -1041,20 +950,20 @@ XRW.D2SeekTime	.EQ *
 XDOS.SPVectHi	.HS 00000000000000  	storage for high byte of smartport entry.
 				.HS 00
 				.HS 00000000000000
-				
+
 XDOS.SPStatus	.HS 00000000
 
 				.LIST ON
 XDOS.DATA.LEN	.EQ *-XDOS.DATA
 				.LIST OFF
 				.ED
-*--------------------------------------			
+*--------------------------------------
 * zero fill to page boundary - 3 ($FEFD). so that cortland flag stays within page boundary.
 				.LIST ON
 XDOS.FREE	.EQ $FEFD-*-XDOS.DATA.LEN	(2.0.3 = $0C)
 				.LIST OFF
-cortdisp		.EQ $FEFD				
-cortflag 		.EQ $FEFF			  		cortland flag. 1 = Cortland system (must stay within page boundary)			
+cortdisp		.EQ $FEFD
+cortflag 		.EQ $FEFF			  		cortland flag. 1 = Cortland system (must stay within page boundary)
 *--------------------------------------
 XDOS.LEN		.EQ *-XDOS
 MAN

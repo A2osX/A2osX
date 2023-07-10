@@ -844,6 +844,160 @@ L4ABE  			lda pathbuf,y			move local name to dir entry workspace.
 
 L4AF0  			jmp drevise1			end by updating all path directories.
 *--------------------------------------
+XDOS.Destroy	jsr XDOS.FindFile		look for file to be destroyed.
+				bcs L4B66			  	if error.
+
+				jsr tstopen				is it open ?
+				lda totent
+				bne L4B64			  	error if open.
+
+				stz reql			 	force proper free count in volume.
+				stz reqh			 	(no disk access occurs if already
+				jsr tstfrblk			proper)
+				bcc L4B39				no errors.
+
+				cmp #MLI.E.VOLFULL	 	was error a full disk ?
+				bne L4B66			  	no, report error.
+
+L4B39  			lda d_attr			 	make sure ok to destroy file.
+*				and #$80
+*				bne L4B45
+				bmi L4B45
+
+				lda #MLI.E.LOCKED	 	access error
+				jsr GP.P8errv
+
+L4B45  			lda DEVNUM			 	last device used.
+				jsr twrprot1			test for write protected hardware
+				bcs L4B66			  	before going thru deallocation.
+
+				lda d_frst			 	'detree' needs first block address
+				sta firstbl
+				lda d_frst+1
+				sta firstbh
+				lda d_stor			 	find out which storage type.
+				and #$F0			 	strip off name length.
+				cmp #$40			 	is it a seed, sapling or tree ?
+				bcc L4B68			  	branch if it is.
+				bra L4BCF			  	otherwise, test for directory destroy.
+
+L4B64  			lda #MLI.E.OPEN			file busy error.
+L4B66  			sec		 				can't be destroyed
+				rts
+
+L4B68  			sta stortyp				destroy a tree file. save storage type.
+
+				ldx #$05
+
+*				lda #$00			 	set 'detree' input variables, must be
+
+L4B6F  			stz stortyp,x		   	in order: deblock, dtree, dsap, dseed.
+				dex
+				bne L4B6F			  	loop until all zero'd.
+
+				lda #$02			 	this avoids an extra file i/o and pre-
+				sta dseed+1				vents destruction of any deleted data.
+				inc delflag				don't allow detree to zero index blocks.
+				jsr detree				make trees and saplings into seeds.
+				dec delflag				reset flag.
+				bcs L4B93			  	(de-evolution)
+
+L4B85  			ldx firstbh
+				lda firstbl				now deallocate seed.
+				jsr XDOS.DeallocAX
+				bcs L4B93
+
+				jsr upbmap
+
+L4B93  			pha		 				save possible error code.
+				lda #$00			 	update directory to free entry space.
+				sta d_stor
+				cmp h_fcnt			 	file entry wrap ?
+				bne L4BA1			 	branch if no carry adjustment.
+
+				dec h_fcnt+1			take carry from hi byte of file entries.
+
+L4BA1  			dec h_fcnt				mark header with one less file.
+				jsr dvcbrev				go update block count in vcb (ignore
+				jsr drevise				error, if any) and update dir last.
+				tax		 				save possible new error code,
+				pla		 				restore possible old error code.
+				bcc L4BAF			  	branch if last call succeeded.
+				txa		 				last call failed, use it's error code.
+
+L4BAF  			cmp #$01			 	adjust carry accordingly
+				rts
+
+dvcbrev			ldx vcbptr			 	update block free count in vcb. point to vcb of correct device.
+				lda deblock				get # of blocks recently freed.
+				adc VCBs+VCB.FBLK,x
+				sta VCBs+VCB.FBLK,x		update current free block count.
+				lda deblock+1
+				adc VCBs+VCB.FBLK+1,x
+				sta VCBs+VCB.FBLK+1,x
+
+				stz VCBs+VCB.BMAPIDX,x	force re-scan from 1st bitmap
+
+*			lda #0						?????
+
+				rts
+
+L4BCD  			bcc L4B85			  	branch widened (always taken)
+
+L4BCF  			cmp #$D0			 	is this a directory file ?
+				bne L4C1B			  	no, file incompatible.
+
+				jsr fndbmap				make sure a buffer available for bitmap
+				bcs L4C1A			  	if error.
+
+				jsr XDOS.ReadGBuf_d_frst	read 1st block of directory into gbuf
+				bcs L4C1A
+
+				lda gbuf+37				do any files exist in this directory ?
+				ora gbuf+38
+				bne L4C1Abis			if so, access error.
+
+L4BF6  			sta gbuf+4			 	make it an invalid subdirectory
+				.DO LOWERCASE=1
+				jsr XDOS.WriteGBufDir
+				.ELSE
+				jsr XDOS.WriteGBuf
+				.FIN
+				bcs L4C1A
+
+L4BFE  			lda gbuf+2			 	get forward link.
+				cmp #$01			 	test for null block into carry.
+				ldx gbuf+3				get the rest of the block address.
+				bne L4C0A			  	branch if not null.
+				bcc L4BCD			  	was the low part null as well ?
+
+L4C0A  			jsr XDOS.DeallocAX		free this block.
+				bcs L4C1A
+
+				lda gbuf+2
+				ldx gbuf+3
+				jsr XDOS.ReadGBufAX		read next DIR block (no need to unpack)
+				bcc L4BFE			  	loop until all freed
+
+L4C1A  			rts
+
+L4C1Abis		lda #MLI.E.LOCKED	 	access error.
+				.HS 2C					BIT ABS
+L4C1B  			lda #MLI.E.INCFF	 	file incompatible
+				jsr GP.P8errv
+
+fcbused			pha		 				mark fcb as dirty so the directory will be flushed on 'flush'.
+				phy		 				save regs.
+
+				ldy fcbptr
+
+				lda #$80			 	mark fcb as dirty.
+				sta FCBs+FCB.DIRTY,y	save it back
+
+				ply		 				and restore regs.
+				pla
+				rts
+*--------------------------------------
 XDOS.UpdateHdr	ldx #$00
 
 .1  			sta gbuf+4,x
