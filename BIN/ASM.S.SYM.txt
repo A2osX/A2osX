@@ -20,12 +20,21 @@ SYM.Init		lda #SL..+SL._
 				bcs .9
 
 				>STA.G SYM.hList
+
+				lda #SL..+SL._
+				>SYSCALL SListNew
+				bcs .9
+
+				>STA.G FWR.hList
+
 				>LDYAI 256
 				>SYSCALL GetMem
 				bcs .9
+
 				>STYA ZPSymbolBuf
 				txa
 				>STA.G SYM.hBuf
+
 .9				rts
 *---------------------------------------
 SYM.Quit		>LDA.G SYM.hBuf
@@ -33,7 +42,12 @@ SYM.Quit		>LDA.G SYM.hBuf
 
 				>SYSCALL FreeMem
 
-.1				>LDA.G SYM.hList
+.1				>LDA.G FWR.hList
+				beq .2
+
+				>SYSCALL SListFree
+
+.2				>LDA.G SYM.hList
 				beq .8
 
 				>SYSCALL SListFree
@@ -59,9 +73,7 @@ SYM.NewGlobal	>LDA.G ASM.PASS
 
 				jsr SRC.SkipX
 
-.1				stz SRC.ACC.F
-				jsr SYM.PC2Acc
-				jsr SYM.Acc2Global
+				stz SRC.ACC.F
 
 				lda #SYMG
 				>STA.G SYM.BufPtr
@@ -69,13 +81,10 @@ SYM.NewGlobal	>LDA.G ASM.PASS
 				lda #0
 				sta (ZPSymbolBuf),y
 
-				.DO ASMDBG=1
-				lda #'1'
-				>SYSCALL putchar
-				jsr SYM.Dump.G
-				jsr OUT.PrintCR
-				.FIN
-				clc
+				jsr SYM.PC2Acc
+				jsr SYM.Acc2Global
+
+.80				clc
 				rts
 
 .9				cmp #E.DUPKEY
@@ -122,14 +131,7 @@ SYM.GetGlobal	>PUSHB.G SYM.hList		Pass #2: should be already defined...
 				sec
 				rts
 
-.8				.DO ASMDBG=1
-				lda #'2'
-				>SYSCALL putchar
-				jsr SYM.Dump.G
-				jsr OUT.PrintCR
-				.FIN
-
-				lda #SYMG
+.8				lda #SYMG
 				>STA.G SYM.BufPtr
 
 				>STZ.G MAC.CtxID
@@ -147,11 +149,18 @@ SYM.LookupGlobal
 				>PUSHW ZPLinePtr
 				>PUSHWI 0				ScopeID
 				>SYSCALL SListLookup
-				bcs .4
+				bcc .10
 
-				>STYA ZPPtr1			KeyID
+				>LDA.G ASM.PASS			pass#2?
+				beq .11
 
-				jsr SRC.SkipX
+				lda #E.UNDEF.SYMBOL
+				sec
+				rts
+
+.11				jmp SYM.AddFWFef
+
+.10				>STYA ZPPtr1			KeyID
 
 .1				>LDA.G SYM.ID
 				cmp ZPPtr1
@@ -169,47 +178,72 @@ SYM.LookupGlobal
 				dey
 				bne .2					Keep ACC.F unchanged
 
-				clc
-.99				rts
+				jsr SRC.SkipX
 
-.3				>PUSHB.G SYM.hList
+				clc
+				rts
+
+.3				phx
+
+				>PUSHB.G SYM.hList
 				>PUSHW ZPPtr1			KeyID
 				>PUSHW L.SRC.ACC.SIZE
 				>PUSHWI SYMG-1			Get only Global value
 				>PUSHWI	1				Skip SYMG.F
 				>SYSCALL SListGetData
-				rts
+				bcs .90
 
-.4				>LDA.G ASM.PASS			pass#2?
-				bne .9					yes, undefined symbol
+				jsr SYM.LookupFWFef
+				bcs .8
 
+*				lda #2
+*				cmp SRC.ACC.SIZE
+*				beq .8
+
+*				sta SRC.ACC.SIZE
+				
 				lda #SYMG.F.FWREF
 				tsb SRC.ACC.F
 
-				lda #2
-				sta SRC.ACC.SIZE
+.8				plx
+				jsr SRC.SkipX
 
-				lda #$ff
-				sta SRC.ACC
-				sta SRC.ACC+1
-
-.5				jsr SRC.GetNextChar
-				bcs .8
-
-				jsr SRC.IsLetterOrDigit
-				bcc .5
-
-				cmp #'.'
-				beq .5
-
-				cmp #'_'
-				beq .5
-
-.8				clc
+				clc
 				rts
 
-.9				lda #E.UNDEF.SYMBOL
-				sec
+.90				plx
+.9				rts
+*---------------------------------------
+SYM.AddFWFef	jsr SYM.LookupFWFef
+				bcc .8					Already Defined
+
+				>PUSHB.G FWR.hList
+				>PUSHW ZPLinePtr		Pass #1: try to add global...
+				>PUSHWI 0				ScopeID
+				>SYSCALL SListNewKey
+				bcs .9
+
+				>STYA.G FWR.ID
+
+				jsr SRC.SkipX
+
+				>PUSHB.G FWR.hList
+				>PUSHW.G FWR.ID
+				>PUSHW ZPSymbolBuf
+				>PUSHWI 1
+				>SYSCALL SListAddData
+				rts
+
+.8				jsr SRC.SkipX
+
+				clc
+
+.9				rts
+*---------------------------------------
+SYM.LookupFWFef	>PUSHB.G FWR.hList
+				>PUSHW ZPLinePtr
+				>PUSHWI 0				ScopeID
+				>SYSCALL SListLookup
 				rts
 *---------------------------------------
 SYM.StoreGlobal	>LDA.G ASM.PASS
@@ -230,6 +264,7 @@ SYM.StoreGlobal	>LDA.G ASM.PASS
 
 				iny						Add 1 for \0 after locals/privates
 				bne .1
+
 				inc
 
 .1				>PUSHYA
@@ -274,8 +309,17 @@ SYM.PC2Acc		ldy #ASM.PC+3
 				dex
 				bpl .1
 
-				lda #2
-				sta SRC.ACC.SIZE
+				ldx #4
+
+.2				lda SRC.ACC-1,x
+				bne .3
+
+				dex
+				bne .2
+				
+				inx
+
+.3				stx SRC.ACC.SIZE
 
 				rts
 *---------------------------------------
@@ -651,6 +695,14 @@ SYM.Dump.PushValueY
 				bpl .1
 
 				rts
+*---------------------------------------
+				.DO SYMDBG=1
+SYM.Debug		>PUSHW L.MSG.SYMDBG
+				>PUSHW.G SYM.ID
+				>PUSHBI 2
+				>SYSCALL PrintF
+				rts
+				.FIN
 *---------------------------------------
 MAN
 SAVE usr/src/bin/asm.s.sym
