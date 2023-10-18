@@ -6,7 +6,6 @@ NEW
 * ## C
 * `hFD socket(short int type, short int protocol);`
 * ## ASM
-* **In:**
 * `>PUSHB type`
 * `>PUSHB protocol`
 * `>LIBCALL hLIBTCPIP,LIBTCPIP.socket`
@@ -76,14 +75,14 @@ SKT.Socket.RTS	rts
 SKT.Socket.FindFree
 				sty TmpDWord			Y = socket.size
 
-				ldx #0
+				ldx #1
 
-.1				lda SKT.TABLE,x
+.1				lda FDs.pHI-1,x
 				beq .2
 
 				inx
-				cpx #K.SKTTABLE.SIZE
-				bne .1
+				cpx #K.FD.MAX+1
+				bcc .1
 
 				lda #E.OOH
 *				sec
@@ -97,10 +96,10 @@ SKT.Socket.FindFree
 
 				>STYA ZPTmpPtr1
 
-				txa
-
-.8				ldy #$FF				SELF MODIFIED
-				sta SKT.TABLE,y
+.8				ldx #$FF				SELF MODIFIED
+				sta FDs.pHI-1,x
+				tya
+				sta FDs.pLO-1,x
 
 *				clc
 				rts
@@ -110,7 +109,6 @@ SKT.Socket.FindFree
 * ## C
 * `int bind(hFD fd, const struct sockaddr *addr);`
 * ## ASM
-* **In:**
 * `>PUSHB fd`
 * `>PUSHW addr`
 * `>LIBCALL hLIBTCPIP,LIBTCPIP.socket`
@@ -130,15 +128,21 @@ SKT.bind		jsr SKT.PullLocAddr
 				sta SKT.LOC.ADDR+S.SOCKADDR.PORT
 				stx SKT.LOC.ADDR+S.SOCKADDR.PORT+1
 
-.1				ldx #0
+.1				ldx #1
 
-.2				lda SKT.TABLE,x
+.2				lda FDs.pHI-1,x
 				beq .7
 
-				phx
-				>SYSCALL2 GetMemPtr
-				>STYA ZPTmpPtr1
-				plx
+				sta ZPTmpPtr1+1
+				lda FDs.pLO-1,x
+				sta ZPTmpPtr1
+
+				lda (ZPTmpPtr1)
+				cmp #S.FD.T.DSOCK
+				beq .4
+				
+				cmp #S.FD.T.SSOCK
+				bne .7
 
 				ldy #S.SOCKET.AF
 				lda (ZPTmpPtr1),y
@@ -147,19 +151,20 @@ SKT.bind		jsr SKT.PullLocAddr
 
 				ldy #S.SOCKET.LOC.ADDR
 
-.3				lda (ZPTmpPtr1),y
+.4				lda (ZPTmpPtr1),y
 				cmp SKT.LOC.ADDR+S.SOCKADDR.ADDR-S.SOCKET.LOC.ADDR,y
 				bne .7
+
 				iny
 				cpy #S.SOCKET.LOC.PORT+2
-				bne .3
+				bne .4
 
 				lda #ERR.SKT.BUSY
 *				sec
 				rts
 
 .7				inx
-				cpx #K.SKTTABLE.SIZE
+				cpx #K.FD.MAX+1
 				bne .2
 
 				jmp SKT.SetLocAddr
@@ -169,7 +174,6 @@ SKT.bind		jsr SKT.PullLocAddr
 * ## C
 * `int connect(hFD fd, const struct sockaddr *addr);`
 * ## ASM
-* **In:**
 * `>PUSHB fd`
 * `>PUSHW addr`
 * `>LIBCALL hLIBTCPIP,LIBTCPIP.socket`
@@ -232,7 +236,6 @@ SKT.connect.SEQPKT
 * ## C
 * `int listen(hFD fd);`
 * ## ASM
-* **In:**
 * `lda fd`
 * `>LIBCALL hLIBTCPIP,LIBTCPIP.listen`
 * ## RETURN VALUE
@@ -268,7 +271,6 @@ SKT.listen.RTS	rts
 * ## C
 * `hFD Accept(hFD fd);`
 * ## ASM
-* **In:**
 * `lda fd`
 * `>LIBCALL hLIBTCPIP,LIBTCPIP.accept`
 * ## RETURN VALUE
@@ -313,7 +315,6 @@ SKT.GetFromQueue
 * ## C
 * `int shutdown(int fd);`
 * ## ASM
-* **In:**
 * `lda fd`
 * `>LIBCALL hLIBTCPIP,LIBTCPIP.shutdown`
 * ## RETURN VALUE
@@ -331,7 +332,15 @@ SKT.shutdown	pha
 				cmp #S.SOCKET.T.SEQPKT
 				bcc	SKT.shutdown.HQ
 
-				ldy #S.SOCKET.TCP.S
+				bne .15
+				
+.11				jsr SKT.GetFromQueue
+				bcs .15
+				
+				>SYSCALL2 FreeMem
+				bcc .11
+
+.15				ldy #S.SOCKET.TCP.S
 				lda (ZPPtrSKT),y
 				cmp #S.SOCKET.TCP.S.CLWAIT
 				bne .10
@@ -347,10 +356,11 @@ SKT.shutdown	pha
 				jsr SKT.GetTCB
 				ldy #S.SOCKET.TCP.S
 				lda (ZPPtrSKT),y
+
 				cmp #S.SOCKET.TCP.S.ESTBLSH
 				bne .1
 
-				jsr SKT.OUT.SendFINACK
+				jsr TCP.OUT.SendFINACK
 
 				lda #S.SOCKET.TCP.S.FINWT1
 				jmp SKT.StoreTCB.S
@@ -358,7 +368,7 @@ SKT.shutdown	pha
 .1				cmp #S.SOCKET.TCP.S.FINWT2
 				bne .2
 
-				jsr SKT.OUT.SendFINACK
+				jsr TCP.OUT.SendFINACK
 
 				lda #S.SOCKET.TCP.S.LASTACK
 				jmp SKT.StoreTCB.S
@@ -370,32 +380,25 @@ SKT.shutdown	pha
 				jmp SKT.StoreTCB.S
 *--------------------------------------
 SKT.shutdown.HQ	jsr SKT.GetFromQueue
-				bcs .3
+				bcs .1
 
 				>SYSCALL2 FreeMem
+
 				bra SKT.shutdown.HQ
 
-.3				pla					get hFD...
-
-				ldx #0
-
-.4				cmp SKT.TABLE,x
-				beq .5
-
-				inx
-				cpx #K.SKTTABLE.SIZE
-				bne .4
-
-.5				stz SKT.TABLE,x
-				>SYSCALL2 freemem
-*				clc
+.1				pla					get hFD...
+*--------------------------------------
+SKT.FreeFD		tax
+				lda FDs.pHI-1,x
+				stz FDs.pHI-1,x
+				ldy FDs.pLO-1,x
+				>SYSCALL2 Free
 				rts
 */--------------------------------------
 * # Read (STREAM)
 * ## C
 * `int skt.read(hFD fd, void *buf, int count);`
 * ## ASM
-* **In:**
 * `>PUSHB fd`
 * `>PUSHW buf`
 * `>PUSHW count`
@@ -615,7 +618,6 @@ SKT.AddDataToSktIn
 * ## C
 * `int skt.write(hFD fd, const void *buf, int count);`
 * ## ASM
-* **In:**
 * `>PUSHB fd`
 * `>PUSHW buf`
 * `>PUSHW count`
@@ -833,7 +835,6 @@ SKT.GetDataFromSktOut
 * ## C
 * `hMem recvfrom(hFD fd, struct sockaddr *addr);`
 * ## ASM
-* **In:**
 * `>PUSHB fd`
 * `>PUSHW addr`		(RecvFrom)
 * `>LIBCALL hLIBTCPIP,LIBTCPIP.Recv`
@@ -850,7 +851,6 @@ SKT.RecvFrom	>PULLW ZPTmpPtr1		addr
 * ## C
 * `hMem recv(hFD fd);`
 * ## ASM
-* **In:**
 * `lda fd`
 * `>LIBCALL hLIBTCPIP,LIBTCPIP.Recv`
 * ## RETURN VALUE
@@ -963,7 +963,6 @@ SKT.Recv		clc
 * ## C
 * `int skt.sendto(hFD fd, const void *buf, int count, const struct sockaddr *addr);`
 * ## ASM
-* **In:**
 * `>PUSHB fd`
 * `>PUSHW buf`
 * `>PUSHWI count`
@@ -979,7 +978,6 @@ SKT.SendTo		jsr SKT.PullRemAddr
 * ## C
 * `int skt.send(hFD fd, const void *buf, int count);`
 * ## ASM
-* **In:**
 * `>PUSHB fd`
 * `>PUSHW buf`
 * `>PUSHWI count`
@@ -1040,7 +1038,6 @@ SKT.Send.9		rts
 * ## C
 * `int getsockopt(hFD fd);`
 * ## ASM
-* **In:**
 * `lda fd`
 * `>LIBCALL hLIBTCPIP,LIBTCPIP.GetSockOpt`
 * ## RETURN VALUE
@@ -1056,7 +1053,6 @@ SKT.getsockopt	jsr SKT.GetFD
 * ## C
 * `int setsockopt(hFD fd, short int opts);`
 * ## ASM
-* **In:**
 * `>PUSHB fd`
 * `>PUSHB opts`
 * `>LIBCALL hLIBTCPIP,LIBTCPIP.SetSockOpt`
@@ -1078,7 +1074,6 @@ SKT.setsockopt	>PULLA
 * ## C
 * `int eof(hFD fd);`
 * ## ASM
-* **In:**
 * `lda fd`
 * `>LIBCALL hLIBTCPIP,LIBTCPIP.EOF`
 * ## RETURN VALUE
@@ -1138,19 +1133,6 @@ SKT.CheckTCP	ldy #S.SOCKET.O
 SKT.BAD			lda #ERR.SKT.BAD
 				sec
 				rts
-*/--------------------------------------
-* # GetTable
-* Get socket table
-* ## C
-* `void * gettable();`
-* ## ASM
-* **In:**
-* `>LIBCALL hLIBTCPIP,LIBTCPIP.GetTable`
-* ## RETURN VALUE
-*\--------------------------------------
-SKT.GetTable	>LDYA L.SKT.Table
-				clc
-				rts
 *--------------------------------------
 SKT.PullhFDDataInPtrLen
 				>PULLW ZPDataInLen		!!!use DataInPtr/Len
@@ -1158,7 +1140,10 @@ SKT.PullhFDDataInPtrLen
 
 SKT.PullhFD		>PULLA
 
-SKT.GetFD		>SYSCALL2 GetMemPtr
+SKT.GetFD		tax
+				lda FDs.pHI-1,x
+				ldy FDs.pLO-1,x
+
 				>STYA ZPPtrSKT
 				rts
 *--------------------------------------
@@ -1206,14 +1191,14 @@ SKT.SetRemAddr	ldy #S.SOCKET.REM.PORT+1
 *  SKT.LOC.ADDR = Incoming Frame DST
 *--------------------------------------
 SKT.FindMatchingLocRem
-				ldx #0
+				ldx #1
 
-.1				lda SKT.TABLE,x
+.1				lda FDs.pHI-1,x
 				beq .8
 
-				phx
-				jsr SKT.GetFD
-				plx
+				ldy FDs.pLO-1,x
+
+				>STYA ZPPtrSKT
 
 				ldy #S.SOCKET.AF
 				lda (ZPPtrSKT),y
@@ -1282,12 +1267,12 @@ SKT.FindMatchingLocRem
 				cpy #S.SOCKET.REM.PORT+2
 				bne .42
 
-.7				clc						x = SKT.TABLE index
+.7				clc						x = hFD
 				rts
 
 .8				inx
-				cpx #K.SKTTABLE.SIZE
-				bne .1
+				cpx #K.FD.MAX+1
+				bcc .1
 
 *				sec
 				rts

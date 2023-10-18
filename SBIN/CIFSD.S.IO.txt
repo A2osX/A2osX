@@ -91,33 +91,55 @@ IO.R.SetAttr
 *--------------------------------------
 IO.Q.ChMod
 IO.R.ChMod
-*--------------------------------------
-IO.Q.FStat
-*--------------------------------------
-IO.R.FStat		lda #MLI.E.BADCALL
+				lda #MLI.E.BADCALL
 				sec
 				rts
 *--------------------------------------
+IO.Q.FStat		jsr IO.GetFD
+
+				jsr IO.Q.Stat1
+
+				jsr IO.WriteSocket
+				bcs .9
+
+				jmp IO.Sleep
+
+.9				>POP 3
+
+				jmp IO.Exit
+*--------------------------------------
+IO.R.FStat		jsr IO.ReadSocket
+				bvs .99
+
+				bcs .98
+
+				jsr CORE.CheckSMBStatus
+
+				lda #MLI.E.INVPATH		Return this for stat() match ProDOS Behavior
+				bcs .98
+
+				jsr CORE.GetRespDataPtr1
+				jsr IO.FileInfo2StatBuf
+
+				>PULLW ZPPtr2			Stat Buffer
+
+				jsr IO.StatBuf2Ptr2
+
+				inc pStack				Pop hFILE
+
+				clc
+
+				jmp IO.Exit
+
+.98				>POP 3
+
+				jmp IO.Exit
+
+.99				jmp IO.SleepCont
+*--------------------------------------
 IO.Q.Stat		>STYA pPath				resolved path
 
-				jsr CORE.ReqT2SetupX
-
-				ldx #0
-
-.1				lda SMB.QueryPathInfo,x
-				sta (ZPReqPtr),y
-				iny
-				inx
-				cpx #SMB.QueryPathInfo.Len
-				bne .1
-
-				jsr CORE.ReqT2SetupPtr2
-
-				jsr CORE.AppendPathPtr2
-
-				jsr CORE.AddYReqLenPtr2
-
-				jsr CORE.SetT2ReqLen
+				jsr IO.Q.Stat1
 
 				jsr IO.WriteSocket
 				bcs .9
@@ -143,10 +165,10 @@ IO.R.Stat		jsr IO.ReadSocket
 
 				>PULLW ZPPtr2			Stat Buffer
 
-				inc pStack				Skip Filename
-				inc pStack
-
 				jsr IO.StatBuf2Ptr2
+
+				inc pStack				Pop Filename
+				inc pStack
 
 				clc
 
@@ -157,6 +179,25 @@ IO.R.Stat		jsr IO.ReadSocket
 				jmp IO.Exit
 
 .99				jmp IO.SleepCont
+*--------------------------------------
+IO.Q.Stat1		jsr CORE.ReqT2SetupX
+
+				ldx #0
+
+.1				lda SMB.QueryPathInfo,x
+				sta (ZPReqPtr),y
+				iny
+				inx
+				cpx #SMB.QueryPathInfo.Len
+				bne .1
+
+				jsr CORE.ReqT2SetupPtr2
+
+				jsr CORE.AppendPathPtr2
+
+				jsr CORE.AddYReqLenPtr2
+
+				jmp CORE.SetT2ReqLen
 *--------------------------------------
 IO.Q.MKDir		>STYA pPath				resolved path
 
@@ -203,7 +244,7 @@ IO.R.MKDir		jsr IO.ReadSocket
 .99				jmp IO.SleepCont
 *--------------------------------------
 IO.Q.OpenDir	>STYA pPath				resolved path
-
+				>SYSCALL PutS
 				jsr IO.NewFD
 				bcs .98
 
@@ -218,10 +259,7 @@ IO.Q.OpenDir	>STYA pPath				resolved path
 				iny
 				sta (pFD),y
 
-				>PUSHW pPath
-				>PUSHWZ
-				>PUSHB hFD
-				>SYSCALL2 mknod
+				jsr IO.NewFILE
 				bcc .98
 
 				pha
@@ -665,28 +703,11 @@ IO.R.ReadDir.Type
 				
 				rts
 *--------------------------------------
-
-*--------------------------------------
-IO.Q.CloseReg
-IO.Q.CloseDir	tax
-
-				lda hFDs.hName-1,x
-				beq .1
-
-				phx
-
-				stz hFDs.hName-1,x
-				>SYSCALL2 FreeMem
-
-				plx
-
-.1				lda hFDs-1,x
-				stz hFDs-1,x
-				>SYSCALL2 FreeMem
+IO.Q.CloseDir	jsr IO.FreeFILE
 
 *				clc
 
-				jmp IO.Exit
+.8				jmp IO.Exit
 *--------------------------------------
 * IO.R.CloseDir
 *--------------------------------------
@@ -800,13 +821,12 @@ IO.R.FOpen		jsr IO.ReadSocket
 				ldy #4					path
 
 				lda (pStack),y
-				>PUSHA
+				sta pPath
+				iny
 				lda (pStack),y
-				>PUSHA
+				sta pPath+1
 
-				>PUSHWZ					mod
-				>PUSHB hFD
-				>SYSCALL2 mknod
+				jsr IO.NewFILE
 				bcc .98
 
 				pha
@@ -912,8 +932,7 @@ IO.R.FClose		sta hFILE
 				jsr CORE.CheckSMBStatus
 				bcs .98
 
-				lda hFILE
-				jsr IO.Q.CloseReg
+				jsr IO.FreeFILE
 
 				clc
 
@@ -1372,67 +1391,6 @@ IO.R.Rename		jsr IO.ReadSocket
 
 .99				jmp IO.SleepCont
 *--------------------------------------
-IO.NewFD		ldx #1
-
-.1				lda hFDs-1,x
-				beq .2
-
-				inx
-				cpx #K.hFD.MAX+1
-				bne .1
-
-				lda #E.OOH
-*				sec
-				rts
-
-.2				stx hFILE
-
-				>LDYAI 16				S.FD.REG = S.FD.DIR = 16
-				>SYSCALL2 GetMem
-				bcs .9
-
-				>STYA pFD
-				stx hFD
-
-				txa
-				ldx hFILE
-
-				sta hFDs-1,x
-				stz hFDs.hName-1,x
-
-				lda hHandler
-				ldy #S.FD.PFT
-				sta (pFD),y
-
-*				clc
-
-.9				rts
-*--------------------------------------
-IO.GetFD		sta hFILE
-
-				tax
-				phx
-
-				lda hFDs.hName-1,x
-				>SYSCALL2 GetMemPtr
-				>STYA pPath
-
-				plx
-				lda hFDs-1,x
-				>SYSCALL2 GetMemPtr
-				>STYA pFD
-				rts
-*--------------------------------------
-IO.FreeFD		pha
-				lda hFD
-				>SYSCALL2 FreeMem
-
-				ldx hFILE
-				stz hFDs-1,x
-
-				pla
-				rts
-*--------------------------------------
 IO.RWGetFidOfs	ldx #6
 				ldy #S.FD.REG.REF
 
@@ -1716,6 +1674,96 @@ IO.IsDigit		cmp #'0'
 
 .9				sec
 .99				rts
+*--------------------------------------
+IO.NewFD		ldx #1
+				
+.1				lda FDs.pHI-1,x
+				beq .2
+				
+				inx
+				cpx #K.FD.MAX+1
+				bcc .1
+
+				lda #E.OOH
+*				sec
+				rts
+
+.2				stx hFD
+
+				>LDYAI S.FD.REG 		S.FD.DIR = 16
+				>SYSCALL2 GetMem
+				bcs .9
+
+				>STYA pFD
+				ldx hFD
+				sta FDs.pHI-1,x
+				tya
+				sta FDs.pLO-1,x
+
+				lda hHandler
+				ldy #S.FD.PFT
+				sta (pFD),y
+
+*				clc
+
+.9				rts
+*--------------------------------------
+IO.GetFD		sta hFILE
+
+				tay
+
+				ldx FILEs.hFD-1,y
+				stx hFD
+				
+				lda FDs.pLO-1,x
+				sta pFD
+				lda FDs.pHI-1,x
+				sta pFD+1
+
+				lda FILEs.hName-1,y
+				>SYSCALL2 GetMemPtr
+				>STYA pPath
+
+				rts
+*--------------------------------------
+IO.NewFILE		>PUSHW pPath
+				>PUSHWZ
+				>PUSHB hFD
+				>SYSCALL2 mknod
+				bcs .9
+				
+				tax
+				inc FILEs.oCnt-1,x
+				
+*				clc				
+				
+.9				rts				
+*--------------------------------------
+IO.FreeFILE		ldx hFILE
+				lda FILEs.hFD-1,x
+				sta hFD
+
+				stz FILEs.hFD-1,x
+
+				lda FILEs.hName-1,x
+				beq IO.FreeFD
+
+				stz FILEs.hName-1,x
+				>SYSCALL2 FreeMem
+*--------------------------------------
+IO.FreeFD		ldx hFD
+
+				lda FDs.pHI-1,x
+				beq .8
+
+				stz FDs.pHI-1,x
+				ldy FDs.pLO-1,x
+				
+				>SYSCALL2 Free
+
+.8				clc
+
+				rts
 *--------------------------------------
 MAN
 SAVE usr/src/sbin/cifsd.s.io

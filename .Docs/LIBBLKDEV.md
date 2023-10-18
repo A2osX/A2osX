@@ -37,7 +37,8 @@ Write a track (16 sectors)
 
 # D2TrkWriteNIB  
 Write a track (NIBBLE)  
-**In:**  
+
+## ASM  
  PUSHB = DSSS0000  
  PUSHW = Ptr to NIBBLE buffer (0 ended)  
 
@@ -53,7 +54,6 @@ Write a track (NIBBLE)
 int getprodoscatsize (short int options, short int catsize, int devsize );  
 
 ## ASM  
-**In:**  
  PUSHW = DevSize (in 512b blocks)  
  PUSHB = Catalog Size (in blocks)  
  PUSHB = Options  
@@ -63,7 +63,8 @@ int getprodoscatsize (short int options, short int catsize, int devsize );
  Y,A=BufSize  (max $4400)  
 
 # BuildProDOSCat  
-**In:**  
+
+## ASM  
  PUSHW = DevSize (in 512b blocks)  
  PUSHB = Catalog Size (in blocks)  
  PUSHB = Options  

@@ -49,7 +49,6 @@ A = Arg count
 # LoadDrv  
 
 ## ASM  
-**In:**  
  Y,A = PTR to "NAME.DRV [PARAM]" C-String  
 
 ## RETURN VALUE  
@@ -61,7 +60,6 @@ none
 `void * insdrv (void * src, void * crvcsstart, void * drvcssize, void * drvend);`  
 
 ## ASM  
-**In:**  
 `>PUSHW DRV.END`  
 `>PUSHW DRV.CS.SIZE`  
 `>PUSHW DRV.CS.START`  
@@ -199,7 +197,6 @@ Change or add an environment variable, string is 'NAME=VALUE'
 `int putenv(char *string);`  
 
 ## ASM  
-**In:**  
 `>PUSHW string`  
 `>SYSCALL putenv`  
 
@@ -221,7 +218,6 @@ Remove an environment variable
 Return X+Y, X-Y, X*Y, X/Y, X mod Y....  
 
 ## ASM  
-**In:**  
 `>PUSHL X (long)`  
 `>PUSHL Y (long)`  
 `>FPU add32`  
@@ -237,7 +233,6 @@ Return X*Y, X/Y, X+Y, X-Y
 `float pwr ( float x, float y);`  
 
 ## ASM  
-**In:**  
 `>PUSHF X (float)`  
 `>PUSHF Y (float)`  
 `>FPU fmul`  
@@ -263,7 +258,6 @@ Return Log(x), Sqr(x), E^X, Cos(x), Sin(X), Tan(x), ATan(x)
 `float atan ( float x);`  
 
 ## ASM  
-**In:**  
 `>PUSHF x (Float)`  
 `>FPU log`  
 
@@ -277,7 +271,6 @@ Return 'floated' long
 `float f = (float)l;  
 
 ## ASM  
-**In:**  
 `>PUSHL l` (long)  
 `>FPU float`  
 
@@ -291,7 +284,6 @@ Return float rounded into a long
 `long int lrintf (float x);`  
 
 ## ASM  
-**In:**  
 `>PUSHF x`  
 `>FPU lrintf`  
 
@@ -528,7 +520,6 @@ Load TXT a file in memory (with ending 0)
 `int loadtxtfile ( const char * filename );`  
 
 ## ASM  
-**In:**  
 `>LDYA filename`  
 `>SYSCALL loadtxtfile`  
 
@@ -543,7 +534,6 @@ Load a file in memory
 `int loadfile ( const char * filename, short int flags, short int ftype, int auxtype );`  
 
 ## ASM  
-**In:**  
 `>PUSHW filename`  
 `>PUSHB flags`  
 `>PUSHB ftype`  
@@ -562,7 +552,6 @@ And return, if found, the full path to it.
 `int filesearch( char *filename, char *searchpath, char *fullpath, stat *filestat);`  
 
 ## ASM  
-**In:**  
 `>PUSHW filename`  
 `>PUSHW fullpath`  
 `>PUSHW searchpath`  
@@ -576,7 +565,6 @@ DstStat = S.STAT
 CS : not found  
 
 # GetMemStat  
-**In:**  
  Y,A = Ptr to 24 bytes buffer  
 
 ## RETURN VALUE  
@@ -835,7 +823,7 @@ A = hFILE
 
 # MkNod  
 Create a special or ordinary file.  
-(CDEV, BDEV, DSOCKS, SSOCK, PIPE)  
+(CDEV, BDEV, DSOCK, SSOCK, PIPE)  
 
 ## C  
 `hFILE mknod(const char *pathname, int mode, hFD fd);`  
@@ -870,7 +858,6 @@ Print A (char) to hFILE
 `int fputc ( hFILE stream , short int character );`  
 
 ## ASM  
-**In:**  
 `>PUSHB stream`  
 `>PUSHB character`  
 `>SYSCALL fputc`  
@@ -885,7 +872,6 @@ Print A (char) to StdOut
 `int putchar ( short int character );`  
 
 ## ASM  
-**In:**  
 `lda character`  
 `>SYSCALL putchar`  
 
@@ -897,7 +883,6 @@ Write Str to StdOut, appends '\r\n'
 
 ## C  
 `int puts ( const char * str );`  
-**In:**  
 
 ## ASM  
 `>LDYAI str`  
@@ -913,7 +898,6 @@ Write Str to hFILE
 `int fputs (hFILE stream, const char * str );`  
 
 ## ASM  
-**In:**  
 `>PUSHB stream`  
 `>PUSHW str`  
 `>SYSCALL fputs`  
@@ -931,7 +915,6 @@ string is then terminated with a null byte.
 `char *fgets(hFILE stream, char * s, int n);`  
 
 ## ASM  
-**In:**  
 `>PUSHB hFILE`  
 `>PUSHW s`  
 `>PUSHW n`  
@@ -948,7 +931,6 @@ Get char from StdIn
 `short int getchar ( );`  
 
 ## ASM  
-**In:**  
 `>SYSCALL getchar`  
 
 ## RETURN VALUE  
@@ -962,7 +944,6 @@ Get char from Node
 `short int getc ( short int stream );`  
 
 ## ASM  
-**In:**  
 `lda stream`  
 `>SYSCALL getc`  
 
@@ -990,7 +971,6 @@ Open a file
 
 ## C  
 `short int fopen ( const char *filename, short int flags, short int ftype, int auxtype );`  
-**In:**  
 
 ## ASM  
 `>PUSHW filename`  
@@ -1024,7 +1004,6 @@ Close a file
 `int fclose ( short int stream );`  
 
 ## ASM  
-**In:**  
 `lda stream`  
 `>SYSCALL FClose`  
 
@@ -1037,7 +1016,6 @@ Read bytes from file
 `int fread (short int stream, void * ptr, int count );`  
 
 ## ASM  
-**In:**  
 `>PUSHB stream`  
 `>PUSHW ptr`  
 `>PUSHW count`  
@@ -1053,7 +1031,6 @@ Write bytes to file
 `int fwrite ( short int stream, const void * ptr, int count );`  
 
 ## ASM  
-**In:**  
 `>PUSHB stream`  
 `>PUSHW ptr`  
 `>PUSHW count`  
@@ -1068,7 +1045,6 @@ Write bytes to file
 `int fflush( short int stream );`  
 
 ## ASM  
-**In:**  
 `lda stream`  
 `>SYSCALL fflush`  
 
@@ -1079,7 +1055,6 @@ Set the file-position indicator for hFILE
 `int fseek( short int stream, long offset, short int whence );`  
 
 ## ASM  
-**In:**  
 `>PUSHB stream`  
 `>PUSHL offset`  
 `>PUSHB whence`  
@@ -1092,7 +1067,6 @@ Test the end-of-file indicator for hFILE
 `short int feof( short int stream );`  
 
 ## ASM  
-**In:**  
 `lda stream`  
 `>SYSCALL feof`  
 
@@ -1109,7 +1083,6 @@ Return the current value of the file-position indicator
 `long ftell( short int stream );`  
 
 ## ASM  
-**In:**  
 `lda stream`  
 `>SYSCALL ftell`  
 
@@ -1123,7 +1096,6 @@ Remove a file or directory
 `int remove ( const char *pathname );`  
 
 ## ASM  
-**In:**  
 `>LDYA pathname`  
 `>SYSCALL remove`  
 
@@ -1136,7 +1108,6 @@ Rename a file
 `int rename ( const char * oldpath, const char * newpath );`  
 
 ## ASM  
-**In:**  
 `>PUSHW oldpath`  
 `>PUSHW newpath`  
 `>SYSCALL rename`  
@@ -1156,7 +1127,6 @@ Prints C-Style String
 `int sprintf ( char *str, const char *format, ... );`  
 
 ## ASM  
-**In:**  
 PrintF : (example is for printing Y,A as integer : format="%I", 2 bytes)  
 `>PUSHW format`  
 `>PUSHW i`  
@@ -1218,7 +1188,6 @@ Read formatted data from string
 `int sscanf ( const char *s, const char *format, ... );`  
 
 ## ASM  
-**In:**  
 ScanF :  
 `>PUSHW format`  
 `>PUSHW ptr`  
@@ -1262,7 +1231,6 @@ Convert String to 40 bits Float
 `float strtof (const char* str, char** endptr );`  
 
 ## ASM  
-**In:**  
 `>PUSHW str`  
 `>PUSHWI EndPtr`  
 `>SYSCALL StrToF`  
@@ -1277,7 +1245,6 @@ Convert String to 40 bits Float
 `float atof ( const char* str );`  
 
 ## ASM  
-**In:**  
 `>LDYA str`  
 `>SYSCALL atof`  
 
@@ -1292,7 +1259,6 @@ Convert String to 32 bits (unsigned) int
 `unsigned long strtoul (const char* str, char** endptr, int base);`  
 
 ## ASM  
-**In:**  
 `>PUSHW str`  
 `>PUSHW EndPtr`  
 `>PUSHB Base`  
@@ -1308,7 +1274,6 @@ Convert String to 32 bits long
 `long atol ( const char * str );`  
 
 ## ASM  
-**In:**  
 `>LDYA str`  
 `>SYSCALL atol`  
 
@@ -1322,7 +1287,6 @@ Convert String to 16 bits int
 `int atoi ( const char * str );`  
 
 ## ASM  
-**In:**  
 `>LDYAI str`  
 `>SYSCALL atoi`  
 
@@ -1336,7 +1300,6 @@ Return the canonicalized absolute pathname
 `char *realpath(const char *path, char *resolvedpath);`  
 
 ## ASM  
-**In:**  
 `>PUSHW path`  
 `>PUSHW resolvedpath`  
 `>SYSCALL realpath`  
@@ -1411,7 +1374,6 @@ Concatenate strings
 `char * strcat ( char * destination, const char * source );`  
 
 ## ASM  
-**In:**   
 `>PUSHWI destination`  
 `>PUSHWI source`  
 `>SYSCALL strcat`  
@@ -1426,7 +1388,6 @@ Copy string
 `char * strcpy ( char * destination, const char * source );`  
 
 ## ASM  
-**In:**   
 `>PUSHWI destination`  
 `>PUSHWI source`  
 `>SYSCALL strcpy`  
@@ -1456,7 +1417,6 @@ Convert string to UPPERCASE/lowercase
 `int strlwr ( char * str);`  
 
 ## ASM  
-**In:**   
 `>LDYAI str`  
 `>SYSCALL strupr`  
 `>SYSCALL strlwr`  
@@ -1472,7 +1432,6 @@ Compare 2 strings
 `int strcmp(const char *s1, const char *s2);`  
 
 ## ASM  
-**In:**   
 `>PUSHWI s1`  
 `>PUSHWI s2`  
 `>SYSCALL strcmp`  
@@ -1490,7 +1449,6 @@ Compare 2 strings, ignoring case
 `int strcasecmp(const char *s1, const char *s2);`  
 
 ## ASM  
-**In:**   
 `>PUSHWI s1`  
 `>PUSHWI s2`  
 `>SYSCALL strcasecmp`  
@@ -1614,7 +1572,6 @@ Convert S.TIME struct to CSTR
 `hFD open(const char *pathname, short int flags);`  
 
 ## ASM  
-**In:**  
 `>PUSHW pathname`  
 `>PUSHB flags`  
 `>SYSCALL open`  
@@ -1629,7 +1586,6 @@ REG File created on ProDOS : T=TXT,X=$0000
 `int close(hFD fd);`  
 
 ## ASM  
-**In:**  
 `lda fd`  
 `>SYSCALL close`  
 
@@ -1639,7 +1595,6 @@ REG File created on ProDOS : T=TXT,X=$0000
 `int read(hFD fd, void *buf, int count);`  
 
 ## ASM  
-**In:**  
 `>PUSHB fd`  
 `>PUSHW buf`  
 `>PUSHW count`  
@@ -1655,7 +1610,6 @@ CS: A = EC
 `int write(hFD fd, const void *buf, int count);`  
 
 ## ASM  
-**In:**  
 `>PUSHB fd`  
 `>PUSHW buf`  
 `>PUSHW count`  
@@ -1672,7 +1626,6 @@ Set the file-position indicator for hFD
 `int lseek( short int hFD, long offset, short int whence );`  
 
 ## ASM  
-**In:**  
 `>PUSHB hFD`  
 `>PUSHL offset`  
 `>PUSHB whence`  
@@ -1684,7 +1637,6 @@ Set the file-position indicator for hFD
  `short int chown(const char *pathname, short int owner, short int group);`  
 
 ## ASM  
-**In:**  
 `>PUSHW pathname`  
 `>PUSHB owner`  
 `>PUSHB group`  

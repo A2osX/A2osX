@@ -5,8 +5,12 @@ NEW
 				.OR	$2000
 				.TF lib/libetalk
 *--------------------------------------
+ETLK.Q.SIZE		.EQ 8
+*--------------------------------------
 				.INB inc/macros.i
 				.INB inc/a2osx.i
+				.INB inc/kernel.i
+				.INB inc/mli.e.i
 				.INB inc/nic.i
 				.INB inc/eth.i
 				.INB inc/lib.net.i
@@ -55,7 +59,12 @@ CS.START		cld
 				.DA AARP.CLEAR
 				.DA AARP.QUERY
 				.DA AARP.ADD
-				.DA AARP.GetCACHE
+				.DA AARP.GetCache
+				
+				.DA NBP.Clear
+				.DA NBP.Query
+				.DA NBP.Lookup
+				.DA NBP.GetCache
 
 L.IOCTL			.DA IOCTL
 			
@@ -63,6 +72,14 @@ L.AARP.REQ		.DA AARP.REQ
 L.AARP.REP		.DA AARP.REP
 
 L.AARP.CACHE	.DA AARP.CACHE
+
+J.DDP.IN		.DA RTMP.IN.REP
+				.DA NBP.IN
+				.DA ATP.IN
+				.DA AEP.IN
+				.DA RTMP.IN.REQ
+				.DA ZIP.IN
+				.DA ADSP.IN
 *--------------------------------------
 L.ETKCFG		.DA ETKCFG
 				.DA 0
@@ -71,6 +88,7 @@ LIB.LOAD		ldx RefCount
 				bne .8
 
 				jsr AARP.CLEAR
+
 .8				inc RefCount
 
 				clc
@@ -84,29 +102,46 @@ INCOMING		sta hFrameIn
 
 				>PULLW ZPTmpPtr1
 				ldy #S.IOCTL.BUFPTR+3
+
 .1				lda (ZPTmpPtr1),y		Get Frame Ptr & Len
 				sta ZPFrameInPtr-S.IOCTL.BUFPTR,y
 				dey
 				bpl .1
 
+				ldy #S.ETH.802.3.LENGTH
+				lda (ZPFrameInPtr),y
+				cmp /$800
+				bcs .9					EII, not for us
+				
+				lda #$AA				SRCSAP=DSTSAP=$AA
+
+				ldy #S.ETH.802.2.DSTSAP
+				cmp (ZPFrameInPtr),y
+				bne .9
+
+				iny						S.ETH.802.2.SRCSAP
+				cmp (ZPFrameInPtr),y
+				bne .9
+
 				ldy #S.ETH.SNAP.PROTO
 				lda (ZPFrameInPtr),y
-				tax
+				cmp /S.ETH.SNAP.PROTO.DDP	$80 for both AARP & DDP
+				bne .9
+
 				iny
 				lda (ZPFrameInPtr),y
-				cmp #S.ETH.SNAP.PROTO.AARP
+				cmp #S.ETH.SNAP.PROTO.DDP
 				bne .2
-				cpx /S.ETH.SNAP.PROTO.AARP
-				bne .2
-				jmp	AARP.IN
-.2				cmp #S.ETH.SNAP.PROTO.DDP
-				bne .9
-				cpx /S.ETH.SNAP.PROTO.DDP
+
+				jmp	DDP.IN
+
+.2				cmp #S.ETH.SNAP.PROTO.AARP
 				bne .9
 
-				jmp DDP.IN
+				jmp AARP.IN
 
-.9				sec
+.9				lda #MLI.E.EOF
+				sec
 				rts
 *--------------------------------------
 *--------------------------------------
@@ -118,14 +153,20 @@ PULSE			and #S.EVT.F.T1SEC
 .9				rts
 *--------------------------------------
 				.INB usr/src/lib/libetalk.s.aarp
+				.INB usr/src/lib/libetalk.s.adsp
+				.INB usr/src/lib/libetalk.s.aep
+				.INB usr/src/lib/libetalk.s.atp
 				.INB usr/src/lib/libetalk.s.cfg
 				.INB usr/src/lib/libetalk.s.ddp
 				.INB usr/src/lib/libetalk.s.elap
 				.INB usr/src/lib/libetalk.s.frm
+				.INB usr/src/lib/libetalk.s.nbp
 				.INB usr/src/lib/libetalk.s.rtmp
+				.INB usr/src/lib/libetalk.s.zip
 *--------------------------------------
 CS.END
 *--------------------------------------
+MAC.BROADCAST	.EQ *
 AARP.REQ		.HS 090007FFFFFF		S.ETH.DSTMAC
 AARP.REQ.SRCMAC	.BS 6
 				.DA #0,#36				S.ETH.802.3.LENGTH
@@ -133,6 +174,7 @@ AARP.REQ.SRCMAC	.BS 6
 				.HS AA					S.ETH.802.2.SRCSAP
 				.HS 03					S.ETH.802.2.CTRL
 				.HS 00.00.00.80.F3		S.ETH.SNAP.PROTO
+*--------------------------------------
 				.HS 00.01.80.9B.06.04
 				.HS 0001				Request
 AARP.REQ.SHA	.BS 6
@@ -150,6 +192,7 @@ AARP.REP.SRCMAC	.BS 6
 				.HS AA					S.ETH.802.2.SRCSAP
 				.HS 03					S.ETH.802.2.CTRL
 				.HS 00.00.00.80.F3		S.ETH.SNAP.PROTO
+*--------------------------------------
 				.HS 00.01.80.9B.06.04
 				.HS 0002				Response
 AARP.REP.SHA	.BS 6
@@ -159,9 +202,27 @@ AARP.REP.TPA	.BS 4
 				.BS AARP.REP+60-*
 AARP.REP.LEN	.EQ 60
 *--------------------------------------
+DDP.LLC			.HS AA
+				.HS AA
+				.HS 03
+				.HS 08.00.07
+				.HS 80.9B
+DDP.LLC.L		.EQ *-DDP.LLC
+*--------------------------------------
+NBP.ID			.BS 1
+*--------------------------------------
+ETLK.Q.Tail		.BS 1
+ETLK.Q.Head		.BS 1 
+ETLK.Q.hMem		.BS ETLK.Q.SIZE
+ETLK.Q.State	.BS ETLK.Q.SIZE
+ETLK.Q.Retry	.BS ETLK.Q.SIZE
+ETLK.Q.LenL		.BS ETLK.Q.SIZE
+ETLK.Q.LenH		.BS ETLK.Q.SIZE
+*--------------------------------------
 RefCount		.BS 1
 IOCTL			.BS S.IOCTL
 hFrameIn		.BS 1
+hFrameOut		.BS 1
 ETKCFG			.BS S.ETKCFG
 AARP.CACHE		.BS K.AARPCACHE.SIZE*S.AARPCACHE
 AARP.TmpCache	.BS S.AARPCACHE

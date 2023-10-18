@@ -5,13 +5,15 @@ Copyright 2015 - 2020, Remy Gibert and the A2osX contributors.
 
 # ARP.Clear  
  Clear ARP Cache  
-**In:**  
+
+## ASM  
 
 ## RETURN VALUE  
 
 # ARP.Query  
  Query ARP Cache and returns HW address  
-**In:**  
+
+## ASM  
  PUSHW PTR to MAC (to fill)  
  PUSHW PTR to IP  
 
@@ -21,26 +23,30 @@ Copyright 2015 - 2020, Remy Gibert and the A2osX contributors.
 
 # ARP.Add  
  Add a static ARP cache record  
-**In:**  
+
+## ASM  
  PUSHW PTR to MAC  
  PUSHW PTR to IP  
 
 # ARP.GetCache  
  Return a Ptr to ARP Cache Table  
-**In:**  
+
+## ASM  
 
 ## RETURN VALUE  
   Y,A = PTR to ARP.CACHE  
 
 # DNS.Clear  
  Clear DNS Cache  
-**In:**  
+
+## ASM  
 
 ## RETURN VALUE  
 
 # DNS.Query  
  Query DNS for specified host  
-**In:**  
+
+## ASM  
   PUSHW = PTR to IP to fill with cached data  
 *	PUSHW = hostname PTR to PSTR  
 
@@ -50,13 +56,15 @@ Copyright 2015 - 2020, Remy Gibert and the A2osX contributors.
 
 # DNS.Add  
  Add a static DNS record  
-**In:**  
+
+## ASM  
  PUSHW = PTR to IP  
  PUSHW = hostname CSTR to Add  
 
 # DNS.GetCAche  
  Return a Ptr to DNS Cache Table  
-**In:**  
+
+## ASM  
 
 ## RETURN VALUE  
   Y,A = PTR to DNS.CACHE  
@@ -68,7 +76,6 @@ Create a new socket
 `hFD socket(short int type, short int protocol);`  
 
 ## ASM  
-**In:**  
 `>PUSHB type`  
 `>PUSHB protocol`  
 `>LIBCALL hLIBTCPIP,LIBTCPIP.socket`  
@@ -84,7 +91,6 @@ bind a name to a socket
 `int bind(hFD fd, const struct sockaddr *addr);`  
 
 ## ASM  
-**In:**  
 `>PUSHB fd`  
 `>PUSHW addr`  
 `>LIBCALL hLIBTCPIP,LIBTCPIP.socket`  
@@ -100,7 +106,6 @@ Initiate a connection on a socket
 `int connect(hFD fd, const struct sockaddr *addr);`  
 
 ## ASM  
-**In:**  
 `>PUSHB fd`  
 `>PUSHW addr`  
 `>LIBCALL hLIBTCPIP,LIBTCPIP.socket`  
@@ -116,7 +121,6 @@ Listen for connections on a socket
 `int listen(hFD fd);`  
 
 ## ASM  
-**In:**  
 `lda fd`  
 `>LIBCALL hLIBTCPIP,LIBTCPIP.listen`  
 
@@ -130,7 +134,6 @@ Accept a connection on a socket
 `hFD Accept(hFD fd);`  
 
 ## ASM  
-**In:**  
 `lda fd`  
 `>LIBCALL hLIBTCPIP,LIBTCPIP.accept`  
 
@@ -144,7 +147,6 @@ Close socket
 `int shutdown(int fd);`  
 
 ## ASM  
-**In:**  
 `lda fd`  
 `>LIBCALL hLIBTCPIP,LIBTCPIP.shutdown`  
 
@@ -156,7 +158,6 @@ Close socket
 `int skt.read(hFD fd, void *buf, int count);`  
 
 ## ASM  
-**In:**  
 `>PUSHB fd`  
 `>PUSHW buf`  
 `>PUSHW count`  
@@ -172,7 +173,6 @@ CS: A = EC
 `int skt.write(hFD fd, const void *buf, int count);`  
 
 ## ASM  
-**In:**  
 `>PUSHB fd`  
 `>PUSHW buf`  
 `>PUSHW count`  
@@ -188,7 +188,6 @@ CS: A = EC
 `hMem recvfrom(hFD fd, struct sockaddr *addr);`  
 
 ## ASM  
-**In:**  
 `>PUSHB fd`  
 `>PUSHW addr`		(RecvFrom)  
 `>LIBCALL hLIBTCPIP,LIBTCPIP.Recv`  
@@ -203,7 +202,6 @@ CS: A = EC
 `hMem recv(hFD fd);`  
 
 ## ASM  
-**In:**  
 `lda fd`  
 `>LIBCALL hLIBTCPIP,LIBTCPIP.Recv`  
 
@@ -217,7 +215,6 @@ CS: A = EC
 `int skt.sendto(hFD fd, const void *buf, int count, const struct sockaddr *addr);`  
 
 ## ASM  
-**In:**  
 `>PUSHB fd`  
 `>PUSHW buf`  
 `>PUSHWI count`  
@@ -234,7 +231,6 @@ CS: A = EC
 `int skt.send(hFD fd, const void *buf, int count);`  
 
 ## ASM  
-**In:**  
 `>PUSHB fd`  
 `>PUSHW buf`  
 `>PUSHWI count`  
@@ -251,7 +247,6 @@ Set Socket Options
 `int getsockopt(hFD fd);`  
 
 ## ASM  
-**In:**  
 `lda fd`  
 `>LIBCALL hLIBTCPIP,LIBTCPIP.GetSockOpt`  
 
@@ -264,7 +259,6 @@ Set Socket Options
 `int setsockopt(hFD fd, short int opts);`  
 
 ## ASM  
-**In:**  
 `>PUSHB fd`  
 `>PUSHB opts`  
 `>LIBCALL hLIBTCPIP,LIBTCPIP.SetSockOpt`  
@@ -278,25 +272,12 @@ End Of File
 `int eof(hFD fd);`  
 
 ## ASM  
-**In:**  
 `lda fd`  
 `>LIBCALL hLIBTCPIP,LIBTCPIP.EOF`  
 
 ## RETURN VALUE  
 CC : A = 0 if some data, A = $ff if EOF  
 CS : A = Socket Error  
-
-# GetTable  
-Get socket table  
-
-## C  
-`void * gettable();`  
-
-## ASM  
-**In:**  
-`>LIBCALL hLIBTCPIP,LIBTCPIP.GetTable`  
-
-## RETURN VALUE  
 
 ## License
 A2osX is licensed under the GNU General Public License.

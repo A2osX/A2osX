@@ -12,36 +12,27 @@ K.GetDevByName	>STYA ZPPtr1			requested dev name
 
 				ldx #1
 
-.1				lda hFDs-1,x
+.1				ldy FDs.pHI-1,x
 				beq .7
 
-				sta IO.hFD
-				jsr K.GetMemPtr
-				>STYA pFD
+				cpy #$C0
+				bcc .7
 
-				lda hFDs.hName-1,x
-				bne .2
+				stx IO.hFD
+				
+				sty pFD+1
+				lda FDs.pLO-1,x
+				sta pFD
 
-				jsr DEV.GetPDrv
-
-				lda pFD
 				clc
 				adc #S.FD.DEV
 				sta ZPPtr2
 
-				lda pFD+1
+				tya
 				adc /S.FD.DEV
 				sta ZPPtr2+1
-				bra .3
-				
-.2				jsr K.GetMemPtr
-				>STYA ZPPtr2
 
-				lda (ZPPtr2)
-				cmp #'/'				REG/DIR
-				beq .7
-
-.3				ldy #$ff
+				ldy #$ff
 
 .4				iny
 				lda (ZPPtr1),y
@@ -51,15 +42,14 @@ K.GetDevByName	>STYA ZPPtr1			requested dev name
 				eor #0
 				bne .4
 
-				stx IO.hFILE
 				>LDYA pFD
 				ldx IO.hFD
 				clc
 				rts
 
-.7				inx						no....loop
-				cpx #K.hFD.MAX+1
-				bne .1
+.7				inx
+				cpx #K.FD.MAX+1
+				bcc .1
 
 				lda #MLI.E.NODEV
 *				sec
@@ -91,7 +81,12 @@ K.GetDev.9		rts
 * ## RETURN VALUE
 *  A = hDEV
 *\--------------------------------------
-K.MKDev			jsr SHARED.PullP2P1		ptr2=name,ptr1=fd
+K.MKDev			jsr SHARED.PullP2P1		ptr2=devname,ptr1=fd
+
+				jsr DEV.GetFreeFD
+				bcs .9
+				
+				stx IO.hFD
 
 				ldy #$ff
 				ldx #S.FD.DEV
@@ -103,12 +98,18 @@ K.MKDev			jsr SHARED.PullP2P1		ptr2=name,ptr1=fd
 
 				txa
 				tay
-				lda #S.FD.T.CDEV
+				lda #0
 
-				jsr DEV.MkFDy
+				jsr MEM.GetKBuf
 				bcs .9
 
+				>STYA pFD
 				>STYA .4+1
+				
+				ldx IO.hFD
+				sta FDs.pHI-1,x
+				tya
+				sta FDs.pLO-1,x
 
 				ldy #S.FD.DEV-1
 
@@ -123,6 +124,7 @@ K.MKDev			jsr SHARED.PullP2P1		ptr2=name,ptr1=fd
 .3				iny
 				inx
 				lda (ZPPtr2),y
+
 .4				sta $ffff,x
 				bne .3
 
@@ -156,8 +158,10 @@ K.MKDev			jsr SHARED.PullP2P1		ptr2=name,ptr1=fd
 
 				inx
 				inx
-				cpx #K.IRQDEV.MAX*2+1
-				bne .6
+				cpx #K.IRQDEV.MAX*2
+				bcc .6
+
+				lda #E.OOH
 
 *				sec
 
@@ -171,7 +175,9 @@ K.MKDev			jsr SHARED.PullP2P1		ptr2=name,ptr1=fd
 				sta IRQ.Vectors+1,x
 
 .8				lda IO.hFD
+
 *				clc
+
 				rts
 */--------------------------------------
 * # IOCTL
@@ -238,10 +244,60 @@ DEV.CLOSE		ldx #IOCTL.CLOSE
 DEV.pDrvJmp		>LDYAI K.S.IOCTL
 DEV.pDrvJmp.1	jmp (pDrv)
 *--------------------------------------
-DEV.GetPFD		sta IO.hFD
+* For REG, DIR, PIPE
+*--------------------------------------
+DEV.MkFD		sta .8+1				A = S.FD.T
 
-				jsr K.GetMemPtr
+				jsr DEV.GetFreeFD
+				bcs .9
+
+				stx IO.hFD
+
+				ldy #16					Y = Size, MAX=16 for S.FD.DIR
+				lda #0
+				ldx #S.MEM.F.INIT0+S.MEM.F.FD
+				jsr MEM.GetMem.YAX
+				bcs .9
+
 				>STYA pFD
+				ldx IO.hFD
+				sta FDs.pHI-1,x
+				tya
+				sta FDs.pLO-1,x
+				
+				jsr Mem.SetOwnerPS0
+				
+.8				lda	#$ff				SELF MODIFIED
+				sta (pFD)
+
+*				clc
+
+.9				rts
+*--------------------------------------
+DEV.GetFreeFD	ldx #1
+
+				clc
+
+.1				lda FDs.pHI-1,x
+				beq .8
+				
+				inx
+				cpx #K.FD.MAX+1
+				bcc .1
+				
+				lda #E.OOH
+
+*				sec
+
+.8				rts
+*--------------------------------------
+DEV.GetPFD		sta IO.hFD
+				tay
+				
+				lda FDs.pLO-1,y
+				sta pFD
+				lda FDs.pHI-1,y
+				sta pFD+1
 
 DEV.GetPDrv		ldy #S.FD.DEV.DRVPTR
 				lda (pFD),y
@@ -251,69 +307,6 @@ DEV.GetPDrv		ldy #S.FD.DEV.DRVPTR
 				sta pDRV+1
 
 				rts
-*--------------------------------------
-DEV.MkFD		ldy #16					Y = Size, MAX=16 for S.FD.DIR
-				
-DEV.MkFDy		sta .8+1				A = S.FD.T
-
-				jsr DEV.GetFreeFD
-				bcs .9
-
-.2				stx IO.hFILE
-
-				lda #0
-				ldx #S.MEM.F.INIT0+S.MEM.F.FD
-				jsr MEM.GetMem.YAX
-				bcs .9
-
-				>STYA pFD
-				stx IO.hFD
-				
-				jsr Mem.SetOwnerPS0
-				
-				txa
-				
-.7				ldx IO.hFILE
-
-				sta hFDs-1,x
-				stz hFDs.hName-1,x
-
-.8				lda	#$ff				SELF MODIFIED
-				sta (pFD)
-
-				>LDYA pFD				Y,A = pFD, X = hFILE
-
-*				clc
-.9				rts
-*--------------------------------------
-DEV.GetFreeFD	lda #0
-
-DEV.GetFD		ldx #1
-
-.1				cmp hFDs-1,x
-				beq DEV.GetFD.8
-
-				inx
-				cpx #K.hFD.MAX+1
-				bne .1
-
-				tax
-				beq DEV.GetFD.8
-				
-				lda #E.INVH
-				.HS 2C					BIT ABS
-.9				lda #E.OOH
-*				sec
-				rts
-
-K.MkFD
-DEV.GetFD.8		clc
-				rts
-*--------------------------------------
-DEV.hFDFree		lda IO.hFD
-				beq DEV.GetFD.8
-				
-				jmp K.FreeMem
 *--------------------------------------
 MAN
 SAVE usr/src/sys/kernel.s.dev

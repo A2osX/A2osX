@@ -26,9 +26,13 @@ ZPFrameBase		.BS 2
 ZPFramePtr		.BS 2
 BufPtr			.BS 2
 
+DevID			.BS 1
 ProbeCnt		.BS 1
 TimeOut			.BS 1
 hFrame			.BS 1
+
+ZPPtr1			.BS 1
+
 ZS.END			.ED
 *--------------------------------------
 *			File Header (16 Bytes)
@@ -67,25 +71,27 @@ L.MSG2.C		.DA MSG2.C
 L.MSG2.U		.DA MSG2.U
 L.MSG2.ADDR		.DA MSG2.ADDR
 L.MSG2.ROUTER	.DA MSG2.ROUTER
+L.MSG2.MCAST	.DA MSG2.MCAST
+L.MSG2.NETRANGE	.DA MSG2.NETRANGE
 L.MSG2.OBJECT	.DA MSG2.OBJECT
 L.MSG.CFG		.DA MSG.CFG
 L.MSG.CFG.KO	.DA MSG.CFG.KO
 L.MSG.CFG.OK	.DA MSG.CFG.OK
 L.HOSTNAME		.DA HOSTNAME
 L.CFG.DefaultHost	.DA  CFG.DefaultHost
-L.ETKCFG		.DA ETKCFG
-L.ETKCFG.OBJECT	.DA ETKCFG+S.ETKCFG.OBJECT
 *--------------------------------------
 L.MSG.PROBE		.DA MSG.PROBE
 L.MSG.PROBE.KO	.DA MSG.PROBE.KO
 L.MSG.PROBE.OK	.DA MSG.PROBE.OK
 L.AARP.PRB		.DA AARP.PRB
 L.DDP.GetNetInfo .DA DDP.GetNetInfo
+L.NBP.Browse	.DA NBP.Browse
 				.DA 0
 *--------------------------------------
 CS.INIT			>LDYA L.LIBETALK
 				>SYSCALL LoadLib
 				bcs .9
+
 				sta hLIBETALK
 
 .9				rts
@@ -93,35 +99,33 @@ CS.INIT			>LDYA L.LIBETALK
 CS.RUN			>LIBCALL hLIBETALK,LIBETALK.GETCFG
 				>STYA pETKCFG
 
-				ldy #S.ETKCFG-1
-.1				lda (pETKCFG),y
-				sta ETKCFG,y
-				dey
-				bpl .1
-
-				lda ETKCFG+S.NETCFG.DevID
+				ldy #S.NETCFG.DevID
+				lda (pETKCFG),y
 				bne CS.RUN.SETUP
+
 				>LDYA L.MSG.NODEV
 				>SYSCALL PutS
 				lda #MLI.E.NODEV
 				sec
 				rts
 				
-CS.RUN.SETUP	lda ETKCFG+S.NETCFG.STATUS
-				bne .7
+CS.RUN.SETUP	sta DevID
+
+				lda (pETKCFG)
+				bmi .7
 				
-				jsr CFG.EtcFiles
+				bne .1
+				
+				jsr CS.RUN.EtcFiles
 
 				jsr CS.RUN.PROBE
 				
-				jsr CS.RUN.GETNETINFO
-
-				lda #$80
-				sta ETKCFG+S.NETCFG.STATUS
-				>PUSHW L.ETKCFG
-				>LIBCALL hLIBETALK,LIBETALK.SETCFG
+.1				jsr CS.RUN.GETNETINFO
 
 .7				jsr CS.RUN.DUMP
+
+				>PUSHW L.NBP.Browse
+				>LIBCALL hLIBETALK,LIBETALK.NBP.Lookop
 
 .8				lda #0
 				sec
@@ -139,20 +143,17 @@ CS.RUN.DUMP		>LEA.G DCB.NIC
 				ldx #S.IOCTL.S.GETDIB
 				jsr CS.RUN.IOCTL
 				bcs CS.RUN.SETUP.RTS
-				
+*--------------------------------------				
 CS.RUN.DUMPNIC	>PUSHW L.MSG1.DEV
 				
-				lda ETKCFG+S.NETCFG.DevID
-				>PUSHA
+				>PUSHB DevID
 				
-				>SYSCALL GetMemPtr
-				
-				pha
-				tya
+				tax
+				lda FDs.pLO-1,x
 				clc
 				adc #S.FD.DEV
 				tay
-				pla
+				lda FDs.pHI-1,x
 				adc /S.FD.DEV
 				>PUSHYA
 				
@@ -201,10 +202,11 @@ CS.RUN.DUMPNIC	>PUSHW L.MSG1.DEV
 				>LDA.G DCB.NIC+S.DCB.NIC.LINK
 				and #S.DCB.NIC.LINK.OK
 				bne CS.RUN.LINK
+
 				>LDYA L.MSG1.LINK.KO
 				>SYSCALL PutS
-				bra CS.RUN.DUMPNET
-
+				bra CS.RUN.DUMPETKCFG
+*--------------------------------------
 CS.RUN.LINK		>LDYA L.MSG1.LINK.OK
 				>SYSCALL PutS
 
@@ -215,82 +217,149 @@ CS.RUN.LINK		>LDYA L.MSG1.LINK.OK
 				>LDA.G DCB.NIC+S.DCB.NIC.SPEED
 				and #$0F
 				tax
+
 .4				phx
 				lda #'0'
 				>SYSCALL PutChar
 				plx
 				dex
 				bne .4
+
 				>LDA.G DCB.NIC+S.DCB.NIC.LINK
 				and #S.DCB.NIC.LINK.FD
 				bne .5
+
 				>LDYA L.MSG1.DPLX.HD
 				bra .6
-.5				>LDYA L.MSG1.DPLX.FD
-.6				>SYSCALL PutS
 
-CS.RUN.DUMPNET	>PUSHW L.MSG2
+.5				>LDYA L.MSG1.DPLX.FD
+
+.6				>SYSCALL PutS
+*--------------------------------------
+CS.RUN.DUMPETKCFG
+				>PUSHW L.MSG2
 				>PUSHBI 0
 				>SYSCALL PrintF
-
-				lda ETKCFG+S.ETKCFG.NodID
+				
+				lda (pETKCFG)
 				beq .11
+
 				>LDYA L.MSG2.C
 				bra .10
+
 .11				>LDYA L.MSG2.U
+
 .10				>SYSCALL PutS
 
 				>PUSHW L.MSG2.ADDR
-				>PUSHW ETKCFG+S.ETKCFG.NetID
-				>PUSHB ETKCFG+S.ETKCFG.NodID
+				
+				ldy #S.ETKCFG.NetID+1
+				lda (pETKCFG),y
+				>PUSHA
+				dey
+				lda (pETKCFG),y
+				>PUSHA
+				ldy #S.ETKCFG.NodID
+				lda (pETKCFG),y
+				>PUSHA
 				>PUSHBI 3
 				>SYSCALL PrintF
 				
 				>PUSHW L.MSG2.ROUTER
-				>PUSHW ETKCFG+S.ETKCFG.NetID
-				>PUSHB ETKCFG+S.ETKCFG.Router
+				ldy #S.ETKCFG.NetID+1
+				lda (pETKCFG),y
+				>PUSHA
+				dey
+				lda (pETKCFG),y
+				>PUSHA
+				ldy #S.ETKCFG.Router
+				lda (pETKCFG),y
+				>PUSHA
 				>PUSHBI 3
 				>SYSCALL PrintF
 				
-				>PUSHW L.MSG2.OBJECT
-				>PUSHW L.ETKCFG.OBJECT
-				>PUSHBI 2
+				>PUSHW L.MSG2.MCAST
+				
+				ldy #S.ETKCFG.MCAddress+1
+				
+.1				>PUSHB (pETKCFG),y
+				iny
+				cpy #S.ETKCFG.MCAddress+7
+				bcc .1
+				
+				>PUSHBI 6
 				>SYSCALL PrintF
-				lda #0					tell TSKMGR that all done ok, but 
-				sec						we do not want to stay in memory
+				
+				>PUSHW L.MSG2.NETRANGE
+				ldy #S.ETKCFG.NetStart+1
+				lda (pETKCFG),y
+				>PUSHA
+				dey
+				lda (pETKCFG),y
+				>PUSHA
+				ldy #S.ETKCFG.NetEnd+1
+				lda (pETKCFG),y
+				>PUSHA
+				dey
+				lda (pETKCFG),y
+				>PUSHA
+				>PUSHBI 4
+				>SYSCALL PrintF
+
+				>PUSHW L.MSG2.OBJECT
+				lda pETKCFG
+				clc
+				adc #S.ETKCFG.Object
+				tay
+				lda pETKCFG+1
+				adc /S.ETKCFG.Object
+				>PUSHYA
+				lda pETKCFG
+				clc
+				adc #S.ETKCFG.Zone
+				tay
+				lda pETKCFG+1
+				adc /S.ETKCFG.Zone
+				>PUSHYA
+				>PUSHBI 4
+				>SYSCALL PrintF
+
 				rts
 *--------------------------------------
 CS.RUN.PROBE	>LDYA L.MSG.PROBE
 				>SYSCALL PutS
 
+				ldy #S.ETKCFG.MAC+5
 				ldx #5
 
-.20				lda ETKCFG+S.NETCFG.MAC,x
+.20				lda (pETKCFG),y
 				sta AARP.PRB.SHA,x
+				dey
 				dex
 				bpl .20
 				
 				lda #$FF
-				sta AARP.PRB.SPA+2
-				sta AARP.PRB.TPA+2
-
-				lda #$FE
 				sta AARP.PRB.SPA+1
 				sta AARP.PRB.TPA+1
+
+				lda #$FE
+				sta AARP.PRB.SPA+2
+				sta AARP.PRB.TPA+2
 
 				lda A2osX.TIMER16
 				eor A2osX.TIMER16+1
 				bne .1
 
 				inc
+
 .1				cmp #$FE
 				bcc .2
 	
 				eor #$80
-
+			
 .2				sta AARP.PRB.SPA+3
 				sta AARP.PRB.TPA+3
-
+				
 				lda #PROBE.MAX
 				sta ProbeCnt
 
@@ -299,27 +368,31 @@ CS.RUN.PROBE	>LDYA L.MSG.PROBE
 				>LDYAI AARP.PRB.LEN
 				>STYA.G DEV.IOCTL+S.IOCTL.BYTECNT
 				
-				>PUSHB ETKCFG+S.NETCFG.DevID
-				lda #IOCTL.WRITE
-				jsr CS.RUN.IOCTL.A
+				ldx #IOCTL.WRITE
+				jsr CS.RUN.IOCTL.X
 				
 				>SLEEP
 				dec ProbeCnt
 				bne .3
 				
 				lda AARP.PRB.SPA+2
-				sta ETKCFG+S.ETKCFG.NetID
-				sta DDP.GetNetInfo+S.DDP2.SRC.NET
-				
-				lda AARP.PRB.SPA+1
-				sta ETKCFG+S.ETKCFG.NetID+1
+				ldy #S.ETKCFG.NetID
+				sta (pETKCFG),y
 				sta DDP.GetNetInfo+S.DDP2.SRC.NET+1
 				
+				lda AARP.PRB.SPA+1
+				iny
+				sta (pETKCFG),y
+				sta DDP.GetNetInfo+S.DDP2.SRC.NET
+				
 				lda AARP.PRB.SPA+3
-				sta ETKCFG+S.ETKCFG.NodID
+				ldy #S.ETKCFG.NodID
+				sta (pETKCFG),y
 				sta DDP.GetNetInfo+S.DDP2.SRC.NOD
 				
-*				clc
+				lda (pETKCFG)
+				inc
+				sta (pETKCFG)
 
 				rts
 *--------------------------------------
@@ -329,54 +402,45 @@ CS.RUN.GETNETINFO
 				>LDYAI DDP.GetNetInfo.LEN
 				>STYA.G DEV.IOCTL+S.IOCTL.BYTECNT
 				
-				>PUSHW ETKCFG+S.NETCFG.DevID
-				lda #IOCTL.WRITE
-				jsr CS.RUN.IOCTL.A
+				ldx #IOCTL.WRITE
+				jsr CS.RUN.IOCTL.X
+				bcs .9
 				
 				lda #TIMEOUT.MAX
 				sta TimeOut
 				
 .1				>SLEEP
 
-				dec TimeOut
-				beq .9
+				lda (pETKCFG)
+				bmi .8
 
-				>PUSHW ETKCFG+S.NETCFG.DevID
-				lda #IOCTL.READ
-				jsr CS.RUN.IOCTL.A
-				bcs .1
+				dec TimeOut
+				bne .1
 				
-				sta hFrame
-				>SYSCALL GetMemPtr
-				>STYA ZPFrameBase
+				sec
+				rts
 				
-				
-				
-				lda hFrame
-				>SYSCALL FreeMem
-				
-				>LDYA L.MSG.PROBE.OK
+.8				>LDYA L.MSG.PROBE.OK
 				>SYSCALL PutS
-				rts
-				
-.9				sec				
-				rts
+
+.9				rts
 *--------------------------------------
 CS.RUN.IOCTL	>STYA.G DEV.IOCTL+S.IOCTL.BUFPTR
 
 				txa
 				>STA.G DEV.IOCTL+S.IOCTL.S
 
-				>PUSHB ETKCFG+S.NETCFG.DevID
-				lda #IOCTL.STATUS
+				ldx #IOCTL.STATUS
 
-CS.RUN.IOCTL.A	>PUSHA
+CS.RUN.IOCTL.X	>PUSHB DevID
+				txa
+				>PUSHA
 
 				>PUSHEA.G DEV.IOCTL
 				>SYSCALL IOCTL
 				rts
 *--------------------------------------
-CFG.EtcFiles	>LDYAI 256
+CS.RUN.EtcFiles	>LDYAI 256
 				>SYSCALL GetMem
 				bcs .9
 
@@ -386,22 +450,26 @@ CFG.EtcFiles	>LDYAI 256
 				jsr CFG.Read.PrintF
 				jsr CFG.Read.HOSTNAME
 
-				lda ETKCFG+S.ETKCFG.OBJECT
+				ldy #S.ETKCFG.Object
+				lda (pETKCFG),y
 				bne .2
 
-				>LDYA L.ETKCFG.OBJECT
-				iny
-				bne .1
-				inc
+				lda pETKCFG
+				clc
+				adc #S.ETKCFG.Object+1
+				tay
+				lda pETKCFG+1
+				adc /S.ETKCFG.Object+1
 				
-.1				>PUSHYA				
+				>PUSHYA				
 				>PUSHW L.CFG.DefaultHost
 				>PUSHW A2osX.TIMER16
 				>PUSHBI 2
 				>SYSCALL SPrintF
 				
 				lda #10
-				sta ETKCFG+S.ETKCFG.OBJECT
+				ldy #S.ETKCFG.Object
+				sta (pETKCFG),y
 				
 .2				lda CFG.hBuf1
 				>SYSCALL FreeMem
@@ -417,6 +485,14 @@ CFG.Read.PrintF pha
 				rts
 *--------------------------------------
 CFG.Read.HOSTNAME
+				lda pETKCFG
+				clc
+				adc #S.ETKCFG.Object
+				sta ZPPtr1
+				lda pETKCFG+1
+				adc /S.ETKCFG.Object
+				sta ZPPtr1+1
+
 				>LDYA L.HOSTNAME
 				jsr CFG.Read.Open
 				bcs .9
@@ -429,6 +505,7 @@ CFG.Read.HOSTNAME
 				
 				lda (BufPtr)
 				beq .1					empty line...
+
 				cmp #'#
 				beq .1					comment...
 				
@@ -437,12 +514,13 @@ CFG.Read.HOSTNAME
 .2				lda (BufPtr),y
 				beq .8					end of name
 
-				sta ETKCFG+S.ETKCFG.OBJECT+1,y
 				iny
+				sta (ZPPtr1),y
 				cpy #32
 				bne .2
 				
-.8				sty ETKCFG+S.ETKCFG.OBJECT
+.8				tya
+				sta (ZPPtr1)
 
 				clc
 				.HS B0					BCS
@@ -450,6 +528,7 @@ CFG.Read.HOSTNAME
 				jmp CFG.Read.Close
 *--------------------------------------
 CFG.Read.Result	bcc .1
+
 				pha
 				>PUSHW L.MSG.CFG.KO
 				pla
@@ -506,7 +585,9 @@ CS.DOEVENT		lda (pEvent)
 *--------------------------------------
 CS.QUIT			lda hLIBETALK
 				beq .8
+
 				>SYSCALL UnloadLib
+
 .8				clc
 				rts
 *--------------------------------------
@@ -519,7 +600,7 @@ MSG.USAGE		.CZ "Usage : ETCONFIG\r\n"
 MSG.NODEV		.CZ "EtherTalk not bound to any device."
 *--------------------------------------
 MSG1.DEV		.CS "NIC Device Configuration :\r\n"
-				.CS	" Device ID   : $%h\r\n"
+				.CS	" Device ID   : %d\r\n"
 				.CS " Device Name : %s\r\n"
 				.CS " Device Type : %S\r\n"
 				.CZ " HW Address  : %02h:%02h:%02h:%02h:%02h:%02h\r\n"
@@ -537,7 +618,9 @@ MSG2.C			.CZ "Configured"
 MSG2.U			.CZ "Not Configured"
 MSG2.ADDR		.CZ " Network/Node : %D/%d\r\n"
 MSG2.ROUTER		.CZ " Router       : %D/%d\r\n"
-MSG2.OBJECT		.CZ " Object Name  : %S\r\n"
+MSG2.MCAST		.CZ " Multicast @  : %h:%h:%h:%h:%h:%h\r\n"
+MSG2.NETRANGE	.CZ " Netrange     : %D/%D\r\n"
+MSG2.OBJECT		.CZ " Object.Zone  : %S@%S\r\n"
 *--------------------------------------
 MSG.CFG			.CZ "ETCONFIG:Reading %s..."
 MSG.CFG.KO		.CZ "Not Found. [%h]\r\n"
@@ -551,35 +634,40 @@ MSG.PROBE		.CZ "ETCONFIG:Acquiring NODE..."
 MSG.PROBE.KO	.CZ "ETCONFIG:Time Out [%h].\r\n"
 MSG.PROBE.OK	.CZ "ETCONFIG:Success."
 *--------------------------------------
-ETKCFG			.BS S.ETKCFG
 CFG.hCfgFile	.BS 1
 CFG.hBuf1		.BS 1
 *--------------------------------------
 AARP.PRB		.HS 090007FFFFFF		S.ETH.DSTMAC
-AARP.PRB.SRCMAC	.BS 6
-				.DA #0,#36				S.ETH.802.3.LENGTH
+				.BS 6
+				.DA /AARP.PRB.DEND-AARP.PRB.LLC
+				.DA #AARP.PRB.DEND-AARP.PRB.LLC
+AARP.PRB.LLC
 				.HS AA					S.ETH.802.2.DSTSAP
 				.HS AA					S.ETH.802.2.SRCSAP
 				.HS 03					S.ETH.802.2.CTRL
-				.HS 00.00.00.80.F3		S.ETH.SNAP.PROTO
+				.HS 00.00.00
+				.HS 80.F3				S.ETH.SNAP.PROTO
+*--------------------------------------
 				.HS 00.01.80.9B.06.04
 				.HS 0003				Probe
 AARP.PRB.SHA	.BS 6
 AARP.PRB.SPA	.BS 4
 AARP.PRB.THA	.BS 6
 AARP.PRB.TPA	.BS 4
+AARP.PRB.DEND	.EQ *
 				.BS AARP.PRB+60-*
 AARP.PRB.LEN	.EQ 60
 *--------------------------------------
 DDP.GetNetInfo	.HS 090007FFFFFF		S.ETH.DSTMAC
 				.BS 6
-				.DA #0,#DDP.GetNetInfo.DEND-DDP.GetNetInfo.LLC
-*--------------------------------------
+				.DA /DDP.GetNetInfo.DEND-DDP.GetNetInfo.LLC
+				.DA #DDP.GetNetInfo.DEND-DDP.GetNetInfo.LLC
 DDP.GetNetInfo.LLC
 				.HS AA
 				.HS AA
 				.HS 03
-				.HS 08.00.07.80.9B
+				.HS 08.00.07
+				.HS 80.9B				S.ETH.SNAP.PROTO
 *--------------------------------------
 DDP.GetNetInfo.DDP
 				.DA #0,#DDP.GetNetInfo.DEND-DDP.GetNetInfo.DDP
@@ -600,6 +688,11 @@ DDP.GetNetInfo.DEND	.EQ *
 				.BS DDP.GetNetInfo+60-*
 DDP.GetNetInfo.LEN	.EQ 60
 *--------------------------------------
+NBP.Browse		.PS "="
+				.PS "="
+				.PS "*"
+				.HS 00
+*--------------------------------------				
 				.DUMMY
 				.OR 0
 DS.START
