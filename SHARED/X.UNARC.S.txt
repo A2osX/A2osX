@@ -1,0 +1,352 @@
+NEW
+  AUTO 3,1
+*--------------------------------------
+* ZPInBufPtr = Ptr to Shunk Data
+* ZPOutBufPtr = Ptr to Uncompressed Data
+*--------------------------------------
+* ZPnCnt = !ZPULen
+* ZPPtr1
+* ZPPtr2
+* ZPInMask
+* ZPSTRLenBits
+* ZPBLLenBits
+* ZPBLOfsLBits
+* ZPBLOfsHBits
+* ZPTOPCnt
+*--------------------------------------
+X.UnArc			jsr X.UnArc.GetByte		ULEN LO
+				eor #$ff
+				sta ZPnCnt
+
+				jsr X.UnArc.GetByte		ULEN HI
+				eor #$ff
+				sta ZPnCnt+1
+
+				jsr X.UnArc.GetByte		TBLBITS LO
+				sta ZPPtr1
+
+				jsr X.UnArc.GetByte		TBLBITS HI
+				sta ZPPtr1+1
+				ora ZPPtr1
+				bne X.UnArc.ARC
+*--------------------------------------
+X.UnArc.STORE	ldx ZPnCnt				!LEN LO
+
+				ldy #0
+
+.1				inx
+				bne .2
+
+				inc ZPnCnt+1
+				beq .8
+
+.2				lda (ZPInBufPtr),y
+				sta (ZPOutBufPtr),y
+				iny
+				bne .1
+
+				inc ZPInBufPtr+1
+				inc ZPOutBufPtr+1
+
+				bra .1
+
+.8				clc
+				rts
+*--------------------------------------
+X.UnArc.ARC		lda #$80
+				sta ZPTOPCnt			Default to no TOP bytes...
+				sta ZPSTRLenBits		...and no long length for STR...
+				sta ZPBLLenBits			...and BL
+				sta ZPInMask			Init Bit shifter
+
+				lda ZPPtr1+1
+				and #%01111111			-llloooo
+				beq  .13				no BL/STR
+
+				lsr
+				lsr
+				lsr
+				lsr
+				sta ZPBLLenBits			lll
+
+				lda ZPPtr1+1			----oooo
+				and #%00001111
+
+				ldx #0
+				cmp #8
+				bcc .10
+
+*				sec
+				sbc #8
+				tax
+				lda #8
+
+.10				sta ZPBLOfsLBits
+				stx ZPBLOfsHBits
+
+				lda ZPPtr1				sss-----
+
+				lsr
+				lsr
+				lsr
+				lsr
+				lsr
+				beq .13
+
+				sta ZPSTRLenBits
+
+.13				lda ZPPtr1+1			c-------
+				asl
+				lda ZPPtr1				---ccccc
+				and #%00011111
+				rol
+				beq X.UnArc.ARC.LOOP
+
+				sta ZPTOPCnt
+
+				ldx ZPInBufPtr			ZPPtr1 = TOP table
+				stx ZPPtr1
+				ldx ZPInBufPtr+1
+				stx ZPPtr1+1
+
+				clc
+				adc ZPInBufPtr			skip TOP table
+				sta ZPInBufPtr
+				bcc X.UnArc.ARC.LOOP
+
+				inc ZPInBufPtr+1
+*--------------------------------------
+X.UnArc.ARC.LOOP
+				bit ZPSTRLenBits
+				bpl X.UnArc.ARC.LOOPBL
+
+.1				jsr X.UnArc.Single
+				bne .1
+
+				clc
+				rts
+*--------------------------------------
+X.UnArc.ARC.LOOPBL
+				jsr X.UnArc.GetBitInC
+				bcs .60					-> STRBL	
+
+				jsr X.UnArc.Single
+				bne X.UnArc.ARC.LOOPBL
+
+				clc
+				rts				
+*--------------------------------------
+* STRBL
+*--------------------------------------
+.60				jsr X.UnArc.GetBitInC
+				bcs .70					-> BL
+*--------------------------------------
+* STR
+*--------------------------------------
+*				bit ZPSTRLenBits
+*				bmi .63					no long len
+
+				jsr X.UnArc.GetBitInC
+				bcs .61					-> Long Len
+
+.63				ldx #ARC.B.SHORTSTR.W
+				jsr X.UnArc.GetXBitInA
+
+				clc
+				adc #STR.MIN
+				bra .62
+
+.61				ldx ZPSTRLenBits
+				jsr X.UnArc.GetXBitInA
+
+				clc
+				adc #STR.MID
+
+.62				pha						STR len
+
+				jsr X.UnArc.Single
+
+				pla
+				dec
+				bne .62
+
+.81				bra .80
+*--------------------------------------
+* BL
+*--------------------------------------
+.70				bit ZPBLLenBits
+				bmi .73					no long len
+
+				jsr X.UnArc.GetBitInC
+				bcs .71					-> Long Len
+
+.73				ldx #ARC.B.SHORTBLL.W
+				jsr X.UnArc.GetXBitInA
+
+				clc
+				adc #BLL.MIN
+				bra .72
+*--------------------------------------
+.71				ldx ZPBLLenBits
+				jsr X.UnArc.GetXBitInA
+
+				clc
+				adc #BLL.MID
+
+.72				sta ZPPtr2				save BL Len....
+
+* BLOFS
+				pha
+
+				ldy #0
+				ldx ZPBLOfsHBits
+				beq .75
+
+				jsr X.UnArc.GetXBitInA
+
+				tay
+
+.75				jsr X.UnArc.Get8BitInA	YA=Offset
+
+				clc
+				adc ZPPtr2				ZPPtr2=BL Len+Offset
+				sta ZPPtr2
+				
+				tya
+				adc #0
+				sta ZPPtr2+1
+
+				lda ZPOutBufPtr
+				sec
+				sbc ZPPtr2
+				sta ZPPtr2
+
+				lda ZPOutBufPtr+1
+				sbc ZPPtr2+1
+				sta ZPPtr2+1
+
+				plx						Get Back BL Len
+				ldy #0
+
+.76				lda (ZPPtr2),y
+				jsr X.UnArc.PutByte
+
+				iny
+				dex
+				bne .76
+
+.80				lda ZPnCnt
+				and ZPnCnt+1
+				inc
+				beq .88
+
+				jmp X.UnArc.ARC.LOOPBL
+
+.88				clc
+				rts
+*--------------------------------------
+X.UnArc.Single	bit ZPTOPCnt
+				bmi .1					no TOP Table
+
+				jsr X.UnArc.GetBitInC
+				bcs .3					->TOP0
+*--------------------------------------
+* RAW
+*--------------------------------------
+.1				jsr X.UnArc.Get8BitInA
+				bra X.UnArc.PutByte
+*--------------------------------------
+.3				jsr X.UnArc.GetBitInC
+				bcs .4					->TOP8
+*--------------------------------------
+* TOP0/4
+*--------------------------------------
+				ldx #ARC.B.TOP0.W-1
+				jsr X.UnArc.GetXBitInA
+				bra .51
+*--------------------------------------
+.4				jsr X.UnArc.GetBitInC
+				bcs .5					->TOP16
+*--------------------------------------
+* TOP8
+*--------------------------------------
+				ldx #ARC.B.TOP8.W-2
+				jsr X.UnArc.GetXBitInA
+				ora #%1000
+				bra .51
+*--------------------------------------
+* TOP16
+*--------------------------------------
+.5				ldx #ARC.B.TOP16.W-2
+				jsr X.UnArc.GetXBitInA
+				ora #%10000
+
+.51				tay
+				lda (ZPPtr1),y
+*--------------------------------------
+* fall in PutByte
+*--------------------------------------
+X.UnArc.PutByte	inc ZPnCnt
+				bne .1
+
+				inc ZPnCnt+1
+				beq .8
+
+.1				sta (ZPOutBufPtr)
+
+				inc ZPOutBufPtr
+				bne .8
+
+				inc ZPOutBufPtr+1
+
+.8				rts
+*--------------------------------------
+X.UnArc.Get8BitInA
+				ldx #8
+X.UnArc.GetXBitInA
+				lda #0
+
+.1				pha
+				jsr X.UnArc.GetBitInC
+				pla
+				rol
+				dex
+				bne .1
+
+				rts
+*--------------------------------------
+X.UnArc.GetBitInC
+				lda (ZPInBufPtr)
+				and ZPInMask
+				
+				cmp #1					CC if bit=0
+				
+				php
+
+				lsr ZPInMask
+				bcc .8
+
+				ror ZPInMask
+
+				jsr X.UnArc.NextByte
+
+.8				plp
+				rts
+*--------------------------------------
+X.UnArc.GetByte	lda (ZPInBufPtr)
+X.UnArc.NextByte
+				inc ZPInBufPtr
+				bne .8
+
+				inc ZPInBufPtr+1
+
+.8				rts
+*--------------------------------------
+				.LIST ON
+X.UnArc.Size	.EQ *-X.UnArc
+				.LIST OFF
+*--------------------------------------
+MAN
+SAVE usr/src/shared/x.unarc.s
+LOAD usr/src/bin/unarc.s
+ASM

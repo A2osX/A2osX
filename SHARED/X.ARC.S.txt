@@ -1,0 +1,1534 @@
+NEW
+  AUTO 3,1
+*--------------------------------------
+* ZPInBufPtr = Ptr to Uncompressed Data
+* ZPOutBufPtr = Ptr to Shunk Data
+* Y,A = ULEN
+*--------------------------------------
+* ZPInBufPtr
+* ZPOutBufPtr
+* ZPBackPtr
+* ZPStrPtr
+ *--------------------------------------
+X.Arc			>STYA X.Arc.ShnkOut+S.ARCSHNK.ULEN
+
+				eor #$ff
+				sta X.Arc.nCnt+1
+				sta X.Arc.nCntOut+1
+				tya
+				eor #$ff
+				sta X.Arc.nCnt
+				sta X.Arc.nCntOut
+
+				stz X.Arc.ShnkOut+S.ARCSHNK.TBLBITS
+				stz X.Arc.ShnkOut+S.ARCSHNK.TBLBITS+1
+
+				>LDYA ZPInBufPtr
+				>STYA X.Arc.InBufPtr
+				>LDYA ZPOutBufPtr
+				>STYA X.Arc.OutBufPtr
+
+				jsr X.Arc.Reset			Reset counters
+* PASS #1
+				stz X.Arc.STRLen
+
+				jsr X.Arc.Run1
+
+				lda #32					4 Bytes header
+				sta X.Arc.TBits
+				sta X.Arc.BLBits
+				sta X.Arc.TBLBits
+
+				jsr X.Arc.ComputeTBits
+
+				lda X.Arc.BLL.Max
+				beq .1
+
+				jsr X.Arc.ComputeBLBits
+				jsr X.Arc.ComputeTBLBits
+
+.1				.DO DBG
+				jsr X.Arc.PrintDBG1
+				jsr X.Arc.PrintDBG2
+				.FIN
+
+				jsr X.Arc.Select
+				bcs .9
+
+				sta X.Arc.Alg
+* PASS #2
+				>LDYA X.Arc.InBufPtr
+				>STYA ZPInBufPtr
+
+				>LDYA X.Arc.nCntOut
+				>STYA X.Arc.nCnt
+
+				stz X.Arc.STRLen
+
+				jsr X.Arc.Out.Init2		Initialize properly for first "PutBit" Call
+				bcs .9
+
+				jsr X.Arc.Run2
+				bcs .9
+
+				.DO DBG
+				jsr X.Arc.ComputeDBG3	Get exact output bit count...
+				.FIN
+
+				jsr X.Arc.Close			...before sending last FULL byte
+				bcs .9
+
+				.DO DBG
+				jsr X.Arc.PrintDBG3
+				>DEBUG
+				.FIN
+
+				jsr X.Arc.RestorePtrs
+				
+				>LDYA X.Arc.CLen
+				ldx X.Arc.Alg
+				clc
+				rts
+
+.9				jsr X.Arc.RestorePtrs
+				
+				>LDYA X.Arc.ShnkOut+S.ARCSHNK.ULEN
+				ldx #0
+				sec
+				rts
+*--------------------------------------
+X.Arc.RestorePtrs
+				>LDYA X.Arc.InBufPtr
+				>STYA ZPInBufPtr
+				>LDYA X.Arc.OutBufPtr
+				>STYA ZPOutBufPtr
+				rts
+*--------------------------------------
+X.Arc.Reset		ldx #X.Arc.ResetCnt
+
+.1				stz X.Arc.ResetData-1,x
+				dex
+				bne .1
+
+*				ldx #0
+
+.2				stz X.Arc.TopCntL,x
+				stz X.Arc.TopCntH,x
+				stz	X.Arc.TopCntBLL,x
+				stz X.Arc.TopCntBLH,x
+				inx
+				bne .2
+
+				lda X.Arc.ShnkOut+S.ARCSHNK.ULEN+1
+				sta X.Arc.Bits+1
+
+				lda X.Arc.ShnkOut+S.ARCSHNK.ULEN
+
+				ldx #3
+
+.3				asl
+				rol X.Arc.Bits+1
+				rol X.Arc.Bits+2
+				dex
+				bne .3
+
+				sta X.Arc.Bits
+
+				rts
+*--------------------------------------
+X.Arc.Run1		inc X.Arc.nCnt
+				bne .1
+
+				inc X.Arc.nCnt+1
+				beq X.Arc.StrStat			0 byte left, flush pending string
+
+.1				jsr X.Arc.ScanBL
+				bcc .5
+
+				lda (ZPInBufPtr)
+
+				tax
+				inc X.Arc.TopCntBLL,x
+				bne .2
+
+				inc X.Arc.TopCntBLH,x
+
+.2				inc X.Arc.TopCntL,x
+				bne .3
+
+				inc X.Arc.TopCntH,x
+
+.3				inc X.Arc.STRLen
+				lda X.Arc.STRLen
+				cmp #STR.MAX
+				bcc .4
+
+				jsr X.Arc.StrStat		Max Len string, flush
+
+.4				inc ZPInBufPtr
+				bne X.Arc.Run1
+
+				inc ZPInBufPtr+1
+				bra X.Arc.Run1
+*--------------------------------------
+.5				jsr X.Arc.StrStat		flush pending string
+
+				jsr X.Arc.BlStat
+
+				ldy X.Arc.BLLen
+				jsr X.Arc.StrSkipY
+				bcc .1
+				
+				clc						End Of InBuf
+				rts
+*--------------------------------------
+X.Arc.StrStat	lda X.Arc.STRLen
+				tay
+				beq .8
+
+				cmp #STR.MIN
+				bcs .1
+
+*				clc
+				adc X.Arc.S.TB.Cnt
+				sta X.Arc.S.TB.Cnt
+				bcc .5
+
+				inc X.Arc.S.TB.Cnt+1
+				bra .5
+
+.1				clc
+				adc X.Arc.STR.TB.Cnt
+				sta X.Arc.STR.TB.Cnt
+				bcc .2
+
+				inc X.Arc.STR.TB.Cnt+1
+
+.2				lda X.Arc.STRLen
+				cmp X.Arc.STR.Max
+				bcc .3
+
+				sta X.Arc.STR.Max
+
+.3				cmp #STR.MID
+				bcc .4
+
+				inc X.Arc.STR.LL.Cnt
+				bne .5
+
+				inc X.Arc.STR.LL.Cnt+1
+				bra .5
+
+.4				inc X.Arc.STR.SL.Cnt
+				bne .5
+
+				inc X.Arc.STR.SL.Cnt+1
+				
+.5				ldy #0
+
+.6				lda (ZPStrPtr),y
+				tax
+
+				inc X.Arc.TopCntL,x
+				bne .7
+
+				inc X.Arc.TopCntH,x
+
+.7				iny
+				cpy X.Arc.STRLen
+				bne .6
+
+				stz X.Arc.STRLen
+
+.8				rts
+*--------------------------------------
+X.Arc.StrSkipY	tya
+				clc
+				adc ZPInBufPtr
+				sta ZPInBufPtr
+				bcc .1
+
+				inc ZPInBufPtr+1
+
+.1				tya
+				clc
+				adc X.Arc.nCnt
+				sta X.Arc.nCnt
+				bcc .8
+
+				inc X.Arc.nCnt+1
+				beq .8					CS
+				
+				clc
+				
+.8				rts				
+*--------------------------------------
+X.Arc.BlStat	lda X.Arc.BLLen
+				clc
+				adc X.Arc.BL.TB.Cnt
+				sta X.Arc.BL.TB.Cnt
+				bcc .10
+
+				inc X.Arc.BL.TB.Cnt+1
+
+.10				lda X.Arc.BLLen
+				cmp X.Arc.BLL.Max
+				bcc .11
+
+				sta X.Arc.BLL.Max
+
+.11				cmp #BLL.MID
+				bcc .12
+
+				inc X.Arc.BLL.LL.Cnt
+				bne .20
+
+				inc X.Arc.BLL.LL.Cnt+1
+				bra .20
+
+.12				inc X.Arc.BLL.SL.Cnt
+				bne .20
+
+				inc X.Arc.BLL.SL.Cnt+1
+* BLOFS
+.20				>LDYA X.Arc.Ofs
+				cpy X.Arc.BLO.Max
+				pha
+				sbc X.Arc.BLO.Max+1
+				pla
+				bcc .21
+
+				>STYA X.Arc.BLO.Max
+
+.21				jsr X.Arc.GetYABitCntInX
+				inc X.Arc.BLO.LO.cnt-1,x
+				bne .8
+
+				inc X.Arc.BLO.HI.cnt-1,x
+
+.8				rts
+*--------------------------------------
+X.Arc.ComputeTBits
+				ldy #0
+
+.1				stz X.Arc.Cnt				Init best score to 0
+				stz X.Arc.Cnt+1
+
+				sec
+				ror X.Arc.bStop
+
+				ldx #0
+
+.2				lda X.Arc.TopCntH,x
+				bne .20
+
+				lda X.Arc.TopCntL,x
+				cmp #TOP.MIN.CNT
+				bcc .3
+
+.20				stz X.Arc.bStop
+
+				lda X.Arc.Cnt
+				cmp X.Arc.TopCntL,x		is it better at X
+				lda X.Arc.Cnt+1
+				sbc X.Arc.TopCntH,x
+				bcs .3					not better or equal...
+
+				stx X.Arc.Best			save new score index...
+
+				lda X.Arc.TopCntL,x
+				sta X.Arc.Cnt				...and value
+				lda X.Arc.TopCntH,x
+				sta X.Arc.Cnt+1
+
+.3				inx
+				bne .2
+
+				bit X.Arc.bStop
+				bmi .6
+
+				ldx X.Arc.Best
+				lda X.Arc.TOP.Widths,y
+				clc
+				adc #ARC.B.RAWTOP.W		add ARC.B.TOP bits
+
+.4				pha
+
+				lda X.Arc.TopCntL,x
+				clc
+				adc X.Arc.TBits
+				sta X.Arc.TBits
+
+				lda X.Arc.TopCntH,x
+				adc X.Arc.TBits+1
+				sta X.Arc.TBits+1
+				bcc .5
+
+				inc X.Arc.TBits+2
+
+.5				pla
+				dec
+				bne .4
+
+				lda X.Arc.Best
+				sta X.Arc.TopT,y
+				tax
+				stz X.Arc.TopCntL,x		Discard this entry
+				stz X.Arc.TopCntH,x
+				iny
+				cpy #TOP.MAX
+				bne .1
+
+.6				sty X.Arc.TopTSize
+				lda #0
+				ldx #8					Add Top Table Size
+				jsr X.Arc.AddXtYA2TBits
+
+				ldx #0
+
+.7				lda X.Arc.TopCntL,x
+				tay
+				ora X.Arc.TopCntH,x
+				beq  .10
+
+				lda X.Arc.TopCntH,x
+
+				phx
+
+				ldx #ARC.B.RAWTOP.W+8	add ARC.B.RAW bit
+				jsr X.Arc.AddXtYA2TBits
+
+				plx
+
+.10				inx
+				bne .7
+
+				rts
+*--------------------------------------
+X.Arc.AddXtYA2TBits
+				pha
+
+				txa
+				beq .9
+
+.1				tya
+				clc
+				adc X.Arc.TBits
+				sta X.Arc.TBits
+
+				pla
+				pha
+
+				adc X.Arc.TBits+1
+				sta X.Arc.TBits+1
+				bcc .2
+
+				inc X.Arc.TBits+2
+
+.2				dex
+				bne .1
+
+.9				pla
+				rts
+*--------------------------------------
+X.Arc.ComputeBLBits
+				lda X.Arc.STR.Max
+				beq .10
+
+				sec
+				sbc #STR.MID
+				bcc .10
+
+				bne .13
+
+				inc
+
+.13				jsr X.Arc.GetABitCntInX
+
+				stx X.Arc.STR.Bits
+
+.10				lda X.Arc.BLL.Max
+				beq .40
+
+				sec
+				sbc #BLL.MID
+				bcc .30
+
+				bne .12
+
+				inc
+
+.12				jsr X.Arc.GetABitCntInX
+				stx X.Arc.BLL.Bits
+
+.30				>LDYA X.Arc.BLO.Max
+				jsr X.Arc.GetYABitCntInX
+				stx X.Arc.BLO.Bits
+*--------------------------------------
+.40				ldx #ARC.B.PREFIX.W+8
+				>LDYA X.Arc.S.TB.Cnt
+				jsr X.Arc.AddXtYA2BLBits
+
+				ldx #8
+				>LDYA X.Arc.STR.TB.Cnt
+				jsr X.Arc.AddXtYA2BLBits
+* SLEN
+				lda X.Arc.STR.Bits
+				bne .50
+
+				ldx #ARC.B.PREFIX.W+ARC.B.STRBL.W+ARC.B.SHORTSTR.W
+				>LDYA X.Arc.STR.SL.Cnt
+				jsr X.Arc.AddXtYA2BLBits
+				bra .51
+
+.50				clc
+				adc #ARC.B.PREFIX.W+ARC.B.STRBL.W+ARC.B.LEN.W
+				tax
+				>LDYA X.Arc.STR.LL.Cnt
+				jsr X.Arc.AddXtYA2BLBits
+
+				ldx #ARC.B.PREFIX.W+ARC.B.STRBL.W+ARC.B.LEN.W+ARC.B.SHORTSTR.W
+				>LDYA X.Arc.STR.SL.Cnt
+				jsr X.Arc.AddXtYA2BLBits
+* BLLEN
+.51				lda X.Arc.BLL.Bits
+				bne .60
+
+				ldx #ARC.B.PREFIX.W+ARC.B.STRBL.W+ARC.B.SHORTBLL.W
+				>LDYA X.Arc.BLL.SL.Cnt
+				jsr X.Arc.AddXtYA2BLBits
+				bra .61
+
+.60				clc
+				adc #ARC.B.PREFIX.W+ARC.B.STRBL.W+ARC.B.LEN.W
+				tax
+				>LDYA X.Arc.BLL.LL.Cnt
+				jsr X.Arc.AddXtYA2BLBits
+
+				ldx #ARC.B.PREFIX.W+ARC.B.STRBL.W+ARC.B.LEN.W+ARC.B.SHORTBLL.W
+				>LDYA X.Arc.BLL.SL.Cnt
+				jsr X.Arc.AddXtYA2BLBits
+* BLOFS
+.61				ldx #12
+
+.62				phx
+
+				ldy X.Arc.BLO.LO.cnt-1,x
+				lda X.Arc.BLO.HI.cnt-1,x
+
+				ldx X.Arc.BLO.Bits
+
+				jsr X.Arc.AddXtYA2BLBits
+				plx
+				dex
+				bne .62
+
+				rts
+
+X.Arc.AddXtYA2BLBits
+				pha
+
+				txa
+				beq .9
+
+.1				tya
+				clc
+				adc X.Arc.BLBits
+				sta X.Arc.BLBits
+
+				pla
+				pha
+
+				adc X.Arc.BLBits+1
+				sta X.Arc.BLBits+1
+				bcc .2
+
+				inc X.Arc.BLBits+2
+
+.2				dex
+				bne .1
+
+.9				pla
+				rts
+*--------------------------------------
+X.Arc.ComputeTBLBits
+				ldy #0
+
+.1				stz X.Arc.Cnt			Init best score to 0
+				stz X.Arc.Cnt+1
+
+				sec
+				ror X.Arc.bStop
+
+				ldx #0
+
+.2				lda X.Arc.TopCntBLH,x
+				bne .20
+
+				lda X.Arc.TopCntBLL,x
+				cmp #TOP.MIN.CNT
+				bcc .3
+
+.20				stz X.Arc.bStop
+
+				lda X.Arc.Cnt
+				cmp X.Arc.TopCntBLL,x	is it better at X
+				lda X.Arc.Cnt+1
+				sbc X.Arc.TopCntBLH,x
+				bcs .3					not better or equal...
+
+				stx X.Arc.Best			save new score index...
+
+				lda X.Arc.TopCntBLL,x
+				sta X.Arc.Cnt			...and value
+				lda X.Arc.TopCntBLH,x
+				sta X.Arc.Cnt+1
+
+.3				inx
+				bne .2
+
+				bit X.Arc.bStop
+				bmi .6
+
+				ldx X.Arc.Best
+				lda X.Arc.TOP.Widths,y
+				clc
+				adc #ARC.B.RAWTOP.W		add ARC.B.TOP bit
+
+.4				pha
+
+				lda X.Arc.TopCntBLL,x
+				clc
+				adc X.Arc.TBLBits
+				sta X.Arc.TBLBits
+
+				lda X.Arc.TopCntBLH,x
+				adc X.Arc.TBLBits+1
+				sta X.Arc.TBLBits+1
+				bcc .5
+
+				inc X.Arc.TBLBits+2
+
+.5				pla
+				dec
+				bne .4
+
+				lda X.Arc.Best
+				sta X.Arc.TopTBL,y
+				tax
+				stz X.Arc.TopCntBLL,x	Discard this entry
+				stz X.Arc.TopCntBLH,x
+				iny
+				cpy #TOP.MAX
+				bne .1
+
+.6				sty X.Arc.TopTBLSize
+				lda #0
+				ldx #8
+				jsr X.Arc.AddXtYA2TBLBits
+
+				ldx #0
+
+.7				lda X.Arc.TopCntBLL,x
+				tay
+				ora X.Arc.TopCntBLH,x
+				beq .10
+
+				lda X.Arc.TopCntBLH,x
+
+				phx
+
+				ldx #ARC.B.RAWTOP.W+8	add ARC.B.RAW bit
+				jsr X.Arc.AddXtYA2TBLBits
+
+				plx
+
+.10				inx
+				bne .7
+
+X.Arc.ComputeBLBits4TBL
+
+				ldx #ARC.B.PREFIX.W		add ARC.B.SINGLE bits
+				>LDYA X.Arc.S.TB.Cnt
+				jsr X.Arc.AddXtYA2TBLBits
+* SLEN
+				lda X.Arc.STR.Bits
+				bne .50
+
+				ldx #ARC.B.PREFIX.W+ARC.B.STRBL.W+ARC.B.SHORTSTR.W
+				>LDYA X.Arc.STR.SL.Cnt
+				jsr X.Arc.AddXtYA2TBLBits
+				bra .51
+
+.50				clc
+				adc #ARC.B.PREFIX.W+ARC.B.STRBL.W+ARC.B.LEN.W
+				tax
+				>LDYA X.Arc.STR.LL.Cnt
+				jsr X.Arc.AddXtYA2TBLBits
+
+				ldx #ARC.B.PREFIX.W+ARC.B.STRBL.W+ARC.B.LEN.W+ARC.B.SHORTSTR.W
+				>LDYA X.Arc.STR.SL.Cnt
+				jsr X.Arc.AddXtYA2TBLBits
+* BLLEN
+.51				lda X.Arc.BLL.Bits
+				bne .60
+
+				ldx #ARC.B.PREFIX.W+ARC.B.STRBL.W+ARC.B.SHORTBLL.W
+				>LDYA X.Arc.BLL.SL.Cnt
+				jsr X.Arc.AddXtYA2TBLBits
+				bra .61
+
+.60				clc
+				adc #ARC.B.PREFIX.W+ARC.B.STRBL.W+ARC.B.LEN.W
+				tax
+				>LDYA X.Arc.BLL.LL.Cnt
+				jsr X.Arc.AddXtYA2TBLBits
+
+				ldx #ARC.B.PREFIX.W+ARC.B.STRBL.W+ARC.B.LEN.W+ARC.B.SHORTBLL.W
+				>LDYA X.Arc.BLL.SL.Cnt
+				jsr X.Arc.AddXtYA2TBLBits
+* BLOFS
+.61				ldx #12
+
+.62				phx
+
+				ldy X.Arc.BLO.LO.cnt-1,x
+				lda X.Arc.BLO.HI.cnt-1,x
+
+				ldx X.Arc.BLO.Bits
+
+				jsr X.Arc.AddXtYA2TBLBits
+				plx
+				dex
+				bne .62
+
+				rts
+*--------------------------------------
+X.Arc.AddXtYA2TBLBits
+				pha
+
+				txa
+				beq .9
+
+.1				tya
+				clc
+				adc X.Arc.TBLBits
+				sta X.Arc.TBLBits
+
+				pla
+				pha
+
+				adc X.Arc.TBLBits+1
+				sta X.Arc.TBLBits+1
+				bcc .2
+
+				inc X.Arc.TBLBits+2
+
+.2				dex
+				bne .1
+
+.9				pla
+				rts
+*--------------------------------------
+X.Arc.Select	stz X.Arc.bScanBL
+
+				ldx #0
+				ldy #4
+
+.1				lda X.Arc.Bits,y
+				cmp X.Arc.Bits,x
+				lda X.Arc.Bits+1,y
+				sbc X.Arc.Bits+1,x
+				lda X.Arc.Bits+2,y
+				sbc X.Arc.Bits+2,x
+				bcs .2
+
+				tya
+				tax
+
+.2				iny
+				iny
+				iny
+				iny
+				cpy #16
+				bne .1
+
+*		ldx #4
+
+				txa
+				beq .9					CS
+
+				lda #0
+
+				cpx #8					< BL,TBL ?
+				bcc .3					only T
+
+				lda X.Arc.BLL.Bits
+				asl
+				asl
+				asl
+				asl
+				ora X.Arc.BLO.Bits
+				sta X.Arc.ShnkOut+S.ARCSHNK.TBLBITS+1
+
+				lda X.Arc.STR.Bits
+				asl
+				asl
+				asl
+				asl
+				asl
+				sta X.Arc.ShnkOut+S.ARCSHNK.TBLBITS
+
+				dec X.Arc.bScanBL
+
+				cpx #8					only BL ?
+				beq .8
+
+				bra .5					TBL
+
+.3				ldy X.Arc.TopTSize
+
+.4				lda X.Arc.TopT-1,y
+				sta X.Arc.ShnkOut+S.ARCSHNK.TOPBYTES-1,y
+				dey
+				bne .4
+
+				lda X.Arc.TopTSize
+				bra .7
+
+.5				ldy X.Arc.TopTBLSize
+
+.6				lda X.Arc.TopTBL-1,y
+				sta X.Arc.ShnkOut+S.ARCSHNK.TOPBYTES-1,y
+				dey
+				bne .6
+
+				lda X.Arc.TopTBLSize
+
+.7				sta X.Arc.TopSize
+				lsr
+				tsb X.Arc.ShnkOut+S.ARCSHNK.TBLBITS
+				lda #0
+				ror
+				tsb X.Arc.ShnkOut+S.ARCSHNK.TBLBITS+1
+
+.8				txa						X=4,8 or 12
+				lsr
+
+				clc
+				rts
+
+.9				lda #E.BUF
+*				sec
+				rts
+*--------------------------------------
+X.Arc.Out.Init2	ldy #0
+
+.1				lda X.Arc.ShnkOut,y
+				jsr X.Arc.PutByte
+				bcs .9
+	
+				iny
+				cpy #S.ARCSHNK.TOPBYTES
+				bne .1
+
+				ldx X.Arc.TopSize
+				beq .8
+
+.2				lda X.Arc.ShnkOut,y
+				jsr X.Arc.PutByte
+				bcs .9
+
+				iny
+				dex
+				bne .2
+
+.8				lda #$80
+				sta X.Arc.OutMask
+				stz X.Arc.OutByte
+
+				clc
+.9				rts
+*--------------------------------------
+X.Arc.Run2		
+*				>DEBUG
+				bit X.Arc.bScanBL
+				bmi X.Arc.Run2BLTBL
+
+X.Arc.Run2T		inc X.Arc.nCnt
+				bne .1
+
+				inc X.Arc.nCnt+1
+				beq .8					0 byte left...
+
+.1				lda (ZPInBufPtr)
+				jsr X.Arc.PutByte8
+				bcs .9
+
+				inc ZPInBufPtr
+				bne X.Arc.Run2T
+
+				inc ZPInBufPtr+1
+				bra X.Arc.Run2T
+
+.8				clc
+.9				rts
+
+X.Arc.Run2BLTBL	inc X.Arc.nCnt
+				bne .1
+
+				inc X.Arc.nCnt+1
+				beq .8
+
+.1				jsr X.Arc.ScanBL
+				bcc .5
+
+				lda X.Arc.STRLen
+				bne .2
+
+				lda ZPInBufPtr
+				sta ZPStrPtr
+				lda ZPInBufPtr+1
+				sta ZPStrPtr+1
+
+				inc X.Arc.STRLen
+				bra .3
+
+.2				inc
+				sta X.Arc.STRLen
+				cmp #STR.MAX
+				bcc .3
+
+				jsr X.Arc.PutSTR
+				bcs .9
+
+.3				inc ZPInBufPtr
+				bne X.Arc.Run2BLTBL
+
+				inc ZPInBufPtr+1
+
+				bra X.Arc.Run2BLTBL
+*--------------------------------------
+.5				jsr X.Arc.PutSTR
+				bcs .9
+
+				jsr X.Arc.PutBL
+				bcs .9
+
+				lda X.Arc.BLLen
+				clc
+				adc ZPInBufPtr
+				sta ZPInBufPtr
+				bcc .6
+
+				inc ZPInBufPtr+1
+
+.6				lda X.Arc.BLLen
+				clc
+				adc X.Arc.nCnt
+				sta X.Arc.nCnt
+				bcc .1
+
+				inc X.Arc.nCnt+1
+				bmi .1
+
+.8				jmp X.Arc.PutSTR
+
+.9				rts
+*--------------------------------------
+X.Arc.ScanBL	lda ZPInBufPtr
+				sec
+				sbc #BLO.WINDOW
+				tax
+
+				lda ZPInBufPtr+1
+				sbc /BLO.WINDOW
+				pha
+				cpx X.Arc.InBufPtr
+				sbc X.Arc.InBufPtr+1
+				pla
+				bcs .10
+
+				ldx X.Arc.InBufPtr		Start at beginning of Src buf
+				lda X.Arc.InBufPtr+1
+
+.10				stx ZPBackPtr
+				sta ZPBackPtr+1
+
+				stz X.Arc.BLLen			Nothing found yet
+
+.1				lda ZPBackPtr
+				sec
+				sbc ZPInBufPtr
+				sta X.Arc.OfsWnCnt
+
+				lda ZPBackPtr+1
+				sbc ZPInBufPtr+1
+				sta X.Arc.OfsWnCnt+1	ZPBackPtr < !OfsWnCnt < ZPInBufPtr
+				bcs .8					ZPBackPtr = ZPInBufPtr, exit
+
+				>LDYA X.Arc.nCnt		make sure not going past End Buffer
+				>STYA X.Arc.OfsBnCnt	while reading ahead...
+
+				ldy #0					...or Y = BL.MAX
+
+.2				inc X.Arc.OfsWnCnt
+				bne .3
+
+				inc X.Arc.OfsWnCnt+1
+				beq .6					ZPBackPtr = ZPInBufPtr
+
+.3				inc X.Arc.OfsBnCnt
+				bne .4
+
+				inc X.Arc.OfsBnCnt+1
+				beq .6					Last Src Data
+
+.4				lda (ZPInBufPtr),y
+				cmp (ZPBackPtr),y
+				bne .6					End of string matching
+
+.5				iny
+				cpy #BLL.MAX
+				bne .2					Max BL len
+
+.6				cpy #BLL.MIN
+				bcc .7					not long enough
+
+				cpy X.Arc.BLLen
+				bcc .7					not better ...
+*				beq .7					!!! same...but closer !!!
+
+				sty X.Arc.BLLen
+				tya
+				clc
+				adc ZPBackPtr
+				sta X.Arc.Ofs
+				lda ZPBackPtr+1
+				adc #0
+				sta X.Arc.Ofs+1			Make X.Arc.Ofs pointing to the END
+
+				lda ZPInBufPtr
+				sec
+				sbc X.Arc.Ofs
+				sta X.Arc.Ofs
+
+				lda ZPInBufPtr+1
+				sbc X.Arc.Ofs+1
+				sta X.Arc.Ofs+1
+
+.7				inc ZPBackPtr
+				bne .1
+
+				inc ZPBackPtr+1
+				bra .1
+
+.8				lda X.Arc.BLLen			exit with result flag in C
+				beq .9					no BL CS
+
+				clc
+
+.9				rts
+*--------------------------------------
+X.Arc.GetYABitCntInX
+				tax
+				beq .2
+
+				ldx #17					BitCnt = bc(A) + 8
+
+.1				dex
+				asl
+				bcc .1
+
+.9				rts
+
+.2				tya						BitCnt = bc(Y)
+				beq .9
+*--------------------------------------
+X.Arc.GetABitCntInX
+				ldx #9
+
+.1				dex
+				asl
+				bcc .1
+
+				rts
+*--------------------------------------
+X.Arc.PutSTR	lda X.Arc.STRLen
+				beq .8
+
+				cmp #STR.MIN
+				bcs .3
+
+.1				ldx #ARC.B.PREFIX.W
+				lda #ARC.B.SINGLE
+				jsr X.Arc.PutXBits
+				bcs .9
+
+				lda (ZPStrPtr)
+				jsr X.Arc.PutByte8
+				bcs .9
+
+				inc ZPStrPtr
+				bne .2
+
+				inc ZPStrPtr+1
+
+.2				dec X.Arc.STRLen
+				bne .1
+				
+*				clc
+
+				rts
+*--------------------------------------
+.3				ldx #ARC.B.PREFIX.W
+				lda #ARC.B.STRBL
+				jsr X.Arc.PutXBits
+				bcs .9
+
+				ldx #ARC.B.STRBL.W
+				lda #ARC.B.STR
+				jsr X.Arc.PutXBits
+				bcs .9
+
+				lda X.Arc.STR.Bits
+				beq .5
+
+				lda X.Arc.STRLen
+				cmp #STR.MID
+				bcc .4
+
+				ldx #ARC.B.LEN.W
+				lda #ARC.B.LONG.B
+				jsr X.Arc.PutXBits
+				bcs .9
+
+				lda X.Arc.STRLen
+				sec
+				sbc #STR.MID
+				ldx X.Arc.STR.Bits
+				jsr X.Arc.PutXBits
+				bcs .9
+
+				bra .6
+*--------------------------------------
+.4				ldx #ARC.B.LEN.W
+				lda #ARC.B.SHORT.B
+				jsr X.Arc.PutXBits
+				bcs .9
+
+.5				ldx #ARC.B.SHORTSTR.W
+				lda X.Arc.STRLen
+				sec
+				sbc #STR.MIN
+				jsr X.Arc.PutXBits
+				bcs .9
+
+.6				lda (ZPStrPtr)
+				jsr X.Arc.PutByte8
+				bcs .9
+
+				inc ZPStrPtr
+				bne .7
+
+				inc ZPStrPtr+1
+
+.7				dec X.Arc.STRLen
+				bne .6
+
+.8				clc
+.9				rts
+*--------------------------------------
+X.Arc.PutBL		ldx #ARC.B.PREFIX.W
+				lda #ARC.B.STRBL
+				jsr X.Arc.PutXBits
+				bcs .9
+
+				ldx #ARC.B.STRBL.W
+				lda #ARC.B.BL
+				jsr X.Arc.PutXBits
+				bcs .9
+* BLLen
+				lda X.Arc.BLL.Bits
+				beq .2				no long len...
+
+				lda X.Arc.BLLen
+				cmp #BLL.MID
+				bcc .1				this one is short
+
+				ldx #ARC.B.LEN.W
+				lda #ARC.B.LONG.B
+				jsr X.Arc.PutXBits
+				bcs .9
+
+				lda X.Arc.BLLen
+				sec
+				sbc #BLL.MID
+				ldx X.Arc.BLL.Bits
+				jsr X.Arc.PutXBits
+				bcc .3
+				
+.9				rts
+*--------------------------------------
+.1				ldx #ARC.B.LEN.W
+				lda #ARC.B.SHORT.B
+				jsr X.Arc.PutXBits
+				bcs .9
+
+.2				ldx #ARC.B.SHORTBLL.W
+				lda X.Arc.BLLen
+				sec
+				sbc #BLL.MIN
+				jsr X.Arc.PutXBits
+				bcs .9
+* BLOFS
+.3				ldx X.Arc.BLO.Bits
+				cpx #9
+				bcc .4
+
+				txa
+*				sec
+				sbc #8
+				tax
+				lda X.Arc.Ofs+1
+				jsr X.Arc.PutXBits
+				bcs .9
+
+				ldx #8
+
+.4				lda X.Arc.Ofs
+				bra X.Arc.PutXBits
+*--------------------------------------
+X.Arc.PutByte8	ldy X.Arc.TopSize
+				beq .4					No TOP Table
+
+				dey						Range 0-63
+
+.1				cmp X.Arc.ShnkOut+S.ARCSHNK.TOPBYTES,y
+				beq .5
+
+				dey
+				bpl .1
+
+				tay
+
+				ldx #ARC.B.RAWTOP.W
+				lda #ARC.B.RAW
+				jsr X.Arc.PutXBits
+				bcs .9
+
+				tya
+
+.4				ldx #8
+				bra X.Arc.PutXBits
+
+.9				rts
+
+.5				ldx #ARC.B.RAWTOP.W
+				lda #ARC.B.TOP
+				jsr X.Arc.PutXBits
+				bcs .9
+
+				tya
+
+				and X.Arc.TOP.Masks,y
+				ora X.Arc.TOP.Bits,y
+				ldx X.Arc.TOP.Widths,y
+*--------------------------------------
+X.Arc.PutXBits	phx
+
+.1				cpx #8
+				beq .2
+
+				asl
+				inx
+				bra .1
+
+.2				plx
+
+.3				asl
+
+				pha
+
+				bcc .4
+
+				lda X.Arc.OutMask
+				tsb X.Arc.OutByte
+
+.4				lsr X.Arc.OutMask
+				bcc .5
+
+				ror X.Arc.OutMask
+
+				lda X.Arc.OutByte
+				stz X.Arc.OutByte
+
+				jsr X.Arc.PutByte
+
+.5				pla
+				bcs .9
+
+				dex
+				bne .3
+
+*				clc
+
+				rts
+
+.9				lda #E.BUF
+
+*				sec
+
+				rts
+*--------------------------------------
+X.Arc.PutByte	inc X.Arc.nCntOut
+				bne .1
+
+				inc X.Arc.nCntOut+1
+				beq .9
+
+.1				sta (ZPOutBufPtr)
+				inc ZPOutBufPtr
+				bne .2
+
+				inc ZPOutBufPtr+1
+
+.2				inc X.Arc.CLen
+				bne .8
+
+				inc X.Arc.CLen+1
+
+.8				clc
+				rts
+
+.9				lda #E.BUF
+				sec
+				rts
+*--------------------------------------
+X.Arc.Close		lda X.Arc.OutMask
+				bmi .8
+
+				lda X.Arc.OutByte
+				bra X.Arc.PutByte
+
+.8				clc
+				rts
+*--------------------------------------
+				.DO DBG
+X.Arc.PrintDBG1	>PUSHW L.MSG.DBG1
+
+				>PUSHL X.Arc.Bits
+				>PUSHL X.Arc.TBits
+				>PUSHL X.Arc.BLBits
+				>PUSHL X.Arc.TBLBits
+
+				>PUSHB X.Arc.TopTSize
+				>PUSHB X.Arc.TopTBLSize
+				>PUSHB X.Arc.STR.Max
+				>PUSHB X.Arc.BLL.Max
+				>PUSHW X.Arc.BLO.Max
+
+				>PUSHBI 22
+				>SYSCALL2 PrintF
+				rts
+
+X.Arc.PrintDBG2	>PUSHW L.MSG.DBG2
+
+				>PUSHW X.Arc.S.TB.Cnt
+				>PUSHW X.Arc.STR.TB.Cnt
+				>PUSHW X.Arc.BL.TB.Cnt
+
+				>PUSHW X.Arc.STR.SL.Cnt
+				>PUSHW X.Arc.STR.LL.Cnt
+
+				>PUSHBI ARC.B.SHORTSTR.W
+				>PUSHB X.Arc.STR.Bits
+
+				>PUSHW X.Arc.BLL.SL.Cnt
+				>PUSHW X.Arc.BLL.LL.Cnt
+
+				>PUSHBI ARC.B.SHORTBLL.W
+				>PUSHB X.Arc.BLL.Bits
+				>PUSHB X.Arc.BLO.Bits
+
+				ldx #0
+				
+.1				>PUSHB X.Arc.BLO.HI.cnt,x
+				>PUSHB X.Arc.BLO.LO.cnt,x
+				
+				inx
+				cpx #12
+				bne .1
+
+				>PUSHBI 43
+				>SYSCALL2 PrintF
+				rts
+
+X.Arc.ComputeDBG3
+				stz X.Arc.Bits+3
+				stz X.Arc.Bits+2
+				lda X.Arc.CLen+1
+				sta X.Arc.Bits+1
+
+				lda X.Arc.CLen
+				asl
+				rol X.Arc.Bits+1
+				rol X.Arc.Bits+2
+				asl
+				rol X.Arc.Bits+1
+				rol X.Arc.Bits+2
+				asl
+				rol X.Arc.Bits+1
+				rol X.Arc.Bits+2
+				sta X.Arc.Bits
+
+				ldx #0
+
+				lda X.Arc.OutMask
+				bmi .3
+
+.1				inx
+				asl
+				bpl .1
+
+.2				txa
+				clc
+				adc X.Arc.Bits
+				sta X.Arc.Bits
+				bcc .3
+
+				inc X.Arc.Bits+1
+				bne .3
+
+				inc X.Arc.Bits+2
+
+.3				rts
+
+X.Arc.PrintDBG3	>PUSHW L.MSG.DBG3
+				>PUSHL X.Arc.Bits
+				>PUSHW X.Arc.CLen
+				>PUSHB X.Arc.Alg
+				>PUSHBI 7
+				>SYSCALL2 PrintF
+				rts
+				.FIN
+*--------------------------------------
+CS.END
+*--------------------------------------
+* from 1 to 12 (1 to 4095)
+*--------------------------------------
+BLO.LenBits		.DA #%11				bc= 1
+				.DA #%11				bc= 1
+				.DA #%11				bc= 3
+				.DA #%11				bc= 4 : Range 0..15 (4 bits ofs)
+				.DA #%10				bc= 5
+				.DA #%10				bc= 6
+				.DA #%10				bc= 7
+				.DA #%10				bc= 8 : Range 0..255 (8 bits ofs)
+				.DA #%0					bc=a 9
+				.DA #%0					bc=10
+				.DA #%0					bc=11
+				.DA #%0					bc=12 : Range 0..4095 (12 bits ofs)
+*--------------------------------------
+X.Arc.TOP.Masks	.DA #ARC.B.TOP0.M,#ARC.B.TOP0.M,#ARC.B.TOP0.M,#ARC.B.TOP0.M
+				.DA #ARC.B.TOP0.M,#ARC.B.TOP0.M,#ARC.B.TOP0.M,#ARC.B.TOP0.M
+
+				.DA #ARC.B.TOP8.M,#ARC.B.TOP8.M,#ARC.B.TOP8.M,#ARC.B.TOP8.M
+				.DA #ARC.B.TOP8.M,#ARC.B.TOP8.M,#ARC.B.TOP8.M,#ARC.B.TOP8.M
+
+				.DA #ARC.B.TOP16.M,#ARC.B.TOP16.M,#ARC.B.TOP16.M,#ARC.B.TOP16.M
+				.DA #ARC.B.TOP16.M,#ARC.B.TOP16.M,#ARC.B.TOP16.M,#ARC.B.TOP16.M
+				.DA #ARC.B.TOP16.M,#ARC.B.TOP16.M,#ARC.B.TOP16.M,#ARC.B.TOP16.M
+				.DA #ARC.B.TOP16.M,#ARC.B.TOP16.M,#ARC.B.TOP16.M,#ARC.B.TOP16.M
+
+X.Arc.TOP.Widths
+				.DA #ARC.B.TOP0.W,#ARC.B.TOP0.W,#ARC.B.TOP0.W,#ARC.B.TOP0.W
+				.DA #ARC.B.TOP0.W,#ARC.B.TOP0.W,#ARC.B.TOP0.W,#ARC.B.TOP0.W
+
+				.DA #ARC.B.TOP8.W,#ARC.B.TOP8.W,#ARC.B.TOP8.W,#ARC.B.TOP8.W
+				.DA #ARC.B.TOP8.W,#ARC.B.TOP8.W,#ARC.B.TOP8.W,#ARC.B.TOP8.W
+
+				.DA #ARC.B.TOP16.W,#ARC.B.TOP16.W,#ARC.B.TOP16.W,#ARC.B.TOP16.W
+				.DA #ARC.B.TOP16.W,#ARC.B.TOP16.W,#ARC.B.TOP16.W,#ARC.B.TOP16.W
+				.DA #ARC.B.TOP16.W,#ARC.B.TOP16.W,#ARC.B.TOP16.W,#ARC.B.TOP16.W
+				.DA #ARC.B.TOP16.W,#ARC.B.TOP16.W,#ARC.B.TOP16.W,#ARC.B.TOP16.W
+
+X.Arc.TOP.Bits	.DA #ARC.B.TOP0.B,#ARC.B.TOP0.B,#ARC.B.TOP0.B,#ARC.B.TOP0.B
+				.DA #ARC.B.TOP0.B,#ARC.B.TOP0.B,#ARC.B.TOP0.B,#ARC.B.TOP0.B
+
+				.DA #ARC.B.TOP8.B,#ARC.B.TOP8.B,#ARC.B.TOP8.B,#ARC.B.TOP8.B
+				.DA #ARC.B.TOP8.B,#ARC.B.TOP8.B,#ARC.B.TOP8.B,#ARC.B.TOP8.B
+
+				.DA #ARC.B.TOP16.B,#ARC.B.TOP16.B,#ARC.B.TOP16.B,#ARC.B.TOP16.B
+				.DA #ARC.B.TOP16.B,#ARC.B.TOP16.B,#ARC.B.TOP16.B,#ARC.B.TOP16.B
+				.DA #ARC.B.TOP16.B,#ARC.B.TOP16.B,#ARC.B.TOP16.B,#ARC.B.TOP16.B
+				.DA #ARC.B.TOP16.B,#ARC.B.TOP16.B,#ARC.B.TOP16.B,#ARC.B.TOP16.B
+*--------------------------------------
+X.Arc.nCnt		.BS 2
+X.Arc.nCntOut	.BS 2
+X.Arc.InBufPtr	.BS 2
+X.Arc.OutBufPtr	.BS 2
+
+X.Arc.Best		.EQ *					ComputeXXXbits
+X.Arc.STRLen	.BS 1
+X.Arc.BLLen		.BS 1
+X.Arc.bStop		.EQ *
+X.Arc.Ofs		.BS 2
+X.Arc.Cnt		.EQ *
+X.Arc.OfsWnCnt	.BS 2
+X.Arc.OfsBnCnt	.BS 2
+
+X.Arc.OutMask	.BS 1
+X.Arc.OutByte	.BS 1
+
+X.Arc.ShnkOut	.BS S.ARCSHNK
+*--------------------------------------
+X.Arc.ResetData	.EQ *
+
+X.Arc.CLen		.BS 2
+X.Arc.Alg		.BS 1
+
+X.Arc.Bits		.BS 4
+X.Arc.TBits		.BS 4
+X.Arc.BLBits	.BS 4
+X.Arc.TBLBits	.BS 4
+
+X.Arc.TopT		.BS TOP.MAX
+X.Arc.TopTSize	.BS 1
+X.Arc.TopTBL	.BS TOP.MAX
+X.Arc.TopTBLSize	.BS 1
+
+X.Arc.S.TB.Cnt		.BS 2
+X.Arc.STR.TB.Cnt	.BS 2
+X.Arc.BL.TB.Cnt	.BS 2
+
+X.Arc.STR.Max 	.BS 1
+X.Arc.STR.Bits 	.BS 1
+X.Arc.STR.SL.Cnt	.BS 2
+X.Arc.STR.LL.Cnt	.BS 2
+
+X.Arc.TopSize	.BS 1
+X.Arc.bScanBL	.BS 1
+
+X.Arc.BLL.Max 	.BS 1
+X.Arc.BLL.Bits 	.BS 1
+X.Arc.BLL.SL.Cnt	.BS 2
+X.Arc.BLL.LL.Cnt	.BS 2
+
+X.Arc.BLO.Max 	.BS 2
+X.Arc.BLO.Bits 	.BS 1
+
+X.Arc.BLO.LO.cnt	.BS 12
+X.Arc.BLO.HI.cnt	.BS 12
+
+X.Arc.ResetCnt	.EQ *-X.Arc.ResetData
+*--------------------------------------
+X.Arc.TopCntL	.BS 256
+X.Arc.TopCntH	.BS 256
+X.Arc.TopCntBLL	.BS 256
+X.Arc.TopCntBLH	.BS 256
+*--------------------------------------
+MAN
+SAVE usr/src/shared/x.arc.s
+LOAD usr/src/bin/arc.s
+ASM

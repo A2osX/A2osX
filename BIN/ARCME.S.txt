@@ -1,0 +1,587 @@
+NEW
+  AUTO 3,1
+				.LIST OFF
+				.OP	65C02
+				.OR	$2000
+				.TF bin/arcme
+*--------------------------------------
+				.INB inc/macros.i
+				.INB inc/a2osx.i
+				.INB inc/kernel.i
+				.INB inc/mli.e.i
+				.INB inc/arc.i
+*--------------------------------------
+CHUNK.MAX		.EQ 32
+DBG				.EQ 1
+*--------------------------------------
+				.DUMMY
+				.OR ZPBIN
+ZS.START
+ZPSrcFileSize	.BS 2
+ZPDstTableOfs	.BS 2
+ZPChunkOfs		.BS 2
+ZPChunkLen		.BS 2
+
+hSrcBuf			.BS 1
+hDstBuf			.BS 1
+bPause			.BS 1
+hSrcFile		.BS 1
+hDstFile		.BS 1
+ZPChunkIndex	.BS 1
+ZPChunkCnt		.BS 1
+ZPAlg			.BS 1
+
+ZPChunkPakedLen	.BS 2
+ZPChunkNewOfs	.BS 2
+
+ZPInBufPtr		.BS 2
+ZPOutBufPtr		.BS 2
+ZPBackPtr		.BS 2
+ZPStrPtr		.BS 2
+
+ZS.END			.ED
+*--------------------------------------
+*			File Header (16 Bytes)
+*--------------------------------------
+CS.START		cld
+				jmp (.1,x)
+				.DA #$61				6502,Level 1 (65c02)
+				.DA #1					BIN Layout Version 1
+				.DA 0
+				.DA CS.END-CS.START		Code Size (without Constants)
+				.DA DS.END-DS.START		Data SegmentSize
+				.DA #64					Stack Size
+				.DA #ZS.END-ZS.START	Zero Page Size
+				.DA 0
+*--------------------------------------
+* Relocation Table
+*--------------------------------------
+.1				.DA CS.INIT
+				.DA CS.RUN
+				.DA CS.DOEVENT
+				.DA	CS.QUIT
+L.MSG.USAGE		.DA MSG.USAGE
+L.MSG.SRCFILE	.DA MSG.SRCFILE
+L.MSG.CHUNK		.DA MSG.CHUNK
+L.MSG.STORED	.DA MSG.STORED
+				.DA MSG.ARCEDT
+				.DA MSG.ARCEDBL
+				.DA MSG.ARCEDTBL
+L.MSG.ARCED		.DA MSG.ARCED
+L.MSG.E.IARC	.DA MSG.E.IARC
+L.TAG			.DA TAG
+				.DO DBG
+L.MSG.DBG1		.DA MSG.DBG1
+L.MSG.DBG2		.DA MSG.DBG2
+L.MSG.DBG3		.DA MSG.DBG3
+				.FIN
+				.DA 0
+*--------------------------------------
+CS.INIT			clc
+				rts
+*--------------------------------------
+CS.RUN			ldy #S.PS.ARGC
+				lda (pPS),y
+
+				cmp #2
+				bne .9
+
+				jsr CS.RUN.CheckSrcFile
+				bcs .99
+
+				lda #2
+				>SYSCALL ArgV
+				>PUSHYA
+				>PUSHBI	O.CREATE+O.WRONLY
+				>PUSHB.G STATBUF+S.STAT.P.TYPE
+				>PUSHW.G STATBUF+S.STAT.P.AUXTYPE
+
+				>SYSCALL FOpen
+				bcs .99
+
+				sta hDstFile
+
+				bra CS.RUN.START
+
+.9				>PUSHW L.MSG.USAGE
+				>PUSHBI 0
+				>SYSCALL PrintF
+				lda #E.SYN
+				sec
+.99				rts
+*--------------------------------------
+CS.RUN.START	>PUSHW L.MSG.SRCFILE
+				lda #1
+				>SYSCALL ArgV
+				>PUSHYA
+				>PUSHW ZPSrcFileSize
+				>PUSHW.G ARCME.HEADER+5
+				>PUSHB.G ARCME.HEADER+7
+				>PUSHW ZPDstTableOfs
+				>PUSHBI 9
+				>SYSCALL PrintF
+
+				>LDYA ZPDstTableOfs
+				jsr CS.RUN.GetSrcBufYA
+				bcs CS.RUN.RTS
+
+				>PUSHB hSrcFile
+				>PUSHLZ
+				>PUSHBI SEEK.SET
+				>SYSCALL FSeek
+				bcs CS.RUN.RTS
+
+				>PUSHB hSrcFile
+				>PUSHW ZPInBufPtr
+				>PUSHW ZPDstTableOfs
+				>SYSCALL FRead
+				bcs CS.RUN.RTS
+
+				>PUSHB hDstFile
+				>PUSHW ZPInBufPtr
+				>PUSHW ZPDstTableOfs
+				>SYSCALL FWrite
+				bcs CS.RUN.RTS
+
+				jsr CS.QUIT.BUF
+
+				jsr CS.RUN.WriteTable	Write Fake table
+
+				bcc CS.RUN.LOOP
+
+CS.RUN.RTS		rts
+*--------------------------------------
+CS.RUN.LOOP		ldy #S.PS.hStdIn
+				lda (pPS),y
+				>SYSCALL FEOF
+				bcs CS.RUN.RTS
+
+				tay
+				bne .1
+
+				>SYSCALL GetChar
+				bcs CS.RUN.RTS
+
+				cmp #$03				Ctrl-C
+				beq CS.RUN.RTS			Abort....
+
+				cmp #$13				Ctrl-S
+				bne .1
+
+				lda bPause
+				eor	#$ff
+				sta bPause
+				bne CS.RUN.LOOP
+
+.1				lda bPause
+				bne CS.RUN.LOOP			Pause...
+*--------------------------------------
+				jsr CS.RUN.GetChunk
+				bcs CS.RUN.RTS
+
+				>PUSHW L.MSG.CHUNK
+				lda ZPChunkIndex
+				inc
+				>PUSHA
+				>PUSHW ZPChunkOfs
+				>PUSHW ZPChunkLen
+				>PUSHBI 5
+				>SYSCALL PrintF
+				bcs .9
+
+				jsr CS.RUN.Arc
+				bcs .2
+
+				jsr CS.RUN.WriteArc
+				bcc .7
+				rts
+
+.2				jsr CS.RUN.WriteStore
+				bcs .9
+
+.7				jsr CS.QUIT.BUF
+
+				jsr CS.RUN.UpdateTable
+				inc ZPChunkIndex
+				dec ZPChunkCnt
+				beq .8
+
+				jmp CS.RUN.LOOP
+
+.8				jsr CS.RUN.RewriteTable	Write modified Table
+				bcs .9
+
+				lda #0
+				sec
+.9				rts
+*--------------------------------------
+CS.RUN.CheckSrcFile
+				lda #1
+				>SYSCALL ArgV
+				>PUSHYA
+				>PUSHBI	O.RDONLY
+				>PUSHBI 0				Type
+				>PUSHWZ					Aux type
+
+				>SYSCALL FOpen
+				bcs .99
+
+				sta hSrcFile
+
+				>PUSHB hSrcFile
+				>PUSHEA.G STATBUF
+				>SYSCALL FStat
+.99				bcs .9
+
+				>LDA.G STATBUF+S.STAT.SIZE+3
+				dey
+				ora (pData),y
+				bne .90
+
+				dey
+				lda (pData),y
+				sta ZPSrcFileSize+1
+				dey
+				lda (pData),y
+				sta ZPSrcFileSize
+
+				jsr CS.RUN.CheckTAG
+				bcs .9
+
+				jsr CS.RUN.GetTable
+				bcs .9
+
+
+				clc
+				rts
+
+.90				lda #MLI.E.INCFF
+				sec
+.9
+CS.RUN.CheckSrcFile.RTS
+				rts
+*--------------------------------------
+CS.RUN.CheckTAG	>PUSHB hSrcFile
+				>PUSHWZ
+
+				lda ZPSrcFileSize
+				sec
+				sbc #10
+				tay
+				lda ZPSrcFileSize+1
+				sbc #0
+				>PUSHYA
+
+				>PUSHBI SEEK.SET
+				>SYSCALL FSeek
+				bcs CS.RUN.CheckSrcFile.RTS
+
+				>PUSHB hSrcFile
+				>PUSHEA.G ARCME.HEADER
+				>PUSHWI 10
+				>SYSCALL FRead
+				bcs CS.RUN.CheckSrcFile.RTS
+
+				ldx #4
+
+				ldy #ARCME.HEADER+4
+
+.1				lda TAG,x
+				cmp (pData),y
+				bne .90
+				dey
+				dex
+				bpl .1
+
+				clc
+				rts
+
+.90				lda #MLI.E.INCFF
+				sec
+.9				rts
+*--------------------------------------
+CS.RUN.GetTable	>LDA.G ARCME.HEADER+8
+				sec
+				>SBC.G ARCME.HEADER+5
+				sta ZPDstTableOfs
+
+				>LDA.G ARCME.HEADER+9
+				>SBC.G ARCME.HEADER+6
+				sta ZPDstTableOfs+1
+
+				>PUSHB hSrcFile
+				>PUSHWZ
+				>PUSHW ZPDstTableOfs
+				>PUSHBI SEEK.SET
+				>SYSCALL FSeek
+				bcs .9
+
+				>PUSHB hSrcFile
+				>PUSHEA.G ARCME.TABLE
+				>LDA.G ARCME.HEADER+7
+				sta ZPChunkCnt
+
+				asl
+				tay
+				lda #0
+				>PUSHYA
+
+				>SYSCALL FRead
+
+.9				rts
+*--------------------------------------
+CS.RUN.GetChunk	lda ZPChunkIndex
+
+				asl
+				clc
+				adc #ARCME.TABLE+1
+				tay
+				lda (pData),y
+				pha
+				dey
+				lda (pData),y
+				sec
+				ldy #ARCME.HEADER+5
+				sbc (pData),y
+				sta ZPChunkOfs
+
+				iny
+				pla
+				sbc (pData),y
+				sta ZPChunkOfs+1
+
+				>PUSHB hSrcFile
+				>PUSHWZ
+				>PUSHW ZPChunkOfs
+				>PUSHBI SEEK.SET
+				>SYSCALL FSeek
+				bcs .9
+
+				>PUSHB hSrcFile
+				>PUSHEA.G CHUNK.HEADER
+				>PUSHWI S.ARCSHNK.H
+				>SYSCALL FRead
+				bcs .9
+
+				>LDA.G CHUNK.HEADER+2
+				iny
+				ora (pData),y
+				bne .90
+
+				>LDA.G CHUNK.HEADER
+				sta ZPChunkLen
+				pha
+				iny
+				lda (pData),y
+				sta ZPChunkLen+1
+				ply
+
+				jsr CS.RUN.GetSrcBufYA
+				bcs .9
+
+				>PUSHB hSrcFile
+				>PUSHW ZPInBufPtr
+				>PUSHW ZPChunkLen
+				>SYSCALL FRead
+				bcs .9
+
+*				clc
+				rts
+
+.90				lda #MLI.E.INCFF
+				sec
+
+.9				rts
+*--------------------------------------
+CS.RUN.GetSrcBufYA
+				>SYSCALL GetMem
+				bcs .9
+
+				stx hSrcBuf
+				>STYA ZPInBufPtr
+
+.9				rts
+*--------------------------------------
+CS.RUN.Arc		>LDYA ZPChunkLen
+				>SYSCALL GetMem
+				bcs .9
+
+				stx hDstBuf
+				>STYA ZPOutBufPtr
+
+				>LDYA ZPChunkLen
+				jsr X.Arc
+*				bcs .9
+
+				stx ZPAlg
+				>STYA ZPChunkPakedLen
+.9				rts
+*--------------------------------------
+CS.RUN.RewriteTable
+				>PUSHB hDstFile
+				>PUSHWZ
+				>PUSHW ZPDstTableOfs
+				>PUSHBI SEEK.SET
+				>SYSCALL FSeek
+				bcs CS.RUN.WriteTable.RTS
+*--------------------------------------
+CS.RUN.WriteTable
+				>PUSHB hDstFile
+				>PUSHEA.G ARCME.TABLE
+				>LDA.G ARCME.HEADER+7
+				asl
+				tay
+				lda #0
+				>PUSHYA
+				>SYSCALL FWrite
+CS.RUN.WriteTable.RTS
+				rts
+*--------------------------------------
+CS.RUN.WriteArc	lda hDstFile
+				>SYSCALL FTell
+				bcs .9
+
+				>PULLW ZPChunkNewOfs
+				inc pStack
+				inc pStack
+
+				>PUSHB hDstFile
+				>PUSHW ZPOutBufPtr
+				>PUSHW ZPChunkPakedLen
+				>SYSCALL FWrite
+				bcs .9
+
+				>PUSHW L.MSG.ARCED
+				ldx ZPAlg
+				>PUSHW L.MSG.STORED,x
+				>PUSHW ZPChunkPakedLen
+				>PUSHW ZPChunkNewOfs
+				>PUSHBI 6
+				>SYSCALL PrintF
+
+.9
+CS.RUN.WriteArc.RTS
+				rts
+*--------------------------------------
+CS.RUN.WriteStore
+				lda hDstFile
+				>SYSCALL FTell
+				bcs CS.RUN.WriteArc.RTS
+
+				>PULLW ZPChunkNewOfs
+				inc pStack
+				inc pStack
+
+				>PUSHB hDstFile
+				>PUSHEA.G CHUNK.HEADER
+				>PUSHWI S.ARCSHNK.H
+				>SYSCALL FWrite
+				bcs .9
+
+				>PUSHB hDstFile
+				>PUSHW ZPInBufPtr
+				>PUSHW ZPChunkLen
+				>SYSCALL FWrite
+				bcs .9
+
+				>PUSHW L.MSG.ARCED
+				ldx ZPAlg
+				>PUSHW L.MSG.STORED,x
+				>PUSHW ZPChunkPakedLen
+				>PUSHW ZPChunkNewOfs
+				>PUSHBI 6
+				>SYSCALL PrintF
+
+.9				rts
+*--------------------------------------
+CS.RUN.UpdateTable
+				ldy #ARCME.HEADER+6
+				lda (pData),y
+				pha
+
+				dey
+				lda (pData),y
+				pha
+
+				lda ZPChunkIndex
+
+				asl
+				clc
+				adc #ARCME.TABLE
+				tay
+
+				pla
+				clc
+				adc ZPChunkNewOfs
+				sta (pData),y
+
+				iny
+
+				pla
+				adc ZPChunkNewOfs+1
+				sta (pData),y
+				rts
+*--------------------------------------
+CS.DOEVENT		sec
+				rts
+*--------------------------------------
+CS.QUIT			lda hDstFile
+				beq .2
+				>SYSCALL FClose
+
+.2				lda hSrcFile
+				beq CS.QUIT.BUF
+
+				>SYSCALL FClose
+*--------------------------------------
+CS.QUIT.BUF		lda hDstBuf
+				beq .1
+
+				stz hDstBuf
+				>SYSCALL FreeMem
+
+.1				lda hSrcBuf
+				beq .8
+
+				stz hSrcBuf
+				>SYSCALL FreeMem
+
+.8				clc
+				rts
+*--------------------------------------
+				.INB usr/src/shared/x.arc.s
+*--------------------------------------
+MSG.USAGE		.CZ "Usage : ARCME SourceBIN PackedBIN\r\n"
+MSG.SRCFILE		.CZ "Source File : %s, Size=%5D, Org=$%H, %d Chunks at $%H.\r\n"
+MSG.CHUNK		.CZ "  Chunk #%02d : Ofs=$%H, Len=%5D ... "
+MSG.STORED		.CZ "Stored   "
+MSG.ARCEDT		.CZ "ARCed/T  "
+MSG.ARCEDBL		.CZ "ARCed/BL "
+MSG.ARCEDTBL	.CZ "ARCed/TBL"
+MSG.ARCED		.CZ "%s : %5D Bytes, New Ofs=$%H\r\n"
+				.CZ %5D Bytes, New Ofs=$%H\r\n"
+MSG.E.IARC		.CZ "Invalid/corrupt archive"
+TAG				.CZ "ARCME"
+				.DO DBG
+MSG.DBG1		.CS "\r\n\r\n   ULEN:%6u Bits, T:%6u Bits, BL:%6u Bits, TBL:%6u Bits\r\n"
+				.CS "   TopT      :%5d, TopTBL    :%5d\r\n"
+				.CZ "   STR.Max   :%5d, BLL.Max   :%5d, BLO.Max   :%5D\r\n"
+MSG.DBG2		.CS "   S.TB.Cnt  :%5D, STR.TB.Cnt:%5D, BL.TB.Cnt :%5D\r\n"
+				.CS "   STR.SL.Cnt:%5D, STR.LL.Cnt:%5D, Bits: %d/%d\r\n"
+				.CS "   BLL.SL.Cnt:%5D, BLL.LL.Cnt:%5D, Bits: %d/%d,%d\r\n" 
+				.CZ "   %5D %5D %5D %5D %5D %5D %5D %5D %5D %5D %5D %5D\r\n"
+MSG.DBG3		.CZ "   Output : %6u Bits, %5D Bytes, Alg=%d\r\n"
+				.FIN
+*--------------------------------------
+				.DUMMY
+				.OR 0
+DS.START
+STATBUF			.BS S.STAT
+ARCME.HEADER	.BS 10
+ARCME.TABLE		.BS CHUNK.MAX*2
+CHUNK.HEADER	.BS 4
+DS.END			.ED
+*--------------------------------------
+MAN
+SAVE usr/src/bin/arcme.s
+ASM

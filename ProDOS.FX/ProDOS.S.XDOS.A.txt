@@ -1,174 +1,284 @@
 NEW
   AUTO 3,1
 *--------------------------------------
-XDOS			cld						no decimal.
-				sty mliy				save x and y
-				stx mlix			 
-				
+FCB.MAX			.EQ 8
+FCB.ID				.EQ 0
+FCB.DEVID			.EQ 1				d_dev -> d_dev+5
+FCB.DIRHBLK			.EQ 2				2 bytes
+FCB.DIREBLK			.EQ 4				2 bytes
+FCB.DIRENUM			.EQ 6
+FCB.STYPE			.EQ 7
+FCB.F				.EQ 8
+FCB.F.STMOD				.EQ %00001000
+FCB.F.UMOD				.EQ %00010000
+FCB.F.DBLKMOD			.EQ %01000000
+FCB.F.IBLKMOD			.EQ %10000000
+FCB.ACCESS			.EQ 9
+FCB.NLBYTE			.EQ 10
+FCB.BUFID			.EQ 11
+FCB.1stBLK			.EQ 12				2 bytes
+FCB.IBLK			.EQ 14				2 bytes
+FCB.DBLK			.EQ 16				2 bytes
+FCB.MARK			.EQ 18				3 bytes
+FCB.EOF				.EQ 21				3 bytes
+FCB.UBLK			.EQ 24				2 bytes
+
+FCB.FLEVEL			.EQ 27
+FCB.DIRTY			.EQ 28
+
+
+FCB.NLMASK			.EQ 31
+*
+FCB				.EQ 32
+*--------------------------------------
+VCB.DEV				.EQ 16
+VCB.OFCNT			.EQ 17
+VCB.BMAP			.EQ 18				2 bytes
+VCB.TBLK			.EQ 20				2 bytes
+VCB.FBLK			.EQ 22				2 bytes
+VCB.BMAPIDX			.EQ 24
+*
+VCB				.EQ 25
+*--------------------------------------
+XDOS.VCBPtr		.EQ XDOS.VCBs+0
+XDOS.VCBDupFlag	.EQ XDOS.VCBs+1
+XDOS.VCBDupEnt 	.EQ XDOS.VCBs+2
+bmcnt			.EQ XDOS.VCBs+3
+bmptr			.EQ XDOS.VCBs+4
+basval			.EQ XDOS.VCBs+5
+XDOS.VCB0		.EQ XDOS.VCBs+6			range $D906-$DA00
+*--------------------------------------
+* ZERO Page
+*--------------------------------------
+zpt				.EQ	$48					highly used zero page index pointer
+datptr			.EQ	$4A					ptr to data area of buffer.
+sos				.EQ	$4C					sos buffer pointer.
+usrbuf			.EQ	$4E					data ptr in user buffer.
+*--------------------------------------
+XDOS.START		.PH XDOS
+
+				.DO AUXLC=0
+
+XDOS.MAIN		cld						no decimal.
+
+				sty GP.MLIY				save x and y
+				stx GP.MLIX
+
 				ply						get processor status
-				
+
 				pla						find out the address of the caller
-				sta A3L
+				sta ZP.A3L
 				clc						preserve the address of the call spec.
 				adc #$04
-				sta mliretn				last MLI call return address
+				sta GP.MLIRTN			last MLI call return address
 				pla
-				sta A3L+1
+				sta ZP.A3L+1
 				adc #$00
-				sta mliretn+1
+				sta GP.MLIRTN+1
 
 				phy						pull processor status
-				plp						to re-enable interrupts.
+				
+				.ELSE
+				
+XDOS.AUX		cld
+				
+				bit IO.RRAMWRAMBNK1
+				sty GP.BNKBYT2
 
+				stx GP.MLIEXIT.X+1
+
+				tsx
+				stx $100
+				ldx	$101
+				txs
+
+				sec
+				ror GP.MLIACTV
+
+				pha
+
+				lda GP.MLIEXIT.PCL+1
+				sta ZP.A3L
+				clc
+				adc #$04
+				sta GP.MLIEXIT.PCL+1
+				lda GP.MLIEXIT.PCH+1
+				sta ZP.A3L+1
+				adc #$00
+				sta GP.MLIEXIT.PCH+1
+				
+				.FIN
+*--------------------------------------
+				plp						to re-enable interrupts.
 				cld						still no decimal
-				stz	p8error				clear any previous errors.
+				stz	GP.ERROR			clear any previous errors.
 				ldy #$01				find out if command is valid.
-				lda	(A3L),y				get command #
+				lda	(ZP.A3L),y			get command #
 
 				lsr						and hash it to a range of 0-$1F
 				lsr
 				lsr
 				lsr
 				clc
-				adc (A3L),y
+				adc (ZP.A3L),y
 				and #$1F
 				tax
-				lda (A3L),y				check result to see if valid command #
+				lda (ZP.A3L),y			check result to see if valid command #
 				cmp XDOS.CmdNums,x
-				bne scnerr
+				bne XDOS.BadCall
 
 				iny						index to call spec parm list.
-				lda (A3L),y				make A3L point to parameter count byte
+				lda (ZP.A3L),y			make A3L point to parameter count byte
 				pha						in parameter block.
 				iny
-				lda (A3L),y
-				sta A3L+1
+				lda (ZP.A3L),y
+				sta ZP.A3L+1
 				pla
-				sta A3L
+				sta ZP.A3L
 
 				lda	XDOS.ParamCnt,x		make sure parameter list has the correct # of parameters.
-				beq goclock				clock has 0 parameters.
+				beq .2					clock has 0 parameters.
 
-				cmp (A3L)
-				bne scperr				error if wrong count.
+				cmp (ZP.A3L)
+				bne XDOS.BadCnt			error if wrong count.
 
 				lda XDOS.CmdNums,x		get call # again
-				cmp #MLIQUIT			is it quit?
-				beq special				if so, then call quit dispatcher
+				cmp #MLI.QUIT			is it quit?
+				beq .1					if so, then call quit dispatcher
 
-				asl					 	carry set if bfm or dev mgr
-				bpl godevmgr
-				bcs gobfmgr
+				asl					 	carry set if BFMgr or DevMgr
+				bpl .3
+				bcs .4
 
 				lsr						shift back down for interrupt manager
 				and #$03				valid calls are 0 and 1
-				jsr XDOS.intmgr
-				bra exitmli
+				jsr XDOS.IntMgr
+				bra XDOS.Exit
 
-special			jmp jspare				P8 system death vector
+.1				jmp GP.DISPATCH			P8 system death vector
 
-goclock			jsr clockv			 	go read clock.
-				bra exitmli				no errors possible
+.2				jsr GP.CLOCK		 	go read clock.
+				bra XDOS.Exit			no errors possible
 
-godevmgr 		lsr						shift back down for device manager.
+.3		 		lsr						shift back down for device manager.
 				adc #$01				valid commands are 1 and 2.
-				sta A4L					save command #.
-				jsr XDOS.devmgr			execute read or write request.
-				bra exitmli
+				sta ZP.CMDNUM
+				jsr XDOS.DevMgr			execute read or write request.
+				bra XDOS.Exit
 
-gobfmgr			lsr						shift back down for block file manager.
+.4				lsr						shift back down for block file manager.
 				and #$1F				valid commands are 0-$13
 				tax
-				
-				jsr XDOS.bfmgr
 
-exitmli			stz bubit				clear backup bit
-				ldy p8error				P8 error code
-				cpy #$01				if > 0 then set carry
-				tya						and set z flag.
+				jsr XDOS.BFMgr
+*--------------------------------------
+XDOS.Exit		stz GP.BUBIT			clear backup bit
+
+				ldy GP.ERROR			P8 error code
+				cpy #$01				if > 0 then set C
+				tya						and set Z
 				php						disable interrupts until exit complete.
 				sei
-				lsr mliact				indicate MLI done.
-				plx						save status register until return.
-				lda mliretn+1			place last MLI call return address
-				pha						on stack. return is done via 'rti'
-				lda mliretn				so the status register is restored
-				pha						at the same time, so
-				phx						place status back on stack
-				tya						return error, if any.
-				ldx mlix				MLI X register savearea
-				ldy mliy				MLI Y register savearea
-				pha
-				lda bnkbyt1				restore language card status
-				jmp GP.MLIEXIT			and return.
+				lsr GP.MLIACTV			indicate MLI done.
 
-nodevice 		lda #MLI.E.NODEV		no device connected.
-				jsr GP.P8errv
+				ply						Get status register until return.
+
+* Y = Status register
+* A = MLI Error code
 				
-scnerr			lda #MLI.E.BADCALL
+				.DO AUXLC=0
+
+				ldx GP.MLIRTN+1			place last MLI call return address
+				phx						on stack. return is done via 'rti'
+				ldx GP.MLIRTN			so the status register is restored
+				phx						at the same time, so
+
+				phy						place status back on stack
+
+				pha						Push return error, if any.
+
+				ldx GP.MLIX				MLI X register savearea
+				ldy GP.MLIY				MLI Y register savearea
+				lda GP.BNKBYT1			restore language card status
+				jmp GP.MLIEXIT			and return.
+				
+				.ELSE
+				
+				tsx
+				stx $101
+				ldx	$100
+				txs
+				jmp GP.MLIEXITX
+				
+				.FIN
+*--------------------------------------
+XDOS.NoDevice 	lda #MLI.E.NODEV		no device connected.
+				jsr GP.SYSERR
+
+XDOS.BadCall	lda #MLI.E.BADCALL
 				.HS 2C					BIT ABS
-scperr			lda #MLI.E.BADCNT
-				jsr gosyserr
-				bra exitmli
+XDOS.BadCnt		lda #MLI.E.BADCNT
+				jsr XDOS.GoSysErr
+				bra XDOS.Exit
 *--------------------------------------
 * ProDOS Device Manager
 *--------------------------------------
-XDOS.devmgr		ldy #$05				the call spec for devices must
+XDOS.DevMgr		ldy #$05				the call spec for devices must
 
-.1	  			lda (A3L),y				be passed to drivers in page zero:
-				sta A4L,y
+.1	  			lda (ZP.A3L),y			be passed to drivers in page zero:
+				sta ZP.CMDNUM,y
 				dey
 				bne .1
 
-				ldx buf+1				buffer page
+				ldx ZP.BUFPTR+1			buffer page
 				stx usrbuf+1			to user buffer
 				inx
 				inx
-				lda buf					is buffer page aligned (nn00) ?
+				lda ZP.BUFPTR			is buffer page aligned (nn00) ?
 				beq .2					branch if it is
 
 				inx						else account for 3-page straddle
 
 .2  			jsr vldbuf1				make sure user buffer is not
-				bcs gosyserr			conflicting with protected ram.
+				bcs XDOS.GoSysErr		conflicting with protected ram.
 
 				jsr XDOS.DevCall		call internal entry for device dispatch
 				bcc XDOS.DevCall.RTS
 
-gosyserr 		jsr GP.P8errv
+XDOS.GoSysErr	jsr GP.SYSERR
 *--------------------------------------
 XDOS.DevCall	php						do not allow interrupts.
-				sei						
+				sei
 
-				lda unitnum				get device # and
+				lda ZP.UNITNUM			get device # and
 				and #$F0				strip misc lower nibble
-				sta unitnum				then save it.
+				sta ZP.UNITNUM			then save it.
 				lsr						use as index to device table
 				lsr
 				lsr
 				tax
 				jsr XDOS.DevCall.Jmp
-				bit CLRC8ROM			RELEASE $C800-$CFFF ROM space
+				bit IO.CLRC8ROM			RELEASE $C800-$CFFF ROM space
 				bcs .9
-				
+
 				plp
 				clc
 				rts
-				
-.9				plp				
+
+.9				plp
 				sec
 
 XDOS.DevCall.RTS
 				rts
-				
+
 XDOS.DevCall.Jmp
-				jmp (DEVPTRS,x)			goto driver (or error if no driver)
+				jmp (GP.DEVPTRS,x)		goto driver (or error if no driver)
 *--------------------------------------
 * ProDOS interrupt manager
 *--------------------------------------
-XDOS.intmgr		sta A4L					interrupt command
+XDOS.IntMgr		sta ZP.A4L				interrupt command
 				lsr						allocate interrupt or deallocate?
-				bcs dealcint			branch if deallocate.
+				bcs .4					branch if deallocate.
 
 				ldx #$03				test for a free interrupt space in tbl.
 
@@ -176,17 +286,17 @@ XDOS.intmgr		sta A4L					interrupt command
 				bne	.2					branch if spot occupied.
 
 				ldy	#$03				get address of routine.
-				lda	(A3L),y				must not be zero page.
-				beq badint				error if it is.
+				lda	(ZP.A3L),y			must not be zero page.
+				beq .3					error if it is.
 
 				sta GP.IRQVs-2,x		save high address
 				dey
-				lda (A3L),y
+				lda (ZP.A3L),y
 				sta GP.IRQVs-3,x		and low address.
 				txa						return interrupt # in range 1-4
 				lsr
 				dey
-				sta (A3L),y				pass back to user.
+				sta (ZP.A3L),y			pass back to user.
 				clc						no errors.
 				rts
 
@@ -197,39 +307,44 @@ XDOS.intmgr		sta A4L					interrupt command
 
 				lda	#MLI.E.IRQFULL		interrupt table full
 				.HS 2C					BIT ABS
-badint			lda #MLI.E.INVPARAM		invalid parameter.
-				jsr GP.P8errv
+.3				lda #MLI.E.INVPARAM		invalid parameter.
+				jsr GP.SYSERR
 
-dealcint		ldy #$01			   	zero out interrupt vector
-				lda	(A3L),y				but make sure it is a valid #.
-				beq badint				error if < 1
+.4				ldy #$01			   	zero out interrupt vector
+				lda	(ZP.A3L),y			but make sure it is a valid #.
+				beq .3					error if < 1
 
 				cmp #$05				or > 4
-				bcs badint
+				bcs .3
 
 				asl
 				tax
-				
+
 				stz GP.IRQVs-2,x
 				stz GP.IRQVs-1,x
-				clc
+*				clc
 				rts
 *--------------------------------------
-XDOS.syserr		sta p8error				P8 error code
+XDOS.SysErr		sta GP.ERROR			P8 error code
 				plx
 				plx						pop 1 level of return
 				sec
 				rts
 *--------------------------------------
+* $01 = more than 255 unclaimed irqs
+* $0A = open file has no volume
+* $0B = open file has no 1K buffer
+* $0C = block allocation error.
+*--------------------------------------
 XDOS.SysDeath 	tax						death error code.
-				sta CLR80DISP			disable 80 col hardware.
-				lda SETTEXT				switch in text.
-				lda cortflag			is this a Cortland?
+				sta IO.CLR80DISP		disable 80 col hardware.
+				lda IO.SETTEXT			switch in text.
+				lda XDOS.CortFlag		is this a Cortland?
 				beq .1					if not, don't use super hires switch.
 
-				stz newvideo			force off super hires.
+				stz IO.GS.NEWVIDEO		force off super hires.
 
-.1	  			lda CLRPAGE2			switch in text page 1.
+.1	  			lda IO.CLRPAGE2			switch in text page 1.
 
 				ldy #deathmsg.LEN-1
 
@@ -249,9 +364,9 @@ XDOS.SysDeath 	tax						death error code.
 .3  			ldy #deathmsg.LEN
 				ora #$80
 				sta $400,y
-				
+
 				lda #" "
-				
+
 .4				iny
 				sta $400,y
 				cpy #39
@@ -261,7 +376,7 @@ XDOS.SysDeath 	tax						death error code.
 *--------------------------------------
 * ProDOS Block File Manager
 *--------------------------------------
-XDOS.bfmgr		lda XDOS.CmdFlags,x		translate into command address.
+XDOS.BFMgr		lda XDOS.CmdFlags,x		translate into command address.
 				asl						bit 7 indicates pathname to process
 				sta cmdtemp
 				and #$3F				bit 6  is refnum, 5 is time to process
@@ -285,14 +400,15 @@ nopath			asl cmdtemp				test for refnum processing
 				bcs errorsys
 
 nopreref 		asl cmdtemp				check for necessity of time stamp
-				bcc H3274	
+				bcc H3274
 
-				jsr clockv				date/time
+				jsr GP.CLOCK			date/time
 
 H3274  			jsr $FFFF				SELF MODIFIED : execute command
 				bcc goodop
 
-errorsys 		jsr GP.P8errv
+errorsys 		jsr GP.SYSERR
+
 goodop			rts
 *--------------------------------------
 * entry used by rename for 2nd pathname.
@@ -301,18 +417,18 @@ XDOS.GetRenPath	ldy #$03			 	get address to new pathname
 				.HS 2C
 *--------------------------------------
 XDOS.GetPath	ldy #$01				index to pathname pointer
-				lda (A3L),y				low pointer address
+				lda (ZP.A3L),y				low pointer address
 				sta zpt
 
 				iny
-				lda (A3L),y				hi pointer address
+				lda (ZP.A3L),y				hi pointer address
 				sta zpt+1
 
-				ldx #$00				x = index to pathbuf
+				ldx #$00				x = index to XDOS.PathBuf
 				ldy #$00				y = index to input pathname.
 
 				stz prfxflg				assume prefix is in use.
-				stz pathbuf				mark pathbuf = nothing processed.
+				stz XDOS.PathBuf				mark XDOS.PathBuf = nothing processed.
 
 				lda (zpt),y				validate pathname length > 0 and < 65
 				beq errsyn
@@ -332,8 +448,8 @@ XDOS.GetPath	ldy #$01				index to pathname pointer
 				dec prfxflg				set prefix flag = prefix not used.
 				iny						index to 1st character of pathname.
 
-H32AD  			lda #$FF				set current position of pathbuf
-				sta pathbuf,x			to indicate end of pathname.
+H32AD  			lda #$FF				set current position of XDOS.PathBuf
+				sta XDOS.PathBuf,x			to indicate end of pathname.
 
 				sta namcnt				$FF = no chars processed in local name.
 				stx namptr				pointer to local name length byte.
@@ -352,26 +468,32 @@ H32B8  			cpy pathcnt				done with pathname processing?
 				cmp #'a'				lowercase?
 				bcc .1					no
 
-				and #$5F				shift to uppercase
+				cmp #'z'+1
+				bcs .1
+				
+				eor #$20				to uppercase
 .1				.FIN
 
-				sta pathbuf,x			store char
+				sta XDOS.PathBuf,x		store char
 				inc namcnt				is it the 1st char of a local name?
 				bne .2					no
-	
+
 				inc namcnt				increment to 1
 				jsr XDOS.IsValidFirstChar
 				bcc H32B8
 
 				bra errsyn
-				
+
 .2				jsr XDOS.IsValidChar
 				bcc H32B8
 
 errsyn			lda #MLI.E.INVPATH
-				sec
-				rts
+				.HS 2C
 
+ptyperr			lda #MLI.E.UNSUPST		filetype error (not a directory)
+pfxerr			sec
+				rts
+				
 endpath			lda #$00			 	end pathname with a 0
 				bit namcnt				also make sure count is positive
 				bpl H32FD
@@ -380,7 +502,7 @@ endpath			lda #$00			 	end pathname with a 0
 				dex
 
 H32FD  			inx
-				sta pathbuf,x
+				sta XDOS.PathBuf,x
 				beq errsyn				error if '/' only.
 
 				stx pathcnt				save length of pathname
@@ -392,7 +514,7 @@ endname  		lda namcnt				validate local name < 16
 
 				phx						save pointer
 				ldx namptr				get index to beginning of local name
-				sta pathbuf,x			save local name's length
+				sta XDOS.PathBuf,x			save local name's length
 				plx						restore pointer
 				bne H32AD				branch if more names to process
 
@@ -400,25 +522,25 @@ endname  		lda namcnt				validate local name < 16
 				lda prfxflg				make sure all pathnames are prefixed
 				bne H3323				or begin with a '/'.
 
-				lda newpfxptr			must be non-zero
+				lda GP.NEWPFXPTR		must be non-zero
 				beq errsyn
 H3323  			rts
 *--------------------------------------
 XDOS.SetPrefix	jsr XDOS.GetPath		call is made to detect if a null path.
 				bcc H3333				path ok.
 
-				ldy pathbuf				is it a null pathname?
+				ldy XDOS.PathBuf		is it a null pathname?
 				bne pfxerr				error if not
 
-				sty newpfxptr			fix appletalk PFI bug
-				sty preflag	  			prefix flag
+				sty GP.NEWPFXPTR		fix appletalk PFI bug
+				sty GP.PFXPTR
 				clc						no error
 				rts
 
 H3333  			jsr XDOS.FindFileOrVol	go find specified prefix directory.
-				bcs pfxerr				branch if error is not root directory.
+pfxerr1			bcs pfxerr				branch if error is not root directory.
 
-H333C  			lda d_stor				make sure last local name is dir type
+				lda d_stor				make sure last local name is dir type
 				and #$D0				(either root or sub).
 				eor #$D0				directory?
 				bne ptyperr				wrong type
@@ -426,7 +548,7 @@ H333C  			lda d_stor				make sure last local name is dir type
 				ldy prfxflg				new or appended prefix?
 				bne H334D
 
-				lda newpfxptr			append new prefix to old
+				lda GP.NEWPFXPTR			append new prefix to old
 
 H334D  			tay
 				sec						find new beginning of prefix
@@ -435,8 +557,8 @@ H334D  			tay
 				bcc errsyn				then error
 
 				tax
-				sta newpfxptr
-				sta preflag
+				sta GP.NEWPFXPTR
+				sta GP.PFXPTR
 				lda d_dev				save device #
 				sta p_dev
 				lda d_frst				and address of 1st block
@@ -444,25 +566,21 @@ H334D  			tay
 				lda d_frst+1
 				sta p_blok+1
 
-.1				lda pathbuf,y
-				sta pathbuf,x
+.1				lda XDOS.PathBuf,y
+				sta XDOS.PathBuf,x
 				iny
 				inx
 				bne .1
 
 				clc						good prefix
 				rts
-
-ptyperr			lda #MLI.E.UNSUPST		filetype error (not a directory)
-pfxerr			sec
-				rts
 *--------------------------------------
 XDOS.GetPrefix	clc						calc how big a buffer is needed.
 				ldy #$01				get index to users pathname buffer
-				lda (A3L),y
+				lda (ZP.A3L),y
 				sta usrbuf				user buffer ptr
 				iny
-				lda (A3L),y
+				lda (ZP.A3L),y
 				sta usrbuf+1
 
 				stz cbytes+1			set buffer length at 64 char max
@@ -470,10 +588,10 @@ XDOS.GetPrefix	clc						calc how big a buffer is needed.
 				sta cbytes
 
 				jsr valdbuf				go validate prefix buffer address
-				bcs pfxerr
+				bcs pfxerr1
 
 				ldy #$00				y = indirect index to user buffer.
-				lda newpfxptr			get address of beginning of prefix
+				lda GP.NEWPFXPTR			get address of beginning of prefix
 				tax
 				beq nulprfx				if null prefix.
 
@@ -484,7 +602,7 @@ nulprfx  		sta (usrbuf),y			store length in user's buffer.
 				beq gotprfx				branch if null prefix.
 
 sendprfx 		iny						inc to next user buffer location.
-				lda pathbuf,x			get next char of prefix.
+				lda XDOS.PathBuf,x			get next char of prefix.
 
 sndlimit 		sta (usrbuf),y		  	give char to user.
 				and #$F0				check for length descriptor.
@@ -502,14 +620,14 @@ gotprfx  		clc						no error
 				rts
 *--------------------------------------
 XDOS.GetFCB		ldy #$01				index to ref#
-				lda (A3L),y				is it a valid file# ?
+				lda (ZP.A3L),y				is it a valid file# ?
 				beq badref				must not be 0.
 
 				cmp #FCB.MAX+1
 				bcs badref
 
 				pha
-				dec 
+				dec
 				lsr
 				ror
 				ror
@@ -517,13 +635,13 @@ XDOS.GetFCB		ldy #$01				index to ref#
 				sta fcbptr				used as an index to fcb
 				tax
 				pla						restore ref# in acc
-				cmp FCBs+FCB.ID,x
+				cmp XDOS.FCBs+FCB.ID,x
 				bne errnoref
 *--------------------------------------
-XDOS.GetFCBBufX	lda FCBs+FCB.BUFID,x	get page address of file buffer.
-				
+XDOS.GetFCBBufX	lda XDOS.FCBs+FCB.BUFID,x	get page address of file buffer.
+
 				tay						index into global buffer table.
-				lda buftbl-1,y
+				lda GB.BUFTABL-1,y
 				sta bufaddrh
 
 				beq fcbdead				fcb corrupted
@@ -533,7 +651,7 @@ XDOS.GetFCBBufX	lda FCBs+FCB.BUFID,x	get page address of file buffer.
 				inc						index block always 2 pages after data
 				sta zpt+1
 
-				lda buftbl-2,y			???? ALWAYS 0
+				lda GB.BUFTABL-2,y			???? ALWAYS 0
 
 				sta bufaddrl
 				sta datptr				index and data buffers always on
@@ -541,11 +659,11 @@ XDOS.GetFCBBufX	lda FCBs+FCB.BUFID,x	get page address of file buffer.
 
 				jsr XDOS.FCBDevIDSelect
 
-				lda #VCB0
+				lda #XDOS.VCB0
 
 fndfvol			tay						search for associated vcb
-				lda VCBs+VCB.DEV,y
-				cmp FCBs+FCB.DEVID,x	is this vcb the same device?
+				lda XDOS.VCBs+VCB.DEV,y
+				cmp XDOS.FCBs+FCB.DEVID,x	is this vcb the same device?
 				beq tstvopen			if it is, make sure volume is active.
 
 nxtfvol			tya					 	adjust index to next vcb.
@@ -558,16 +676,16 @@ nxtfvol			tya					 	adjust index to next vcb.
 
 fcbdead			lda #$0B				fcb error so
 
-				jsr GP.SysDeath			kill the system.
+				jsr GP.SYSDEATH			kill the system.
 
-tstvopen 		lda VCBs,y				make sure this vcb is open.
+tstvopen 		lda XDOS.VCBs,y				make sure this vcb is open.
 				beq nxtfvol				branch if it is not active.
 
-				sty vcbptr				save ptr to good vcb.
+				sty XDOS.VCBPtr				save ptr to good vcb.
 				clc						no error
-				rts						Y = VCBPtr, X = FCBPtr
+				rts						Y = XDOS.VCBPtr, X = FCBPtr
 
-errnoref 		stz FCBs,x
+errnoref 		stz XDOS.FCBs,x
 
 badref 			lda #MLI.E.BADREF		requested refnum is
 				sec						illegal (out of range)
@@ -578,9 +696,9 @@ XDOS.Online		jsr mvdbufr				figure out how big buffer has to be.
 				stz cbytes				set this for valdbuf routine.
 				stz cbytes+1
 				ldy #$01
-				lda (A3L),y				if 0 then cbytes=$100 else $010 for one
+				lda (ZP.A3L),y				if 0 then cbytes=$100 else $010 for one
 				and #$F0				device. mask out unused nibble.
-				sta DEVNUM				last device used.
+				sta GP.DEVNUM				last device used.
 				beq .1					branch if all devices.
 
 				lda #$10				cbytes = $010
@@ -600,14 +718,14 @@ XDOS.Online		jsr mvdbufr				figure out how big buffer has to be.
 				bne .3
 
 				sta namptr				used as pointer to user buffer.
-				lda DEVNUM				get device # again.
+				lda GP.DEVNUM				get device # again.
 				bne online1				branch if only 1 device to process.
 
 				jsr mvdevnums			get list of currently recognized dev's.
 
 .4  			phx						save index to last item on list
 				lda loklst,x
-				sta DEVNUM				save desired device to look at.
+				sta GP.DEVNUM				save desired device to look at.
 				jsr online1				log this volume and return it's name.
 				lda namptr				inc pointer for next device
 				clc
@@ -629,12 +747,12 @@ online1			jsr XDOS.FindVCBForDevNum	see if it has already been logged in.
 				jsr XDOS.ReadGBufAX		read ROOT VOL into general purpose buffer.
 				bcc .1					branch if read was ok.
 
-				ldx vcbptr
-				ldy VCBs+VCB.OFCNT,x	don't take the vcb offline if
+				ldx XDOS.VCBPtr
+				ldy XDOS.VCBs+VCB.OFCNT,x	don't take the vcb offline if
 				bne online1.ERR			there are active files present.
 
-				stz VCBs,x				now take the volume offline
-				stz VCBs+VCB.DEV,x
+				stz XDOS.VCBs,x				now take the volume offline
+				stz XDOS.VCBs+VCB.DEV,x
 
 				bra online1.ERR			branch if unable to read.
 
@@ -643,21 +761,21 @@ online1			jsr XDOS.FindVCBForDevNum	see if it has already been logged in.
 				bcs online1.ERR
 				.FIN
 
-				ldx vcbptr
-				lda VCBs,x				has it been logged in before?
+				ldx XDOS.VCBPtr
+				lda XDOS.VCBs,x				has it been logged in before?
 				beq .2					if not.
 
-				lda VCBs+VCB.OFCNT,x	it has, are there active files?
+				lda XDOS.VCBs+VCB.OFCNT,x	it has, are there active files?
 				bne .3					branch if volume is currently busy.
 
 .2  			jsr XDOS.VCBMountAtX
 				bcs online1.ERR			branch if there is a problem.
 
 				lda #MLI.E.DUPVOL		anticipate a duplicate active volume
-				bit duplflag			exits.
+				bit XDOS.VCBDupFlag		exits.
 				bmi online1.ERR			branch if so.
 
-.3  			ldx vcbptr
+.3  			ldx XDOS.VCBPtr
 				jsr XDOS.VCBCmpGBUF		does vol read compare with logged vol?
 				lda #MLI.E.DSKSWIT		anticipate wrong volume mounted.
 				bcc online1.OK			branch if ok.
@@ -671,21 +789,21 @@ online1.ERR		pha						save error code.
 				bne .1					no.
 
 				iny						report which other device has same name
-				ldx vcbentry
-				lda VCBs+VCB.DEV,x
+				ldx XDOS.VCBDupEnt
+				lda XDOS.VCBs+VCB.DEV,x
 				sta (usrbuf),y
-				stz duplflag			clear duplicate flag.
+				stz XDOS.VCBDupFlag		clear duplicate flag.
 
 				lda #MLI.E.DUPVOL		duplicate volume error code.
 
 .1  			sec						flag error
 				rts
 *--------------------------------------
-online1.OK		lda VCBs,x				get volume name count
+online1.OK		lda XDOS.VCBs,x				get volume name count
 				sta namcnt
 				ldy namptr				index to user's buffer.
 
-.1  			lda VCBs,x				move name to user's buffer
+.1  			lda XDOS.VCBs,x				move name to user's buffer
 				sta (usrbuf),y
 				inx
 				iny
@@ -693,10 +811,10 @@ online1.OK		lda VCBs,x				get volume name count
 				bpl .1
 
 svdevn			ldy namptr				index to 1st byte of this entry.
-				lda DEVNUM				upper nibble = device# and
+				lda GP.DEVNUM				upper nibble = device# and
 				ora (usrbuf),y			lower nibble = name length.
 				sta (usrbuf),y
-		
+
 				clc						no errors
 				rts						end of block file manager
 *--------------------------------------
@@ -707,14 +825,14 @@ tstfnf			cmp #MLI.E.FNOTFND		'file not found' is ok
 				bne crerr1				otherwise exit with error.
 
 				ldy #$07				test for tree or directory file,
-				lda (A3L),y				no other kinds are legal.
+				lda (ZP.A3L),y				no other kinds are legal.
 				cmp #$04				is it seed, sapling or tree?
 				bcc tstdspc				branch if it is
 
 				cmp #$0D
 				bne ctyperr				report type error if not directory.
 
-tstdspc			lda DEVNUM				make sure destination device
+tstdspc			lda GP.DEVNUM				make sure destination device
 				jsr twrprot1			is not write protected.
 				bcs H351D
 
@@ -733,20 +851,20 @@ ctyperr			lda #MLI.E.UNSUPST		filetype error
 duperr			lda #MLI.E.DUPFILE		name already exists
 crerr1			sec
 H351D  			rts
-	
-H352A  			lda bloknml				preserve disk address of current (last)
+
+H352A  			lda ZP.BLKNUM			preserve disk address of current (last)
 				pha						directory link, before allocating an
-				lda bloknml+1			extended block.
+				lda ZP.BLKNUM+1			extended block.
 				pha
 				jsr alc1blk				allocate a block for extending directory
 				plx
-				stx bloknml+1			restore block addr of dir info in gbuf
+				stx ZP.BLKNUM+1			restore block addr of dir info in XDOS.GBuf
 				plx
-				stx bloknml
+				stx ZP.BLKNUM
 				bcs H351D				unable to allocate.
 
-				sta gbuf+2				save block address in y,a to
-				sty gbuf+3				current directory.
+				sta XDOS.GBuf+2				save block address in y,a to
+				sty XDOS.GBuf+3				current directory.
 				.DO LOWERCASE=1
 				jsr XDOS.WriteGBufDir
 				.ELSE
@@ -756,17 +874,17 @@ H352A  			lda bloknml				preserve disk address of current (last)
 
 				ldx #$01
 
-swpbloks 		lda bloknml,x			prepare new directory block
-				sta gbuf,x				using current block as back link
-				lda gbuf+2,x
-				sta bloknml,x			and save new block as next to be written
+swpbloks 		lda ZP.BLKNUM,x			prepare new directory block
+				sta XDOS.GBuf,x				using current block as back link
+				lda XDOS.GBuf+2,x
+				sta ZP.BLKNUM,x			and save new block as next to be written
 				dex
 				bpl swpbloks
 
 				inx						x = 0
 
-clrdir 			stz gbuf+2,x
-				stz gbuf+$100,x
+clrdir 			stz XDOS.GBuf+2,x
+				stz XDOS.GBuf+$100,x
 				inx
 				bne clrdir
 
@@ -796,7 +914,7 @@ ocalc  			dex						has entry address been calculated?
 				lda own_len				next entry address
 				jsr XDOS.ZPT.NextA
 				bra ocalc
-				
+
 H3584  			ldy #$13				index to block count
 				clc
 
@@ -818,19 +936,19 @@ H3588  			lda (zpt),y
 				jmp XDOS.Create
 crerr2 			rts						return and report errors
 *--------------------------------------
-creat1			ldx #$00				zero out gbuf
+creat1			ldx #$00				zero out XDOS.GBuf
 
-H35A0  			stz gbuf,x
-				stz gbuf+$100,x			and data block of file.
+H35A0  			stz XDOS.GBuf,x
+				stz XDOS.GBuf+$100,x			and data block of file.
 				inx
 				bne H35A0
 
 				ldy #$0B				move user specified date/time
 
-cmvtime			lda (A3L),y				to directory.
+cmvtime			lda (ZP.A3L),y				to directory.
 				sta d_filid,y
 				txa		 				if all 4 bytes of date/time = 0
-				ora (A3L),y				then use built-in date/time.
+				ora (ZP.A3L),y				then use built-in date/time.
 				tax
 				dey
 				cpy #$07
@@ -841,12 +959,12 @@ cmvtime			lda (A3L),y				to directory.
 
 				ldx #$03
 
-mvdftime 		lda p8date,x			move current default date/time
+mvdftime 		lda GP.DATE,x			move current default date/time
 				sta d_credt,x
 				dex
 				bpl mvdftime
 
-cmvname			lda (A3L),y				y = index to file kind.
+cmvname			lda (ZP.A3L),y				y = index to file kind.
 				cmp #$04
 				lda #$10				assume tree type
 				bcc csvfkind
@@ -854,7 +972,7 @@ cmvname			lda (A3L),y				y = index to file kind.
 				lda #$D0			 	it's directory.
 
 csvfkind 		ldx namptr			 	index to local name of pathname.
-				ora pathbuf,x			combine file kind with name length.
+				ora XDOS.PathBuf,x			combine file kind with name length.
 				sta d_stor			 	sos calls this 'storage type'.
 				and #$0F			 	strip back to name length
 				tay		 				and use as counter for move.
@@ -862,7 +980,7 @@ csvfkind 		ldx namptr			 	index to local name of pathname.
 				adc namptr			 	calc end of name
 				tax
 
-crname			lda pathbuf,x			move local name as filename
+crname			lda XDOS.PathBuf,x			move local name as filename
 				sta d_stor,y
 
 				dex
@@ -870,14 +988,14 @@ crname			lda pathbuf,x			move local name as filename
 				bne crname
 
 				ldy #$03				index to 'access' parameter
-				lda (A3L),y
+				lda (ZP.A3L),y
 				sta d_attr
 				iny						also move 'file identification'
-				lda (A3L),y
+				lda (ZP.A3L),y
 				sta d_filid
 
 cmvauxid 		iny						move auxillary identification bytes
-				lda (A3L),y
+				lda (ZP.A3L),y
 				sta d_auxid-5,y
 				cpy #$06
 				bne cmvauxid
@@ -889,7 +1007,7 @@ cmvauxid 		iny						move auxillary identification bytes
 				lda compat			 	and backward compatibility #
 				sta d_comp
 				.FIN
-				
+
 				lda #$01			 	usage is always 1 block
 				sta d_usage
 				lda d_head				place back pointer to header block
@@ -907,48 +1025,48 @@ cmvauxid 		iny						move auxillary identification bytes
 				ldx #$1E			 	move header to data block
 
 cmvheadr 		lda d_stor,x
-				sta gbuf+4,x
+				sta XDOS.GBuf+4,x
 				dex
 				bpl cmvheadr
 
 				eor #$30
-				sta gbuf+4				make it a directory header mark.
+				sta XDOS.GBuf+4				make it a directory header mark.
 
 				.DO LOWERCASE=0
-				
+
 				ldx #$07			 	overwrite password area and other
 
 cmvpass			lda pass,x				header info.
-				sta gbuf+20,x
+				sta XDOS.GBuf+20,x
 
 				lda xdosver,x
-				sta gbuf+32,x
+				sta XDOS.GBuf+32,x
 				dex
 				bpl cmvpass
-				
+
 				.ELSE
 				lda #$75
-				sta gbuf+20
-				
+				sta XDOS.GBuf+20
+
 				ldx #XDOS.VolHdrDef.Cnt-1
-				
+
 .1				lda XDOS.VolHdrDef,x
-				sta gbuf+34,x
+				sta XDOS.GBuf+34,x
 				dex
 				bpl .1
-				
+
 				.FIN
 
 				ldx #$02				and include info about parent directory
 				stx d_eof+1				set file size = 512
 
 cmvparnt 		lda d_entblk,x
-				sta gbuf+39,x
+				sta XDOS.GBuf+39,x
 				dex
 				bpl cmvparnt
 
 				lda h_entln				lastly, the length of parent's
-				sta gbuf+42				directory entries.
+				sta XDOS.GBuf+42				directory entries.
 
 				.DO LOWERCASE=1
 				jsr XDOS.PackGBuf
@@ -959,8 +1077,8 @@ cralcblk 		jsr alc1blk				get address of file's data block
 
 				sta d_frst
 				sty d_frst+1
-				sta bloknml
-				sty bloknml+1
+				sta ZP.BLKNUM
+				sty ZP.BLKNUM+1
 				jsr XDOS.WriteGBuf		go write data block of file
 				bcs crerr3
 
@@ -973,162 +1091,6 @@ credone			jsr drevise				go revise directories with new file
 				bcs crerr3
 
 				jmp upbmap			 	lastly, update volume bitmap
-*--------------------------------------
-entcalc			jsr XDOS.ZPT.InitGBuf
-
-				ldx d_entnum			on the entry #.
-
-				clc
-
-.1				dex		 				addr = gbuf + ((d_entnum-1) * h_entln)
-				beq crerr3			  	branch with carry clear = no errors.
-
-				jsr XDOS.ZPT.Next
-				bcc .1
-
-crerr3 			rts		 				carry set if error.
-*--------------------------------------
-drevise			lda p8date
-				beq drevise1		  	if no clock, then don't mod date/time.
-
-				ldx #$03
-
-modtime			lda p8date,x			move last modification date/time
-				sta d_moddt,x			to entry being updated.
-				dex
-				bpl modtime
-
-drevise1 		lda bkbitflg			(bit 5 = backup needed)
-				tsb d_attr				mark entry as backupable
-				
-				lda d_dev			  	get device # of directory
-				sta DEVNUM			 	to be revised
-
-				lda d_entblk			and address of directory block.
-				ldx d_entblk+1
-
-				.DO LOWERCASE=1
-				jsr XDOS.ReadGBufAXDir
-				.ELSE
-				jsr XDOS.ReadGBufAX		read block into general purpose buffer
-				.FIN
-				bcs crerr3
-
-				jsr entcalc				fix up ptr to entry location within gbuf.
-
-				ldy h_entln				now move 'd.' info to directory.
-				dey
-				
-.1  			lda d_stor,y
-				sta (zpt),y
-				dey
-				bpl .1
-
-				lda d_head				is the entry block same as
-				cmp bloknml				the entry's header block?
-				bne H36E0			  	if no, go save entry block
-
-				lda d_head+1			then maybe, so test high addresses.
-				cmp bloknml+1
-				beq uphead			 	branch if they are the same block.
-
-H36E0  			.DO LOWERCASE=1
-				jsr XDOS.WriteGBufDir
-				.ELSE
-				jsr XDOS.WriteGBuf		go write updated directory block.
-				.FIN
-				bcs crerr3
-
-				lda d_head			 	get address of header block and
-				ldx d_head+1
-
-				.DO LOWERCASE=1
-				jsr XDOS.ReadGBufAXDir
-				.ELSE
-				jsr XDOS.ReadGBufAX		go read in header block to modify.
-				.FIN
-				bcs crerr3
-
-uphead			ldy #$01				update current # of files in this dir.
-
-H36F2  			lda h_fcnt,y
-				sta gbuf+37,y			(current entry count)
-				dey
-				bpl H36F2
-
-				lda h_attr			 	also update header's attributes.
-				sta gbuf+34
-
-				.DO LOWERCASE=1
-				jsr XDOS.WriteGBufDir
-				.ELSE
-				jsr XDOS.WriteGBuf		go write updated header
-				.FIN
-				bcs H375A
-*--------------------------------------
-ripple			lda gbuf+4				test for 'root' directory because
-				and #$F0			 	if it is, then directory revision
-				eor #$F0			 	is complete (leaves carry clear).
-				beq H3770			  	branch if done.
-
-				lda gbuf+41				get entry #
-				sta d_entnum
-				lda gbuf+42				and the length of entries in that dir
-				sta h_entln
-
-				lda gbuf+39				get addr of parent entry's dir block
-				ldx gbuf+40
-	
-				.DO LOWERCASE=1
-				jsr XDOS.ReadGBufAX		no need to pak/unpak....will disturb zpt
-				.ELSE
-				jsr XDOS.ReadGBufAX		read it
-				.FIN
-				bcs H375A
-
-				jsr entcalc				get indirect ptr to parent entry in gbuf
-
-				lda p8date				don't touch mod
-				beq H373B			  	if no clock...
-
-				ldx #$03			 	update the modification date & time
-				ldy #$24			 	for this entry too
-
-H3732  			lda p8date,x
-				sta (zpt),y
-				dey
-				dex
-				bpl H3732
-
-H373B  			.DO LOWERCASE=1
-				jsr XDOS.WriteGBuf		
-				.ELSE
-				jsr XDOS.WriteGBuf		write updated entry back to disk.
-				.FIN
-				bcs H375A			  	if error.
-
-				ldy #$26			 	compare current block # to this
-				lda (zpt),y				entry's header block.
-				tax
-				dey
-				lda (zpt),y				block as header.
-				cmp bloknml				are low addresses the same?
-				bne H3751			 	branch if entry doesn't reside in same
-
-				cpx bloknml+1			are high address the same?
-				beq ripple			 	they are the same, continue to root dir.
-
-H3751  			.DO LOWERCASE=1
-				jsr XDOS.ReadGBufAX		
-				.ELSE
-				jsr XDOS.ReadGBufAX
-				.FIN
-				bcc ripple				continue if read was good
-
-H375A  			rts
-
-H3770  			clc		 				no error
-				rts
 *--------------------------------------
 MAN
 SAVE usr/src/prodos.fx/prodos.s.xdos.a
