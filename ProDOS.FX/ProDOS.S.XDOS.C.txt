@@ -46,7 +46,7 @@ XDOS.DeallocAX	stx bmcnt				high address of block.
 
 				sta XDOS.VCBs+VCB.BMAPIDX,x	and make it current.
 				lda bmadev
-				jsr gtbmap				read it into buffer
+				jsr XDOS.ReadBMDevA		read it into buffer
 				bcs L3C8B
 
 L3C64  			ldy bmptr			  	index to byte
@@ -98,7 +98,7 @@ L3CA8  			lda XDOS.BMBuf+$100,y		search 2nd half for free block
 				bne L3CA8
 
 				inc basval			 	add 2048 offset for next page.
-				jsr nxtbmap				get next bitmap (if exists) and
+				jsr XDOS.NextBM			get next bitmap (if exists) and
 				bcc L3C95			  	update vcb. branch if no error.
 
 L3CB8  			rts		 				return error.
@@ -156,7 +156,7 @@ L3CF7  			lda #$80			 	indicate map is modified.
 				clc		 				no errors.
 				rts
 *--------------------------------------
-nxtbmap			ldx XDOS.VCBPtr			 	inc to next bitmap, but 1st make sure there is another one.
+XDOS.NextBM		ldx XDOS.VCBPtr			 	inc to next bitmap, but 1st make sure there is another one.
 				lda XDOS.VCBs+VCB.TBLK+1,x
 				lsr
 				lsr
@@ -183,7 +183,7 @@ fndbmap			ldy XDOS.VCBPtr
 L3D4A  			ldy bmastat				is it already modified ?
 				bmi L3D54			  	yes, return pointer
 
-				jsr gtbmap			 	otherwise read in fresh bitmap.
+				jsr XDOS.ReadBMDevA	 	otherwise read in fresh bitmap.
 				bcs L3D5F			  	if error.
 
 L3D54  			ldy XDOS.VCBPtr			 	get relative block # of bitmap.
@@ -202,14 +202,14 @@ upbmap			clc
 				lda bmastat				is current map modified ?
 				bpl .9				  	no.
 
-				jsr wrtbmap				update device.
+				jsr XDOS.WriteBM		update device.
 				bcs .9				  	if error on writing.
 
 				stz bmastat				mark bitmap buffer as free
 			lda #0						MUST EXIT WITH A=0
 .9				rts
 *--------------------------------------
-gtbmap			sta bmadev			 	read bitmap specified by dev and vcb.
+XDOS.ReadBMDevA	sta bmadev			 	read bitmap specified by dev and vcb.
 
 				ldy XDOS.VCBPtr			 	get lowest map # with free blocks in it
 				lda XDOS.VCBs+VCB.BMAPIDX,y
@@ -224,7 +224,7 @@ gtbmap			sta bmadev			 	read bitmap specified by dev and vcb.
 
 				lda #$01			 	read device command
 				.HS 2C					BIT ABS
-wrtbmap			lda #$02			 	write command.
+XDOS.WriteBM	lda #$02			 	write command.
 				
 				sta ZP.CMDNUM
 
@@ -244,7 +244,7 @@ wrtbmap			lda #$02			 	write command.
 				plx						keep A=error code if CS
 				stx GP.DEVNUM
 
-L3DB6  			rts
+				rts
 *--------------------------------------
 				.DO LOWERCASE=1
 XDOS.WriteGBufDir
@@ -275,14 +275,7 @@ XDOS.WriteGBuf	lda #$02				write command
 XDOS.RWBlock	sta ZP.BUFPTR+1			buffer high.
 				stz ZP.BUFPTR			buffer low (always on page boundary)
 
-				stz GP.ERROR			clear global error code.
-
-				lda #$FF			 	indicates reg call made to dev handler
-				sta ioaccess
-				lda GP.DEVNUM			transfer dev # for dispatcher to
-				sta ZP.UNITNUM			convert to unit #.
-
-				jmp XDOS.DevCall	 	call the driver.
+				jmp XDOS.FileIO2
 *--------------------------------------
 				.DO LOWERCASE=1
 
@@ -454,7 +447,7 @@ L3E59  			lda XDOS.FCBs+FCB.STYPE,y	use storage type as # of index levels
 				and #FCB.F.DBLKMOD	 	if previous data was modified then
 				beq L3E6B			  	disk must be updated.
 
-				jsr wfcbdat
+				jsr XDOS.WriteDBLK
 
 				bcs L3ED4				if error.
 
@@ -488,7 +481,7 @@ L3E9D  			lda XDOS.FCBs+FCB.F,y		check to see if previous index block
 				and #FCB.F.IBLKMOD		was modified.
 				beq L3EA9				read in over it if current up to date.
 
-				jsr wfcbidx				go update index on disk (fcb block addr)
+				jsr XDOS.WriteIBLK		go update index on disk (fcb block addr)
 				bcs L3ED4
 
 L3EA9  			ldx levels				be sure there is a top index
@@ -547,8 +540,7 @@ saplevel 		sta ZP.BLKNUM			read in next lower index block.
 				sta ZP.CMDNUM
 
 				ldx #zpt			 	address of current index buffer.
-
-				jsr fileio1				go read index block.
+				jsr XDOS.FileIOPtrX		go read index block.
 				bcs L3ED4			 	error
 
 				jsr XDOS.UpdateFCBIBlk save block address of this index in fcb
@@ -570,25 +562,25 @@ L3F18  			jsr XDOS.SetFCBStatus	set status to show what's missing
 
 				lsr			  			discard bit that says data block
 				lsr			  			unallocated because carry indicates if
-				jsr zipdata				index block is invalid and needs to be zeroed.
+				jsr XDOS.ZeroData		index block is invalid and needs to be zeroed.
 				bcc svmark			  	branch if it doesn't need zeroed
 
-				jsr zeroindex			zero index block in user's i/o buffer
+				jsr XDOS.ZeroIndex		zero index block in user's i/o buffer
 				bra svmark
 *--------------------------------------
-zipdata			lda #$00
+XDOS.ZeroData	lda #$00
 				tay
-L3F42  			sta (datptr),y			zero out data area
+
+				inc ZP.DataPtr+1
+
+				jsr .1
+
+				dec ZP.DataPtr+1
+
+.1  			sta (ZP.DataPtr),y
 				iny
-				bne L3F42
+				bne .1
 
-				inc datptr+1
-
-L3F49  			sta (datptr),y
-				iny
-				bne L3F49
-
-				dec datptr+1
 				rts
 *--------------------------------------
 L3F51  			sta ZP.BLKNUM			get data block of new position
@@ -615,11 +607,11 @@ L3F68  			lda XDOS.FCBs+FCB.MARK,y		save old mark in case calling routine
 				bpl L3F68
 
 				clc		 				set up indirect address to buffer
-				lda datptr			 	page pointed to by the current
+				lda ZP.DataPtr			 	page pointed to by the current
 				sta sos			  		position marker.
 				lda tposlh
 				and #$01
-				adc datptr+1
+				adc ZP.DataPtr+1
 				sta sos+1
 L3F86  			rts						carry set if error
 *--------------------------------------
@@ -659,11 +651,11 @@ L3FB9  			ldy #$02			 	position is forward from current.
 
 				beq svmark			  	branch always.
 *--------------------------------------
-dirpos1			lda (datptr),y			get link address of previous or next
+dirpos1			lda (ZP.DataPtr),y			get link address of previous or next
 				sta ZP.BLKNUM			directory block.
 				cmp #$01			 	test for null byte into carry
 				iny		 				but first be sure there is a link.
-				lda (datptr),y			get the rest of the link.
+				lda (ZP.DataPtr),y			get the rest of the link.
 				bne L3FD8			  	branch if certain link exists.
 
 				bcs L3FD8			  	was the low part null as well ?
@@ -680,9 +672,8 @@ XDOS.ReadFCB.DBLK
 				lda #$01				read command
 				sta ZP.CMDNUM
 
-				ldx #datptr				points at address  of data buffer.
-
-				jsr fileio1				go do file input.
+				ldx #ZP.DataPtr			points at address  of data buffer.
+				jsr XDOS.FileIOPtrX		go do file input.
 				bcs L3FF2			  	error.
 
 				ldy fcbptr
@@ -699,8 +690,7 @@ L3FF2  			rts
 *				sta ZP.CMDNUM
 
 *				ldx #zpt			 	address of current index buffer.
-
-*				jsr fileio1				go read index block.
+*				XDOS.FileIOPtrX			go read index block.
 *				bcs L400C			 	error
 
 *				ldy fcbptr
@@ -715,26 +705,26 @@ L3FF2  			rts
 *--------------------------------------
 wfcbfst			jsr upbmap				update the bitmap and write file's 1st block.
 
-				lda #$02				write command
-				.HS 2C					skip next instruction
+				ldx #$02				write command
+				.HS 2C					BIT ABS
 
-rfcbfst			lda	#$01				read command.
+rfcbfst			ldx	#$01				read command.
 
-				pha		 				save the command
 				lda #FCB.1stBLK
 				ora fcbptr			 	add offset to fcbptr
 				tay
-				pla
+				txa						get back command
 
 				ldx #zpt			 	rd block into index portion of file buf
 *--------------------------------------
-dofileio 		sta ZP.CMDNUM	  		command
+XDOS.FileIOPtrXCmdABlkY
+				sta ZP.CMDNUM	  		command
 
-				lda XDOS.FCBs,y				get disk block address from fcb.
+				lda XDOS.FCBs,y			get disk block address from fcb.
 				sta ZP.BLKNUM			block 0 not legal
 				bne .1
 				
-				lda XDOS.FCBs+1,y			high address of disk block
+				lda XDOS.FCBs+1,y		high address of disk block
 				bne .2
 
 				lda #$0C			 	Block = $0000, allocation error.
@@ -743,39 +733,41 @@ dofileio 		sta ZP.CMDNUM	  		command
 .1  			lda XDOS.FCBs+1,y	
 .2				sta ZP.BLKNUM+1
 *--------------------------------------
-fileio1			lda $00,x			  	get memory address of buffer from
+XDOS.FileIOPtrX	lda $00,x			  	get memory address of buffer from
 				sta ZP.BUFPTR			page zero pointed to by x register
 				lda $01,x
 				sta ZP.BUFPTR+1			and pass address to device handler
 
 				jsr XDOS.FCBDevIDSelect
 
-				lda #$FF			 	also, set to indicate reg call made to
-				sta ioaccess			device handler.
+XDOS.FileIO2	sec					 	also, set to indicate reg call made to
+				ror ioaccess			device handler.
 				lda GP.DEVNUM			transfer device # for dispatcher
 				sta ZP.UNITNUM			to convert to unit #.
 				stz GP.ERROR			clear global error code.
 				jmp XDOS.DevCall	 	call the driver.
 *--------------------------------------
-wfcbdat			ldx #datptr				point at memory address with x and
+
+*--------------------------------------
+XDOS.WriteDBLK	ldx #ZP.DataPtr				point at memory address with x and
 				lda #FCB.DBLK		 	disk address with y.
 				ora fcbptr			 	add offset to fcbptr
 				tay		 				and put in y.
 				lda #$02			 	write data block.
-				jsr dofileio
+				jsr XDOS.FileIOPtrXCmdABlkY
 				bcs L4096			  	if errors.
 
 				lda #$BF			 	mark data status as current.
 				bra XDOS.ResetFCBStatus
 
-wfcbidx			jsr upbmap			 	update bitmap.
+XDOS.WriteIBLK	jsr upbmap			 	update bitmap.
 
 				ldx #zpt			 	point to address of index buffer
 				lda #FCB.IBLK		 	and block address of that index block.
 				ora fcbptr
 				tay
 				lda #$02
-				jsr dofileio			go write out index block.
+				jsr XDOS.FileIOPtrXCmdABlkY
 				bcs L4096			  	if errors.
 
 				lda #$7F			 	mark index status as current.

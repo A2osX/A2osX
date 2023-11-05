@@ -100,7 +100,7 @@ L4C99  			stx dtmpx			  	save index to dealc buf.
 				jsr XDOS.ReadGBuf		read sapling level into XDOS.GBuf.
 				bcs L4CC2			  	return errors.
 
-				jsr dealblk				go free all data indexes in this block
+				jsr XDOS.DeallocBlk0	go free all data indexes in this block
 				bcs L4CC2
 
 				jsr XDOS.WriteGBuf		write the flipped index block
@@ -116,7 +116,7 @@ L4CC2  			rts		 				sapling block numbers.
 
 L4CC3  			ldy dtree			  	deallocate all sapling blocks greater
 				iny		 				than specified block.
-				jsr dalblk1				(master index in XDOS.GBuf)
+				jsr XDOS.DeallocBlkY	(master index in XDOS.GBuf)
 				bcs L4CC2			  	if errors.
 
 				jsr XDOS.WriteGBuf		write updated master index back to disk.
@@ -147,7 +147,7 @@ L4CF5  			ldy dsap				pointer to last of desirable indexes.
 				iny		 				inc to 1st undesirable.
 				beq L4D05			  	branch if all are desirable.
 
-				jsr dalblk1				deallocate all indexes above specified.
+				jsr XDOS.DeallocBlkY	deallocate all indexes above specified.
 				bcs L4CC2
 
 				jsr XDOS.WriteGBuf		write out the index block
@@ -222,63 +222,65 @@ shrink			ldx firstbh				first deallocate top index block
 				sta ZP.BLKNUM+1
 				bcs L4D1E			  	report errors.
 
-				lda XDOS.GBuf			 	get # of new 1st block from old index.
+				lda XDOS.GBuf		 	get # of new 1st block from old index.
 				sta firstbl
 				lda XDOS.GBuf+$100
 				sta firstbh
 				ldy #$00
-				jsr swapme				flip that one entry in old top index.
+				jsr XDOS.SwapGBUFY		flip that one entry in old top index.
 				sec		 				now change file type,
 				lda stortyp				from tree to sapling,
 				sbc #$10			 	or from sapling to seed.
 				sta stortyp
 				jmp XDOS.WriteGBuf		write the (deallocated) old top index.
-
-dealblk			ldy #$00			 	start at beginning.
-dalblk1			lda ZP.BLKNUM			save disk address of XDOS.GBuf's data.
+*--------------------------------------
+XDOS.DeallocBlk0
+				ldy #$00			 	start at beginning.
+XDOS.DeallocBlkY
+				lda ZP.BLKNUM			save disk address of XDOS.GBuf's data.
 				pha
 				lda ZP.BLKNUM+1
 				pha
 
-L4D96  			sty saptr			  	save current index.
-				lda XDOS.GBuf,y			 	get low address of block to deallocate.
+.1  			sty saptr			  	save current index.
+				lda XDOS.GBuf,y			get low address of block to deallocate.
 				cmp #$01			 	test for null block into carry.
-				ldx XDOS.GBuf+$100,y			get remainder of block address.
-				bne L4DA5			  	branch if not null.
+				ldx XDOS.GBuf+$100,y	get remainder of block address.
+				bne .2				  	branch if not null.
 
-				bcc L4DB0			  	was the low part null too ?
+				bcc .3				  	was the low part null too ?
 
-L4DA5  			jsr XDOS.DeallocAX		free it up on volume bitmap.
-				bcs L4DB4			  	return any error.
+.2  			jsr XDOS.DeallocAX		free it up on volume bitmap.
+				bcs XDOS.PopBlkNumRTS  	return any error.
 
 				ldy saptr			  	get index to sapling level index block.
 
-				jsr swapme
+				jsr XDOS.SwapGBUFY
 
-L4DB0  			iny		 				next block address.
-				bne L4D96			  	if more to deallocate or test.
+.3  			iny		 				next block address.
+				bne .1				  	if more to deallocate or test.
 
 				clc		 				no error.
-
-L4DB4  			tax		 				save error code, if any.
-				pla		 				restore blocknm (16 bit)
-				sta ZP.BLKNUM+1
-				pla
-				sta ZP.BLKNUM
-				txa		 				restore return code
+*--------------------------------------
+XDOS.PopBlkNumRTS
+				plx		 				restore blocknm (16 bit)
+				stx ZP.BLKNUM+1			keeping A and C if error
+				plx
+				stx ZP.BLKNUM
 				rts
-
-swapme			lda delflag				swapping or zeroing ?
-				bne L4DC5			  	skip if swapping.
+*--------------------------------------
+XDOS.SwapGBUFY	lda delflag				swapping or zeroing ?
+				bne .1				  	skip if swapping.
 
 				tax		 				make x = 0.
-				beq L4DCB			  	zero the index (always taken).
+				beq .2				  	zero the index (always taken).
 
-L4DC5  			ldx XDOS.GBuf+$100,y		   	index high
-				lda XDOS.GBuf,y			 	index low
-L4DCB  			sta XDOS.GBuf+$100,y		   	save index high
+.1  			ldx XDOS.GBuf+$100,y	index high
+				lda XDOS.GBuf,y			index low
+
+.2  			sta XDOS.GBuf+$100,y	save index high
 				txa
-				sta XDOS.GBuf,y			 	save index low
+				sta XDOS.GBuf,y			save index low
 				rts						done.
 *--------------------------------------
 * MEMMGR memory manager
@@ -295,10 +297,10 @@ alcbufr1 		lda (ZP.A3L),y			this buffer must be on a page boundary.
 				cmp #$BC				nor greater than $BB00
 				bcs L4E1E			  	since it would wipe out globals...
 
-				sta datptr+1
+				sta ZP.DataPtr+1
 				dey
 				lda (ZP.A3L),y			low address should be zero !
-				sta datptr
+				sta ZP.DataPtr
 				bne L4E1E			  	error if not page boundary.
 
 				inx		 				add 4 pages for 1k buffer.
@@ -311,7 +313,7 @@ L4DED			dex		 				test for conflicts.
 				and GP.MEMTABL,y
 				bne L4E1E			  	report memory conflict, if any.
 
-				cpx datptr+1			test all 4 pages.
+				cpx ZP.DataPtr+1			test all 4 pages.
 				bne L4DED
 
 				inx		 				add 4 pages again for allocation.
@@ -321,7 +323,7 @@ L4DED			dex		 				test for conflicts.
 
 L4DFE  			dex		 				set proper bits to 1
 				jsr XDOS.MemTablEOR
-				cpx datptr+1			set all 4 pages
+				cpx ZP.DataPtr+1			set all 4 pages
 				bne L4DFE
 
 				ldy fcbptr			 	calculate buffer number
@@ -329,7 +331,7 @@ L4DFE  			dex		 				set proper bits to 1
 				asl			  			buffer number = (entnum) * 2.
 				sta XDOS.FCBs+FCB.BUFID,y	save it in fcb.
 				tax		 				use entnum * 2 as index to global
-				lda datptr+1			buffer addr tables. get addr already
+				lda ZP.DataPtr+1			buffer addr tables. get addr already
 				sta GB.BUFTABL-1,x			validated as good. store hi addr
 
 				clc		 				(entnums start at 1, not 0)
@@ -441,11 +443,11 @@ XDOS.SetBuf		ldy #$03
 				ldx #$03
 
 .1  			lda (usrbuf),y			move all 4 pages of the buffer to
-				sta (datptr),y			new location.
+				sta (ZP.DataPtr),y			new location.
 				iny
 				bne .1
 
-				inc datptr+1
+				inc ZP.DataPtr+1
 				inc usrbuf+1
 				dex
 				bpl .1
@@ -519,16 +521,24 @@ XDOS.CallDisp	lda IO.RRAMWRAMBNK2		read/write RAM bank 2
 				eor #$A5
 				sta ROM.PWREDUP			power up byte
 
+				.DO AUXLC=1
+
+				jmp GP.SELJMP
+
+				.ELSE
+
 				jmp $1000
+				
+				.FIN
 *--------------------------------------
 XDOS.SPREMAP	ldx #$03				assume 3 parameters.
 				lda ZP.CMDNUM
 				sta .5
 				bne .1					taken if not status call
 
-				ldy #XDOS.SPStatus		set up memory for the status list buffer
+				ldy #XDOS.SPStatusBuf	set up memory for the status list buffer
 				sty ZP.BUFPTR			fake up the prodos parameters
-				ldy /XDOS.SPStatus
+				ldy /XDOS.SPStatusBuf
 				sty ZP.BUFPTR+1
 				stz ZP.BLKNUM			set statcode = 0 for simple status call
 
@@ -568,9 +578,9 @@ XDOS.SPREMAP	ldx #$03				assume 3 parameters.
 				ldx .5					status call ?
 				bne .9				  	no...
 
-				ldx XDOS.SPStatus+1		else get the block count
-				ldy XDOS.SPStatus+2
-				lda	XDOS.SPStatus		get the returned status.
+				ldx XDOS.SPStatusBuf+1	else get the block count
+				ldy XDOS.SPStatusBuf+2
+				lda	XDOS.SPStatusBuf	get the returned status.
 				bit #$10			 	is there a disk present ?
 				beq .8
 
@@ -585,20 +595,36 @@ XDOS.SPREMAP	ldx #$03				assume 3 parameters.
 				sec
 .9  			rts
 *--------------------------------------
-XDOS.SPParams	.HS 03					# of parms (always 3 except format)
-XDOS.SPParams.U	.HS 00			  		unit number
-XDOS.SPParams.B	.HS 0000				data buffer
-				.HS 000000				block number (3 bytes)
-*--------------------------------------
 XDOS.TBX		bit	IO.RRAMWRAMBNK1		Get RW access to LC
-				jsr .1
+
+				.DO AUXLC=1
+
+				stx .1+1
+				tsx
+				stx $100
+				ldx	$101
+				txs
+
+.1				ldx #$FF				SELF MODIFIED
+
+				jsr .2
+
+				tsx
+				stx $101
+				ldx	$100
+				txs
+				jmp GP.TBXEXIT
+
+				.ELSE
+
+				jsr .2
 				jmp IRQ.ToRomRTS
+				
+				.FIN
 
-.1				jmp (.2,x)
-
-.2				.DA XDOS.TBX.MemReset
-				.DA XDOS.TBX.EnumBlk
-				.DA XDOS.TBX.EnumNext
+.2				cpx #TBX.EnumNext
+				beq XDOS.TBX.EnumNext
+				bcc XDOS.TBX.EnumBlk
 *--------------------------------------
 XDOS.TBX.MemReset
 				ldx #$17
@@ -641,7 +667,7 @@ XDOS.TBX.CheckFCnt
 				lda h_fcnt
 				ora h_fcnt+1
 				beq XDOS.TBX.SECRTS
-*				clc
+				clc
 				rts
 *--------------------------------------
 XDOS.TBX.EnumNext
@@ -954,20 +980,23 @@ XRW.D2SeekTime	.EQ *
 XDOS.SPVectHi	.HS 00000000000000  	storage for high byte of smartport entry.
 				.HS 00
 				.HS 00000000000000
+*--------------------------------------
+XDOS.SPParams	.HS 00					# of parms
+XDOS.SPParams.U	.HS 00			  		unit number
+XDOS.SPParams.B	.HS 0000				data buffer
+				.HS 000000				block number (3 bytes)
 
-XDOS.SPStatus	.HS 00000000
-
+XDOS.SPStatusBuf .HS 00000000
+*--------------------------------------
 				.LIST ON
 XDOS.DATA.LEN	.EQ *-XDOS.DATA
+XDOS.FREE		.EQ $FEFD-*
 				.LIST OFF
+				.BS XDOS.FREE
 				.ED
 *--------------------------------------
-* zero fill to page boundary - 3 ($FEFD). so that cortland flag stays within page boundary.
-				.LIST ON
-XDOS.FREE	.EQ $FEFD-*-XDOS.DATA.LEN	(2.0.3 = $0C)
-				.LIST OFF
 XDOS.CortDisp	.EQ $FEFD
-XDOS.CortFlag 	.EQ $FEFF			  		cortland flag. 1 = Cortland system (must stay within page boundary)
+XDOS.CortFlag 	.EQ $FEFF			  	cortland flag. 1 = Cortland system (must stay within page boundary)
 *--------------------------------------
 				.EP
 *--------------------------------------

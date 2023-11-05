@@ -8,14 +8,14 @@ XDOS.Close		ldy #$01				close all ?
 				sta cferr			 	clear global close error.
 *				lda #$00				start at the beginning.
 
-L4654  			sta fcbptr			 	save current low byte of pointer.
+.1  			sta fcbptr			 	save current low byte of pointer.
 				tax		 				get the level at which the file
 				lda XDOS.FCBs+FCB.FLEVEL,x	was opened.
 				cmp GP.FLEVEL		 	if file's level is < global level
-				bcc L4675			 	then don't close.
+				bcc .2				 	then don't close.
 
-				lda XDOS.FCBs+FCB.ID,x		is this reference file open ?
-				beq L4675			  	no, try next.
+				lda XDOS.FCBs+FCB.ID,x	is this reference file open ?
+				beq .2				  	no, try next.
 
 				jsr flush2				clean it out...
 				bcs L46B6			  	return flush errors.
@@ -24,14 +24,14 @@ L4654  			sta fcbptr			 	save current low byte of pointer.
 
 				ldy #$01
 				lda (ZP.A3L),y
-				beq L4675			  	no error if close all.
+				beq .2				  	no error if close all.
 
 				bcs L46B6			  	close error.
 
-L4675  			lda fcbptr			 	inc pointer to next fcb
+.2  			lda fcbptr			 	inc pointer to next fcb
 				clc
 				adc #FCB
-				bcc L4654			  	branch if within same page.
+				bcc .1				  	branch if within same page.
 
 				lda cferr			  	on final close report logged errors.
 				beq L46B4			  	branch if errors.
@@ -119,14 +119,14 @@ L4704  			jsr XDOS.GetFCBStatus
 				and #$40			 	does current data buffer need to be
 				beq L4710			  	written ? branch if not.
 
-				jsr wfcbdat				if so, go write it.
+				jsr XDOS.WriteDBLK		if so, go write it.
 				bcs L46E6			  	if error.
 
 L4710  			jsr XDOS.GetFCBStatus	check to see if the index block (tree
 				and #$80			 	files only) needs to be written.
 				beq L471C			  	branch if not.
 
-				jsr wfcbidx
+				jsr XDOS.WriteIBLK
 				bcs L46E6			  	return any errors.
 
 L471C  			ldy #0
@@ -267,7 +267,7 @@ L47CA  			lda #MLI.E.LOCKED	 	access error
 				sec
 L47CD  			rts
 *--------------------------------------
-XDOS.SetEOF		jsr gfcbstyp			can only move end of tree, sapling or seed.
+XDOS.SetEOF		jsr XDOS.GetFCB.ST		can only move end of tree, sapling or seed.
 				cmp #$04			 	tree type ?
 				bcs L47CA			  	if not then access error
 
@@ -280,7 +280,7 @@ XDOS.SetEOF		jsr gfcbstyp			can only move end of tree, sapling or seed.
 				and #$02			 	is write enabled to set new eof ?
 				beq L47CA			  	no, access error.
 
-				jsr tstwprot			hardware write protected ?
+				jsr XDOS.TestWP			hardware write protected ?
 				bcs L47CA			  	yes, access error.
 
 				ldy fcbptr			 	save old eof so it can be seen
@@ -330,11 +330,11 @@ L481C  			lda (ZP.A3L),y
 purge  			jsr flush1			 	make sure file is current
 				bcs L47CD
 
-				ldx datptr+1			pointer to index block
+				ldx ZP.DataPtr+1			pointer to index block
 				inx
 				inx
 				stx zpt+1			  	(zero page conflict with dir buf ptr)
-				ldx datptr
+				ldx ZP.DataPtr
 				stx zpt
 				ldy fcbptr			 	check if eof < mark
 				iny
@@ -405,18 +405,17 @@ L48A2  			ldy fcbptr			 	also must pass file's 1st block address.
 
 				sec
 				ldy fcbptr
-				ldx #$00
+				ldx #$ff
 
-L48C2  			lda firstbl,x
-				sta XDOS.FCBs+FCB.1stBLK,y	move in possible new first file block
+L48C2  			inx
+				lda firstbl,x
+				sta XDOS.FCBs+FCB.1stBLK,y		move in possible new first file block
 				lda XDOS.FCBs+FCB.UBLK,y		address. adjust usage count also
 				sbc deblock,x
 				sta XDOS.FCBs+FCB.UBLK,y
 				iny
-				inx
 				txa
-				and #$01			 	test for both bytes adjusted
-				bne L48C2			  	without disturbing carry.
+				beq L48C2			  	without disturbing carry.
 
 				lda stortyp				get possibly modified storage type
 				jsr XDOS.SetFCBSType
@@ -427,8 +426,8 @@ L48C2  			lda firstbl,x
 				iny
 				iny
 
-				ldx #$02
-
+				ldx #2
+				
 L48F2  			lda XDOS.FCBs+FCB.MARK,y		tell 'rdposn' to go to correct
 				sta tposll,x
 				eor #$80			 	position from incorrect place.
@@ -440,12 +439,13 @@ L48F2  			lda XDOS.FCBs+FCB.MARK,y		tell 'rdposn' to go to correct
 				jsr rdposn			 	go to correct position.
 
 				bcc L490D			  	if no error.
-				tax		 				otherwise, report latest error.
-				pla
+
+				plx		 				discard latest error code to stack
+
 				plp
-				txa		 				restore latest error code to stack
 				sec
 				php
+
 				pha		 				save new error.
 
 * mark file as in need of a flush and update fcb with new end of file,
@@ -455,13 +455,10 @@ L490D  			jsr eofset				go mark and update
 				jsr flush1				then go do the flush.
 				bcc L491C			  	branch if no error.
 
-				tax		 				save latest error.
-				pla		 				clean previous error off stack
-				plp
-				txa		 				and restore latest error to stack.
-				sec		 				show error condition.
-				php		 				restore error status to stack
-				pha		 				and the error code.
+				plx		 				clean previous error off stack
+				plx						and previous P
+				rts
+
 L491C  			pla		 				report any errors that may have
 				plp		 				appeared.
 				rts
@@ -524,7 +521,7 @@ XDOS.GetFileInfo
 *--------------------------------------
 XDOS.SetFileInfo
 				jsr XDOS.FindFile		get the file to work on.
-				bcs L49CF			  	if error.
+				bcs .3				  	if error.
 
 				lda GP.BUBIT		  	see if backup bit can be cleared
 				eor #$20
@@ -534,24 +531,24 @@ XDOS.SetFileInfo
 
 				ldy #$0D			 	init pointer to user supplied list.
 
-L49B9  			ldx inftabl-3,y		   	get index to corresponding 'd.' table.
-				bmi L49C3			  	branch if parameter can't be set.
+.1  			ldx inftabl-3,y		   	get index to corresponding 'd.' table.
+				bmi .2			  	branch if parameter can't be set.
 
 				lda (ZP.A3L),y
 				sta d_stor,x
 
-L49C3  			dey		 				has user's request been satisfied ?
+.2  			dey		 				has user's request been satisfied ?
 				cpy #$03
-				bcs L49B9			  	no, move next byte.
+				bcs .1				  	no, move next byte.
 
 				and #$18				make sure no illegal access bits were
-				beq L49D0			  	set !! branch if legal access.
+				beq .4				  	set !! branch if legal access.
 
 				lda #MLI.E.LOCKED	 	otherwise, access error.
 				sec
-L49CF  			rts
+.3  			rts
 
-L49D0  			ldy #$0B
+.4  			ldy #$0B
 				lda (ZP.A3L),y				was clock null input ?
 				bne XDOS.SetFileInfoEx.8
 
@@ -706,13 +703,13 @@ L49FF  			ldy #0				 	get newname's length
 				ldy #$00
 				ldx XDOS.VCBPtr			 	update vcb also.
 
-.1  			lda XDOS.PathBuf,y			move new name to vcb.
+.3  			lda XDOS.PathBuf,y			move new name to vcb.
 				beq .8
 
 				sta XDOS.VCBs,x
 				iny		 				next character
 				inx
-				bra .1
+				bra .3
 .8
 *	  			clc		 				no errors
 .9				rts
@@ -771,17 +768,15 @@ L4A52  			ldy rnptr			  	index to last name in the chain.
 				beq L4A76			  	if so, continue processing.
 
 L4A72  			lda #MLI.E.INVPATH	 	bad pathname error.
+				.HS 2C					BIT ABS
+L4A7F			lda #MLI.E.DUPFILE	 	
 L4A74  			sec
 				rts
 
 L4A76  			jsr XDOS.CheckPath		test for duplicate file name.
-				bcs L4A7F			  	branch if file not found, which is ok !!
+				bcc L4A7F			  	duplicate name error.
 
-				lda #MLI.E.DUPFILE	 	duplicate name error.
-				sec
-				rts
-
-L4A7F  			cmp #MLI.E.FNOTFND	 	was it a valid file not found ?
+				cmp #MLI.E.FNOTFND	 	was it a valid file not found ?
 				bne L4A74			  	no, rename error.
 
 				jsr XDOS.GetPath		syntax pathname of file to be changed.
@@ -799,7 +794,7 @@ L4A7F  			cmp #MLI.E.FNOTFND	 	was it a valid file not found ?
 				lda #MLI.E.LOCKED	 	otherwise, illegal access.
 				.HS 2C					BIT ABS
 L4A98			lda #MLI.E.INCFF
-L4A9B  			sec
+				sec
 				rts
 
 L4A9D  			lda d_stor				find out which storage type.
@@ -867,8 +862,8 @@ L4B39  			lda d_attr			 	make sure ok to destroy file.
 				lda #MLI.E.LOCKED	 	access error
 				jsr GP.SYSERR
 
-L4B45  			lda GP.DEVNUM			 	last device used.
-				jsr twrprot1			test for write protected hardware
+L4B45  			lda GP.DEVNUM		 	last device used.
+				jsr XDOS.TestWPA		test for write protected hardware
 				bcs L4B66			  	before going thru deallocation.
 
 				lda d_frst			 	'detree' needs first block address
@@ -928,7 +923,7 @@ L4BA1  			dec h_fcnt				mark header with one less file.
 L4BAF  			cmp #$01			 	adjust carry accordingly
 				rts
 
-dvcbrev			ldx XDOS.VCBPtr			 	update block free count in vcb. point to vcb of correct device.
+dvcbrev			ldx XDOS.VCBPtr			update block free count in vcb. point to vcb of correct device.
 				lda deblock				get # of blocks recently freed.
 				adc XDOS.VCBs+VCB.FBLK,x
 				sta XDOS.VCBs+VCB.FBLK,x		update current free block count.
