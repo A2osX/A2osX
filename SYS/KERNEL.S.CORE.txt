@@ -1,6 +1,403 @@
 NEW
   AUTO 3,1
 *--------------------------------------
+GP.Sleep		php
+				sei
+
+				phy
+				ldy #S.PS.A
+				sta (pPS),y
+
+				txa
+				iny						#S.PS.X
+				sta (pPS),y
+
+				pla
+				iny						#S.PS.Y
+				sta (pPS),y
+
+				pla
+				iny						#S.PS.P
+				sta (pPS),y
+
+				pla						get PC LO
+				plx						get PC HI
+
+				inc						Advance one byte because of return by RTI
+				bne GP.Sleep2
+
+				inx
+
+GP.Sleep2		ldy #S.PS.PC
+				sta (pPS),y
+
+				txa
+				iny						#S.PS.PC+1
+				sta (pPS),y
+
+				tsx
+
+				inx
+
+				inx						keep PC HI,LO from KERNEL jsr PSExec/PSResume
+				inx						Stack Ptr is $1ff if empty
+
+				txa
+				beq .3
+
+				tay						Save !Byte count for later
+
+.2				pla
+				>PUSHA
+				inx
+				bne .2
+
+				tya
+
+.3				>PUSHA					push CPU Stack BC to restore on top of Soft Stack
+
+				inc $1fe				PC=PC+1
+				bne .4
+
+				inc $1ff				because of RTI
+
+.4				lda (pPS)
+				ora #S.PS.F.SLEEP
+				sta (pPS)
+				lda #0					cld,clc,cli
+				pha
+				rti						exit to kernel with CC
+*--------------------------------------
+*     *** MUST BE REINTRANT ***
+*--------------------------------------
+GP.SysCall		dec IRQ.InKernel
+
+				pha
+				phy
+				ldy #S.PS.A
+				sta (pPS),y
+				txa
+				iny						#S.PS.X
+				sta (pPS),y
+				pla
+				iny						#S.PS.Y
+				sta (pPS),y
+				tay
+				pla
+				jsr JMP.2
+				bcc .2					no error quit...
+
+				tax						CS,A=0 ?
+				beq .3					Yes, BLOCKING I/O
+
+.2				inc IRQ.InKernel
+				rts						Unmodified Carry
+
+.3				sei
+				inc IRQ.InKernel
+
+GO.Sleep2		pla						get PC LO
+				plx						get PC HI
+*				sec
+				sbc #2
+				bcs GP.Sleep2
+
+				dex
+
+.1				bra GP.Sleep2
+*--------------------------------------
+GP.LibCall		dec IRQ.InLib
+
+				pha
+				phy
+				ldy #S.PS.A
+				sta (pPS),y
+				txa
+				iny						#S.PS.X
+				sta (pPS),y
+				pla
+				iny						#S.PS.Y
+				sta (pPS),y
+
+				jsr K.GetMemPtr			Get LIB Code Segment (MemMgr in $E000, no BNK change)
+				>STYA .1+1
+				pla
+
+.1				jsr $FFFF				SELF MODIFIED
+
+				bcc .2
+
+				tax
+				beq .3
+
+.2				inc IRQ.InLib
+				rts
+
+.3				sei
+				inc IRQ.InLib
+
+				bra GO.Sleep2
+*--------------------------------------
+GP.AtkCall		dec IRQ.InKernel
+
+				>STYA .1
+
+				jsr GO.MainIC
+
+				jsr MLI
+				.DA #MLI.ATALK
+.1				.DA *
+
+				jsr GO.AuxLC
+
+				inc IRQ.InKernel
+				rts
+*/--------------------------------------
+* # Add32,Sub32,Mul32,IMul32,Div32,IDiv32,Mod32,IMod32,Cmp32,ICmp32
+* Return X+Y, X-Y, X*Y, X/Y, X mod Y....
+* ## ASM
+* `>PUSHL X (long)`
+* `>PUSHL Y (long)`
+* `>FPU add32`
+* `...`
+* ## RETURN VALUE
+*  On stack (long)
+*\--------------------------------------
+GP.FpuCall		dec IRQ.InKernel
+				cpx #FPU.FMUL
+				bcs .1
+
+				jsr MATH				math16 & math32, direct JMP
+
+				inc IRQ.InKernel
+				rts
+
+.1				phx
+				jsr GP.SetFAC			Get float from stack
+				plx
+				cpx #FPU.PWR+1
+				bcs GP.GetFAC
+*/--------------------------------------
+* # FAdd,FSub,FMul,FDiv,FPwr
+* Return X*Y, X/Y, X+Y, X-Y
+* ## C
+* `float pwr ( float x, float y);`
+* ## ASM
+* `>PUSHF X (float)`
+* `>PUSHF Y (float)`
+* `>FPU fmul`
+* `>FPU fdiv`
+* `>FPU fmod`							TODO
+* `>FPU fadd`
+* `>FPU fsub`
+* `>FPU fpwr`
+* ## RETURN VALUE
+*  On stack (float)
+*\--------------------------------------
+				lda pStack
+				clc
+				adc #5
+				sta pStack
+				phx
+				jsr GP.SetARG
+				plx
+*/--------------------------------------
+* # Log,Sqr,Exp,Cos,Sin,Tan,ATan
+* Return Log(x), Sqr(x), E^X, Cos(x), Sin(X), Tan(x), ATan(x)
+* ## C
+* `float log ( float x);`
+* `float sqr ( float x);`
+* `float exp ( float x);`
+* `float cos ( float x);`
+* `float sin ( float x);`
+* `float tan ( float x);`
+* `float atan ( float x);`
+* ## ASM
+* `>PUSHF x (Float)`
+* `>FPU log`
+* ## RETURN VALUE
+*  On stack (Float)
+*\--------------------------------------
+GP.GetFAC		jsr GP.ROMCALL
+
+				lda pStack
+				ldy pStack+1
+				sta FORPNT				Ptr to dst buffer
+				sty FORPNT+1
+				ldx #FPU.GETFAC
+*--------------------------------------
+GP.RomCall		phx
+				ldx $D000
+				stx .8+1
+				bit	IO.RROMBNK1
+				plx
+
+				jsr MATHF
+
+.8				ldx #$ff
+				bit $C000,x
+*				bit $C000,x
+				rts
+*--------------------------------------
+GP.SetARG		ldx #FPU.SETARG
+				.HS 2C					BIT ABS
+GP.SetFAC		ldx #FPU.SETFAC
+				lda pStack
+				ldy pStack+1
+				bra GP.RomCall
+*/--------------------------------------
+* # float
+* Return 'floated' long
+* ## C
+* `float f = (float)l;
+* ## ASM
+* `>PUSHL l` (long)
+* `>FPU float`
+* ## RETURN VALUE
+*  On stack (float)
+*\--------------------------------------
+GP.Float		ldy #3
+
+.1				lda (pStack),y
+				sta FAC+1,y				Reverse Order
+				dey
+				bpl .1
+
+				dec pStack				keep 5 bytes on stack
+				stz	FAC.SIGN
+				lda #$80+32
+				sta FAC					Positive + Exp=32
+				ldx #FPU.LTOF
+
+				bra GP.GetFAC
+*/--------------------------------------
+* # lrintf
+* Return float rounded into a long
+* ## C
+* `long int lrintf (float x);`
+* ## ASM
+* `>PUSHF x`
+* `>FPU lrintf`
+* ## RETURN VALUE
+*  On stack (long)
+*\--------------------------------------
+GP.lrintf		jsr GP.SetFAC
+				inc pStack				keep 4 bytes on stack
+				ldx #FPU.QINT
+				jsr GP.ROMCALL
+
+				ldy #3
+
+.1				lda FAC+1,y
+				sta (pStack),y
+				dey
+				bpl .1
+
+				rts
+*--------------------------------------
+* MLI : From Kernel Aux LC to Main LC
+*--------------------------------------
+GP.MLICall		stx .1
+				sta K.MLI.PARAMS
+				jsr GO.MainIC
+				jsr MLI
+.1				.BS 1
+				.DA K.MLI.PARAMS
+				jsr GO.AuxLC
+				rts
+*--------------------------------------
+GO.MainIC		pha
+				lda $D000				We re coming from AUXLC, saving bank...
+				sta GO.AuxLC.BNK+1
+				pla
+				php
+				clc
+				.HS	2C					BIT ABS
+GO.AuxLC		php
+				sec
+
+				sei
+				sta GO.EXIT.SaveA+1
+				stx GO.EXIT.SaveX+1
+				sty GO.EXIT.SaveY+1
+				pla						Restore P in A for later
+				plx						Get PC and add 1 for return
+				ply
+				inx
+				bne .1
+
+				iny
+
+.1				stx GO.EXIT.JMP+1
+				sty GO.EXIT.JMP+2
+
+				bcs .2					if CS, go AUXLC
+
+				tsx
+				stx SaveSX
+				ldx	SaveSM
+				txs
+				sta IO.CLRALTZP
+
+				ldx #IO.RRAMWRAMBNK1	Go MAINLC (ProDOS), always BNK1
+				bra GO.EXIT
+
+.2				sta IO.SETALTZP
+				tsx
+				stx SaveSM
+				ldx	SaveSX
+				txs
+
+GO.AuxLC.BNK	ldx #$FF				Self Modified, initialized to BNK1 for INIT3
+*--------------------------------------
+GO.EXIT			bit $C000,x				Select Proper LC bank
+*				bit $C000,x
+
+				pha						push P on stack
+GO.EXIT.SaveY	ldy #$ff
+GO.EXIT.SaveX	ldx #$ff
+GO.EXIT.SaveA	lda #$ff
+				plp
+
+GO.EXIT.JMP		jmp $FFFF				SELF MODIFIED
+*--------------------------------------
+* Called from ProDOS IRQ Manager (LCBNK1)
+* A,X,Y, $FA->$FF Already Saved
+* Main RAM,ZP/LC selected
+* must begin with CLD
+* must exit with RTS
+* - CC if IRQ cleared, CS if NOT
+*--------------------------------------
+GP.IRQ			cld
+
+				bit IRQ.Skip			After A2osX IRQ.H ?
+				bmi GP.IRQ.Exit
+
+				sta IO.SETALTZP			switch to aux LC
+				tsx
+				stx SaveSM
+				ldx	SaveSX
+				txs
+
+GP.IRQ.JSR		jsr CORE.IRQ.DEV		SELF MODIFIED
+
+				tsx						go back to Main
+				stx SaveSX
+				ldx	SaveSM
+				txs
+				sta IO.CLRALTZP
+
+				rts
+
+GP.IRQ.Exit		stz IRQ.Skip			reset flag
+				sec
+				rts
+*--------------------------------------
+*GO.Reset		jsr GO.AuxLC
+*				jmp CORE.Run
+*--------------------------------------
+*BrkHandler		bra *
+*--------------------------------------
 CORE.Run		ldx #1
 
 				bra .80					Skip PS0
@@ -245,10 +642,10 @@ CORE.GetEvents	lda #K.S.EVT
 				bne .6
 
 .4				inc DevMgr.Timer
-				inc A2osX.TIMER16
+				inc A2osX.T16
 				bne .5
 
-				inc A2osX.TIMER16+1
+				inc A2osX.T16+1
 
 .5				ldx CORE.TickPer10t
 				stx CORE.Tick10t

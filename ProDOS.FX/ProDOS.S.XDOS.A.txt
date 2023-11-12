@@ -338,18 +338,18 @@ XDOS.SysErr		sta GP.ERROR			P8 error code
 *--------------------------------------
 XDOS.SysDeath 	tax						death error code.
 				sta IO.CLR80DISP		disable 80 col hardware.
-				lda IO.SETTEXT			switch in text.
+				sta IO.SETTEXT			switch in text.
 				lda XDOS.CortFlag		is this a Cortland?
 				beq .1					if not, don't use super hires switch.
 
 				stz IO.GS.NEWVIDEO		force off super hires.
 
-.1	  			lda IO.CLRPAGE2			switch in text page 1.
+.1	  			sta IO.CLRPAGE2			switch in text page 1.
 
 				ldy #deathmsg.LEN-1
 
 .2  			lda deathmsg,y
-				sta $400,y				'RESTART SYSTEM-$'
+				sta $400,y				'SYS ERR-$'
 				dey
 				bpl .2
 
@@ -799,11 +799,11 @@ online1.ERR		pha						save error code.
 .1  			sec						flag error
 				rts
 *--------------------------------------
-online1.OK		lda XDOS.VCBs,x				get volume name count
+online1.OK		lda XDOS.VCBs,x			get volume name count
 				sta namcnt
 				ldy namptr				index to user's buffer.
 
-.1  			lda XDOS.VCBs,x				move name to user's buffer
+.1  			lda XDOS.VCBs,x			move name to user's buffer
 				sta (usrbuf),y
 				inx
 				iny
@@ -811,7 +811,7 @@ online1.OK		lda XDOS.VCBs,x				get volume name count
 				bpl .1
 
 svdevn			ldy namptr				index to 1st byte of this entry.
-				lda GP.DEVNUM				upper nibble = device# and
+				lda GP.DEVNUM			upper nibble = device# and
 				ora (usrbuf),y			lower nibble = name length.
 				sta (usrbuf),y
 
@@ -819,52 +819,65 @@ svdevn			ldy namptr				index to 1st byte of this entry.
 				rts						end of block file manager
 *--------------------------------------
 XDOS.Create		jsr XDOS.CheckPath		check for duplicate, get free entry
-				bcc	duperr				error code may be 'file not found'
+				bcc	.4					error code may be 'file not found'
 
-tstfnf			cmp #MLI.E.FNOTFND		'file not found' is ok
-				bne crerr1				otherwise exit with error.
+				cmp #MLI.E.FNOTFND		'file not found' is ok
+				bne .5					otherwise exit with error.
 
 				ldy #$07				test for tree or directory file,
-				lda (ZP.A3L),y				no other kinds are legal.
+				lda (ZP.A3L),y			no other kinds are legal.
 				cmp #$04				is it seed, sapling or tree?
-				bcc tstdspc				branch if it is
+				bcc .1					branch if it is
 
 				cmp #$0D
-				bne ctyperr				report type error if not directory.
+				bne .3					report type error if not directory.
 
-tstdspc			lda GP.DEVNUM			make sure destination device
+.1				lda GP.DEVNUM			make sure destination device
 				jsr XDOS.TestWPA		is not write protected.
 				bcs H351D
 
 				lda nofree				is there space in directory to
-				beq xtndir				add this file? branch if not
-				jmp creat1				otherwise, go create file.
 
-xtndir			lda own_blk				before extending directory,
+				.DO DIREXTENDROOT=1
+
+				beq XDOS.DirExtend
+				bne XDOS.Create1
+				
+				.ELSE
+				
+				beq .2					add this file? branch if not
+
+				jmp XDOS.Create1		otherwise, go create file.
+
+.2				lda own_blk				before extending directory,
 				ora own_blk+1			make sure it's a subdirectory.
-				bne H352A
+				bne XDOS.DirExtend
 
 				lda #MLI.E.DIRFULL		otherwise, directory full error
 				.HS 2C					BIT ABS
-ctyperr			lda #MLI.E.UNSUPST		filetype error
-				.HS 2C					BIT ABS
-duperr			lda #MLI.E.DUPFILE		name already exists
-crerr1			sec
-H351D  			rts
 
-H352A  			lda ZP.BLKNUM			preserve disk address of current (last)
+				.FIN
+
+.3				lda #MLI.E.UNSUPST		filetype error
+				.HS 2C					BIT ABS
+.4				lda #MLI.E.DUPFILE		name already exists
+
+.5				sec
+H351D  			rts
+*--------------------------------------
+XDOS.DirExtend	lda ZP.BLKNUM			preserve disk address of current (last)
 				pha						directory link, before allocating an
 				lda ZP.BLKNUM+1			extended block.
 				pha
-				jsr alc1blk				allocate a block for extending directory
+				jsr XDOS.GetFreeBlk		allocate a block for extending directory
 				plx
 				stx ZP.BLKNUM+1			restore block addr of dir info in XDOS.GBuf
 				plx
 				stx ZP.BLKNUM
 				bcs H351D				unable to allocate.
-
-				sta XDOS.GBuf+2				save block address in y,a to
-				sty XDOS.GBuf+3				current directory.
+			
+				sta XDOS.GBuf+2			save block address in y,a to
+				sty XDOS.GBuf+3			current directory.
 				.DO LOWERCASE=1
 				jsr XDOS.WriteGBufDir
 				.ELSE
@@ -874,25 +887,16 @@ H352A  			lda ZP.BLKNUM			preserve disk address of current (last)
 
 				ldx #$01
 
-swpbloks 		lda ZP.BLKNUM,x			prepare new directory block
-				sta XDOS.GBuf,x				using current block as back link
+.1		 		lda ZP.BLKNUM,x			prepare new directory block
+				sta XDOS.GBuf,x			using current block as back link
 				lda XDOS.GBuf+2,x
 				sta ZP.BLKNUM,x			and save new block as next to be written
 				dex
-				bpl swpbloks
+				bpl .1
 
-				inx						x = 0
+				jsr XDOS.ZeroGBuf
 
-clrdir 			stz XDOS.GBuf+2,x
-				stz XDOS.GBuf+$100,x
-				inx
-				bne clrdir
-
-				.DO LOWERCASE=1
-				jsr XDOS.WriteGBufDir
-				.ELSE
 				jsr XDOS.WriteGBuf		write prepared directory extension.
-				.FIN
 				bcs H351D				if error
 
 				lda own_blk
@@ -908,23 +912,23 @@ clrdir 			stz XDOS.GBuf+2,x
 
 				ldx own_ent				and calc entry address.
 
-ocalc  			dex						has entry address been calculated?
-				beq H3584				if yes.
+.3  			dex						has entry address been calculated?
+				beq .4					if yes.
 
 				lda own_len				next entry address
 				jsr XDOS.ZPT.NextA
-				bra ocalc
+				bra .3
 
-H3584  			ldy #$13				index to block count
+.4  			ldy #$13				index to block count
 				clc
 
-H3588  			lda (zpt),y
+.5  			lda (zpt),y
 				adc dinctbl-$13,y		add 1 to block count and
 				sta (zpt),y
 				iny
 				tya						$200 to the directory's eof.
 				eor #$18				done with usage/eof update?
-				bne H3588				branch if not.
+				bne .5					branch if not.
 
 				.DO LOWERCASE=1
 				jsr XDOS.WriteGBufDir
@@ -934,45 +938,41 @@ H3588  			lda (zpt),y
 				bcs crerr2
 
 				jmp XDOS.Create
+
 crerr2 			rts						return and report errors
 *--------------------------------------
-creat1			ldx #$00				zero out XDOS.GBuf
-
-H35A0  			stz XDOS.GBuf,x
-				stz XDOS.GBuf+$100,x			and data block of file.
-				inx
-				bne H35A0
+XDOS.Create1	jsr XDOS.ZeroGBuf		zero out XDOS.GBuf
 
 				ldy #$0B				move user specified date/time
 
-cmvtime			lda (ZP.A3L),y				to directory.
+.1				lda (ZP.A3L),y			to directory.
 				sta d_filid,y
 				txa		 				if all 4 bytes of date/time = 0
-				ora (ZP.A3L),y				then use built-in date/time.
+				ora (ZP.A3L),y			then use built-in date/time.
 				tax
 				dey
 				cpy #$07
-				bne cmvtime
+				bne .1
 
 				txa						does user want default time?
-				bne cmvname				if not.
+				bne .3					if not.
 
 				ldx #$03
 
-mvdftime 		lda GP.DATE,x			move current default date/time
+.2		 		lda GP.DATE,x			move current default date/time
 				sta d_credt,x
 				dex
-				bpl mvdftime
+				bpl .2
 
-cmvname			lda (ZP.A3L),y				y = index to file kind.
+.3				lda (ZP.A3L),y			y = index to file kind.
 				cmp #$04
 				lda #$10				assume tree type
-				bcc csvfkind
+				bcc .4
 
 				lda #$D0			 	it's directory.
 
-csvfkind 		ldx namptr			 	index to local name of pathname.
-				ora XDOS.PathBuf,x			combine file kind with name length.
+.4		 		ldx namptr			 	index to local name of pathname.
+				ora XDOS.PathBuf,x		combine file kind with name length.
 				sta d_stor			 	sos calls this 'storage type'.
 				and #$0F			 	strip back to name length
 				tay		 				and use as counter for move.
@@ -980,12 +980,12 @@ csvfkind 		ldx namptr			 	index to local name of pathname.
 				adc namptr			 	calc end of name
 				tax
 
-crname			lda XDOS.PathBuf,x			move local name as filename
+.5				lda XDOS.PathBuf,x		move local name as filename
 				sta d_stor,y
 
 				dex
 				dey
-				bne crname
+				bne .5
 
 				ldy #$03				index to 'access' parameter
 				lda (ZP.A3L),y
@@ -994,11 +994,11 @@ crname			lda XDOS.PathBuf,x			move local name as filename
 				lda (ZP.A3L),y
 				sta d_filid
 
-cmvauxid 		iny						move auxillary identification bytes
+.6		 		iny						move auxillary identification bytes
 				lda (ZP.A3L),y
 				sta d_auxid-5,y
 				cpy #$06
-				bne cmvauxid
+				bne .6
 
 				.DO LOWERCASE=0
 				lda xdosver				save current xdos version #
@@ -1019,9 +1019,9 @@ cmvauxid 		iny						move auxillary identification bytes
 				lda d_stor				storage type.
 				and #$E0			 	is it a directory?
 				beq cralcblk			branch if seed file.
-
+*--------------------------------------
 * Create Dir First Block
-
+*--------------------------------------
 				ldx #$1E			 	move header to data block
 
 cmvheadr 		lda d_stor,x
@@ -1030,7 +1030,7 @@ cmvheadr 		lda d_stor,x
 				bpl cmvheadr
 
 				eor #$30
-				sta XDOS.GBuf+4				make it a directory header mark.
+				sta XDOS.GBuf+4			make it a directory header mark.
 
 				.DO LOWERCASE=0
 
@@ -1066,13 +1066,13 @@ cmvparnt 		lda d_entblk,x
 				bpl cmvparnt
 
 				lda h_entln				lastly, the length of parent's
-				sta XDOS.GBuf+42				directory entries.
+				sta XDOS.GBuf+42		directory entries.
 
 				.DO LOWERCASE=1
 				jsr XDOS.PackGBuf
 				.FIN
 
-cralcblk 		jsr alc1blk				get address of file's data block
+cralcblk 		jsr XDOS.GetFreeBlk		get address of file's data block
 				bcs crerr3
 
 				sta d_frst
@@ -1090,7 +1090,16 @@ cralcblk 		jsr alc1blk				get address of file's data block
 credone			jsr drevise				go revise directories with new file
 				bcs crerr3
 
-				jmp upbmap			 	lastly, update volume bitmap
+				jmp XDOS.FlushBM	 	lastly, update volume bitmap
+*--------------------------------------
+XDOS.ZeroGBuf	ldx #0
+
+.1				stz XDOS.GBuf,x
+				stz XDOS.GBuf+$100,x
+				inx
+				bne .1
+				
+				rts
 *--------------------------------------
 MAN
 SAVE usr/src/prodos.fx/prodos.s.xdos.a
