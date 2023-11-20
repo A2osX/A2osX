@@ -1,38 +1,46 @@
 NEW
   AUTO 3,1
 *--------------------------------------
-entcalc			jsr XDOS.ZPT.InitGBuf
+XDOS.ZPT.SetEIB	jsr XDOS.ZPT.InitGBuf
 
-				ldx d_entnum			on the entry #.
+				ldx XDOS.DE.DirEIB			on the entry #.
 
-				clc
-
-.1				dex		 				addr = XDOS.GBuf + ((d_entnum-1) * h_entln)
-				beq crerr3			  	branch with carry clear = no errors.
+.1				dex		 				addr = XDOS.GBuf + ((d_entnum-1) * XDOS.DH.EL)
+				beq .8
 
 				jsr XDOS.ZPT.Next
-				bcc .1
+				bra .1
+
+.8				clc
 
 crerr3 			rts		 				carry set if error.
 *--------------------------------------
-drevise			lda GP.DATE
-				beq drevise1		  	if no clock, then don't mod date/time.
+XDOS.DE.Update	lda GP.DATE
+				beq XDOS.DE.UpdateNoMTime	if no clock, then don't mod date/time.
 
-				ldx #$03
+				ldx #3
 
-modtime			lda GP.DATE,x			move last modification date/time
-				sta d_moddt,x			to entry being updated.
+.1				lda GP.DATE,x			move last modification date/time
+				sta XDOS.DE.MTime,x		to entry being updated.
 				dex
-				bpl modtime
+				bpl .1
+				
+				sec						propagate MTIME
 
-drevise1 		lda bkbitflg			(bit 5 = backup needed)
-				tsb d_attr				mark entry as backupable
+				.HS 90					BCC
+*--------------------------------------
+XDOS.DE.UpdateNoMTime
+				clc						DO NOT propagate MTIME
+				ror scrtch				save this...
+				
+				lda bkbitflg			(bit 5 = backup needed)
+				tsb XDOS.DE.Access		mark entry as backupable
 
-				lda d_dev			  	get device # of directory
-				sta GP.DEVNUM			 	to be revised
+				lda XDOS.DE.DevID		get device # of directory
+				sta GP.DEVNUM			to be revised
 
-				lda d_entblk			and address of directory block.
-				ldx d_entblk+1
+				lda XDOS.DE.DirEBlk		and address of directory block.
+				ldx XDOS.DE.DirEBlk+1
 
 				.DO LOWERCASE=1
 				jsr XDOS.ReadGBufAXDir
@@ -41,33 +49,33 @@ drevise1 		lda bkbitflg			(bit 5 = backup needed)
 				.FIN
 				bcs crerr3
 
-				jsr entcalc				fix up ptr to entry location within XDOS.GBuf.
+				jsr XDOS.ZPT.SetEIB		fix up ptr to entry location within XDOS.GBuf.
 
-				ldy h_entln				now move 'd.' info to directory.
+				ldy XDOS.DH.EL			now move DE info to directory.
 				dey
 
-.1  			lda d_stor,y
+.1  			lda XDOS.DE.Filename,y
 				sta (zpt),y
 				dey
 				bpl .1
 
-				lda d_head				is the entry block same as
+				lda XDOS.DE.DirHBlk		is the entry block same as
 				cmp ZP.BLKNUM			the entry's header block?
-				bne H36E0			  	if no, go save entry block
+				bne .2				  	if no, go save entry block
 
-				lda d_head+1			then maybe, so test high addresses.
+				lda XDOS.DE.DirHBlk+1	then maybe, so test high addresses.
 				cmp ZP.BLKNUM+1
-				beq uphead			 	branch if they are the same block.
+				beq .3				 	branch if they are the same block.
 
-H36E0  			.DO LOWERCASE=1
+.2  			.DO LOWERCASE=1
 				jsr XDOS.WriteGBufDir
 				.ELSE
 				jsr XDOS.WriteGBuf		go write updated directory block.
 				.FIN
 				bcs crerr3
 
-				lda d_head			 	get address of header block and
-				ldx d_head+1
+				lda XDOS.DE.DirHBlk		get address of header block and
+				ldx XDOS.DE.DirHBlk+1
 
 				.DO LOWERCASE=1
 				jsr XDOS.ReadGBufAXDir
@@ -76,14 +84,14 @@ H36E0  			.DO LOWERCASE=1
 				.FIN
 				bcs crerr3
 
-uphead			ldy #$01				update current # of files in this dir.
+.3				ldy #$01				update current # of files in this dir.
 
-H36F2  			lda h_fcnt,y
-				sta XDOS.GBuf+37,y			(current entry count)
+.4  			lda XDOS.DH.FileCnt,y
+				sta XDOS.GBuf+37,y		(current entry count)
 				dey
-				bpl H36F2
+				bpl .4
 
-				lda h_attr			 	also update header's attributes.
+				lda XDOS.DH.Access		also update header's attributes.
 				sta XDOS.GBuf+34
 
 				.DO LOWERCASE=1
@@ -91,19 +99,22 @@ H36F2  			lda h_fcnt,y
 				.ELSE
 				jsr XDOS.WriteGBuf		go write updated header
 				.FIN
-				bcs H375A
+				bcs .9
 *--------------------------------------
-ripple			lda XDOS.GBuf+4				test for 'root' directory because
+.5				bit scrtch				nothing to do ...
+				bpl .8				  	... if no MTIME update
+				
+				lda XDOS.GBuf+4			test for 'root' directory because
 				and #$F0			 	if it is, then directory revision
 				eor #$F0			 	is complete (leaves carry clear).
-				beq H3770			  	branch if done.
+				beq .8				  	branch if done.
 
-				lda XDOS.GBuf+41				get entry #
-				sta d_entnum
-				lda XDOS.GBuf+42				and the length of entries in that dir
-				sta h_entln
+				lda XDOS.GBuf+41		get entry #
+				sta XDOS.DE.DirEIB
+				lda XDOS.GBuf+42		and the length of entries in that dir
+				sta XDOS.DH.EL
 
-				lda XDOS.GBuf+39				get addr of parent entry's dir block
+				lda XDOS.GBuf+39		get addr of parent entry's dir block
 				ldx XDOS.GBuf+40
 
 				.DO LOWERCASE=1
@@ -111,28 +122,25 @@ ripple			lda XDOS.GBuf+4				test for 'root' directory because
 				.ELSE
 				jsr XDOS.ReadGBufAX		read it
 				.FIN
-				bcs H375A
+				bcs .9
 
-				jsr entcalc				get indirect ptr to parent entry in XDOS.GBuf
-
-				lda GP.DATE				don't touch mod
-				beq H373B			  	if no clock...
+				jsr XDOS.ZPT.SetEIB		get indirect ptr to parent entry in XDOS.GBuf
 
 				ldx #$03			 	update the modification date & time
 				ldy #$24			 	for this entry too
 
-H3732  			lda GP.DATE,x
+.6  			lda GP.DATE,x
 				sta (zpt),y
 				dey
 				dex
-				bpl H3732
+				bpl .6
 
-H373B  			.DO LOWERCASE=1
+				.DO LOWERCASE=1
 				jsr XDOS.WriteGBuf
 				.ELSE
 				jsr XDOS.WriteGBuf		write updated entry back to disk.
 				.FIN
-				bcs H375A			  	if error.
+				bcs .9				  	if error.
 
 				ldy #$26			 	compare current block # to this
 				lda (zpt),y				entry's header block.
@@ -140,32 +148,33 @@ H373B  			.DO LOWERCASE=1
 				dey
 				lda (zpt),y				block as header.
 				cmp ZP.BLKNUM			are low addresses the same?
-				bne H3751			 	branch if entry doesn't reside in same
+				bne .7				 	branch if entry doesn't reside in same
 
 				cpx ZP.BLKNUM+1			are high address the same?
-				beq ripple			 	they are the same, continue to root dir.
+				beq .5				 	they are the same, continue to root dir.
 
-H3751  			.DO LOWERCASE=1
+.7  			.DO LOWERCASE=1
 				jsr XDOS.ReadGBufAX
 				.ELSE
 				jsr XDOS.ReadGBufAX
 				.FIN
-				bcc ripple				continue if read was good
+				bcc .5					continue if read was good
 
-H375A  			rts
-
-H3770  			clc		 				no error
 				rts
+
+.8  			clc		 				no error
+
+.9				rts
 *--------------------------------------
 XDOS.FindDirOrVol
 				jsr XDOS.FindFileOrVol
 				bcs .99
 				
-				lda d_stor
+				lda XDOS.DE.Filename
 			
 				and #$F0
 				cmp #$D0
-				beq moventry.CLCRTS
+				beq XDOS.ZPT.GetDE.CLCRTS
 
 .9				lda #MLI.E.UNSUPST
 				sec
@@ -173,26 +182,27 @@ XDOS.FindDirOrVol
 *--------------------------------------
 XDOS.FindFileOrVol
 				jsr XDOS.CheckPath
-				bcc moventry
+				bcc XDOS.ZPT.GetDE
 
 				cmp #MLI.E.INVPATH
 				bne fnderr
 				clc
 				rts
-				
-moventry 		ldy h_entln				Get FileInfo From Directory Block Buffer
+*--------------------------------------				
+XDOS.ZPT.GetDE 	ldy XDOS.DH.EL				Get FileInfo From Directory Block Buffer
 
 .1  			dey
 				lda (zpt),y				move entry into storage
-				sta d_stor,y
+				sta XDOS.DE.Filename,y
 				tya
 				bne .1
-moventry.CLCRTS
+
+XDOS.ZPT.GetDE.CLCRTS
 				clc
 				rts
 *--------------------------------------
 XDOS.FindFile	jsr XDOS.CheckPath		see if file exists
-				bcc moventry
+				bcc XDOS.ZPT.GetDE
 				rts
 *--------------------------------------
 XDOS.CheckPath 	jsr XDOS.FindVol
@@ -205,27 +215,27 @@ XDOS.CheckPath 	jsr XDOS.FindVol
 				ldy #$1F				move in id and date info
 
 .1  			lda (zpt),y
-				sta d_stor,y
+				sta XDOS.DE.Filename,y
 				dey
 				cpy #$17
 				bne .1
 
 .2		  		lda rootstuf-$10,y
-				sta d_stor,y
+				sta XDOS.DE.Filename,y
 				dey
 				cpy #$0F
 				bne .2
 
 				lda #$D0				fake directory file
-				sta d_stor
+				sta XDOS.DE.Filename
 				lda XDOS.GBuf+2			check forward link.
 				ora XDOS.GBuf+3			if non-zero, assume full sized directory
 				bne .3				 	else assume it's the slot 3 /RAM volume
 
 				lda #$02			 	so reset eof and blocks_used fields
-				sta d_eof+1
+				sta XDOS.DE.EOF+1
 				lda #$01
-				sta d_usage
+				sta XDOS.DE.BlkUsed
 
 .3  			lda #MLI.E.INVPATH		bad path (carry set)
 				rts
@@ -243,16 +253,17 @@ L37C9  			stz totent			 	reset entry counter.
 				jsr XDOS.LookupNameInDirBlk		look for name pointed to by pnptr.
 				bcc namfound			if name was found.
 
-				lda entcntl				have we looked at all of the
+				lda XDOS.FileCnt		have we looked at all of the
 				sbc totent			 	entries in this directory?
 				bcc L37E2			  	maybe, check hi count.
 				bne L37EB			  	no, read next directory block.
 
-				lda entcnth				has the last entry been looked at?
+				lda XDOS.FileCnt+1		has the last entry been looked at?
 				beq errfnf			 	yes, give 'file not found' error
 
-L37E2  			dec entcnth				should be at least one
-L37EB  			sta entcntl				keep a running count.
+L37E2  			dec XDOS.FileCnt+1		should be at least one
+
+L37EB  			sta XDOS.FileCnt		keep a running count.
 				lda /XDOS.GBuf			reset indirect pointer
 				sta zpt+1
 
@@ -280,11 +291,11 @@ errfnf 			lda nofree				was any free entry found?
 				cmp XDOS.GBuf+3			if both are 0 then give up.
 				beq .2				 	report 'not found'.
 
-.1  			sta d_entblk
+.1  			sta XDOS.DE.DirEBlk
 				lda XDOS.GBuf+3
-				sta d_entblk+1			assume 1st entry of next block
+				sta XDOS.DE.DirEBlk+1	assume 1st entry of next block
 				lda #$01			 	is free for use.
-				sta d_entnum			mark as valid (for create)
+				sta XDOS.DE.DirEIB		mark as valid (for create)
 				sta nofree
 
 .2   			jsr nxtpnam1			'file not found' or 'path not found'?
@@ -301,20 +312,20 @@ lookfil0.RTS	rts
 namfound 		jsr nxtpname			adj index to next name in path.
 				beq filfound			branch if that was the last name.
 
-				ldy #$00			 	be sure this is a directory entry.
-				lda (zpt),y				high nibble will tell.
+*				ldy #$00			 	be sure this is a directory entry.
+				lda (zpt)				high nibble will tell.
 				and #$F0
 				cmp #$D0			 	is it a subdirectory?
 				bne errpath1			error if not.
 
 				ldy #$12			 	get address of 1st subdirectory block
 				lda (zpt),y
-				sta d_head+1		 	save as file's header block too
+				sta XDOS.DE.DirHBlk+1	save as file's header block too
 				tax
 				
 				dey
 				lda (zpt),y
-				sta d_head
+				sta XDOS.DE.DirHBlk
 
 				.DO LOWERCASE=1
 				jsr XDOS.ReadGBufAXDir
@@ -324,9 +335,9 @@ namfound 		jsr nxtpname			adj index to next name in path.
 				bcs lookfil0.RTS		if error.
 
 				lda XDOS.GBuf+37		get the # of files contained in this
-				sta entcntl				directory.
+				sta XDOS.FileCnt		directory.
 				lda XDOS.GBuf+38
-				sta entcnth
+				sta XDOS.FileCnt+1
 *--------------------------------------
 * Check if $75 at VOL/DIR entry + $14
 * (8 bytes reserved)
@@ -350,14 +361,14 @@ L386C  			asl
 				sec
 				rts
 				.FIN
-*--------------------------------------
-movhead  		jsr movhed0				move directory info.
+
+movhead  		jsr XDOS.GetDH			move directory info.
 				jmp lookfil0			do next local pathname.
+*--------------------------------------
+XDOS.GetDH		ldx #10					move this directory info
 
-movhed0			ldx #9					move this directory info
-
-.1				lda XDOS.GBuf+$1C,x
-				sta h_credt,x
+.1				lda XDOS.GBuf+28,x
+				sta XDOS.DH.CTime,x
 				dex
 				bpl .1
 
@@ -368,17 +379,17 @@ movhed0			ldx #9					move this directory info
 				cmp #$57
 				bne .20
 
-				lda XDOS.GBuf+$15
+				lda XDOS.GBuf+21
 				bne .20
 				
-.2				lda XDOS.GBuf+$14,x
-				sta h_acl,x
+.2				lda XDOS.GBuf+20,x
+				sta XDOS.DH.ACL,x
 				dex
 				bpl .2
 				
 				bra .21
 
-.20				stz h_acl,x
+.20				stz XDOS.DH.ACL,x
 				dex
 				bpl .20
 
@@ -391,30 +402,30 @@ movhed0			ldx #9					move this directory info
 
 				ldx #$03			 	otherwise, save owner info about
 
-.3  			lda XDOS.GBuf+$27,x		this header.
-				sta own_blk,x
+.3  			lda XDOS.GBuf+39,x		this header.
+				sta XDOS.OH.Blk,x
 				dex
 				bpl .3
 
 .8  			rts
 *--------------------------------------
-filfound 		lda h_maxent			figure out which entry # this is
+filfound 		lda XDOS.DH.EPB			figure out which entry # this is
 				sec
 				sbc cntent			 	max entries - count entries + 1
 				adc #$00			 	= entry # (carry was set)
-				sta d_entnum
+				sta XDOS.DE.DirEIB
 
 				lda ZP.BLKNUM			and indicate block # of this directory
-				sta d_entblk
+				sta XDOS.DE.DirEBlk
 				lda ZP.BLKNUM+1
-				sta d_entblk+1
+				sta XDOS.DE.DirEBlk+1
 
 *				clc						done by ADC #$00
 
 				rts
 *--------------------------------------
 XDOS.LookupNameInDirBlk
-				lda h_maxent			reset count of files per block
+				lda XDOS.DH.EPB			reset count of files per block
 				sta cntent
 
 				jsr XDOS.ZPT.InitGBuf	reset indirect pointer to XDOS.GBuf
@@ -470,26 +481,30 @@ XDOS.FindVol	jsr XDOS.FindVolInVCBOrDev
 				ldx #$42				zero out directory temps
 				.FIN
 				
-.1  			stz own_blk,x			and owner info
+.1  			stz XDOS.OH.Blk,x		and owner info
 				dex
 				bpl .1
 
-				lda GP.DEVNUM			 	setup device # for this directory
-				sta d_dev
-				jsr movhed0				setup other header info from directory
+				lda GP.DEVNUM			setup device # for this directory
+				sta XDOS.DE.DevID
+				jsr XDOS.GetDH			setup other header info from directory
 
 				ldy #$01			 	in XDOS.GBuf and clean up misc info.
 				ldx XDOS.VCBPtr
 				inx
 
-.2  			lda XDOS.VCBs+VCB.TBLK,x		misc info includes
-				sta h_tblk,y			total # of blocks,
-				lda XDOS.VCBs+VCB.BMAP,x		the address of the 1st bitmap,
-				sta h_bmap,y
+.2  			lda XDOS.VCBs+VCB.TBLK,x	misc info includes
+				sta XDOS.DH.BlkCnt,y	total # of blocks,
+
+				lda XDOS.VCBs+VCB.BMAP,x	the address of the 1st bitmap,
+				sta XDOS.DH.BMPtr,y
+
 				lda	ZP.BLKNUM,y			directory's disk address,
-				sta d_head,y
-				lda h_fcnt,y			and setting up a counter for the # of
-				sta entcntl,y			files in this directory.
+				sta XDOS.DE.DirHBlk,y
+
+				lda XDOS.DH.FileCnt,y	and setting up a counter for the # of
+				sta XDOS.FileCnt,y		files in this directory.
+
 				dex
 				dey
 				bpl .2
@@ -503,31 +518,32 @@ nxtpnam1 		ldy namptr			 	inc pathname pointer to next name
 				sec
 				adc namptr			 	if this addition results in zero,
 				tay		 				then prefixed directory has been moved
-				bne .1				  	to another device. branch if not.
 
-				lda GP.DEVNUM			revise GP.DEVNUM for prefixed directory
-				sta p_dev
+*				bne .1				  	to another device. branch if not.
+
+*				lda GP.DEVNUM			revise GP.DEVNUM for prefixed directory
+*				sta p_dev
 
 .1	  			lda XDOS.PathBuf,y		test for end of name.
 				clc						no errors
 novolume 		rts
-*--------------------------------------
+*--------------------------------------	OK for .
 XDOS.FindVolInVCBOrDev
 				lda #$00
-				ldy GP.PFXPTR				use prefix volume name to look up vcb.
+				ldy GP.PFXPTR			use prefix volume name to look up vcb.
 				bit prfxflg				is this a prefixed path?
 				bpl L396F			 	branch if it is
 
 				tay		 				set ptr to volume name
 
 L396F  			sty L39D4+1			  	and save.
-				sta GP.DEVNUM			 	zero out dev# until vcb located.
+				sta GP.DEVNUM			zero out dev# until vcb located.
 
 				lda #XDOS.VCB0
 
 L3975 			pha		 				acc now used as vcb lookup index.
 				tax		 				index pointer to x.
-				lda XDOS.VCBs,x				get vcb volume name length.
+				lda XDOS.VCBs,x			get vcb volume name length.
 				bne L3987			  	branch if claimed vcb to be tested.
 
 L397C 			ldy L39D4+1			  	restore pointer to requested vol name.
@@ -540,7 +556,7 @@ L397C 			ldy L39D4+1			  	restore pointer to requested vol name.
 
 L3987  			sta namcnt			 	save length of vol name to be compared.
 
-L398A  			cmp XDOS.PathBuf,y			is it the same as requested vol name?
+L398A  			cmp XDOS.PathBuf,y		is it the same as requested vol name?
 				bne L397C			  	branch if not
 
 				inx
@@ -550,9 +566,9 @@ L398A  			cmp XDOS.PathBuf,y			is it the same as requested vol name?
 				bpl L398A			  	if not.
 
 				plx		 				restore pointer to matching vcb.
-				stx XDOS.VCBPtr			 	save it for future reference.
-				lda XDOS.VCBs+VCB.DEV,x		get it's device #
-				sta GP.DEVNUM			 	and save it.
+				stx XDOS.VCBPtr			save it for future reference.
+				lda XDOS.VCBs+VCB.DEV,x	get it's device #
+				sta GP.DEVNUM			and save it.
 				
 				lda #$02				assume prefix is not used and
 				ldx #$00			 	that root directory is to be used.
@@ -566,7 +582,7 @@ L39AC  			tay		 				if prefix then find ptr to prefixed
 				beq L39C2			  	branch if no prefix.
 
 				sec
-				adc XDOS.PathBuf,y			inc to next dir in prefix path.
+				adc XDOS.PathBuf,y		inc to next dir in prefix path.
 				bcc L39AC			  	branch if another dir in prefix.
 
 				pla
@@ -589,18 +605,18 @@ L39C2  			pla
 				jsr XDOS.CheckVolName	compare dir name with path name.
 				bcc L39F0			  	if they match, stop looking.
 
-L39CC  			ldx XDOS.VCBPtr			 	check if current (matched) vcb is active
+L39CC  			ldx XDOS.VCBPtr			check if current (matched) vcb is active
 				lda XDOS.VCBs+VCB.OFCNT,x	i.e. does it have open files?
 				bne L39ED			  	report not found if active.
 
 L39D4  			lda #$FF				SELF MODIFIED vnptr : make path ptr same as volume ptr
-
 				sta namptr
+
 				jsr mvdevnums			copy all device #'s to be examined.
-				lda GP.DEVNUM			 	log current device 1st before searching
+				lda GP.DEVNUM			log current device 1st before searching
 				bne L39F1			  	others.
 
-L39E2  			ldx GP.DEVCNT				scan look list for devices we need
+L39E2  			ldx GP.DEVCNT			scan look list for devices we need
 
 L39E5  			lda loklst,x			to search for the requested volume.
 				bne L39F4			  	branch if we've a device to look at.
@@ -612,7 +628,7 @@ L39ED  			lda #MLI.E.VNOTFND	 	no mounted volume
 				sec						error
 L39F0  			rts
 
-L39F1  			ldx GP.DEVCNT				now remove the device from the list
+L39F1  			ldx GP.DEVCNT			now remove the device from the list
 
 L39F4  			cmp loklst,x			of prospective devices.
 				beq L39FE			  	branch if match.
@@ -622,13 +638,13 @@ L39F4  			cmp loklst,x			of prospective devices.
 
 				bmi L39ED			  	if dev was removed from GP.DEVLST (/RAM).
 
-L39FE  			sta GP.DEVNUM			 	preserve device to be checked next.
+L39FE  			sta GP.DEVNUM			preserve device to be checked next.
 				stz loklst,x			mark this one as tested.
 
 				jsr XDOS.FindVCBForDevNum	find vcb that claims this dev (if any).
 				bcs L3A29			  	branch if vcb full.
 
-				lda XDOS.VCBs,x			 	did we find it or return free vcb?
+				lda XDOS.VCBs,x			did we find it or return free vcb?
 				beq L3A16				if free vcb.
 
 				lda XDOS.VCBs+VCB.OFCNT,x	is this volume active?
@@ -648,9 +664,10 @@ L3A16  			lda #$02			 	go read root dir into XDOS.GBuf
 
 				jsr XDOS.CheckVolName	is this the volume ?
 				bcs L39E2			  	if not
+
 L3A29  			rts
 *--------------------------------------
-mvdevnums 		ldx GP.DEVCNT				copy all dev #'s to be checked.
+mvdevnums 		ldx GP.DEVCNT			copy all dev #'s to be checked.
 
 .1  			lda GP.DEVLST,x		   	active device list.
 				and #$F0			 	strip device type info.
@@ -666,24 +683,24 @@ XDOS.FindVCBForDevNum
 				ldy #$FF
 
 .1  			tax						new index to next vcb
-				lda XDOS.VCBs+VCB.DEV,x		check all devnums
-				cmp GP.DEVNUM				is this the vcb?
+				lda XDOS.VCBs+VCB.DEV,x	check all devnums
+				cmp GP.DEVNUM			is this the vcb?
 				beq .7
 
-				lda XDOS.VCBs,x				is this a free vcb?
+				lda XDOS.VCBs,x			is this a free vcb?
 				bne .3					if not
 
 				iny
 				bne .3					already found a free one
 
-				stx XDOS.VCBPtr				save first free VCB
+				stx XDOS.VCBPtr			save first free VCB
 				
 .3  			txa
 				clc						inc index to next vcb
 				adc #VCB
 				bcc .1
 
-				ldx XDOS.VCBPtr				get found free if any
+				ldx XDOS.VCBPtr			get found free if any
 
 				tya		 				any free vcb's available?
 				bpl .8				  	yes, exit with X = XDOS.VCBPtr
@@ -703,10 +720,10 @@ XDOS.FindVCBForDevNum
 *				sec
 				rts
 				
-.5  			stz XDOS.VCBs,x				free this entry
+.5  			stz XDOS.VCBs,x			free this entry
 				stz XDOS.VCBs+VCB.DEV,x
 
-.7				stx XDOS.VCBPtr			 	save entry index.
+.7				stx XDOS.VCBPtr			save entry index.
 				
 .8  			clc		 				no error.
 				rts
@@ -715,7 +732,7 @@ XDOS.CheckVolName
 				ldx #$00			 	index to directory name.
 				ldy namptr			 	index to pathname.
 
-				lda XDOS.GBuf+4			 	get dir name length and type.
+				lda XDOS.GBuf+4			get dir name length and type.
 				cmp #$E0				is it a directory?
 				bcc .1				  	if not.
 
@@ -726,7 +743,7 @@ XDOS.CheckVolName
 .1  			sec		 				indicate not found
 				rts
 
-.2  			lda XDOS.GBuf+4,x			next char
+.2  			lda XDOS.GBuf+4,x		next char
 				
 .3  			cmp XDOS.PathBuf,y
 				bne .1				  	if not the same.
@@ -734,40 +751,40 @@ XDOS.CheckVolName
 				inx		 				check next char
 				iny
 				dec namcnt
-				bpl .2			  	if more to compare.
+				bpl .2			  		if more to compare.
 
 				clc		 				match found
 XDOS.CheckVolName.RTS
 				rts
 *--------------------------------------
-XDOS.VCBMount	ldx XDOS.VCBPtr			 	previously logged in volume?
-				lda XDOS.VCBs,x				(acc = 0?)
+XDOS.VCBMount	ldx XDOS.VCBPtr			previously logged in volume?
+				lda XDOS.VCBs,x			(acc = 0?)
 				beq XDOS.VCBMountAtX  	no, go prepare vcb.
 
 				jsr XDOS.VCBCmpGBUF	 	does vcb match vol read?
-				bcc XDOS.CheckVolName.RTS			  	yes, do not disturb.
+				bcc XDOS.CheckVolName.RTS	yes, do not disturb.
 
 XDOS.VCBMountAtX
 				ldy #VCB			 	zero out vcb entry
 
-L3AB2  			stz XDOS.VCBs,x
+.1  			stz XDOS.VCBs,x
 				inx
 				dey
-				bne L3AB2
+				bne .1
 	
-				lda XDOS.GBuf			 	pointer to previous dir block
-				ora XDOS.GBuf+1			 	must be null
-				bne tsterr
+				lda XDOS.GBuf			pointer to previous dir block
+				ora XDOS.GBuf+1			must be null
+				bne .9
 
-				lda XDOS.GBuf+4			 	test for header
+				lda XDOS.GBuf+4			test for header
 				and #$E0
 				cmp #$E0
-				bne tsterr
+				bne .9
 
-				jsr tstdupvol			does a duplicate with open files
-				bcs L3B04			 	already exist? branch if yes.
+				jsr XDOS.ChkDupVol		does a duplicate with open files
+				bcs .8				 	already exist? branch if yes.
 
-				lda XDOS.GBuf+4			 	move volume name to vcb.
+				lda XDOS.GBuf+4			move volume name to vcb.
 				and #$0F			 	strip root marker
 				tay
 				pha
@@ -775,31 +792,31 @@ L3AB2  			stz XDOS.VCBs,x
 				adc XDOS.VCBPtr
 				tax
 
-L3ACE  			lda XDOS.GBuf+4,y
+.2  			lda XDOS.GBuf+4,y
 				sta XDOS.VCBs,x
 				dex
 				dey
-				bne L3ACE
+				bne .2
 
 				pla		 				get length again
-				sta XDOS.VCBs,x				and save.
+				sta XDOS.VCBs,x			and save.
 
-				lda GP.DEVNUM			 	last device used.
-				sta XDOS.VCBs+VCB.DEV,x		save device # and
+				lda GP.DEVNUM			last device used.
+				sta XDOS.VCBs+VCB.DEV,x	save device # and
 
 				ldy #0
 				
-.1				lda XDOS.GBuf+39,y
-				sta XDOS.VCBs+VCB.BMAP,x		copy BMAP+TBLK
+.3				lda XDOS.GBuf+39,y
+				sta XDOS.VCBs+VCB.BMAP,x	copy BMAP+TBLK
 				iny
 				inx
 				cpy #4
-				bne .1
+				bne .3
 
-L3B04  			clc		 				indicate logged if possible
+.8  			clc		 				indicate logged if possible
 				rts
 				
-tsterr 			lda #MLI.E.NOTPRODOS	not tree or dir, unrecognized type
+.9	 			lda #MLI.E.NOTPRODOS	not tree or dir, unrecognized type
 				sec
 				rts				
 *--------------------------------------
@@ -829,39 +846,40 @@ XDOS.VCBCmpGBUF	lda XDOS.GBuf+4			with name in directory.
 				ldx .1+1				xvcbptr : offset to start of vcb (rev note #23)
 				rts
 *--------------------------------------
-tstdupvol 		lda #XDOS.VCB0		 	check for other logged in volumes with the same name.
+XDOS.ChkDupVol	lda #XDOS.VCB0		 	check for other logged in volumes with the same name.
 
-L3B2C  			tax
+.1  			tax
 				jsr XDOS.VCBCmpGBUF
-				bcs L3B41			  	if no match.
+				bcs .2				  	if no match.
 
 				lda XDOS.VCBs+VCB.OFCNT,x	test for any open files.
-				bne L3B4B			  	cannot look at this volume.
+				bne .3				  	cannot look at this volume.
 
-				stz XDOS.VCBs,x			 	take duplicate offline if no open files
+				stz XDOS.VCBs,x			take duplicate offline if no open files
 				stz XDOS.VCBs+VCB.DEV,x
 *				clc					  	ok to log in new volume.
 				rts
 
-L3B41  			txa		 				index to next vcb
+.2  			txa		 				index to next vcb
 *				sec
 				adc #VCB-1
-				bcc L3B2C			  	branch if more to check
+				bcc .1				  	branch if more to check
 
 				clc
 				rts
 
-L3B4B  			sta XDOS.VCBDupFlag		duplicate has been found.
+.3  			sta XDOS.VCBDupFlag		duplicate has been found.
 				stx XDOS.VCBDupEnt		save pointer to conflicting vcb.
 				sec		 				error.
 				rts
 *--------------------------------------
-tstfrblk 		ldx XDOS.VCBPtr			 	test if enough free blocks available for request.
+XDOS.CheckFree	ldx XDOS.VCBPtr			test if enough free blocks available for request.
 				lda XDOS.VCBs+VCB.FBLK+1,x	check if proper count for this volume.
 				ora XDOS.VCBs+VCB.FBLK,x
-				bne L3BAD			  	branch if count is non-zero.
+				bne XDOS.CheckFree1		branch if count is non-zero.
 
-tkfrecnt 		jsr cntbms				get # of bitmaps
+XDOS.GetFreeCntVCBX
+				jsr XDOS.GetBMCnt		get # of bitmaps
 				sta bmcnt			  	and save.
 
 				stz scrtch			 	start count at 0
@@ -879,31 +897,31 @@ tkfrecnt 		jsr cntbms				get # of bitmaps
 				lda XDOS.VCBs+VCB.BMAP+1,x
 				sta ZP.BLKNUM+1
 
-L3B81  			jsr XDOS.ReadGBuf		use general buffer for temp space to
+.1  			jsr XDOS.ReadGBuf		use general buffer for temp space to
 				bcs L3BC1			  	count free blocks (bits).
 
-				jsr count
+				jsr XDOS.CntFreeGBuf
 				dec bmcnt			  	was that the last bitmap?
-				bmi L3B96			  	if so, go change fcb so not done again.
+				bmi .2				  	if so, go change fcb so not done again.
 
 				inc ZP.BLKNUM
-				bne L3B81
+				bne .1
 
 				inc ZP.BLKNUM+1
-				bra L3B81
+				bra .1
 
-L3B96  			ldx XDOS.VCBPtr			mark which block had 1st free space
+.2  			ldx XDOS.VCBPtr			mark which block had 1st free space
 				lda nofree
 				bmi L3BBE			 	if no free space was found.
 
 				sta XDOS.VCBs+VCB.BMAPIDX,x		update the free count.
 
 				lda scrtch+1
-				sta XDOS.VCBs+VCB.FBLK+1,x		update volume control byte.
+				sta XDOS.VCBs+VCB.FBLK+1,x	update volume control byte.
 				lda scrtch
 				sta XDOS.VCBs+VCB.FBLK,x
-				
-L3BAD  			lda XDOS.VCBs+VCB.FBLK,x		compare total available free blocks
+*--------------------------------------				
+XDOS.CheckFree1	lda XDOS.VCBs+VCB.FBLK,x	compare total available free blocks
 				sec		 				on this volume.
 				sbc reql
 				lda XDOS.VCBs+VCB.FBLK+1,x
@@ -917,57 +935,57 @@ L3BBE  			lda #MLI.E.VOLFULL
 				sec
 L3BC1  			rts
 *--------------------------------------
-count			ldy #$00
+XDOS.CntFreeGBuf
+				ldy #$00
 
-L3BC4  			lda XDOS.GBuf,y				bit pattern.
-				beq L3BCC			  	don't count
+.1  			lda XDOS.GBuf,y			bit pattern.
+				beq .2				  	don't count
 
-				jsr cntfree
+				jsr XDOS.CntFreeA
 
-L3BCC  			lda XDOS.GBuf+$100,y			do both pages with same loop
-				beq L3BD4
+.2  			lda XDOS.GBuf+$100,y	do both pages with same loop
+				beq .3
 
-				jsr cntfree
+				jsr XDOS.CntFreeA
 				
-L3BD4  			iny
-				bne L3BC4			  	loop until all 512 bytes counted.
+.3  			iny
+				bne .1				  	loop until all 512 bytes counted.
 
 				bit nofree			 	has 1st block w/free space been found?
-				bpl L3BEE			  	if yes.
+				bpl .8				  	if yes.
 
 				lda scrtch			 	test to see if any blocks were counted
 				ora scrtch+1
-				beq L3BEE			  	branch if none counted.
+				beq .8				  	branch if none counted.
 
-				jsr cntbms			 	get total # of maps.
+				jsr XDOS.GetBMCnt	 	get total # of maps.
 				sec		 				subtract countdown from total bitmaps
 				sbc bmcnt
 				sta nofree
 
-L3BEE  			rts
+.8  			rts
 *--------------------------------------
-cntfree			asl			  			count the # of bits in this byte
-				bcc L3BFA
+XDOS.CntFreeA	asl			  			count the # of bits in this byte
+				bcc .1
 
 				inc scrtch
-				bne L3BFA
+				bne .1
 
 				inc scrtch+1
 
-L3BFA  			ora #$00
-				bne cntfree				loop until all bits counted
-				rts
+.1  			tax
+				bne XDOS.CntFreeA		loop until all bits counted
+
+.8				rts
 *--------------------------------------
-cntbms			ldx XDOS.VCBPtr
-				ldy XDOS.VCBs+VCB.TBLK+1,x	return the # of bitmaps
-				lda XDOS.VCBs+VCB.TBLK,x		possible with the total count
-				bne L3C0B			  	found in the vcb.
+XDOS.GetBMCnt	ldx XDOS.VCBPtr
+				lda XDOS.VCBs+VCB.TBLK+1,x	return the # of bitmaps
+				ldy XDOS.VCBs+VCB.TBLK,x	possible with the total count
+				bne .1				  	found in the vcb.
 
-				dey						adj for bitmap block boundary
+				dec						adj for bitmap block boundary
 
-L3C0B  			tya
-
-				lsr			  			divide by 16. the result is
+.1  			lsr			  			divide by 16. the result is
 				lsr			  			the # of bitmaps.
 				lsr
 				lsr
