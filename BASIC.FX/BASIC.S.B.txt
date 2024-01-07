@@ -115,7 +115,7 @@ BS.SetFileBuf	sta	GP.SBUFADR+1
 				stz	GP.SBUFADR
 				lda BS.REFNUMs,x
 				sta	GP.MLIMRKEOFBUF.REFNUM
-				lda #MLI.C.SETBUF
+				lda #MLI.SETBUF
 				jmp GP.GOSYSTEM
 *--------------------------------------
 BS.GETBUFR		jsr	BS.GetSysBufA
@@ -461,7 +461,9 @@ BS.LINEBUFCLR80	lda #$A0
 
 				rts
 *--------------------------------------
-BS.DOSCMD		lda #$FF
+BS.DOSCMD		stz BS.bFreeBuf
+
+				lda #$FF
 				sta	GP.XCNUM
 				lda #$20
 				sta	BS.GetCharSep
@@ -481,9 +483,9 @@ LA6A5			jsr	BS.IsIntCmd
 				bcc .1
 
 				jsr	BS.IsExtCmd
-				bcs	LA6A2
+				bcc .1
 				
-				jmp	BS.ExecCmd
+				rts
 
 .1				lda GP.STATE
 				bne	LA6BA
@@ -524,7 +526,7 @@ LA6BA			stz	GP.FoundBITS
 				lda GP.AllowedBITS
 				bpl	LA6F8				CMDBITS0.PFIX
 
-				lda #MLI.C.GETPREFIX
+				lda #MLI.GETPREFIX
 				jsr	GP.GOSYSTEM
 
 LA6F8			pla
@@ -738,11 +740,27 @@ LA80B			lda GP.XCNUM
 				rts
 
 .8				clc
-LA844			jmp	(BS.KW.JMPADDR)
+LA844			jsr .1
+
+				bit BS.bFreeBuf
+				bpl .8
+
+				php
+				pha
+				
+				jsr GP.FREEBUFR
+				
+				pla
+				plp
+.8				rts
+
+.1				jmp	(BS.KW.JMPADDR)
 
 BS.SYNERR		lda #BS.E.SYNTAX
 LA849			sec
 				rts
+				
+BS.bFreeBuf		.BS 1				
 *--------------------------------------
 BS.GetVolAtSxDy	lda GP.ParamS
 				asl
@@ -762,7 +780,7 @@ BS.GetVolAtSxDy	lda GP.ParamS
 				ldy	#$02
 				jsr BS.SetSBUFADRXY
 
-				lda #MLI.C.ONLINE
+				lda #MLI.ONLINE
 				jsr	GP.GOSYSTEM
 				bcs	LA849
 
@@ -1229,7 +1247,7 @@ BS.CreateFileOrDir
 
 LAD82			stx	GP.CRACCESS
 				sty	GP.CRSTTYPE
-				lda #MLI.C.CREATE
+				lda #MLI.CREATE
 				jmp	GP.GOSYSTEM
 
 LAD8D			lda #BS.E.NOBUFFER
@@ -1238,14 +1256,14 @@ LAD8D			lda #BS.E.NOBUFFER
 BS.KW.RENAME	lda GP.FoundBITS
 				lsr
 				lsr
-				lda #MLI.C.RENAME
+				lda #MLI.RENAME
 				bcs	LAD9E
 
 				jmp	BS.SYNERR
 *--------------------------------------
-BS.KW.DELETE	lda #MLI.C.DESTROY
+BS.KW.DELETE	lda #MLI.DESTROY
 				.HS 2C					BIT ABS
-BS.SETPREFIX	lda #MLI.C.SETPREFIX
+BS.SETPREFIX	lda #MLI.SETPREFIX
 
 LAD9E			jmp	GP.GOSYSTEM
 *--------------------------------------
@@ -1297,7 +1315,6 @@ LADF0			sec
 				rts
 *--------------------------------------
 BS.IsExtCmd		ldx #BSX.GetPath.X
-
 				jsr BS.ToAUX
 
 				ldx BS.CMDBUF.LEN
@@ -1317,40 +1334,89 @@ BS.IsExtCmd		ldx #BSX.GetPath.X
 				bra .1
 				
 .2				stx BS.CMDBUF.LEN
+				dey
+				sty GP.XLEN
 
 				jsr	BS.GetFileInfo
-				bcs .9
-
-				jsr MON.CROUT
+				bcs .99
 				
-				lda GP.FIAUXTYPE+1
-				ldx GP.FIAUXTYPE
-				jsr PRNTAX
+				stz GP.XCNUM
+				
+				lda AS.HIMEM+1
+				sta	BS.BUFPAGE
 
-				jsr MON.CROUT
+				lda #$01				Read
+				ldx	#$06				BIN
 
-				lda #$01
-				ldx	#$04
 				jsr	BS.OpenTypeXAccessA
-			>DEBUG
-				bcs .9
+				bcs .99
 
 				jsr	BS.MLIGetEOF
-				bcs .9
+				php
+				pha
+				jsr BS.MLIClose
+				pla
+				plp
+				bcs .99
 
-				lda GP.SBUFADR+1
-				ldx GP.SBUFADR
-				jsr PRNTAX
-
-				jsr MON.CROUT
-
-
-				jmp	BS.MLIClose			
-
-.9				rts
-*--------------------------------------
-BS.ExecCmd		clc
+				lda GP.SBUFADR+2		File LEN in GP.SBUFADR
+				beq .20
+				
+				lda #BS.E.TOOLARGE
+				sec
 				rts
+
+.20				lda GP.SBUFADR+1
+				sta GP.MLIRW.COUNT+1
+				ldx GP.SBUFADR
+				stx GP.MLIRW.COUNT
+				beq .3
+				
+				inc
+
+.3				jsr GP.GETBUFR
+				bcs .99
+							
+				dec BS.bFreeBuf
+				stz GP.MLIRW.DATAPTR
+
+			stz BS.KW.JMPADDR
+
+				lda GP.SBUFADR+1		Buffer Addr in GP.SBUFADR
+				sta GP.MLIRW.DATAPTR+1
+
+			sta BS.KW.JMPADDR+1
+
+				lda AS.HIMEM+1
+				sta	BS.BUFPAGE
+
+				lda #$01				Read
+				ldx	#$06				BIN
+
+				jsr	BS.OpenTypeXAccessA
+				bcs .98
+
+				lda #MLI.READ
+				jsr	GP.GOSYSTEM
+				bcs .98
+		
+				jsr BS.MLIClose
+				bcs .98
+		
+				ldx #BSX.Rel.X
+
+				jsr BS.ToAUX
+				bcc .99
+				
+.98				pha
+
+				jsr GP.FREEBUFR
+				
+				pla
+
+				sec
+
+.99				rts
 *--------------------------------------
 MAN
 SAVE usr/src/basic.fx/basic.s.b
