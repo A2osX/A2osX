@@ -1,8 +1,8 @@
 # A2osX Multi-Tasking OS for Apple II  
 
-### Updated May 24, 2020
+### Updated January 17, 2024
 
-## A2osX 0.94
+## A2osX 0.95
 
 ![](./.screen-shots/ScreenShot.Logo.png)
 
@@ -22,15 +22,20 @@ Consult the **[documentation](#documentation)** section below to find other reso
 
 ## News
 
-### KansasFest 2021
+### Lots of updates for 2024!
 
-The A2osX team is proud to present "A2osX and the Languages of Development," a virtual KansasFest 2021 presentation by Patrick Kloepfer, which you can find **[here](https://www.youtube.com/watch?v=5OO9vj991vo)**.
+It has been a long time since the news has been updated, but that doesn't mean that development on A2osX has ceased in the last 4 years! We've actually had quite a number of releases over this time. In general, stability has been greatly improved but there have also been additions like BASIC.FX which is a ProDOS BASIC.SYSTEM environment which supports a number of ProDOS FX extensions (RamWorks III and extension commands for starters).
 
-### Upcoming Release - 0.94 Stable Alpha
+As far as where things are going now, development is underway on Kernel 1.0 which will finally bring support for breaking past the 128KB barrier of the //e series by supporting RamWorks-type memory cards. In the past, RamWorks boards were supported but would only allow for /RAM type storage. With Kernel 1.0, up to 8MB of RAM can now be used for code and applications! Early builds of the new kernel are expected in 1H 2024.
 
-The A2osX Team is preparing to issue the first Stable Alpha of A2osX Version 0.94.  This new version will include an updated version of ProDOS FX, further kernel enhancements to improve memory usage and for the first time an included Assembler so developers can edit, assemble and test problems all from with A2osX.  We are inviting interested developers and testers to [join us on Slack!](#join-us-on-slack)
+With current builds and all going forward, the distributions are only shipped with [ProDOS FX](ProDOS.md) by default. While 2.0.3tc is still available and can be used with A2osX, the recommendation is now to use FX because of the filename case handling in addition to the number of under-the-hood improvements that FX offers. Both FX and 2.0.3tc's clock tables have been updated for 2024.
+
+We are currently looking for volunteers to help with flushing out the C libraries! A C89-compliant compiler is available, however, the API needs some work to be compliant and can result in changing the kernel's APIs too, so "the sooner, the better" as the saying goes. Want to help? Reach out on the Slack server!
+
+Finally, we are always looking for people to help! A project as complicated at A2osX requires a lot of testing, but we always need help with creating new applications, libraries, and documentation. If you have some applicable skills, let us know!
 
 If you would like to read all the past news articles for A2osX, you can read the news article found **[here](.Docs/News.md)**.
+
 
 ## **Visit us at [A2osX](http://www.a2osx.com)**
 
@@ -75,4 +80,4 @@ The full A2osX license can be found **[Here](LICENSE)**.
 
 ## Copyright
 
-Copyright 2015 - 2020, Remy Gibert and the A2osX contributors.
+Copyright 2015 - 2024, Remy Gibert and the A2osX contributors.
