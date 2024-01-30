@@ -1,0 +1,433 @@
+NEW
+  AUTO 3,1
+				.LIST OFF
+				.OP	65C02
+				.OR	$2000
+				.TF bin/mac2unix
+*--------------------------------------
+				.INB inc/macros.i
+				.INB inc/a2osx.i
+				.INB inc/kernel.i
+				.INB inc/mli.i
+				.INB inc/mli.e.i
+*--------------------------------------
+X.ENTER.SUBDIR	.EQ 0
+X.COPY.TO.DEST	.EQ 0
+X.DELETE.SOURCE	.EQ 0
+X.RESET.SRC.DIR	.EQ 0
+*--------------------------------------
+				.DUMMY
+				.OR ZPBIN
+ZS.START
+ZPPtr1			.BS 2
+ZPPtr2			.BS 2
+ZPFileName		.BS 2
+ZPFileStat		.BS 2
+
+ZPFullPath		.BS 2
+ZPRelPath		.BS 2
+ZPFileBuf		.BS 2
+
+ArgIndex		.BS 1
+hFile			.BS 1
+
+FilePos			.BS 4
+
+ByteCnt			.BS 2
+
+bPause			.BS 1
+bContinue		.BS 1
+bRecurse		.BS 1
+
+ZS.END			.ED
+*--------------------------------------
+*			File Header (16 Bytes)
+*--------------------------------------
+CS.START		cld
+				jmp (.1,x)
+				.DA #$61				6502,Level 1 (65c02)
+				.DA #1					BIN Layout Version 1
+				.DA 0
+				.DA CS.END-CS.START		Code Size (without Constants)
+				.DA DS.END-DS.START		Data SegmentSize
+				.DA #64					Stack Size
+				.DA #ZS.END-ZS.START	Zero Page Size
+				.DA 0
+*--------------------------------------
+* Relocation Table
+*--------------------------------------
+.1				.DA CS.INIT
+				.DA CS.RUN
+				.DA CS.DOEVENT		
+				.DA	CS.QUIT
+L.MSG.USAGE		.DA MSG.USAGE
+L.MSG.CRLF		.DA MSG.CRLF
+L.MSG.ERR		.DA MSG.ERR
+				.DA 0
+*--------------------------------------
+CS.INIT			clc
+				rts
+*--------------------------------------
+CS.RUN			inc ArgIndex
+				lda ArgIndex
+				>SYSCALL ArgV
+				bcs .5
+				
+				>STYA ZPPtr1
+				lda (ZPPtr1)
+				cmp #'-'
+				bne .4
+				
+				jsr CS.RUN.CheckOpt
+				bcc CS.RUN
+
+.9				>LDYA L.MSG.USAGE
+				>SYSCALL PutS
+				lda #E.SYN
+				sec
+				rts
+
+.4				>LDA.G hSrcBasePath
+				bne .9
+
+				>LDYA ZPPtr1
+				jsr X.InitSrcDirYA
+				bcc CS.RUN
+
+.99				rts
+*--------------------------------------
+.5				>LDA.G hSrcBasePath
+				bne .6
+				
+				ldy #S.PS.hCWD
+				lda (pPS),y
+				>SYSCALL GetMemPtr
+				>STYA ZPPtr1
+				
+.6				>LDYAI 256
+				>SYSCALL Malloc
+				bcs .99
+
+				>STYA ZPFullPath
+
+				>LDA.G hSrcBasePath
+				>SYSCALL GetMemPtr
+				>STYA ZPPtr1
+
+				ldy #$ff
+
+.80				iny
+				lda (ZPPtr1),y
+				bne .80
+
+				tya
+				clc
+				adc ZPFullPath
+				sta ZPRelPath
+				lda ZPFullPath+1
+				adc #0
+				sta ZPRelPath+1
+
+				>LDYAI 256
+				>SYSCALL Malloc
+				bcs .99
+
+				>STYA ZPFileBuf
+*--------------------------------------
+CS.RUN.LOOP		jsr CS.RUN.CheckSTDIN
+				bcs .99
+
+				jsr X.GetEntry
+				bcs .9
+
+				ldy #S.STAT.P.DRIVE
+				lda (ZPFileStat),y		ProDOS Device ?
+				beq .5
+
+				jsr CS.RUN.DEV
+				bcc CS.RUN.LOOP
+
+				rts
+				
+.5				ldy #S.STAT.MODE+1
+				lda (ZPFileStat),y
+				and #$F0
+				cmp /S.STAT.MODE.DIR
+				bne .6
+
+				jsr CS.RUN.DIR
+				bcs .99
+
+				bra .8			
+
+.6				jsr CS.RUN.FILE
+				bcs .99
+
+				bra .8
+
+.9				jsr X.LeaveSubDir
+				bcs .90
+
+				jsr X.BasePath..
+.8				jsr X.GetNextEntry
+				jmp CS.RUN.LOOP
+
+.90				lda #0
+				sec
+.99				rts
+*--------------------------------------
+CS.RUN.CheckSTDIN
+				ldy #S.PS.hStdIn
+				lda (pPS),y
+				>SYSCALL FEOF
+				bcs .9
+
+				tay
+				bne .1
+
+				>SYSCALL GetChar
+				bcs .9
+
+				cmp #$03				Ctrl-C
+				beq .9					Abort....
+
+				cmp #$13				Ctrl-S
+				bne .1
+
+				lda bPause
+				eor	#$ff
+				sta bPause
+				bne CS.RUN.CheckSTDIN
+				
+				clc
+				rts
+
+.1				lda bPause
+				bne CS.RUN.CheckSTDIN	Pause...
+
+*				clc
+
+.9				rts	
+*--------------------------------------
+CS.RUN.DIR		lda bRecurse
+				bpl .8
+
+				lda (ZPFileName)
+				cmp #'.'
+				beq .8
+
+				>LDYA ZPFileName
+				jsr X.EnterSubDirYA
+				jmp CS.RUN.CheckErr
+
+.8				clc
+				rts
+*--------------------------------------
+CS.RUN.DEV
+.8				jsr X.GetNextEntry
+
+CS.RUN.DEV.CLC.RTS
+				clc
+				rts
+*--------------------------------------
+CS.RUN.FILE		jsr X.IncludeMatch
+				bcs CS.RUN.DEV.CLC.RTS	no match, skip....
+
+				jsr CS.RUN.GetFilePath
+
+				jsr CS.RUN.OpenFile
+				bcs .9
+
+				jsr CS.RUN.FILE.LOOP
+				bcs .7
+				
+				jmp CS.RUN.CloseFile
+
+.8				clc
+				rts
+
+.7				pha
+				jsr CS.RUN.CloseFile
+				pla
+				sec
+.9				jmp CS.RUN.CheckErr
+
+.99				rts
+*--------------------------------------
+CS.RUN.FILE.LOOP
+.1				>PUSHB hFile
+				>PUSHW ZPFileBuf
+				>PUSHWI 256
+				>SYSCALL FRead
+				bcs .8
+
+				>STYA ByteCnt
+				
+				jsr CS.RUN.FILE.MOD
+
+				jsr CS.RUN.FSeek
+				bcs .99
+
+				>PUSHB hFile
+				>PUSHW ZPFileBuf
+				>PUSHW ByteCnt
+				>SYSCALL FWrite
+				bcs .99
+				
+				lda ByteCnt
+*				clc
+				adc FilePos
+				sta FilePos
+				lda ByteCnt+1
+				adc FilePos+1
+				sta FilePos+1
+				bcc .1
+				
+				inc FilePos+2
+				bne .1
+				
+				inc FilePos+3
+				jmp .1
+				
+.8				cmp #MLI.E.EOF
+				bne .99
+
+				clc
+
+.99				rts
+*--------------------------------------
+CS.RUN.FILE.MOD	ldy #0
+				
+.2				lda	(ZPFileBuf),y
+				cmp #C.LF
+				bne .3
+				
+				lda #C.CR
+				sta	(ZPFileBuf),y
+
+.3				iny
+				cpy ByteCnt
+				bne .2
+
+				rts
+*--------------------------------------
+CS.RUN.CheckErr	bcc .9
+
+				pha
+				>PUSHW L.MSG.ERR
+				>PUSHA
+				>PUSHBI 1
+				>SYSCALL PrintF
+				lda bContinue
+				eor #$80
+				asl
+				pla
+
+.9				rts
+*--------------------------------------
+CS.RUN.GetFilePath
+				>PUSHW ZPFullPath
+				>LDA.G hSrcBasePath
+				>SYSCALL GetMemPtr
+				>PUSHYA
+				>SYSCALL StrCpy
+
+				>PUSHW ZPFullPath
+				>PUSHW ZPFileName
+				>SYSCALL StrCat
+				rts
+*--------------------------------------
+CS.RUN.OpenFile	>PUSHW ZPFullPath
+				>PUSHBI	O.RDWR+O.APPEND
+				>PUSHBI 0				Type
+				>PUSHWZ					Aux type
+				>SYSCALL FOpen
+				bcs CS.RUN.FSeek.9
+
+				sta hFile
+				
+				stz FilePos
+				stz FilePos+1
+				stz FilePos+2
+				stz FilePos+3
+				
+CS.RUN.FSeek	>PUSHB hFile
+				>PUSHL FilePos
+				>PUSHBI SEEK.SET
+				>SYSCALL fseek
+				
+CS.RUN.FSeek.9	rts
+*--------------------------------------
+CS.RUN.CloseFile
+				lda hFile
+				>SYSCALL FClose
+				bcs .9
+				
+				stz hFile
+				
+.9				rts
+*--------------------------------------
+CS.DOEVENT		sec
+				rts
+*--------------------------------------
+CS.QUIT			jsr X.LeaveSubDir
+				bcc CS.QUIT
+
+				>LDA.G hInclude
+				beq .1
+
+				>SYSCALL FreeMem
+
+.1				>LDYA ZPFileBuf
+				>SYSCALL Free
+
+.2				>LDYA ZPFullPath
+				>SYSCALL Free
+
+.8				clc
+				rts
+*--------------------------------------
+CS.RUN.CheckOpt	ldy #1 
+				lda (ZPPtr1),y
+
+				ldx #OptionVars-OptionList-1
+
+.2				cmp OptionList,x
+				beq .3
+
+				dex
+				bpl .2
+
+				sec
+				rts
+
+.3				ldy OptionVars,x
+				lda #$ff
+				sta 0,y
+				clc
+				rts
+*--------------------------------------
+				.INB usr/src/shared/x.fileenum.s
+*--------------------------------------
+CS.END
+*--------------------------------------
+OptionList		.AS "CRcr"
+OptionVars		.DA #bContinue,#bRecurse
+				.DA #bContinue,#bRecurse
+*--------------------------------------
+MSG.USAGE		.CS "Usage : MAC2UNIX File(s) (*,? wildcards allowed)\r\n"
+				.CS "   -C : Continue on error\r\n"
+				.CS "   -R : Recurse subdirectories\r\n"
+MSG.CRLF		.CZ "\r\n"
+MSG.ERR			.CZ "[%h]\r\n"
+*--------------------------------------
+				.DUMMY
+				.OR 0
+DS.START
+				.INB usr/src/shared/x.fileenum.g
+
+DS.END			.ED
+*--------------------------------------
+MAN
+SAVE usr/src/bin/mac2unix.s
+ASM
