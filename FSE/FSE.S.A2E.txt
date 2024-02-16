@@ -1,0 +1,240 @@
+NEW
+  AUTO 3,1
+*--------------------------------
+
+D.YSAVE          .EQ VAR.BEG-1
+D.CHR.UNDER.CURS .EQ D.YSAVE-1
+ 
+*--------------------------------
+* APPLE IIE VIDEO JUMP VECTORS
+*  1. READ KEYBOARD KEY CODE
+*       TURNS ON CURSOR
+*       GETS KEY CODE
+*       TURNS OFF CURSOR
+*       REG-A HAS KEY CODE SIGN BIT ON.
+*  2. HORIZONTAL TAB
+*       REG-A HAS TAB 0-79
+*  3. VERTICAL TAB
+*       REG-A HAS TAB 0-23
+*  4. CLEAR TO END OF LINE
+*  5. CLEAR TO END OF SCREEN
+*  6. CHARACTER OUTPUT ROUTINE
+*       REG-A HAS CHAR TO OUTPUT.
+*       MUST NOT SCROLL SCREEN OR
+*       GO TO NEXT LINE WHEN LAST
+*       CHARACTER IS PRINTED ON A LINE.
+*--------------------------------
+ 
+       JMP D.RD.KBD
+*      JMP D.MY.HTAB
+D.MY.HTAB
+ 
+       STA CH       set tab value
+       RTS
+ 
+       JMP D.MY.VTAB
+       JMP D.MY.CLREOL
+       JMP D.MY.CLREOP
+*      JMP D.MY.COUT
+ 
+*--------------------------------
+ 
+D.MY.COUT
+ 
+       STY D.YSAVE
+       PHA          SAVE ORIG CHAR
+       CMP #$A0     CONVERT CNTRL CHARS TO INVERSE ALPHA
+       BCS .1       REG CHAR
+       AND #$7F     CNTRL CHAR
+* dcj *ORA #$40     makes mousetext!!!
+ 
+.1     PHA          store in-line to speed it up some
+       STA D.SET80COL
+       STA D.SET80VID
+       STA D.SETALTCHR
+       LDA CH
+       LSR
+       TAY
+       PLA
+       PHP
+       SEI
+       BIT D.TXTPAGE2
+       BCC .2
+       BIT D.TXTPAGE1
+ 
+.2     STA (BASEL),Y
+       BIT D.TXTPAGE1
+       PLP
+       INC CH
+       PLA          RESTORE ORIG CHAR
+       LDY D.YSAVE
+ 
+D.SEV  RTS
+ 
+*--------------------------------
+ 
+D.MY.CLP
+ 
+       LDA CTR
+       JSR D.MY.VTAB
+ 
+D.MY.CLREOP
+ 
+       JSR D.MY.CLREOL   ZAP REST OF LINE
+       LDA #0
+       JSR D.MY.HTAB     NEXT LINE ZAPPED FROM COL 0
+       INC CTR           BUMP COUNT TO NEXT LINE
+       LDA CTR
+       CMP LAST.LINE     END OF PAGE?
+       BCC D.MY.CLP      < END
+       BEQ D.MY.CLP      = END
+       RTS               > END
+ 
+*--------------------------------
+ 
+D.MY.VTAB STA CV         SET TAB VALUE
+       JMP M.BASCALC     COMPUTE NEW COUT BASE ADRS
+ 
+*--------------------------------
+ 
+D.RD80VID   .EQ $C01F
+D.TXTPAGE2  .EQ $C055
+D.TXTPAGE1  .EQ $C054
+D.SET80COL  .EQ $C001
+D.SET80VID  .EQ $C00D
+D.SETALTCHR .EQ $C00F
+
+D.PICK CLV
+
+D.SCREENIT
+ 
+       PHA
+       STA D.SET80COL    ENABLE 80 COL STORE
+       STA D.SET80VID    ENABLE 80 COL DISPLAY
+       STA D.SETALTCHR   ENABLE LOWER CASE
+       LDA CH
+       LSR               CH MOD 2 FOR PAGE SELECT
+       TAY               CH/2 FOR INDEX
+       BVS .20           GO STORE
+* 80 COL PICK
+       PHP
+       SEI
+       LDA D.TXTPAGE2
+       BCC .10
+       LDA D.TXTPAGE1
+ 
+.10    LDA (BASEL),Y     GET 80 COL CHAR
+       TAY
+       LDA D.TXTPAGE1
+       PLP
+       PLA
+       TYA
+       PHA
+       BVC .30           EXIT ALWAYS
+* 80 COL STORE
+ 
+.20    PLA
+       PHA
+       PHP
+       SEI
+       PHA
+       LDA D.TXTPAGE2
+       BCC .21
+       LDA D.TXTPAGE1
+ 
+.21    PLA
+       STA (BASEL),Y     PUT 80 COL CHAR
+       LDA D.TXTPAGE1
+       PLP
+ 
+* COMMON EXIT
+ 
+.30    PLA
+       RTS
+ 
+*--------------------------------
+ 
+D.MY.CLREOL
+ 
+       LDY CH
+ 
+.1     LDA #$A0          A-REG = BLANK
+       CPY SCREEN.WIDTH
+       BCS .2
+       JSR D.MY.COUT     OUTPUT BLANKS UNTIL SCREEN WIDTH
+       LDY CH
+       BNE .1            ...ALWAYS
+ 
+.2     RTS
+ 
+*--------------------------------
+ 
+D.RD.KBD
+ 
+       JSR D.POSN        SETUP CURSOR POSN
+       LDA ESC.FLAG      SEE IF EDIT MODE
+       BNE .20           YES IT IS
+* CURSOR MODE - CURSOR IS INVERSE "+"
+       JSR D.PICK
+       STA D.CHR.UNDER.CURS
+       AND #$80          SAVE INV BIT
+       EOR #$80+'+       FLIP IT FOR + CURSOR
+       BIT D.SEV
+       JSR D.SCREENIT
+ 
+.10    LDA $C000
+       BPL .10
+ 
+.11    BIT $C010
+       PHA
+       LDA D.CHR.UNDER.CURS
+       BIT D.SEV
+       JSR D.SCREENIT
+       PLA
+       RTS
+ 
+* EDIT MODE - CURSOR IS BLINKING CURRENT CHAR
+*      BLINKED WITH SOFTWARE TIMING LOOP.
+ 
+.20    JSR D.PICK
+       STA D.CHR.UNDER.CURS
+ 
+.21    JSR D.PICK        TOGGLE INV FLAG
+       EOR #$80
+       cmp #$40
+       bcc .99
+       cmp #$60
+       bcs .99
+       and #$1F
+ 
+.99    BIT D.SEV
+       JSR D.SCREENIT
+       LDY #200          LOOP 200 TIMES BEFORE FLIPPING CHAR
+ 
+.22    LDA $C000
+       BMI .11
+       LDA #00
+ 
+.23    SEC               COUNT 7*256 MICRO SECS
+       SBC #1
+       BNE .23
+       DEY
+       BEQ .21           END LOOP - FLIP CHAR
+       BNE .22      BA   CK KEY AGAIN
+ 
+*--------------------------------
+ 
+D.POSN LDA POSV
+       JSR D.MY.VTAB     POSITION VERTICALLY
+       LDA POSH
+       SEC
+       SBC LEFT.MARGIN
+       CLC
+       ADC RM.ADJUST
+       JMP D.MY.HTAB     POSITION HORIZONTALLY
+ 
+*--------------------------------
+MAN
+SAVE usr/src/fse/fse.s.a2e
+LOAD usr/src/fse/fse.s
+ASM

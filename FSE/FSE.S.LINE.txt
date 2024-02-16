@@ -1,0 +1,479 @@
+NEW
+  AUTO 3,1
+*--------------------------------
+GET.KEY JSR READ.KEY.CODE
+COMP.PTR
+       LDX POSH
+       STX ED.PTR
+       RTS
+*--------------------------------
+EDIT.LINE LDA ESC.FLAG   IS HE IN EDIT MODE
+       BNE EDIT.ONE.LINE YES, GO EDIT
+       LDA SPECIAL.FLG   IS HE POPING INTO EDIT MODE?
+       BEQ .1            NO
+       STA ESC.FLAG      YES SET EDIT MODE NOW
+       BNE EDIT.ONE.LINE  GO EDIT
+.1     LDA ONCE.FLG      ONE TIME SCROLL FUNCTION
+       STA ESC.FLAG
+       BEQ GET.KEY       NO, JUST RETURN KEY
+EDIT.ONE.LINE
+       LDA #0
+       STA ONCE.FLG      CLEAR ONE TIME SCROLL FUNCTION
+       LDA FIRST.LINE    COMPUTE
+       STA CTR           INIT CTR
+       JSR P1.INIT       INIT PTR1 FOR EDIT LINE SEARCH
+.1     JSR P1.ENDCK      END OF PROG?
+       BNE .2            NO
+       JSR E.ESC         ERROR CANT EDIT *EOF*
+       LDA #0            CLEAR SPECIAL FLAG
+       STA SPECIAL.FLG
+       BEQ GET.KEY       GO GET KEY FOR SCROLL MODE
+.2     LDA CTR           SEE IF FOUND EDIT LINE
+       CMP POSV          POSV IS THE EDIT LINE WANTED
+       BEQ E.FOUND       FOUND LINE TO EDIT
+       JSR P1.ADD        BUMP FORWARD TO THE EDIT LINE
+       INC CTR           BUMP POSN CTR
+       BNE .1            ...ALWAYS
+E.FOUND LDA CTR
+       STA SAV.CTR       SAVE EDIT LINE POSN
+       LDA PTR1
+       STA SAV.PTR1      SAVE PTR TO IT
+       LDA PTR1+1
+       STA SAV.PTR1+1
+       LDY #1            SAVE LINE NUMBER
+       LDA (PTR1),Y
+       STA SAV.LNO
+       INY
+       LDA (PTR1),Y
+       STA SAV.LNO+1
+       JSR E.GETLN       GET THE LINE INTO WBUF
+* PTR1 IS PTR TO SOURCE LINE
+* WBUF HAS LINE EXPANDED
+.1     JSR E.PROCESS.KEY   READ AND PROCESS A KEY
+       BCC .1            NON-EXIT TYPE KEY
+       LDA CHANGE.FLG    DID LINE CHANGE
+       BEQ .2            NO
+       LDA #0            YES, CLEAR CHANGE FLAG
+       STA CHANGE.FLG
+       JSR E.SUBMIT.LINE   SUBMIT THE LINE
+.2     LDA ESC.FLAG      STILL IN EDIT MODE
+       BEQ EDIT.LINE     NO GO GET A KEY FOR SCROLL MODE
+       JSR E.ESC         CLEAR EDIT FLAG
+       INC ONCE.FLG      SET FLAG TO SAY WE ARE DOING
+       LDA CUR.KEY       1 SCROLL MODE FUNCTION
+       RTS               RETURN WITH A REG = FUNCTION CODE
+*--------------------------------
+ 
+; if skmod not installed, don't change case
+ 
+E.SHIFT BIT SKMOD.FLG
+       BPL .1
+       LDA ALPHA.FLG
+       EOR #$80           FLIP ALPHA LOCK FLAG
+       STA ALPHA.FLG
+.1     CLC
+       RTS
+*--------------------------------
+READ.KEY.CODE
+       JSR MY.RD.KBD     GET KEYBOARD CHAR
+       AND #$7F          DROP SIGN BIT
+       PHA
+       LDA ESC.FLAG      IS HE IN EDIT MODE?
+       BNE .50           YES, SO ALLOW CASE CHANGE
+       PLA               NO, SKIP CASE CHANGE
+       bpl .60           BA
+.50    PLA
+       BIT ALPHA.FLG     LOWER CASE
+       BPL .60           NO, UPPER CASE
+       BIT SKMOD.FLG     SHFT KEY MOD?
+       BPL .54           NO, SO DONT LOOK AT IT
+       BIT $C063         IS SHIFT KEY DOWN?
+       BMI .54           NO, FORCE LOWER CASE
+* FIX PROBLEM SHIFT CHARACTERS THAT MUST BE UPPER CASE
+       CMP #'^           ^ -> N
+       BNE .51
+       LDA #'N
+.51    CMP #'@           @ -> P
+       BNE .52
+       LDA #'P
+.52    CMP #']           ] -> M
+       BNE .53
+       LDA #'M
+.53    BNE .60           OTHERWISE USE UPERCASE VALUE
+* CK AND CHANGE CASE
+.54    CMP #'A           CHANGE UPPER CASE
+       BCC .60             ALPHA CHARS TO LOWER
+       CMP #'Z+1           CASE.
+       BCS .60
+       ORA #$20
+* PROCESS OTHER SHIFT KEYS
+.60    BIT SKMOD.FLG
+       BPL .2       NOT ALLOWED
+       BIT $C063    IS SW ON
+       BMI .2       NOPE
+       CMP #'H-$40  CHANGE <- TO ^"K"
+       BNE .10
+       LDA #'K-$40
+.10    CMP #'U-$40  CHANGE -> TO ^"J"
+       BNE .11
+       LDA #'J-$40
+.11    PHA
+       LDA ESC.FLAG  IF NOT IN EDIT MODE
+       BNE .1       EDIT MODE, NO CAN DO!
+       PLA
+       CMP #'I      CHANGE SHIFT I TO "2"
+       BNE .12
+       LDA #'2
+.12    CMP #']      CHANGE SHIFT M TO "1"
+       BNE .2
+       LDA #'1
+       PHA
+.1     PLA
+.2     STA CUR.KEY
+       RTS
+*--------------------------------
+P1.INIT LDA PP.BEG  SET PTR1 TO PROG START
+       STA PTR1
+       LDA PP.BEG+1
+       STA PTR1+1
+       RTS
+*--------------------------------
+P1.ENDCK LDA PTR1   CK FOR PTR1=END OF PROG
+       CMP PP.END
+       BNE .1
+       LDA PTR1+1
+       CMP PP.END+1
+.1     RTS
+*--------------------------------
+P1.ADD LDY #0       BUMP UP TO NEXT PROG LINE
+       LDA (PTR1),Y
+       CLC
+       ADC PTR1
+       STA PTR1
+       BCC .1
+       INC PTR1+1
+.1     RTS
+*--------------------------------
+ 
+E.SET.TAB
+ 
+       TXA
+       SEC
+       SBC #START.COL-1  CONVERT POSH TO TAB VALUES
+       TAX
+       LDY #0
+.1     CMP TAB.TBL,Y     SEARCH TAB TABLE
+       BEQ .10           MATCH EXACTLY MEANS DELETE
+       BCC .20           IF POSH<TAB(I) INSERT BEFORE TAB(I)
+       INY
+       CPY #SZ.TAB.TBL-1
+       BCC .1
+* APPEND TAB ON END
+       LDA TAB.TBL+SZ.TAB.TBL-1
+       BNE .99           FULL TABLE
+.2     LDA TAB.TBL,Y     LOOK BACKWARDS FOR NON-ZERO ENTRY
+       BNE .3            FOUND IT
+       DEY
+       BPL .2
+       TXA               FIRST ENTRY IS ZERO
+       STA TAB.TBL       PUT NEW TAB THERE
+       BNE .90
+.3     TXA               PUT INTO NEXT ENTRY
+       STA TAB.TBL+1,Y   THAT WAS THE LAST ZERO ENTRY
+       BNE .90           ...ALWAYS
+* DELETE TAB FROM TABLE
+.10    LDA TAB.TBL+1,Y   GET NEXT ENTRY
+       STA TAB.TBL,Y     PUT INTO CUR ENTRY
+       INY
+       CPY #SZ.TAB.TBL-1 SEE IF END OF TABLE
+       BCC .10
+       LDA #0            ZAP LAST ENTRY IN TABLE
+       STA TAB.TBL+SZ.TAB.TBL-1
+       BEQ .90           ...ALWAYS
+* INSERT TAB IN TABLE
+.20    PHA               SAVE TAB
+       LDA TAB.TBL,Y     GET CUR ENTRY
+       TAX               SAVE IT
+       PLA               GET NEW TAB
+       STA TAB.TBL,Y     PLUG IT IN
+       TXA               RECOVER SAVED TAB
+       INY
+       CPY #SZ.TAB.TBL-1  DO ANOTHER INSERT
+       BCC .20           IF NOT END OF TABLE
+       BCS .90           ...ALWAYS
+ 
+.99    JSR M.BELL
+
+.90    CLC
+       RTS
+*--------------------------------
+E.PROCESS.KEY LDA SPECIAL.FLG  CK FOR SPECIAL EDIT KEY
+       BEQ E.PK1         NOT SPECIAL
+       LDA #0            CLEAR SPECIAL
+       STA SPECIAL.FLG   EDIT FLAG
+       JSR COMP.PTR      copy POSH into ED.PTR using X-reg
+       LDA CUR.KEY       GET EDIT KEY
+       JMP E.PK2    'JMP' SINCE ^@ = $00
+E.PK1  JSR GET.KEY
+E.PK2  CMP #$20          IS IT CONTROL CHAR
+       BCC E.CNTRL       YES
+       STA CHANGE.FLG    NO, SET CHANGE FLAG AND TYPE OVER
+       STA WBUF,X        CURSOR CHAR
+       JSR E.SHOW.LINE   DISPLAY LINE TO SHOW CHANGE
+       LDX ED.PTR        GET POSITION
+E.RIT  CPX #254          END OF MAX LINE?
+       BCS E.RIT2        YES
+       JSR MOVE.RT       NO, MOVE RIGHT 1 COLUMN
+E.RIT1 JSR SHOW.ND       SHOW SCREEN IF NECESSARY
+E.RIT2 CLC
+       RTS
+*--------------------------------
+E.BKSP JSR MOVE.LF       MOVE LEFT TO PROCESS A BACKSPACE
+       JMP E.RIT1        GO SHOW SCREEN IF NEEDED
+*--------------------------------
+E.CNTRL LDY #0           SEARCH EDIT MODE FUNCTION TABLE
+ 
+.1     CMP E.TBL,Y       COMPARE KEY TO TABLE
+       BEQ .2            FOUND KEY
+       INY
+       INY
+       INY
+       CPY #E.TBLSZ
+       BCC .1
+       JSR M.BELL        NOT IN TABLE ERROR
+       JMP E.PK1
+.2     LDA E.TBL+2,Y     EXECUTE THE FUNCTION
+       PHA
+       LDA E.TBL+1,Y
+       PHA
+       RTS
+*--------------------------------
+E.END  LDX #254          SEARCH FROM HERE
+       LDA #$20          BLANK CHAR
+.1     CMP WBUF,X        IS IT BLANK
+       BNE .2            NO FOUND END CHAR
+       DEX
+       CPX #START.COL-1  DONT PASS COLUMN 1
+       BNE .1
+.2     CPX #254          IF FULL LINE DONT PASS EOL
+       BEQ .3            YES ON EOL
+       INX               NEXT CHAR IS END
+.3     TXA               THIS IS POSITION, LOCATE IT IN A WINDOW
+**** FALL INTO LOC.WNDW ****
+*--------------------------------
+LOC.WNDW STA POSH        IF LM>=POSH<RM
+       CMP LEFT.MARGIN   THEN STAY ON CURRENT WINDOW
+       BCC .0            OTHERWISE HUNT FOR WINDOW
+       CMP RIGHT.MARGIN
+       BCS .0
+       RTS               STAY ON WINDOW, RTN CRY CLR
+.0     LDA #START.COL
+.1     JSR SET.MARGIN
+       LDA LEFT.MARGIN
+       CLC
+       ADC HORT.PAGE
+       CMP POSH
+       BCS .2            FOUND THE WINDOW
+       CMP RT.FENCEL
+       BCC .1            NOT TOO FAR YET
+       LDA RT.FENCEL     THIS IS MAX LEFT MARGIN
+       CMP LEFT.MARGIN     UNLESS IT WAS BEFORE
+       BNE .1            NO,  TRY NEXT LEFT MARGIN
+       LDA RIGHT.MARGIN  BACK POSH TO THE
+       JSR LIMITR        RIGHT MARGIN
+.2     JMP E.RIT1
+*--------------------------------
+E.TAB  TXA
+       SEC
+       SBC #START.COL-1  CONVERT POSH TO TAB VALUES
+       LDY #0
+.1     CMP TAB.TBL,Y     SEARCH TAB TABLE
+       BCC .2            IF POSH<TAB(I) THEN POSITION TO TAB(I)
+       INY
+       CPY #SZ.TAB.TBL-1 
+       BCC .1
+       LDA TAB.TBL       USE FIRST TAB IF PAST LAST TAB
+       BNE E.TAB.BUMP    WRAP ARROUND TABS!
+       CLC               IF NO FIRST TAB, DO NOTHING
+       RTS
+.2     LDA TAB.TBL,Y     GET NEW POSH FROM TAB TABLE
+E.TAB.BUMP CLC
+       ADC #START.COL-1  CONVERT TO REAL POSITION
+       BNE LOC.WNDW      LOCATE IT IN A WINDOW
+*--------------------------------
+E.COPY1 LDA ED.PTR
+       SEC
+       SBC #START.COL-1  CONVERT POSH TO TAB VALUE
+       TAX
+       LDY #0
+.1     CMP TAB.TBL,Y     SEARCH TAB TABLE
+       BCC .2            AHA, FOUND POSITION TO COPY TO!
+       INY
+       CPY #SZ.TAB.TBL-1
+       BCC .1
+       LDA #248          COPY TO EOL IF PAST LAST TAB
+       BCS .3            ...ALWAYS
+.2     LDA TAB.TBL,Y     END POINT
+.3     STA ED.KEY        NEW CURSOR POSN
+.4     LDA WBUF+START.COL-1,X    COPY FROM WBUF
+       STA $F00+START.COL-1,X    INTO SAVED WBUF
+       INX
+       CPX ED.KEY        UNTIL WE REACH THE CURRENT
+       BCC .4            POSITION
+       TXA               THIS IS NEW POSN
+       PHA               SAVE POSN
+       JSR REST.WBUF     RESTORE WBUF
+       JSR E.SHOW.LINE   DISPLAY IT
+       PLA               GET SAVED POSN
+       STA CHANGE.FLG    SET CHANGE FLAG
+       BNE E.TAB.BUMP    ...ALWAYS
+*--------------------------------
+E.COPY JSR SAVE.WBUF     SAVE WBUF DATA
+       LDA POSV
+       SEC
+       SBC FIRST.LINE
+       BNE .1
+       LDY #255          IF ON FIRST LINE THEN PREV LINE=BLANKS
+       JSR FILL.WBUF
+       JMP E.COPY1
+.1     STA CTR           LOCATE AND GET PREV LINE IN WBUF
+       JSR P1.INIT
+.2     DEC CTR
+       BEQ .3
+       JSR P1.ADD
+       JMP .2
+.3     LDA #255          SET BLANK FILL POINT
+       STA FILL.TO
+       JSR GET.LINE.IN.WBUF
+       JMP E.COPY1
+*--------------------------------
+E.RESTORE
+       LDA SAV.PTR1      RESTORE LINE FROM PROG
+       STA PTR1          THROW AWAY EDIT CHANGES
+       LDA SAV.PTR1+1
+       STA PTR1+1
+       JSR E.GETLN       GET CUR LINE
+       JSR E.SHOW.LINE   DISPLAY NEW LINE
+*** FALL INTO E.BEG ***
+*--------------------------------
+E.BEG  LDA #START.COL    SET POSN TO BEGINING OF LINE
+       STA POSH
+       CMP LEFT.MARGIN   ARE WE ALREADY ON RIGHT WINDOW?
+       BEQ E.SL          YES
+       JSR SET.MARGIN    NO SET NEW MARGIN
+       JSR SHOW.ND       AND SHOW IT
+E.SL   JSR E.SHOW.LINE   SHOW CUR EDIT LINE
+       CLC
+       RTS
+*--------------------------------
+E.DEL  LDX #1            SET CHANGE FLAG
+       STX CHANGE.FLG
+       LDX ED.PTR        GET POSN
+.1     LDA WBUF,X        CK END OF LINE
+       BEQ E.SL          YES END
+       LDA WBUF+1,X      GET NEXT CHAR
+       BEQ .2            END OF LINE
+       STA WBUF,X        PUT OVER PREV CHAR
+       INX               NEXT COL SHIFT
+       BNE .1            ..ALWAYS
+.2     LDA #$20          PUT BLANK AT LAST
+       STA WBUF,X        CHAR POSN
+       BNE E.SL          ...ALWAYS
+*--------------------------------
+E.ZAP  LDA #$20          BLANK CHAR
+       STA CHANGE.FLG    SET CHANGE FLAG
+.1     STA WBUF,X        BLANK OUT FROM CUR POSN
+       INX               TO EOL
+       CPX #255
+       BNE .1            NEXT COLUMN
+       BEQ E.SL          ...ALWAYS   (GO SHOW LINE)
+*--------------------------------
+E.FIND JSR GET.KEY       GET KEY TO FIND
+       STA ED.KEY        SAVE IT
+.1     INX               NEXT COLUMN
+       CPX #255          END OF WBUF?
+       BEQ .2            YES
+       CMP WBUF,X        CK FOR KEY
+       BNE .1            NOT THERE
+       TXA
+       JSR LOC.WNDW      GET CORRECT WINDOW
+       JSR GET.KEY       GET KEY TO FIND
+       CMP ED.KEY        IS IT SAME
+       BEQ .1            NO, TREAT AS EDIT KEY
+       JMP E.PK2
+.2     JSR M.BELL
+       CLC
+       RTS
+*--------------------------------
+E.OVR  JSR GET.KEY       GET KEY CODE
+       CMP #0            CANT INSERT A CNTRL @
+       BNE E.INS1        ...NOT CNTRL @
+E.INS  JSR GET.KEY       GET A KEY
+       CMP #$20          EXIT INSRT ON ANY CONTROL CHAR
+       BCS E.INS1        NOT CONTROL
+       JMP E.CNTRL       YES CONTROL
+E.INS1 LDX #1
+       STX CHANGE.FLG    SET CHANGE FLAG
+       LDX ED.PTR        GET CUR POSN
+.1     CPX #254          ARE WE ON EOL?
+       BCS .2            YES
+       PHA               SAVE NEW KEY
+       LDA WBUF,X        GET CUR CHAR
+       TAY               SAVE IT
+       PLA               RECOVER NEW KEY
+       STA WBUF,X        PUT INTO CUR POSN
+       INX               NEXT COLUMN
+       TYA               NEW KEY = CUR KEY
+       BNE .1            AGAIN IF NOT EOL
+.2     STA WBUF,X        TYPE OVER IF ON EOL
+       LDA #0
+       STA WBUF+255      MAKE SURE EOL ON END
+       JSR E.SHOW.LINE   SHOW LINE
+       JSR MOVE.RT       MOVE RIGHT 1 COLUMN
+       JSR SHOW.ND       SHOW SCREEN IF NECESSARY
+       JMP E.INS         GO DO ANOTHER CHAR INSERT
+*--------------------------------
+E.ESC  LDA #0            SET SCROLL MODE
+       STA ESC.FLAG
+E.CTRL SEC
+       RTS
+*--------------------------------
+E.GETLN LDA LN.FLAG      SAVE OLD LN.FLAG
+       PHA
+       LDA #0
+       STA CHANGE.FLG    INIT TO FALSE
+       LDA #255
+       STA FILL.TO       COL TO FILL TO
+       LDA #START.COL
+       STA LN.FLAG       FORCE LINE NUM IN WBUF
+       JSR GET.LINE.IN.WBUF
+       PLA
+       STA LN.FLAG       RESTORE LN.FLAG
+       RTS
+*--------------------------------
+SAVE.WBUF LDY #0         SAVE 256 BYTE WBUF
+.1     LDA WBUF,Y
+       STA $F00,Y
+       INY
+       BNE .1
+       RTS
+*--------------------------------
+SHOW.ND LDY #0
+       LDA NO.SHOW.FLAG
+       BEQ .1
+       STY NO.SHOW.FLAG
+       RTS
+.1     JSR SAVE.WBUF     SAVE WBUF SINCE
+*                        SHOW.SCREEN USES IT
+       JSR SHOW.SCREEN
+REST.WBUF LDY #0
+.1     LDA $F00,Y        RECOVER SAVED WBUF
+       STA WBUF,Y
+       INY
+       BNE .1
+       RTS
+*--------------------------------
+MAN
+SAVE usr/src/fse/fse.s.line
+LOAD usr/src/fse/fse.s
+ASM
