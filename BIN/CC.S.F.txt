@@ -1,54 +1,85 @@
 NEW
   AUTO 3,1
 *--------------------------------------
-F.Decl			jsr SCOPE.New			function (
+F.Decl			ldy #SYM.Cnt
+				lda #$ff
+				sta (ZP.pLSymBuf),y		func() : unknown arg count
+
+				jsr CORE.GetNCharNBNL	Skip (
+				bcs .9
+
+				cmp #')'				func()
+				bne F.DeclArgs
+
+				jsr CORE.GetNCharNBNL	Skip ')'
+				bcs .9
+
+				cmp #';'
+				bne .9
+
+				jmp SYM.Update			Store this declaration & exit
+				
+.9				lda #E.CSYN
+				sec
+.99				rts				
+*--------------------------------------
+F.DeclArgs		jsr SCOPE.New			function (type.....
 				bcs .99
+			
+				lda ScopePtr
+				clc
+				adc #SCOPE.State
+				tay
+				lda #$FF				add args
+				sta (ScopeStk),y
 
-				lda (ZPSymBufPtr)		#SYM.T
-				pha
+				lda #'P'
+				jsr SYM.LookupLabelA
+				bcs .99
+				
+				lda ScopePtr
+				clc
+				adc #SCOPE.ParamSize
+				tay
+				txa
+				sta (ScopeStk),y
+				
+				jsr SYM.AddScope
+				
+				jsr SYM.IncCnt			$FF -> 0
 
-				ldy #SYM.Q
-				lda (ZPSymBufPtr),y
-				and #SYM.Q.PPPOINTER+SYM.Q.AAARRAY
+				jsr TYPE.IsVoid
+				beq .1					void function(....
 
-				ply
-				cpy #SYM.T.VOID
+				ldy #SYM.SizeOf+1
+				lda (ZP.pLSymBuf),y
 				bne .10
-
-				tax
-				beq .11					function is void
+				
+				dey
+				lda (ZP.pLSymBuf),y
+				cmp #2+1
+				bcc .1					R in Y,A
 
 .10				lda #'R'
 				jsr SYM.NewLabelA
 				bcs .99
-
-.11				jsr CORE.GetNCharNBNL	Skip (
-				bcs .9
-
-				cmp #')'				func()
-				beq .6
 *--------------------------------------
-.1				jsr F.DeclGetTQ
+.1				jsr F.DeclGetType		function (type.... ?
+				bcs .99
+			
+				jsr TYPE.IsVoid
+				beq .5					function (void)
+
+.2				jsr F.NewArg
 				bcs .99
 
-				>STYA ZPPtr2			Save T/Q
+				jsr SYM.IncCnt
 
-				jsr SYM.AddWord
-				bcs .99
-
-				cpy #SYM.T.VARIADIC
-				beq .5
+				lda (ZP.pTypeBuf)
+				cmp #SYM.T.VARIADIC
+				beq .5					function ( , ...)
 
 				jsr CC.GetCharNB
-				bcs .9
-
-				jsr CC.IsLetter
-				bcs .2
-
-				jsr F.NewArg			will update LocalPtr,FrameSize
-				bcs .99
-
-.2				jsr CC.GetCharNB
 				bcs .9
 
 				cmp #')'
@@ -57,8 +88,14 @@ F.Decl			jsr SCOPE.New			function (
 				cmp #','
 				bne .9
 
-				jsr CORE.GetNCharNB	Skip ,
-				bcc .1
+				jsr CORE.GetNCharNBNL	Skip ,
+				bcs .9
+				
+				jsr F.DeclGetType
+				bcs .99
+
+				jsr TYPE.IsVoid
+				bne .2
 
 .9				lda #E.CSYN
 				sec
@@ -70,7 +107,15 @@ F.Decl			jsr SCOPE.New			function (
 				cmp #')'
 				bne .9
 
-.6				jsr SYM.Add0000			definition End
+.6				lda ScopePtr
+				clc
+				adc #SCOPE.ParamSize
+				tay
+				lda (ScopeStk),y
+				tax
+
+				lda #'P'				define PARAM SIZE
+				jsr SYM.NewLabelA
 				bcs .99
 
 				jsr CORE.GetNCharNBNL	Skip ')'
@@ -83,22 +128,11 @@ F.Decl			jsr SCOPE.New			function (
 				bcs .99
 
 				jmp SYM.Update			Store this declaration & exit
-
-				rts
 *--------------------------------------
 .7				cmp #'{'
 				bne .9
-				
-				jmp F.Body
 *--------------------------------------
-F.Def			>DEBUG
-
-
-.9				lda #E.CSYN
-				sec
-.99				rts
-*--------------------------------------
-F.Body			>LDA.G CC.bInitCode
+F.Def			>LDA.G CC.bInitCode
 				bmi .1
 
 				lda #$60				RTS
@@ -107,34 +141,22 @@ F.Body			>LDA.G CC.bInitCode
 
 				lda #$FF
 				>STA.G CC.bInitCode
-
+*--------------------------------------
 .1				jsr SYM.SetAddrCCode	f() Code starts HERE
 
 				jsr SYM.Update			Store f() Declaration
 				bcs .99
 
-				ldy #SYM.SizeOf
-				lda (ZPSymBufPtr),y
-				beq .2					void f()
-
-
-
-
-
-
-
-.2				ldy ScopePtr
-				iny
-				iny
-				iny
-				lda (ScopeStk),y		#SCOPE.FrameSize
-
-				jsr CODE.LDAI			A = f() ARGS size
+				>LDYA L.PCC.BS
+				jsr CODE.EmitPCC 
 				bcs .99
 
-				>LDYA L.PCC.ENTER
-				jsr CODE.EmitPCC		Start Definition
-				bcs .99
+				lda ScopePtr
+				clc
+				adc #SCOPE.State
+				tay
+				lda #0
+				sta (ScopeStk),y
 
 				lda #$ff
 				>STA.G CC.CmdSave
@@ -145,30 +167,113 @@ F.Body			>LDA.G CC.bInitCode
 				jsr STMT.SetTypeCP		type = {}
 				bcs .99
 
-				jmp SCOPE.AddLocal		function () {
+				lda #'F'
+				jsr SYM.LookupLabelA
+				bcs .99
+
+				txa
+
+				jmp CODE.AddLocal
 
 .99				rts
 *--------------------------------------
 F.Def.END		lda #'X'				define EXIT Label
 				jsr SYM.NewLabelA
-				bcs .9
+				bcs .99
 
-				jsr SCOPE.RemLocal		function () {}
-				bcs .9
+				lda #'F'				define FRAME SIZE
+				jsr SYM.NewLabelA
+				bcs .99
+
+				lda ScopePtr
+*				clc
+				adc	#SCOPE.FrameSize
+				tay
+				lda (ScopeStk),y
+
+				jsr CODE.RemLocal
+				bcs .99
 
 				jsr STMT.Close
-				bcs .9
-
-				>LDYA L.PCC.LEAVE
-				jsr CODE.EmitPCC
-				bcs .9
+				bcs .99
 
 				jsr SCOPE.Close			function () {};
+				bcs .99
+
+*			jsr CODE.DEBUG	
+
+				>LDYA L.PCC.BR
+				jsr CODE.EmitPCC 
+				bcs .99
+
+				lda #$60				RTS
+				jsr CODE.EmitByte
+
+.99				rts
+*--------------------------------------
+* ZP.pLSymBuf = f() declaration
+* ZP.pTypeBuf = arg type
+* update SCOPE.LocalPtr, SCOPE.FrameSize
+*--------------------------------------
+F.NewArg		ldy #SYM.Cnt
+				lda (ZP.pLSymBuf),y
+				ora #$30
+				>STA.G CC.Label+1		add "_1,_2...."
+
+				>LDYA.G CC.LSymID
+				>STYA.G CC.LSymIDSave
+
+				>LEA.G CC.ArgBuf
+				>STYA ZP.pLSymBuf
+
+				jsr CC.GetCharNB
 				bcs .9
 
-.9				rts
+				jsr CC.IsLetter			function (type name... ?
+				bcc .2
+
+				ldx ZP.pLineBuf
+				phx
+				ldx ZP.pLineBuf+1
+				phx
+
+				>LEA.G CC.Label
+				>STYA ZP.pLineBuf
+
+				jsr SYM.NewAuto
+
+				plx
+				stx ZP.pLineBuf+1
+				plx
+				stx ZP.pLineBuf
+				bcs .99
+
+
+
+
+				bra .8
+
+.2				jsr SYM.NewAuto
+				bcs .99
+
+.8				jsr SYM.Store
+				bcs .99
+
+				>LDYA.G CC.pLSymBuf
+				>STYA ZP.pLSymBuf
+
+				>LDYA.G CC.LSymIDSave
+				>STYA.G CC.LSymID
+
+*				clc
+				rts
+
+.9				lda #E.CSYN
+				sec
+
+.99				rts
 *--------------------------------------
-F.DeclGetTQ		lda (ZPLineBufPtr)
+F.DeclGetType	lda (ZP.pLineBuf)
 				cmp #'.'
 				bne .5
 
@@ -189,157 +294,108 @@ F.DeclGetTQ		lda (ZPLineBufPtr)
 				eor #')'
 				bne .9
 
-				ldy #SYM.T.VARIADIC		Type
-*				lda #0					Qual
+				lda #SYM.T.VARIADIC
+				sta (ZP.pTypeBuf)
+
 *				clc
 				rts
 *--------------------------------------
-.5				jsr SYM.Lookup			var or func() ?
-				bcs .6
-
-				ldy #SYM.SC
-				lda (ZPLookupSymPtr),y
-				cmp #SYM.SC.TYPEDEF
-				bne .9
-
-				jmp TYPE.GetTQInYA2
-
-.6				>LDYA L.CC.TYPEQUAL
-				jsr CC.LookupID
+.5				jsr DECL.GetType
 				bcs .9
 
-				jmp TYPE.GetTQInYA
+				rts
 
 .9				lda #E.CSYN
 				sec
 				rts
 *--------------------------------------
-F.NewArg		>LDYA.G CC.SymID
-				>STYA.G CC.SymIDSave
-
-				>LEA.G CC.ArgBuf
-				>STYA ZPSymBufPtr
-
-				>LDYA ZPPtr2
-				ldx #SYM.SC.AUTO
-				sec						Reset Buffer
-
-				jsr SYM.New
-				bcs .9
-
-				jsr SYM.Store
-				bcs .9
-
-				>LDA.G CC.hSymBuf
-				>SYSCALL GetMemPtr
-				>STYA ZPSymBufPtr
-
-				>LDYA.G CC.SymIDSave
-				>STYA.G CC.SymID
-
-.9				
-F.NewArg.RTS	rts
+* in :
+*  f() in ZP.pRSymBuf
+*  Y,A = pLSymBuf
 *--------------------------------------
-* in : ZPSymPtr
-*      Y,A = Expected T/Q
-*--------------------------------------
-F.CallNoRetV	ldy #0					no expected T/Q
+F.CallNoRetV	ldy #SYM-1
+
+.1				lda (ZP.pLSymBuf),y
+				sta (ZP.pRSymBuf),y
+				dey
+				bpl .1
+
+				ldy #0					no target pLSym
 				tya
-				clc
-				.HS B0					BCS
-F.CallRetV		sec
-
-				ldx ZPPtr1				local : variadic size
+				
+F.CallRetV		ldx ZPPtr1				local : variadic size
 				phx
-				ldx ZPPtr1+1			local : bRetV
+				ldx ZPPtr1+1			local : bFastCall
 				phx
 
-				ldx ZPPtr2				local : expected T
+				ldx ZPPtr2				local : target pLSym
 				phx
-				ldx ZPPtr2+1			local : expected Q
+				ldx ZPPtr2+1
 				phx
 
-				>STYA ZPPtr2			T/Q
+				>STYA ZPPtr2
+				
+				stz ZPPtr1				Reset VARIADIC byte count
+				stz ZPPtr1+1			Reset StackInit Status
 
-				ror ZPPtr1+1			bRetV
-				bpl .1					no Return value expected....
-
-				ldy #SYM.Addr+1
-				lda (ZPLookupSymPtr),y
-				cmp #3+LIBS.MAX
-				bcc .1					SYS/FPU/LIB call, no room on stack required
-
-				>LDYA ZPPtr2
-				jsr EXP.GetYASizeOfInAX
-
-				jsr CODE.AddLocal		add room for return value
-				bcs F.NewArg.RTS
-
-.1				jsr CORE.GetNCharNB	skip '('
+				jsr CORE.GetNCharNB		skip '('
 				bcs .90
 
-				jsr SYM.LookupCheckTQ
-				bcs .93
-*--------------------------------------
-				stz ZPPtr1				Reset VARIADIC byte count
+				ldy #SYM.Cnt
+				lda (ZP.pRSymBuf),y
+				bpl .1
+				
+				lda #E.FUNDEF			should be at least f(void)
+				bra .98
 
-				lda #SYM.Def
-				>STA.G CC.LookupSymPtr
+.1				jsr F.StackReturn		Add room for RET value if required
+				bcs .99
+				
+				jsr F.GetArg0			get First Arg in pLSymBuf
+				bcs .7
+				
+				jsr F.StackSave
+				bcs .99
 
-				jsr F.GetTQ				get First Arg T/Q
-				beq .7					end of list, go check ending ')'
+.3				jsr SYM.NextRBuf
 
-.3				cpy #SYM.T.VARIADIC
-				bne .4
-
-				lda #0					Expected T/Q = 0 if VARIADIC
-				tay
-
-.4				and #$F0				CONST+VOLATILE+FUNC+FASTCALL
-
+				>LDYA ZP.pLSymBuf
 				jsr EXP.Eval
-				bcs .93
+				bcs .99
 
-				jsr EXP.GetYASizeOfInAX
-				tax						save Sizeof in X
+				jsr F.StackPushV
+				bcs .99
+				
+				jsr F.NextArg
+				
+				jsr SYM.PrevRBuf
+				jsr SYM.PrevLBuf
 
-				jsr F.GetTQ
-				cpy #SYM.T.VARIADIC
-				bne .50					if VARIADIC, don't advance to next arg
-
-				txa
-				clc						make sure pointer only 2 bytes
-				adc ZPPtr1
-				sta ZPPtr1				Add to byte count
-				bra .5
-
-.50				>LDA.G CC.LookupSymPtr
-				clc
-				adc #2
-				sta (pData),y
-
-.5				jsr CC.GetCharNB
-
+				jsr CC.GetCharNB
 				bcs .90
 
 				cmp #','
 				bne .6
 
 				jsr CORE.GetNCharNBNL	Skip ','
+				bcs .90
 
-				jsr F.GetTQ
-				bne .3					Another ARG....
+				jsr F.GetArg
+				bcc .3					Another ARG....
 
-				bra .90					extra args....error
+				bra .99					extra args....error
 
 .6				cmp #')'
 				bne .90
 
-				jsr F.GetTQ
-				beq .8					no more arg after ')', exit
+				jsr F.GetArg
+				bcs .8					no more arg after ')', exit
 
-				cpy #SYM.T.VARIADIC
+				lda (ZP.pLSymBuf)		#SYM.T
+				cmp #SYM.T.VARIADIC
 				bne .90					missing arg
+				
+				jsr SYM.PrevLBuf
 
 				lda ZPPtr1				push VARIADIC byte count
 				jsr CODE.PUSHI
@@ -350,16 +406,19 @@ F.CallRetV		sec
 				cmp #')'
 				bne .90
 
-.8				jsr CORE.GetNCharNB	Skip )
+.8				jsr CORE.GetNCharNB		Skip )
 
 				jsr F.Call2
-				bra .93
+				bcs .99
+				
+				jsr F.StackRestore
+				bra .99
 
 .90				lda #E.CSYN
 
-.92				sec
+.98				sec
 
-.93				plx
+.99				plx
 				stx ZPPtr2+1
 				plx
 				stx ZPPtr2
@@ -369,85 +428,17 @@ F.CallRetV		sec
 				plx
 				stx ZPPtr1
 
-.99				rts
-*--------------------------------------
-* X = last var size
-*--------------------------------------
-F.Call2			ldy #SYM.Q
-				lda (ZPLookupSymPtr),y
-				and #SYM.Q.FASTCALL
-				beq .1
-
-				ldy #SYM.Def			Get first (only) argument
-				jsr F.GetTQAtY
-				jsr TYPE.SizeOf
-
-				dex
-				bne .19
-
-				jsr CODE.PULLA
-				bra .1
-
-.19				jsr CODE.PULLYA
-
-.1				jsr F.Call3
-				bcs .9
-
-				bit ZPPtr1+1			bRetV
-				bmi .5
-
-* NO Return Value : call & discard stack if not in Y,A
-
-				>LDYA ZPPtr2			function T/Q
-				jsr TYPE.SizeOf
-				txa
-				beq .11					void
-
-				cpx #3					A or Y,A
-				bcc .11
-
-.10				jsr CODE.INCPSTACK
-				dex
-				bne .10
-
-.11				clc
-.9				rts
-
-* Return Value : call & put result on stack if in Y,A
-
-.5
-				ldy #SYM.Addr+1
-				lda (ZPLookupSymPtr),y
-				cmp #3+LIBS.MAX
-				bcs .8					not a SYS/FPU/LIB call...Ret value on stack
-
-				>LDYA ZPPtr2			function T/Q
-				jsr TYPE.SizeOf
-				cpx #3
-				bcs .8					leave on stack
-
-				dex
-				bne .60
-
-				jsr CODE.PUSHA			push ONE byte on stack
-				bra .8
-
-.60				jsr CODE.PUSHYA			push TWO bytes on stack
-
-.8				>LDYA ZPPtr2			T/Q
-
-				clc
 				rts
 *--------------------------------------
-F.Call3			ldy #SYM.Addr+1
+F.Call2			ldy #SYM.Addr+1
 
-				lda (ZPLookupSymPtr),y
+				lda (ZP.pRSymBuf),y
 				beq .9
 
 				pha
 
 				dey
-				lda (ZPLookupSymPtr),y
+				lda (ZP.pRSymBuf),y
 				tax
 
 				ply						Y=HI,X=LO
@@ -455,17 +446,18 @@ F.Call3			ldy #SYM.Addr+1
 				cpy #1
 				bne .1
 
-				jmp CODE.SYSCALL
+				jsr CODE.LIBC
+				bcs .99
+				
+				bra .8
 
-.1				cpy #2
-				bne .2
-
-				jmp CODE.FPUCALL
-
-.2				cpy #3+LIBS.MAX
+.1				cpy #3+LIBS.MAX
 				bcs .3
 
-				jmp CODE.LIBCALL
+				jsr CODE.LIBCALL
+				bcs .99
+				
+				bra .8
 
 .3				lda #$EA				NOP
 				jsr CODE.EmitByte
@@ -476,7 +468,8 @@ F.Call3			ldy #SYM.Addr+1
 				bcs .99
 
 				lda #$20				JSR abs
-				jmp CODE.TOABSYX
+				jsr CODE.TOABSYX
+				bcs .99
 
 .9				bit bPass2
 				bmi .91
@@ -485,26 +478,138 @@ F.Call3			ldy #SYM.Addr+1
 				clc
 				adc ZPCCCode
 				sta ZPCCCode
-
-				bcc .90
+				bcc .8
 
 				inc ZPCCCode+1
 
-.90				clc
+.8				lda ZPPtr2
+				ora ZPPtr2+1
+				bne .80
+
+				ldy #SYM.SizeOf
+				lda (ZP.pRSymBuf),y
+	
+				tax
+				beq .80					void
+
+				cmp #3
+				bcc .80
+
+.81				jsr CODE.INCPSTACK
+				dex
+				bne .81
+
+.80				clc
 				rts
 
 .91				lda #E.FUNDEF
 				sec
 .99				rts
 *--------------------------------------
-F.GetTQ			>LDA.G CC.LookupSymPtr
-				tay
+F.GetArg0		lda #$30				arg "_0, _1, ...."
+				>STA.G CC.Label+1
 
-F.GetTQAtY		lda (ZPLookupSymPtr),y
-				pha
-				iny
-				lda (ZPLookupSymPtr),y
-				ply
+F.GetArg		>SS
+				>PUSHW.G CC.pSyms
+				>PUSHEA.G CC.Label
+
+				ldy #SYM.ScopeID+1
+				lda (ZP.pRSymBuf),y
+				>PUSHA
+				dey
+				lda (ZP.pRSymBuf),y
+				>PUSHA
+
+				>PUSHWI	0				NextPtr
+				>KAPI SListLookup
+				>SR
+				bcs .9
+
+				>STYA ZP.pLookup
+				jsr SYM.NextLBuf
+				
+				>SS
+				>PUSHW.G CC.pSyms
+				>PUSHW ZP.pLookup
+				>PUSHW ZP.pLSymBuf
+				>PUSHWI 65535			all
+				>PUSHWZ					From Start
+				>KAPI SListGetData
+				>SR
+
+.9				rts
+*--------------------------------------
+F.NextArg		lda (ZP.pLSymBuf)		#SYM.T
+				cmp #SYM.T.VARIADIC
+				bne .1					if VARIADIC, don't advance to next arg
+
+				jsr EXP.GetRSymSizeOf
+
+				clc						make sure pointer only 2 bytes
+				adc ZPPtr1
+				sta ZPPtr1				Add to byte count
+				rts
+
+.1				>INC.G CC.Label+1
+				rts
+*--------------------------------------
+F.StackReturn	ldy #SYM.SizeOf
+				lda (ZP.pRSymBuf),y
+				cmp #3
+				bcc .8					RetV in Y,A
+
+				cmp #4
+				bne .1
+				
+				>LDYA L.PCC.SL
+				jmp CODE.EmitPCC 
+
+.1				cmp #5
+				bne *
+
+				>LDYA L.PCC.SF
+				jmp CODE.EmitPCC 
+				
+.8				rts
+*--------------------------------------
+F.StackSave		ldy #SYM.Cnt
+				lda (ZP.pRSymBuf),y
+				cmp #2
+				bcs .3					more than 1 arg
+				
+				ldy #SYM.SizeOf
+				lda (ZP.pLSymBuf),y		First Arg
+				cmp #3
+				bcc .9					only 1 or 2 bytes in Y,A
+				
+.3				dec ZPPtr1+1			for F.StackRestore
+				
+				>LDYA L.PCC.SS
+				jmp CODE.EmitPCC 
+
+.9				rts
+*--------------------------------------
+F.StackPushV	bit ZPPtr1+1
+				bpl .8
+				
+				lda ExpState
+			beq *
+
+				bit #ExpState.VinReg
+				beq .8
+				
+				jmp CODE.PUSHYA
+				
+.8				clc
+				rts				
+*--------------------------------------
+F.StackRestore	bit ZPPtr1+1
+				bpl .8
+				
+				>LDYA L.PCC.SR
+				jmp CODE.EmitPCC
+
+.8				clc
 				rts
 *--------------------------------------
 MAN

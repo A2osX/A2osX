@@ -2,25 +2,29 @@ NEW
   AUTO 3,1
 *--------------------------------------
 XDOS.Read		jsr XDOS.GetUserBuf		xfer buffer address and request count
-				jsr mvcbytes			to a more accessable location, also
-				pha		 				get fcb attributes and save on stack.
-				jsr XDOS.CalcNewMark	calc mark after read, test if mark > eof
-				pla		 				carry set means end mark > eof.
+				jsr XDOS.GetUserRWCnt	to a more accessable location, also
+*				pha		 				get fcb attributes and save on stack.
+*				jsr XDOS.CalcNewMark	calc mark after read, test if mark > eof
+*				pla		 				carry set means end mark > eof.
+
+				jsr XDOS.GetFCB.A
 				and #$01			 	test for read enabled.
 				beq .9
 
 	  			bcc L4205			  	branch if result mark < eof. adjust
 
-				ldy XDOS.FCBPtr			 	request to read until just before eof.
-				lda XDOS.FCBs+FCB.EOF,y		result = (eof-1) - position
-				sbc XDOS.TmpPos
-				sta cbytes
-				sta rwreql
+				ldy XDOS.FCBPtr			request to read until just before eof.
+				lda XDOS.FCBs+FCB.EOF,y	result = (eof-1) - position
+				sbc XDOS.NewMark
+				sta XDOS.TmpCnt
+				sta XDOS.RWCnt
+
 				lda XDOS.FCBs+FCB.EOF+1,y
-				sbc XDOS.TmpPos+1
-				sta cbytes+1
-				sta rwreqh
-				ora cbytes			 	if both bytes = 0 then eof error
+				sbc XDOS.NewMark+1
+				sta XDOS.TmpCnt+1
+				sta XDOS.RWCnt+1
+
+				ora XDOS.TmpCnt			if both bytes = 0 then eof error
 				bne L4210
 
 				lda #MLI.E.EOF
@@ -29,71 +33,117 @@ XDOS.Read		jsr XDOS.GetUserBuf		xfer buffer address and request count
 
 L4202  			jmp errfix1
 
-L4205  			lda cbytes
-				ora cbytes+1
+L4205  			lda XDOS.TmpCnt
+				ora XDOS.TmpCnt+1
 				bne L4210				if read request definitely non-zero.
 
-L420D  			jmp rwdone			 	do nothing.
+L420D  			jmp XDOS.RWDone			do nothing.
 
-L4210  			jsr valdbuf				validate user's data buffer range.
+L4210  			.DO IOBANK=1
+
+				lda MLI.IOBANK
+				bmi .1
+
+				.FIN
+
+				jsr XDOS.CheckUserBuf	validate user's data buffer range.
 				bcs L4202			  	branch if memory conflict.
 
-				jsr XDOS.GetFCB.ST		get storage type
+.1				jsr XDOS.GetFCB.ST		get storage type
 				cmp #$04			 	and find out if it's a tree or other.
-				bcc L421F			 	branch if a tree file
+				bcc XDOS.ReadFile		branch if a tree file
+*--------------------------------------
+XDOS.ReadDir	jsr XDOS.ReadAtNewMark
+				bcs L4202				pass back any errors.
 
-				jmp XDOS.ReadDir	  	otherwise assume it's a directory.
+				jsr XDOS.RWInit		 	prepare for transfer.
+				jsr XDOS.ReadPart		move data to user's buffer.
+				bvc XDOS.ReadDir	  	repeat until request is satisfied.
 
-L421F  			jsr rdposn			 	set up data pointer.
+				jsr XDOS.RWDone			update fcb as to new position.
+				bcc .8				  	branch if done with no errors.
+
+				cmp #MLI.E.EOF		 	was last read to end of file ?
+				sec		 				anticipate some other error.
+				bne .9				  	branch if not eof error.
+
+				jsr XDOS.FCBSetMark
+				jsr XDOS.ZeroData		clear out data block.
+* Y = 0 from XDOS.ZeroData
+*				ldy #$00			 	provide dummy back pointer for future
+				ldx XDOS.FCBPtr			re-position. x = hi byte of last block
+
+.1  			lda XDOS.FCBs+FCB.DBLK,x
+				sta (ZP.DataPtr),y
+				stz XDOS.FCBs+FCB.DBLK,x	mark current block as impossible
+				inx
+				iny		 				inc indexes to do both hi and low bytes
+				cpy #$02
+				bne .1
+
+.8  			clc		 				no error
+.9  			rts
+*--------------------------------------
+XDOS.ReadFile	stz XDOS.DirectIO	 	Disable DirectIO Mode
+
+.1				jsr XDOS.ReadAtNewMark 	set up data pointer.
 				bcs L4202			  	errors.
 
-				jsr preprw				test for newline, setup for partial
-				jsr readpart			read. move current data buffer contents
-				bvs L420D				to user area. branch if satisfied.
-				bcs L421F			  	indicates newline is set.
+				jsr XDOS.RWInit			test for newline, setup for partial read.
+				jsr XDOS.ReadPart		move current IO buffer contents to user area.
 
-				lda rwreqh			 	how many blocks are to be read ?
-				lsr			  			if < 2 then use the slow way.
-				beq L421F
+				bvs L420D				V=1 if all done.
+
+				bcs .1					C=1 if newline is set.
+
+				lda XDOS.RWCnt+1		how many pages are to be read ?
+				lsr			  			convert to block count
+				beq .1					if no full block then use the slow way.
 
 				sta cmdtemp				save bulk block count.
-				jsr	XDOS.GetFCBStatus	make sure current data area doesn't
-				and #$40				need writing before resetting ptr to
-				bne L421F			  	read into user's area. branch if data
 
-				sta ioaccess			needs to be written to force 1st call
-				lda ZP.UserBuf			 	thru all dev handler checking. make
-				sta ZP.DataPtr			 	the data buffer the user's space.
+				jsr	XDOS.GetFCBStatus	make sure current data area doesn't
+				and #FCB.F.DBLKMOD		need writing before resetting ptr to
+				bne .1					read into user's area. branch if data
+
+				lda ZP.UserBuf			thru all dev handler checking. make
+				sta ZP.DataPtr			the data buffer the user's space.
 				lda ZP.UserBuf+1
 				sta ZP.DataPtr+1
 
-L4249  			jsr rdposn			 	get next block directly into user space.
-				bcs L42B7				if error.
+.2  			sec
+				ror XDOS.DirectIO		Enable Direct IO
 
-L424E  			inc ZP.DataPtr+1			incll ptrs by one block (512 bytes)
+				jsr XDOS.ReadAtNewMark 	get next block directly into user space.
+
+				stz XDOS.DirectIO		Disable Direct IO
+
+				bcs .8					if error.
+
+.3  			inc ZP.DataPtr+1		incll ptrs by one block (512 bytes)
 				inc ZP.DataPtr+1
-				dec rwreqh
-				dec rwreqh
-				inc XDOS.TmpPos+1
-				inc XDOS.TmpPos+1
-				bne L4269				if pos'n doesn't get to a 64k boundary
+				dec XDOS.RWCnt+1
+				dec XDOS.RWCnt+1
+				inc XDOS.NewMark+1
+				inc XDOS.NewMark+1
+				bne .4					if pos'n doesn't get to a 64k boundary
 
-				inc XDOS.TmpPos+2			 	otherwise, must check for a 128k one.
-				lda XDOS.TmpPos+2				carry set if 128k boundary reached.
+				inc XDOS.NewMark+2		otherwise, must check for a 128k one.
+				lda XDOS.NewMark+2		carry set if 128k boundary reached.
 				eor #$01
 				lsr
 
-L4269  			dec cmdtemp				has all been read fast ?
-				bne L427B			  	branch if more to read.
+.4  			dec cmdtemp				has all been read fast ?
+				bne .5			  		branch if more to read.
 
 				jsr fxdatptr			go fix up data pointer to xdos buffer.
-				lda rwreql			 	test for end of read.
-				ora rwreqh			 	are both 0 ?
-				beq rwdone			  	yes, done.
+				lda XDOS.RWCnt		 	test for end of read.
+				ora XDOS.RWCnt+1		are both 0 ?
+				beq XDOS.RWDone			yes, done.
 
-				bne L421F			  	no, read last partial block
-
-L427B  			bcs L4249
+				bra .1					no, read last partial block
+*--------------------------------------
+.5  			bcs .2
 
 				jsr XDOS.Tpos2Y			get index to next block address
 
@@ -101,59 +151,69 @@ L427B  			bcs L4249
 				sta ZP.BLKNUM
 				inc zpt+1
 				cmp (zpt),y				are hi and low address the same?
-				bne L4299			  	no, it's a real block address.
+				bne .6			  		no, it's a real block address.
 
 				cmp #$00			 	are both bytes 0 ?
-				bne L4299			  	no, must be real data.
+				bne .6			  		no, must be real data.
 
-				sta ioaccess			don't do repeat io just after sparse.
-				beq L429C			  	branch always (carry set).
-
-L4299  			lda (zpt),y				get high address
+				bra .7			  		branch always (carry set).
+*--------------------------------------
+.6  			lda (zpt),y				get high address
 				clc
-L429C  			dec zpt+1
-				bcs L4249			  	if no block to read.
+
+.7  			dec zpt+1
+				bcs .2			  		if no block to read.
 
 				sta ZP.BLKNUM+1
-				lda ioaccess			has 1st call gone to device yet ?
-				beq L4249			  	no, go thru normal route
+				lda XDOS.DirectIO		Direct IO mode ?
+				beq .2			  		no, go thru normal route
 
 				lda ZP.DataPtr+1		reset hi buffer address for dev handler
 				sta ZP.BUFPTR+1
-				jsr XDOS.DevCall
-				bcc L424E			  	no errors, branch always.
 
-L42B7  			pha		 				save error code.
+				.DO IOBANK=1
+
+				jsr XDOS.DevCallX
+
+				.ELSE
+
+				jsr XDOS.DevCall
+
+				.FIN
+
+				bcc .3			  		Branch if no errors
+
+.8  			pha		 				save error code.
 				jsr fxdatptr			go restore data pointers, etc.
 				pla
 
 errfix1			pha		 				save error code
-				jsr rwdone			 	pass back # of bytes actually read
+				jsr XDOS.RWDone			pass back # of bytes actually read
 				pla
 				sec						error
 				rts
 *--------------------------------------
-rwdone			ldy #$06			 	return total # of bytes actually read
-				sec		 				derived from cbytes-rwreq.
-				lda cbytes
-				sbc rwreql
+XDOS.RWDone		ldy #$06			 	return total # of bytes actually read
+				sec		 				derived from TmpCnt-RWCnt.
+				lda XDOS.TmpCnt
+				sbc XDOS.RWCnt
 				sta (ZP.A3L),y
 				iny
-				lda cbytes+1
-				sbc rwreqh
+				lda XDOS.TmpCnt+1
+				sbc XDOS.RWCnt+1
 				sta (ZP.A3L),y
-				jmp rdposn			 	leave with valid position in fcb.
+				jmp XDOS.ReadAtNewMark 	leave with valid position in fcb.
 *--------------------------------------
-preprw			ldy XDOS.FCBPtr			 	adj pointer to user's buffer to make
+XDOS.RWInit		lda ZP.UserBuf			adj pointer to user's buffer to make
 				sec		 				the transfer
-				lda ZP.UserBuf
-				sbc XDOS.TmpPos
+				sbc XDOS.NewMark
 				sta ZP.UserBuf
 				bcs .1				  	if no adjustment to hi address needed
 
 				dec ZP.UserBuf+1
 
-.1  			lda XDOS.FCBs+FCB.NLMASK,y	test for new line enabled.
+.1  			ldy XDOS.FCBPtr
+				lda XDOS.FCBs+FCB.NLMASK,y	test for new line enabled.
 				clc
 				beq .2				  	if new line not enabled.
 
@@ -162,24 +222,39 @@ preprw			ldy XDOS.FCBPtr			 	adj pointer to user's buffer to make
 				lda XDOS.FCBs+FCB.NLBYTE,y	move newline character to more
 				sta nlchar			 	accesible spot.
 
-.2  			ldy XDOS.TmpPos				index to 1st data.
-				lda ZP.DataPtr			 	reset low order of position pointer to
+.2  			ldy XDOS.NewMark		index to 1st data.
+				lda ZP.DataPtr			reset low order of position pointer to
 				sta sos			  		beginning of page.
-				ldx rwreql			 	get low order count of requested bytes.
-				rts		 				return statuses.
+
+				rts		 				return CS if NL enabled
 *--------------------------------------
-readpart 		txa						x = low count of bytes to move.
+XDOS.ReadPart	ldx XDOS.RWCnt			get low order count of requested bytes.
 				bne L430F			  	branch if request is not an even page.
 
-				lda rwreqh			 	a call of 0 bytes should never get here!
+				lda XDOS.RWCnt+1		a call of 0 bytes should never get here!
 				beq L435D				branch if nothing to do.
 
-				dec rwreqh
+				dec XDOS.RWCnt+1
 
 L430F  			dex
 
-L4310  			lda (sos),y				move data to user's buffer
+L4310  			.DO IOBANK=1
+				lda MLI.IOBANK
+				bpl .3
+
+				sta IO.SETWRITEAUX
+
+.3				.FIN
+
+				lda (sos),y				move data to user's buffer
 				sta (ZP.UserBuf),y
+
+				.DO IOBANK=1
+
+				sta IO.CLRWRITEAUX
+
+				.FIN
+
 				bcs tstnewl				test for newline 1st !
 
 L4316  			txa		 				note: x must be unchanged from tstnewl !
@@ -190,34 +265,34 @@ L4319  			dex		 				dec # of bytes left to move.
 				bne L4310			  	no, move next byte.
 
 				lda sos+1			  	test for end of buffer, but first
-				inc ZP.UserBuf+1			adjust user buffer pointer
-				inc XDOS.TmpPos+1			 	and position
+				inc ZP.UserBuf+1		adjust user buffer pointer
+				inc XDOS.NewMark+1		and position
 				bne L4329
 
-				inc XDOS.TmpPos+2
+				inc XDOS.NewMark+2
 
 L4329  			inc sos+1			  	and sos buffer high address.
-				eor ZP.DataPtr+1			(carry is undisturbed)
+				eor ZP.DataPtr+1		(carry is undisturbed)
 				beq L4310			  	branch if more to read in buffer.
 
 				clv		 				indicate not finished.
 				bvc L4360			  	always.
 
-L4332  			lda rwreqh
+L4332  			lda XDOS.RWCnt+1
 				beq L4350			  	branch if request is satisfied.
 
 				iny		 				done with this block of data ?
 				bne L4340			  	no, adjust high byte of request.
 
 				lda sos+1			  	maybe, check for end of block buffer.
-				eor ZP.DataPtr+1			(don't disturb carry).
+				eor ZP.DataPtr+1		(don't disturb carry).
 				bne L4343			  	if hi count can be dealt with next time
 
-L4340  			dec rwreqh
+L4340  			dec XDOS.RWCnt+1
 
 L4343  			dey		 				restore proper value
 				bra L4319
-
+*--------------------------------------
 tstnewl  		lda (sos),y				get last byte transferred again.
 				and nlmask			 	only bits on in mask are significant.
 				eor nlchar			 	does it match newline character?
@@ -226,20 +301,20 @@ tstnewl  		lda (sos),y				get last byte transferred again.
 L4350  			iny		 				adjust position.
 				bne L435D
 
-				inc ZP.UserBuf+1			inc pointers
-				inc XDOS.TmpPos+1
+				inc ZP.UserBuf+1		inc pointers
+				inc XDOS.NewMark+1
 				bne L435D
 
-				inc XDOS.TmpPos+2
+				inc XDOS.NewMark+2
 
 L435D  			bit setvflg				(sets v flag)
 
-L4360  			sty XDOS.TmpPos				save low position
+L4360  			sty XDOS.NewMark		save low position
 				bvs L4366
 
 				inx		 				leave request as +1 for next call
 
-L4366  			stx rwreql			 	and remainder of request count.
+L4366  			stx XDOS.RWCnt		 	and remainder of request count.
 
 				php		 				save statuses
 				clc		 				adjust user's low buffer address
@@ -248,98 +323,66 @@ L4366  			stx rwreql			 	and remainder of request count.
 				sta ZP.UserBuf
 				bcc L4374
 
-				inc ZP.UserBuf+1			adjust hi address as needed.
+				inc ZP.UserBuf+1		adjust hi address as needed.
 
 L4374  			plp		 				restore return statuses.
 
 setvflg	 		rts						this byte ($60) is used to set v flag.
 *--------------------------------------
-fxdatptr 		lda ZP.DataPtr			 	put current user buffer address back to normal
+fxdatptr 		lda ZP.DataPtr			put current user buffer address back to normal
 				sta ZP.UserBuf
 				lda ZP.DataPtr+1
-				sta ZP.UserBuf+1			bank pair byte should be moved also.
+				sta ZP.UserBuf+1		bank pair byte should be moved also.
 
-				ldx XDOS.FCBPtr			 	restore buffer address
+				ldx XDOS.FCBPtr			restore buffer address
 				jmp XDOS.GetFCBBufX
 *--------------------------------------
-XDOS.ReadDir	jsr rdposn
-				bcs L43B8				pass back any errors.
-
-				jsr preprw			 	prepare for transfer.
-				jsr readpart			move data to user's buffer.
-				bvc XDOS.ReadDir	  	repeat until request is satisfied.
-
-				jsr rwdone			 	update fcb as to new position.
-				bcc L43B6			  	branch if done with no errors.
-
-				cmp #MLI.E.EOF		 	was last read to end of file ?
-				sec		 				anticipate some other error.
-				bne L43B7			  	branch if not eof error.
-
-				jsr svmark
-				jsr XDOS.ZeroData		clear out data block.
-
-				ldy #$00			 	provide dummy back pointer for future
-				ldx XDOS.FCBPtr			 	re-position. x = hi byte of last block
-
-L43A6  			lda XDOS.FCBs+FCB.DBLK,x
-				sta (ZP.DataPtr),y
-				stz XDOS.FCBs+FCB.DBLK,x		mark current block as impossible
-				inx
-				iny		 				inc indexes to do both hi and low bytes
-				cpy #$02
-				bne L43A6
-
-L43B6  			clc		 				no error
-L43B7  			rts
-
-L43B8  			jmp errfix1				report how much xfer'd before error.
-*--------------------------------------
-mvcbytes 		ldy #$04				move request count to a more accessable location
-				lda (ZP.A3L),y
-				sta cbytes
-				sta rwreql
-				iny
-				lda (ZP.A3L),y
-				sta cbytes+1
-				sta rwreqh
-				ldy XDOS.FCBPtr			 	return y = val(XDOS.FCBPtr),
-
-				lda XDOS.FCBs+FCB.ACCESS,y	a = attributes
+XDOS.GetFCB.A	ldy XDOS.FCBPtr
+				lda XDOS.FCBs+FCB.ACCESS,y
 *				clc		 				and carry clear...
 				rts
 *--------------------------------------
 XDOS.GetUserBuf	ldy #$02			 	move the pointer to user's buffer
-				lda (ZP.A3L),y				to the block file manager
-				sta ZP.UserBuf			 	z-page area
+				lda (ZP.A3L),y			to the block file manager
+				sta ZP.UserBuf			z-page area
 				iny
 				lda (ZP.A3L),y
 				sta ZP.UserBuf+1
 
-XDOS.GetFCB.ST	ldy XDOS.FCBPtr			 	return storage type
+XDOS.GetFCB.ST	ldy XDOS.FCBPtr			return storage type
 				lda XDOS.FCBs+FCB.STYPE,y
 				rts
 *--------------------------------------
+XDOS.GetUserRWCnt
+				ldy #$04				move request count to a more accessable location
+				lda (ZP.A3L),y
+				sta XDOS.TmpCnt
+				sta XDOS.RWCnt
+				iny
+				lda (ZP.A3L),y
+				sta XDOS.TmpCnt+1
+				sta XDOS.RWCnt+1
+*--------------------------------------
 * this subroutine adds the requested byte count to mark and returns sum
-* in scrtch and also returns mark in tpos and oldmark.
+* in scrtch and also returns mark in tpos and XDOS.OldMark.
 *
 * on exit:
 *				 y,x,a is unknown
 *				 carry set indicates scrtch > eof
 *--------------------------------------
 XDOS.CalcNewMark
-				ldx #$00			 
+				ldx #$00
 				ldy XDOS.FCBPtr
 
 				clc
 
 .1  			lda XDOS.FCBs+FCB.MARK,y
-				sta XDOS.TmpPos,x
-				sta oldmark,x
-				adc cbytes,x
+				sta XDOS.NewMark,x
+				sta XDOS.OldMark,x
+				adc XDOS.TmpCnt,x
 				sta scrtch,x
 				txa
-				eor #$02				cbytes+2 always=0
+				eor #$02				TmpCnt+2 always=0
 				beq eoftest
 
 				iny
@@ -349,7 +392,7 @@ XDOS.CalcNewMark
 eoftest			lda scrtch,x			new mark in scrtch.
 				cmp XDOS.FCBs+FCB.EOF,y		is new position > eof ?
 				bcc .1				  	no, proceed.
-				bne .1				  	yes, adjust 'cbytes' request
+				bne .1				  	yes, adjust TmpCnt request
 
 				dey
 				dex						all tree bytes compared ?
@@ -361,7 +404,7 @@ werreof			jsr plus2fcb			reset eof to pre-error position.
 
 L4418  			lda oldeof,x			place oldeof back into fcb
 				sta XDOS.FCBs+FCB.EOF,y
-				lda oldmark,x			also reset mark to last best
+				lda XDOS.OldMark,x		also reset mark to last best
 				sta XDOS.FCBs+FCB.MARK,y		write position
 				sta scrtch,x			and copy mark to scrtch for test of
 				dey		 				eof less than mark.
@@ -394,11 +437,29 @@ plus2fcb 		lda #$02			 	on exit both a and y = XDOS.FCBPtr+2.
 				tay
 				rts
 *--------------------------------------
-XDOS.Write		jsr mvcbytes			first determine if requested write is legal.
-				pha
-				jsr XDOS.CalcNewMark	save a copy of eof to old eof, set/clr
+XDOS.ZeroData	lda #$00
+				tay
+
+				inc ZP.DataPtr+1
+
+				jsr .1
+
+				dec ZP.DataPtr+1
+
+.1  			sta (ZP.DataPtr),y
+				iny
+				bne .1
+
+				rts
+*--------------------------------------
+XDOS.Write		jsr XDOS.GetUserRWCnt	first determine if requested write is legal.
+
+*				pha
+*				jsr XDOS.CalcNewMark	save a copy of eof to old eof, set/clr
 				jsr wadjeof				carry to determine if new mark > eof.
-				pla		 				get attributes again.
+*				pla		 				get attributes again.
+
+				jsr XDOS.GetFCB.A
 				and #$02			 	is write enabled ?
 				bne L4462			  	yes, continue...
 
@@ -408,17 +469,17 @@ L445E  			lda #MLI.E.LOCKED	 	illegal access error.
 L4462  			jsr XDOS.TestWP			otherwise, make sure device is not
 				bcs L44A2			  	write protected. if so, branch to abort.
 
-				lda cbytes
-				ora cbytes+1			anything to write ?
+				lda XDOS.TmpCnt
+				ora XDOS.TmpCnt+1		anything to write ?
 				bne L4472			  	branch if so,
 
-				jmp rwdone			 	else do nothing.
+				jmp XDOS.RWDone			else do nothing.
 
 L4472  			jsr XDOS.GetUserBuf		move the user's buffer ptr to bfm zero
 				cmp #$04			 	page area, also get storage type.
 				bcs L445E			  	if not tree, return an access error.
 
-L4479  			jsr rdposn			 
+L4479  			jsr XDOS.ReadAtNewMark
 				bcs L44A2
 
 				jsr XDOS.GetFCBStatus
@@ -461,10 +522,10 @@ L44B8  			jsr alcwblk				go allocate for data block.
 				bcs L44A2
 
 				jsr XDOS.ClrFCBStatus	clear allocation required bits in status
-				
+
 				lda #FCB.F.IBLKMOD		indicate index block is dirty.
 				jsr XDOS.SetFCBStatus
-				
+
 				jsr XDOS.Tpos2Y			now put block address into index block.
 
 				inc zpt+1			  	high byte first.
@@ -480,20 +541,39 @@ L44B8  			jsr alcwblk				go allocate for data block.
 				txa		 				get high address again.
 				sta XDOS.FCBs+FCB.DBLK+1,y
 
-L44E9  			jsr preprw
-				jsr wrtpart
+L44E9  			jsr XDOS.RWInit
+				jsr XDOS.WritePart
 				bvc L4479
-				jmp rwdone			 	update fcb with new position
 
-wrtpart			txa
+				jmp XDOS.RWDone			update fcb with new position
+*--------------------------------------
+XDOS.WritePart	ldx XDOS.RWCnt			get low order count of requested bytes.
 				bne L44FF				branch if request is not even pages
-				lda rwreqh			 	a call of 0 bytes should never get here!
+
+				lda XDOS.RWCnt+1		a call of 0 bytes should never get here!
 				beq L4546				do nothing
-				dec rwreqh
+
+				dec XDOS.RWCnt+1
 
 L44FF  			dex
-				lda (ZP.UserBuf),y			move data from user's buffer
+
+				.DO IOBANK=1
+				lda MLI.IOBANK
+				bpl .1
+
+				sta IO.SETREADAUX
+
+.1				.FIN
+
+				lda (ZP.UserBuf),y		move data from user's buffer
 				sta (sos),y
+
+				.DO IOBANK=1
+
+				sta IO.CLRREADAUX
+
+				.FIN
+
 				txa
 				beq L4525
 
@@ -501,62 +581,62 @@ L4507  			iny		 				page crossed ?
 				bne L44FF			  	no, keep moving.
 
 				lda sos+1			  	test for end of buffer
-				inc ZP.UserBuf+1			but first adjust user buffer pointer
-				inc XDOS.TmpPos+1			 	and position
+				inc ZP.UserBuf+1		but first adjust user buffer pointer
+				inc XDOS.NewMark+1		and position
 				bne L451C
 
-				inc XDOS.TmpPos+2
+				inc XDOS.NewMark+2
 				bne L451C
 
 				lda #MLI.E.BEYEOF	 	out of range if > 32MB
 				bne L44A2
 
 L451C  			inc sos+1			 	adjust sos buffer high address
-				eor ZP.DataPtr+1			(carry is undisturbed)
+				eor ZP.DataPtr+1		(carry is undisturbed)
 				beq L44FF			  	branch if more to write to buffer.
 
 				clv		 				indicates not finished.
 				bvc L4549			  	always.
 
-L4525  			lda rwreqh
+L4525  			lda XDOS.RWCnt+1
 				beq L4539			  	branch if request satisfied.
 
 				iny		 				done with this block of data ?
 				bne L4533			  	if not.
 
 				lda sos+1				this is necessary for proper
-				eor ZP.DataPtr+1			adjustment of request count
+				eor ZP.DataPtr+1		adjustment of request count
 				bne L4536
 
-L4533  			dec rwreqh
+L4533  			dec XDOS.RWCnt+1
 L4536  			dey		 				reset modified y
 				bra L4507
 
 L4539  			iny		 				and position
 				bne L4546
 
-				inc ZP.UserBuf+1			inc pointers
-				inc XDOS.TmpPos+1
+				inc ZP.UserBuf+1		inc pointers
+				inc XDOS.NewMark+1
 				bne L4546
 
-				inc XDOS.TmpPos+2
+				inc XDOS.NewMark+2
 
 L4546  			bit setvflg				set v flag
 
-L4549  			sty XDOS.TmpPos			 	save low position
-				stx rwreql			 	and remainder of request count.
+L4549  			sty XDOS.NewMark		save low position
+				stx XDOS.RWCnt			and remainder of request count.
 				php		 				save statuses
-				
-				lda #$50
+
+				lda #FCB.F.DBLKMOD+FCB.F.UMOD
 				jsr XDOS.SetFCBStatus
 
 				clc		 				adjust user's low buffer address
-				lda XDOS.TmpPos
+				lda XDOS.NewMark
 				adc ZP.UserBuf
 				sta ZP.UserBuf
 				bcc L4564
 
-				inc ZP.UserBuf+1			adjust high address as needed.
+				inc ZP.UserBuf+1		adjust high address as needed.
 
 L4564  			jsr XDOS.SetFCB.DIRTY	set directory flush bit.
 				plp		 				restore return statuses
@@ -580,7 +660,7 @@ topdown			jsr swapdown			make current 1st block an entry in new
 L457A  			jsr alcwblk				get another block address for the sap
 				bcs L45B1			  	level index. branch if errors.
 
-				lda XDOS.TmpPos+2			 	calculate position of new index block
+				lda XDOS.NewMark+2		calculate position of new index block
 				lsr			  			in the top of the tree.
 				tay
 				lda scrtch			 	get address of newly allocated index
@@ -590,7 +670,7 @@ L457A  			jsr alcwblk				get another block address for the sap
 				lda scrtch+1
 				sta (zpt),y				save hi address
 				dec zpt+1
-				ldy XDOS.FCBPtr			 	make newly allocated block the current
+				ldy XDOS.FCBPtr			make newly allocated block the current
 				sta XDOS.FCBs+FCB.IBLK+1,y	index block.
 				txa
 				sta XDOS.FCBs+FCB.IBLK,y
@@ -623,7 +703,7 @@ L45B1			rts		 				return errors.
 swapdown		jsr alcwblk				make current seed into a sapling, allocate a block before swap.
 				bcs .9					return errors.
 
-				ldy XDOS.FCBPtr				get previous first block
+				ldy XDOS.FCBPtr			get previous first block
 				lda XDOS.FCBs+FCB.1stBLK,y	address into index block.
 				pha						save temporarily while swapping in new
 				lda scrtch				top index. get new block address (low)
@@ -661,7 +741,7 @@ alcwblk			jsr XDOS.GetFreeBlk
 
 				inc XDOS.FCBs+FCB.UBLK,x
 				bne .9
-				
+
 				inc XDOS.FCBs+FCB.UBLK+1,x
 
 .9  			rts
@@ -690,9 +770,9 @@ XDOS.TestWPA	sta ZP.UNITNUM			make the device status call
 
 .1  			jmp XDOS.PopBlkNumRTS	restore the block #
 *--------------------------------------
-XDOS.Tpos2Y		lda XDOS.TmpPos+2	 	get index to next block address
+XDOS.Tpos2Y		lda XDOS.NewMark+2	 	get index to next block address
 				lsr
-				lda XDOS.TmpPos+1
+				lda XDOS.NewMark+1
 				ror
 				tay		 				index to address = int(pos/512)
 XDOS.Tpos2Y.RTS	rts

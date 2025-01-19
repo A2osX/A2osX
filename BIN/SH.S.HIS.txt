@@ -3,18 +3,22 @@ NEW
 *--------------------------------------
 HIS.Init		>LDYAI HISBUF.MAX		Get a buffer for History
 
-				>SYSCALL StrVNew
+				>LIBC Malloc
 				bcs .9
 
-				>STA.G HIS.hBuf
+				>STYA R1
+				>STYA.G HIS.pBuf
+
+				lda #0
+				sta (R1)
 
 *				>STZ.G HIS.Count
-*				>STZ.G HIS.Head
+*				>STZ.G HIS.Ptr
 *				clc
 
 .9				rts
 *--------------------------------------
-HIS.Add			>LDA.G HIS.hBuf
+HIS.Add			>LDA.G HIS.pBuf+1
 				beq .9
 
 				>LDA.G HIS.Count
@@ -24,21 +28,11 @@ HIS.Add			>LDA.G HIS.hBuf
 				inc
 				sta (pData),y
 
-				>STA.G HIS.Head
 				bra .2
 
-.1				ldy #HIS.Head
-				jsr HIS.NextY			replace oldest
-				sta (pData),y
+.1				jsr HIS.DelOldest
 
-.2				tax
-
-				>PUSHB.G HIS.hBuf
-				>PUSHBI 0
-				txa
-				>PUSHA
-				>PUSHW ZPCLBuf
-				>SYSCALL StrVSet
+.2				jmp HIS.AddNew
 
 .9				rts
 *--------------------------------------
@@ -46,32 +40,35 @@ HIS.Select		>LDA.G HIS.Count
 				bne .10
 
 				clc
-.99				rts
+.19				rts
 
 .10				jsr CL.Reset
 
-				ldx #0
+				stz ZPTmpW
 
-.1				inx
-				phx
-				jsr HIS.GetX
-				plx
-				bcs .99
+				>LDYA.G HIS.pBuf
+				>STYA R1
 
+				lda (R1)
+				beq .19
+
+.1				>SS
 				>PUSHW L.MSG.HIS
-				txa
-				dec
-				>PUSHA
-				>PUSHW ZPCLBuf
+				>PUSHB ZPTmpW
+				>PUSHW R1
 				>PUSHBI 3
-				phx
-				>SYSCALL PrintF
-				plx
+				>LIBC PrintF
+				>SR
 				bcs .9
 
-				txa
+				lda (R1)
+				sec
+				jsr HIS.AddACPtr1
+
+				inc ZPTmpW
+				lda ZPTmpW
 				>CMP.G HIS.Count
-				bne .1
+				bcc .1
 
 				>LDYA L.MSG.HISPROMPT
 				jsr IO.OutYA
@@ -83,7 +80,7 @@ HIS.Select		>LDA.G HIS.Count
 				ldy #HIS.Ptr
 				sta (ZPCLBuf),y
 
-				>SYSCALL GetChar
+				>LIBC GetChar
 				bcs .9
 
 				cmp #'0'
@@ -109,27 +106,27 @@ HIS.GetPrev		>LDA.G HIS.Count
 				beq HIS.Select.RTS		empty history,nothing to do
 
 				>LDA.G HIS.Ptr
-				bne .1
+				beq .1
 
-				>LDA.G HIS.Head			Get newest
+				dec
+				bne HIS.GetToCL
+
+.1				>LDA.G HIS.Count
+
 				bra HIS.GetToCL
-
-.1				dec
-				bne .2
-
-				>LDA.G HIS.Count
-
-.2				bra HIS.GetToCL
 *--------------------------------------
 HIS.GetNext		>LDA.G HIS.Count
 				beq HIS.Select.RTS		empty history,nothing to do
 
 				>LDA.G HIS.Ptr
-				bne .1
+				beq .1
 
-				ldy #HIS.Head
+				>CMP.G HIS.Count
+				bcc .1
+				
+				lda #0
 
-.1				jsr HIS.NextY
+.1				inc
 *--------------------------------------
 HIS.GetToCL		>STA.G HIS.Ptr
 
@@ -138,15 +135,8 @@ HIS.GetToCL		>STA.G HIS.Ptr
 HIS.GetToCL1	>LDA.G HIS.Ptr
 				beq .9
 
-				tax
-				jsr HIS.GetX
+				jsr HIS.GetA
 				bcs .9
-
-				ldy #$ff
-
-.1				iny
-				lda (ZPCLBuf),y
-				bne .1
 
 				tya
 
@@ -158,27 +148,127 @@ HIS.GetToCL1	>LDA.G HIS.Ptr
 
 .9				rts
 *--------------------------------------
-HIS.GetX		>PUSHB.G HIS.hBuf
-				>PUSHBI 0
+HIS.GetA		tax
+
+				>LDYA.G HIS.pBuf
+				>STYA R1
+
+.1				lda (R1)
+				beq .9
+
+				dex
+				beq .6
+
+				sec
+				jsr HIS.AddACPtr1
+				bra .1
+
+.6				tax
+
+				inc R1
+				bne .7
+				
+				inc R1+1
+				
+.7				ldy #0
+
+.8				lda (R1),y
+				sta (ZPCLBuf),y
+				iny
+				dex
+				bne .8
+				
 				txa
-				>PUSHA
-				>PUSHW ZPCLBuf
-				>SYSCALL StrVGet
+				sta (ZPCLBuf),y
+				
+				clc						Y = StrLen
+				rts
+
+.9				lda #E.NOKEY
+				sec
 				rts
 *--------------------------------------
-HIS.NextY		lda (pData),y
+HIS.AddNew		>LDYA.G HIS.pBuf
+				>STYA R1
 
-				phy
-				>CMP.G HIS.Count
-				ply
+				ldy #0
 
-				bcc .1
+.1				lda (R1),y
+				beq .2
 
-				lda #0
+				tya
+				sec
+				adc (R1),y
+				tay
+				bra .1
 
-.1				inc
+.2				sty ZPTmpW
 
+				ldy #$ff
+
+.3				iny
+				lda (ZPCLBuf),y
+				bne .3
+
+				tya
+				sec
+				adc ZPTmpW
+				bcc .4
+
+				jsr HIS.DelOldest
+
+				bra HIS.AddNew
+
+.4				lda	ZPTmpW
+				clc
+				jsr HIS.AddACPtr1
+				
+				tya
+				sta (R1)
+				
+				inc R1
+				bne .5
+				
+				inc R1+1
+
+.5				ldy #$ff
+
+.6				iny
+				lda (ZPCLBuf),y
+				sta (R1),y
+				bne .6
+
+				clc
 				rts
+*--------------------------------------
+HIS.DelOldest	>LDYA.G HIS.pBuf
+				>STYA R2
+
+.1				>STYA R1
+
+				lda (R1)
+				beq .8
+
+				sec
+				jsr HIS.AddACPtr1
+
+				ldy #$ff
+				
+.2				iny
+				lda (R1),y
+				sta (R2),y
+				bne .2
+
+.8				clc
+				rts
+*--------------------------------------
+HIS.AddACPtr1	adc R1
+				sta R1
+				bcc .8
+
+				inc R1+1
+
+.8				rts
 *--------------------------------------
 MAN
 SAVE usr/src/bin/sh.s.his

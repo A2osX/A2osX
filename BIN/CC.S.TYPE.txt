@@ -1,65 +1,15 @@
 NEW
   AUTO 3,1
 *--------------------------------------
-TYPE.GetTQInYA	>ENTER 2
-				lda #0
-				sta (pStack)			Type
-				ldy #1
-				sta (pStack),y			Qual
-
-				jsr .8
-				bcs .99
-
-				ldy #1
-				lda (pStack),y
-				pha
-				lda (pStack)
-				tay						Y = Type
-				pla						A = Qual
-
-				clc
-
-.99				>LEAVE
-				rts
-
-.8				jmp (J.CC.TYPEQUAL,x)
-*--------------------------------------
-TYPE.GetTQInYA2	>ENTER 2
-				lda (ZPLookupSymPtr)
-				sta (pStack)			Type
-
-				ldy #SYM.Q
-				lda (ZPLookupSymPtr),y
-
-*				ldy #1
-				sta (pStack),y			Qual
-
-				jsr TYPE.GetQ2
-				bcs .99
-
-				jsr SYM.LookupFree
-
-				ldy #1
-				lda (pStack),y
-				pha
-				lda (pStack)
-				tay						Y = Type
-				pla						A = Qual
-
-				clc
-
-.99				>LEAVE
-				rts
-*--------------------------------------
 * Type Declaration keywords
 *--------------------------------------
 TYPE.CONST		lda #SYM.Q.CONST
 				bra TYPE.VOLATILE.1
 *--------------------------------------
 TYPE.VOLATILE	lda #SYM.Q.VOLATILE
-TYPE.VOLATILE.1	ldy #1
-				ora (pStack),y
-				sta (pStack),y
+TYPE.VOLATILE.1	ldy #SYM.Q
+				ora (ZP.pTypeBuf),y
+				sta (ZP.pTypeBuf),y
 
 				jsr CC.CheckSpace
 				bcs .9
@@ -74,6 +24,11 @@ TYPE.VOLATILE.1	ldy #1
 				sec
 				rts
 *--------------------------------------
+TYPE.RESTRICT
+				lda #E.CSYN
+				sec
+				rts
+*--------------------------------------
 TYPE.STRUCT		clc
 				.HS B0					BCS
 *--------------------------------------
@@ -81,17 +36,17 @@ TYPE.UNION		sec
 				ror ZPPtr2+1			bStrucUnion
 
 				stz ZPPtr2				bNewTagDef
-
+			bra TYPE.SU.Pass1
 				bit bPass2
-				bpl TYPE.SU.1			Pass 1: create def
+				bpl TYPE.SU.Pass1		Pass 1: create def
 *--------------------------------------
-TYPE.SU.2		jsr CORE.GetCharNBNL
+TYPE.SU.Pass2	jsr CORE.GetCharNBNL
 				bcs .98
 
 				cmp #'{'
 				beq .1					no TAG
 
-				jsr TYPE.GetTag
+				jsr TAG.Lookup
 				bcs .99
 
 				jsr CORE.GetNCharNBNL
@@ -108,185 +63,102 @@ TYPE.SU.2		jsr CORE.GetCharNBNL
 				jsr CORE.GetNCharNB	skip '}'
 
 .8				lda #SYM.T.SU
-				jmp TYPE.GetQ
+				jsr TYPE.SetT
+	
+				rts
 
 .98				lda #E.CSYN
 				sec
 .99				rts
 *--------------------------------------
-TYPE.SU.1		ldy #SYM.T.SU
-				lda #0
-				ldx #SYM.SC.TAG
-				sec						reset buffer
-				jsr SYM.BufInitYAXC
+TYPE.SU.Pass1	jsr CORE.GetCharNBNL
+				bcs .97
+
+				cmp #'{'
+				beq .30					no TAG
+
+				jsr TAG.Lookup
+				bcs .20
+				
+				jmp TYPE.SetQ
+*--------------------------------------
+.20				jsr TAG.New
+				bcs .99
+
+				sec
+				ror ZPPtr2				bNewTagDef
 
 				jsr CORE.GetCharNBNL
 				bcs .98
 
 				cmp #'{'
-				beq .30					no TAG
-
-				jsr TYPE.GetTag
-				bcc .20
-
-				jsr TYPE.NewTag
+				bne .98
+*--------------------------------------
+.30				lda #SYM.T.SU
+				sta (ZP.pTypeBuf)		#SYM.T
+				
+				jsr SCOPE.New
 				bcs .99
+				
+				jsr TYPE.SetScope
+				
+.31				jsr CORE.GetNCharNBNL	skip '{' of ';'
 
-				sec
-				ror ZPPtr2				bNewTagDef
-*--------------------------------------
-.20				jsr CORE.GetCharNBNL
-				bcs .98
-
-				cmp #'{'
-				beq .30
-
-				bit ZPPtr2				bNewTagDef
-				bmi .98
-
-				bra .38
-*--------------------------------------
-.30				jsr CORE.GetNCharNBNL	skip '{' of ';'
-				bcs .98
+.97				bcs .98
 
 				cmp #'}'
 				beq .37
 
-				>LDYA L.CC.TYPEQUAL
-				jsr CC.LookupID
-				bcs .98
+				jsr TYPE.NextBuf
 
-				cpx #4					no const nor volatile
-				bcc .98
-
-				jsr TYPE.GetTQInYA
+				jsr DECL.GetType
 				bcs .99
 
-				jsr TYPE.SizeOf			get sizeof in X
+				ldy #SYM.Q				no const nor volatile
+				lda (ZP.pTypeBuf),y
+				and #SYM.Q.CONST+SYM.Q.VOLATILE+SYM.Q.FUNCTION
+				bne .98
 
-				jsr TYPE.SU.AddYAX
+				jsr SYM.NewAuto
 				bcs .99
 
-				jsr SYM.Add0000			TODO: bitO & bitW
+*				TODO: bitO & bitW
+*				bcs .99
+
+				jsr SYM.Store
 				bcs .99
 
-				jsr SYM.AddName
-				bcs .99
+				jsr TYPE.PrevBuf
 
 				jsr CC.GetCharNB
 				cmp #';'
 				bne .98
 
-				bra .30
+				bra .31
 *--------------------------------------
 .37				jsr CORE.GetNCharNB	skip '}'
 				bcs .98
 
-				jsr SYM.Add0000			Close F definition
+				jsr SCOPE.Close			Close SU definition
 				bcs .99
 
 				bit ZPPtr2				bNewTagDef
 				bpl .38
 
-				jsr TYPE.StoreTag
+				jsr TAG.Store
 				bcs .99
 *--------------------------------------
-.38				lda #SYM.T.SU
-				jmp TYPE.GetQ
+.38				jsr TYPE.SetQ
+
+				rts		
 
 .98				lda #E.CSYN
 				sec
 .99				rts
 *--------------------------------------
-TYPE.SU.AddYAX	jsr SYM.AddWord			add T/Q
-				bcs .99
-
-				bit ZPPtr2+1			bStrucUnion
-				bmi .1
-
-				ldy #SYM.SizeOf
-				lda (ZPSymBufPtr),y
-				pha
-				iny
-				lda (ZPSymBufPtr),y
-				ply
-
-				jsr SYM.AddWord			Add Y/A Offset
-				bcs .99
-
-				txa
-
-				ldy #SYM.SizeOf
-*				clc
-				adc (ZPSymBufPtr),y
-				sta (ZPSymBufPtr),y
-				bcc .99
-
-				iny
-				lda #0
-				adc (ZPSymBufPtr),y
-				sta (ZPSymBufPtr),y
-
-*				clc
-
-.99				rts
-
-.1				txa
-				ldy #SYM.SizeOf
-				cmp (ZPSymBufPtr),y
-				bcs .2
-
-				sta (ZPSymBufPtr),y
-
-.2				jmp SYM.Add0000			Add Y/A Offset (always 0 for union)
-*--------------------------------------
 TYPE.ENUM
 				lda #E.CSYN
 				sec
-				rts
-*--------------------------------------
-TYPE.NewTag		>LDA.G CC.hTags
-				jsr SYM.NewKey
-				bcs .9
-
-				>STYA ZPPtr1			TagID
-				dec ZPPtr2				bNewTagDef = true
-
-				jsr CC.SkipX
-
-.9				rts
-*--------------------------------------
-TYPE.GetTag		>PUSHB.G CC.hTags
-				>PUSHW ZPLineBufPtr
-				>PUSHWI 0				ScopeID
-				>SYSCALL SListLookup
-				bcs .9
-
-				phy						Y,A = KeyID
-				pha
-
-				jsr CC.SkipX			X = KeyLen
-
-				>PUSHB.G CC.hTags
-				pla
-				>PUSHA
-				pla
-				>PUSHA
-				>PUSHW ZPSymBufPtr
-				>PUSHWI 65535			all
-				>PUSHWZ					From Start
-				>SYSCALL SListGetData
-.9				rts
-*--------------------------------------
-TYPE.StoreTag	>PUSHB.G CC.hTags
-				>PUSHW ZPPtr1
-				>PUSHW ZPSymBufPtr
-				>PUSHBI 0
-				ldy #SYM.DefSize
-				lda (ZPSymBufPtr),y
-				>PUSHA
-
-				>SYSCALL SListAddData
 				rts
 *--------------------------------------
 TYPE.SIGNED		sec
@@ -337,46 +209,46 @@ TYPE.SHORT		jsr CC.CheckSpace
 				rts
 *--------------------------------------
 TYPE.VOID		lda #SYM.T.VOID
-				bra TYPE.GetQ
+				bra TYPE.SetT
 
 TYPE.CHAR
 TYPE.UCHAR		lda #SYM.T.UCHAR
-				bra TYPE.GetQ
+				bra TYPE.SetT
 
 TYPE.SCHAR		lda #SYM.T.SCHAR
-				bra TYPE.GetQ
+				bra TYPE.SetT
 
 TYPE.UINT		lda #SYM.T.UINT
-				bra TYPE.GetQ
+				bra TYPE.SetT
 
 TYPE.INT
 TYPE.SINT		lda #SYM.T.SINT
-				bra TYPE.GetQ
+				bra TYPE.SetT
 
 TYPE.ULONG		lda #SYM.T.ULONG
-				bra TYPE.GetQ
+				bra TYPE.SetT
 
 TYPE.LONG
 TYPE.SLONG		lda #SYM.T.SLONG
-				bra TYPE.GetQ
+				bra TYPE.SetT
 
 TYPE.FLOAT		lda #SYM.T.FLOAT
 
-TYPE.GetQ		sta (pStack)			T
+TYPE.SetT		sta (ZP.pTypeBuf)		T
 
-TYPE.GetQ2		jsr CC.GetCharNB
+TYPE.SetQ		jsr CC.GetCharNB
 				bcs .9
 
 .1				cmp #'*'
-				bne .10
+				bne .8
 
-				ldy #1					Q
-				lda (pStack),y
+				ldy #SYM.Q
+				lda (ZP.pTypeBuf),y
 				clc
 				adc #SYM.Q.POINTER
 				bcs .9					more than ***
 
-				sta (pStack),y
+				sta (ZP.pTypeBuf),y
 
 				jsr CORE.GetNCharNB
 				bcc .1
@@ -384,21 +256,6 @@ TYPE.GetQ2		jsr CC.GetCharNB
 .9				lda #E.CSYN
 				sec
 .99				rts
-*--------------------------------------
-.10				jsr CC.IsLetter
-				bcs .8
-
-				>LDYA L.CC.FTYPES		int fastcall f() ?
-				jsr CC.LookupID
-				bcs .8					next char is an identifier
-
-				ldy #1
-				lda (pStack),y
-				ora #SYM.Q.FUNC+SYM.Q.FASTCALL
-				sta (pStack),y
-
-				jsr CORE.GetNCharNB
-				bcs .9					next char is an identifier, ",", "(",")"
 
 .8				clc
 				rts
@@ -416,6 +273,112 @@ TYPE.SizeOf		bit #SYM.Q.PPPOINTER
 
 .2				ldx #2					pointer
 				sec						+1 for hMem Storage
+				rts
+*--------------------------------------
+TYPE.Lookup		>STZW.G CC.TypeID
+
+				>SS
+				>PUSHW.G CC.pTypes
+				>PUSHW ZP.pLineBuf
+				>PUSHWI 0				ScopeID
+				>PUSHWI	ZP.pLineBuf	NextPtr
+				>KAPI SListLookup
+				>SR
+				bcs .9
+
+				>STYA.G CC.TypeID
+
+				>SS
+				>PUSHW.G CC.pTypes
+				>PUSHW.G CC.TypeID
+				>PUSHW ZP.pTypeBuf
+				>PUSHWI 65535			all
+				>PUSHWZ					From Start
+				>KAPI SListGetData
+				>SR
+
+.9				rts
+*--------------------------------------
+TYPE.Reset		ldy #SYM-1
+
+				lda #0
+				
+.1				sta (ZP.pTypeBuf),y
+				dey
+				bpl .1
+				
+				rts
+*--------------------------------------
+TYPE.New		>SS
+				>PUSHW.G CC.pTypes
+				>PUSHW ZP.pLineBuf
+				>PUSHWI 0				ScopeID
+				>PUSHWI	ZP.pLineBuf		NextPtr
+				>KAPI SListNewKey
+				>SR
+				bcs .9
+
+				>STYA.G CC.TypeID
+
+.9				rts
+*--------------------------------------
+TYPE.Store		>SS
+				>PUSHW.G CC.pTypes
+				>PUSHW.G CC.TypeID
+				>PUSHW ZP.pTypeBuf
+				>PUSHWI SYM
+				>KAPI SListAddData
+				>SR
+
+.9				rts
+*--------------------------------------
+TYPE.SetScope	>LDA.G CC.ScopeID
+				ldy #SYM.ScopeID
+				sta (ZP.pTypeBuf),y
+				
+				>LDA.G CC.ScopeID+1
+				ldy #SYM.ScopeID+1
+				sta (ZP.pTypeBuf),y
+				rts
+*--------------------------------------
+TYPE.IsVoid		ldy #SYM.TypeID
+				lda (ZP.pTypeBuf),y
+				iny
+				ora (ZP.pTypeBuf),y
+				bne .9
+
+				ldy #SYM.Q
+				lda (ZP.pTypeBuf),y
+				and #SYM.Q.PPPOINTER+SYM.Q.AAARRAY
+				bne .9
+
+				lda (ZP.pTypeBuf)		#SYM.T
+				cmp #SYM.T.VOID
+
+*				bne .9
+
+.9				rts				
+*--------------------------------------
+TYPE.NextBuf	clc
+				lda ZP.pTypeBuf
+				adc #SYM
+				sta ZP.pTypeBuf
+				
+				lda ZP.pTypeBuf+1
+				adc /SYM
+				sta ZP.pTypeBuf+1
+				
+				rts
+*--------------------------------------
+TYPE.PrevBuf	sec
+				lda ZP.pTypeBuf
+				sbc #SYM
+				sta ZP.pTypeBuf
+				
+				lda ZP.pTypeBuf+1
+				sbc /SYM
+				sta ZP.pTypeBuf+1
+				
 				rts
 *--------------------------------------
 MAN

@@ -2,33 +2,22 @@ NEW
   AUTO 3,1
 *---------------------------------------
 MAC.Init		lda #SL..+SL._
-				>SYSCALL SListNew
+				>KAPI SListNew
 				bcs .9
 
-				>STA.G MAC.hList
+				>STYA.G MAC.pList
 
 				>LDYAI 256
-				>SYSCALL GetMem
+				>LIBC Malloc
 				bcs .9
 
-				txa
-				>STA.G MAC.hBuf
+				>STYA.G MAC.pBuf
 
-				>LDYAI 256
-				>SYSCALL GetMem
+				>LDYAI MA.MAXDEPTH*8
+				>LIBC Malloc
 				bcs .9
 
-				>STYA ZPMacroArgBuf
-				txa
-				>STA.G MAC.hArgBuf
-
-				>LDYAI MA.MAXDEPTH*6
-				>SYSCALL GetMem
-				bcs .9
-
-				>STYA ZPMacroStk
-				txa
-				>STA.G MAC.hStk
+				>STYA.G MAC.pStack
 
 .9				rts
 *---------------------------------------
@@ -38,49 +27,60 @@ MAC.Quit		>LDA.G MAC.StkPtr
 				jsr MAC.Pop
 				bra MAC.Quit
 
-.10				>LDA.G MAC.hStk
+.10				>LDYA.G MAC.pStack
+				cmp #0
 				beq .1
 
-				>SYSCALL FreeMem
+				>LIBC Free
 
-.1				>LDA.G MAC.hBuf
+.1				>LDYA.G MAC.pBuf
+				cmp #0
 				beq .2
 
-				>SYSCALL FreeMem
+				>LIBC Free
 
-.2				>LDA.G MAC.hArgBuf
-				beq .3
-
-				>SYSCALL FreeMem
-
-.3				>LDA.G MAC.hList
+.2				>LDYA.G MAC.pList
+				cmp #0
 				beq .8
 
-				>SYSCALL SListFree
+				>KAPI SListFree
 
 .8				clc
 				rts
 *---------------------------------------
-MAC.Learn		>LDA.G MAC.hBuf
-				>SYSCALL GetMemPtr
-				>STYA ZPMacroBuf
+MAC.New			>SS
+				>PUSHW.G MAC.pList
+				>PUSHW ZPLinePtr
+				>PUSHWZ					ScopeID
+				>PUSHWI ZPLinePtr		NextPtr
+				>KAPI SListNewKey
+				>SR
+				bcs .99
+
+				>STYA.G MAC.ID
+
+*				clc
+
+.99				rts
+*---------------------------------------
+MAC.Learn		>LDYA.G MAC.pBuf
+				>STYA R1
 
 				>STZ.G MAC.BufPtr
-				sta (ZPMacroBuf)
+				sta (R1)
+
 				lda (ZPLinePtr)
 				cmp #C.SPACE			No label, scan to DIR/OP if any
 				bne .1
 
-				jsr SRC.GetNextCharNB
-				bcs .8
-
-				lda #C.SPACE			Store ONE blank
-				jsr MAC.AddChar
+				jsr MAC.AddChar			Store ONE blank
 				bcs .90
 
-				lda (ZPLinePtr)			get back non blank char
-				bra .2
+				jsr SRC.GetNextCharNB
+				bcc .2
 
+				bra .80
+*---------------------------------------
 .1				jsr MAC.AddChar
 				bcs .99
 
@@ -95,7 +95,7 @@ MAC.Learn		>LDA.G MAC.hBuf
 
 				jsr SRC.GetNextCharNB
 				bcs .80
-
+*---------------------------------------
 .2				cmp #'.'				Directive ?
 				bne .4
 
@@ -103,29 +103,26 @@ MAC.Learn		>LDA.G MAC.hBuf
 				lda (ZPLinePtr),y
 				beq .3
 
+				jsr SRC.ToUpperCase
 				cmp #'E'
-				beq .21
-
-				cmp #'e'
 				bne .3
 
 .21				iny
 				lda (ZPLinePtr),y
 				beq .3
 
+				jsr SRC.ToUpperCase
 				cmp #'M'
-				beq .22
-
-				cmp #'m'
 				bne .3
 
-.22				>STZ.G ASM.MA.ON
-.8				clc
-				rts
+				>STZ.G MAC.bLearning
+
+*				lda #0
+				jmp MAC.AddChar			End Of Macro
 
 .80				lda #C.CR
 				jmp MAC.AddChar
-
+*---------------------------------------
 .3				lda (ZPLinePtr)
 
 .4				jsr MAC.AddChar
@@ -138,7 +135,7 @@ MAC.Learn		>LDA.G MAC.hBuf
 				bne .4
 
 				jsr SRC.GetNextChar
-				bcs .8
+				bcs .80
 
 				cmp #C.SPACE
 				beq .80					Comments...
@@ -169,101 +166,197 @@ MAC.AddChar		tax
 				>LDA.G MAC.BufPtr
 				tay
 				txa
-				sta (ZPMacroBuf),y
+				sta (R1),y
 				>INC.G MAC.BufPtr
 				txa
 				beq .1
 
-				cmp #C.CR
+				eor #C.CR
 				bne .8
 
-.1				>PUSHB.G MAC.hList
+.1				>SS
+				>PUSHW.G MAC.pList
 				>PUSHW.G MAC.ID
-				>PUSHW ZPMacroBuf
+				>PUSHW R1
 				>LDA.G MAC.BufPtr
 				tay
 				lda #0
 				>PUSHYA
-				>SYSCALL SListAddData
+				>KAPI SListAddData
+				>SR
+
 				rts
 
 .8				clc
 				rts
 *---------------------------------------
-MAC.Exec		jsr SRC.GetNextChar		skip '>'
-				bcs .90
+MAC.Exec		jsr MAC.Push
+				bcs .99
+				
+				inc ZPMacroNextID
+				lda ZPMacroNextID
+				sta ZPMacroCtxID
 
-				>PUSHB.G MAC.hList
-				>PUSHW ZPLinePtr
-				>PUSHWI 0				ScopeID
-				>SYSCALL SListLookup
-				bcs .90
+				jsr MAC.GetBody
+				bcs .99
 
-				>STYA ZPPtr1			MAC.ID
+				>STYA ZPMacroBuf
+				>STYA ZPMacroBufPtr
 
-				jsr SRC.SkipX
+				stz ZPMacroArgBuf+1
 
-.1				jsr SRC.GetChar
+				jsr SRC.GetChar
 				bcs .8
 
 				cmp #C.SPACE
 				bne .92
 
 				jsr SRC.GetNextChar
-				beq .8					eol..
+				bcs .8					eol..
 
-				cmp #C.SPACE			some arg...
-				bne .8
+				cmp #C.SPACE			comment....skip
+				beq .8
 
-.2				jsr SRC.GetNextChar		comment....skip
-				bcc .2
+				jsr MAC.GetArgs
+				bcs .99
 
-.8				jmp MAC.Push
+.8				clc
+				rts
 
 .90				lda #E.MACRO.INV
 *				sec
-				rts
+.99				rts
 
 .92				lda #E.SYNTAX.ERROR
 				sec
 MAC.Exec.RTS	rts
 *---------------------------------------
-MAC.ReadLine	>LDA.G MAC.hBuf
-				>SYSCALL GetMemPtr
-				>STYA ZPMacroBuf
+MAC.GetBody		>SS
+				>PUSHW.G MAC.pList
+				>PUSHW ZPLinePtr
+				>PUSHWZ					ScopeID
+				>PUSHWI ZPLinePtr		NextPtr
+				>KAPI SListLookup
+				>SR
+				bcs .99
 
-				jsr MAC.Get				ZPMacroArgBuf = args
+				>STYA R1				MAC.ID
 
-				>PUSHB.G MAC.hList
-				>PUSHW ZPPtr1			Mac ID
-				>PUSHW ZPMacroBuf
-				>PUSHWZ					len = 0 (string mode)
-				>PUSHW ZPPtr2			offset
-				>SYSCALL SListGetData
-				bcs MAC.Exec.RTS
+				>SS
+				>PUSHW.G MAC.pList
+				>PUSHW R1				Mac ID
+				>PUSHWZ					allocate
+				>PUSHWI $ffff			all
+				>PUSHWZ					from Start
+				>KAPI SListGetData
+				>SR
 
-				pha
+.99				rts
+*---------------------------------------
+MAC.GetArgs		ldy #$ff
+
+.10				iny
+				lda (ZPLinePtr),y
+				bne .10
+
+				iny
+				iny
+
+				lda #0
+
+				>LIBC Malloc
+				bcs .99
+
+				>STYA ZPMacroArgBuf
+
+				>STYA R2
+
+				ldx #0					arg cnt
+
+.1				ldy #$ff
+
+				stz DIR.Byte			between " flag
+
+.2				iny
+				lda	(ZPLinePtr),y
+				beq .3
+
+				cmp #C.SPACE			end of args ?
+				bne .21
+
+				bit DIR.Byte
+				bpl .3
+
+.20				sta	(R2)
+				inc R2
+				bne .2
+
+				inc R2+1
+				bra .2
+
+.21				cmp #'"'
+				bne .22
+
+				lda DIR.Byte
+				eor #$ff
+				sta DIR.Byte
+				bra .2
+
+.22				cmp #','
+				bne .20
+
+				bit DIR.Byte
+				bmi .20
+
+				lda #0
+				sta	(R2)
+
+				inc R2
+				bne .23
+
+				inc R2+1
+
+.23				tya
+				beq .4
+
+				inx
+
+				sec
+				adc ZPLinePtr
+				sta ZPLinePtr
+				bcc .1
+
+				inc ZPLinePtr+1
+				bra .1
+
+.3				lda #0
+				sta	(R2)
+
 				tya
-				sec						+1 for CR
-				adc ZPPtr2
-				sta ZPPtr2
-				pla
-				adc ZPPtr2+1
-				sta ZPPtr2+1
+				beq .4
 
-				ldy #0
+				inx
+
+.4				stx ZPMacroArgCnt
+
+				clc
+
+.99				rts
+*---------------------------------------
+MAC.ReadLine	ldy #0
 
 				stz DIR.Byte
 
-.1				lda (ZPMacroBuf)
-				beq .8
+.1				lda (ZPMacroBufPtr)
+				beq .80
 
 				cmp #C.CR
 				beq .8
 
-				inc ZPMacroBuf
+				inc ZPMacroBufPtr
 				bne .2
-				inc ZPMacroBuf+1
+
+				inc ZPMacroBufPtr+1
 
 .2				cmp #']'
 				bne .7
@@ -271,12 +364,13 @@ MAC.ReadLine	>LDA.G MAC.hBuf
 				bit DIR.Byte
 				bmi .7
 
-				lda (ZPMacroBuf)
+				lda (ZPMacroBufPtr)
 				beq .9
 
-				inc ZPMacroBuf
+				inc ZPMacroBufPtr
 				bne .21
-				inc ZPMacroBuf+1
+
+				inc ZPMacroBufPtr+1
 
 .21				cmp #'#'
 				bne .22
@@ -300,13 +394,14 @@ MAC.ReadLine	>LDA.G MAC.hBuf
 				jsr MAC.GetArgX
 				bcs .1					no arg ]n, append nothing
 
-.3				lda (ZPPtr1)
+.3				lda (R1)
 				sta (ZPLineBuf),y
 				iny
 
-				inc ZPPtr1
+				inc R1
 				bne .4
-				inc ZPPtr1+1
+
+				inc R1+1
 
 .4				dex
 				bne .3
@@ -323,230 +418,30 @@ MAC.ReadLine	>LDA.G MAC.hBuf
 				iny
 				bra .1
 
-.8				lda #0
+.8				inc ZPMacroBufPtr
+				bne .80
+
+				inc ZPMacroBufPtr+1
+
+.80				lda #0
 				sta (ZPLineBuf),y
-				jmp MAC.Put
+
+				clc
+				rts
 
 .9				lda #E.SYNTAX.ERROR
 				sec
-MAC.ReadLine.RTS
-				rts
-*---------------------------------------
-MAC.Push		>LDA.G MAC.StkPtr
-				cmp #MA.MAXDEPTH*6
-				beq MAC.ReadLine.RTS
-
-				>LDA.G MAC.CtxID
-				pha
-
-				>INC.G MAC.CtxStackPtr
-				clc
-				adc #MAC.CtxStack-1
-				tay
-				pla
-				sta (pData),y
-
-				>INC.G MAC.CtxNextID
-				>STA.G MAC.CtxID
-
-				ldy #$ff
-
-.10				iny
-				lda (ZPLinePtr),y
-				bne .10
-
-				iny
-				iny
-
-				lda #0
-
-				>SYSCALL GetMem
-				bcs MAC.ReadLine.RTS
-
-				>STYA ZPPtr2
-				phx						hArgs
-
-				ldx #0					arg cnt
-
-.1				ldy #$ff
-
-				stz DIR.Byte			between " flag
-
-.2				iny
-				lda	(ZPLinePtr),y
-				beq .3
-
-				cmp #C.SPACE			end of args ?
-				bne .21
-
-				bit DIR.Byte
-				beq .3
-
-.20				sta	(ZPPtr2)
-				inc ZPPtr2
-				bne .2
-				inc ZPPtr2+1
-				bra .2
-
-.21				cmp #'"'
-				bne .22
-
-				lda DIR.Byte
-				eor #$ff
-				sta DIR.Byte
-				bra .2
-
-.22				cmp #','
-				bne .20
-
-				bit DIR.Byte
-				bmi .20
-
-				lda #0
-				sta	(ZPPtr2)
-
-				inc ZPPtr2
-				bne .23
-				inc ZPPtr2+1
-
-.23				tya
-				beq .4
-
-				inx
-
-				sec
-				adc ZPLinePtr
-				sta ZPLinePtr
-				bcc .1
-
-				inc ZPLinePtr+1
-				bra .1
-
-.3				lda #0
-				sta	(ZPPtr2)
-
-				tya
-				beq .4
-
-				inx
-
-.4				>LDA.G MAC.StkPtr
-				tay
-
-				pla						push hArgs
-				sta (ZPMacroStk),y
-				iny
-
-				txa						push arg count
-				sta (ZPMacroStk),y
-				iny
-
-				lda #0					push offset
-				sta (ZPMacroStk),y
-				iny
-				sta (ZPMacroStk),y
-
-				iny
-				lda ZPPtr1+1			push MAC.ID
-				sta (ZPMacroStk),y
-				iny
-				lda ZPPtr1
-				sta (ZPMacroStk),y
-
-				iny
-				tya
-				>STA.G MAC.StkPtr
-				clc
-				rts
-
-.9				lda #E.MACRO.TOO.MANY
-				sec
-				rts
-*---------------------------------------
-MAC.Pop			>LDA.G MAC.StkPtr
-
-				dec
-				dec							mac id
-
-				dec
-				dec							offset
-
-				dec							arg cnt
-				dec							hArgs
-
-				sta (pData),y				6 bytes off stack
-
-				tay
-				lda (ZPMacroStk),y
-				>SYSCALL FreeMem
-
-				>LDA.G MAC.CtxStackPtr
-				clc
-				adc #MAC.CtxStack-1
-				tay
-				lda (pData),y
-				>STA.G MAC.CtxID
-				>DEC.G MAC.CtxStackPtr
-
-				clc
-				rts
-*---------------------------------------
-MAC.Get			>LDA.G MAC.StkPtr
-
-				tay
-
-				dey
-				lda (ZPMacroStk),y
-				sta ZPPtr1
-				dey
-				lda (ZPMacroStk),y
-				sta ZPPtr1+1			get mac ID
-
-				dey
-				lda (ZPMacroStk),y
-				sta ZPPtr2
-				dey
-				lda (ZPMacroStk),y
-				sta ZPPtr2+1			get offset
-
-				dey
-				lda (ZPMacroStk),y		get arg count
-				sta ZPMacroArgCnt
-
-				dey
-				lda (ZPMacroStk),y
-				>SYSCALL GetMemPtr
-
-				>STYA ZPMacroArgBuf		get args
-				rts
-*---------------------------------------
-MAC.Put			>LDA.G MAC.StkPtr
-
-				tay
-
-				dey						to arg cnt
-
-				dey
-				dey						skip mac ID
-
-				lda ZPPtr2
-				sta (ZPMacroStk),y
-				dey
-
-				lda ZPPtr2+1
-				sta (ZPMacroStk),y		save offset
-				clc
 				rts
 *---------------------------------------
 MAC.GetArgX		phy
 
 				>LDYA ZPMacroArgBuf
-				>STYA ZPPtr1
+				>STYA R1
 
 .1				ldy #$ff
 
 .2				iny
-				lda (ZPPtr1),y
+				lda (R1),y
 				bne .2
 
 .3				dex
@@ -556,10 +451,11 @@ MAC.GetArgX		phy
 				beq .9
 
 				sec
-				adc ZPPtr1
-				sta ZPPtr1
+				adc R1
+				sta R1
 				bcc .1
-				inc ZPPtr1+1
+
+				inc R1+1
 				bra .1
 
 .4				tya
@@ -572,6 +468,73 @@ MAC.GetArgX		phy
 
 .9				ply
 				sec
+				rts
+*---------------------------------------
+MAC.Push		>LDA.G MAC.StkPtr
+				cmp #MA.MAXDEPTH*8
+				bcs .98
+
+				>LDYA.G MAC.pStack
+				>STYA R1
+
+				>LDA.G MAC.StkPtr
+				tay
+
+				ldx #0
+
+.1				lda ZPMacroBuf,x
+				sta (R1),y
+				iny
+				inx
+				cpx #8
+				bcc .1
+
+				tya
+				>STA.G MAC.StkPtr
+				
+				clc
+				rts
+
+.98				lda #E.MACRO.TOO.MANY
+*				sec
+				rts
+*---------------------------------------
+MAC.Pop			>LDYA ZPMacroArgBuf
+				beq .1
+				
+				>LIBC Free
+
+				stz ZPMacroArgBuf+1
+
+.1				>LDYA ZPMacroBuf
+				beq .2
+				
+				>LIBC Free
+
+				stz ZPMacroBuf+1
+
+.2				>LDYA.G MAC.pStack
+				>STYA R1
+
+				>LDA.G MAC.StkPtr
+				beq .8
+				
+				sec
+				sbc #8
+				sta (pData),y				8 bytes off stack
+
+				tay
+
+				ldx #0
+
+.3				lda (R1),y
+				sta ZPMacroBuf,x
+				iny
+				inx
+				cpx #8
+				bcc .3
+
+.8				clc
 				rts
 *---------------------------------------
 MAN

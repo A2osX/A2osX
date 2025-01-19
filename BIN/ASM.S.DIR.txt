@@ -1,19 +1,6 @@
 NEW
   AUTO 3,1
 *---------------------------------------
-DIR.Reset		lda #$ff
-				>STA.G ASM.LI.ON
-				iny						#ASM.LI.CON
-				sta (pData),y
-				iny						#ASM.LI.MON
-				sta (pData),y
-				iny						#ASM.LI.XON
-				sta (pData),y
-
-				>STA.G MAC.StkPtr
-
-				rts
-*---------------------------------------
 DIR.AC			clc
 				rts
 *---------------------------------------
@@ -24,7 +11,7 @@ DIR.AS			clc
 				lda #0
 				ror
 				sta DIR.Byte			Save b7 of last char in string
-				jsr	SRC.GetNextChar
+				jsr	SRC.GetNextCharNB
 				bcs .9
 
 				cmp #'-'
@@ -79,10 +66,11 @@ DIR.AS.RTS		rts
 *---------------------------------------
 DIR.AZ			jsr DIR.AS
 				bcs DIR.AS.RTS
+
 				lda #0
 				jmp OUT.EmitByte
 *---------------------------------------
-DIR.PS			jsr SRC.GetNextChar
+DIR.PS			jsr SRC.GetNextCharNB
 				bcs .9
 
 				sta DIR.Word			Save delimiter....
@@ -122,7 +110,7 @@ DIR.PS			jsr SRC.GetNextChar
 				sec
 				rts
 *---------------------------------------
-DIR.CS			jsr SRC.GetNextChar
+DIR.CS			jsr SRC.GetNextCharNB
 				bcs .9
 
 				stz DIR.Byte
@@ -175,6 +163,7 @@ DIR.CZ.RTS		rts
 *---------------------------------------
 DIR.CZ			jsr DIR.CS
 				bcs DIR.CZ.RTS
+
 				lda #0
 				jmp OUT.EmitByte
 *---------------------------------------
@@ -223,6 +212,7 @@ DIR.BS			jsr SRC.GetNextCharNB
 
 .1				inc DIR.Word
 				bne .2
+
 				inc DIR.Word+1
 				beq .8
 
@@ -281,29 +271,26 @@ DIR.DA			jsr SRC.GetNextCharNB
 				rts
 *---------------------------------------
 DIR.DO			>LDA.G ASM.DO.StackPtr
-				tay
-				inc
+				beq .1					empty stack
+				
 				cmp #DO.MAXDEPTH
 				bcs .98
-
-				tya
-				beq .1
 
 *				clc
 				adc #ASM.DO.Stack-1
 				tay
 
-				lda (pData),y			Previous DO is false?
+				lda (pData),y			Previous DO = TRUE ?
 				bne .1
 
-				>INC.G ASM.DO.StackPtr	yes,stack FALSE
+				>INC.G ASM.DO.StackPtr	FALSE, stack another FALSE
 
 *				clc
 				adc #ASM.DO.Stack-1
 				tay
 				lda #0
 				bra .8
-
+*---------------------------------------
 .1				jsr	SRC.GetNextCharNB
 				bcs .99
 
@@ -321,6 +308,7 @@ DIR.DO			>LDA.G ASM.DO.StackPtr
 				ora SRC.ACC+2
 				ora SRC.ACC+3
 				beq .8
+
 				lda #$ff
 
 .8				sta (pData),y
@@ -333,9 +321,9 @@ DIR.DO			>LDA.G ASM.DO.StackPtr
 .99				rts
 *---------------------------------------
 DIR.EL			>LDA.G ASM.DO.StackPtr
+				tax
 				beq .9
 
-				tax
 				dec
 				beq .1					no previous DO context
 
@@ -360,6 +348,15 @@ DIR.EL			>LDA.G ASM.DO.StackPtr
 				sec
 				rts
 *---------------------------------------
+DIR.FI			>LDA.G ASM.DO.StackPtr
+				beq DIR.EP.ILLEGAL
+
+				dec
+				sta (pData),y
+
+				clc
+				rts
+*---------------------------------------
 DIR.EM			lda #E.MACRO.INV.DEF
 				sec
 				rts
@@ -378,6 +375,7 @@ DIR.PH			>LDA.G ASM.PH.ON
 
 				lda #$80
 				sta (pData),y
+
 				ldy #ASM.PC.PH
 				jsr DIR.SavePC
 
@@ -397,6 +395,7 @@ DIR.EP			>LDA.G ASM.PH.ON
 
 				lda #0
 				sta (pData),y
+
 				ldy #ASM.PC.PH
 				jmp DIR.RestorePC
 .9
@@ -409,153 +408,129 @@ DIR.SE			sec
 *---------------------------------------
 DIR.EQ			clc
 
+				jsr EXP.ResetAcc		keep F
+
+				lda (ZPSymbolBuf)
+				bcc .1
+	
+				ora #SYMG.F.RW
+	
+.1				ora #SYMG.F.EQU
+				sta (ZPSymbolBuf)
+				
+				sta SRC.ACC.F
+
 				lda #$ff
 				>STA.G OUT.bEquate
 
-				>LDA.G SYM.BufPtr
-				beq DIR.EP.ILLEGAL		not in global symbol context
-
-				eor #SYMG
-				beq .1
-
-				bcs DIR.EP.ILLEGAL		.SE not allowed in local/private
-				bcc .10					.EQ in local, skip F update
-
-.1				ror						A = 0 : CS = SYMG.F.RW
-
-				ora #SYMG.F.EQU
-				sta SRC.ACC.F
-
-.10				jsr	SRC.GetNextCharNB
-				bcs .9
-
-				jsr EXP.ResetAccV		keep F
+				jsr	SRC.GetNextCharNB
+				bcs .98
 
 				jsr EXP.Eval
 				bcs DIR.EP.RTS
-
+				
 				>LDA.G SYM.BufPtr
-
 				cmp #SYMG
-				beq .12
+				bne .4
+				
+				ldy #SYMG-1
 
-				tay
-				ldx #3					we are in local/private
-
-.11				lda SRC.ACC,x			update value
-				dey
-				sta (ZPSymbolBuf),y
-				dex
-				bpl .11
-
-				clc
-				rts
-
-.12				ldy #SYMG-1
-
-.13				lda SRC.ACC.F,y
+.2				lda SRC.ACC.F,y
 				sta (ZPSymbolBuf),y
 				dey
-				bpl .13
-
-				>LDA.G ASM.PASS
 				bne .2
-
+				
+				>LDA.G ASM.PASS
+				bne .3
+				
 				jmp SYM.StoreGlobal
+				
+.3				lda (ZPSymbolBuf)
+				and #SYMG.F.FWREF
+				beq .8
 
-.2				jmp SYM.UpdateGlobal
-
-.9				lda #E.SYNTAX.ERROR
+				jmp SYM.UpdateGlobal
+				
+.4				jsr SYM.Acc2Offset
+				bcs .99
+				
+				lda #$FF
+				>STA.G SYM.bDirty
+				
+.8				clc
+				rts				
+				
+.98				lda #E.SYNTAX.ERROR
 				sec
-				rts
-*---------------------------------------
-DIR.FI			>LDA.G ASM.DO.StackPtr
-				beq DIR.EP.ILLEGAL
-
-				dec
-				sta (pData),y
-
-				clc
-				rts
+.99				rts				
 *---------------------------------------
 DIR.HS			clc
 				.HS B0					BCS
 				
 DIR.HX			sec
-				ror DIR.Word
+				ror DIR.Byte
+				
+				stz DIR.Word
 
 				jsr SRC.GetNextCharNB
-				bcs .99
-
-				jsr SRC.IsDigit16
-				bcs .99
-
-.1				sta DIR.Byte
-				jsr	SRC.GetNextChar
-				bcc .2
-
-				jmp OUT.EmitByte
-
-.2				jsr SRC.IsDigit16
-				bcc .3
-
-				cmp #','
-				beq .22
-
-				cmp #'.'
-				bne .99
-
-.22				lda DIR.Byte
-				jsr OUT.EmitByte
-				bcc .5
-				rts
-*---------------------------------------
-.3				bit DIR.Word
-				bmi .30
-				
-				asl DIR.Byte
-				asl DIR.Byte
-				asl DIR.Byte
-				asl DIR.Byte
-				
-				bra .4
-				
-.30				asl
-				asl
-				asl
-				asl
-
-.4				ora DIR.Byte
-				jsr OUT.EmitByte
 				bcs .9
 
+.10				jsr SRC.IsDigit16
+				bcs .9
+
+.1				jsr .80
+				bcs .99
+				
 				jsr	SRC.GetNextChar
 				bcs .8
 
-				cmp #C.SPACE
-				beq .8
-
 				jsr SRC.IsDigit16
 				bcc .1
 
 				cmp #','
-				beq .5
+				beq .2
 
 				cmp #'.'
 				bne .99
 
-.5				jsr	SRC.GetNextChar
-				bcs .99
+.2				jsr	SRC.GetNextChar
+				bcc .10
 
-				jsr SRC.IsDigit16
-				bcc .1
-
-.99				lda #E.SYNTAX.ERROR
+.9				lda #E.SYNTAX.ERROR
 				sec
-.9				rts
+.99				rts
 
-.8				clc
+.8				lda #0
+*---------------------------------------
+.80				bit DIR.Word
+				bmi .81
+				
+				sta DIR.Word+1
+				dec DIR.Word
+				
+				clc
 				rts
+
+.81				bit DIR.Byte
+				bmi .82
+				
+				asl DIR.Word+1
+				asl DIR.Word+1
+				asl DIR.Word+1
+				asl DIR.Word+1
+				
+				bra .88
+				
+.82				asl
+				asl
+				asl
+				asl
+
+.88				ora DIR.Word+1
+
+				stz DIR.Word
+
+				jmp OUT.EmitByte
 *---------------------------------------
 DIR.IN			jsr SRC.GetNextCharNB
 				bcs .9
@@ -571,7 +546,7 @@ DIR.LI			jsr SRC.GetNextChar
 				bcs .9
 
 				>LDYA L.T.LI
-				jsr SRC.GetKeyword
+				jsr SRC.Lookup
 				bcs .9
 				jsr .7
 
@@ -622,32 +597,30 @@ DIR.LI.XON		ldy #ASM.LI.XON
 
 DIR.LI.XOFF		ldy #ASM.LI.XON
 				clc
+
 DIR.LI.APPLY	lda #0
 				ror
 
 				sta (pData),y
 				rts
 *---------------------------------------
-DIR.MA			>LDA.G ASM.MA.ON
+DIR.MA			>LDA.G MAC.bLearning
 				bmi .9
 
-				>LDA.G ASM.PASS		If Pass#2, ignore
+				>LDA.G ASM.PASS			If Pass#2, ignore
 				bne .8
 
 				jsr SRC.GetNextCharNB
 				beq DIR.OP.SYNERR
 
-				>PUSHB.G MAC.hList
-				>PUSHW ZPLinePtr
-				>PUSHWI 0				ScopeID
-				>SYSCALL SListNewKey
+				jsr MAC.New
 				bcs .99
 
-				>STYA.G MAC.ID
-
 .8				lda #$ff
-				>STA.G ASM.MA.ON
+				>STA.G MAC.bLearning
+
 				clc
+
 				rts
 
 .9				lda #E.MACRO.INV.DEF
@@ -672,15 +645,14 @@ DIR.OR			jsr SRC.GetNextCharNB
 				jsr EXP.Eval
 				bcs .9
 
-				ldx #0
-				ldy #ASM.PC
+				ldx #3
+				ldy #ASM.PC+3
 
 .1				lda SRC.ACC,x
 				sta (pData),y
-				iny
-				inx
-				cpx #4
-				bne .1
+				dey
+				dex
+				bpl .1
 
 				>LDA.G ASM.DU.ON
 				bmi .8
@@ -694,7 +666,10 @@ DIR.OR			jsr SRC.GetNextCharNB
 				iny
 				sta (pData),y
 
-.8				clc
+.8
+
+*				clc
+
 .9				rts
 *---------------------------------------
 DIR.EN
@@ -712,88 +687,99 @@ DIR.TA.RTS		rts
 *---------------------------------------
 DIR.TF			>LDA.G ASM.PASS			If Pass#1, ignore
 				beq DIR.TA.8
-
-				>LDA.G ArgDstFile
-				beq .1
-
-				>SYSCALL ArgV
-				bra .2
+			
+				>LDYA.G DST.pFILENAME
+				cmp #0
+				bne .2
 
 .1				jsr SRC.GetNextCharNB
 				bcs DIR.OP.SYNERR
 
 				>LDYA ZPLinePtr
 
-.2				>SYSCALL StrDup
-				bcs DIR.TA.RTS
-				>STYA ZPPtr1
-				stx ZPPtr2
+.2				>STYA R1
 
 				lda #S.FI.T.BIN
-				sta ZPPtr2+1
+				sta R2+1
 
 				ldy #$ff
 
-.3				iny
-				lda (ZPPtr1),y
-				beq .7
-				cmp #','
-				bne .3
-
-				lda #0
-				sta (ZPPtr1),y
+				lda #'/'
+				cmp (R1)
+				beq .3
+				
+				sta (ZPTmpBuf)
 
 				iny
-				lda (ZPPtr1),y
-				cmp #'T'
-				beq .4
+				bra .3
 
-.30				lda #E.SYNTAX.ERROR
-				bra .9
+.30				inc R1
+				bne .3
+				
+				inc R1+1
+				
+.3				iny
+				lda (R1)
+				sta (ZPTmpBuf),y
+				beq .7
 
-.4				ldx #0
-
-.5				iny
-				lda (ZPPtr1),y
-				cmp DIR.SYS,x			including \0
+				eor #','
 				bne .30
-				inx
-				cpx #4
-				bne .5
+				
+				sta (ZPTmpBuf),y
+				
+				inc R1
+				bne .40
+				
+				inc R1+1
+				
+.40				lda (R1)
+				cmp #'T'
+				bne .98
+
+				inc R1
+				bne .4
+				
+				inc R1+1
+
+.4				ldy #$ff
+
+.6				iny
+				lda (R1),y
+				cmp DIR.SYS,y			including \0
+				bne .98
+
+				iny
+				cpy #4
+				bcc .6
 
 				lda #S.FI.T.SYS
-				sta ZPPtr2+1
+				sta R2+1
 
-.7				>PUSHW ZPPtr1
-				>PUSHWZ					Allocate
-				>SYSCALL RealPath
-				bcs .9
-
-				txa
-				>STA.G DST.hFILENAME
-				>SYSCALL GetMemPtr
-				>PUSHYA
+.7				>SS
+				>PUSHW ZPTmpBuf
 				>PUSHBI O.WRONLY+O.CREATE
-				>PUSHB ZPPtr2+1			Type
+				>PUSHB R2+1			Type
 				>PUSHW.G DST.AUXTYPE
-				>SYSCALL FOpen
-				bcs .9
+				>LIBC FOpen
+				>SR
+				bcs .99
 
-				>STA.G DST.hREFNUM
+				>STYA.G DST.pFILE
 
-				clc
-
-.9				php
-				pha
-				lda ZPPtr2
-				>SYSCALL FreeMem
-				pla
-				plp
+*				clc
 
 				rts
+				
+.98				lda #E.SYNTAX.ERROR
+
+				sec
+
+.99				rts
 *---------------------------------------
-DIR.SavePC		phy
-				plx
+DIR.SavePC		tya
+				tax
+
 				ldy #ASM.PC+3
 
 .1				lda (pData),y
@@ -802,8 +788,9 @@ DIR.SavePC		phy
 				cpy #ASM.PC-1
 				bne .1
 
-				phx
-				ply
+				txa
+				tay
+				
 				ldx #3
 
 .2				pla
@@ -824,6 +811,7 @@ DIR.RestorePC	ldx #3
 				bpl .1
 
 				ldy #ASM.PC+3
+
 				ldx #3
 
 .2				pla

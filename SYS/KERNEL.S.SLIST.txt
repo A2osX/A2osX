@@ -1,103 +1,715 @@
 NEW
   AUTO 3,1
+*--------------------------------------
+SLIST.Opt		.BS 1
+SLIST.Bnk		.BS 1
+SLIST.bScoped	.BS 1
+SLIST.KeyLen	.BS 1
+SLIST.DataLen	.BS 2
+SLIST.nDataCnt	.BS 2
+SLIST.nBufCnt	.BS 2
+SLIST.bStr		.BS 1
+SLIST.b0		.BS 1
+SLIST.KeyID		.BS 2
+SLIST.ScopeID	.BS 2
+ZPSListDataOfs	.BS 2
+ZPSListDataLen	.BS 2
 */--------------------------------------
 * # SListGetData
 * ## ASM
-* `>PUSHB hSList`
+* `>SS`
+* `>PUSHW pSList`
 * `>PUSHW KeyID`
 * `>PUSHW DataPtr` (0 if KERNEL should allocate a buffer)
 * `>PUSHW DataLen` (Data bytes to return, 0 if String mode)
 * `>PUSHW DataOfs` (Start offset in Data)
-* `>SYSCALL SListGetData`
+* `>KAPI SListGetData`
+* `>SR`
 * ## RETURN VALUE
-*  Y,A = Byte Count
-*  X = hMem (if DataPtr = 0)
+*  Y,A = DataPtr
 *\--------------------------------------
-K.SListGetData	>PULLW ZPSListDataOfs
+K.SListGetData	ldy #0					DataOfs
+				jsr RAMSW.GetStkYW
+				>STYA ZPSListDataOfs
+
+				ldy #2					DataLen
+				jsr RAMSW.GetStkYW
+				>STYA ZPSListDataLen
+
+				ldy #4					DataPtr
+				jsr RAMSW.StkY2FORPNT
+
+				ldy #8					pSList
+				jsr RAMSW.GetStkYW
+				>STYA pIBlk
+
+				ldy #6					KeyID
+				jsr RAMSW.GetStkYW
+				jsr SLIST.SelectYA
+
+				jsr SLIST.SkipKey
+				jsr SLIST.GetDataLen
+
+				lda SLIST.DataLen
+				sec
+				sbc ZPSListDataOfs		Offset
+				eor #$ff
+				sta SLIST.nDataCnt
+
+				lda SLIST.DataLen+1
+				sbc ZPSListDataOfs+1
+				eor #$ff
+				sta SLIST.nDataCnt+1	Data remaining
+				bcs .10
+
+				lda #E.EMPTYKEY			Offset Beyond DataLen
+				sec
+.9				rts
+
+.10				lda ZPSListDataOfs		Skip to Offset
+				ldx ZPSListDataOfs+1
+				jsr SLIST.SkipDataAX
+
+				stz SLIST.b0
+
+				>LDYA FORPNT
+				bne .12					buffer provided
+
+				>LDYA SLIST.DataLen
+
+				iny
+				bne .11
+
+				inc						+1 for ending 0
+
+.11				sec
+				ror SLIST.b0
+
+				jsr K.Malloc
+				bcs .9
+
+				>STYA FORPNT
+
+.12				sty .87+1
+				sta .88+1
+
+				lda ZPSListDataLen
+				ora ZPSListDataLen+1
+				sec
+				beq .1					String Mode
+
+				lda ZPSListDataLen
+				eor #$ff
+				sta SLIST.nBufCnt
+				lda ZPSListDataLen+1
+				eor #$ff
+				sta SLIST.nBufCnt+1
+				clc
+
+.1				ror SLIST.bStr
+
+				stz ZPSListDataLen
+				stz ZPSListDataLen+1
+
+.2				inc SLIST.nDataCnt
+				bne .3
+
+				inc SLIST.nDataCnt+1
+				beq .80
+
+.3				bit SLIST.bStr
+				bmi .4					String mode : until CR
+
+				inc SLIST.nBufCnt
+				bne .4
+
+				inc SLIST.nBufCnt+1
+				beq .80					not string mode : until end of buffer
+
+.4				jsr BLIST.GetNByte
+				bit SLIST.bStr
+				bpl .5
+
+				cmp #C.CR
+				beq .81
+
+.5				jsr SHARED.xFORPNTpn
+				inc ZPSListDataLen
+				bne .2
+
+				inc ZPSListDataLen+1
+				bra .2
+
+.80				lda SLIST.bStr
+				ora SLIST.b0
+				bpl .87
+
+.81				lda #0
+				jsr SHARED.xFORPNTpn
+
+.87				ldy #$ff				SELF MODIFIED
+.88				lda #$ff				SELF MODIFIED
+
+				clc
+				rts
 */--------------------------------------
 * # SListAddData
 * ## ASM
-* `>PUSHB hSList`
+* `>SS`
+* `>PUSHW pSList`
 * `>PUSHW KeyID`
 * `>PUSHW DataPtr`
 * `>PUSHW DataLen` (Data bytes to add, 0 if String mode)
-* `>SYSCALL SListAddData`
+* `>KAPI SListAddData`
+* `>SR`
 * ## RETURN VALUE
 *\--------------------------------------
-K.SListAddData
+K.SListAddData	ldy #0					DataLen
+				jsr RAMSW.GetStkYW
+				>STYA ZPSListDataLen
+
+				ldy #2					DataPtr
+				jsr RAMSW.StkY2TXTPTR
+
+				ldy #6					pSList
+				jsr RAMSW.GetStkYW
+				>STYA pIBlk
+
+				ldy #4					KeyID
+				jsr RAMSW.GetStkYW
+				jsr SLIST.SelectYA
+
+				jsr SLIST.SkipKey
+				jsr SLIST.CheckLen
+
+				ldy iByte
+				jsr BLIST.GetDBlkY
+				pha
+				clc
+				adc ZPSListDataLen
+				jsr BLIST.SetDBlkY
+				php
+				jsr BLIST.2NByte		skip LEN lo
+
+				plp
+				ldy iByte
+				jsr BLIST.GetDBlkY
+				pha
+				adc ZPSListDataLen+1
+				jsr BLIST.SetDBlkY
+				jsr BLIST.2NByte		skip LEN hi
+
+				plx
+				pla
+				jsr SLIST.SkipDataAX
+				lda ZPSListDataLen
+				eor #$ff
+				sta ZPSListDataLen
+
+				lda ZPSListDataLen+1
+				eor #$ff
+				sta ZPSListDataLen+1
+
+				sec
+
+.1				inc ZPSListDataLen
+				bne .2
+
+				inc ZPSListDataLen+1
+				beq .8
+
+.2				jsr RAMSW.xTXTPTRg		DataPtr
+				>INCW TXTPTR
+				bcc .3
+
+				jsr BLIST.SetBlkByte	override ending 0, already allocated
+				clc
+				bra .1
+
+.3				jsr BLIST.AddByte
+				bcc .1
+
+				rts
+
+.8				lda #0
+				jmp BLIST.AddByte		Add an extra 0 to stop Search here
 */--------------------------------------
 * # SListSetData
 * ## ASM
-* `>PUSHB hSList`
+* `>SS`
+* `>PUSHW pSList`
 * `>PUSHW KeyID`
 * `>PUSHW DataPtr`
 * `>PUSHW DataLen` (Data bytes to set, 0 if String mode)
-* `>SYSCALL SListSetData`
+* `>KAPI SListSetData`
+* `>SR`
 * ## RETURN VALUE
 *\--------------------------------------
-K.SListSetData	>PULLW ZPSListDataLen
-				jmp JMP.X2A
+K.SListSetData	ldy #0					DataLen
+				jsr RAMSW.GetStkYW
+				>STYA ZPSListDataLen
+
+				ldy #2					DataPtr
+				jsr RAMSW.StkY2TXTPTR
+
+				ldy #6					pSList
+				jsr RAMSW.GetStkYW
+				>STYA pIBlk
+
+				ldy #4					KeyID
+				jsr RAMSW.GetStkYW
+				jsr SLIST.SelectYA
+
+				jsr SLIST.SkipKey
+				jsr SLIST.GetDataLen
+
+				jsr SLIST.CheckLen
+
+				lda SLIST.DataLen
+				cmp ZPSListDataLen
+				bne .9
+
+				ldx SLIST.DataLen+1
+				cpx ZPSListDataLen+1
+				bne .9
+
+				eor #$ff
+				sta SLIST.nDataCnt
+				txa
+				eor #$ff
+				sta SLIST.nDataCnt+1
+
+.1				inc SLIST.nDataCnt
+				bne .2
+
+				inc SLIST.nDataCnt+1
+				beq .8
+
+.2				jsr RAMSW.xTXTPTRg
+				>INCW TXTPTR
+				jsr BLIST.SetBlkByte
+				bra .1
+
+.8				clc
+				rts
+
+.9				lda #E.DATALEN
+				sec
+				rts
 */--------------------------------------
 * # SListGetByID
 * ## ASM
-* `>PUSHB hSList`
+* `>SS`
+* `>PUSHW pSList`
 * `>PUSHW KeyID`
 * `>PUSHW KeyPtr`
-* `>SYSCALL SListGetByID`
+* `>KAPI SListGetByID`
+* `>SR`
 * ## RETURN VALUE
 *  Y,A = Next KeyID
 *\--------------------------------------
-K.SListGetByID	.EQ JMP.X2A
-*				>PULLW FORPNT
-*				>PULLW TXTPTR
-*				>PULLA
+K.SListGetByID	ldy #0					KeyPtr
+				jsr RAMSW.StkY2FORPNT
+
+				ldy #4					pSList
+				jsr RAMSW.GetStkYW
+				>STYA pIBlk
+
+				ldy #2					KeyID
+				jsr RAMSW.GetStkYW
+				jsr SLIST.SelectYA
+
+				jsr BLIST.GetNByte
+				tax
+				beq .9
+
+				ldy #0
+
+.1				phy
+				jsr BLIST.GetNByte
+				ply
+
+				jsr SHARED.xFORPNTpn
+
+				iny
+				dex
+				bne .1
+
+				txa 					lda #0
+
+				jsr SHARED.xFORPNTpn		ending \0
+
+				bit SLIST.bScoped
+				bpl .2
+
+				jsr BLIST.GetNByte		ScopeID lo
+				jsr SHARED.xFORPNTpn
+
+				jsr BLIST.GetNByte		ScopeID hi
+				jsr SHARED.xFORPNTpn
+
+.2				jsr SLIST.SkipData
+				>LDYA KeyID
+				clc
+				rts
+
+.9				lda #E.NOKEY
+				sec
+				rts
 */--------------------------------------
 * # SListNewKey
 * ## ASM
-* `>PUSHB hSList`
+* `>SS`
+* `>PUSHW pSList`
 * `>PUSHW KeyPtr`
 * `>PUSHW ScopeID`
-* `>SYSCALL SListNewKey`
+* `>PUSHWI NextPtr`
+* `>KAPI SListNewKey`
+* `>SR`
 * ## RETURN VALUE
 *  Y,A = KeyID
-*  X = KeyLen
 *\--------------------------------------
-K.SListNewKey	.EQ JMP.X2A
-*				>PULLW FORPNT
-*				>PULLW TXTPTR
-*				>PULLA
+K.SListNewKey	ldy #0					&NextPtr
+				jsr RAMSW.StkY2FORPNT
+
+				ldy #2					ScopeID
+				jsr RAMSW.GetStkYW
+				>STYA SLIST.ScopeID
+
+				ldy #4					KeyPtr
+				jsr RAMSW.StkY2TXTPTR
+
+				jsr SLIST.GetKeyLen
+				bcs .9
+
+				ldy #6					pSList
+				jsr RAMSW.GetStkYW
+
+				jsr SLIST.LookupYA
+				bcc .99
+
+				>LDYA KeyID
+				>STYA SLIST.KeyID		End of list
+
+				lda SLIST.KeyLen
+				jsr BLIST.SetBlkByte	override ending 0, already allocated
+
+				ldy #0
+
+.1				jsr RAMSW.xTXTPTRgY
+				jsr BLIST.AddByte
+				bcs .9
+
+				iny
+				cpy SLIST.KeyLen
+				bne .1
+
+				bit SLIST.bScoped
+				bpl .2
+
+				lda SLIST.ScopeID
+				jsr BLIST.AddByte
+				bcs .9
+
+				lda SLIST.ScopeID+1
+				jsr BLIST.AddByte
+				bcs .9
+
+.2				lda #0					Data Len lo = 0
+				jsr BLIST.AddByte
+				bcs .9
+
+				lda #0					Data Len hi = 0
+				jsr BLIST.AddByte
+				bcs .9
+
+				lda #0					Ending Len = 0
+				jsr BLIST.AddByte
+				bcc SLIST.SetFORPNT
+
+				rts
+
+.99				lda #E.DUPKEY
+				sec
+.9				rts
 */--------------------------------------
 * # SListLookup
 * ## ASM
-* `>PUSHB hSList`
+* `>SS`
+* `>PUSHW pSList`
 * `>PUSHW KeyPtr`
 * `>PUSHW ScopeID`
-* `>SYSCALL SListLookup`
+* `>PUSHWI NextPtr`
+* `>KAPI SListLookup`
+* `>SR`
 * ## RETURN VALUE
 *  Y,A = KeyID
-*  X = Key Length
 *\--------------------------------------
-K.SListLookup	.EQ JMP.X2A
-*				>PULLW FORPNT
-*				>PULLW TXTPTR
-*				>PULLA
+K.SListLookup	ldy #0					&NextPtr
+				jsr RAMSW.StkY2FORPNT
+
+				ldy #2					ScopeID
+				jsr RAMSW.GetStkYW
+				>STYA SLIST.ScopeID
+
+				ldy #4					KeyPtr
+				jsr RAMSW.StkY2TXTPTR
+
+				jsr SLIST.GetKeyLen
+				bcs .9
+
+				ldy #6					pSList
+				jsr RAMSW.GetStkYW
+
+				jsr SLIST.LookupYA
+				bcc SLIST.SetFORPNT
+
+.9				rts
+*--------------------------------------
+SLIST.SetFORPNT	lda FORPNT+1
+				ora FORPNT
+				beq .8
+
+				sta IO.SETWRITEAUX
+
+				jsr RAMSW.xFORPNTg
+				clc
+				adc SLIST.KeyLen
+				sta (FORPNT)
+
+				ldy #1
+				jsr RAMSW.xFORPNTgY
+				adc #0
+				sta (FORPNT),y
+
+				sta IO.CLRWRITEAUX
+
+.8				>LDYA SLIST.KeyID
+
+				clc
+				rts
 */--------------------------------------
 * # SListFree
 * ## ASM
-* `lda hSList`
-* `>SYSCALL SListFree`
+* `>LDYA pSList`
+* `>KAPI SListFree`
 * ## RETURN VALUE
 *\--------------------------------------
-K.SListFree		.EQ JMP.X
+*K.SListFree	.EQ BLIST.Free
 */--------------------------------------
 * # SListNew
 * ## ASM
 * `lda Opt`
-* `>SYSCALL SListNew`
+* `>KAPI SListNew`
 * ## RETURN VALUE
-* A=hSList
+* Y,A=pSList
 *\--------------------------------------
-K.SListNew		.EQ JMP.X
+*K.SListNew		.EQ BLIST.New
+*--------------------------------------
+* 				PRIVATE
+*--------------------------------------
+SLIST.GetKeyLen	ldy #$ff
+
+.1				iny
+				jsr RAMSW.xTXTPTRgY
+				beq .2
+
+				jsr SLIST.IsIDValid
+				bcc .1
+
+.2				tya
+				beq .9
+
+				sta SLIST.KeyLen
+				clc
+				rts
+
+.9				lda #E.INVKEY
+				sec
+				rts
+*--------------------------------------
+SLIST.SelectYA	>STYA KeyID
+
+				lda (pIBlk)
+				sta SLIST.Opt
+
+				and #SL.Scoped
+				cmp #SL.Scoped
+				ror SLIST.bScoped
+
+				ldy #1
+				lda (pIBlk),y
+				sta SLIST.Bnk
+
+				ldy iBlk
+				jmp BLIST.GetpDblkY
+*--------------------------------------
+SLIST.LookupYA	>STYA pIBlk
+
+				lda (pIBlk)
+				sta SLIST.Opt
+
+				and #SL.Scoped
+				cmp #SL.Scoped
+				ror SLIST.bScoped
+
+				ldy #1
+				lda (pIBlk),y
+				sta SLIST.Bnk
+
+				stz iByte
+
+				ldy #2
+				sty iBlk
+
+				jsr BLIST.GetpDblkY
+
+.3				>LDYA KeyID
+				>STYA SLIST.KeyID
+
+				ldy iByte
+				jsr BLIST.GetDBlkY
+				beq .9
+
+				cmp SLIST.KeyLen
+				bne .6
+
+				jsr BLIST.GetNByte		Skip Len
+
+				ldy #0
+
+.4				phy
+				jsr BLIST.GetNByte
+				sta .5+1
+				ply
+
+				jsr RAMSW.xTXTPTRgY
+
+.5				cmp #$ff				SELF MODIFIED
+				bne .6
+
+				iny
+				cpy SLIST.KeyLen
+				bne .4
+
+				bit SLIST.bScoped
+				bpl .8
+
+				jsr SLIST.GetDataLen	Get ScopeID
+
+				cmp SLIST.ScopeID+1
+				bne .6
+
+				lda SLIST.ScopeID
+				cmp SLIST.DataLen
+				bne .6
+
+.8				clc
+				rts
+
+.6				>LDYA SLIST.KeyID
+
+				jsr SLIST.SelectYA		move back...
+				jsr SLIST.SkipKey
+				jsr SLIST.SkipData
+				bra	.3
+
+.9				lda #E.NOKEY
+				sec
+				rts
+*--------------------------------------
+SLIST.CheckLen	lda ZPSListDataLen
+				ora ZPSListDataLen+1
+				bne .8
+
+				tax						ldx #0
+				tay						ldy #0
+
+				lda TXTPTR+1
+				pha
+
+.1				jsr RAMSW.xTXTPTRgY
+				beq .2
+
+				iny
+				bne .1
+
+				inc TXTPTR+1
+
+				inx
+				bra .1
+
+.2				iny						add Ending \0
+				bne .3
+
+				inx
+
+.3				sty ZPSListDataLen
+				stx ZPSListDataLen+1
+
+				pla
+				sta TXTPTR+1
+
+.8				rts
+*--------------------------------------
+SLIST.SkipKey	ldy iByte
+				jsr BLIST.GetDBlkY		Get KeyLen
+
+				sec						Skip len byte
+
+				bit SLIST.bScoped
+				bpl .1
+
+				inc
+				inc						Skip ScopeID
+
+.1				adc iByte
+				sta iByte
+				bcc .8
+
+				jmp BLIST.2NBlk
+
+.8				rts
+*--------------------------------------
+SLIST.SkipData	jsr SLIST.GetDataLen
+
+				lda SLIST.DataLen
+				ldx SLIST.DataLen+1
+SLIST.SkipDataAX
+				clc
+				adc iByte
+				sta iByte
+
+				txa
+				adc iBlk
+				sta iBlk
+				tay
+				jmp BLIST.GetpDblkY
+*--------------------------------------
+SLIST.GetDataLen
+				jsr BLIST.GetNByte		Get DataLenLo
+				sta SLIST.DataLen
+				jsr BLIST.GetNByte		Get DataLenHI
+				sta SLIST.DataLen+1
+				rts
+*--------------------------------------
+SLIST.IsIDValid	bit SLIST.Opt			SL..
+				bpl .2
+
+				cmp #'.'
+				beq .8
+
+.1				bit SLIST.Opt			SL._
+
+.2				bvc .3
+
+				cmp #'_'
+				beq .8
+
+.3				jmp SHARED.IsDigitOrL
+
+.8				clc
+				rts
 *--------------------------------------
 MAN
 SAVE usr/src/sys/kernel.s.slist

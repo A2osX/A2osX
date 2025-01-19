@@ -14,6 +14,7 @@ NEW
 ZS.START
 ZPArgPtr		.BS 2
 ZPSlotPtr		.BS 2
+
 ZS.END			.ED
 *--------------------------------------
 *			File Header (16 Bytes)
@@ -21,10 +22,10 @@ ZS.END			.ED
 CS.START		cld
 				jmp Dev.Detect			cld,jmp abs=DRV
 				.DA #$61				6502,Level 1 (65c02)
-				.DA #1					DRV Layout Version 1
+				.DA #2					DRV Layout Version 2
 				.DA 0
-				.DA CS.END-CS.START		Code Length
-				.DA 0
+				.DA CS.END
+				.DA ID.END
 				.DA 0
 				.DA 0
 *--------------------------------------
@@ -41,7 +42,7 @@ L.FD.DEV.NAME	.DA FD.DEV.NAME
 Dev.Detect		>STYA ZPArgPtr
 
 				>LDYA L.MSG.DETECT
-				>SYSCALL PutS
+				>LIBC PutS
 				stz ZPSlotPtr
 
 				lda #$C1
@@ -64,14 +65,14 @@ Dev.Detect		>STYA ZPArgPtr
 
 				bra .4
 
-.3				inc FD.DEV.NAME+3
+.3				inc FD.DEV.NAME+8
 				inc ZPSlotPtr+1			no match, try next slot....
 				lda ZPSlotPtr+1
 				cmp #$C8
 				bne .1
 
 				>LDYA L.MSG.DETECT.KO
-				>SYSCALL PutS
+				>LIBC PutS
 
 				lda #MLI.E.NODEV		Not Found in any slot, exiting
 				sec
@@ -88,24 +89,30 @@ Dev.Detect		>STYA ZPArgPtr
 
 				jsr Dev.ParseArgs
 				bcs .99
-
-.8				>PUSHW L.MSG.DETECT.OK
+*--------------------------------------
+Dev.Setup		>SS
+				>PUSHW L.MSG.DETECT.OK
 				>PUSHW L.FD.DEV.NAME
 				>PUSHBI 2
-				>SYSCALL PrintF
+				>LIBC PrintF
+				>SR
 
-				>PUSHWI DRV.END
-				>PUSHWI DRV.CS.END-DRV.CS.START
+				>SS
+				>PUSHW L.DRV.CS.START
 				>PUSHWI DRV.CS.START
-				>LDYA L.DRV.CS.START
-				>SYSCALL InsDrv
+				>PUSHWI DRV.CS.END
+				>PUSHWI DRV.ID.END
+				>LIBC InsDrv
+				>SR
 				bcs .9
 
-				>STYA FD.DEV+S.FD.DEV.DRVPTR
+				>STYA FD.DEV+S.FD.DEV.pDRV
 
+				>SS
 				>PUSHW L.FD.DEV
 				>PUSHW L.FD.DEV.NAME
-				>SYSCALL MKDev
+				>LIBC MKDev
+				>SR
 				bcs .9
 				
 				lda ZPSlotPtr+1
@@ -327,7 +334,8 @@ Dev.CheckBaud	ldx #0
 				
 				rts
 *--------------------------------------
-CS.END
+CS.END			.EQ *
+*--------------------------------------
 DEVSIG.Offset	.HS 05070B0C
 DEVSIG.Value	.HS 38180131
 DEVSIG.Length	.EQ DEVSIG.Value-DEVSIG.Offset
@@ -377,14 +385,17 @@ FD.DEV			.DA #S.FD.T.CDEV
 				.BS 2					DRVPTR
 				.DA 0					DCBPTR
 				.DA 0					BUFPTR
-FD.DEV.NAME		.AZ "com1"
+FD.DEV.NAME		.AZ "/dev/com1"
 *--------------------------------------
 *			Driver Code
 *--------------------------------------
-ZPIOCTL			.EQ ZPDRV
-ZPBufPtr		.EQ ZPDRV+2
-ZPCount			.EQ ZPDRV+4
-ZPCount2		.EQ ZPDRV+6
+				.DUMMY
+				.OR ZPDRV+4
+				
+ZPIOCTL			.BS 2
+ZPReadCnt		.BS 2
+
+				.ED
 *--------------------------------------
 DRV.CS.START	cld
 				jmp (.1,x)
@@ -415,10 +426,17 @@ STATUS			jsr STATUS.CONTROL.Init
 				.HS 2C					bit abs
 .1				ldy #3
 
+				bit A2osX.IOOpt
+				bpl .2
+				
+				sta IO.SETWRITEAUX
+
 .2				lda DIB,y
-				sta (ZPBufPtr),y
+				sta (ZPpBuf),y
 				dey
 				bpl .2
+				
+				sta IO.CLRWRITEAUX
 
 				clc
 				rts
@@ -427,11 +445,18 @@ STATUS.DCB		cmp #S.IOCTL.S.GETDCB
 				bne .3
 
 				ldy #S.DCB.COM-1
+				
+				bit A2osX.IOOpt
+				bpl .2
+				
+				sta IO.SETWRITEAUX
 
 .2				lda DCB,y
-				sta (ZPBufPtr),y
+				sta (ZPpBuf),y
 				dey
 				bpl .2
+
+				sta IO.CLRWRITEAUX
 
 				clc
 				rts
@@ -480,8 +505,11 @@ CONTROL			jsr STATUS.CONTROL.Init
 
 				ldy #S.DCB.COM-1
 
-.2				lda (ZPBufPtr),y
+.2				jsr A2osX.GetpBuf
 				sta DCB,y
+				
+				>INCW ZPpBuf
+				
 				dey
 				bpl .2
 *--------------------------------------
@@ -499,18 +527,16 @@ OPEN.1			php
 				.DO SSCIRQ=1
 
 				>LDYAI 256
-				>SYSCALL2 NewStkObj
+				>KAPI2 Malloc
 				bcs .99
 
-				stx hINBUF
 				>STYA READ.INBUF+1
 				>STYA IRQ.INBUF+1
 
 				>LDYAI 256
-				>SYSCALL2 NewStkObj
+				>KAPI2 Malloc
 				bcs .90
 
-				stx hOUTBUF
 				>STYA WRITE.OUTBUF+1
 				>STYA IRQ.OUTBUF+1
 
@@ -543,8 +569,8 @@ OPEN.1			php
 				.DO SSCIRQ=1
 
 .90				pha
-				lda hINBUF
-				>SYSCALL FreeStkObj
+				>LDYA READ.INBUF+1
+				>KAPI2 Free
 				pla
 
 .99				plp
@@ -563,10 +589,11 @@ CLOSE			lda DIB+S.DIB.S
 				stz SSC.RESET-$8F,x
 
 				.DO SSCIRQ=1
-				lda hINBUF
-				>SYSCALL FreeStkObj
-				lda hOUTBUF
-				>SYSCALL FreeStkObj
+				>LDYA READ.INBUF+1
+				>KAPI2 Free
+
+				>LDYA WRITE.OUTBUF+1
+				>KAPI2 Free
 				.FIN
 
 				lda #S.DIB.S.OPENED
@@ -580,17 +607,13 @@ READ			php
 				sei
 				jsr READ.WRITE.Init
 
-				stz ZPCount2
-				stz ZPCount2+1
+				stz ZPReadCnt
+				stz ZPReadCnt+1
 
-				.DO SSCIRQ=1
-				sta IO.SETREADAUX
-				.FIN
-
-READ.10			inc ZPCount
+READ.10			inc ZPCnt
 				bne READ.11
 
-				inc ZPCount+1
+				inc ZPCnt+1
 				beq READ.8
 
 READ.11			.DO SSCIRQ=1
@@ -601,19 +624,19 @@ READ.11			.DO SSCIRQ=1
 READ.INBUF		lda $FFFF,y				SELF MODIFIED
 				inc INBUF.TAIL
 
-				sta (ZPBufPtr)
-				inc ZPBufPtr
-				bne READ.12
+				sta IO.SETWRITEAUX
+				sta (ZPpBuf)
+				sta IO.CLRWRITEAUX
+				
+				>INCW ZPpBuf
 
-				inc ZPBufPtr+1
-
-READ.12			inc ZPCount2
+				inc ZPReadCnt
 				bne READ.10
 
-				inc ZPCount2+1
+				inc ZPReadCnt+1
 				bra READ.10
 				.FIN
-
+*--------------------------------------
 READ.2			lda SSC.STATUS-$8F,x
 				bit #SSC.STATUS.nDCD	true when 0
 				bne READ.9
@@ -622,46 +645,43 @@ READ.2			lda SSC.STATUS-$8F,x
 				beq	READ.8
 
 				lda SSC.DATA-$8F,x
-				sta (ZPBufPtr)
-				inc ZPBufPtr
-				bne READ.13
-
-				inc ZPBufPtr+1
-
-READ.13			inc ZPCount2
+				sta IO.SETWRITEAUX
+				sta (ZPpBuf)
+				sta IO.CLRWRITEAUX
+				
+				>INCW ZPpBuf
+		
+				inc ZPReadCnt
 				bne READ.2
 
-				inc ZPCount2+1
+				inc ZPReadCnt+1
 				bra READ.2
 
-READ.8			lda ZPCount2
+READ.8			lda ZPReadCnt
 				bne READ.81
 
-				ora ZPCount2+1
+				ora ZPReadCnt+1
 				beq READ.99
 
-				lda ZPCount2
+				lda ZPReadCnt
 
 READ.81			ldy #S.IOCTL.BYTECNT
 				sta (ZPIOCTL),y
 				iny
-				lda ZPCount2+1
+				lda ZPReadCnt+1
 				sta (ZPIOCTL),y
 
-				.DO SSCIRQ=1
-				sta IO.CLRREADAUX
-				.FIN
 				plp
 				clc
 				rts
 
 READ.9			lda #MLI.E.IO
-				.HS 2C					BIT ABS
+				plp
+				sec
+				rts
 
 READ.99			lda	#E.NODATA
-				.DO SSCIRQ=1
-				sta IO.CLRREADAUX
-				.FIN
+
 				plp
 				sec
 				rts
@@ -670,14 +690,10 @@ WRITE			php
 				sei
 				jsr READ.WRITE.Init
 
-				.DO SSCIRQ=1
-				sta IO.SETWRITEAUX
-				.FIN
-
-WRITE.2			inc ZPCount
+WRITE.2			inc ZPCnt
 				bne WRITE.3
 
-				inc ZPCount+1
+				inc ZPCnt+1
 				beq WRITE.8
 
 WRITE.3			.DO SSCIRQ=1
@@ -693,28 +709,30 @@ WRITE.3			.DO SSCIRQ=1
 				and #SSC.STATUS.TDRE 	Register Empty ?
 				beq WRITE.5				not empty, queue char
 
-				lda (ZPBufPtr)			yes, write directly to ACIA
+				jsr A2osX.GetpBuf		yes, write directly to ACIA
 				sta SSC.DATA-$8F,x
-				inc ZPBufPtr
+
+				inc ZPpBuf
 				bne WRITE.2
 
-				inc ZPBufPtr+1
-
+				inc ZPpBuf+1
 				bra WRITE.2
 
 WRITE.5			lda OUTBUF.HEAD
+
 WRITE.6			tay
 				inc
 				cmp OUTBUF.TAIL
 				beq WRITE.99			Buffer Full!!
 
 				sta OUTBUF.HEAD
-				lda (ZPBufPtr)
+				jsr A2osX.GetpBuf
+
 WRITE.OUTBUF	sta $FFFF,y				SELF MODIFIED
-				inc ZPBufPtr
+				inc ZPpBuf
 				bne WRITE.2
 
-				inc ZPBufPtr+1
+				inc ZPpBuf+1
 				bra WRITE.2
 
 				.ELSE
@@ -725,28 +743,26 @@ WRITE.4			lda SSC.STATUS-$8F,x
 				bit #SSC.STATUS.TDRE	Outgoing char?
 				beq WRITE.4
 
-				lda (ZPBufPtr)
+				jsr A2osX.GetpBuf
 				sta SSC.DATA-$8F,x
-				inc ZPBufPtr
+				inc ZPpBuf
 				bne WRITE.2
 
-				inc ZPBufPtr+1
+				inc ZPpBuf+1
 				bra WRITE.2
 				.FIN
 
-WRITE.8			.DO SSCIRQ=1
-				sta IO.CLRWRITEAUX
-				.FIN
-				plp
+WRITE.8			plp
 				clc
 				rts
 
 WRITE.9			lda	#MLI.E.IO
-				.HS 2C					BIT ABS
+				plp
+				sec
+				rts
+				
 WRITE.99		lda #E.NODATA
-				.DO SSCIRQ=1
-				sta IO.CLRWRITEAUX
-				.FIN
+				
 				plp
 				sec
 				rts
@@ -758,23 +774,23 @@ STATUS.CONTROL.Init
 
 				ldy #S.IOCTL.BUFPTR
 				lda (ZPIOCTL),y
-				sta ZPBufPtr
+				sta ZPpBuf
 
 				iny
 
 				lda (ZPIOCTL),y
-				sta ZPBufPtr+1
+				sta ZPpBuf+1
 				iny 					#S.IOCTL.BYTECNT
 
 				lda (ZPIOCTL),y
 				eor #$ff
-				sta ZPCount
+				sta ZPCnt
 
 				iny
 
 				lda (ZPIOCTL),y
 				eor #$ff
-				sta ZPCount+1
+				sta ZPCnt+1
 				rts
 *--------------------------------------
 * IRQ Handler
@@ -785,9 +801,6 @@ IRQ				ldx DEVSLOTn08F
 				lda SSC.STATUS-$8F,x
 *				and #SSC.STATUS.IRQ		Useless
 				bpl IRQ.9				IRQ from this device ? no, exit !!!!Applewin bug #308!!!!
-
-				sta IO.SETREADAUX
-				sta IO.SETWRITEAUX
 
 				bit #SSC.STATUS.RDRF	incoming char?
 				beq IRQ.2
@@ -818,17 +831,15 @@ IRQ.OUTBUF		lda $FFFF,y				SELF MODIFIED
 				sta SSC.DATA-$8F,x		write data to clear IRQ
 				inc OUTBUF.TAIL
 
-IRQ.8			sta IO.CLRREADAUX
-				sta IO.CLRWRITEAUX
-
-				clc
+IRQ.8			clc
 				rts
 
 IRQ.9			sec
 				rts
 				.FIN
 *--------------------------------------
-DRV.CS.END
+DRV.CS.END		.EQ *
+*--------------------------------------
 DEVSLOTn08F		.BS 1
 				.DO SSCIRQ=1
 DEVCMD			.DA #SSC.CMD.NOP+SSC.CMD.TEIRQ+SSC.CMD.DTR
@@ -843,8 +854,6 @@ INBUF.TAIL		.BS 1
 INBUF.HEAD		.BS 1
 OUTBUF.TAIL		.BS 1
 OUTBUF.HEAD		.BS 1
-hINBUF			.BS 1
-hOUTBUF			.BS 1
 				.FIN
 *--------------------------------------
 DIB				.DO SSCIRQ=1
@@ -870,7 +879,10 @@ DCB				.DA #S.DCB.T.COM
 				.DA #'N'				PARITY
 				.DA #'N'				FLOW
 *--------------------------------------
-DRV.END
+DRV.ID.END		.EQ *
+*--------------------------------------
+ID.END			.EQ *
+*--------------------------------------
 MAN
 SAVE usr/src/shared/x.ssc.drv.s
 LOAD usr/src/drv/ssc.i.drv.s

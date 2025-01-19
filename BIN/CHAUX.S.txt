@@ -45,20 +45,20 @@ ZS.END			.ED
 CS.START		cld
 				jmp (.1,x)
 				.DA #$61				6502,Level 1 (65c02)
-				.DA #1					BIN Layout Version 1
-				.DA #0					S.PS.F.EVENT
+				.DA #2					BIN Layout Version 2
 				.DA #0
-				.DA CS.END-CS.START		Code Size (without Constants)
-				.DA DS.END-DS.START		Data SegmentSize
-				.DA #16					Stack Size
+				.DA #0
+				.DA CS.END
+				.DA ID.END
+				.DA DS.END
+				.DA #64					Stack Size
 				.DA #ZS.END-ZS.START	Zero Page Size
-				.DA 0
 *--------------------------------------
 * Relocation Table
 *--------------------------------------
 .1				.DA CS.INIT
 				.DA CS.RUN
-				.DA CS.DOEVENT		
+				.DA CS.SIG
 				.DA	CS.QUIT
 *--------------------------------------
 L.MSG.USAGE		.DA MSG.USAGE
@@ -74,7 +74,7 @@ CS.INIT			clc
 *--------------------------------------
 CS.RUN			inc ArgIndex
 				lda ArgIndex
-				>SYSCALL ArgV
+				>LIBC ArgV
 				bcs .7
 
 				>STYA ZPPtr1
@@ -82,7 +82,7 @@ CS.RUN			inc ArgIndex
 				cmp #'-'
 				bne .4
 
-				ldy #1 
+				ldy #1
 				lda (ZPPtr1),y
 
 				ldx #OptionVars-OptionList-1
@@ -93,7 +93,7 @@ CS.RUN			inc ArgIndex
 				bne .2
 
 .99				>LDYA L.MSG.USAGE
-				>SYSCALL PutS
+				>LIBC PutS
 				lda #E.SYN
 				sec
 				rts
@@ -105,13 +105,13 @@ CS.RUN			inc ArgIndex
 *--------------------------------------
 .4				bit bAuxFileType
 				bmi .5
-				
+
 				jsr GetAuxType
 				bcs .99
 
 				bra CS.RUN
 
-.5				>LDA.G hSrcBasePath
+.5				>LDA.G pSrcBasePath+1
 				bne .99
 
 				>LDYA ZPPtr1
@@ -119,28 +119,31 @@ CS.RUN			inc ArgIndex
 				bcs .99
 				bra CS.RUN
 *--------------------------------------
-.7				>LDA.G hSrcBasePath
+.7				>LDA.G pSrcBasePath+1
 				beq .99					no src ? ERROR
 
 				bit bAuxFileType
 				bpl .99					we also have a TYPE
-				
+
 				>LDYAI 256
-				>SYSCALL GetMem
+				>LIBC Malloc
 				bcs .99
 
 				>STYA ZPFullPath
-				stx hSrcFullPath
 *--------------------------------------
-CS.RUN.LOOP		ldy #S.PS.hStdIn
-				lda (pPS),y
-				>SYSCALL FEOF
+CS.RUN.LOOP		ldy #S.PS.pStdIn
+				jsr A2osX.GetPSy
+				pha
+				iny
+				jsr A2osX.GetPSy
+				ply
+				>LIBC FEOF
 				bcs .99
 
 				tay
 				bne .1
 
-				>SYSCALL GetChar
+				>LIBC GetChar
 				bcs .99
 
 				cmp #$03				Ctrl-C
@@ -185,12 +188,12 @@ CS.RUN.LOOP		ldy #S.PS.hStdIn
 *--------------------------------------
 CS.RUN.NEXT		jsr X.GetNextEntry
 				bcc CS.RUN.LOOP
-				
+
 CS.RUN.LEAVE	jsr X.LeaveSubDir
 				bcs .90
 
 				jsr X.BasePath..
-				
+
 				jmp CS.RUN.NEXT
 
 .90				lda #0
@@ -203,20 +206,20 @@ CS.RUN.DIR		bit bRecurse
 				lda (ZPFileName)
 				cmp #'.'
 				bne .1
-				
+
 				ldy #1
 				lda (ZPFileName),y
 				beq .8
-				
+
 				cmp #'.'
 				bne .1
-				
+
 				iny
 				lda (ZPFileName),y
 				beq .8
-				
+
 .1				jsr CS.RUN.GetFilePath
-				
+
 				>LDYA ZPFileName
 				jmp X.EnterSubDirYA
 
@@ -225,20 +228,22 @@ CS.RUN.DIR		bit bRecurse
 *--------------------------------------
 CS.RUN.FILE		jsr X.IncludeMatch
 				bcs .8					no match, skip....
-				
+
 				jsr CS.RUN.GetFilePath
-				
+
+				>SS
 				>PUSHW L.MSG.FILE
 				>PUSHW ZPFullPath
 				>PUSHBI 2
-				>SYSCALL PrintF
+				>LIBC PrintF
+				>SR
 				bcs .9
-				
+
+				>SS
 				>PUSHW ZPFullPath
-
 				>PUSHW AuxFileType
-
-				>SYSCALL ChAux
+				>LIBC ChAux
+				>SR
 				jsr CS.RUN.CheckErr
 
 .8				clc
@@ -247,16 +252,17 @@ CS.RUN.FILE		jsr X.IncludeMatch
 CS.RUN.CheckErr	bcs .1
 
 				>LDYA L.MSG.OK
-				>SYSCALL PutS
+				>LIBC PutS
 				rts
 
-.1				pha
+.1				tay
+				>SS
 				>PUSHW L.MSG.ERR
-				pla
-				pha
+				txa
 				>PUSHA
 				>PUSHBI 1
-				>SYSCALL PrintF
+				>LIBC PrintF
+				>SR
 
 				lda bContinue
 				eor #$80
@@ -265,32 +271,28 @@ CS.RUN.CheckErr	bcs .1
 				rts
 *--------------------------------------
 CS.RUN.GetFilePath
+				>SS
 				>PUSHW ZPFullPath
-				>LDA.G hSrcBasePath
-				>SYSCALL GetMemPtr
-				>PUSHYA
-				>SYSCALL StrCpy
+				>PUSHW.G pSrcBasePath
+				>LIBC StrCpy
+				>SR
 
+				>SS
 				>PUSHW ZPFullPath
 				>PUSHW ZPFileName
-				>SYSCALL StrCat
+				>LIBC StrCat
+				>SR
 				rts
 *--------------------------------------
-CS.DOEVENT		sec
+CS.SIG			sec
 				rts
 *--------------------------------------
-CS.QUIT			jsr X.LeaveSubDir
-				bcc CS.QUIT
+CS.QUIT			jsr X.Quit
 
-				>LDA.G hInclude
-				beq .1
-
-				>SYSCALL FreeMem
-
-.1				lda hSrcFullPath
+				>LDYA ZPFullPath
 				beq .8
 
-				>SYSCALL FreeMem
+				>LIBC Free
 
 .8				clc
 				rts
@@ -298,36 +300,38 @@ CS.QUIT			jsr X.LeaveSubDir
 GetAuxType		lda (ZPPtr1)
 				cmp #'0'
 				bcc .1
-				
+
 				cmp #'9'+1
 				bcs .1
-				
+
 				ldx #0
 				bra .7
-				
+
 .1				cmp #'x'
 				beq .2
-				
+
 				cmp #'X'
 				bne .9
-				
+
 				inc ZPPtr1
 				bne .2
-				
+
 				inc ZPPtr1+1
-				
+
 .2				ldx #2
 
-.7				>PUSHW ZPPtr1
+.7				>SS
+				>PUSHW ZPPtr1
 				>PUSHW L.SSCANF.D,x
 				>PUSHWI AuxFileType
 				>PUSHBI 2
-				>SYSCALL SScanF
+				>LIBC SScanF
+				>SR
 				bcs .9
 
 				cpy #1
 				bne .9
-				
+
 				dec bAuxFileType
 				clc
 				rts
@@ -337,7 +341,7 @@ GetAuxType		lda (ZPPtr1)
 *--------------------------------------
 				.INB usr/src/shared/x.fileenum.s
 *--------------------------------------
-CS.END
+CS.END			.EQ *
 *--------------------------------------
 OptionList		.AS "CRcr"
 OptionVars		.DA #bContinue,#bRecurse,#bContinue,#bRecurse
@@ -352,9 +356,11 @@ MSG.FILE		.CZ "CHAUX File:%S..."
 SSCANF.D		.CZ "%D"
 SSCANF.H		.CZ "%H"
 *--------------------------------------
+ID.END			.EQ *
+*--------------------------------------
 				.DUMMY
 				.OR 0
-DS.START		.INB usr/src/shared/x.fileenum.g
+				.INB usr/src/shared/x.fileenum.g
 DS.END			.ED
 *--------------------------------------
 MAN

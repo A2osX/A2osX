@@ -7,22 +7,25 @@ Copyright 2015 - 2020, Remy Gibert and the A2osX contributors.
 Initialize screen & create a new context  
 
 ## C  
-`short int hCTX tuiInit();`  
+`CTX *pCTX tuiInit();`  
 
 ## ASM  
-`>LIBCALL hLIBTUI,LIBTUI.Init`  
+`>SS`  
+`>PUSHWI retries`  
+`>LIBCALL pLIBTUI,LIBTUI.Init`  
+`>SR`  
 
 ## RETURN VALUE  
-CC = success, A = hCTX  
+CC = success, Y,A = pCTX  
 
 # tuiClose  
 destroy context  
 
 ## C  
-`void fastcall tuiClose(short int hCTX);`  
+`void tuiClose(CTX *pCTX);`  
 
 ## ASM  
-`lda hCTX`  
+`>PUSHW pCTX`  
 `>LIBCALL hLIBTUI,LIBTUI.Close`  
 
 ## RETURN VALUE  

@@ -16,11 +16,11 @@ IAC.BUF.MAX		.EQ 20
 				.OR ZPBIN
 ZS.START
 ZPPtr1			.BS 2
+pFILE			.BS 2
 TimeOut			.BS 1
 ArgIndex		.BS 1
 ArgDev			.BS 1
 ArgProg			.BS 1
-hFILE			.BS 1
 bExitOnClose	.BS 1
 
 IAC.CMD			.BS 1
@@ -37,20 +37,20 @@ ZS.END			.ED
 CS.START		cld
 				jmp (.1,x)
 				.DA #$61				6502,Level 1 (65c02)
-				.DA #1					BIN Layout Version 1
-				.DA #S.PS.F.EVENT		S.PS.F
+				.DA #2					BIN Layout Version 2
+				.DA #S.PS.SIG.T1SEC
 				.DA #0
-				.DA CS.END-CS.START		Code Size (without Constants)
-				.DA DS.END-DS.START		Data SegmentSize
+				.DA CS.END
+				.DA ID.END
+				.DA DS.END
 				.DA #16					Stack Size
 				.DA #ZS.END-ZS.START	Zero Page Size
-				.DA 0
 *--------------------------------------
 * Relocation Table
 *--------------------------------------
 .1				.DA CS.INIT
 				.DA CS.RUN
-				.DA CS.DOEVENT
+				.DA CS.SIG
 				.DA	CS.QUIT
 L.MSG.USAGE		.DA MSG.USAGE
 L.MSG.GREETINGS .DA MSG.GREETINGS
@@ -61,14 +61,13 @@ L.ENV.TERM		.DA ENV.TERM
 				.DA 0					End Of Reloc Table
 *--------------------------------------
 CS.RUN			ldy #S.PS.ARGC
-				lda (pPS),y
+				jsr A2osX.GetPSy
 				cmp #2
-
 				bcc .9
 
 .1				inc ArgIndex
 				lda ArgIndex
-				>SYSCALL ArgV
+				>LIBC ArgV
 				bcs .8
 
 				>STYA ZPPtr1
@@ -92,7 +91,7 @@ CS.RUN			ldy #S.PS.ARGC
 				bra .1
 
 .9				>LDYA L.MSG.USAGE
-				>SYSCALL PutS
+				>LIBC PutS
 
 				lda #E.SYN
 				sec
@@ -104,35 +103,53 @@ CS.RUN			ldy #S.PS.ARGC
 				lda ArgDev
 				beq .9
 
-				>SYSCALL ArgV
+				>LIBC ArgV
+				>SS
 				>PUSHYA
 				>PUSHBI O.RDWR
 				>PUSHBI 0				type
 				>PUSHA					auxtype
 				>PUSHA
-				>SYSCALL FOpen
+				>LIBC FOpen
+				>SR
 				bcs .99
 
-				sta hFILE
+				>STYA pFILE
+				phy
 
-				ldy #S.PS.hStdIn
-				sta (pPS),y
+				ldy #S.PS.pStdIn+1
+				jsr A2osX.SetPSy
 				iny						#S.PS.hStdOut
-				sta (pPS),y
+				iny
+				jsr A2osX.SetPSy
 				iny						#S.PS.hStdErr
-				sta (pPS),y
+				iny
+				jsr A2osX.SetPSy
+				
+				pla
+
+				ldy #S.PS.pStdIn
+				jsr A2osX.SetPSy
+				iny						#S.PS.hStdOut
+				iny
+				jsr A2osX.SetPSy
+				iny						#S.PS.hStdErr
+				iny
+				jsr A2osX.SetPSy
 *--------------------------------------
 CS.RUN.LOOP0 	>SLEEP
 
-				>PUSHW L.ENV.TERM
-				>SYSCALL UnsetEnv
+				>LDYA L.ENV.TERM
+				>LIBC UnsetEnv
 
-				ldy #S.PS.hStdOut
-				lda (pPS),y
-				>PUSHA
+				ldy #S.PS.pStdOut
+				jsr CS.RUN.GetPSyW
+				>SS
+				>PUSHYA
 				>PUSHW L.TELNETOPTS
 				>PUSHWI TELNETOPTS.LEN
-				>SYSCALL FWrite
+				>LIBC FWrite
+				>SR
 				bcs CS.RUN.EXIT			I/O error
 
 				lda #TIMEOUT.MAX
@@ -140,25 +157,25 @@ CS.RUN.LOOP0 	>SLEEP
 			
 CS.RUN.LOOP1	>SLEEP
 
-				ldy #S.PS.hStdIn
-				lda (pPS),y
-				>SYSCALL FEOF
+				ldy #S.PS.pStdIn
+				jsr CS.RUN.GetPSyW
+				>LIBC FEOF
 				bcs CS.RUN.9			I/O error
 
 				tay
 				bne .1					no char
 
-				>SYSCALL GetChar
+				>LIBC GetChar
 				bcs CS.RUN.9
 
 				cmp #IAC
 				beq CS.RUN.IACMODE
 
-				>SYSCALL PutChar
+				>LIBC PutChar
 				bcs CS.RUN.EXIT
 
 				bra CS.RUN.LOOP1
-
+*--------------------------------------
 .1				lda TimeOut
 				bne CS.RUN.LOOP1
 
@@ -166,17 +183,20 @@ CS.RUN.LOOP1	>SLEEP
 				bcs CS.RUN.EXIT			unable to send greetings...
 
 .2				lda ArgProg
-				>SYSCALL ArgV
+				>LIBC ArgV
+				>SS
 				>PUSHYA
+				>PUSHBI 0
 				>PUSHBI S.PS.F.HOLD
-				>SYSCALL ExecV
+				>LIBC ExecV
+				>SR
 				>SLEEP
 
 CS.RUN.EXIT		lda bExitOnClose
 				bmi .8
 
 				ldy #S.PS.S
-				lda (pPS),y
+				jsr A2osX.GetPSy
 				cmp #S.PS.S.QUIT		I've been killed :-(
 				beq .8
 				
@@ -186,11 +206,18 @@ CS.RUN.EXIT		lda bExitOnClose
 				sec		
 CS.RUN.9		rts
 *--------------------------------------
-CS.RUN.IACMODE	>SYSCALL GetChar		Wait for IAC CMD (or SB)
+CS.RUN.GetPSyW	jsr A2osX.GetPSy
+				pha
+				iny
+				jsr A2osX.GetPSy
+				ply
+				rts
+*--------------------------------------
+CS.RUN.IACMODE	>LIBC GetChar		Wait for IAC CMD (or SB)
 				bcs CS.RUN.9
 
 				sta IAC.CMD
-				>SYSCALL GetChar		Wait for IAC SUBCMD
+				>LIBC GetChar		Wait for IAC SUBCMD
 				bcs CS.RUN.9
 
 				sta IAC.SUBCMD
@@ -205,9 +232,10 @@ CS.RUN.IAC.CMD	cmp #WILL
 				cpx #TN.O.TTYPE
 				bne .2
 
-				ldy #S.PS.hStdOut
-				lda (pPS),y
-				>PUSHA
+				>SS
+				ldy #S.PS.pStdOut
+				jsr CS.RUN.GetPSyW
+				>PUSHYA
 				>PUSHW L.TELNETOPT.TTYPE
 				>PUSHWI TELNETOPT.TTYPE.LEN
 				bra .7
@@ -215,23 +243,25 @@ CS.RUN.IAC.CMD	cmp #WILL
 .2				cpx #TN.O.LINEMODE
 				bne .8
 
-				ldy #S.PS.hStdOut
-				lda (pPS),y
+				>SS
+				ldy #S.PS.pStdOut
+				jsr CS.RUN.GetPSyW
 				>PUSHA
 				>PUSHW L.TELNETOPT.LMODE
 				>PUSHWI TELNETOPT.LMODE.LEN
 
-.7				>SYSCALL FWrite
+.7				>LIBC FWrite
+				>SR
 
 .8				jmp CS.RUN.LOOP1
 *--------------------------------------
-CS.RUN.IAC.SB  	>SYSCALL GetChar		Wait for IAC SB.IS or SEND
+CS.RUN.IAC.SB  	>LIBC GetChar		Wait for IAC SB.IS or SEND
 				bcs .9
 
 				sta IAC.SB.CMD
 				stz IAC.SB.LEN
 
-.2				>SYSCALL GetChar
+.2				>LIBC GetChar
 				bcs .9
 
 				cmp #IAC
@@ -248,7 +278,7 @@ CS.RUN.IAC.SB  	>SYSCALL GetChar		Wait for IAC SB.IS or SEND
 
 				bra .8
 
-.4				>SYSCALL GetChar
+.4				>LIBC GetChar
 				bcs .9
 
 				cmp #SE
@@ -262,27 +292,29 @@ CS.RUN.IAC.SB  	>SYSCALL GetChar		Wait for IAC SB.IS or SEND
 				cmp #SB.IS
 				bne .8
 
+				>SS
 				>PUSHW L.ENV.TERM
 				>PUSHWI IAC.BUF
-				>SYSCALL SetEnv
+				>PUSHWZ
+				>LIBC SetEnv
+				>SR
 .8				jmp CS.RUN.LOOP1
 
 .9				rts
 *--------------------------------------
 CS.RUN.GREETINGS
+				>SS
 				>PUSHW L.MSG.GREETINGS
 				>PUSHW A2osX.KVER
 				lda ArgDev
-				>SYSCALL ArgV
+				>LIBC ArgV
 				>PUSHYA
 				>PUSHBI 4
-				>SYSCALL PrintF
+				>LIBC PrintF
+				>SR
 				rts
 *--------------------------------------
-CS.DOEVENT		lda (pEvent)
-				bpl .9					is it a TIMER event?
-
-				lda TimeOut
+CS.SIG			lda TimeOut
 				beq .9
 
 				dec TimeOut
@@ -290,10 +322,10 @@ CS.DOEVENT		lda (pEvent)
 .9				sec						do not discard TIMER event
 				rts	
 *--------------------------------------
-CS.QUIT			lda hFILE
+CS.QUIT			>LDYA pFILE
 				beq .8
 
-				>SYSCALL FClose
+				>LIBC FClose
 
 .8
 CS.INIT			clc
@@ -328,7 +360,8 @@ CkeckOption		lda (ZPPtr1)
 .8				clc						!0 if not an option
 				rts
 *--------------------------------------
-CS.END
+CS.END			.EQ *
+*--------------------------------------
 OptionList		.AS "Ee"
 OptionVars		.DA #bExitOnClose,#bExitOnClose
 *--------------------------------------
@@ -352,10 +385,12 @@ TELNETOPT.LMODE	.DA #IAC,#SB,#TN.O.LINEMODE,#SB.SEND,#0,#IAC,#SE
 TELNETOPT.LMODE.LEN .EQ *-TELNETOPT.LMODE
 ENV.TERM		.AZ "TERM"
 *--------------------------------------
+ID.END			.EQ *
+*--------------------------------------
 				.DUMMY
 				.OR 0
-DS.START
 DS.END			.ED
+*--------------------------------------
 MAN
 SAVE usr/src/sbin/getty.s
 ASM

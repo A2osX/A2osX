@@ -5,136 +5,140 @@ NEW
 *  Y,A = Ptr to device name (C-String)
 * ## RETURN VALUE
 * CC = OK, CS = ERROR
-* Y,A = FD
-* X = hFD
+* A = hFD
 *\--------------------------------------
-K.GetDevByName	>STYA ZPPtr1			requested dev name
+K.GetDevByName	>STYA TXTPTR			requested dev name
 
-				ldx #1
+				ldx #0
 
-.1				ldy FDs.pHI-1,x
+.1				jsr DEV.GetDevX
 				beq .7
-
-				cpy #$C0
-				bcc .7
-
-				stx IO.hFD
-				
-				sty pFD+1
-				lda FDs.pLO-1,x
-				sta pFD
-
-				clc
-				adc #S.FD.DEV
-				sta ZPPtr2
-
-				tya
-				adc /S.FD.DEV
-				sta ZPPtr2+1
 
 				ldy #$ff
 
-.4				iny
-				lda (ZPPtr1),y
-				cmp (ZPPtr2),y
+.2				iny
+				jsr RAMSW.xTXTPTRgY
+				cmp (ZPPtr1),y
 				bne .7
 
 				eor #0
-				bne .4
+				bne .2
 
-				>LDYA pFD
-				ldx IO.hFD
+				lda IO.hFD
+
 				clc
 				rts
 
 .7				inx
-				cpx #K.FD.MAX+1
+				inx
+				cpx #K.FD.MAX*2
 				bcc .1
 
 				lda #MLI.E.NODEV
 *				sec
 
-K.GetDev.9		rts
+				rts
+*--------------------------------------
+DEV.Find		ldx #0
+
+.1				jsr DEV.GetDevX
+				beq .7
+
+				ldy #$ff
+
+.2				iny
+				lda K.PathBuf,y
+				cmp (ZPPtr1),y
+				bne .7
+
+				eor #0
+				bne .2
+
+				clc
+				rts
+
+.7				inx
+				inx
+				cpx #K.FD.MAX*2
+				bcc .1
+
+				lda #MLI.E.NODEV
+
+*				sec
+
+				rts
+*--------------------------------------
+DEV.GetDevX		lda pFDs+1,x
+				beq .9
+
+				ldy pNames+1,x
+				beq .9
+
+				stx IO.hFD
+
+				sta pFD+1
+				lda pFDs,x
+				sta pFD
+
+				sty ZPPtr1+1
+				lda pNames,x
+				sta ZPPtr1
+
+				tya						set NZ
+
+.9				rts
 */--------------------------------------
 * # MkFD
 * ## C
-* `short int mkfd(short int type, );`
+* `short int mkfd(short int type);`
 * ## ASM
 * `>PUSHB DevID`
-* `>PUSHW S.DIB`
-* `>SYSCALL MkFD`
+* `>LIBC MKFD`
 * ## RETURN VALUE
+* A = hFD
 *\--------------------------------------
+K.MKFD			jsr DEV.NewFD
+				bcs .9
 
+				lda IO.hFD
 
 *				clc
-*				rts
+
+.9				rts
 */--------------------------------------
 * # MKDev
-* Create a hDEV
+* Create a CDEV or BDEV
 * ## C
-* `hDEV mkdev (S.FD *fd, const char *devname)`
+* `int mkdev (S.FD *fd, const char *devname)`
 * ## ASM
 * `>PUSHW fd`
 * `>PUSHW devname`
-* `>SYSCALL mkdev`
+* `>LIBC mkdev`
 * ## RETURN VALUE
 *  A = hDEV
 *\--------------------------------------
-K.MKDev			jsr SHARED.PullP2P1		ptr2=devname,ptr1=fd
+K.MKDev			jsr PFT.GetPath0		devname
 
-				jsr DEV.GetFreeFD
-				bcs .9
-				
-				stx IO.hFD
-
-				ldy #$ff
-				ldx #S.FD.DEV
-
-.1				iny						Get DEV name length
-				inx						compute FD+NAME+\0 in X
-				lda (ZPPtr2),y
-				bne .1
-
-				txa
-				tay
-				lda #0
-
-				jsr MEM.GetKBuf
+				jsr DEV.NewNamedFD
 				bcs .9
 
-				>STYA pFD
-				>STYA .4+1
-				
-				ldx IO.hFD
-				sta FDs.pHI-1,x
-				tya
-				sta FDs.pLO-1,x
+				ldy #2					fd
+				jsr RAMSW.StkY2TXTPTR
 
-				ldy #S.FD.DEV-1
+				ldy #S.FD-1
 
-.2				lda (ZPPtr1),y
+.1				jsr RAMSW.xTXTPTRgY
 				sta (pFD),y
 				dey
-				bpl .2
-
-				ldy #$ff
-				ldx #S.FD.DEV-1
-
-.3				iny
-				inx
-				lda (ZPPtr2),y
-
-.4				sta $ffff,x
-				bne .3
+				bpl .1
 
 				>LDYAI K.IOBuf
-				>STYA K.S.IOCTL+S.IOCTL.BUFPTR
+				>STYA K.DRV.IOCTL+S.IOCTL.BUFPTR
 
-				ldy #S.FD.DEV.DRVPTR+1
+				ldy #S.FD.DEV.pDRV+1
 				lda (pFD),y
 				bne .5
-				
+
 				lda /DRV.SP
 				sta (pFD),y
 				dey
@@ -144,7 +148,14 @@ K.MKDev			jsr SHARED.PullP2P1		ptr2=devname,ptr1=fd
 .5				jsr DEV.GetPDrv
 
 				lda #S.IOCTL.S.STATUS
+				clc
+				ror A2osX.IOOpt
 				jsr DEV.GetStatus
+
+				php
+				asl A2osX.IOOpt
+				plp
+
 				bcs .9
 
 				lda K.IOBuf				Get Status byte
@@ -174,7 +185,7 @@ K.MKDev			jsr SHARED.PullP2P1		ptr2=devname,ptr1=fd
 				lda (pDRV),y
 				sta IRQ.Vectors+1,x
 
-.8				lda IO.hFD
+.8				>LDYA pFD
 
 *				clc
 
@@ -182,124 +193,307 @@ K.MKDev			jsr SHARED.PullP2P1		ptr2=devname,ptr1=fd
 */--------------------------------------
 * # IOCTL
 * ## C
-* `int ioctl(short int hFD, short int request, void *param);`
+* `int ioctl(int fd, short int request, void *param);`
 * ## ASM
-* `>PUSHB hDEV`
+* `>SS`
+* `>PUSHW fd`
 * `>PUSHB request`
 * `>PUSHW param`
-* `>SYSCALL IOCTL`
+* `>LIBC IOCTL`
+* `>SR`
 * ## RETURN VALUE
 *  Y,A = ...
 *\--------------------------------------
-K.IOCTL			ldy #3					hFD
-				lda (pStack),y
+K.IOCTL			ldy #3
+				jsr RAMSW.GetStkYW
+				tax
+				bne .99
 
-				jsr DEV.GetPFD
+				cpy #K.FILE.MAX*2
+				bcs .99
+
+				tya
+
+				lsr
+				bcs .99
+
+				lda pFDs+1,y
+				sta pFD+1
+
+				lda pFDs,y
+				sta pFD
+
+				ldy #S.FD.DEV.T
+				lda (pFD),y
+				cmp #10
+				bne .10
+*--------------------------------------
+* Native SP
+* $110	JSR C70D
+* $113	.DA #REQUEST
+* $114  .DA PRARAM
+* $116	RTS
+*--------------------------------------
+				lda #$20				JSR
+				sta $110
+
+				ldy #S.FD.DEV.pBUS
+				lda (pFD),y
+				sta $111
+				iny
+				lda (pFD),y
+				sta $112
 
 				ldy #2					request
-				lda (pStack),y
+				jsr RAMSW.GetStkY
+
+				lsr
+				sta $113
 				tax
 
-				>PULLYA					param
-				inc pStack
-				inc pStack
+				jsr RAMSW.GetStkW		param
+				>STYA TXTPTR
+				>STYA $114
 
-				jmp (pDrv)
+				sta IO.SETWRITEAUX
+				lda DRV.SP.PCnt,x
+				sta (TXTPTR)			#S.IOCTL.CNT
+
+				ldy #S.FD.DEV.DEVID
+				lda (pFD),y
+				ldy #S.IOCTL.UNITNUM
+				sta (TXTPTR),y
+
+				lda #$60				RTS
+				sta $116
+ 
+				jmp RAMSW.SPJmp			Native SP ROM call
+
+.99				lda #MLI.E.NODEV
+				sec
+				rts
 *--------------------------------------
-DEV.OPEN		ldx #IOCTL.OPEN
+.10				jsr DEV.GetPDrv
+
+				ldy #2					request
+				jsr RAMSW.GetStkY
+				tax
+
+				jsr RAMSW.GetStkW		param
+				>STYA TXTPTR
+
+				ldy #S.IOCTL-1
+
+.1				jsr RAMSW.xTXTPTRgY
+				sta K.DRV.IOCTL,y
+				dey
+				bpl .1
+
+				jsr DEV.pDrvJmp
+				bcs .9
+
+				sta IO.SETWRITEAUX
+
+				ldy #S.IOCTL-1
+
+.2				lda K.DRV.IOCTL,y
+				sta (TXTPTR),y
+				dey
+				bpl .2
+
+*				sta IO.CLRWRITEAUX
+
+*				clc
+
+.9				rts
+*--------------------------------------
+DEV.Stat		jsr SHARED.ClrStat
+
+				lda (pFD)				#S.FD.T
+				tax
+
+				asl
+				asl
+				asl
+				sta K.S.STAT+S.STAT.MODE+1
+
+				jmp (.1,x)
+
+.1				.DA .10					S.FD.T.REG	
+				.DA .20					S.FD.T.DIR	
+				.DA .30					S.FD.T.CDEV	
+				.DA .40					S.FD.T.BDEV	
+				.DA .50					S.FD.T.LNK	
+				.DA .60					S.FD.T.DSOCK
+				.DA .70					S.FD.T.SSOCK
+				.DA .80					S.FD.T.PIPE	
+*--------------------------------------
+.10				clc
+				rts
+*--------------------------------------
+.20				clc
+				rts
+*--------------------------------------
+.30				clc
+				rts
+*--------------------------------------
+.40				ldy #S.FD.DEV.BUSID
+				lda (pFD),y
+				sta K.S.STAT+S.STAT.P.SLOT
+				iny
+				lda (pFD),y
+				sta K.S.STAT+S.STAT.P.DRIVE
+
+				clc
+				rts
+*--------------------------------------
+.50				clc
+				rts
+*--------------------------------------
+.60				clc
+				rts
+*--------------------------------------
+.70				clc
+				rts
+*--------------------------------------
+.80				clc
+				rts
+*--------------------------------------
+DEV.Open		ldx #IOCTL.OPEN
+
 				lda IO.hFD
-				jsr DEV.pDrvJmp.1
+				jsr DEV.pDrvJmp
 				bcs .9
 
 				lda IO.hFD
 
 .9				rts
 *--------------------------------------
-DEV.READ		ldx #IOCTL.READ
+DEV.Read		ldx #IOCTL.READ
 				.HS 2C					BIT ABS
 *--------------------------------------
-DEV.WRITE		ldx #IOCTL.WRITE
+DEV.Write		ldx #IOCTL.WRITE
 
-				>PULLW K.S.IOCTL+S.IOCTL.BYTECNT
-				>PULLW K.S.IOCTL+S.IOCTL.BUFPTR
+				ldy #2
+				jsr RAMSW.GetStkYW
+				>STYA K.DRV.IOCTL+S.IOCTL.BUFPTR
 
-				inc pStack				pop hFD
+				ldy #0
+				jsr RAMSW.GetStkYW
+				>STYA K.DRV.IOCTL+S.IOCTL.BYTECNT
 
 				jsr DEV.pDrvJmp
 				bcs .9
 
-				>LDYA K.S.IOCTL+S.IOCTL.BYTECNT
+				>LDYA K.DRV.IOCTL+S.IOCTL.BYTECNT
 
 .9				rts
 *--------------------------------------
 DEV.EOF			lda #S.IOCTL.S.EOF
 *--------------------------------------
-DEV.GetStatus	sta K.S.IOCTL+S.IOCTL.S
+DEV.GetStatus	sta K.DRV.IOCTL+S.IOCTL.S
 
 				ldx #IOCTL.STATUS
 				.HS 2C					BIT ABS
 *--------------------------------------
-DEV.CLOSE		ldx #IOCTL.CLOSE
+DEV.Close		ldx #IOCTL.CLOSE
 *--------------------------------------
-DEV.pDrvJmp		>LDYAI K.S.IOCTL
-DEV.pDrvJmp.1	jmp (pDrv)
+DEV.pDrvJmp		>LDYAI K.DRV.IOCTL
+				jmp (pDRV)
 *--------------------------------------
-* For REG, DIR, PIPE
-*--------------------------------------
-DEV.MkFD		sta .8+1				A = S.FD.T
+DEV.NewNamedFD	jsr DEV.NewFD
+				bcs DEV.RTS
 
-				jsr DEV.GetFreeFD
+DEV.AddName		ldy #0
+
+.4				iny
+				lda K.PathBuf-1,y
+				bne .4
+
+				jsr MEM.Malloc			Y,A = StrLen
 				bcs .9
 
-				stx IO.hFD
+				>STYA A1L				dst
 
-				ldy #16					Y = Size, MAX=16 for S.FD.DIR
-				lda #0
-				ldx #S.MEM.F.INIT0+S.MEM.F.FD
-				jsr MEM.GetMem.YAX
+				ldx IO.hFD
+				sta pNames+1,x
+				tya
+				sta pNames,x
+
+				ldy #$ff
+
+.5				iny
+				lda K.PathBuf,y
+				sta (A1L),y
+				bne .5
+
+*				clc
+
+				rts
+
+.9				pha
+				jsr DEV.FreeFD
+				pla
+				sec
+
+DEV.RTS			rts
+*--------------------------------------
+DEV.NewFD		sta .8+1
+
+				ldx #0
+
+.1				lda pFDs+1,x
+				beq .2
+
+				inx
+				inx
+				cpx #K.FD.MAX*2
+				bcc .1
+
+				lda #E.OOH
+*				sec
+				rts
+
+.2				stx IO.hFD
+
+				>LDYAI S.FD
+				ldx #S.MEM.F.INIT0
+				jsr MEM.Malloc.YAX
 				bcs .9
 
 				>STYA pFD
+
 				ldx IO.hFD
-				sta FDs.pHI-1,x
+				sta pFDs+1,x
 				tya
-				sta FDs.pLO-1,x
-				
-				jsr Mem.SetOwnerPS0
-				
-.8				lda	#$ff				SELF MODIFIED
+				sta pFDs,x
+
+.8				lda #$FF				SELF MODIFIED
 				sta (pFD)
 
 *				clc
 
 .9				rts
 *--------------------------------------
-DEV.GetFreeFD	ldx #1
+DEV.FreeFD		ldx IO.hFD
 
-				clc
+				lda pNames+1,x
+				beq .1
 
-.1				lda FDs.pHI-1,x
-				beq .8
-				
-				inx
-				cpx #K.FD.MAX+1
-				bcc .1
-				
-				lda #E.OOH
+				stz pNames+1,x
+				ldy pNames,x
 
-*				sec
+				jsr MEM.FreeYA
 
-.8				rts
+				ldx IO.hFD
+
+.1				lda pFDs+1,x
+				stz pFDs+1,x
+				ldy pFDs,x
+
+				jmp MEM.FreeYA
 *--------------------------------------
-DEV.GetPFD		sta IO.hFD
-				tay
-				
-				lda FDs.pLO-1,y
-				sta pFD
-				lda FDs.pHI-1,y
-				sta pFD+1
-
-DEV.GetPDrv		ldy #S.FD.DEV.DRVPTR
+DEV.GetPDrv		ldy #S.FD.DEV.pDRV
 				lda (pFD),y
 				sta pDRV
 				iny

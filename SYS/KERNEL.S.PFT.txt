@@ -1,141 +1,241 @@
 NEW
   AUTO 3,1
 *--------------------------------------
-PFT.CheckPath1	ldy #1
+PFT.GetPath0	ldy #0
 				.HS 2C					BIT ABS
-PFT.CheckPath2	ldy #2
+PFT.GetPath1	ldy #1
 				.HS 2C					BIT ABS
-PFT.CheckPath4	ldy #4
+PFT.GetPath2	ldy #2
+				.HS 2C					BIT ABS
+PFT.GetPath4	ldy #4
 
-				lda (pStack),y
-				pha
-				iny
-				lda (pStack),y
-				ply
+				jsr RAMSW.GetStkYW
 
-PFT.CheckPathYA	>PUSHYA
+PFT.GetPathYA	jsr RAMSW.YA2PathBuf
 
-				stx .6+1				Save SYSCALL #
-
-				>PUSHWI K.Buf256
-				>SYSCALL2 realpath
-				bcs PFT.RTS
+				jsr STDLIB.Expand
+				jmp STDLIB.RealPath
+*--------------------------------------
+PFT.CheckExtFS	stx .6+1				Save SYSCALL #
 
 				ldx #0
 
-.1				inx
-				lda PFTs.pHI-1,x
+.1				lda pPFTs+1,x
 				beq .8
 
-				sta ZPPtr1+1
-
-				lda PFTs.pLO-1,x
-				sta ZPPtr1
+				sta .3+2
+				lda pPFTs,x
+				sta .3+1
 
 				ldy #$ff
 
 .2				iny
-				lda (ZPPtr1),y			"/FILTER\0"
-				beq .3					end of filter string....
 
-				cmp K.Buf256,y			can be \0
+.3				lda $FFFF,y				SELF MODIFIED
+				beq .4					end of filter string....
+
+				cmp K.PathBuf,y			can be \0
 				beq .2
 
 				bra .8
 
-.3				lda K.Buf256,y
-				beq .4					path is "/FILTER" ?
+.4				lda K.PathBuf,y
+				beq .5					path is "/FILTER" ?
 
 				cmp #'/'				path is "/FILTER/..." ?
 				bne .8
 
 				iny
 
-.4				lda PFTs.cbLO-1,x
+.5				lda pCBs,x
 				sta .7+1
 
-				lda PFTs.cbHI-1,x
+				lda pCBs+1,x
 				sta .7+2
-
-				stx hHandler
 
 				pla						discard JSR return @
 				pla
 
-				lda /K.Buf256			pass full path to handler
+				>LDYAI K.PathBuf		pass full path to handler
 
 .6				ldx #$ff				SELF MODIFIED SYSCALL #
 
 .7				jmp $ffff				SELF MODIFIED
 
-.8				cpx #K.PFT.MAX
-				bne .1
-
-				>LDYAI K.Buf256
-*--------------------------------------
-PFT.YAToMLIPATH	>STYA .1+1
-
-				ldx #0					no filter, prodos path
-
-.1				lda  $ffff,x			SELF MODIFIED
-				beq .2
-
+.8				inx
 				inx
-				sta K.MLI.PATH,x
-				cpx #MLI.MAXPATH
-				bne .1
-
-.2				stx K.MLI.PATH
-				inx
-				stz K.MLI.PATH,x		Make ending 0 for /dev/xxx path
-
-				>LDYAI K.MLI.PATH
-				>STYA K.MLI.PARAMS+1
+				cpx #K.PFT.MAX*2
+				bcc .1
 
 				clc
-PFT.RTS			rts
+				rts
+*--------------------------------------
+* X = 0 /dev VS = /dev/ VC = /dev/file
+* X = 2 /mnt VS = /mnt/ VC = /mnt/file
+* X = 4 /prodos/path VC
+*--------------------------------------
+PFT.Translate	>LDYAI K.MLI.PATH
+				>STYA K.MLI.PARAMS+1
+
+				stz K.MLI.PATH
+
+				jsr PFT.CheckDirs
+				bcc .20					/dev /mnt ....
+
+				ldy #$ff
+
+				ldx #0
+
+.10				iny
+				lda SYS.BOOT,y			add /BOOT/DIR/ prefix
+				beq .11
+
+				sta K.MLI.PATH+1,x
+				inx
+				cpx #MLI.MAXPATH+1
+				bcc .10
+
+				lda #MLI.E.INVPATH
+*				sec
+				rts
+
+.11				stx K.MLI.PATH
+
+				ldy #1					skip leading /
+				jsr PFT.Y2MLIPath
+				bcs .9
+
+				ldx #4					PRODOS
+				clv						not special DIR
+
+*				clc
+
+				rts
+*--------------------------------------
+.20				bvs	.8					CC/VS, /dev or /mnt, X = special DIR
+
+				txa						/dev/file
+				beq .7					nothing to do
+
+				ldy #4					skip /mnt from /mnt/VOLUME
+				jsr PFT.Y2MLIPath
+				bcs .9
+
+				ldx #4					Standard ProDOS /VOLUME
+
+.7
+
+*				clv
+
+.8
+
+*				clc
+
+.9				rts
+*--------------------------------------
+PFT.CheckDirs	bit .9					if V, NO additional path
+
+				ldx #0
+
+.1				lda PFT.Dirs,x
+				sta .3+1
+				lda PFT.Dirs+1,x
+				sta .3+2
+
+				ldy #0
+				bra .3
+
+.2				cmp K.PathBuf,y
+				bne .7
+
+				iny
+
+.3				lda $FFFF,y				SELF MODIFIED
+				bne .2
+
+				lda K.PathBuf,y
+				bne .4
+
+				lda #'/'				/XXX\0, append '/'
+				sta K.PathBuf,y
+				iny
+				lda #0
+				sta K.PathBuf,y
+
+				clc						V set
+				rts
+
+.4				cmp #'/'
+				bne .7
+
+				iny
+				lda K.PathBuf,y
+				beq .8					/XXX/\0, V set
+
+				clv						/XXX/something.... clear V
+
+.8				clc
+				rts
+
+.7				inx
+				inx
+				cpx #4
+				bcc .1
+
+				clv
+
+*				sec
+
+.9				rts
+*--------------------------------------
+PFT.Y2MLIPath	ldx K.MLI.PATH
+
+.1				lda K.PathBuf,y
+				beq .8
+
+				iny
+
+				sta K.MLI.PATH+1,x
+				inx
+				cpx #MLI.MAXPATH+1
+				bcc .1
+
+				lda #MLI.E.INVPATH
+*				sec
+				rts
+
+.8				stx K.MLI.PATH
+
+				clc
+				rts
 *--------------------------------------
 PFT.CheckNode4	ldy #4
 
-PFT.CheckNodeY	lda (pStack),y
+PFT.CheckNodeY	jsr RAMSW.GetStkYW
 
-PFT.CheckNodeA	stx .80+1				Save SYSCALL #
-				sta IO.hFILE
+PFT.CheckNodeYA	>STYA pFILE
 
-				tax
-				beq .9
-
-				cpx #K.FILE.MAX+1
-				bcs .9
-
-				ldy FILEs.hFD-1,x
-				sty IO.hFD
-				lda FDs.pLO-1,y
-				sta pFD
-				lda FDs.pHI-1,y
-				sta pFD+1
-				beq .9
+				lda (pFILE)				#S.FILE.hFD
+				jsr SHARED.GethFDpFDA
 
 				ldy #S.FD.PFT
 				lda (pFD),y
 				beq .8					Handler is 0, back to kernel....
 
-				tax
+				tay
 
-				lda PFTs.cbLO-1,x
-				sta .7+1
+				lda pCBs,y
+				sta .1+1
 
-				lda PFTs.cbHI-1,x
-				sta .7+2
-
-				stx hHandler
+				lda pCBs+1,y
+				sta .1+2
 
 				pla						discard JSR return @
 				pla
-				ldx .80+1				restore SYSCALL #
-				lda IO.hFILE
 
-.7				jmp $ffff				SELF MODIFIED
+				>LDYA pFILE
+
+.1				jmp $ffff				SELF MODIFIED
 
 .8				jsr DEV.GetPDrv
 
@@ -145,17 +245,19 @@ PFT.CheckNodeA	stx .80+1				Save SYSCALL #
 
 				ldy #S.FD.REG.REF		REG or DIR
 				lda (pFD),y
+
 				sta K.MLI.PARAMS+1
 
-.80				ldx #$ff				SELF MODIFIED
-.81				lda IO.hFILE
+.80				>LDYA pFILE
+
 				clc
-
-.99				rts
-
-.9				lda #E.INVH
-				sec
 				rts
+*--------------------------------------
+PFT.Dirs		.DA PFT.DEV
+				.DA PFT.MNT
+
+PFT.DEV			.AZ "/dev"
+PFT.MNT			.AZ "/mnt"
 *--------------------------------------
 MAN
 SAVE usr/src/sys/kernel.s.pft

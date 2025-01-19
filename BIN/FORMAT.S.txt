@@ -14,13 +14,12 @@ NEW
 				.OR ZPBIN
 ZS.START
 ZPPtr1			.BS 2
-ZPPtrFD			.BS 2
-ZPPtrDevName	.BS 2
-hDevID			.BS 1
-hCatBuf			.BS 1
+pFD				.BS 2
+pDevName		.BS 2
+pCatBuf			.BS 2
 
 ArgIndex		.BS 1
-hTrackBuf		.BS 1
+TimeOut			.BS 1
 DSSS0000 		.BS 1
 CurTrack		.BS 1
 CurQTrack		.BS 1
@@ -35,14 +34,17 @@ VolNum			.BS 1
 bAltBB			.BS 1
 HeadCnt			.BS 1
 
+BlkNum			.BS 1
+
+hFD				.BS 1
+
 CatSize			.BS 1
 CatBlkCnt		.BS 1
 bLL				.BS 1
 bVerify			.BS 1
 bCustomBlkSize	.BS 1
 
-TimeOut			.BS 1
-
+pTrackBuf		.BS 2
 ZS.END
 				.ED
 *--------------------------------------
@@ -51,20 +53,20 @@ ZS.END
 CS.START		cld
 				jmp (.1,x)
 				.DA #$61				6502,Level 1 (65c02)
-				.DA #1					BIN Layout Version 1
-				.DA #S.PS.F.EVENT
+				.DA #2					BIN Layout Version 2
+				.DA #S.PS.SIG.T1SEC
 				.DA #0
-				.DA CS.END-CS.START		Code Size (without Constants)
-				.DA DS.END-DS.START		Data SegmentSize
+				.DA CS.END
+				.DA ID.END
+				.DA DS.END
 				.DA #64					Stack Size
 				.DA #ZS.END-ZS.START	Zero Page Size
-				.DA 0
 *--------------------------------------
 * Relocation Table
 *--------------------------------------
 .1				.DA CS.INIT
 				.DA CS.RUN
-				.DA CS.DOEVENT
+				.DA CS.SIG
 				.DA	CS.QUIT
 L.LIBBLKDEV		.DA LIBBLKDEV
 L.MSG.USAGE1	.DA MSG.USAGE1
@@ -89,15 +91,15 @@ J.Opts			.DA CS.RUN.OptA
 				.DA 0
 *--------------------------------------
 CS.INIT			>LDYA L.LIBBLKDEV
-				>SYSCALL LoadLib
+				>LIBC LoadLib
 				bcs .9
 
-				sta hLIBBLKDEV
+				>STYA LIBBLKDEV
 
 .9				rts
 *--------------------------------------
 CS.RUN			ldy #S.PS.ARGC
-				lda (pPS),y
+				jsr A2osX.GetPSy
 				beq .99
 
 				ldx #6
@@ -134,39 +136,45 @@ CS.RUN			ldy #S.PS.ARGC
 
 				bra .1
 
-.4				lda hDevID
+.4				lda hFD
 				bne .5					Already have a dev...go get VolName
 
 				jsr CS.RUN.GetDev
 				bcc .1
-				
+
 				rts
 
 .5				jsr CS.RUN.GetVolName
 				bcc .1
-				
+
 				rts
 
 .99				>LDYA L.MSG.USAGE1
-				>SYSCALL PutS
+				>LIBC PutS
+
 				>LDYA L.MSG.USAGE2
-				>SYSCALL PutS
+				>LIBC PutS
 
 				lda #E.SYN
 				sec
 .9				rts
 
-.8				lda hDevID
+.8				lda hFD
 				beq .99
 *--------------------------------------
-CS.RUN.Format	jsr CS.RUN.GetDevDIB
-				bcs .9
+CS.RUN.Format	jsr CS.RUN.InitCat
+				bcs .90
 
+				jsr CS.RUN.GetDevDIB
+				bcs .90
+
+				>SS
 				>PUSHW L.MSG.INIT
-				>PUSHW ZPPtrDevName
+				>PUSHW pDevName
 				>PUSHW pData			>PUSHEA.G VolName
 				>PUSHBI 4
-				>SYSCALL PrintF
+				>LIBC PrintF
+				>SR
 				bcs .9
 
 				jsr CS.RUN.GET.DSSS0000
@@ -175,24 +183,24 @@ CS.RUN.Format	jsr CS.RUN.GetDevDIB
 				bpl .1
 
 				jsr CS.RUN.LL
-				bcs .9
 
-.1				jsr CS.RUN.InitCat
-				bcs .9
+.90				bcs .9
 
-				jsr CS.RUN.BuildCat
+.1				jsr CS.RUN.BuildCat
 				bcs .9
 
 				jsr CS.RUN.WriteCat
 				bcs .9
 
 				>LDYA L.MSG.OK
-				>SYSCALL PutS
+				>LIBC PutS
 				bcs .9
 
-.8				>PUSHB DSSS0000
+				>SS
+				>PUSHB DSSS0000
 				>PUSHW pData
-				>SYSCALL Online
+				>LIBC Online
+				>SR
 				bcs .9
 
 				lda #0
@@ -200,12 +208,14 @@ CS.RUN.Format	jsr CS.RUN.GetDevDIB
 				rts
 
 .9				pha
+				>SS
+				tay
 				>PUSHW L.MSG.ERR
-				pla
-				pha
+				tya
 				>PUSHA
 				>PUSHBI 1
-				>SYSCALL PrintF
+				>LIBC PrintF
+				>SR
 				pla
 				sec
 				rts
@@ -238,7 +248,7 @@ CS.RUN.OptA		sec
 CS.RUN.OptB		jsr CS.RUN.NextArg
 				bcs .9
 
-				>SYSCALL AToI
+				>LIBC AToI
 				>STYA BlkCnt
 
 				sec
@@ -269,66 +279,68 @@ CS.RUN.OptL		sec
 CS.RUN.OptS		jsr CS.RUN.NextArg
 				bcs .99
 
-				>SYSCALL AToI
+				>LIBC AToI
 				tax
 				bne .9
-				
+
 				tya
 				beq .9
-				
+
 				cmp #5
 				bcs .99
-				
+
 				sta Stepping
 				cmp #4
 				beq .8
-				
+
 				tsb VolNum
-				
+
 				sec
 				ror bAltBB
-	
+
 .8				clc
 				rts
-	
+
 .9				sec
-	
+
 .99				rts
 *--------------------------------------
 CS.RUN.OptT		jsr CS.RUN.NextArg
 				bcs .99
 
-				>SYSCALL AToI
+				>LIBC AToI
 				tax
 				bne .9
-				
+
 				tya
 				beq .9
-				
+
 				sta TrkCnt
-				
+
 				clc
 				rts
-				
+
 .9				sec
-	
-.99				rts				
+
+.99				rts
 *--------------------------------------
 CS.RUN.NextArg	inc ArgIndex
 				lda ArgIndex
-				>SYSCALL ArgV
+				>LIBC ArgV
 				rts
-*--------------------------------------		
+*--------------------------------------
 CS.RUN.GetDev	>LDYA ZPPtr1
-				>SYSCALL GetDevByName
+				>LIBC GetDevByName
 				bcs .9
 
-				stx hDevID
-				>STYA ZPPtrFD
+				sta hFD
+				>KAPI GetFDByID
+
+				>STYA pFD
 
 				>LDYA ZPPtr1
-				>STYA ZPPtrDevName
-				
+				>STYA pDevName
+
 .9				rts
 *--------------------------------------
 CS.RUN.GetVolName
@@ -348,7 +360,7 @@ CS.RUN.GetVolName
 				sta (pData),y
 *				clc
 				beq .8					\0
-				
+
 				jsr CS.RUN.IsDOrL
 				bcs .9
 
@@ -362,22 +374,25 @@ CS.RUN.GetVolName
 .8				rts
 *--------------------------------------
 CS.RUN.GetDevDIB
-				>LEA.G DIB
-				>STYA.G IOCTL+S.IOCTL.BUFPTR
+				>LEA.G DEV.DIB
+				>STYA.G DEV.IOCTL+S.IOCTL.BUFPTR
 
 				lda #S.IOCTL.S.GETDIB
-				>STA.G IOCTL+S.IOCTL.S
+				>STA.G DEV.IOCTL+S.IOCTL.S
 
-				>PUSHB hDevID
+				>SS
+				>PUSHBI 0
+				>PUSHB hFD
 				>PUSHBI IOCTL.STATUS
-				>PUSHEA.G IOCTL
-				>SYSCALL IOCTL
-				bcs .9
+				>PUSHEA.G DEV.IOCTL
+				>LIBC IOCTL
+				>SR
+				bcs .99
 
 				lda bCustomBlkSize
 				bmi .8
 
-				>LDA.G DIB+S.DIB.SIZE
+				>LDA.G DEV.DIB+S.DIB.SIZE
 				tax
 				iny
 				ora (pData),y
@@ -391,14 +406,14 @@ CS.RUN.GetDevDIB
 				rts
 
 .9				>LDYA L.MSG.NOSIZE
-				>SYSCALL PutS
+				>LIBC PutS
 				lda #MLI.E.IO
 				sec
-				rts
+.99				rts
 *--------------------------------------
 CS.RUN.GET.DSSS0000
 				ldy #S.FD.DEV.BUSID
-				lda (ZPPtrFD),y			00000SSS
+				lda (pFD),y				00000SSS
 
 				lsr
 				ror
@@ -408,7 +423,7 @@ CS.RUN.GET.DSSS0000
 
 				iny 					S.FD.DEV.DEVID
 
-				lda (ZPPtrFD),y
+				lda (pFD),y
 				dec						0/1
 				ror						in C
 				pla
@@ -417,21 +432,25 @@ CS.RUN.GET.DSSS0000
 
 				rts
 *--------------------------------------
-CS.RUN.LL		>PUSHW L.MSG.LL
+CS.RUN.LL		>SS
+				>PUSHW L.MSG.LL
 				>PUSHW BlkCnt
 				>PUSHBI 2
-				>SYSCALL PrintF
+				>LIBC PrintF
+				>SR
 				bcs .9
 
-				>LDA.G DIB+S.DIB.T
+				>LDA.G DEV.DIB+S.DIB.T
 				cmp #S.DIB.T.D2
 				beq CS.RUN.LL.DISKII
 
-				>PUSHB hDevID
+				>SS
+				>PUSHBI 0
+				>PUSHB hFD
 				>PUSHBI IOCTL.FORMAT
-				>PUSHEA.G IOCTL
-
-				>SYSCALL IOCTL
+				>PUSHEA.G DEV.IOCTL
+				>LIBC IOCTL
+				>SR
 
 .9
 CS.RUN.LL.RTS	rts
@@ -444,8 +463,10 @@ CS.RUN.LL.DISKII
 				jsr CS.RUN.Wait
 				bcs CS.RUN.LL.RTS
 
+				>SS
 				>PUSHB DSSS0000
-				>LIBCALL hLIBBLKDEV,LIBBLKDEV.D2Recalibrate
+				>LIBCALL LIBBLKDEV,D2Recalibrate
+				>SR
 
 				lda #20
 				jsr CS.RUN.Wait
@@ -477,17 +498,21 @@ CS.RUN.LL.DISKII
 				dec HCounter
 				beq .3
 
+				>SS
 				>PUSHB DSSS0000
 				>PUSHBI 1
-				>LIBCALL hLIBBLKDEV,LIBBLKDEV.D2HeadSelect
+				>LIBCALL LIBBLKDEV,D2HeadSelect
+				>SR
 				bcs .9
 
 				jsr CS.RUN.LL.DISKII.FT
 				bcs .9
 
+				>SS
 				>PUSHB DSSS0000
 				>PUSHBI 0
-				>LIBCALL hLIBBLKDEV,LIBBLKDEV.D2HeadSelect
+				>LIBCALL LIBBLKDEV,D2HeadSelect
+				>SR
 				bcs .9
 
 				inc CurTrack
@@ -498,9 +523,9 @@ CS.RUN.LL.DISKII
 				lda CurQTrack
 *				clc
 				adc Stepping
-				tax
+				tay
 
-				jsr CS.RUN.SeekToX
+				jsr CS.RUN.SeekToY
 				jmp .1
 
 .9				pha
@@ -509,17 +534,19 @@ CS.RUN.LL.DISKII
 				sec
 .99				rts
 
-.8				ldx #0
-				jsr CS.RUN.SeekToX
-				
+.8				ldy #0
+				jsr CS.RUN.SeekToY
+
+				>SS
 				>PUSHW L.MSG.CRLF
 				>PUSHBI 0
-				>SYSCALL PrintF
+				>LIBC PrintF
+				>SR
 				bcs .9
 
 				jsr CS.RUN.CheckCtrlC
 				bcs .9
-				
+
 				bit bVerify
 				bpl .80
 
@@ -529,6 +556,7 @@ CS.RUN.LL.DISKII
 .80				rts
 *--------------------------------------
 CS.RUN.LL.DISKII.P
+				>SS
 				>PUSHW L.MSG.LLDISK2
 				>PUSHB CurHead
 				>PUSHB CurTrack
@@ -536,34 +564,36 @@ CS.RUN.LL.DISKII.P
 				>PUSHA
 				>PUSHB TrkCnt
 				>PUSHBI 4
-				>SYSCALL PrintF
+				>LIBC PrintF
+				>SR
 				rts
 *--------------------------------------
 CS.RUN.LL.DISKII.FT
+				>SS
 				>PUSHB DSSS0000
 				>PUSHB VolNum
+				>PUSHB CurHead
 				>PUSHB CurTrack
-				>LIBCALL hLIBBLKDEV,LIBBLKDEV.D2TrkFmt16s
+				>LIBCALL LIBBLKDEV,D2TrkFmt16s
+				>SR
 				rts
 *--------------------------------------
 CS.RUN.LL.DISKII.V
-				lda hTrackBuf
+				>LDYA pTrackBuf
 				bne .10
 
 				>LDYAI 512
-				>SYSCALL GetMem
+				>LIBC Malloc
 				bcs .99
 
-				stx hTrackBuf
-				bra .11
+				>STYA pTrackBuf
 
-.10				>SYSCALL GetMemPtr
-.11				>STYA.G IOCTL+S.IOCTL.BUFPTR
+.10				>STYA.G DEV.IOCTL+S.IOCTL.BUFPTR
 
 				>LDYA BlkCnt
-				>STYA.G IOCTL+S.IOCTL.BLKNUM
+				>STYA.G DEV.IOCTL+S.IOCTL.BLKNUM
 
-				>STZ.G IOCTL+S.IOCTL.BLKNUM
+				>STZ.G DEV.IOCTL+S.IOCTL.BLKNUM
 				iny
 				sta (pData),y
 
@@ -577,7 +607,7 @@ CS.RUN.LL.DISKII.V
 
 				stz CurHead
 
-.1				ldx #0
+.1				stz BlkNum
 
 .2				jsr CS.RUN.CheckCtrlC
 				bcs .9
@@ -585,10 +615,11 @@ CS.RUN.LL.DISKII.V
 				jsr CS.RUN.LL.DISKII.VBLK
 .99				bcs .9
 
-				>INCW.G IOCTL+S.IOCTL.BLKNUM
+				>INCW.G DEV.IOCTL+S.IOCTL.BLKNUM
 
-				inx
-				cpx #8
+				inc BlkNum
+				lda BlkNum
+				cmp #8
 				bne .2
 
 				inc CurHead
@@ -607,81 +638,78 @@ CS.RUN.LL.DISKII.V
 
 				stz CurHead
 
-.3				ldx #7
+.3				lda #7
+				sta BlkNum
 
 				dec CurTrack
 
 .4				jsr CS.RUN.CheckCtrlC
 				bcs .9
 
-				>DECW.G IOCTL+S.IOCTL.BLKNUM
+				>DECW.G DEV.IOCTL+S.IOCTL.BLKNUM
 
 				jsr CS.RUN.LL.DISKII.VBLK
 				bcs .9
 
-				dex
+				dec BlkNum
 				bpl .4
 
 				inc CurHead
 				dec HCounter
 				bne .3
-				
+
 				dec TCounter
 				bne .13
 
 				>LDYA L.MSG.OK
-				>SYSCALL PutS
+				>LIBC PutS
 
 .9				rts
 *--------------------------------------
 CS.RUN.LL.DISKII.VBLK
-				phx
+				>SS
 				>PUSHW L.MSG.VERIFY
 				>PUSHB CurHead
 				>PUSHB CurTrack
-				pla
-				pha
-				>PUSHA
-
-				>PUSHW.G IOCTL+S.IOCTL.BLKNUM
+				>PUSHB BlkNum
+				>PUSHW.G DEV.IOCTL+S.IOCTL.BLKNUM
 				>PUSHBI 5
-				>SYSCALL PrintF
+				>LIBC PrintF
+				>SR
 
-				>PUSHB hDevID
+				>SS
+				>PUSHBI 0
+				>PUSHB hFD
 				>PUSHBI IOCTL.READBLOCK
-				>PUSHEA.G IOCTL
-				>SYSCALL IOCTL
-				bcc .8
+				>PUSHEA.G DEV.IOCTL
+				>LIBC IOCTL
+				>SR
 
-				pha
-				>PUSHW L.MSG.ERR
-				pla
-
-				>PUSHA
-				>PUSHBI 1
-				>SYSCALL PrintF
-
-.8				plx
 				rts
 *--------------------------------------
 CS.RUN.MotorOn	sec
 				.HS 90					BCC
 CS.RUN.MotorOff	clc
+
+				>SS
 				>PUSHB DSSS0000
 				ror
 				>PUSHA
-				>LIBCALL hLIBBLKDEV,LIBBLKDEV.D2MotorControl
+				>LIBCALL LIBBLKDEV,D2MotorControl
+				>SR
 				rts
 *--------------------------------------
-CS.RUN.SeekToX	>PUSHB DSSS0000
+CS.RUN.SeekToY	>SS
+				>PUSHB DSSS0000
 				>PUSHB CurQTrack
-				txa
+				tya
 				sta CurQTrack
 				>PUSHA
-				>LIBCALL hLIBBLKDEV,LIBBLKDEV.D2MoveHead
+				>LIBCALL LIBBLKDEV,D2MoveHead
+				>SR
 				rts
 *--------------------------------------
-CS.RUN.ZeroPtr1	lda ZPPtr1+1
+CS.RUN.ZeroPtr1_OLD	lda ZPPtr1+1
 				pha
 
 				lda #0
@@ -709,115 +737,117 @@ CS.RUN.InitCat	lda CatSize
 .1				lda (pData)				>LDA.G VolName
 				bne .8					Volume name ok
 
+				>SS
 				>PUSHW pData			>PUSHEA.G VolName
 				>PUSHW L.FMT.BLANK
 				>PUSHW A2osX.T16
 				>PUSHW A2osX.R16
 				>PUSHBI 4
-				>SYSCALL SPrintF
+				>LIBC SPrintF
+				>SR
 				rts
 
 .8				clc
 				rts
 *--------------------------------------
-CS.RUN.BuildCat	jsr .7
-
-				>LIBCALL hLIBBLKDEV,LIBBLKDEV.GetProDOSCatSize
+CS.RUN.BuildCat	>SS
+				>PUSHW BlkCnt
+				>PUSHB CatSize
+				>LIBCALL LIBBLKDEV,GetProDOSCatSize
+				>SR
 				bcs .9
 
-				stx CatBlkCnt
+				pha
 
-				>SYSCALL GetMem			BufferSize
+				lsr
+				sta CatBlkCnt
+
+				pla
+				>LIBC Malloc			BufferSize
 				bcs .9
 
-				>STYA ZPPtr1
+				>STYA pCatBuf
 
-				>STYA.G IOCTL+S.IOCTL.BUFPTR
-				stx hCatBuf
-
-				lda CatBlkCnt
-				asl
-				tax
-
-				lda #0
-				tay
-
-.1				sta (ZPPtr1),y
-				iny
-				bne .1
-
-				inc ZPPtr1+1
-				dex
-				bne .1
-
-				jsr .7
-
-				>PUSHW pData			>PUSHEA.G VolName
-				>PUSHW.G IOCTL+S.IOCTL.BUFPTR
-				>LIBCALL hLIBBLKDEV,LIBBLKDEV.BuildProDOSCat
-.9				rts
-
-.7				>PUSHW BlkCnt
+				>SS
+				>PUSHW BlkCnt
 				>PUSHB CatSize
 				>PUSHB bAltBB
-				rts
+				>PUSHW pData			>PUSHEA.G VolName
+				>PUSHW pCatBuf
+				>LIBCALL LIBBLKDEV,BuildProDOSCat
+				>SR
+
+.9				rts
 *--------------------------------------
-CS.RUN.WriteCat	>PUSHW L.MSG.WRITECAT
+CS.RUN.WriteCat	>SS
+				>PUSHW L.MSG.WRITECAT
 				>PUSHBI 0
-				>SYSCALL PrintF
+				>LIBC PrintF
+				>SR
 				bcs .9
 
-				>STZ.G IOCTL+S.IOCTL.BLKNUM
-				iny
-				sta (pData),y
+				>STZW.G DEV.IOCTL+S.IOCTL.BLKNUM
 
-.1				>PUSHB hDevID
+				>LDYA pCatBuf
+				>STYA.G DEV.IOCTL+S.IOCTL.BUFPTR
+
+.1				>SS
+				>PUSHBI 0
+				>PUSHB hFD
 				>PUSHBI IOCTL.WRITEBLOCK
-				>PUSHEA.G IOCTL
-
-				>SYSCALL IOCTL
+				>PUSHEA.G DEV.IOCTL
+				>LIBC IOCTL
+				>SR
 				bcs .9
 
 				lda #'.'
-				>SYSCALL PutChar
+				>LIBC PutChar
 				bcs .9
 
-				>LDA.G IOCTL+S.IOCTL.BUFPTR+1
+				>INC.G DEV.IOCTL+S.IOCTL.BLKNUM
+
+				>LDA.G DEV.IOCTL+S.IOCTL.BUFPTR+1
 				inc
 				inc
 				sta (pData),y
-				>INC.G IOCTL+S.IOCTL.BLKNUM
+
 				>SLEEP
+
 				dec CatBlkCnt
 				bne .1
 
 				clc
 .9				rts
 *--------------------------------------
-CS.DOEVENT		lda (pEvent)
-				bpl .9					is it a TIMER event?
-
-				lda TimeOut
+CS.SIG			lda TimeOut
 				beq .9
 
 				dec TimeOut
-.9				sec						do not discard TIMER event
+
+.9				sec
+
 				rts
 *--------------------------------------
-CS.QUIT			lda hCatBuf
+CS.QUIT			>LDYA pCatBuf
 				beq .1
 
-				>SYSCALL FreeMem
+				>LIBC Free
 
-.1				lda hTrackBuf
+.1				>LDYA pTrackBuf
 				beq .2
 
-				>SYSCALL FreeMem
+				>LIBC Free
 
-.2				lda hLIBBLKDEV
+.2				>LDYA pFD
+				beq .3
+
+				>LIBC Free
+
+.3				>LDYA LIBBLKDEV
 				beq .8
 
-				>SYSCALL UnloadLib
+				>LIBC UnloadLib
+
 .8				clc
 				rts
 *--------------------------------------
@@ -825,11 +855,11 @@ CS.RUN.Wait		sta TimeOut
 
 .1				jsr CS.RUN.CheckCtrlC
 				bcs .9
-				
+
 				lda TimeOut
 				bne .1
-				
-.9				rts				
+
+.9				rts
 *--------------------------------------
 CS.RUN.CheckCtrlC
 				phx
@@ -837,14 +867,19 @@ CS.RUN.CheckCtrlC
 
 				>SLEEP
 
-				ldy #S.PS.hStdIn
-				lda (pPS),y
-				>SYSCALL FEOF
+				ldy #S.PS.pStdIn
+				jsr A2osX.GetPSy
+				pha
+				iny
+				jsr A2osX.GetPSy
+				ply
+				>LIBC FEOF
 				bcs .9
+
 				tay
 				bne .9					CC
 
-				>SYSCALL GetChar
+				>LIBC GetChar
 				bcs .9
 
 				cmp #$03				Ctrl-C
@@ -858,24 +893,24 @@ CS.RUN.CheckCtrlC
 *--------------------------------------
 CS.RUN.IsDOrL	cmp #'0'
 				bcc CS.RUN.IsL
-				
+
 				cmp #'9'+1
 				bcc CS.RUN.IsL.RTS
 
 CS.RUN.IsL		cmp #'_'
 				clc
 				beq CS.RUN.IsL.RTS
-				
+
 				cmp #'.'
 				clc
 				beq CS.RUN.IsL.RTS
-				
+
 				cmp #'A'
 				bcc CS.RUN.IsL.9
-				
+
 				cmp #'Z'+1
 				bcc CS.RUN.IsL.RTS
-				
+
 				cmp #'a'
 				bcc CS.RUN.IsL.9
 
@@ -889,18 +924,16 @@ CS.RUN.IsL.9	sec
 CS.END
 *--------------------------------------
 LIBBLKDEV		.AZ "libblkdev"
-hLIBBLKDEV		.BS 1
 *--------------------------------------
 MSG.USAGE1		.CS "Usage : FORMAT <BLOCKDEV> [VOL.NAME]\r\n"
 				.CS "   -L : Low-Level Format\r\n"
 				.CS "   -V : Verify After LLF\r\n"
-				.CS "   -B xxxx : Volume size (blocks)\r\n"
+				.CS " -B n : Volume size (blocks)\r\n"
 				.CZ " -1-9 : Catalog Size (blocks)"
-MSG.USAGE2		.CS "------- ProDOS.FX only ------\r\n"
-				.CS "   -A : Alternate boot block\r\n"
+MSG.USAGE2		.CS "   -A : Alternate boot block\r\n"
 				.CS "   -D : Dual sided\r\n"
-				.CS "   -S x : Quarter track stepping\r\n"
-				.CZ "   -T xxx : Track count\r\n"
+				.CS " -S n : Quarter track stepping\r\n"
+				.CZ " -T n : Track count\r\n"
 *--------------------------------------
 MSG.OK			.CZ "[OK]"
 MSG.ERR			.CS "[%h]"
@@ -923,13 +956,13 @@ Disk2.Default	.DA 280					BlkCnt
 				.DA #0					bAltBB
 				.DA #1					HeadCnt
 *--------------------------------------
+ID.END			.EQ *
+*--------------------------------------
 				.DUMMY
 				.OR 0
-DS.START
 VolName			.BS 16
-
-IOCTL			.BS S.IOCTL
-DIB				.BS S.DIB
+DEV.IOCTL		.BS S.IOCTL
+DEV.DIB			.BS S.DIB
 DS.END			.ED
 *--------------------------------------
 MAN

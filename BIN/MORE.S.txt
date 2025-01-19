@@ -19,7 +19,6 @@ NEW
 *\-------------------------------------
 				.INB inc/macros.i
 				.INB inc/a2osx.i
-				.INB inc/kernel.i
 				.INB inc/mli.i
 				.INB inc/mli.e.i
 *--------------------------------------
@@ -30,15 +29,13 @@ PG.SIZE			.EQ 23
 ZS.START
 ZPPtr1			.BS 2
 ZPBufPtr		.BS 2
+pFile			.BS 2
 ArgCount		.BS 1
-hFile			.BS 1
 LineCount		.BS 1
 LineNum			.BS 2
 bHelp			.BS 1
 bLineNum		.BS 1
 bPage			.BS 1
-ArgIndex		.BS 1
-hBuf			.BS 1
 ZS.END			.ED
 *--------------------------------------
 *			File Header (16 Bytes)
@@ -46,14 +43,14 @@ ZS.END			.ED
 CS.START		cld
 				jmp (.1,x)
 				.DA #$61				6502,Level 1 (65c02)
-				.DA #1					BIN Layout Version 1
+				.DA #2					BIN Layout Version 2
 				.DA #0					S.PS.F.EVENT
 				.DA #0
-				.DA CS.END-CS.START		Code Size (without Constants)
-				.DA DS.END-DS.START		Data SegmentSize
+				.DA CS.END
+				.DA ID.END
+				.DA DS.END
 				.DA #64					Stack Size
-				.DA #ZS.END-ZS.START	Zero Page Size
-				.DA 0
+				.DA #ZS.END-ZS.START	Zero Page Size				
 *--------------------------------------
 * Relocation Table
 *--------------------------------------
@@ -70,10 +67,11 @@ L.MSG.PauseErase	.DA MSG.PauseErase
 *--------------------------------------
 CS.RUN			inc ArgCount
 				lda ArgCount
-				>SYSCALL ArgV
+				>LIBC ArgV
 				bcs .7
 
 				>STYA ZPPtr1
+
 				lda (ZPPtr1)
 				cmp #'-'
 				bne .4
@@ -91,11 +89,11 @@ CS.RUN			inc ArgCount
 				bpl .2
 
 .99				>LDYA L.MSG.USAGE
-				>SYSCALL PutS
+				>LIBC PutS
 				lda #E.SYN
 				sec
 .9				rts
-
+*--------------------------------------
 .3				lda OptionVars,x
 				tax
 				sec
@@ -107,7 +105,7 @@ CS.RUN			inc ArgCount
 
 				bra CS.RUN
 
-.4				lda hFile
+.4				lda pFile+1
 				bne .99
 
 				>LDYA ZPPtr1
@@ -120,38 +118,53 @@ CS.RUN			inc ArgCount
 				beq .8
 
 .71				jsr .99
+
 				lda #0
 				rts
-
-.8				lda hFile
+*--------------------------------------
+.8				lda pFile+1
 				bne .80
 
-				ldy #S.PS.hStdIn
-				lda (pPS),y
-				tay
-				ldx FILEs.hFD-1,y
-				lda FDs.pLO-1,x
-				sta ZPPtr1
-				lda FDs.pHI-1,x
-				sta ZPPtr1+1
+				ldy #S.PS.pStdIn
+				jsr A2osX.GetPSy
+				pha
+				iny
+				jsr A2osX.GetPSy
+				ply
 
-				lda (ZPPtr1)
+				>STYA ZPPtr1
 
-				cmp #S.FD.T.PIPE
-				bne .71
-
-				sty hFile
-
-.80				>LDYAI 256
-				>SYSCALL GetMem
+				>LIBC FileNo
 				bcs .9
 
-				>STYA ZPBufPtr
-				stx hBuf
+				>SS
+				>PUSHYA
+				>PUSHEA.G STATBUF
+				>LIBC FStat
+				>SR
+				bcs .9
+				
+				>LDA.G STATBUF+S.STAT.MODE+1
+				and #$F0
 
+				cmp /S.STAT.MODE.FIFO
+				bne .71
+
+				>LDYA ZPPtr1
+				>STYA pFile
+
+.80				>LDYAI 256
+				>LIBC Malloc
+				bcs CS.RUN.LOOP.RTS
+
+				>STYA ZPBufPtr
+
+				>SS
 				>PUSHW L.MSG.Init
 				>PUSHBI 0
-				>SYSCALL PrintF
+				>LIBC PrintF
+				>SR
+				bcs CS.RUN.LOOP.RTS
 *--------------------------------------
 CS.RUN.LOOP		jsr CS.RUN.GETLINE
 				bcs	.9
@@ -168,12 +181,13 @@ CS.RUN.LOOP		jsr CS.RUN.GETLINE
 				beq .2
 
 				lda #C.FF
-				>SYSCALL PutChar
+				>LIBC PutChar
 
 .2				jsr CS.RUN.PRINT
 
 				inc LineCount
 				lda LineCount
+
 				cmp #PG.SIZE
 				bne CS.RUN.LOOP
 
@@ -187,29 +201,34 @@ CS.RUN.LOOP		jsr CS.RUN.GETLINE
 				lda #0					Exit with no Error
 
 .99				sec
-				rts
+CS.RUN.LOOP.RTS	rts
 *--------------------------------------
-CS.RUN.OPEN		>PUSHYA
+CS.RUN.OPEN		>SS
+				>PUSHYA
 				>PUSHBI	O.RDONLY+O.TEXT
 				>PUSHBI S.FI.T.TXT
 				>PUSHWZ				Aux type
-
-				>SYSCALL FOpen
+				>LIBC FOpen
+				>SR
 				bcs .9
 
-				sta hFile
+				>STYA pFile
 
 .9				rts
 *--------------------------------------
-CS.RUN.PAUSE	ldy #S.PS.hStdErr
-				lda (pPS),y
-				>PUSHA
+CS.RUN.PAUSE	>SS
 				>PUSHW L.MSG.Pause
-				>SYSCALL FPutS
+				jsr CS.RUN.PushStdErr
+				>LIBC FPutS
+				>SR
 
-.10				ldy #S.PS.hStdErr
-				lda (pPS),y
-				>SYSCALL GetC
+.10				ldy #S.PS.pStdErr
+				jsr A2osX.GetPSy
+				pha
+				iny
+				jsr A2osX.GetPSy
+				ply
+				>LIBC GetC
 				bcs .99
 
 				cmp #'Q'
@@ -222,7 +241,7 @@ CS.RUN.PAUSE	ldy #S.PS.hStdErr
 				bne .4
 
 				jmp CS.RUN.ERASE
-
+*--------------------------------------
 .4				cmp #C.CR
 				bne .10
 
@@ -244,49 +263,62 @@ CS.RUN.PAUSE	ldy #S.PS.hStdErr
 .6				jsr CS.RUN.PRINT
 
 				bra CS.RUN.PAUSE
+*--------------------------------------
 .9				jsr CS.RUN.ERASE
 
 .90				lda #0
 .99				sec
 				rts
 *--------------------------------------
-CS.RUN.ERASE	ldy #S.PS.hStdErr
-				lda (pPS),y
-				>PUSHA
+CS.RUN.ERASE	>SS
 				>PUSHW L.MSG.PauseErase
-				>SYSCALL FPutS
+				jsr CS.RUN.PushStdErr
+				>LIBC FPutS
+				>SR
 				rts
 *--------------------------------------
-CS.RUN.GETLINE	>PUSHB hFile
-
+CS.RUN.GETLINE	>SS
 				>PUSHW ZPBufPtr
 				>PUSHWI	256
-				>SYSCALL FGetS
+				>PUSHW pFile
+				>LIBC FGetS
+				>SR
 				rts
 *--------------------------------------
 CS.RUN.PRINT	lda bLineNum
 				bpl .1
 
+				>SS
 				>PUSHW L.MSG.NUMLINE
 				>PUSHW LineNum
 				>PUSHBI 2
-				>SYSCALL PrintF
+				>LIBC PrintF
+				>SR
 				bcs .9
 
 .1				>LDYA ZPBufPtr
-				>SYSCALL PutS
+				>LIBC PutS
 
 .9				rts
 *--------------------------------------
-CS.QUIT			lda hBuf
+CS.RUN.PushStdErr
+				ldy #S.PS.pStdErr+1
+				jsr A2osX.GetPSy
+				>PUSHA
+				dey
+				jsr A2osX.GetPSy
+				>PUSHA
+				rts
+*--------------------------------------
+CS.QUIT			>LDYA ZPBufPtr
 				beq .1
 
-				>SYSCALL FreeMem
+				>LIBC Free
 
-.1				lda hFile
+.1				>LDYA pFile
 				beq .2
 
-				>SYSCALL FClose
+				>LIBC FClose
 .2
 .8
 CS.INIT			clc
@@ -295,7 +327,7 @@ CS.INIT			clc
 CS.DOEVENT		sec
 				rts
 *--------------------------------------
-CS.END
+CS.END			.EQ *
 *--------------------------------------
 OptionList		.AS "NnHhPp"
 OptionVars		.DA #bLineNum,#bLineNum,#bHelp,#bHelp,#bPage,#bPage
@@ -309,9 +341,12 @@ MSG.NUMLINE		.CZ "%5D:"
 MSG.Pause		.CZ "\r\e[7m --- 'SPACE' for more, 'CR' one line, 'Q/q' to quit --- \e[0m"
 MSG.PauseErase	.CZ "\r\e[2K"
 *--------------------------------------
+ID.END			.EQ *
+*--------------------------------------
 				.DUMMY
 				.OR 0
-DS.START
+
+STATBUF			.BS S.STAT
 DS.END			.ED
 *--------------------------------------
 MAN

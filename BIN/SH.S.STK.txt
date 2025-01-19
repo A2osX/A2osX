@@ -1,7 +1,88 @@
 NEW
   AUTO 3,1
 *--------------------------------------
-STK.PopCtx		jsr STK.Pull
+* stack+8  		old InputBuf
+* stack+6  		old InputBufPtr
+* stack+5  		old ARGC
+* stack+3       old pARGV
+* stack+1  		new pCode
+* stack			CMD
+*--------------------------------------
+STK.PushCode	jsr CORE.ArgVDup		Y,A = ArgV
+				bcs .9
+				
+				lda #10					ZPTmpW = new ArgV, X = Arg Count
+				jsr STK.CheckA
+				bcs .9
+
+				>LDYA ZPInputBuf
+				jsr STK.PushYA
+
+				jsr STK.PushInputBufPtr
+
+				ldy #S.PS.ARGC
+				jsr A2osX.GetPSy
+				jsr STK.PushA			old ARGC
+
+				ldy #S.PS.pARGV
+				jsr A2osX.GetPSy
+				jsr STK.PushA			old ARGV
+
+				ldy #S.PS.pARGV+1
+				jsr A2osX.GetPSy
+				jsr STK.PushA
+
+				ldy #S.PS.ARGC
+				txa						X = Arg Count
+				dec 					Skip ARG0 in count
+				jsr A2osX.SetPSy
+
+				lda ZPTmpW
+				ldy	#S.PS.pARGV
+				jsr A2osX.SetPSy		new pARGV
+				lda ZPTmpW+1
+				iny
+				jsr A2osX.SetPSy
+
+				>LDYA.G CORE.pNewCode
+				>STYA ZPInputBuf
+				>STYA ZPInputBufPtr
+
+				jmp STK.PushYA
+
+.9				rts
+*--------------------------------------
+STK.PopCode		jsr STK.PopFree			Code buffer
+
+				jsr GetArgV
+				>LIBC Free			ArgV buffer
+
+				jsr STK.PopA
+				ldy #S.PS.pARGV+1
+				jsr A2osX.SetPSy
+
+				jsr STK.PopA
+				ldy #S.PS.pARGV
+				jsr A2osX.SetPSy
+
+				jsr STK.PopA
+				ldy #S.PS.ARGC
+				jsr A2osX.SetPSy
+
+				jsr STK.PopYA
+				>STYA ZPInputBufPtr
+
+				jsr STK.PopYA
+				>STYA ZPInputBuf
+
+				ldy #S.PS.ERRNO
+				jsr A2osX.GetPSy
+
+				cmp #1
+
+				rts
+*--------------------------------------
+STK.PopCtx		jsr STK.PopA
 
 STK.PopCtxA		and #$3F
 				cmp #C.IF
@@ -11,108 +92,98 @@ STK.PopCtxA		and #$3F
 				cmp #C.WHILE			WHILE : One Ptr = 2 bytes
 				beq STK.PopX
 
-				cmp #C.SWITCH			SWITCH : hValue
+				cmp #C.SWITCH			SWITCH : pValue
 				beq .2
 
 				ldx #1
-				cmp #C.CASE				CASE : C.CASE + hValue
+				cmp #C.CASE				CASE : C.CASE + pValue
 				beq .1
 
 				cmp #C.FOR
 				beq .3
 
-				cmp #C.DEFAULT			DEFAULT : C.DEFAULT + hValue
+				cmp #C.DEFAULT			DEFAULT : C.DEFAULT + pValue
 				bne .9
 
 .1				jsr STK.PopX
 
-.2				jsr STK.PullFree
+.2				jsr STK.PopFree
 
 .8				clc
 				rts
-
-.3				jsr STK.Pull			Get FOR sub cmd
+*--------------------------------------
+.3				jsr STK.PopA			Get FOR sub cmd
 				beq .4					FOR List
 
-				jsr STK.PullFree		hVARNAME
+				jsr STK.PopFree			pVARNAME
 
-				jsr STK.PullFClose		hFILE/hPIPE
+				jsr STK.PopFClose		pFILE/pPIPE
 
 				ldx #2					CmdPtr
-				jmp STK.PopX
+				bra STK.PopX
+*--------------------------------------
+.4				jsr STK.PopFree			pVARNAME
 
-.4				jsr STK.PullFree		hVARNAME
-
-				jsr STK.PullFClose		hFILE/hPIPE
+				jsr STK.PopFClose		pFILE/pPIPE
 
 				ldx #4					ListPtr,CmdPtr
-				jmp STK.PopX
+				bra STK.PopX
 
 .9				lda #E.STACKERROR
 				sec
 				rts
 *--------------------------------------
-STK.PopX		lda (pData)
-.1				dec
-				dex
-				bne .1
-
-				sta (pData)
-
+STK.PopX		txa
 				clc
+				adc StkPtr
+				sta StkPtr
+
 				rts
 *--------------------------------------
-STK.Check		sec
-				adc (pData)				StackPtr
-				cmp #CORE.STACK.MAX
-				bcc .8
+STK.CheckA		ldy StkPtr
+				beq .8
 
-				lda #E.STKOVERFLOW
-*				sec
-.8				rts
+				cmp StkPtr
+				bcs .9
+
+.8				clc
+				rts
+
+.9				lda #E.STKOVERFLOW
+*				sec
+				rts
 *--------------------------------------
-STK.PushYAX		phx
-				jsr STK.PushYA
-				bcc STK.Push.1
+CORE.PushVarName
+				>LDYA ZPVarNamePtr
+				>LIBC StrDup
+				bcc STK.PushYA
 
-				plx
 				rts
 *--------------------------------------
 STK.PushInputBufPtr
 				>LDYA ZPInputBufPtr
 *--------------------------------------
 STK.PushYA		phy
-				jsr STK.Push
-				bcc STK.Push.1
+				jsr STK.PushA
+				bcc .1
 
-				plx
-				rts
-*--------------------------------------
-CORE.PushVarName
-				>LDYA ZPVarNamePtr
-				>SYSCALL StrDup
-				bcs STK.Push.RTS
-
-				txa
-*--------------------------------------
-STK.Push		pha
-
-STK.Push.1		lda (pData)				StackPtr
-				inc
-				cmp #CORE.STACK.MAX
-				bcs .9
-
-				sta (pData)				StackPtr
-				tay
-				pla
-				sta (pData),y
-*				clc
+				ply
 				rts
 
-.9				pla
-				lda #E.STKOVERFLOW
-*				sec
-STK.Push.RTS
+.1				pla
+*--------------------------------------
+STK.PushA		ldy StkPtr
+				dey
+				beq .9
+
+				sty StkPtr
+				sta (pStk),y
+
+				clc
+				rts
+
+.9				lda #E.STKOVERFLOW
+				sec
 				rts
 *--------------------------------------
 STK.GetCtx		jsr STK.Get
@@ -139,47 +210,71 @@ STK.GetCtx		jsr STK.Get
 				txa
 				rts
 *--------------------------------------
-STK.PullInputBufPtr
-				jsr STK.Pull
+STK.PopFClose	jsr STK.PopYA
 				bcs .9
 
-				sta ZPInputBufPtr
-				jsr STK.Pull
-				bcs .9
-
-				sta ZPInputBufPtr+1
+				>LIBC FClose
 
 .9				rts
 *--------------------------------------
-STK.PullFClose	jsr STK.Pull
-				>SYSCALL FClose
-				rts
-*--------------------------------------
-STK.PullFree	jsr STK.Pull
-				>SYSCALL FreeMem
-				rts
-*--------------------------------------
-STK.Pull		jsr STK.Get
+STK.PopFree		jsr STK.PopYA
 				bcs .9
 
-				dey
+				>LIBC Free
+
+.9				rts
+*--------------------------------------
+STK.PopYA		ldy StkPtr
+				beq STK.Error
+
+				lda (pStk),y
+
+				iny
+				beq STK.Error
+
 				pha
-				tya
-				sta (pData)				StackPtr
-				pla
 
-.9				rts
+				lda (pStk),y
+
+				iny
+				sty StkPtr
+				
+				ply
+
+				clc
+
+				rts
 *--------------------------------------
-STK.Get			lda (pData)				StackPtr
-				beq .9
+STK.PopA		ldy StkPtr
+				beq STK.Error
 
-				tay
-				lda (pData),y
+				lda (pStk),y
+				inc StkPtr
+
+				clc
+				rts
+*--------------------------------------
+STK.Get			ldy StkPtr
+				beq STK.Error
+
+				lda (pStk),y
+
 				clc
 				rts
 
-.9				lda #E.STACKERROR
+STK.Error		lda #E.STACKERROR
 				sec
+				rts
+*--------------------------------------
+STK.GetWAtA		clc
+				adc StkPtr
+				tay
+
+				lda (pStk),y
+				pha
+				iny
+				lda (pStk),y
+				ply
 				rts
 *--------------------------------------
 MAN

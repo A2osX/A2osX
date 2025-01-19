@@ -6,99 +6,113 @@ CMD.ALIAS		lda (ZPArgVBufPtr)
 
 				jmp CMD.ALIAS.ADD
 
-.10				>LDA.G hAliases
+.8				clc
+				rts
+
+.10				>LDA.G pAliases+1
 				beq .8
 
 				ldy #0
-				lda #1
+				lda #2
 
 .1				>STYA ZPTmpW			Save KeyID
 
-				>PUSHB.G hAliases
+				>SS
+				>PUSHW.G pAliases
 				>PUSHW ZPTmpW			KeyID
 				>PUSHW ZPCLBuf
-				>SYSCALL SListGetByID
+				>KAPI SListGetByID
+				>SR
 				bcs .8
 
-				>STYA ZPPtr1			NextID
+				>STYA R1			NextID
 
-				ldy #hAliases
+				ldy #pAliases
 				jsr CORE.SListGetData
 				bcs .9
 
-				phx
+				>STYA ZPTmpW
 
+				>SS
 				>PUSHW L.MSG.ALIAS
 				>PUSHW ZPCLBuf
-				txa
-				>SYSCALL GetMemPtr
-				>PUSHYA
+				>PUSHW ZPTmpW
 				>PUSHBI 4
-				>SYSCALL PrintF
+				>LIBC PrintF
+				>SR
+				bcs .9
 
-				pla
-				>SYSCALL FreeMem
+				>LDYA ZPTmpW
 
-				>LDYA ZPPtr1
-				bra .1
+				>LIBC Free
 
-.8				clc
+				>LDYA R1
+				jmp .1
+				
 .9				rts
+
+CMD.ALIAS.CSYN	lda #E.CSYN
+				sec		
+				rts
 *--------------------------------------
 CMD.ALIAS.ADD	>LDYA ZPArgVBufPtr
 				>STYA ZPVarNamePtr
 
 				jsr CORE.ArgV.Next
-				beq .9
+				beq CMD.ALIAS.CSYN
 
 				cmp #'='
-				bne .99
+				bne CMD.ALIAS.CSYN
 
 				jsr CORE.ArgV.Next
-				beq .9
+				beq CMD.ALIAS.CSYN
 
-				>LDA.G hAliases
+				>LDA.G pAliases+1
 				bne .1
 
-				lda #0
-				>SYSCALL SListNew
-				bcs .99
+*				lda #0
+				>KAPI SListNew
+				bcs .98
 
-				>STA.G hAliases
+				>STYA.G pAliases
 
-.1				>PUSHA
+.1				>SS
+				>PUSHW.G pAliases
 				>PUSHW ZPVarNamePtr
 				>PUSHWZ					ScopeID
-				>SYSCALL SListNewKey
-				bcs .99
+				>PUSHWZ					NextPtr
+				>KAPI SListNewKey
+				>SR
+.98				bcs .99
 
 				>STYA ZPTmpW			Save KeyID
 
-				>PUSHB.G hAliases
+				>SS
+				>PUSHW.G pAliases
 				>PUSHW ZPTmpW			KeyID
 				>PUSHW ZPArgVBufPtr		DataPtr
 				>PUSHWZ					String Mode
-				>SYSCALL SListAddData
-				rts
-
-.9				lda #E.CSYN
-				sec
+				>KAPI SListAddData
+				>SR
+	
 .99				rts
 *--------------------------------------
 CMD..			lda (ZPArgVBufPtr)
 				beq CMD...9
 
 				>LDYA ZPArgVBufPtr
-				>SYSCALL LoadTxtFile
+				>LIBC LoadTxtFile
 				bcs CMD.SHIFTA.RTS
+				
+				>STYA.G CORE.pNewCode
 
 				>LDYA ZPArgVBufPtr		Exec . file
 
-CMD..EXEC.YAX	jsr CORE.Load.YAX		Y,A = Args, X = Code
+CMD..RunNewCode	jsr STK.PushCode		Y,A = Args
 				bcs CMD.SHIFTA.RTS
 
 				lda #$C0+C..
-				jmp STK.Push
+				jmp STK.PushA
 
 CMD...9			jmp CMD.E.CSYN
 *--------------------------------------
@@ -119,22 +133,31 @@ CMD.SHIFT		lda (ZPArgVBufPtr)
 
 CMD.SHIFT.1		inc
 
-CMD.SHIFTA		>SYSCALL Shift
+CMD.SHIFTA		>LIBC Shift
 
 CMD.SHIFTA.RTS	rts
 *--------------------------------------
 CMD.PUSHD		>LDA.G PUSHD.STACK
-				cmp #PUSHD.STACK+PUSHD.STACK.MAX
+				cmp #PUSHD.STACK.MAX*2+PUSHD.STACK+1
 				beq CMD.POPD.CSYN
 
-				jsr GetCWD
-				>SYSCALL StrDup
+				>LIBC GetCWD
+				>LIBC StrDup
 				bcs CMD.POPD.CSYN
+				
+				phy
+				pha
 
 				>INC.G PUSHD.STACK
 				tay
-				txa
+				pla
 				sta (pData),y
+				iny
+				pla
+				sta (pData),y
+				tya
+				>STA.G PUSHD.STACK
+				
 				lda (ZPArgVBufPtr)
 				bne CMD.CD.0
 
@@ -147,10 +170,22 @@ CMD.POPD		>LDA.G PUSHD.STACK
 
 				tay
 				lda (pData),y
-				jsr CMD.SetCWDA
-				>DEC.G PUSHD.STACK
-				clc
-CMD.POPD.RTS	rts
+				pha
+				dey
+				lda (pData),y
+				ply
+				>LIBC ChDir
+				bcs .9
+
+				>LDA.G PUSHD.STACK
+				dec
+				dec
+				sta (pData),y
+
+*				clc
+
+.9				rts
+
 CMD.POPD.CSYN	jmp CMD.E.CSYN
 *--------------------------------------
 CMD...			lda (ZPArgVBufPtr)
@@ -167,22 +202,20 @@ CMD.CD.0		>LDYA ZPArgVBufPtr
 
 CMD.CD.HOME 	>LDYA L.HOME
 
-CMD.CD.YA		>PUSHYA
+CMD.CD.YA		>SS
+				>PUSHYA
 				>PUSHWZ					Allocate
-				>SYSCALL RealPath
-				bcs CMD.POPD.RTS
+				>LIBC RealPath
+				>SR
+				bcs .9
 
-				>STYA ZPPtr1
-				stx ZPTmpW				Save hMem
+				>STYA R1
 
 				ldy #1
-				lda (ZPPtr1),y
-				bne .12
+				lda (R1),y
+				beq .14					we have '/'
 
-				txa
-				jmp CMD.SetCWDA			we have '/'
-
-.12				>LDYA ZPPtr1
+.12				>LDYA R1
 				jsr IO.StatYA
 				bcs .19
 
@@ -192,8 +225,8 @@ CMD.CD.YA		>PUSHYA
 				lda #MLI.E.INVPATH
 
 .19				pha
-				lda ZPTmpW
-				>SYSCALL FreeMem
+				>LDYA R1
+				>LIBC Free
 				pla
 				sec
 				rts
@@ -201,52 +234,48 @@ CMD.CD.YA		>PUSHYA
 .11				jsr GetPtr1LenY
 				dey
 				lda #'/'
-				cmp (ZPPtr1),y
+				cmp (R1),y
 				beq .14
 
 				iny
-				sta (ZPPtr1),y
+				sta (R1),y
 				iny
 				lda #0
-				sta (ZPPtr1),y
+				sta (R1),y
 
-.14				lda ZPTmpW
-*--------------------------------------
-CMD.SetCWDA		pha
-				ldy #S.PS.hCWD
-				lda (pPS),y
-				>SYSCALL FreeMem
-				pla
-				ldy #S.PS.hCWD
-				sta (pPS),y
-				lda #0
-*				clc
-				rts
+.14				>LDYA R1
+				>LIBC ChDir
+.9				rts
 *--------------------------------------
 CMD.SET			lda (ZPArgVBufPtr)
 				bne CMD.SET.1
 
 * No arg, print all ENV
 
-				>PUSHWZ
-				>PUSHWZ
-				>SYSCALL GetEnv
-				>STYA ZPPtr1
-				stx ZPTmpW
+				>LDYAI 0
+				>LIBC GetEnv
+				>STYA R1
 
-.1				lda (ZPPtr1)
+.1				lda (R1)
 				beq .8					Ending 0 ?
 
-				>LDYA ZPPtr1
-				>SYSCALL PutS
+				>LDYA R1
+				>LIBC PutS
 				bcs .9
 
-				jsr GetPtr1NextString
+				jsr GetPtr1LenY
+				tya
+				sec
+
+				adc R1
+				sta R1
+				bcc .1
+
+				inc R1+1
 				bra .1
 
-.8				lda ZPTmpW
-				>SYSCALL FreeMem
-*				clc
+.8				clc
+
 .9				rts
 *--------------------------------------
 * SET +X VAR = VALUE1 op VALUE2 op VALUE3 ...
@@ -306,24 +335,25 @@ CMD.SET.1
 
 .99				jmp CMD.E.CSYN
 
-CMD.SET.YA		pha
+CMD.SET.YA		>SS
+				pha
 				>PUSHW ZPVarNamePtr
 				pla
 				>PUSHYA
-				>SYSCALL SetEnv
+				>PUSHWZ
+				>LIBC SetEnv
+				>SR
 				rts
 
-CMD.SET.UNSET	>PUSHW ZPVarNamePtr
-				>SYSCALL UnsetEnv
+CMD.SET.UNSET	>LDYA ZPVarNamePtr
+				>LIBC UnsetEnv
 				rts
 
-CMD.SET.GET		>PUSHW ZPVarNamePtr
-				>PUSHW ZPCLBuf
-				>SYSCALL GetEnv
+CMD.SET.GET		>LDYA ZPVarNamePtr
+				>LIBC GetEnv
 				bcs .8
 
-				>LDYA ZPCLBuf
-				>SYSCALL PutS
+				>LIBC PutS
 
 				rts
 
@@ -331,12 +361,14 @@ CMD.SET.GET		>PUSHW ZPVarNamePtr
 CMD.SET.RTS		rts
 *--------------------------------------
 CMD.SET.EXEC	jsr CORE.ArgV.NextChar	skip "`"
-			
+
 				jsr IO.Pipe.Out
 				bcs CMD.SET.RTS
 
 				jsr IO.Exec
 				bcs CMD.SET.RTS
+
+				jsr IO.Pop.Out			Restore OUT (NO close)
 
 				jsr IO.Pipe.In
 				bcs CMD.SET.RTS
@@ -346,9 +378,10 @@ CMD.SET.EXEC	jsr CORE.ArgV.NextChar	skip "`"
 
 				jmp CMD.READ.VAR
 *--------------------------------------
-CMD.DATE		>PUSHEA.G TimeBuf
-				>SYSCALL Time
-
+CMD.DATE		>LEA.G TimeBuf
+				>LIBC Time
+ 
+				>SS
 				>PUSHW ZPCLBuf
 
 				lda (ZPArgVBufPtr)
@@ -360,18 +393,19 @@ CMD.DATE		>PUSHEA.G TimeBuf
 .1				>LDYA L.FMT.DATE
 
 .2				>PUSHYA
-
 				>PUSHEA.G TimeBuf
-				>SYSCALL StrFTime
+				>LIBC StrFTime
+				>SR
+				bcs .9
 
-CMD.DATE.PRINT	>LDYA ZPCLBuf
-				>SYSCALL PutS
-				rts
+				>LDYA ZPCLBuf
+				>LIBC PutS
+.9				rts
 *--------------------------------------
-CMD.ECHO		stz ZPPtr1				echo -E
-				stz ZPPtr1+1			echo -N
+CMD.ECHO		stz R1				echo -E
+				stz R1+1			echo -N
 
-				stz ZPPtr2				index in buffer
+				stz R2				index in buffer
 
 				lda (ZPArgVBufPtr)
 				beq .7
@@ -388,15 +422,15 @@ CMD.ECHO		stz ZPPtr1				echo -E
 				cmp #'N'
 				bne CMD.ECHO.CSYN
 
-.2				ror ZPPtr1,x
+.2				ror R1,x
 				bra .6
 
-.3				ldy ZPPtr2
+.3				ldy R2
 				beq .4
 
 				lda #C.SPACE
 				sta (ZPCLBuf),y
-				inc ZPPtr2
+				inc R2
 
 .4				ldy #$ff
 
@@ -405,18 +439,18 @@ CMD.ECHO		stz ZPPtr1				echo -E
 				beq .6
 
 				phy
-				ldy ZPPtr2
+				ldy R2
 				sta (ZPCLBuf),y
-				inc ZPPtr2
+				inc R2
 				ply
 				bra .5
 
 .6				jsr CORE.ArgV.Next
 				bne .1
 
-.7				ldy ZPPtr2
+.7				ldy R2
 
-				bit ZPPtr1+1			-N
+				bit R1+1			-N
 				bmi .8
 
 				lda #C.CR
@@ -430,7 +464,7 @@ CMD.ECHO		stz ZPPtr1				echo -E
 				sta (ZPCLBuf),y
 
 				>LDYA ZPCLBuf
-				bit ZPPtr1
+				bit R1
 				bmi .80
 
 				jmp IO.OutYA
@@ -495,7 +529,7 @@ CMD.READ		lda (ZPArgVBufPtr)
 *--------------------------------------
 CMD.READ.VAR	jsr CL.Reset
 
-.1				>SYSCALL GetChar
+.1				>LIBC GetChar
 				bcs CMD.SLEEP.RTS
 
 				jsr CL.CHARIN
@@ -519,6 +553,8 @@ CMD.SLEEP		lda (ZPArgVBufPtr)
 
 				>PULLL.G Sleep
 
+				clc
+
 CMD.SLEEP.RTS	rts
 *--------------------------------------
 CMD.PAUSE		lda #bState.Pause
@@ -530,14 +566,16 @@ CMD.PAUSE		lda #bState.Pause
 CMD.MD			lda (ZPArgVBufPtr)
 				beq CMD.REN.CSYN
 
+				>SS
 				>PUSHW ZPArgVBufPtr
 				>PUSHWI S.STAT.MODE.FO+S.STAT.MODE.FG+S.STAT.MODE.FU
-				>SYSCALL MKDir
+				>LIBC MKDir
+				>SR
 				rts
 *--------------------------------------
-CMD.PWD			jsr GetCWD
+CMD.PWD			>LIBC GetCWD
 
-				>SYSCALL PutS
+				>LIBC PutS
 				rts
 *--------------------------------------
 CMD.RD			lda (ZPArgVBufPtr)
@@ -550,11 +588,11 @@ CMD.RD			lda (ZPArgVBufPtr)
 				bne CMD.REN.CSYN
 
 				>LDYA ZPArgVBufPtr
-				>SYSCALL Remove
+				>LIBC Remove
 .99				rts
 *--------------------------------------
 CMD.REN.CSYN	jmp CMD.E.CSYN
-
+*--------------------------------------
 CMD.REN			lda (ZPArgVBufPtr)
 				beq CMD.REN.CSYN
 
@@ -562,19 +600,24 @@ CMD.REN			lda (ZPArgVBufPtr)
 				lda (ZPArgVBufPtr)
 				beq CMD.REN.CSYN
 
+				stz R1+1
+				stz R2+1
+
+				>SS
 				>PUSHW ZPArgVBufPrev	old path
 				>PUSHWZ					Allocate
-				>SYSCALL RealPath
+				>LIBC RealPath
+				>SR
 				bcs CMD.REN.CSYN
 
-				>STYA ZPPtr1
-				stx ZPTmpW
+				>STYA R1
 
 				ldy #$ff
 
 .1				iny
-				lda (ZPPtr1),y
+				lda (R1),y
 				beq .2
+
 				cmp #'/'
 				bne .1
 
@@ -593,19 +636,18 @@ CMD.REN			lda (ZPArgVBufPtr)
 				tay
 				lda #0
 
-				>SYSCALL GetMem
+				>LIBC Malloc
 				bcs .90
 
-				>STYA ZPPtr2
-				stx ZPTmpW+1
+				>STYA R2
 
 				ldy #$ff
 
 .4				iny
-				lda (ZPPtr1),y
+				lda (R1),y
 				beq .5
 
-				sta (ZPPtr2),y
+				sta (R2),y
 				cmp #'/'
 				bne .4
 
@@ -617,26 +659,34 @@ CMD.REN			lda (ZPArgVBufPtr)
 .5				txa
 				tay
 				lda #0
-				sta (ZPPtr2),y
+				sta (R2),y
 
-				>PUSHW ZPPtr2
+				>SS
+				>PUSHW R2
 				>PUSHW ZPArgVBufPtr
-				>SYSCALL StrCat
+				>LIBC StrCat
+				>SR
 
-				lda ZPTmpW
-				>SYSCALL FreeMem
-				lda ZPTmpW+1
-				sta ZPTmpW
-
-				>PUSHW ZPPtr1
-				>PUSHW ZPPtr2
-				>SYSCALL Rename
+				>SS
+				>PUSHW R1
+				>PUSHW R2
+				>LIBC Rename
+				>SR
 
 .90				php
 				pha
-				lda ZPTmpW
-				>SYSCALL FreeMem
-				pla
+
+				>LDYA R1
+				beq .91
+				
+				>LIBC Free
+
+.91				>LDYA R2
+				beq .92
+				
+				>LIBC Free
+
+.92				pla
 				plp
 				rts
 *--------------------------------------
@@ -645,19 +695,22 @@ CMD.FUNCTION	lda (ZPArgVBufPtr)
 				jsr STK.GetCtx
 				bcc .9					No context allowed
 
-				>LDA.G hFunctions
+				>LDA.G pFunctions+1
 				bne .1
 
 				lda #SL..+SL._
-				>SYSCALL SListNew
+				>KAPI SListNew
 				bcs .99
 
-				>STA.G hFunctions
+				>STYA.G pFunctions
 
-.1				>PUSHA
+.1				>SS
+				>PUSHW.G pFunctions
 				>PUSHW ZPArgVBufPtr
 				>PUSHWZ					ScopeID
-				>SYSCALL SListNewKey
+				>PUSHWZ					NextPtr
+				>KAPI SListNewKey
+				>SR
 				bcs .99
 
 				>STYA ZPTmpW			Save KeyID
@@ -686,10 +739,10 @@ CMD.FUNCTION	lda (ZPArgVBufPtr)
 				bcs .9
 
 .11				>LDYA ZPInputBufPtr
-				>STYA ZPPtr1
+				>STYA R1
 
-				stz ZPPtr2
-				stz ZPPtr2+1			DataLen
+				stz R2
+				stz R2+1				DataLen
 
 				ldx #0					'{' counter
 
@@ -708,10 +761,10 @@ CMD.FUNCTION	lda (ZPArgVBufPtr)
 				dex
 				bmi .7
 
-.14				inc ZPPtr2
+.14				inc R2
 				bne .15
 
-				inc ZPPtr2+1
+				inc R2+1
 
 .15				jsr CORE.GetNextChar
 				bcc .12
@@ -721,18 +774,22 @@ CMD.FUNCTION	lda (ZPArgVBufPtr)
 
 .7				jsr CORE.GetNextChar	skip ending '}'
 
-				>PUSHB.G hFunctions
+				>SS
+				>PUSHW.G pFunctions
 				>PUSHW ZPTmpW			KeyID
-				>PUSHW ZPPtr1			DataPtr
-				>PUSHW ZPPtr2			DataLen
-				>SYSCALL SListAddData
+				>PUSHW R1				DataPtr
+				>PUSHW R2				DataLen
+				>KAPI SListAddData
+				>SR
 				bcs .99
 
-				>PUSHB.G hFunctions
+				>SS
+				>PUSHW.G pFunctions
 				>PUSHW ZPTmpW			KeyID
 				>PUSHW L.PtrZero		DataPtr
 				>PUSHWI 1				DataLen
-				>SYSCALL SListAddData	Add Ending \0
+				>KAPI SListAddData	Add Ending \0
+				>SR
 				rts
 *--------------------------------------
 CMD.CALL		jsr CMD.CALL.GETFUNC
@@ -740,28 +797,33 @@ CMD.CALL		jsr CMD.CALL.GETFUNC
 
 				>STYA ZPTmpW			KeyID
 
-				ldy #hFunctions
+				ldy #pFunctions
 				jsr CORE.SListGetData
 				bcs CMD.CALL.RTS
+				
+				>STYA.G CORE.pNewCode
 
 				>LDYA ZPArgVBufPtr		FUNC PARAM1 PARAM2...
-				jsr CORE.Load.YAX		Exec FUNC
+				jsr STK.PushCode		Exec FUNC
 				bcs CMD.CALL.RTS
 
 				lda #$C0+C.CALL
-				jmp STK.Push
+				jmp STK.PushA
 *--------------------------------------
 CMD.CALL.GETFUNC
-				>LDA.G hFunctions
-				beq CMD.CALL.UNDEF
+				>LDA.G pFunctions+1
+				beq .9
 
-				>PUSHB.G hFunctions
+				>SS
+				>PUSHW.G pFunctions
 				>PUSHW ZPArgVBufPtr
 				>PUSHWZ					ScopeID
-				>SYSCALL SListLookup
+				>PUSHWZ					NextPtr
+				>KAPI SListLookup
+				>SR
 				bcc CMD.CALL.RTS
 
-CMD.CALL.UNDEF	lda #E.FUNDEF
+.9				lda #E.FUNDEF
 				sec
 CMD.CALL.RTS	rts
 *--------------------------------------
@@ -771,59 +833,30 @@ CMD.EXIT		lda (ZPArgVBufPtr)
 				jsr EXP.GetInt8Exp
 				bcs .9
 
-.1				ldy #S.PS.RC
-				sta (pPS),y
+.1				ldy #S.PS.ERRNO
+				jsr A2osX.SetPSy
 
-.2				jsr STK.Pull		Pull everything until CALL . CL...
+.2				jsr STK.PopA			POP everything until CALL . CL...
 				bcs .9
 
 				cmp #$C0+C..			in CALL, "." or CL context ?
-				beq CMD.EXIT.FILE
+				beq .8
 
 				cmp #$C0+C.CALL
-				beq CMD.EXIT.FILE
+				beq .8
 
 				cmp #$C0+C.CLEXEC
-				beq .8
+				beq .7
 
 				jsr STK.PopCtxA
 				bcc .2
-				rts
 
-.8				jsr CMD.EXIT.FILE
-				lda #bState.ExitOnEOF
+.9				rts
+				
+.7				lda #bState.ExitOnEOF
 				tsb bState
 
-				clc
-.9				rts
-*--------------------------------------
-CMD.EXIT.FILE	jsr STK.PullFree		Code buffer
-
-				ldy #S.PS.hARGV
-				lda (pPS),y
-				>SYSCALL FreeMem		ArgV buffer
-
-				jsr STK.Pull
-				ldy #S.PS.hARGV
-				sta (pPS),y
-
-				jsr STK.Pull
-				ldy #S.PS.ARGC
-				sta (pPS),y
-
-				jsr STK.PullInputBufPtr
-
-				jsr STK.Pull
-				sta ZPInputBuf
-				jsr STK.Pull
-				sta ZPInputBuf+1
-
-				ldy #S.PS.RC
-				lda (pPS),y
-
-				cmp #1
-				
-				rts
+.8				jmp STK.PopCode
 *--------------------------------------
 CMD.BREAK		jsr STK.GetCtx			Get context in CORE.TestResult
 				bcs .9
@@ -837,19 +870,19 @@ CMD.BREAK		jsr STK.GetCtx			Get context in CORE.TestResult
 				txa
 				bpl .8					already FALSE
 
-				jsr STK.Pull			remove C.CASE
+				jsr STK.PopA			remove C.CASE
 				jsr STK.Get				get SWITCH
 				bra .7
 *--------------------------------------
 .1				cmp #C.IF
 				bne .2
 
-				sta (pData),y			IF=false to skip until FI
+				sta (pStk),y			IF=false to skip until FI
 
-				dey						get parent context
+				iny						get parent context
 				beq .9
 
-				lda (pData),y
+				lda (pStk),y
 				and #$3F
 
 .2				cmp #C.WHILE
@@ -858,33 +891,32 @@ CMD.BREAK		jsr STK.GetCtx			Get context in CORE.TestResult
 .3				cmp #C.FOR
 				bne .9
 
-.6				lda (pData),y
+.6				lda (pStk),y
 
 .7				and #%01111111
-				sta (pData),y			WHILE/FOR=false, Parent=unchanged
+				sta (pStk),y			WHILE/FOR=false, Parent=unchanged
 
 .8				clc
 				rts
 
 .9				jmp CMD.E.CSYN
 *--------------------------------------
-* stack-1		hVALUE
+* stack+1		pVALUE
 * stack			SWITCH TOKEN
 *--------------------------------------
 CMD.SWITCH		jsr STK.GetCtx
 
-				lda #2
-				jsr STK.Check
+				lda #3
+				jsr STK.CheckA
 				bcs .9
 
 				jsr EXP.GET
 				bcs .9
 
-				>SYSCALL StrDup
+				>LIBC StrDup
 				bcs .9
 
-				txa
-				jsr STK.Push			Push EXP hVALUE
+				jsr STK.PushYA			Push EXP VALUE
 
 				lda CORE.TestResult
 				beq .1
@@ -892,7 +924,7 @@ CMD.SWITCH		jsr STK.GetCtx
 				ora #$80
 
 .1				ora #C.SWITCH
-				jmp STK.Push
+				jmp STK.PushA
 
 .9				rts
 *--------------------------------------
@@ -914,27 +946,25 @@ CMD.CASE		jsr STK.GetCtx			Get context in CORE.TestResult
 				bcs .9
 
 				rts						keep existing context
-
-.10				jsr STK.Pull			remove previous C.CASE
+*--------------------------------------
+.10				jsr STK.PopA			remove previous C.CASE
 				bra CMD.CASE
-
+*--------------------------------------
 .1				jsr EXP.GET
 				bcs .9
 
+				>SS
 				>PUSHYA
-				lda (pData)
-				tay
-				dey						get hVALUE
-				lda (pData),y
-				>SYSCALL GetMemPtr
-				>PUSHYA
-				>SYSCALL StrCmp
+				lda #1					pVALUE
+				jsr STK.GetWAtA
+				>LIBC StrCmp
+				>SR
 				ror						CS if !=
 				and #$80
 				eor #$80
 				ora CORE.TestResult
 				ora #C.CASE
-				jmp STK.Push
+				jmp STK.PushA
 .9
 CMD.E.CSYN		lda #E.CSYN
 				sec
@@ -951,12 +981,12 @@ CMD.DEFAULT		jsr STK.GetCtx			Get context in CORE.TestResult
 				cmp #C.CASE
 				bne CMD.E.CSYN
 
-				jsr STK.Pull			remove C.CASE
+				jsr STK.PopA			remove C.CASE
 
 .1				jsr STK.Get
 				and #$C0
 				ora #C.DEFAULT
-				jmp STK.Push
+				jmp STK.PushA
 *--------------------------------------
 CMD.END			jsr STK.GetCtx			Get context in CORE.TestResult
 				bcs CMD.E.CSYN
@@ -985,16 +1015,18 @@ CMD.FOR			jsr STK.GetCtx
 				jsr CORE.ArgV.Next
 				beq CMD.E.CSYN
 
+				>SS
 				>PUSHW L.IN
 				>PUSHW ZPArgVBufPtr
-				>SYSCALL StrCaseCmp
+				>LIBC StrCaseCmp
+				>SR
 				bcs CMD.E.CSYN
 
 				jsr CORE.ArgV.Next
 				beq CMD.E.CSYN
 
-				lda #8					Make sure 8 bytes free on stack
-				jsr STK.Check
+				lda #10					Make sure 10 bytes free on stack
+				jsr STK.CheckA
 				bcs FOR.FILE.9
 
 				lda (ZPArgVBufPtr)
@@ -1005,29 +1037,31 @@ CMD.FOR			jsr STK.GetCtx
 				beq CMD.FOR.EXEC
 *--------------------------------------
 CMD.FOR.LIST	>LDYA ZPArgVBufPtr
-				>SYSCALL StrDup
-				bcs FOR.FILE.9
+				>LIBC StrDup
+				bcs .9
 
-				phy
-				pha
+				>STYA ZPTmpW
 
-				jsr STK.PushInputBufPtr  Push CmdPtr AFTER FOR
+				jsr STK.PushInputBufPtr Push CmdPtr AFTER FOR
 
-				pla
-				ply
+				>LDYA ZPTmpW
+				jsr STK.PushYA			Push pListPtr
+				
+				>LDYA ZPTmpW
+				jsr STK.PushYA			Push pList for free
 
-				jsr STK.PushYAX			Push listPtr,hList
-
-				jsr CORE.PushVarName	Push hVARNAME
+				jsr CORE.PushVarName	Push pVARNAME
 
 				lda #C.FOR.LIST
-				jsr STK.Push
+				jsr STK.PushA
+				
 				lda #C.FOR
-				jsr STK.Push
+				jsr STK.PushA
 
 				jsr CMD.NEXT.LIST.TOKEN
 				bcc CMD.FOR.LOOP
-				rts
+
+.9				rts
 *--------------------------------------
 CMD.FOR.FILE	jsr CORE.ArgV.NextChar	skip "("
 
@@ -1035,6 +1069,7 @@ CMD.FOR.FILE	jsr CORE.ArgV.NextChar	skip "("
 				ldx	#O.RDONLY+O.TEXT
 				jsr IO.FOpenYAX
 				bcc CMD.FOR.PUSH
+
 FOR.FILE.9		rts
 *--------------------------------------
 CMD.FOR.EXEC	jsr CORE.ArgV.NextChar	skip "`"
@@ -1047,35 +1082,36 @@ CMD.FOR.EXEC	jsr CORE.ArgV.NextChar	skip "`"
 
 				jsr IO.Pop.Out			Restore OUT (NO close)
 
-				jsr IO.Pipe.OpenR
+				ldx #O.RDONLY+O.TEXT
+				jsr IO.Pipe.Open
 
 				bcs FOR.FILE.9
 
-CMD.FOR.PUSH	pha						save hFILE/hPIPE
+CMD.FOR.PUSH	pha						save pFILE/pPIPE
+				phy
 
 				jsr STK.PushInputBufPtr		Push CmdPtr AFTER FOR
 
+				ply
 				pla
 
-				jsr STK.Push			push hPIPE for read
-				jsr CORE.PushVarName	Push hVARNAME
-*				bcs FOR.FILE.9
+				jsr STK.PushYA			push pPIPE for read
+
+				jsr CORE.PushVarName	Push pVARNAME
+				bcs FOR.FILE.9
 
 				lda #C.FOR.FILEEXEC
-				jsr STK.Push
+				jsr STK.PushA
 				lda #C.FOR
-				jsr STK.Push
+				jsr STK.PushA
 
 				jsr CMD.NEXT.LINE
 				bcs FOR.FILE.9
 
 CMD.FOR.LOOP	ora CORE.TestResult
 				ora #C.FOR				Push FOR
-				pha
-				lda (pData)
-				tay
-				pla
-				sta (pData),y
+				ldy StkPtr
+				sta (pStk),y
 
 *				clc
 				rts
@@ -1086,64 +1122,67 @@ CMD.NEXT		jsr STK.Get				Y = StkPtr
 				and #$3F
 				cmp #C.FOR
 				bne .9
+
+				iny						FOR SUB TOKEN
+				lda (pStk),y
 				dey
-				lda (pData),y
-				iny
+
 				tax
 				beq CMD.NEXT.LIST
+
 				jmp CMD.NEXT.FILEEXEC
 
 .9				lda #E.NOFOR
 				sec
 				rts
 *--------------------------------------
-* stack-6		CmdPtr
-* stack-4		ListPtr
-* stack-3		hLIST
-* stack-2       hVARNAME
-* stack-1		FOR SUB TOKEN
+* stack+8		CmdPtr
+* stack+6		ListPtr
+* stack+4		pLIST
+* stack+2       pVARNAME
+* stack+1		FOR SUB TOKEN
 * stack			FOR TOKEN
 *--------------------------------------
-CMD.NEXT.LIST	lda (pData),y			Y = StkPtr
+CMD.NEXT.LIST	lda (pStk),y			Y = StkPtr
 				bpl .1
 
 				jsr CMD.NEXT.LIST.TOKEN
 				bcs .9
+
 				bpl .1
 
-				lda (pData)
-				sec
-				sbc #6
-				jmp CMD.NEXT.FILEEXEC.LOOPY
+				lda #8
+				jsr STK.GetWAtA
+				>STYA ZPInputBufPtr
+				
+				clc
+				rts
+*--------------------------------------
+.1				lda #2					pVARNAME
+				jsr STK.GetWAtA
+				>LIBC Free
+				
+				lda #4					pLIST
+				jsr STK.GetWAtA
+				>LIBC Free
+				
+				lda StkPtr
+				clc
+				adc #10
+				sta StkPtr
 
-.1				lda (pData)
-				tay
-				sec
-				sbc #8
-				sta (pData)
-
-				dey
-				dey
-				lda (pData),y			hVARNAME
-				pha
-				dey
-				lda (pData),y			hLIST
-				>SYSCALL FreeMem
-				pla
-				>SYSCALL FreeMem
-*				clc
+				clc
 .9				rts
 *--------------------------------------
 CMD.NEXT.LIST.TOKEN
-				jsr CMD.NEXT.GetVarNamePtr
+				lda #2					pVARNAME
+				jsr STK.GetWAtA
+				>STYA ZPVarNamePtr
 
-				dey						skip hLIST
-				dey
-				lda (pData),y
-				sta ZPPtr1
-				dey
-				lda (pData),y
-				sta ZPPtr1+1
+				lda #6					ListPtr
+				jsr STK.GetWAtA
+				>STYA R1
+
 				ldy #0
 
 .10				jsr GetPtr1NextChar
@@ -1175,15 +1214,15 @@ CMD.NEXT.LIST.TOKEN
 				jsr CMD.SET.YA
 				bcs .9
 
-				lda (pData)
-				sec
-				sbc #4
+				lda StkPtr
+				clc
+				adc #6					ListPtr
 				tay
-				lda ZPPtr1
-				sta (pData),y
-				dey
-				lda ZPPtr1+1
-				sta (pData),y
+				lda R1
+				sta (pStk),y
+				iny
+				lda R1+1
+				sta (pStk),y
 
 				lda #$80
 				clc
@@ -1191,91 +1230,69 @@ CMD.NEXT.LIST.TOKEN
 
 .8				jmp CMD.NEXT.END
 *--------------------------------------
-* stack-4		CmdPtr
-* stack-3		hFILE/hPIPE
-* stack-2       hVARNAME
-* stack-1		FOR SUB TOKEN
+* stack+6		CmdPtr
+* stack+4		pFILE/pPIPE
+* stack+2       pVARNAME
+* stack+1		FOR SUB TOKEN
 * stack			FOR TOKEN
 *--------------------------------------
 CMD.NEXT.FILEEXEC
-				lda (pData),y			Y = StkPtr
+				lda (pStk),y			Y = StkPtr
 				bpl CMD.NEXT.FILEEXEC.POP
 
 				jsr CMD.NEXT.LINE
-				bcs CMD.NEXT.FILEEXEC.9
+				bcs .9
+
 				bpl CMD.NEXT.FILEEXEC.POP	end of file/pipe
 
-				lda (pData)
-				sec
-				sbc #4
-CMD.NEXT.FILEEXEC.LOOPY
-				tay
+				lda #6
+				jsr STK.GetWAtA
+				>STYA ZPInputBufPtr
 
-				lda (pData),y
-				sta ZPInputBufPtr
-				dey
-				lda (pData),y
-				sta ZPInputBufPtr+1
 				clc
-CMD.NEXT.FILEEXEC.9
-				rts
+
+.9				rts
 
 CMD.NEXT.FILEEXEC.POP
-				lda (pData)
-				tay
-				sec
-				sbc #6
-				sta (pData)
+				lda #2					pVARNAME
+				jsr STK.GetWAtA
+				>LIBC Free
 
-				dey
-				dey
-				lda (pData),y			hVARNAME
-				pha
-				dey
-				lda (pData),y			hFILE/hPIPE
-				>SYSCALL FClose
-				pla
-				>SYSCALL FreeMem
-*				clc
+				lda #4					pFILE/pPIPE
+				jsr STK.GetWAtA
+				>LIBC FClose
+
 				rts
 *--------------------------------------
-CMD.NEXT.LINE	jsr CMD.NEXT.GetVarNamePtr
+CMD.NEXT.LINE	lda #2					pVARNAME
+				jsr STK.GetWAtA
+				>STYA ZPVarNamePtr
 
-				dey
-				lda (pData),y			hFILE/hPIPE
-				>PUSHA
+				>SS
 				>PUSHW ZPCLBuf
 				>PUSHWI 256
-				>SYSCALL FGetS
+				lda #4					pFILE/pPIPE
+				jsr STK.GetWAtA
+				>PUSHYA
+				>LIBC FGetS
+				>SR
 				bcs CMD.NEXT.END
 
 				>LDYA ZPCLBuf
 				jsr CMD.SET.YA
-				bcs CMD.NEXT.LINE.RTS
+				bcs .9
 
 				lda #$80
 *				clc
-				rts
+.9				rts
 
 CMD.NEXT.END	jsr CMD.SET.UNSET
 				bcs .9
+
 				lda #0
 				clc						keep this CLC for CMD.NEXT.LIST.TOKEN
 .9
 CMD.NEXT.LINE.RTS
-				rts
-*--------------------------------------
-CMD.NEXT.GetVarNamePtr
-				lda (pData)
-				dec						skip FOR
-				dec						skip SUB TOKEN
-
-				tay
-				lda (pData),y
-				phy
-				>SYSCALL GetMemPtr		hVARNAME
-				>STYA ZPVarNamePtr
-				ply
 				rts
 *--------------------------------------
 CMD.WHILE
@@ -1292,7 +1309,7 @@ CMD.IF			jsr STK.GetCtx
 				bne .8
 
 				lda #3
-				jsr STK.Check
+				jsr STK.CheckA
 				bcs CMD.NEXT.LINE.RTS
 
 				>LDYA ZPInputCmdPtr
@@ -1300,7 +1317,7 @@ CMD.IF			jsr STK.GetCtx
 
 .8				lda CORE.TestResult
 				ora CORE.IntCmd
-				jmp STK.Push
+				jmp STK.PushA
 *--------------------------------------
 CMD.LOOP		jsr STK.Get
 				bcs .9
@@ -1315,12 +1332,18 @@ CMD.LOOP		jsr STK.Get
 
 				jmp STK.PopCtx			false, Discard loop Ptr
 
-.8 				jsr STK.Pull
-				jmp STK.PullInputBufPtr
+.8 				jsr STK.PopA
+
+				jsr STK.PopYA
+				bcs .99
+				
+				>STYA ZPInputBufPtr
+*				clc
+				rts
 
 .9				lda #E.NOWHILE
 				sec
-				rts
+.99				rts
 *--------------------------------------
 CMD.ELSE		jsr STK.Get
 				bcs .9
@@ -1335,7 +1358,7 @@ CMD.ELSE		jsr STK.Get
 
 				txa
 				eor #$80				toggle and store at stack ptr
-				sta (pData),y
+				sta (pStk),y
 
 .8				clc
 				rts
@@ -1344,7 +1367,7 @@ CMD.ELSE.NOIF	lda #E.NOIF
 				sec
 				rts
 *--------------------------------------
-CMD.FI			jsr STK.Pull
+CMD.FI			jsr STK.PopA
 				bcs CMD.ELSE.NOIF
 
 				and #$3F

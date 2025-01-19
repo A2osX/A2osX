@@ -7,7 +7,8 @@ NEW
 *--------------------------------------
 				.INB inc/macros.i
 				.INB inc/a2osx.i
-				.INB inc/mli.e.i
+				.INB inc/io.i
+				.INB inc/io.iic.i
 *--------------------------------------
 				.DUMMY
 				.OR ZPBIN
@@ -18,10 +19,11 @@ ZPPtr2			.BS 2
 Index			.BS 1
 Count			.BS 1
 
-hFILE			.BS 1
+CPUSpeed		.BS 2					WORD, (->255.99 Mhz)
 
-bHostName		.BS 1
+pFILE			.BS 2
 
+bHostname		.BS 1
 bMachineType	.BS 1
 bCPUType		.BS 1
 bCPUSpeed		.BS 1
@@ -38,20 +40,20 @@ ZS.END			.ED
 CS.START		cld
 				jmp (.1,x)
 				.DA #$61				6502,Level 1 (65c02)
-				.DA #1					BIN Layout Version 1
-				.DA #0					S.PS.F.EVENT
+				.DA #2					BIN Layout Version 2
 				.DA #0
-				.DA CS.END-CS.START		Code Size (without Constants)
-				.DA DS.END-DS.START		Data SegmentSize
+				.DA #0
+				.DA CS.END
+				.DA ID.END
+				.DA DS.END
 				.DA #32					Stack Size
 				.DA #ZS.END-ZS.START	Zero Page Size
-				.DA 0
 *--------------------------------------
 * Relocation Table
 *--------------------------------------
 .1				.DA CS.INIT
 				.DA CS.RUN
-				.DA CS.DOEVENT
+				.DA CS.SIG
 				.DA	CS.QUIT
 L.MSG.USAGE		.DA MSG.USAGE
 L.MSG.CRLF		.DA MSG.CRLF
@@ -68,25 +70,26 @@ L.CPUS			.DA CPU.65C02
 				.DA CPU.65R02
 				.DA CPU.65816
 L.CPU.SPEED		.DA CPU.SPEED
+L.CPU.Z80		.DA CPU.Z80
 L.KERNEL.VER	.DA KERNEL.VER
 L.KERNEL.MODES	.DA	KERNEL.POLLING
 				.DA	KERNEL.IRQ
 				.DA	KERNEL.PREEMPT
 L.FSID			.DA FSID.PRODOS
 				.DA FSID.FX
-L.KERNEL.HZ		.DA KERNEL.HZ				
+L.KERNEL.HZ		.DA KERNEL.HZ
 				.DA 0
 *--------------------------------------
 CS.INIT			clc
 				rts
 *--------------------------------------
 CS.RUN			ldy #S.PS.ARGC
-				lda (pPS),y
+				jsr A2osX.GetPSy
 				beq .8
 
 .1				inc Index
 				lda Index
-				>SYSCALL ArgV
+				>LIBC ArgV
 				bcs CS.RUN.PRINT
 
 				>STYA ZPPtr1
@@ -102,29 +105,29 @@ CS.RUN			ldy #S.PS.ARGC
 				bcc .1
 
 .99				>LDYA L.MSG.USAGE
-				>SYSCALL PutS
+				>LIBC PutS
 
 				lda #E.SYN
 				sec
 				rts
 
 .8				lda #$ff
-				sta bKernelVersion
-				sta bKernelBuild
-				sta bKernelMode
+
+				sta bHostname
 				sta bMachineType
 				sta bCPUType
 				sta bCPUSpeed
+				sta bAltCPU
+				sta bKernelVersion
+				sta bKernelBuild
+				sta bKernelMode
+				sta bKernelHz
 				sta bFSID
 *--------------------------------------
 CS.RUN.PRINT	bit bHostName
 				bpl .1
 
 				jsr CS.RUN.GetHostName
-				bcs .1
-
-				>LDYA pData
-				jsr CS.RUN.PRINTYA
 
 .1				bit bMachineType
 				bpl .2
@@ -144,9 +147,7 @@ CS.RUN.PRINT	bit bHostName
 .4				bit bAltCPU
 				bpl .5
 
-
-
-
+				jsr CS.RUN.AltCPU
 
 .5				bit bKernelVersion
 				bpl .6
@@ -157,10 +158,6 @@ CS.RUN.PRINT	bit bHostName
 				bpl .7
 
 				jsr CS.RUN.GetBuild
-				bcs .7
-
-				>LDYA pData
-				jsr CS.RUN.PRINTYA
 
 .7				bit bKernelMode
 				bpl .8
@@ -176,15 +173,12 @@ CS.RUN.PRINT	bit bHostName
 				bpl .10
 
 				jsr CS.RUN.FSID
-				
-				
-				
-				
-				
-.10				>PUSHW L.MSG.CRLF
-				>PUSHBI 0
-				>SYSCALL PrintF
 
+.10				>SS
+				>PUSHW L.MSG.CRLF
+				>PUSHBI 0
+				>LIBC PrintF
+				>SR
 
 				lda #0
 				sec
@@ -196,27 +190,31 @@ CS.RUN.GetHostName
 
 CS.RUN.GetBuild	>LDYA L.ETCVERSION
 
-CS.RUN.GetFile	stz hFILE
+CS.RUN.GetFile	stz pFILE+1
 
+				>SS
 				>PUSHYA
 				>PUSHBI	O.RDONLY
 				>PUSHBI 0
 
-				sta (pData)
+				sta (pData)				HostNameBuf
 
 				>PUSHWZ
-				>SYSCALL FOpen
+				>LIBC FOpen
+				>SR
 				bcs .9
 
-				sta hFILE
+				>STYA pFILE
 
 				>LEA.G FGetSBuf
 				>STYA ZPPtr1
 
-.1				>PUSHB hFILE
+.1				>SS
 				>PUSHW ZPPtr1
 				>PUSHWI 64
-				>SYSCALL FGetS
+				>PUSHW pFILE
+				>LIBC FGetS
+				>SR
 				bcs .8
 
 				lda (ZPPtr1)
@@ -229,29 +227,36 @@ CS.RUN.GetFile	stz hFILE
 
 .2				iny
 				lda (ZPPtr1),y
-				sta (pData),y
+				sta (pData),y			HostNameBuf
 				bne .2
 
-.8				clc
+.8				jsr CS.RUN.IncCount
+
+				>LDYA pData				HostNameBuf
+				jsr CS.RUN.PrintYA
+				
+				clc
 
 .9				php
 				pha
 
-				lda hFILE
+				>LDYA pFILE
 				beq .90
 
-				>SYSCALL FClose
+				>LIBC FClose
 
 .90				pla
 				plp
 				rts
 *--------------------------------------
-CS.RUN.TYPESUBT	lda A2osX.HWT
+CS.RUN.TYPESUBT	jsr CS.RUN.IncCount
+
+				lda A2osX.HWT
 				asl
 				tax
 
 				>LDYA L.TYPES,x
-				jsr CS.RUN.PRINTYA
+				jsr CS.RUN.PrintYA
 
 				lda A2osX.HWT
 				beq .8					Unknown
@@ -259,46 +264,64 @@ CS.RUN.TYPESUBT	lda A2osX.HWT
 				cmp #A2osX.HWT.IIc
 				bcc .1
 
+				>SS
 				>PUSHW L.SUBT.ROM		//c & IIgs
 				>PUSHB A2osX.HWSubT
 				>PUSHBI 1
-				>SYSCALL PrintF
+				>LIBC PrintF
+				>SR
 				rts
 
 .1				lda A2osX.HWSubT		//e
 				beq .8
 
 				asl
-				tax
+				tay
 
-				>PUSHW L.SUBT.IIE-2,x
+				>SS
+				>PUSHW L.SUBT.IIE-2,y
 				>PUSHBI 0
-				>SYSCALL PrintF
+				>LIBC PrintF
+				>SR
 
 .8				rts
 *--------------------------------------
-CS.RUN.HZ		>PUSHW L.KERNEL.HZ
+CS.RUN.HZ		jsr CS.RUN.IncCount
+
+				>SS
+				>PUSHW L.KERNEL.HZ
 				>PUSHB A2osX.HZ
 				>PUSHBI 1
-				jmp CS.RUN.PRINTF
+				>LIBC PrintF
+				>SR
+				rts
 *--------------------------------------
-CS.RUN.FSID		ldx #0
+CS.RUN.FSID		jsr CS.RUN.IncCount
+
+				ldx #0
 				bit A2osX.FSID
 				bpl .1
-				
+
 				inx
 				inx
-				
-.1				>LDYA L.FSID,x		
-				jmp CS.RUN.PRINTYA	
+
+.1				>LDYA L.FSID,x
+				jmp CS.RUN.PrintYA
 *--------------------------------------
-CS.RUN.KVER		>PUSHW L.KERNEL.VER
+CS.RUN.KVER		jsr CS.RUN.IncCount
+
+				>SS
+				>PUSHW L.KERNEL.VER
 				>PUSHW A2osX.KVER
 				>PUSHBI 2
-				jmp CS.RUN.PRINTF
+				>LIBC PrintF
+				>SR
+				rts
 *--------------------------------------
-CS.RUN.KMode	ldx #0
-				bit A2osX.IRQMode
+CS.RUN.KMode	jsr CS.RUN.IncCount
+
+				ldx #0
+				bit A2osX.bIRQ
 				bpl .1
 
 				inx
@@ -310,14 +333,34 @@ CS.RUN.KMode	ldx #0
 				inx
 
 .1				>LDYA L.KERNEL.MODES,x
-				jmp CS.RUN.PRINTYA
+				jmp CS.RUN.PrintYA
 *--------------------------------------
-CS.RUN.CPUSpeed	>PUSHW L.CPU.SPEED
-				>PUSHW A2osX.CPUSPEED
+CS.RUN.AltCPU	lda A2osX.Z80SLOT
+				beq .8
+
+				jsr CS.RUN.IncCount
+
+				>LDYA L.CPU.Z80
+				bra CS.RUN.PrintYA
+
+.8				clc
+				rts
+*--------------------------------------
+CS.RUN.CPUSpeed	jsr CS.RUN.CPU
+
+				jsr CS.RUN.IncCount
+
+				>SS
+				>PUSHW L.CPU.SPEED
+				>PUSHW CPUSpeed
 				>PUSHBI 2
-				jmp CS.RUN.PRINTF
+				>LIBC PrintF
+				>SR
+				rts
 *--------------------------------------
-CS.RUN.CPUType	lda A2osX.CPUTYPE
+CS.RUN.CPUType	jsr CS.RUN.IncCount
+
+				lda A2osX.CPUTYPE
 
 				asl
 				and #$0F
@@ -325,24 +368,27 @@ CS.RUN.CPUType	lda A2osX.CPUTYPE
 
 				>LDYA L.CPUS-2,x
 *--------------------------------------
-CS.RUN.PRINTYA	>PUSHYA
+CS.RUN.PrintYA	>SS
+				>PUSHYA
 				>PUSHBI 0
-
-CS.RUN.PRINTF	lda Count
+				>LIBC PrintF
+				>SR
+				rts
+*--------------------------------------
+CS.RUN.IncCount	lda Count
 				beq .1
 
 				lda #C.SPACE
-				>SYSCALL PutChar
+				>LIBC PutChar
 
-.1				>SYSCALL PrintF
+.1				inc Count
 
-				inc Count
-
-CS.DOEVENT		sec
 				rts
 *--------------------------------------
-CS.QUIT
-.8				clc
+CS.SIG			sec
+				rts
+*--------------------------------------
+CS.QUIT			clc
 				rts
 *--------------------------------------
 CS.RUN.CheckOpt	ldy #1
@@ -365,7 +411,105 @@ CS.RUN.CheckOpt	ldy #1
 				clc
 				rts
 *--------------------------------------
-CS.END
+CS.RUN.CPU		stz CPUSpeed+1
+
+				ldy #0
+
+				php
+				sei
+
+				lda A2osX.HWT
+				cmp #A2osX.HWT.IIc
+				beq CS.RUN.CPU2C
+*--------------------------------------
+* VBL = 20.000us 50hz, 16.666 60hz
+*--------------------------------------
+				ldx A2osX.HZ
+
+.1				bit IO.VBL				//e : Wait VBL high....
+				bpl .1
+
+.2				lda IO.VBL				//e : wait VBL low
+				bmi .2
+
+.3				pha						(3)
+
+				lda CPU.Hz2L-5,x		(5) 50Hz = 36, 60Hz = 29
+
+.4				dec						(2)
+				bne .4					(3)
+
+				iny						(2)	38*5+10 = 200us
+				cpy #100				(3)
+				bne .5					(3)
+
+				inc CPUSpeed+1
+				ldy #0
+
+.5				pla
+
+				eor IO.VBL
+				bpl .3
+
+				lda IO.VBL
+				bmi .3
+
+				bra CS.RUN.CPUOK
+*--------------------------------------
+CS.RUN.CPU2C	lda IO.RDIOUDIS
+				pha
+				sta IO.CLRIOUDIS
+
+				lda IO.IIC.RDVBLMSK
+				pha						Save VBLIRQ enable
+				sta IO.IIC.ENVBL
+
+				lda IO.IIC.CLRVBLIRQ
+
+.1				bit IO.VBL				Wait VBL high....
+				bpl .1
+
+				bit IO.IIC.CLRVBLIRQ	clear //c IRQ
+
+.3				ldx A2osX.HZ
+
+.4				pha						(3)
+				pla						(4)
+				pha						(3)
+				pla						(4)
+
+				dex
+				bne .4
+
+				iny
+				cpy #100
+				bne .5
+
+				inc CPUSpeed+1
+				ldy #0
+
+.5				bit IO.VBL				Wait VBL high....
+				bpl .3
+
+				bit IO.IIC.CLRVBLIRQ	clear //c IRQ
+
+				pla						Disable VBLIRQ ?
+				bpl .8
+
+				sta IO.IIC.DISVBL
+
+.8				pla
+				bpl CS.RUN.CPUOK
+
+				sta IO.SETIOUDIS
+*--------------------------------------
+CS.RUN.CPUOK	plp
+
+				sty CPUSpeed
+
+				rts
+*--------------------------------------
+CS.END			.EQ *
 *--------------------------------------
 OptionList		.AS "HhMmCcSsAaVvBbKkZzXx"
 OptionVars		.DA #bHostName,#bHostName
@@ -392,8 +536,8 @@ MSG.USAGE		.CS "Usage : UNAME\r\n"
 				.CS "   -X : ProDOS | FX"
 MSG.CRLF		.CZ "\r\n"
 *--------------------------------------
-ETCHOSTNAME		.AZ "${ROOT}etc/hostname"
-ETCVERSION		.AZ "${ROOT}etc/version"
+ETCHOSTNAME		.AZ "/etc/hostname"
+ETCVERSION		.AZ "/etc/version"
 *--------------------------------------
 TYPE.UNKNOWN	.AZ "Unknown_HW"
 TYPE.IIe		.AZ "Apple//e"
@@ -406,6 +550,8 @@ CPU.65C02		.AZ "65c02"
 CPU.65R02		.AZ "65r02"
 CPU.65816		.AZ "65816"
 CPU.SPEED		.AZ "%d.%02dmhz"
+CPU.Z80			.AZ "Z80"
+CPU.Hz2L		.DA #36,#29
 KERNEL.VER		.AZ "A2osX_%d.%02d"
 KERNEL.POLLING	.AZ "Polling_Mode"
 KERNEL.IRQ		.AZ "IRQ_Mode"
@@ -414,9 +560,11 @@ KERNEL.HZ		.AZ "%d0hz"
 FSID.PRODOS		.AZ "ProDOS"
 FSID.FX			.AZ "FX"
 *--------------------------------------
+ID.END			.EQ *
+*--------------------------------------
 				.DUMMY
 				.OR 0
-DS.START		.BS 65
+HostNameBuf		.BS 65
 FGetSBuf		.BS 65
 DS.END			.ED
 *--------------------------------------

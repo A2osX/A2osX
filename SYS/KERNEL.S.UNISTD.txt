@@ -2,218 +2,254 @@ NEW
   AUTO 3,1
 */--------------------------------------
 * # open
-* ## C
-* `hFD open(const char *pathname, short int flags);`
+* ## C / CSH
+* `int open(const char *pathname, short int flags);`
 * ## ASM
 * `>PUSHW pathname`
 * `>PUSHB flags`
-* `>SYSCALL open`
+* `>LIBC open`
 * ## RETURN VALUE
 * A = hFD
 * REG File created on ProDOS : T=TXT,X=$0000
 *\--------------------------------------
-K.Open			jsr PFT.CheckPath1
-				>PULLB IO.Open.FLAGS
+K.Open			jsr PFT.GetPath1
+				jsr RAMSW.GetStk
+				sta IO.Flags
 
 				lda #S.FI.T.TXT
-				sta IO.Open.TYPE
-				stz IO.Open.AUXTYPE
-				stz IO.Open.AUXTYPE+1
+				sta IO.Type
+				stz IO.AuxType
+				stz IO.AuxType+1
 *--------------------------------------
-UNISTD.Open		ldx #5					/dev/
-				cpx K.MLI.PATH
-				bcs .2
+UNISTD.Open		jsr PFT.Translate
+				bcs .9
 
-.1				lda K.MLI.PATH,x
-				cmp UNISTD.DEV-1,x
-				bne .2
+				bvs .19					/dev/\0 or /mnt/\0
 
-				dex
-				bne .1
-*--------------------------------------
-* /dev/xxxxxx (CDEV,BDEV,DSOCK,SSOCK,PIPE)
-*--------------------------------------
-				>LDYAI K.MLI.PATH+6		skip $/dev/
+				cpx #4
+				beq .1
 
-				jsr K.GetDevByName
+				cpx #0					/dev/file ?
+				bne .19
+
+				jsr DEV.Find
 				bcc .6
 
-				ldx #1
+				rts
+*--------------------------------------
+* Check for other special files... /tmp/fifo....
+*....or already opened files
+*--------------------------------------
+.1				ldx #0
 
-.3				lda FILEs.hFD-1,x
+.3				lda pNames+1,x
 				beq .5
 
-				lda FILEs.hName-1,x
-				beq .5
-
-				jsr K.GetMemPtr
-				>STYA ZPPtr1
+				sta ZPPtr1+1
+				lda pNames,x
+				sta ZPPtr1
 
 				ldy #$ff
 
 .4				iny
-				lda K.Buf256,y
+				lda K.PathBuf,y
 				cmp (ZPPtr1),y
 				bne .5
 
 				cmp #0
 				bne .4
-				
-				stx IO.hFILE
-			
-				lda FILEs.hFD-1,x
-				jsr DEV.GetPFD
+
+				txa
+				jsr SHARED.GethFDpFDA
 				bra .7
 
 .5				inx
-				cpx #K.FILE.MAX+1
+				inx
+				cpx #K.FD.MAX*2
 				bcc .3
 
-				lda #MLI.E.NODEV
-*				sec				
+				lda #S.FD.T.REG
+				jsr DEV.NewNamedFD
+				bcs .9
+
+				jsr PRODOS.OpenReg
+				bcc .9
+				
+				pha
+				
+				jsr DEV.FreeFD
+				
+				pla
+				sec
 				rts
 
-.2				jmp FS.OPEN.REG
-
+.19				lda #MLI.E.INVPATH
+				sec
+.9				rts
+*--------------------------------------
 .6				jsr DEV.GetPDrv
 
-.7				lda (pFD)				#S.FD.T
+.7				lda (pFD)
 				tax
 				jmp (.8-2,x)
 .8
 *				.DA STDIO.IOERR			REG
 				.DA STDIO.IOERR			DIR
-				.DA DEV.OPEN
-				.DA DEV.OPEN
+				.DA DEV.Open
+				.DA DEV.Open
 				.DA STDIO.IOERR			LNK
-				.DA SOCK.OPEN
-				.DA SOCK.OPEN
-				.DA PIPE.OPEN
-
-.9				rts
+				.DA SOCK.Open
+				.DA SOCK.Open
+				.DA PIPE.Open
 */--------------------------------------
 * # close
 * ## C
-* `int close(hFD fd);`
+* `#include <unistd.h>`
+* `int close(int fd);`
 * ## ASM
-* `lda fd`
-* `>SYSCALL close`
+* `>LDYA fd`
+* `>LIBC close`
 *\--------------------------------------
-K.Close			jsr DEV.GetPFD
+K.Close			>STYA pFD
 
-UNISTD.Close	lda (pFD)				#S.FD.T
+UNISTD.Close	lda (pFD)
 				tax
 				jmp (.1,x)
 
-.1				.DA FS.CLOSE
-				.DA FS.CLOSE
-				.DA DEV.CLOSE
-				.DA DEV.CLOSE
+.1				.DA PRODOS.Close
+				.DA PRODOS.Close
+				.DA DEV.Close
+				.DA DEV.Close
 				.DA STDIO.IOERR			LNK
-				.DA SOCK.CLOSE
-				.DA SOCK.CLOSE
-				.DA PIPE.CLOSE
+				.DA SOCK.Close
+				.DA SOCK.Close
+				.DA PIPE.Close
 */--------------------------------------
 * # read
 * ## C
-* `int read(hFD fd, void *buf, int count);`
+* `#include <unistd.h>`
+* `size_t read(int fd, void *buf, size_t count);`
 * ## ASM
-* `>PUSHB fd`
+* `>PUSHW fd`
 * `>PUSHW buf`
 * `>PUSHW count`
-* `>SYSCALL read`
+* `>LIBC read`
 * ## RETURN VALUE
 * CC: Y,A = bytes read
 * CS: A = EC
 *\--------------------------------------
-K.Read			ldy #4					hFD
-				lda (pStack),y
-
-				jsr DEV.GetPFD
+K.Read			ldy #4
+				jsr RAMSW.GetStkYW
+				>STYA pFD
 
 UNISTD.Read		lda (pFD)				#S.FD.T
 				tax
 				jmp (.1,x)
 
-.1				.DA FS.READ.REG
+.1				.DA PRODOS.Read
 				.DA STDIO.IOERR			DIR
-				.DA DEV.READ
+				.DA DEV.Read
 				.DA STDIO.IOERR			BDEV
 				.DA STDIO.IOERR			LNK
 				.DA STDIO.IOERR			DSOCK
-				.DA SOCK.READ
-				.DA PIPE.READ
+				.DA SOCK.Read
+				.DA PIPE.Read
 */--------------------------------------
 * # write
 * ## C
-* `int write(hFD fd, const void *buf, int count);`
+* `#include <unistd.h>`
+* `int write(int fd, const void *buf, int count);`
 * ## ASM
-* `>PUSHB fd`
+* `>PUSHW fd`
 * `>PUSHW buf`
 * `>PUSHW count`
-* `>SYSCALL write`
+* `>LIBC write`
 * ## RETURN VALUE
 * CC: Y,A = bytes written
 * CS: A = EC
 *\--------------------------------------
-K.Write			ldy #4					hFD
-				lda (pStack),y
-
-				jsr DEV.GetPFD
+K.Write			ldy #4
+				jsr RAMSW.GetStkYW
+				>STYA pFD
 
 UNISTD.Write	lda (pFD)				#S.FD.T
 				tax
 				jmp (.1,x)
 
-.1				.DA FS.WRITE.REG
+.1				.DA PRODOS.Write
 				.DA STDIO.IOERR			DIR
-				.DA DEV.WRITE
+				.DA DEV.Write
 				.DA STDIO.IOERR			BDEV
 				.DA STDIO.IOERR			LNK
 				.DA STDIO.IOERR			DSOCK
-				.DA SOCK.WRITE
-				.DA PIPE.WRITE
+				.DA SOCK.Write
+				.DA PIPE.Write
+*--------------------------------------
+UNISTD.Stat		lda (pFD)				#S.FD.T
+				tax
+				jmp (.1,x)
+
+.1				.DA PRODOS.Stat			REG
+				.DA PRODOS.Stat			DIR
+				.DA DEV.Stat			CDEV
+				.DA DEV.Stat			BDEV
+				.DA STDIO.IOERR			LNK
+				.DA STDIO.IOERR			DSOCK
+				.DA STDIO.IOERR			SSOCK
+				.DA PIPE.Stat				
 */-------------------------------------
 * # LSeek
 * Set the file-position indicator for hFD
 * ## C
-* `int lseek( short int hFD, long offset, short int whence );`
+* `int lseek(off_t fildes, off_t offset, short int whence );`
 * ## ASM
 * `>PUSHB hFD`
 * `>PUSHL offset`
 * `>PUSHB whence`
-* `>SYSCALL fseek`
+* `>LIBC fseek`
 *\-------------------------------------
 *K.LSeek
 
 */--------------------------------------
 * # ChOwn
 * ## C
-*  `short int chown(const char *pathname, short int owner, short int group);`
+* `#include <unistd.h>`
+*  `int chown(const char *pathname, uid_t owner, gid_t group);`
 * ## ASM
+* `>SS`
 * `>PUSHW pathname`
-* `>PUSHB owner`
-* `>PUSHB group`
-* `>SYSCALL chown`
+* `>PUSHW owner`
+* `>PUSHW group`
+* `>LIBC chown`
+* `>SR`
 * ## RETURN VALUE
 *\--------------------------------------
-K.ChOwn			jsr PFT.CheckPath2
+K.ChOwn			jsr PFT.GetPath4
 				bcs	.9
+
+				jsr PFT.CheckExtFS
+				bcs .9
 
 				stz K.MLI.PARAMS+3+S.FIEX.ACL		read mode
 
 				>MLICALL MLI.ACL
 				bcs .9
 
-				lda (pStack)
+				ldy #1
+				jsr RAMSW.GetStkY
 				bmi .1
 
+				sta K.MLI.PARAMS+3+S.FIEX.ACL.GID+1
+				jsr RAMSW.GetStk
 				sta K.MLI.PARAMS+3+S.FIEX.ACL.GID
 
-.1				ldy #1
-				lda (pStack),y
+.1				ldy #3
+				jsr RAMSW.GetStkY
 				bmi .2
 
+				sta K.MLI.PARAMS+3+S.FIEX.ACL.UID+1
+				dey
+				jsr RAMSW.GetStkY
 				sta K.MLI.PARAMS+3+S.FIEX.ACL.UID
 
 .2				lda #$57							write mode
@@ -221,9 +257,105 @@ K.ChOwn			jsr PFT.CheckPath2
 
 				>MLICALL MLI.ACL
 
-.9				>RET 4
-*--------------------------------------
-UNISTD.DEV		.AS "/dev/"
+.9				rts
+*/--------------------------------------
+* # GetCWD
+* ## C
+* `#include <unistd.h>`
+*  `char *getcwd(char *buf, size_t size);`
+* ## ASM
+* `>PUSHW buf`
+* `>PUSHW size`
+* `>LIBC chown`
+* ## RETURN VALUE
+*  NULL CS
+*  buf CC
+*\--------------------------------------
+K.GetCWD		ldy #S.PS.pCWD
+				lda (pPS),y
+				pha
+				iny
+				lda (pPS),y
+				ply
+				rts
+*/--------------------------------------
+* # ChDir
+* ## Description
+* chdir() changes the current working directory of the calling
+*         process to the directory specified in path.
+* ## See also
+* getcwd()
+* ## C
+* `#include <unistd.h>`
+* `int chdir(const char *path);`
+* ## ASM
+* `>LDYA path`
+* `>LIBC chdir`
+* ## RETURN VALUE
+*  CS : YA = int RC < 0 $FFxx
+*  CC : YA = 0
+*\--------------------------------------
+K.ChDir			pha
+				phy
+				ldy #S.PS.pCWD+1
+				lda (pPS),y
+				beq .1
+
+				pha
+				dey
+				lda (pPS),y
+				tay
+				pla
+
+				jsr K.Free
+
+.1				pla
+				ldy #S.PS.pCWD
+				sta (pPS),y
+				iny
+				pla
+				sta (pPS),y
+
+				lda #0
+				clc
+				rts
+*/--------------------------------------
+* # GetHostName
+* ## Description
+* gethostname() returns the null-terminated hostname in the
+* character array name, which has a length of len bytes.  If the
+* null-terminated hostname is too large to fit, then the name is
+* truncated, and no error is returned
+* ## See also
+* ## C
+* `#include <unistd.h>`
+* ` int gethostname(char *name, size_t len);`
+* ## ASM
+* `>SS`
+* `>PUSHW name`
+* `>PUSHW len`
+* `>LIBC GetHostName`
+* `>SR`
+* ## RETURN VALUE
+*  CS : YA = -1, ERRNO
+*  CC : YA = 0
+*\--------------------------------------
+K.GetHostName	ldy #2					name
+				jsr RAMSW.StkY2FORPNT
+
+				ldy #$ff
+
+				sta IO.SETWRITEAUX
+
+.1				iny
+				lda K.Hostname,y
+				sta (FORPNT),y
+				bne .1
+
+				sta IO.CLRWRITEAUX
+
+				clc
+				rts
 *--------------------------------------
 MAN
 SAVE usr/src/sys/kernel.s.unistd

@@ -7,7 +7,6 @@ NEW
 *--------------------------------------
 				.INB inc/macros.i
 				.INB inc/a2osx.i
-				.INB inc/kernel.i
 				.INB inc/mli.i
 				.INB inc/mli.e.i
 *--------------------------------------
@@ -18,12 +17,11 @@ ArgIndex     	.BS 1
 ArgPattern   	.BS 1
 ZPPtr1       	.BS 2
 ZPBufPtr     	.BS 2
-hFile        	.BS 1
-hBuf         	.BS 1
+pFile        	.BS 2
 char         	.BS 1
 ByteCount    	.BS 3
 bPause       	.BS 1
-bPipe        	.BS 1
+bIsPipe        	.BS 1
 bIsTTY       	.BS 1
 bTemp        	.BS 1
 bDummy       	.BS 1
@@ -35,14 +33,14 @@ ZS.END       	.ED
 CS.START        cld
                 jmp (.1,x)
                 .DA #$61                  6502,Level 1 (65c02)
-                .DA #1                    BIN Layout Version 1
+                .DA #2                    BIN Layout Version 2
                 .DA #0                    S.PS.F.EVENT
                 .DA #0
-                .DA CS.END-CS.START       Code Size (without Constants)
-                .DA DS.END-DS.START       Data Segment Size
+                .DA CS.END
+				.DA ID.END
+                .DA DS.END
                 .DA #16                   Stack Size
                 .DA #ZS.END-ZS.START      Zero Page Size
-                .DA 0
 *--------------------------------------
 * Relocation Table
 *--------------------------------------
@@ -57,33 +55,35 @@ L.MSG.HEXBYTE   .DA MSG.HEXBYTE
                 .DA 0
 *--------------------------------------
 CS.INIT         clc
-                rts
+				rts
 *--------------------------------------
-CS.RUN          stz bPipe
-                stz bIsTTY
-                jsr CS.RUN.ISATTY
-                jsr CS.RUN.CheckArgs
+CS.RUN          jsr CS.RUN.ISATTY
+				bcs CS.RUN.LOOP.RTS
+                
+				jsr CS.RUN.CheckArgs
                 bcs CS.RUN.LOOP.RTS
 
-                stz ByteCount
-                stz ByteCount+1
-                stz ByteCount+2
+CS.RUN.LOOP     bit bIsPipe              If reading from pipe
+                bpl .2                   No ^C/^S handling
 
-CS.RUN.LOOP     lda bPipe                If reading from pipe
-                bne .2                   No ^C/^S handling
-
-                ldy #S.PS.hStdIn
-                lda (pPS),y
-                >SYSCALL FEOF
+				ldy #S.PS.pStdIn
+				jsr A2osX.GetPSy
+				pha
+				iny
+				jsr A2osX.GetPSy
+				ply
+                >LIBC FEOF
                 bcs .9                   I/O Error
 
                 tay
                 bne .1                   No char
 
-                >SYSCALL GetChar
+                >LIBC GetChar
                 bcs .9                   I/O error
+
                 cmp #$03                 Ctrl-C
                 beq .9
+
                 cmp #$13                 Ctrl-S
                 bne .1
 
@@ -97,8 +97,8 @@ CS.RUN.LOOP     lda bPipe                If reading from pipe
 
 .2              >SLEEP
 
-                lda hFile
-                >SYSCALL GetC
+                >LDYA pFile
+                >LIBC GetC
                 bcs .7
 
                 jsr CS.RUN.PRINTBYTE
@@ -122,14 +122,14 @@ CS.RUN.CheckArgs
                 cmp #'-'
                 beq .1
 
-.11             lda hFile
+.11             lda pFile+1
                 bne .97
 
                 >LDYA ZPPtr1
                 jsr CS.RUN.OPEN
                 bcs .9
 
-                sta hFile
+                >STYA pFile
                 bra CS.RUN.CheckArgs
 
 .1              ldy #1
@@ -154,31 +154,14 @@ CS.RUN.CheckArgs
                 sta bDummy-1,x
                 bra CS.RUN.CheckArgs
 
-.4              lda hFile
-                bne .80
-
-                ldy #S.PS.hStdIn
-                lda (pPS),y
-                tay
-				ldx FILEs.hFD-1,y
-				lda FDs.pLO-1,x
-				sta ZPPtr1
-				lda FDs.pHI-1,x
-                sta ZPPtr1+1
-
-                lda (ZPPtr1)
-                cmp #S.FD.T.PIPE
-                bne .97
-
-                sty hFile
-                inc bPipe
+.4              lda pFile+1
+                beq .98
 
 .80             >LDYAI 256
-                >SYSCALL GetMem
+                >LIBC Malloc
                 bcs .9
 
                 >STYA ZPBufPtr
-                stx hBuf
 
 *               clc
 
@@ -187,60 +170,120 @@ CS.RUN.CheckArgs
 .97             lda #E.SYN
 
 .98             pha
-                >PUSHW L.MSG.USAGE
-                >PUSHBI 0
-                >SYSCALL PrintF
-                pla
+                >LDYA L.MSG.USAGE
+                >LIBC PutS
+				pla
                 sec
                 rts
 *--------------------------------------
 CS.RUN.NextArg  inc ArgIndex
                 lda ArgIndex
-                >SYSCALL ArgV
+                >LIBC ArgV
                 bcs .9
 
                 >STYA ZPPtr1
 
 .9              rts
 *--------------------------------------
-CS.RUN.OPEN     >PUSHYA
+CS.RUN.OPEN     >SS
+				>PUSHYA
                 >PUSHBI O.RDONLY+O.TEXT
                 >PUSHBI S.FI.T.TXT
                 >PUSHWZ                         Aux type
-                >SYSCALL FOpen
-                bcs .9
-                sta hFile
+                >LIBC FOpen
+                >SR
+				bcs .9
+ 
+				>STYA pFile
+
 .9              rts
 *--------------------------------------
-CS.RUN.ISATTY   ldy #S.PS.hStdOut
-                lda (pPS),y
-                tax
-                lda FILEs.hFD-1,x
-                >SYSCALL GetMemPtr
-                >STYA ZPPtr1
-                lda (ZPPtr1)
-                beq .9
-                inc bIsTTY
+CS.RUN.IsPipe	ldy #S.PS.pStdIn
+				jsr A2osX.GetPSy
+				pha
+				iny
+				jsr A2osX.GetPSy
+				ply
+
+				>LIBC FileNo
+				bcs .9
+
+				>SS
+				>PUSHYA
+				>PUSHEA.G STATBUF
+				>LIBC FStat
+				>SR
+				bcs .9
+				
+				>LDA.G STATBUF+S.STAT.MODE+1
+				and #$F0
+
+				cmp /S.STAT.MODE.FIFO
+				bne .8
+				
+				ldy #S.PS.pStdIn
+				jsr A2osX.GetPSy
+				pha
+				iny
+				jsr A2osX.GetPSy
+				ply
+				
+				>STYA pFile
+				dec bIsPipe
+				
+.8				clc				
+
+.9				rts
+*--------------------------------------
+CS.RUN.ISATTY   ldy #S.PS.pStdOut
+				jsr A2osX.GetPSy
+				pha
+				iny
+				jsr A2osX.GetPSy
+				ply
+
+				>LIBC FileNo
+				bcs .9
+
+				>SS
+				>PUSHYA
+				>PUSHEA.G STATBUF
+				>LIBC FStat
+				>SR
+				bcs .9
+				
+				>LDA.G STATBUF+S.STAT.MODE+1
+				and #$F0
+
+                dec bIsTTY
+
+.8				clc
+
 .9              rts
 *--------------------------------------
-CS.QUIT         lda hFile
+CS.QUIT         >LDYA pFile
                 beq .1
-                >SYSCALL FClose
-.1              lda hBuf
+
+                >LIBC FClose
+
+.1              >LDYA ZPBufPtr
                 beq .8
-                >SYSCALL FreeMem
+
+                >LIBC Free
+
 .8              clc
                 rts
 *--------------------------------------
 CS.RUN.PRINTBYTE
-                pha                           Char is in A
+                sta char                      Char is in A
 
                 lda ByteCount                 Divisible by 16
                 and #$0f
                 sta bTemp
                 bne .2
 
-                >PUSHW L.MSG.OFFSET           Print offset
+                >SS
+				>PUSHW L.MSG.OFFSET           Print offset
                 lda ByteCount+2
                 >PUSHA
                 lda ByteCount+1
@@ -248,24 +291,27 @@ CS.RUN.PRINTBYTE
                 lda ByteCount
                 >PUSHA
                 >PUSHBI 3
-                >SYSCALL PrintF
+                >LIBC PrintF
+				>SR
 
 .2              ldy bTemp                     Offset mod 16
-                pla                           Character
-                pha
+                lda char
                 sta (ZPBufPtr),y
 
-                >PUSHW L.MSG.HEXBYTE
-                pla
-                >PUSHA
+                >SS
+				>PUSHW L.MSG.HEXBYTE
+                >PUSHB char
                 >PUSHBI 1
-                >SYSCALL PrintF
+                >LIBC PrintF
+				>SR
 
 .6              inc ByteCount
                 bne .7
-                inc ByteCount+1
+ 
+				inc ByteCount+1
                 bne .7
-                inc ByteCount+2
+                
+				inc ByteCount+2
 
 .7              lda bTemp
                 cmp #$0f
@@ -277,7 +323,7 @@ CS.RUN.PRINTBYTE
 *--------------------------------------
 CS.RUN.PRINTASCII
                 lda #'>'
-                >SYSCALL PutChar
+                >LIBC PutChar
 
                 ldy #$00
 .7              lda (ZPBufPtr),y
@@ -289,7 +335,7 @@ CS.RUN.PRINTASCII
                 bra .8
 .75             lda #'.'
 
-.8              >SYSCALL PutChar
+.8              >LIBC PutChar
                 ply
                 cpy bTemp
                 beq .85
@@ -297,14 +343,14 @@ CS.RUN.PRINTASCII
                 bra .7
 
 .85             lda #'<'
-                >SYSCALL PutChar
+                >LIBC PutChar
 
                 lda #C.CR
-                >SYSCALL PutChar
+                >LIBC PutChar
                 lda bIsTTY
                 beq .9
                 lda #C.LF
-                >SYSCALL PutChar
+                >LIBC PutChar
 .9              rts
 *--------------------------------------
 CS.RUN.FINISHUP
@@ -314,11 +360,11 @@ CS.RUN.FINISHUP
                 rts
 .1              pha
                 lda #' '
-                >SYSCALL PutChar
+                >LIBC PutChar
                 lda #' '
-                >SYSCALL PutChar
+                >LIBC PutChar
                 lda #' '
-                >SYSCALL PutChar
+                >LIBC PutChar
                 pla
                 inc
                 cmp #$10
@@ -329,7 +375,7 @@ CS.RUN.FINISHUP
 CS.DOEVENT      sec
                 rts
 *--------------------------------------
-CS.END
+CS.END			.EQ *
 *--------------------------------------
 OptionList      .AS "x"
 OptionList.Cnt  .EQ *-OptionList
@@ -339,9 +385,12 @@ MSG.CRLF        .CZ "\r\n"
 MSG.OFFSET      .CZ "%h%h%h "
 MSG.HEXBYTE     .CZ "%h "
 *--------------------------------------
+ID.END			.EQ *
+*--------------------------------------
                 .DUMMY
                 .OR 0
-DS.START
+
+STATBUF			.BS S.STAT
 DS.END          .ED
 *--------------------------------------
 MAN

@@ -2,28 +2,30 @@ NEW
   AUTO 3,1
 *--------------------------------------
 CC.Link			>LDYA L.MSG.LINKING
-				>SYSCALL PutS
+				>LIBC PutS
 
 				ldy #0
-				lda #1
+				lda #2
 
-.1				>STYA ZPPtr1			SymID
-*			>DEBUG
-				>PUSHB.G CC.hSyms
+.1				>SS
+				>STYA ZPPtr1			SymID
+				>PUSHW.G CC.pSyms
 				>PUSHW ZPPtr1			SymID
 				>PUSHW pData
-
-				>SYSCALL SListGetByID
+				>KAPI SListGetByID
+				>SR
 				bcs .8
 
 				>STYA ZPPtr2			NextID
 
-				>PUSHB.G CC.hSyms
+				>SS
+				>PUSHW.G CC.pSyms
 				>PUSHW ZPPtr1			SymID
-				>PUSHW ZPSymBufPtr
+				>PUSHW ZP.pLSymBuf
 				>PUSHWI 65535			All
 				>PUSHWZ					from Start
-				>SYSCALL SListGetData
+				>KAPI SListGetData
+				>SR
 				bcs .99
 
 				>LDA.G bVerbose
@@ -32,13 +34,13 @@ CC.Link			>LDYA L.MSG.LINKING
 				jsr CC.Link.Dump
 
 .2				ldy #SYM.SC
-				lda (ZPSymBufPtr),y
+				lda (ZP.pLSymBuf),y
 				bne .7					SYM.SC.STATIC
 
 				ldy #SYM.Addr+1
-				lda (ZPSymBufPtr),y
+				lda (ZP.pLSymBuf),y
 				dey
-				ora (ZPSymBufPtr),y
+				ora (ZP.pLSymBuf),y
 				bne .7
 
 				jsr CC.Link.Lookup
@@ -51,6 +53,8 @@ CC.Link			>LDYA L.MSG.LINKING
 				jmp .1
 
 .8				clc
+*			>DEBUG
+			
 				rts
 
 .9				>LDA.G bVerbose
@@ -64,14 +68,9 @@ CC.Link			>LDYA L.MSG.LINKING
 *--------------------------------------
 * Input : pData = Symbol
 *--------------------------------------
-CC.Link.Lookup	>LDYA L.CC.SYSCALL
+CC.Link.Lookup	>LDYA L.CC.LIBC
 				jsr CC.Link.LookupYA
 				ldx #1
-				bcc .99
-
-				>LDYA L.CC.FPUCALL
-				jsr CC.Link.LookupYA
-				ldx #2
 				bcc .99
 
 				>LDA.G LibCount
@@ -82,11 +81,15 @@ CC.Link.Lookup	>LDYA L.CC.SYSCALL
 				sta ArgIndex
 				clc
 
-.1				adc #hLibOs
+.1				asl
+				adc #pLibOs
 				tay
 				lda (pData),y
+				pha
+				iny
+				lda (pData),y
+				ply
 
-				>SYSCALL GetMemPtr
 				jsr CC.Link.LookupYA
 				bcs .2
 
@@ -104,7 +107,7 @@ CC.Link.Lookup	>LDYA L.CC.SYSCALL
 .99				rts
 *--------------------------------------
 CC.Link.LookupYA
-				>STYA ZPLookupPtr
+				>STYA ZP.pLookup
 
 				ldy #$ff
 
@@ -115,16 +118,16 @@ CC.Link.LookupYA
 				tya
 				tax						Symbol Len
 
-.2				lda (ZPLookupPtr)
+.2				lda (ZP.pLookup)
 				beq .9					Ending 0, not found....
 
 				txa						Get Back Len
-				cmp (ZPLookupPtr)		Same Len ?
+				cmp (ZP.pLookup)		Same Len ?
 				bne .4
 
 				tay
 
-.3				lda (ZPLookupPtr),y
+.3				lda (ZP.pLookup),y
 
 				dey
 				cmp (pData),y
@@ -133,15 +136,15 @@ CC.Link.LookupYA
 				tya
 				bne .3
 
-				lda (ZPLookupPtr)
+				lda (ZP.pLookup)
 				tay
 				iny
-				lda (ZPLookupPtr),y			get fID
+				lda (ZP.pLookup),y			get fID
 
 				clc
 				rts
 
-.4				lda (ZPLookupPtr)
+.4				lda (ZP.pLookup)
 				inc
 				jsr CC.ZPLookupPtrAddAp1	Skip LEN\Symbol\ID
 				bra .2
@@ -149,33 +152,22 @@ CC.Link.LookupYA
 .9				sec
 				rts
 *--------------------------------------
-* A=ID X=SYS|FPU|LIB
+* A=ID X=SYS|LIB
 *--------------------------------------
 CC.Link.Update	ldy #SYM.Addr
-				sta (ZPSymBufPtr),y
+				sta (ZP.pLSymBuf),y
 
 				iny
 				txa
-				sta (ZPSymBufPtr),y
+				sta (ZP.pLSymBuf),y
 
-				>PUSHB.G CC.hSyms
+				>SS
+				>PUSHW.G CC.pSyms
 				>PUSHW ZPPtr1				SymID
-				>PUSHW ZPSymBufPtr
-				>PUSHBI 0
-
-				ldy #SYM.Q
-				lda (ZPSymBufPtr),y
-				and #SYM.Q.FUNC
-				bne .1
-
-				ldy #SYM.DefSize
-				lda (ZPSymBufPtr),y
-				bra .2
-
-.1				lda #SYM.F.MAX
-
-.2				>PUSHA
-				>SYSCALL SListSetData
+				>PUSHW ZP.pLSymBuf
+				>PUSHWI SYM
+				>KAPI SListSetData
+				>SR
 				rts
 *--------------------------------------
 CC.Link.Dump	ldy #$ff
@@ -191,6 +183,7 @@ CC.Link.Dump	ldy #$ff
 				lda (pData),y
 				sta ZPPtr3+1
 
+				>SS
 				>PUSHW L.MSG.LINKING2
 
 				>PUSHW ZPPtr1			ID
@@ -198,58 +191,64 @@ CC.Link.Dump	ldy #$ff
 
 				>PUSHW pData			Name
 
-				>PUSHB (ZPSymBufPtr)	SYM.T
+				>PUSHB (ZP.pLSymBuf)	SYM.T
 
 				ldy #1
-				>PUSHB (ZPSymBufPtr),y	SYM.Q
+				>PUSHB (ZP.pLSymBuf),y	SYM.Q
 
 				iny
-				>PUSHB (ZPSymBufPtr),y	SYM.SC
+				>PUSHB (ZP.pLSymBuf),y	SYM.SC
 
-				ldy #SYM.DefSize
-				>PUSHB (ZPSymBufPtr),y
+				ldy #SYM.Cnt
+				>PUSHB (ZP.pLSymBuf),y
 
 				ldy #SYM.SizeOf+1
-				>PUSHB (ZPSymBufPtr),y
+				>PUSHB (ZP.pLSymBuf),y
 				dey
-				>PUSHB (ZPSymBufPtr),y
+				>PUSHB (ZP.pLSymBuf),y
 
 				ldy #SYM.Addr+1
-				>PUSHB (ZPSymBufPtr),y
+				>PUSHB (ZP.pLSymBuf),y
 				dey
-				>PUSHB (ZPSymBufPtr),y
+				>PUSHB (ZP.pLSymBuf),y
 
 				>PUSHBI 14
-				>SYSCALL PrintF
+				>LIBC PrintF
+				>SR
 				rts
 *--------------------------------------
 CC.Link.CheckMain
-				>PUSHB.G CC.hSyms
+				>SS
+				>PUSHW.G CC.pSyms
 				>PUSHW L.CC.MAIN
 				>PUSHWI 0				ScopeID
-				>SYSCALL SListLookup
+				>PUSHWI	0				NextPtr
+				>KAPI SListLookup
+				>SR
 				bcs .9
 
 				>STYA ZPPtr1			SymID
 
-				>PUSHB.G CC.hSyms
+				>SS
+				>PUSHW.G CC.pSyms
 				>PUSHW ZPPtr1			SymID
-				>PUSHW ZPSymBufPtr
+				>PUSHW ZP.pLSymBuf
 				>PUSHWI 65535			all
 				>PUSHWZ					From Start
-				>SYSCALL SListGetData
+				>KAPI SListGetData
+				>SR
 				bcs .99
 
 				ldy #SYM.Addr
-				lda (ZPSymBufPtr),y
+				lda (ZP.pLSymBuf),y
 				iny
-				ora (ZPSymBufPtr),y
+				ora (ZP.pLSymBuf),y
 				beq .9
 
-				lda (ZPSymBufPtr),y
+				lda (ZP.pLSymBuf),y
 				sta PCC.FH+PCC.FH.MAIN+1
 				dey
-				lda (ZPSymBufPtr),y
+				lda (ZP.pLSymBuf),y
 				sta PCC.FH+PCC.FH.MAIN
 
 *				clc
@@ -257,7 +256,7 @@ CC.Link.CheckMain
 				rts
 
 .9				>LDYA L.MSG.NOMAIN
-				>SYSCALL putS
+				>LIBC putS
 				lda #E.CSYN
 				sec
 .99				rts

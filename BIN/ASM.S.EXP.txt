@@ -5,7 +5,11 @@ NEW
 * # : 8b,Byte 1
 * / : 8b,Byte 2
 * ^ : 8b,Byte 3
+* ## : 16b,Byte 1,2
+* // : 16b,Byte 2,3
+* ^^ : 16b,Byte 3,4
 * < : 24b,Byte 1,2,3
+* << : 24b,Byte 2,3,4
 * > : 32b
 *---------------------------------------
 * Num Format : 0-9 -> decimal
@@ -19,8 +23,11 @@ EXP.Eval.Missing
 				sec
 				rts
 
+EXP.Eval.SYN	lda #E.SYNTAX.ERROR
+				sec
+				rts
+
 EXP.Eval		>STZ.G EXP.Modifier
-				>STA.G EXP.Prefix
 				>STA.G EXP.Operator
 
 				jsr SRC.GetChar
@@ -28,14 +35,12 @@ EXP.Eval		>STZ.G EXP.Modifier
 
 				jsr SRC.IsMODReserved
 				bcs EXP.Eval.Next
+				
+				jsr SRC.MODLookup
+				bcs EXP.Eval.SYN
 
 				txa
 				>STA.G EXP.Modifier
-
-				lda #'#'
-				>STA.G EXP.Prefix
-
-EXP.Eval.Next0	jsr SRC.GetNextChar
 
 EXP.Eval.Next	stz SRC.ACC
 				stz SRC.ACC+1
@@ -48,18 +53,18 @@ EXP.Eval.Next	stz SRC.ACC
 				cmp #'.'				Local Label?
 				bne .12
 
-				>LDA.G MAC.StkPtr
-				bne .9					illegal INSIDE macro
+				jsr EXP.GetLocal
+				bcs .99
 
-				bra .13
+				jmp EXP.EvalOperator
 
-.12				cmp #':'
+.12				cmp #':'				Private Label ?
 				bne .14
 
 				>LDA.G MAC.StkPtr
 				beq .9					illegal OUTSIDE macro
 
-.13				jsr EXP.GetLocal
+				jsr EXP.GetPrivate
 				bcs .99
 
 				jmp EXP.EvalOperator
@@ -81,13 +86,15 @@ EXP.Eval.Next	stz SRC.ACC
 
 				jsr SRC.GetDecimal
 				bcs EXP.EvalExitRTS
-				jmp EXP.EvalOperator
 
+				jmp EXP.EvalOperator
+*---------------------------------------
 .1				cmp #'$'			Hex?
 				bne .2
 
 				jsr SRC.GetHex
 				bcs EXP.EvalExitRTS
+
 				jmp EXP.EvalOperator
 
 .2				cmp #'%'			binary?
@@ -95,6 +102,7 @@ EXP.Eval.Next	stz SRC.ACC
 
 				jsr SRC.GetBinary
 				bcs EXP.EvalExitRTS
+
 				jmp EXP.EvalOperator
 
 .3				cmp #'&'			octal?
@@ -102,6 +110,7 @@ EXP.Eval.Next	stz SRC.ACC
 
 				jsr SRC.GetOctal
 				bcs EXP.EvalExitRTS
+
 				bra EXP.EvalOperator
 
 .4				cmp #'''
@@ -109,6 +118,7 @@ EXP.Eval.Next	stz SRC.ACC
 
 				jsr SRC.GetNextChar
 				bcs EXP.EvalExitSYN
+
 				jsr EXP.SetAccA
 				jsr SRC.GetNextChar
 				bcs EXP.EvalOperator
@@ -150,18 +160,18 @@ EXP.Eval.Next	stz SRC.ACC
 
 				jsr SYM.LookupGlobal
 				bcc EXP.EvalOperator
+
 EXP.EvalExitRTS	rts
 
 EXP.EvalExitOK	>LDA.G EXP.Modifier
 				beq .1
-
-				asl
+				
 				tax
 
 				lda #SYMG.F.FWREF		Reset FW flag because of IMM modifier
 				trb SRC.ACC.F
 
-				jmp (J.EXP.MOD-2,x)
+				jmp (J.MODS-2,x)
 
 .1				clc
 				rts
@@ -183,9 +193,9 @@ EXP.EvalOperator
 				
 				lda SRC.ACC.F
 				ora SRC.ARG.F
-				and #SYMG.F.FWREF
+				and #SYMG.F.EQU+SYMG.F.FWREF
 				tsb SRC.ACC.F
-				
+
 				jsr EXP.Compute			ARG op ACC -> ACC
 				bcc .7
 
@@ -211,27 +221,33 @@ EXP.EvalOperator
 				txa
 				>STA.G EXP.Operator
 
-				ldx #3
+				jsr SRC.GetNextChar
+				bcs EXP.EvalExitSYN
 
-.8				lda SRC.ACC,x
-				sta SRC.ARG,x
+				ldx #4
+
+.8				lda SRC.ACC.F,x
+				sta SRC.ARG.F,x
 				dex
 				bpl .8
-
-				lda SRC.ACC.F
-				sta SRC.ARG.F
 				
-				jmp EXP.Eval.Next0
+				jmp EXP.Eval.Next
 *---------------------------------------
-EXP.GetLocal	jsr SRC.GetNextChar
+EXP.GetPrivate	lda ZPMacroCtxID 
+				sta R3+1
+				bra EXP.GetLocal1
+
+EXP.GetLocal	stz R3+1
+
+EXP.GetLocal1	jsr SRC.GetNextChar
 				bcs .9
 
 				jsr SRC.GetDecimal8
 				bcs EXP.EvalExitSYN
 
-				tax
+				sta R3
 
-				jsr SYM.LookupLocalX
+				jsr SYM.LookupLocal
 				bcc .8
 
 				>LDA.G ASM.PASS			pass#2?
@@ -267,7 +283,30 @@ EXP.MOD.8.1		lda #1
 				clc
 				rts
 
-EXP.MOD.24		lda #3
+EXP.MOD.16.3	lda SRC.ACC+2
+				sta SRC.ACC
+				lda SRC.ACC+3
+				sta SRC.ACC
+				bra EXP.MOD.16.1
+
+EXP.MOD.16.2	lda SRC.ACC+1
+				sta SRC.ACC
+				lda SRC.ACC+2
+				sta SRC.ACC+1
+
+EXP.MOD.16.1	lda #2
+				sta SRC.ACC.SIZE
+				clc
+				rts
+
+EXP.MOD.24.2	lda SRC.ACC+1
+				sta SRC.ACC
+				lda SRC.ACC+2
+				sta SRC.ACC+1
+				lda SRC.ACC+3
+				sta SRC.ACC+2
+
+EXP.MOD.24.1	lda #3
 				sta SRC.ACC.SIZE
 				clc
 				rts
@@ -376,7 +415,18 @@ EXP.OP.ADD		ldx #0					ARG-ACC->ACC
 				lda #E.VAL.TOO.BIG
 .8				rts
 *---------------------------------------
-EXP.OP.SUB		jsr EXP.SUB
+EXP.OP.SUB		
+			.DO EXPDBG=1
+			>SS
+			>PUSHW L.MSG.EXPDBG
+			>PUSHL SRC.ARG
+			>PUSHL SRC.ACC
+			>PUSHBI 8
+			>LIBC PrintF
+			>SR
+			>DEBUG
+			.FIN
+				jsr EXP.SUB
 				bcs .8
 
 				lda #E.VAL.TOO.BIG
@@ -416,7 +466,7 @@ EXP.OP.DIV		>PUSHL SRC.ARG
 *---------------------------------------
 EXP.ResetAcc	stz SRC.ACC.F
 
-EXP.ResetAccV	lda #2
+				lda #2
 				sta SRC.ACC.SIZE
 
 				stz SRC.ACC
@@ -435,16 +485,18 @@ EXP.SetAccA		sta SRC.ACC
 				rts
 *---------------------------------------
 				.DO ASMDBG=1
-EXP.DBG			>SYSCALL putchar
-				>PUSHW L.MSG.DBG
-				>PUSHB.G MAC.CtxID
+EXP.ASMDBG		>LIBC putchar
+				
+				>SS
+				>PUSHW L.MSG.ASMDBG
+				>PUSHB ZPMacroCtxID
 				>PUSHL SRC.ARG
 				>PUSHL SRC.ACC
 				>PUSHB SRC.ACC.F
 				>PUSHB SRC.ACC.SIZE
 				>PUSHBI 11
-				>SYSCALL PrintF
-*				>DEBUG
+				>LIBC PrintF
+				>SR
 				rts
 				.FIN
 *---------------------------------------

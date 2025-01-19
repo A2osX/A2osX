@@ -1,7 +1,13 @@
 NEW
   AUTO 3,1
 *--------------------------------------
-CORE.Init		lda #PUSHD.STACK
+CORE.Init		>LDYAI 256
+				>LIBC Malloc
+				bcs .9
+				
+				>STYA pStk
+
+				lda #PUSHD.STACK
 				tay
 				sta (pdata),y
 
@@ -11,63 +17,75 @@ CORE.Init		lda #PUSHD.STACK
 
 .9				rts
 *--------------------------------------
-CORE.FUNCRESET	>LDA.G hFunctions
+CORE.FUNCRESET	>LDA.G pFunctions+1
 				beq .8
 
-				>SYSCALL SListFree
-				>STZ.G hFunctions
+				>LDYA.G pFunctions
+				>KAPI SListFree
+				>STZ.G pFunctions+1
 
 .8				rts
 *--------------------------------------
-* stack-6,7		old InputBuf
-* stack-4,5		old InputBufPtr
-* stack-3		old ARGC
-* stack-2       old ARGV
-* stack-1		new hCode
-* stack
-*--------------------------------------
-CORE.Load.YAX	stx LOAD.hCode			X = Code to Execute
+CORE.ArgVDup	>STYA R1
+				>STYA R2
 
-				>SYSCALL ArgVDup		Y,A = ArgV
+				ldy #0
+				ldx #0
+				
+.1				lda (R2),y
+				beq .2
+				
+.11				iny
+				bne .1
+				
+				inx
+				inc R2+1
+				bra .1
+				
+.2				iny
+				bne .3
+
+				inx
+				inc R2+1
+				
+.3				lda (R2),y
+				bne .11
+				
+				txa
+				
+				>LIBC Malloc
 				bcs .9
+				
+				>STYA R2
+				>STYA ZPTmpW			new pARGV
 
-				stx LOAD.hArgs			X = hARGV
-				sta LOAD.ArgCnt			A = ARGC
+				ldx #0
+				ldy #0
+				
+.4				lda (R1),y
+				sta (R2),y
+				beq .6
 
-				lda #8
-				jsr STK.Check
-				bcs .9
+.5				iny
+				bne .4
+				
+				inc R1+1
+				inc R2+1
+				bra .4
+				
+.6				inx
 
-				>LDYA ZPInputBuf
-				jsr STK.PushYA
-
-				jsr STK.PushInputBufPtr
-
-				ldy #S.PS.ARGC
-				lda (pPS),y
-				jsr STK.Push			old ARGC
-
-				ldy #S.PS.hARGV
-				lda (pPS),y
-				jsr STK.Push			old hARGV
-
-				ldy #S.PS.ARGC
-				lda LOAD.ArgCnt			new ARGC
-				dec 					Skip ARG0 in count
-				sta (pPS),y
-
-				iny 					#S.PS.hARGV
-				lda LOAD.hArgs
-				sta (pPS),y				new hARGV
-
-				lda LOAD.hCode			new code
-				jsr STK.Push
-*				lda LOAD.hCode
-				>SYSCALL GetMemPtr
-				>STYA ZPInputBuf
-				>STYA ZPInputBufPtr
-
-*				clc
+				iny
+				bne .7
+				
+				inc R1+1
+				inc R2+1
+				
+.7				lda (R1),y
+				sta (R2),y			Ending \0 ?
+				bne .5
+				
+				clc						X = Arg Count
 .9				rts
 *--------------------------------------
 * http://heirloom.sourceforge.net/sh/sh.1.html
@@ -77,26 +95,27 @@ CORE.Load.YAX	stx LOAD.hCode			X = Code to Execute
 * Tokenize ZPArgVBuf
 * :LOOP
 * if CmdSep=| :
-*    set hStdIn = hStdOut
-*    set hStdOut = Std
+*    set StdIn = StdOut
+*    set StdOut = Std
 * GetCmd from line until | or EOL
 * if CmdSep=| :
 *     create PIPE
-*     set hStdOut -> PIPE
+*     set StdOut -> PIPE
 *	  CORE.Exec &
 *      :LOOP
 * else CORE.Exec
 *--------------------------------------
 * SET VAR = `cmd args`, FOR VAR IN `cmd args`
 * create PIPE
-* set hStdOut -> PIPE
+* set StdOut -> PIPE
 * CORE.Exec `cmd args` &
 * set READMODE
-* set hStdIn = hStdOut
-* set hStdOut = Std
+* set StdIn = StdOut
+* set StdOut = Std
 *--------------------------------------
-CORE.Run.EOF	jsr STK.Pull
-				bcs *
+CORE.Run.EOF	jsr STK.PopA
+			bcs *
+
 				cmp #$C0+C..			check CALL . CL context
 				beq .1
 
@@ -106,7 +125,7 @@ CORE.Run.EOF	jsr STK.Pull
 				cmp #$C0+C.CLEXEC
 				bne .9
 
-.1				jsr CMD.EXIT.FILE
+.1				jsr STK.PopCode
 
 				jsr IO.Reset
 
@@ -121,13 +140,11 @@ CORE.Run.EOF	jsr STK.Pull
 CORE.Run.RTS	rts
 *--------------------------------------
 CORE.Run	 	>LDYAI 256
-				>SYSCALL GetMem
+				>LIBC Malloc
 				bcs CORE.Run.RTS
 
 				>STYA ZPArgVBuf
-				txa
-				>STA.G CORE.hArgVBuf
-
+				
 				lda #bState.PipeIn+bState.PipeOut
 				trb bState
 *--------------------------------------
@@ -162,29 +179,31 @@ CORE.Run.1		>LDYA ZPInputBufPtr		Save Actual ptr for looping
 
 .8				jmp CORE.Run.Exit0		EOL, CS,A=0
 *--------------------------------------
-CORE.Run.3		>LDA.G hAliases
+CORE.Run.3		>LDA.G pAliases+1
 				beq CORE.Run.4
 
-				>PUSHA
+				>SS
+				>PUSHW.G pAliases
 				>PUSHW ZPInputBufPtr
 				>PUSHWZ					ScopeID
-				>SYSCALL SListLookup
+				>PUSHEA.G ZPInputBufPtr	NextPtr
+				>KAPI SListLookup
+				>SR
 				bcs CORE.Run.4
 
 				>STYA ZPTmpW			Save KeyID
-				txa
-				jsr CORE.SkipCharsA
 
-				ldy #hAliases
+				ldy #pAliases
 				jsr CORE.SListGetData
 				bcs .9
 
-				jsr CORE.PushBufX
+				jsr CORE.PushBufYA
 				bcc CORE.Run.3
 
 .9				rts
 *--------------------------------------
 CORE.Run.4		>LDYA L.CMD				internal command ?
+
 				jsr CORE.LookupInputBuf
 				bcc .41
 
@@ -227,6 +246,7 @@ CORE.Run.4		>LDYA L.CMD				internal command ?
 				jmp CORE.Run.Exit0
 *--------------------------------------
 CORE.Run.5		jsr CORE.GetCharNB
+
 				bcs CORE.Run.6			Nothing to skip
 
 				jsr CORE.IsEndCmd
@@ -345,13 +365,13 @@ CORE.Run.Exit0	lda #0
 
 CORE.Run.Exit	php
 				pha
-				>LDA.G CORE.hArgVBuf
+				>LDYA ZPArgVBuf
 				beq .1
 
-				>SYSCALL FreeMem
+				>LIBC Free
 
-				>STZ.G CORE.hArgVBuf
-
+				stz ZPArgVBuf+1
+				
 .1				jsr IO.Reset
 
 				pla
@@ -372,13 +392,16 @@ CORE.ExecCmd	lda #0
 				tax
 				jmp (J.CMD,x)
 *--------------------------------------
-CORE.ExecExtCmd	>PUSHW ZPArgVBuf
+CORE.ExecExtCmd	>SS
+				>PUSHW ZPArgVBuf
+				>PUSHBI 0
 				>PUSHB CORE.PSFlags
-
-				>SYSCALL ExecV
+				>LIBC ExecV
+				>SR
 				bcs .9
 
-				tax						CPID
+				sta ZPTmpW				CPID
+
 				lda CORE.PSFlags
 				and #S.PS.F.HOLD
 				bne .1
@@ -387,21 +410,20 @@ CORE.ExecExtCmd	>PUSHW ZPArgVBuf
 				bit #bState.PipeOut
 				bne .1
 
-				ldy #S.PS.hStdErr
-				lda (pPS),y
-				>PUSHA
+				>SS
+				jsr IO.GetStdErr
+				>PUSHYA
 				>PUSHW L.MSG.PID
-
-				txa
-				>PUSHA
+				>PUSHB ZPTmpW
 				>PUSHBI 1
-				>SYSCALL FPrintF
+				>LIBC FPrintF
+				>SR
 				rts
 
 .1				>SLEEP					Suspend this PID
 
-				ldy #S.PS.RC			CPID will update S.PS.RC
-				lda (pPS),y
+				ldy #S.PS.ERRNO			CPID will update S.PS.RC
+				jsr A2osX.GetPSy
 				cmp #1
 
 .9				rts
@@ -423,13 +445,13 @@ CORE.LookupInputBuf
 				.HS 90					BCC
 CORE.LookupArgVBuf
 				clc
-				>STYA ZPPtr1			Keywords table
+				>STYA R1			Keywords table
 				>LDYA ZPArgVBufPtr
 				bcc CORE.Lookup
 
 				>LDYA ZPInputBufPtr
 
-CORE.Lookup		>STYA ZPPtr2
+CORE.Lookup		>STYA R2
 
 				ldx #0
 
@@ -439,7 +461,7 @@ CORE.Lookup		>STYA ZPPtr2
 				bcs .3
 
 .20				jsr ToUpperCase
-				eor (ZPPtr1),y			match table char ?
+				eor (R1),y			match table char ?
 				asl						compare only 7 bits
 				bne .4					no match...get next table keyword
 
@@ -454,19 +476,19 @@ CORE.Lookup		>STYA ZPPtr2
 				rts
 
 .3				dey
-				lda (ZPPtr1),y			was last char in this keyword ?
+				lda (R1),y			was last char in this keyword ?
 				bmi .8
 
 				iny
 .41				jsr IncPtr1				skip chars to next keyword
 
-.4				lda (ZPPtr1)
+.4				lda (R1)
 				bpl .41
 
 				jsr IncPtr1
 
 .6				inx
-				lda (ZPPtr1)			Array Ending 0, lookup failed
+				lda (R1)			Array Ending 0, lookup failed
 				bne .1
 
 				lda #E.SYN
@@ -475,7 +497,7 @@ CORE.Lookup		>STYA ZPPtr2
 				rts
 
 .7				iny
-				lda (ZPPtr2),y			Get Src text char...
+				lda (R2),y			Get Src text char...
 				beq .9					end of text
 
 				jsr CORE.IsSpaceOrEndCmd
@@ -540,12 +562,20 @@ CORE.ArgV.Add	lda #C.SPACE
 .7				lda #0
 				sta (ZPArgVBufPtr),y
 
+				>SS
 				>LDYA ZPArgVBufPtr
 				>STYA ZPArgVBufPrev
 				>PUSHYA
 				>PUSHW ZPArgVBufPtr
-				>SYSCALL Expand
+				>LIBC Expand
+				>SR
 				bcs .9
+
+				ldy #$ff
+				
+.70				iny
+				lda (ZPArgVBufPtr),y
+				bne .70
 
 				tya
 				beq .8					Empty string....
@@ -693,7 +723,9 @@ CORE.GetChar	clc
 				lda (ZPInputBufPtr)
 				bne .8
 
+				phy
 				jsr CORE.PopBuf
+				ply
 				bcc CORE.GetChar
 
 				lda #0
@@ -709,57 +741,67 @@ CORE.SkipCharsA	clc
 
 .8				rts
 *--------------------------------------
-CORE.PushBufX	>LDA.G CODE.STACK
-				cmp #CODE.STACK.MAX*5
+CORE.PushBufYA	>STYA ZPTmpW			new code
+
+				>LDA.G CODE.STACK
+				cmp #CODE.STACK.MAX*10+1
 				beq .9
 
-				inc
 				tay
-
-				phx						next hBuffer
 
 				ldx #0
 
 .1				lda ZPInputBuf,x		ZPInputBuf
+				iny
 				sta (pData),y
 				inx						ZPInputBufPtr
-				iny
 				cpx #6					ZPInputCmdPtr
-				bne .1
+				bcc .1
 
-				pla
-				pha
+				iny
+				
+				lda ZPTmpW
 				sta (pData),y
+				sta ZPInputBuf
+				sta ZPInputBufPtr
+
+				iny
+				
+				lda ZPTmpW+1
+				sta (pData),y
+				sta ZPInputBuf+1
+				sta ZPInputBufPtr+1
 
 				tya
 				>STA.G CODE.STACK
 
-				pla
-				>SYSCALL GetMemPtr
-				>STYA ZPInputBuf
-				>STYA ZPInputBufPtr
-
-*				clc
+				clc
 				rts
 
 .9				lda #E.STKOVERFLOW
 *				sec
 				rts
 *--------------------------------------
-CORE.PopBuf		phy
-
-				>LDA.G CODE.STACK
+CORE.PopBuf		>LDA.G CODE.STACK
 				cmp #CODE.STACK
 				beq .9
 
 				tay
 				lda (pData),y
-				phy
-				>SYSCALL FreeMem
-				ply
+				pha
+				dey
+				lda (pData),y
+				tay
+				pla
+	
+				>LIBC Free
+
+				>LDA.G CODE.STACK
+				tay
+				dey
+				dey
 
 				ldx #5
-				dey
 
 .1				lda (pData),y			ZPInputBuf
 				sta ZPInputBuf,x
@@ -770,24 +812,25 @@ CORE.PopBuf		phy
 				tya
 				>STA.G CODE.STACK
 
-				ply
-
-*				clc
+				clc
 				rts
 
-.9				ply
-
-				lda #E.STACKERROR
+.9				lda #E.STACKERROR
 *				sec
 				rts
 *--------------------------------------
 CORE.SListGetData
+				>SS
+				iny
+				>PUSHB (pData),y
+				dey
 				>PUSHB (pData),y
 				>PUSHW ZPTmpW			KeyID
 				>PUSHWZ					Allocate
 				>PUSHWI $ffff			All
 				>PUSHWZ					from Start
-				>SYSCALL SListGetData	X = hMem
+				>KAPI SListGetData	X = hMem
+				>SR
 				rts
 *--------------------------------------
 MAN

@@ -1,14 +1,10 @@
 NEW
   AUTO 3,1
 *---------------------------------------
-* Global Symbol Record: (6+ bytes)
-*  0 : Len
-*  1 : Flags:
-*		b7=0=pending,1=resolved
-*		b6=R/W (.SE)
-*		b2,b1,b0 : Size (in bytes)
-*  2-5 : 32 bits Value
-*  6+  : Local Symbols.....
+* Global Symbol Record: (5+ bytes)
+*  0 : Flags:
+*  1-4 : 32 bits Value
+*  5+  : Local Symbols.....
 *---------------------------------------
 * Local/Private Symbol Record: (4 bytes)
 *  0 : Local ID (1->255)
@@ -16,62 +12,71 @@ NEW
 *  2-3 : 16 bits offset (PC)
 *---------------------------------------
 SYM.Init		lda #SL..+SL._
-				>SYSCALL SListNew
+				>KAPI SListNew
 				bcs .9
 
-				>STA.G SYM.hList
+				>STYA.G SYM.pList
 
 				lda #SL..+SL._
-				>SYSCALL SListNew
+				>KAPI SListNew
 				bcs .9
 
-				>STA.G FWR.hList
+				>STYA.G FWR.pList
 
 				>LDYAI 256
-				>SYSCALL GetMem
+				>LIBC Malloc
 				bcs .9
 
 				>STYA ZPSymbolBuf
-				txa
-				>STA.G SYM.hBuf
 
 .9				rts
 *---------------------------------------
-SYM.Quit		>LDA.G SYM.hBuf
+SYM.Quit		>LDYA ZPSymbolBuf
 				beq .1
 
-				>SYSCALL FreeMem
+				>LIBC Free
 
-.1				>LDA.G FWR.hList
+.1				>LDYA.G FWR.pList
+				cmp #0
 				beq .2
 
-				>SYSCALL SListFree
+				>KAPI SListFree
 
-.2				>LDA.G SYM.hList
+.2				>LDYA.G SYM.pList
+				cmp #0
 				beq .8
 
-				>SYSCALL SListFree
+				>KAPI SListFree
 
-.8				rts
+.8
+SYM.Quit.RTS	rts
 *---------------------------------------
-SYM.NewGlobal	>LDA.G ASM.PASS
+SYM.NewGlobal	jsr SYM.StoreGlobal		Store previous if any
+				bcs SYM.Quit.RTS
+
+				stz ZPMacroNextID
+				
+				>LDA.G ASM.PASS
 				bne SYM.GetGlobal
+*---------------------------------------
+.10				stz SRC.ACC.F
 
-				jsr SYM.StoreGlobal		Store previous if any
-				bcs .99
+				jsr SYM.FWRLookup
+				bcs .1
+				
+				lda #SYMG.F.FWREF
+				tsb SRC.ACC.F
 
-				>STZ.G MAC.CtxID
-				>STA.G MAC.CtxNextID
-
-				>PUSHB.G SYM.hList
-				>PUSHW ZPLinePtr		Pass #1: try to add global...
-				>PUSHWI 0				ScopeID
-				>SYSCALL SListNewKey
+.1				>SS
+				>PUSHW.G SYM.pList
+				>PUSHW ZPLinePtr
+				>PUSHWZ					ScopeID
+				>PUSHWI ZPLinePtr		NextPtr
+				>KAPI SListNewKey
+				>SR
 				bcs .9					Already Defined
 
 				>STYA.G SYM.ID
-
-				stz SRC.ACC.F
 
 				lda #SYMG
 				>STA.G SYM.BufPtr
@@ -79,90 +84,161 @@ SYM.NewGlobal	>LDA.G ASM.PASS
 				lda #0
 				sta (ZPSymbolBuf),y
 
-				phx
+				jsr SYM.PC2Global
 
-				jsr SYM.LookupFWFef
-				bcs .1
-
-				lda #SYMG.F.FWREF
-				tsb SRC.ACC.F
-
-.1				plx
-				jsr SRC.SkipX
-
-				jsr SYM.PC2Acc
-				jsr SYM.Acc2Global
-
-.80				clc
-				rts
-
-.9				cmp #E.DUPKEY
-				bne .99
-
-				lda #E.SYMBOL.REDEF
-.99
-SYM.NewGlobal.RTS
-				rts
-*---------------------------------------
-SYM.GetGlobal	>PUSHB.G SYM.hList		Pass #2: should be already defined...
-				>PUSHW ZPLinePtr
-				>PUSHWI 0				ScopeID
-				>SYSCALL SListLookup
-				bcs SYM.NewGlobal.RTS
-
-				>STYA.G SYM.ID
-
-				jsr SRC.SkipX
-
-.1				>PUSHB.G SYM.hList		Pass #2: Restore full context
-				>PUSHW.G SYM.ID
-				>PUSHW ZPSymbolBuf
-				>PUSHWI $ffff			all
-				>PUSHWZ					from Start
-				>SYSCALL SListGetData
-				bcs .99
-
-				lda (ZPSymbolBuf)		#SYMG.F
-				bit #SYMG.F.EQU
-				bne .8
-
-*				bit #SYMG.F.FWREF
-*				beq .2
-
-*			>DEBUG
-
-.2				>LDA.G ASM.PC
-				ldy #SYMG.V
-				cmp (ZPSymbolBuf),y
-				bne .7
-
-				>LDA.G ASM.PC+1
-				ldy #SYMG.V+1
-				cmp (ZPSymbolBuf),y
-				beq .8
-
-.7				lda #E.OUT.OF.SYNC
-				sec
-				rts
-
-.8				lda #SYMG
-				>STA.G SYM.BufPtr
-
-				>STZ.G MAC.CtxID
-				>STA.G MAC.CtxNextID
+				lda #$FF
+				>STA.G SYM.bDirty
+				
+				.DO SYMDBG=1
+				jsr SYM.DebugN
+				.FIN
 
 				clc
 				rts
 
-.9				lda #E.UNDEF.SYMBOL
+.9				cmp #E.DUPKEY
+				sec
+				bne .99
+
+				lda #E.SYMBOL.REDEF
+
+.99				rts
+*---------------------------------------
+SYM.GetGlobal	jsr SYM.SYMLookup		Pass #2: should be already defined...
+				bcc .1
+				
+				lda #E.UNDEF.SYMBOL
+*				sec
+				rts
+
+.1				>STYA.G SYM.ID
+
+				>SS
+				>PUSHW.G SYM.pList		Pass #2: Restore full context
+				>PUSHW.G SYM.ID
+				>PUSHW ZPSymbolBuf
+				>PUSHWI $ffff			all
+				>PUSHWZ					from Start
+				>KAPI SListGetData
+				>SR
+				bcs .99
+
+				ldy #SYMG
+
+				lda (ZPSymbolBuf)		#SYMG.F
+				bit #SYMG.F.LOCALS
+				beq .7
+
+.2				lda (ZPSymbolBuf),y
+				beq .7
+				
+				tya
+				clc
+				adc #SYML
+				tay
+				bra .2
+
+.7				tya
+				>STA.G SYM.BufPtr
+				
+				lda (ZPSymbolBuf)		#SYMG.F
+				bit #SYMG.F.EQU
+				bne .8
+
+				>LDA.G ASM.PC
+				ldy #SYMG.V
+				cmp (ZPSymbolBuf),y
+				bne .98
+
+				>LDA.G ASM.PC+1
+				ldy #SYMG.V+1
+				cmp (ZPSymbolBuf),y
+				bne .98
+
+.8				.DO SYMDBG=1
+				jsr SYM.DebugG
+				.FIN
+				
+				>STZ.G SYM.bDirty
+
+				clc
+				rts
+
+.98				lda #E.OUT.OF.SYNC
 				sec
 .99				rts
 *---------------------------------------
+SYM.StoreGlobal	>LDA.G SYM.BufPtr
+				beq .8
+
+				>LDA.G SYM.bDirty
+				beq .8
+				
+				>LDA.G ASM.PASS
+				bne .8
+
+				>SS
+				>PUSHW.G SYM.pList
+				>PUSHW.G SYM.ID
+				>PUSHW ZPSymbolBuf
+
+				>LDA.G SYM.BufPtr
+				tay
+				lda #0
+				cpy #SYMG
+				beq .1
+
+				iny						Add 1 for \0 after locals/privates
+				bne .1
+
+				inc
+			
+.1				>PUSHYA
+
+				>KAPI SListAddData
+				>SR
+
+				.DO SYMDBG=1
+				php
+				pha
+				jsr SYM.DebugS
+				pla
+				plp
+				.FIN
+
+				bcs .9
+				
+				>STZ.G SYM.bDirty
+
+.8				clc
+
+.9				rts
+*---------------------------------------
+* From .EQ pass #2
+*---------------------------------------
+SYM.UpdateGlobal
+				>SS
+				>PUSHW.G SYM.pList
+				>PUSHW.G SYM.ID
+				>PUSHW ZPSymbolBuf
+
+				>PUSHWI SYMG
+
+				>KAPI SListSetData
+				>SR
+
+				.DO SYMDBG=1
+				php
+				pha
+				jsr SYM.DebugU
+				pla
+				plp
+				.FIN
+
+.9				rts
+*---------------------------------------
 SYM.LookupGlobal
-				>PUSHB.G SYM.hList
-				>PUSHW ZPLinePtr
-				>PUSHWI 0				ScopeID
-				>SYSCALL SListLookup
+				jsr SYM.SYMLookup
 				bcc .10
 
 				>LDA.G ASM.PASS			pass#2?
@@ -180,18 +256,16 @@ SYM.LookupGlobal
 				sta SRC.ACC+1
 
 				jmp SYM.AddFWFef
-
-.10				>STYA ZPPtr1			KeyID
-
-				jsr SRC.SkipX
+*---------------------------------------
+.10				>STYA R1			KeyID
 
 .1				>LDA.G SYM.ID
-				cmp ZPPtr1
+				cmp R1
 				bne .3
 
 				iny
 				lda (pData),y
-				cmp ZPPtr1+1
+				cmp R1+1
 				bne .3
 
 				ldy #SYMG-1
@@ -203,205 +277,126 @@ SYM.LookupGlobal
 
 				clc
 				rts
-
-.3				>PUSHB.G SYM.hList
-				>PUSHW ZPPtr1			KeyID
+*---------------------------------------
+.3				>SS
+				>PUSHW.G SYM.pList
+				>PUSHW R1			KeyID
 				>PUSHW L.SRC.ACC.F
 				>PUSHWI SYMG
-				>PUSHWZ
-				>SYSCALL SListGetData
-				bcs .90
+				>PUSHWZ					from Start
+				>KAPI SListGetData
+				>SR
 
-				clc
 				rts
-
-.90				plx
-.9				rts
 *---------------------------------------
-SYM.AddFWFef	jsr SYM.LookupFWFef
-				bcc .8					Already Defined
+SYM.SYMLookup	>SS
+				>PUSHW.G SYM.pList
+				>PUSHW ZPLinePtr
+				>PUSHWZ					ScopeID
+				>PUSHWI ZPLinePtr		NextPtr
+				>KAPI SListLookup
+				>SR
+				rts
+*---------------------------------------
+SYM.AddFWFef	>SS
+				>PUSHW.G FWR.pList
+				>PUSHW ZPLinePtr
+				>PUSHWZ					ScopeID
+				>PUSHWI ZPLinePtr		NextPtr
+				>KAPI SListLookup
+				>SR
+				bcc .9					Already Defined
 
-				>PUSHB.G FWR.hList
-				>PUSHW ZPLinePtr		Pass #1: try to add global...
-				>PUSHWI 0				ScopeID
-				>SYSCALL SListNewKey
+				jsr SYM.NewFWRef
 				bcs .9
-
+				
 				>STYA.G FWR.ID
 
-				jsr SRC.SkipX
-
-				>PUSHB.G FWR.hList
+				>SS
+				>PUSHW.G FWR.pList
 				>PUSHW.G FWR.ID
-				>PUSHW ZPSymbolBuf
+				>PUSHW L.SRC.ACC.F
 				>PUSHWI 1
-				>SYSCALL SListAddData
-				rts
-
-.8				jsr SRC.SkipX
-
-				clc
+				>KAPI SListAddData
+				>SR
 
 .9				rts
 *---------------------------------------
-SYM.LookupFWFef	>PUSHB.G FWR.hList
+SYM.NewFWRef	>SS
+				>PUSHW.G FWR.pList
 				>PUSHW ZPLinePtr
-				>PUSHWI 0				ScopeID
-				>SYSCALL SListLookup
+				>PUSHWZ					ScopeID
+				>PUSHWI ZPLinePtr		NextPtr
+				>KAPI SListNewKey
+				>SR
 				rts
 *---------------------------------------
-SYM.StoreGlobal	>LDA.G ASM.PASS
-				bne .8
-
-				>LDA.G SYM.BufPtr
-				beq .8
-
-				>PUSHB.G SYM.hList
-				>PUSHW.G SYM.ID
-				>PUSHW ZPSymbolBuf
-
-				>LDA.G SYM.BufPtr
-				tay
-				lda #0
-				cpy #SYMG
-				beq .1
-
-				iny						Add 1 for \0 after locals/privates
-				bne .1
-
-				inc
-
-.1				>PUSHYA
-
-				>SYSCALL SListAddData
-				bcs .9
-
-				>STZ.G SYM.BufPtr
-
-.8				clc
-.9				rts
-*---------------------------------------
-SYM.UpdateGlobal
-				>PUSHB.G SYM.hList
-				>PUSHW.G SYM.ID
-				>PUSHW ZPSymbolBuf
-
-				>LDA.G SYM.BufPtr
-				tay
-				lda #0
-				cpy #SYMG
-				beq .1
-
-				iny						Add 1 for \0 after locals/privates
-				bne .1
-				inc
-
-.1				>PUSHYA
-
-				>SYSCALL SListSetData
-				bcs .9
-
-				>STZ.G SYM.BufPtr
-.9				rts
-*---------------------------------------
-SYM.PC2Acc		ldy #ASM.PC+3
-				ldx #3
-
-.1				lda (pData),y
-				sta SRC.ACC,x
-				dey
-				dex
-				bpl .1
-
+SYM.FWRLookup	>SS
+				>PUSHW.G FWR.pList
+				>PUSHW ZPLinePtr
+				>PUSHWZ					ScopeID
+				>PUSHWZ					NextPtr
+				>KAPI SListLookup
+				>SR
 				rts
 *---------------------------------------
-SYM.Acc2Global	ldy #SYMG-1
+SYM.NewPrivateA ldx ZPMacroCtxID
 
-.2				lda SRC.ACC.F,y
-				sta (ZPSymbolBuf),y
-				dey
-				bpl .2
+				bra SYM.NewLocal
 
-				rts
-*---------------------------------------
-SYM.NewLocalA	tax						Save Local ID
+SYM.NewLocalA	ldx #0
 
+SYM.NewLocal	sta R3					local ID
+				stx R3+1				Ctx ID
+				
 				>LDA.G SYM.BufPtr		not in a global label
 				beq .91
 
 				>LDA.G ASM.PASS
-				bne .20
+				bne SYM.GetLocalA
 *---------------------------------------
-				jsr SYM.LookupLocalX	Pass #1: try to add
-				bcc .9					Already Defined
+				jsr SYM.LookupLocal		Pass #1: try to add
+				bcc .98					Already Defined
 
 				>LDA.G SYM.BufPtr
 *				sec
 				adc #SYML
 				bcs .90
 
-				ldy #ASM.PC+4
-
-.1				dey
 				lda (pData),y
-				pha
-				cpy #ASM.PC
-				bne .1
-
-				ldy #SYMG.V
-
-				sec
-
-				pla
-				sbc (ZPSymbolBuf),y
-				sta SYM.LocalOfs
-
-				iny
-				pla
-				sbc (ZPSymbolBuf),y
-				sta SYM.LocalOfs+1
-
-				iny
-				pla
-				sbc (ZPSymbolBuf),y
-				bne .97
-
-				iny
-				pla
-				sbc (ZPSymbolBuf),y
-				bne .98
-
-				>LDA.G MAC.CtxID		Get Macro Context ID
-
-				pha
-
-				>LDA.G SYM.BufPtr
 				tay
-				txa						Get Back ID
+				
+				lda R3
 				sta (ZPSymbolBuf),y
 
-				pla
+				lda R3+1
 				iny
 				sta (ZPSymbolBuf),y
 
-				lda SYM.LocalOfs
+				iny						Leave 2 bytes for offset
 				iny
-				sta (ZPSymbolBuf),y
-
-				lda SYM.LocalOfs+1
-				iny
-				sta (ZPSymbolBuf),y
-
+				
 				iny
 				lda #0
 				sta (ZPSymbolBuf),y		ending \0
+				
 				tya
-
 				>STA.G SYM.BufPtr
+				
+				jsr SYM.PC2Acc
+				jsr SYM.Acc2Offset
+				bcs .99
 
 				lda (ZPSymbolBuf)
 				ora #SYMG.F.LOCALS
 				sta (ZPSymbolBuf)
+
+				lda #$FF
+				>STA.G SYM.bDirty
+
+				.DO SYMDBG=1
+				jsr SYM.DebugAL
+				.FIN
 
 				clc
 				rts
@@ -414,25 +409,24 @@ SYM.NewLocalA	tax						Save Local ID
 				sec
 				rts
 
-.97				pla
-.98				lda #E.RANGE
-
+.98				lda #E.SYMBOL.REDEF
 				sec
-				rts
-
-.9				lda #E.SYMBOL.REDEF
-				sec
-				rts
+.99				rts
 *---------------------------------------
-.20				>LDA.G SYM.BufPtr		Pass #2: setup SYM.BufPtr in case of .EQ
+SYM.GetLocalA	jsr SYM.LookupLocal		Pass #2: must be defined
+				bcs .9
+
+				.DO SYMDBG=1
+				jsr SYM.DebugGL
+				.FIN
+
 				clc
-				adc #SYML
-				sta (pData),y
-*				clc
+				rts
+				
+.9				lda #E.UNDEF.SYMBOL
 				rts
 *---------------------------------------
-SYM.LookupLocalX
-				lda (ZPSymbolBuf)
+SYM.LookupLocal	lda (ZPSymbolBuf)
 				and #SYMG.F.LOCALS
 				beq .99
 
@@ -443,28 +437,23 @@ SYM.LookupLocalX
 
 				phy						SYML.ID
 
-				txa
-				cmp (ZPSymbolBuf),y
+				lda (ZPSymbolBuf),y
+				cmp R3
 				bne .4
-
-				>LDA.G MAC.CtxID
-
-				ply
-				phy
 
 				iny						SYML.CtxID
-				cmp (ZPSymbolBuf),y
+				lda (ZPSymbolBuf),y
+				cmp R3+1
 				bne .4
 
-				ldy #SYMG.V
-				ldx #0
+				ldy #SYMG.V+3
+				ldx #3
 
 .2				lda (ZPSymbolBuf),y
 				sta SRC.ACC,x
-				inx
-				iny
-				cpy #SYMG
-				bne .2
+				dey
+				dex
+				bpl .2
 
 				ply
 				iny
@@ -482,6 +471,9 @@ SYM.LookupLocalX
 				bcc .3
 
 				inc SRC.ACC+2
+				bne .3
+				
+				inc SRC.ACC+3
 
 .3				clc
 				rts
@@ -496,10 +488,75 @@ SYM.LookupLocalX
 				sec
 				rts
 *---------------------------------------
-SYM.Dump.End	>PUSHW L.MSG.SUMMARY
-				>PUSHW ZPPtr2
+SYM.PC2Global	jsr SYM.PC2Acc
+
+SYM.ACC2Global	ldy #SYMG-1
+
+.1				lda SRC.ACC.F,y
+				sta (ZPSymbolBuf),y
+				dey
+				bpl .1
+
+				rts
+*---------------------------------------
+SYM.PC2Acc		ldy #ASM.PC+3
+				ldx #3
+
+.1				lda (pData),y
+				sta SRC.ACC,x
+				dey
+				dex
+				bpl .1
+
+				rts
+*---------------------------------------
+SYM.Acc2Offset	sec
+
+				lda SRC.ACC
+				ldy #SYMG.V
+				sbc (ZPSymbolBuf),y
+				pha
+				
+				lda SRC.ACC+1
+				ldy #SYMG.V+1
+				sbc (ZPSymbolBuf),y
+				pha
+
+				>LDA.G SYM.BufPtr
+				tay
+				dey
+				pla
+				sta (ZPSymbolBuf),y
+				pla
+				dey
+				sta (ZPSymbolBuf),y
+				
+				lda SRC.ACC+2
+				ldy #SYMG.V+2
+				sbc (ZPSymbolBuf),y
+				bne .9
+				
+				lda SRC.ACC+3
+				ldy #SYMG.V+3
+				sbc (ZPSymbolBuf),y
+				bne .9
+				
+				clc
+				rts
+				
+.9				lda #E.RANGE
+				sec
+				rts				
+*---------------------------------------
+SYM.Dump.End	>SS
+
+				>PUSHW L.MSG.SUMMARY
+				>PUSHW R2
 				>PUSHBI 2
-				jmp OUT.Print
+				>LIBC PrintF
+				>SR
+				
+				jmp OUT.PrintCR
 
 SYM.Dump.8		clc
 				rts
@@ -511,34 +568,41 @@ SYM.Dump		>LDA.G bListAll
 				bpl SYM.Dump.8
 
 SYM.Dump.1		>LDYA L.MSG.SYMBOLS
-				>SYSCALL PutS
+				>LIBC PutS
 
-				stz ZPPtr2
-				lda #1
-				sta ZPPtr2+1
+				stz R2
+				lda #2
+				sta R2+1
 
-.1				>LDYA ZPPtr2
-				>STYA ZPPtr1
+.1				>LDYA R2
+				>STYA R1
 
-				>PUSHB.G SYM.hList
-				>PUSHW ZPPtr1
+				>SS
+				>PUSHW.G SYM.pList
+				>PUSHW R1
 				>PUSHW ZPTmpBuf
-				>SYSCALL SListGetByID
-				bcs SYM.Dump.End
+				>KAPI SListGetByID
+				>SR
+				bcc .2
+				
+				jmp SYM.Dump.End
 
-				>STYA ZPPtr2			Save Next ID
+.2				>STYA R2			Save Next ID
 
-				>PUSHB.G SYM.hList
-				>PUSHW ZPPtr1			KeyID
+				>SS
+				>PUSHW.G SYM.pList
+				>PUSHW R1			KeyID
 				>PUSHW ZPSymbolBuf
 				>PUSHWI $ffff			All
 				>PUSHWZ					from Start
-				>SYSCALL SListGetData
+				>KAPI SListGetData
+				>SR
 				bcs .9
-
+ 
 				jsr SYM.Dump.GLP
-
-				bcc .1
+				bcs .9
+				
+				jmp .1
 
 .9				rts
 *---------------------------------------
@@ -546,7 +610,7 @@ SYM.Dump.GLP	jsr SYM.Dump.G
 				bcs .9
 
 				>LDYA ZPTmpBuf			Label
-				>SYSCALL PutS
+				>LIBC PutS
 
 				ldx #5
 				lda (ZPSymbolBuf)
@@ -565,19 +629,21 @@ SYM.Dump.GLP	jsr SYM.Dump.G
 .8				clc
 .9				rts
 *---------------------------------------
-SYM.Dump.G		ldx #8
+SYM.Dump.G		>SS
+	
+				ldx #8
 
 				ldy #SYMG.V+3
 
-.10				lda (ZPSymbolBuf),y
-				bne .1
+.1				lda (ZPSymbolBuf),y
+				bne .2
 
 				dey
 				dex
 				dex
-				bne .10
+				bne .1
 
-.1				txa
+.2				txa
 				lsr
 				pha
 
@@ -585,7 +651,7 @@ SYM.Dump.G		ldx #8
 				>PUSHB L.MSG.EQU0,x
 
 				pla
-				beq .3
+				beq .4
 
 				pha
 				tax						byte count
@@ -595,17 +661,18 @@ SYM.Dump.G		ldx #8
 
 				tay
 
-.2				dey
+.3				dey
 				lda (ZPSymbolBuf),y
 				>PUSHA
 				dex
-				bne .2
+				bne .3
 
 				pla						Byte Count
 
-.3				>PUSHA
+.4				>PUSHA
 
-				>SYSCALL PrintF
+				>LIBC PrintF
+				>SR
 				rts
 *---------------------------------------
 SYM.Dump.LP		ldy #SYMG
@@ -618,6 +685,8 @@ SYM.Dump.LP		ldy #SYMG
 				phy
 
 				phx
+				
+				>SS
 
 				tax						ID
 
@@ -646,7 +715,9 @@ SYM.Dump.LP		ldy #SYMG
 
 .5				>PUSHA
 
-				>SYSCALL PrintF
+				>LIBC PrintF
+				
+				>SR
 
 				plx
 				dex
@@ -700,11 +771,107 @@ SYM.Dump.PushValueY
 				rts
 *---------------------------------------
 				.DO SYMDBG=1
-SYM.Debug		>PUSHW L.MSG.SYMDBG
-				>PUSHW.G SYM.ID
-				>PUSHBI 2
-				>SYSCALL PrintF
+SYM.DebugN		>SS
+				>PUSHW L.MSG.SYMDBGN
+				bra SYM.Debug
+
+SYM.DebugG		>SS
+				>PUSHW L.MSG.SYMDBGG
+				bra SYM.Debug
+
+SYM.DebugS		>SS
+				>PUSHW L.MSG.SYMDBGS
+				bra SYM.Debug
+
+SYM.DebugU		>SS
+				>PUSHW L.MSG.SYMDBGU
+				bra SYM.Debug
+				
+SYM.DebugAL		>SS
+				>PUSHW L.MSG.SYMDBGAL
+
+				bra SYM.Debug
+				
+SYM.DebugGL		>SS
+				>PUSHW L.MSG.SYMDBGGL
+
+SYM.Debug		>PUSHW.G SYM.ID
+
+				>PUSHB.G SYM.BufPtr
+				
+				lda (ZPSymbolBuf)
+				>PUSHA
+				
+				ldy #SYMG.V+3
+
+.1				lda (ZPSymbolBuf),y
+				>PUSHA
+				dey
+				bne .1
+
+				>PUSHBI 8
+				>LIBC PrintF
+				>SR
+
+				lda (ZPSymbolBuf)		#SYMG.F
+				bit #SYMG.F.LOCALS
+				beq .8
+
+				jsr OUT.PrintCR
+
+				ldy #SYMG
+
+.2				lda (ZPSymbolBuf),y
+				beq .8
+				
+				phy
+				iny
+				lda (ZPSymbolBuf),y		#SYML.CtxID
+				bne .3
+				
+				>SS
+				>PUSHW L.MSG.SYMDBGL
+			
+				jsr .80
+				
+				>PUSHBI 3
+
+				bra .7
+				
+.3				>SS
+				>PUSHW L.MSG.SYMDBGP
+				
+				lda (ZPSymbolBuf),y		#SYML.CtxID
+				>PUSHA
+				
+				jsr .80
+				
+				>PUSHBI 4
+
+.7				>LIBC PrintF
+				>SR
+				
+				pla
+				clc
+				adc #SYML
+				tay
+				bra .2
+
+.8				jmp OUT.PrintCR
+
+.80				dey
+				lda (ZPSymbolBuf),y		#SYML.ID
+				>PUSHA
+				iny
+				iny
+				iny
+				lda (ZPSymbolBuf),y
+				>PUSHA
+				dey
+				lda (ZPSymbolBuf),y
+				>PUSHA
 				rts
+
 				.FIN
 *---------------------------------------
 MAN

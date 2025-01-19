@@ -6,6 +6,7 @@ NEW
 				.TF sbin/initd
 *--------------------------------------
 INITDDBG		.EQ 0
+ROOTMODE		.EQ 0
 *--------------------------------------
 				.INB inc/macros.i
 				.INB inc/a2osx.i
@@ -16,9 +17,8 @@ INITDDBG		.EQ 0
 				.DUMMY
 				.OR ZPBIN
 ZS.START
-BufPtr			.BS 2
-hBuf			.BS 1
-hFile			.BS 1
+pBuf			.BS 2
+pFile			.BS 2
 ZS.END			.ED
 *--------------------------------------
 *			File Header (16 Bytes)
@@ -26,25 +26,25 @@ ZS.END			.ED
 CS.START		cld
 				jmp (.1,x)
 				.DA #$61				6502,Level 1 (65c02)
-				.DA #1					BIN Layout Version 1
+				.DA #2					BIN Layout Version 2
 				.DA #0					S.PS.F.EVENT
 				.DA #0
-				.DA CS.END-CS.START		Code Size (without Constants)
-				.DA DS.END-DS.START		Data SegmentSize
-				.DA #16					Stack Size
+				.DA CS.END
+				.DA ID.END
+				.DA DS.END
+				.DA #32					Stack Size
 				.DA #ZS.END-ZS.START	Zero Page Size
-				.DA 0
 *--------------------------------------
 * Relocation Table
 *--------------------------------------
 .1				.DA CS.INIT
 				.DA CS.RUN
-				.DA CS.DOEVENT
+				.DA CS.SIG
 				.DA	CS.QUIT
 L.MSG.CTRLR		.DA MSG.CTRLR
 				.DO INITDDBG=1
-L.MSG.ETCINIT	.DA MSG.ETCINIT
 L.MSG.START		.DA MSG.START
+L.MSG.EXEC		.DA MSG.EXEC
 L.MSG.OK		.DA MSG.OK
 L.MSG.KO		.DA MSG.KO
 				.FIN
@@ -63,45 +63,50 @@ CS.QUIT			clc
 *--------------------------------------
 CS.RUN			.DO INITDDBG=1
 				>LDYA L.MSG.START
-				>SYSCALL PutS
+				>LIBC PutS
 				.FIN
+			
+				.DO ROOTMODE=0
 
 				ldy #S.PS.PID
-				lda (pPS),y
+				jsr A2osX.GetPSy
 				cmp #1
 				bne .9
 
-				ldy #S.PS.hStdIn
-				lda (pPS),y
-				>SYSCALL FEOF
+				ldy #S.PS.pStdIn
+				jsr A2osX.GetPSy
+				pha
+				iny
+				jsr A2osX.GetPSy
+				ply
+
+				>LIBC FEOF
 				bcs .99
 
 				tay
 				bne .1
 
-				>SYSCALL GetChar
+				>LIBC GetChar
 				bcs .99
 
 				cmp #18					CTRL-R for Root mode
 				bne .1
+				
+				.FIN
 
 				>LDYA L.MSG.CTRLR
-				>SYSCALL PutS
+				>LIBC PutS
 
-				ldx #0
-				jsr CS.RUN.EXEC.X
+				ldy #0
+				jsr CS.RUN.EXEC.Y
+				bcs .99
 
 				>SLEEP
 *--------------------------------------
-.1				.DO INITDDBG=1
-				>LDYA L.MSG.ETCINIT
-				>SYSCALL PutS
-				.FIN
-				
-				jsr CS.RUN.ETCINIT
+.1				jsr CS.RUN.ETCINIT
 				bcs .99
 *--------------------------------------
-.2				>SYSCALL GetChar
+.2				>LIBC GetChar
 				bcs .99
 
 				ldy #4
@@ -116,8 +121,8 @@ CS.RUN			.DO INITDDBG=1
 
 .7				tya
 				asl
-				tax
-				jsr CS.RUN.EXEC.X
+				tay
+				jsr CS.RUN.EXEC.Y
 				bra .2
 
 .9				lda #E.SYN
@@ -125,112 +130,163 @@ CS.RUN			.DO INITDDBG=1
 .99				rts
 *--------------------------------------
 CS.RUN.ETCINIT	>LDYAI 256
-				>SYSCALL GetMem
-				>STYA BufPtr
-				stx hBuf
+				>LIBC Malloc
+				>STYA pBuf
 
+				>SS
 				>PUSHW L.ETCINIT
 				>PUSHBI	O.RDONLY+O.TEXT
 				>PUSHBI S.FI.T.TXT
 				>PUSHWZ
-				>SYSCALL FOpen
+				>LIBC FOpen
+				>SR
 				bcc .10
 
 				pha
+
 				.DO INITDDBG=1
+
 				jsr CS.RUN.ERRMSG
+
 				.FIN
+
 				jsr .81
 
 				pla
 				sec
 				rts
 
-.10				sta hFile
+.10				>STYA pFile
 
-.1				>PUSHB hFile
-				>PUSHW BufPtr
+.1				>SS
+				>PUSHW pBuf
 				>PUSHWI 256
-				>SYSCALL FGetS
+				>PUSHW pFile
+				
+				>LIBC FGetS
+				>SR
 				bcs .80
 
-				lda (BufPtr)
+				lda (pBuf)
 				cmp #'#'
 				beq .1
 
 				.DO INITDDBG=1
-				>PUSHW BufPtr
+				>SS
+				>PUSHW pBuf
 				>PUSHBI 0
-				>SYSCALL PrintF
+				>LIBC PrintF
+				>SR
 				.FIN
 
-				>PUSHW BufPtr
+				>SS
+				>PUSHW pBuf
+				>PUSHBI 0
 				>PUSHBI S.PS.F.NOHUP+S.PS.F.HOLD
-				>SYSCALL ExecL
+				>LIBC ExecL
+				>SR
 
 				.DO INITDDBG=1
 				bcs .2
 
 				>LDYA L.MSG.OK
-				>SYSCALL PutS
+				>LIBC PutS
 
 				.FIN
+
 				>SLEEP
-				bra .1
+				jmp .1
 
 				.DO INITDDBG=1
+
 .2				jsr CS.RUN.ERRMSG
-				bra .1
+				jmp .1
+
 				.FIN
 
-.80				lda hFile
-				>SYSCALL FClose
+.80				>LDYA pFile
+				>LIBC FClose
 
-.81				lda hBuf
-				>SYSCALL FreeMem
+.81				>LDYA pBuf
+				>LIBC Free
 
 				rts
 *--------------------------------------
-CS.RUN.EXEC.X	>PUSHW L.CMDS,x
+CS.RUN.EXEC.Y	.DO INITDDBG=1
+		
+				phy
+				>SS
+				>PUSHW L.MSG.EXEC
+				>PUSHW L.CMDS,y
+				>PUSHBI 2
+				>LIBC PrintF
+				>SR
+				ply
+			
+				.FIN
+				
+				>SS
+				>PUSHW L.CMDS,y
+				>PUSHBI 0
 				>PUSHBI S.PS.F.HOLD
-				>SYSCALL ExecL
+				>LIBC ExecL
+				>SR
+
+				.DO INITDDBG=1
+				bcs CS.RUN.ERRMSG
+				
+				>LDYA L.MSG.OK
+				>LIBC PutS
+				.FIN
+
 				rts
 *--------------------------------------
 				.DO INITDDBG=1
-CS.RUN.ERRMSG	tax
+
+CS.RUN.ERRMSG	pha
+				tay
+				>SS
 				>PUSHW L.MSG.KO
-				txa
+				tya
 				>PUSHA
 				>PUSHBI 1
-				>SYSCALL PrintF
+				>LIBC PrintF
+				>SR
+				pla
+				sec
 				rts
+
 				.FIN
 *--------------------------------------
-CS.DOEVENT		sec
+CS.SIG			sec
 				rts
 *--------------------------------------
-CS.END
+CS.END			.EQ *
 *--------------------------------------
 MSG.CTRLR		.AZ "INITD:Entering ROOT mode..."
+
 				.DO INITDDBG=1
+
 MSG.START		.AZ "INITD:Starting..."
-MSG.OK			.AZ " [OK]"
-MSG.KO			.CZ " [%h]\r\n"
-MSG.ETCINIT		.AS "INITD:Executing "
+MSG.EXEC		.CZ "INITD:Starting %s..."
+MSG.OK			.CZ "[OK]\r\n"
+MSG.KO			.CZ "[%h]\r\n"
+
 				.FIN
-ETCINIT			.AZ "${ROOT}etc/init"
 *--------------------------------------
 CTRLCHARS		.DA #19,#13,#16,#12,#4
 *--------------------------------------
-BINSH			.AZ "${ROOT}bin/sh"
-BINMEM			.AZ "${ROOT}bin/mem"
-BINPS			.AZ "${ROOT}bin/ps"
-BINLSOF			.AZ "${ROOT}bin/lsof"
-BINSHUTDOWN		.AZ "${ROOT}bin/shutdown"
+ETCINIT			.AZ "/etc/init"
+BINSH			.AZ "/bin/sh"
+BINMEM			.AZ "/bin/mem"
+BINPS			.AZ "/bin/ps"
+BINLSOF			.AZ "/bin/lsof"
+BINSHUTDOWN		.AZ "/bin/shutdown"
+*--------------------------------------
+ID.END			.EQ *
 *--------------------------------------
 				.DUMMY
 				.OR 0
-DS.START
 DS.END			.ED
 *--------------------------------------
 MAN

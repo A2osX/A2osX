@@ -1,77 +1,67 @@
 NEW
   AUTO 3,1
-*--------------------------------------
-ZPMemMgrSPtr 	.EQ ZPMEMMGR			Pointer To Slot selected
-ZPMemMgrTmp1	.EQ ZPMEMMGR+2
-ZPMemMgrSize	.EQ ZPMEMMGR+4
-MEM.ReqFlags	.EQ ZPMEMMGR+6			store requested Flags
-MEM.BestSlot	.EQ ZPMEMMGR+7
-MEM.BestScore	.EQ ZPMemMgrTmp1
 */--------------------------------------
 * # Realloc
-* ## C
-* `void *realloc(short int hMem, int size);`
+* ## C / CSH
+* `#include <stdlib.h>`
+* `void *realloc(void *ptr, size_t size);`
 * ## ASM
-* `>PUSHB hMem`
+* `>SS`
+* `>PUSHW ptr`
 * `>PUSHW size`
-* `>SYSCALL realloc`
+* `>LIBC realloc`
+* `>SR`
 * ## RETURN VALUE
 *  YA = ptr
 *  X = hMem
 *\--------------------------------------
-K.Realloc		>PULLA
-				sta .1+1				New Size LO
+K.Realloc		sta IO.SETREADAUX
+				sta IO.SETWRITEAUX
 
-				>PULLA
-				sta .2+1				New Size HI
+				ldy #2
+				jsr RAMSW.GetStkYW		ptr
 
-				>PULLA					Src hMem
-				tax
-				
-				jsr MEM.GetMemByID
-				
+				jsr MEM.GetPtrYA
+				bcs .99
+
 				ldy #S.MEM.LEN
 				lda (ZPMemMgrSPtr),y
-				pha
+				sta A4L
 				iny
 				lda (ZPMemMgrSPtr),y
-				ply
+				sta A4L+1
 
-				jsr MEM.MoveToAux		x = Src hMem, YA = Old size
+				lda (ZPMemMgrSPtr)
+				and #$7F
+				tax
+
+				ldy #0
+				jsr RAMSW.GetStkYW		size
+
+				jsr MEM.Malloc.YAX
 				bcs .99
-				
-				stx .7+1				Aux hMem
-				
-.1				ldy #$FF				SELF MODIFIED
-.2				lda #$FF				SELF MODIFIED
 
-				>STYA A2L				size for MoveSetupA1A2
-				
-				jsr K.getmem
-				bcs .99
-				
-				stx .8+1				new main hMem to return
-				>STYA A4L				Save MAIN Ptr
+				>STYA A2L
+				pha
 
-				lda .7+1
-				sta IO.SETREADAUX
-				jsr MEM.SetA1A2			Setup AUX base & End Ptrs
-				sta IO.CLRREADAUX
-				
-				clc						Aux To Main
-				jsr XMov
-				
-.7				lda #$ff				SELF MODIFIED
-				>SYSCALL2 FreeStkObj
-				
-.8				lda #$ff				SELF MODIFIED
-				tax						X = new hMem
-				jmp k.GetMemPtr			YA = new ptr
-				
-.99				rts
+				jsr MEM.CpyA1A2A4
+
+				pla
+				ldy A2L
+*				clc
+
+.99				sta IO.CLRREADAUX
+				sta IO.CLRWRITEAUX
+
+				rts
 */--------------------------------------
-* # GetMem
-*  Y,A = Size Requested
+* # Malloc
+* ## C / CSH
+* `#include <stdlib.h>`
+* `void *malloc(size_t size);`
+* ## ASM
+* `>LDYA ptr`
+* `>LIBC malloc`
 * ## RETURN VALUE
 *  CC : success
 *   YA = PTR to Mem (Uninitialised)
@@ -79,15 +69,23 @@ K.Realloc		>PULLA
 *  CS :
 *   A = EC
 *\--------------------------------------
-K.GetMem0		ldx #S.MEM.F.INIT0
-				.HS 2C					BIT ABS
-K.GetMem		ldx #0
-MEM.GetMem.YAX	stx MEM.ReqFlags
+K.Malloc		ldx #0
+
+MEM.MallocX.YAX	sta IO.SETREADAUX
+				sta IO.SETWRITEAUX
+				jsr MEM.Malloc.YAX
+				sta IO.CLRREADAUX
+				sta IO.CLRWRITEAUX
+				rts
+*--------------------------------------
+MEM.Malloc		ldx #0
+
+MEM.Malloc.YAX	stx MEM.ReqFlags
 				sta ZPMemMgrSize+1
 
 				tya
 				bit #K.MEM.ALIGN-1		aligned ?
-				beq .10					yes, request it	
+				beq .10					yes, request it
 
 				and #K.MEM.nALIGNm1		align on boundary
 				clc
@@ -97,7 +95,8 @@ MEM.GetMem.YAX	stx MEM.ReqFlags
 				inc ZPMemMgrSize+1
 
 .10				sta ZPMemMgrSize
-				>LDYAI Mem.Table
+
+				>LDYAI MEM.LoMem
 				>STYA ZPMemMgrSPtr
 				stz MEM.BestSlot
 				ldx #$ff
@@ -107,7 +106,7 @@ MEM.GetMem.YAX	stx MEM.ReqFlags
 				bra .4					skip slot 0, Check if some free slot to reuse first
 
 .1				inx						move to next slot
-				jsr Mem.NextSlot
+				jsr MEM.NextSlot
 				lda (ZPMemMgrSPtr)		Get Flags
 				bmi .4					in use ?
 
@@ -117,15 +116,15 @@ MEM.GetMem.YAX	stx MEM.ReqFlags
 
 				ldy ZPMemMgrSize+1		> 255, not applicable
 				bne .22					Align to page if $100
-				
+
 				ldy #S.MEM.PTR
 				lda (ZPMemMgrSPtr),y	get LO of PTR
 				clc
 				adc ZPMemMgrSize
 				bcs .4					cross page boundary....
-				
+
 				lda MEM.ReqFlags		get back flags to test if match
-				
+
 .21				bit #S.MEM.F.ALIGN		is request needs a page align ?
 				beq .3
 
@@ -148,20 +147,23 @@ MEM.GetMem.YAX	stx MEM.ReqFlags
 				pha
 				sbc MEM.BestScore+1
 				pla
-				bcs	.4					Delta is >= BestScore	
+				bcs	.4					Delta is >= BestScore
 				bne .4					Delta is > 255...
 
 				sty MEM.BestScore
 				sta MEM.BestScore+1
 				stx MEM.BestSlot
-.4				cpx Mem.LastSlot		any other slot to check?
+
+.4				cpx MEM.LastSlot		any other slot to check?
 				bne .1					last one, create a new slot
 
 				lda MEM.BestSlot
 				beq .5
+
 				tax
 				jsr MEM.GetMemByID
 				bra .7
+
 *-------------- Create a New SLOT
 
 .5				lda MEM.ReqFlags
@@ -171,73 +173,86 @@ MEM.GetMem.YAX	stx MEM.ReqFlags
 				lda ZPMemMgrSize+1		> 255, not applicable
 				bne .52					Align to page if $100
 
-				lda Mem.Free			target PTR will be in same page ?
+				lda MEM.Free			target PTR will be in same page ?
 				beq .6					Memfree is xx00, will be in same page
+
 				cmp ZPMemMgrSize
 				bcs .6					yes, allocate
 
 				tay						no, reserve a free slot to fill gap
 				lda #0
-				jsr Mem.AddSlot			X = new slot
+				jsr MEM.AddSlot			X = new slot
 				bcs .9
 
 				lda #S.MEM.F.NOCROSS	Make sure marked FREE
 				sta (ZPMemMgrSPtr)
 				bra .6
-				
+
 .51				bit #S.MEM.F.ALIGN		is request needs a page align ?
 				beq .6
 
-.52				lda Mem.Free			target PTR will be page aligned ?
+.52				lda MEM.Free			target PTR will be page aligned ?
 				sec
 				sbc ZPMemMgrSize
 				beq .6					yes, allocate
 
 				tay						no, reserve a free slot to fill gap
 				lda #0
-				jsr Mem.AddSlot			X = new slot
+				jsr MEM.AddSlot			X = new slot
 				bcs .9
 
 				lda #S.MEM.F.ALIGN		Make sure marked FREE
 				sta (ZPMemMgrSPtr)
 
 .6				>LDYA ZPMemMgrSize
-				jsr Mem.AddSlot			X = new slot
+				jsr MEM.AddSlot			X = new slot
 				bcs .9
+
 *-------------- Reuse this SLOT
 
-.7				lda MEM.ReqFlags		get requested flags
+.7				phx
+
+				lda MEM.ReqFlags		get requested flags
 				ora #S.MEM.F.INUSE		mark as in use
 				sta (ZPMemMgrSPtr)
 				and #S.MEM.F.INIT0
 				beq .8
 
 				jsr MEM.Init0
-				
-.8				lda #0
-				ldy #S.MEM.BIN
-				sta (ZPMemMgrSPtr),y
-				inc						Mark this slot used by one process
+
+.8				lda #1
 				ldy #S.MEM.REFCNT
 				sta (ZPMemMgrSPtr),y
 
-				lda IO.RDREADAUX
-				pha
-				
+				lda MEM.ReqFlags
+				and #S.MEM.F.CODE
+				bne .88
+
+				bit IO.RDREADAUX
+				php
+
 				sta IO.CLRREADAUX
 
 				ldy #S.PS.PID
 				lda (pPS),y
-				
-				ldy #S.MEM.OWNERPID
-				sta (ZPMemMgrSPtr),y
-				
-				pla
+				tax
+				iny
+				lda (pPS),y
+
+				plp
 				bpl .80
-				
+
 				sta IO.SETREADAUX
 
-.80				clc
+.80				ldy #S.MEM.OWNER+1
+				sta (ZPMemMgrSPtr),y
+				txa
+				dey
+				sta (ZPMemMgrSPtr),y
+
+.88				plx
+
+				clc
 
 				jmp MEM.GetMEMPTR
 * A = HI PTR,Y = LO PTR,X = Current hMem
@@ -246,49 +261,51 @@ MEM.GetMem.YAX	stx MEM.ReqFlags
 * Mem.AddSlot
 *  In:
 *   Y,A = Requested size
-*  Out: 
+*  Out:
 *--------------------------------------
-Mem.AddSlot  	>STYA ZPMemMgrTmp1		save req size
-				ldx Mem.LastSlot
+MEM.AddSlot  	>STYA ZPMemMgrTmp1		save req size
+				ldx MEM.LastSlot
 				inx
 				beq .99					> 255 ERR:OUT OF SLOT
 
-				lda Mem.Free			Compute base PTR=FREE-REQ size
+				lda MEM.Free			Compute base PTR=FREE-REQ size
 				sec
 				sbc ZPMemMgrTmp1
-				tay						save new Mem.Free LO
-				lda Mem.Free+1
+				tay						save new MEM.Free LO
+				lda MEM.Free+1
 				sbc ZPMemMgrTmp1+1
-				pha						save new Mem.Free HI
-				cpy Mem.LoMem
-				sbc Mem.LoMem+1
+				pha						save new MEM.Free HI
+				cpy MEM.LoMem
+				sbc MEM.LoMem+1
 				bcc .98					ERR out of mem
 
-				jsr Mem.NextSlot		X,Y unmodified
-				tya						get back Mem.Free LO
+				jsr MEM.NextSlot		X,Y unmodified
+				tya						get back MEM.Free LO
 				ldy #S.MEM.PTR
-				sta Mem.Free			set as system Mem.Free value
+				sta MEM.Free			set as system MEM.Free value
 				sta (ZPMemMgrSPtr),y	store it as base address of new slot
 				iny
-				pla						get back Mem.Free HI
-				sta Mem.Free+1
+				pla						get back MEM.Free HI
+				sta MEM.Free+1
 				sta (ZPMemMgrSPtr),y
 
 				iny
 				lda ZPMemMgrTmp1		get requested size
 				sta (ZPMemMgrSPtr),y	setup slot LEN
-				iny	
+				iny
 				lda ZPMemMgrTmp1+1
 				sta (ZPMemMgrSPtr),y
 
-				stx Mem.LastSlot		mark this slot allocated
+				stx MEM.LastSlot		mark this slot allocated
+
 				clc
 				rts
+
 .98				pla						discard new Mem.Free HI
 
 .99				lda #E.OOM
 				sec
-				rts	
+				rts
 *--------------------------------------
 MEM.NextSlot	lda ZPMemMgrSPtr
 				clc
@@ -300,8 +317,7 @@ MEM.NextSlot	lda ZPMemMgrSPtr
 
 .8				rts
 *--------------------------------------
-MEM.Init0		phx
-				ldy #S.MEM.PTR
+MEM.Init0		ldy #S.MEM.PTR
 				lda (ZPMemMgrSPtr),y	ZPMemMgrSPtr already set
 				sta .12+1
 				iny
@@ -311,7 +327,7 @@ MEM.Init0		phx
 				eor #$ff
 				tay						y=not lo count
 				lda ZPMemMgrSize+1
-				eor #$ff				a=not hi count			
+				eor #$ff				a=not hi count
 
 				ldx #0
 
@@ -328,90 +344,48 @@ MEM.Init0		phx
 				inc .12+2
 				bra .11
 
-.13				plx
-				rts
-*--------------------------------------
-DEV.FreeFD.8	clc
-				rts
-				
-DEV.FreeFD		ldx IO.hFD
-				lda FDs.pHI-1,x
-				cmp #$C0
-				bcs DEV.FreeFD.8
-
-				stz FDs.pHI-1,x	
-
-				ldy FDs.pLO-1,x
+.13				rts
 */--------------------------------------
 * # Free
-*  Y,A = Ptr To Free
+* ## C / CSH
+* `#include <stdlib.h>`
+* `void free(void *ptr);`
+* ## ASM
+* `>LDYA ptr`
+* `>LIBC free`
 * ## RETURN VALUE
 *  none.
-*  (X unmodified)
 *\--------------------------------------
-K.Free			>STYA ZPMemMgrTmp1
-				
-				ldx Mem.LastSlot
+K.Free			sta IO.SETREADAUX
+				sta IO.SETWRITEAUX
+				jsr MEM.FreeYA
+				sta IO.CLRREADAUX
+				sta IO.CLRWRITEAUX
+				rts
+*--------------------------------------
+MEM.FreeYA		jsr MEM.GetPtrYA
+				bcc MEM.FreeH
 
-.1				txa
-				jsr MEM.GetMemByID
-				
-				ldy #S.MEM.PTR
-				lda (ZPMemMgrSPtr),y
-				cmp ZPMemMgrTmp1
-				bne .2
-				
-				iny
-				lda (ZPMemMgrSPtr),y
-				cmp ZPMemMgrTmp1+1
-				beq MEM.FreeMem
-
-.2				dex
-				bne .1
-				
+MEM.Err			>DEBUG
+				lda #E.BADPTR
 				sec
 				rts
-*/--------------------------------------
-* # FreeMem
-*  A = hMem To Free
-* ## RETURN VALUE
-*  none.
-*  (X unmodified)
-*\--------------------------------------
-K.FreeMem.ERR	>PUSHWI .1
-				
-				tya						hMem n Y
-				>PUSHA
-	
-				ldy #S.PS.PID
-				lda (pPS),y
-				>PUSHA
-				>PUSHBI 2
-				
-				>SYSCALL2 PrintF
-*			>DEBUG
-				lda #E.INVH
-				sec
+*--------------------------------------
+MEM.FreeAX		sta IO.SETREADAUX
+				sta IO.SETWRITEAUX
+				jsr MEM.FreeA
+				sta IO.CLRREADAUX
+				sta IO.CLRWRITEAUX
 				rts
-
-.1				.CZ "Free(%h),PID=%d\r\n"
 *--------------------------------------
-K.FreeMem	    tay
-				beq K.FreeMem.ERR		Slot=0, reserved by Kernel
-
-				cmp Mem.LastSlot
-				bcc .1
-				
-				bne K.FreeMem.ERR
-
-.1				jsr MEM.GetMemByID		X,Y unmodified
+MEM.FreeA		jsr MEM.GetMemByID
 *--------------------------------------
-MEM.FreeMem		lda (ZPMemMgrSPtr)		In use ?
-				bpl K.FreeMem.ERR
-				
+MEM.FreeH		lda (ZPMemMgrSPtr)		In use ?
+				bpl MEM.Err
+
 				ldy #S.MEM.REFCNT
 				lda (ZPMemMgrSPtr),y
-				dec						only one left ?	
+				dec						only one left ?
 				sta (ZPMemMgrSPtr),y
 				bne .8					no, must be a code segment loaded several times
 
@@ -421,55 +395,56 @@ MEM.FreeMem		lda (ZPMemMgrSPtr)		In use ?
 				and #S.MEM.F.CODE		CS: Any BINPATH to discard ?
 				beq .1
 
-				ldy #S.MEM.BIN
+				ldy #S.MEM.OWNER
 				lda (ZPMemMgrSPtr),y
-				jsr MEM.GetMemByID		X unmodified
-*				lda (ZPMemMgrSPtr)
-*				bpl *					***MUST BE ALLOCATED***
-				lda #0					mark BINPATH slot as free
-				sta (ZPMemMgrSPtr)
-				
-.1				lda Mem.LastSlot
+				pha
+				iny
+				lda (ZPMemMgrSPtr),y
+				ply
+				phx
+				jsr MEM.GetPtrYA
+				plx
+			bcs *						***MUST BE ALLOCATED***
+				lda (ZPMemMgrSPtr)
+			bpl *						***MUST BE ALLOCATED***
+				and #$7f				keep flags for memdump
+				sta (ZPMemMgrSPtr)		mark BINPATH slot as free
+
+.1				lda MEM.LastSlot
 				beq .8
 
 				jsr MEM.GetMemByID		X unmodified
 				lda (ZPMemMgrSPtr)
 				bmi .8					used, exit
 
-.2				dec	Mem.LastSlot		free! get previous....
-				beq .80					empty list: go set Mem.Free=Mem.HiMem
+.2				dec	MEM.LastSlot		free! get previous....
+				beq .80					empty list: go set MEM.Free=MEM.HiMem
 
-				lda Mem.LastSlot
+				lda MEM.LastSlot
 				jsr MEM.GetMemByID		X unmodified
 				lda (ZPMemMgrSPtr)
 				bpl .2					free again! loop
 
 				ldy #S.MEM.PTR
-				lda (ZPMemMgrSPtr),y	set Mem.Free... 
-				sta Mem.Free
+				lda (ZPMemMgrSPtr),y	set MEM.Free...
+				sta MEM.Free
 				iny
 				lda (ZPMemMgrSPtr),y
-				sta Mem.Free+1
+				sta MEM.Free+1
 
 .8				clc
 				rts
 
-.80				>LDYA Mem.HiMem
-				>STYA Mem.Free
+.80				>LDYA MEM.HiMem
+				>STYA MEM.Free
 				clc
 				rts
-*/--------------------------------------
-* # GetMemPtr
-* A = hMem
-* ## RETURN VALUE
-* Y,A = PTR to MemBlock
-* (X unmodified)
-*\--------------------------------------
+*--------------------------------------
 * Optimized for :
-* Mem.Table is page aligned at $800
+* Mem.LoMem is page aligned at $800
 * S.MEM is 8 bytes
 *--------------------------------------
-				.DO Mem.Table=$800
+				.DO MEM.LoMem=$800
 				.ELSE
 				!!!!!WARNING!!!!!
 				.FIN
@@ -478,17 +453,97 @@ MEM.FreeMem		lda (ZPMemMgrSPtr)		In use ?
 				!!!!!WARNING!!!!!
 				.FIN
 *--------------------------------------
-K.GetMemPtr		jsr MEM.GetMemByID
-MEM.GetMEMPTR	ldy #S.MEM.PTR
-				lda (ZPMemMgrSPtr),y
+MEM.AddBIN		sta IO.SETREADAUX
+				sta IO.SETWRITEAUX
+
 				pha
+				txa
+				jsr MEM.GetMemByID
+
+				tya
+				ldy #S.MEM.OWNER
+				sta (ZPMemMgrSPtr),y
+				pla
+				iny
+				sta (ZPMemMgrSPtr),y
+				
+				lda (ZPMemMgrSPtr)
+				ora #S.MEM.F.CODE
+				sta (ZPMemMgrSPtr)
+
+				sta IO.CLRWRITEAUX
+				sta IO.CLRREADAUX
+				rts
+*--------------------------------------
+MEM.FindByBIN	sta IO.SETREADAUX
+
+				lda MEM.LastSlot
+
+				tax
+
+				jsr MEM.GetMemByID
+
+.1				lda (ZPMemMgrSPtr)
+				bpl .7
+
+				and #S.MEM.F.CODE
+				beq .7
+
+				ldy #S.MEM.OWNER
+				lda (ZPMemMgrSPtr),y
+				sta A1L
 				iny
 				lda (ZPMemMgrSPtr),y
-				ply
+				sta A1L+1
+
+				ldy #$ff
+
+.2				iny
+				sta IO.CLRREADAUX
+				lda K.PathBuf,y
+				sta IO.SETREADAUX
+				cmp (A1L),y
+				bne .7
+
+				eor #0
+				bne .2
+
+				ldy #S.MEM.REFCNT
+				lda (ZPMemMgrSPtr),y
+				inc
+				sta IO.SETWRITEAUX
+				sta (ZPMemMgrSPtr),y
+				sta IO.CLRWRITEAUX
+
+				jsr MEM.GetMEMPTR
+
+				sta IO.CLRREADAUX
+				clc
+				rts
+
+.7				lda ZPMemMgrSPtr
+				sec
+				sbc #S.MEM
+				sta ZPMemMgrSPtr
+				bcs .8
+
+				dec ZPMemMgrSPtr+1
+
+.8				dex
+				bne .1
+
+				sta IO.CLRREADAUX
+				sec
+				rts
+*--------------------------------------
+MEM.GetPtrX		sta IO.SETREADAUX
+				jsr MEM.GetMemByID
+				jsr MEM.GetMEMPTR
+				sta IO.CLRREADAUX
 				rts
 *--------------------------------------
 MEM.GetMemByID	sta ZPMemMgrSPtr
-				lda /Mem.Table/8
+				lda /MEM.LoMem/8
 				asl ZPMemMgrSPtr
 				rol
 				asl ZPMemMgrSPtr
@@ -498,194 +553,248 @@ MEM.GetMemByID	sta ZPMemMgrSPtr
 				sta ZPMemMgrSPtr+1
 				rts
 *--------------------------------------
-Mem.SetOwner	lda CORE.LastPSID
-				.HS 2C					BIT ABS
-Mem.SetOwnerPS0	lda #0	
-				ldy #S.MEM.OWNERPID
-				sta (ZPMemMgrSPtr),y
-				rts
-*--------------------------------------
-Mem.IncRefCnt	ldy #S.MEM.REFCNT
-				lda (ZPMemMgrSPtr),y
-				inc
-				sta (ZPMemMgrSPtr),y
-				rts
-*/--------------------------------------
-* # NewStkObj
-*  Y,A = Size Requested
-* ## RETURN VALUE
-*  CC : success
-*   YA = PTR to Mem (Uninitialised)
-*	X = hMem
-*  CS :
-*   A = EC
-*\--------------------------------------
-*/--------------------------------------
-* # GetStkObjPtr
-* ## ASM
-* `lda hStkObj`
-* `>SYSCALL GetStkObjPtr`
-* ## RETURN VALUE
-*\--------------------------------------
-*/--------------------------------------
-* # FreeStkObj
-*  A = hMem To Free (AUX Memory)
-* ## RETURN VALUE
-*  none.
-*  (X,Y unmodified)
-*\--------------------------------------
-*--------------------------------------
-MEM.DupX		sta IO.SETREADAUX
-				sta IO.SETWRITEAUX
-				jsr MEM.Dup
-				sta IO.CLRREADAUX
-				sta IO.CLRWRITEAUX
-				rts
-*--------------------------------------
-MEM.Dup			jsr K.GetMemPtr
-				>STYA A1L
-				
-				ldy #S.MEM.LEN
+MEM.GetMEMPTR	ldy #S.MEM.PTR
 				lda (ZPMemMgrSPtr),y
 				pha
-				eor #$ff
-				sta A4L
 				iny
 				lda (ZPMemMgrSPtr),y
-				eor #$ff
-				sta A4L+1
-				eor #$ff
 				ply
-
-MEM.DupA1LnA4L	jsr K.GetMem
-				bcs MEM.Dup.RTS
-				
-				>STYA A2L
-				
-				ldy #0
-				
-.1				inc A4L
-				bne .2
-				inc A4L+1
-				beq .8
-	
-.2				lda (A1L),y
-				sta (A2L),y
-				iny
-				bne .1
-				
-				inc A1L+1
-				inc A2L+1
-				bra .1
-				
-.8				txa
-*				clc
-MEM.Dup.RTS		rts				
+				rts
 *--------------------------------------
-MEM.CopyToMain	clc
-				.HS B0					BCS
-MEM.MoveToMain	sec
-				ror .1+1
-				stx .2+1				Save AUX hMem
-				>STYA A2L				Save LEN to copy/move
-
-				sta IO.CLRREADAUX			Make sure MAIN !!!!
-				sta IO.CLRWRITEAUX
-				jsr K.GetMem
-				bcs MEM.Dup.RTS
-
-				stx .8+1				Save MAIN hMem
-				>STYA A4L				Save MAIN Ptr
-
-				lda .2+1				Get AUX mem Ptr
-				sta IO.SETREADAUX
-				jsr MEM.SetA1A2			Setup AUX base & End Ptrs
-				sta IO.CLRREADAUX
-
-				clc						Aux To Main
-				jsr XMov
-
-.1				lda #$ff				SELF MODIFIED
-				bpl .8					Copy : dont discard AUX mem
-
-.2				lda #$ff				SELF MODIFIED
-				>SYSCALL2 FreeStkObj	release AUX mem
-
-.8				ldx #$ff				Returns MAIN hMem
-				txa
-				jmp K.GetMemPtr			Y,A = Ptr
+*MEM.IncRefCnt	ldy #S.MEM.REFCNT
+*				lda (ZPMemMgrSPtr),y
+*				inc
+*				sta (ZPMemMgrSPtr),y
+*				rts
 *--------------------------------------
-MEM.MoveToAux	stx .1+1				Save MAIN hMem
-				>STYA A2L				Save LEN to move
+MEM.GetRefCntX	sta IO.SETREADAUX
 
-				>SYSCALL2 NewStkObj
+				jsr MEM.GetPtrYA
 				bcs .9
 
-				stx .8+1				Save AUX hMem
-				>STYA A4L				Save AUX Ptr
+				ldy #S.MEM.REFCNT
+				lda (ZPMemMgrSPtr),y
 
-				lda .1+1
-				jsr MEM.SetA1A2			Setup MAIN base & End Ptrs
+				sta IO.CLRREADAUX
 
-				sec						Main To Aux
-				jsr XMov
-
-.1				lda #$ff				SELF MODIFIED
-				jsr K.FreeMem			release MAIN memory
-
-.8				ldx #$ff				Returns AUX hMem
 *				clc
 
 .9				rts
 *--------------------------------------
-MEM.SetA1A2		jsr K.GetMemPtr
+* Copy A4 bytes from A1 to A2
+*--------------------------------------
+MEM.CpyX2X		sta IO.SETWRITEAUX
+MEM.CpyX2M		sta IO.SETREADAUX
 
-				>STYA A1L				Start Address
-				pha
-				tya
-				clc
-				adc A2L
-				tay
+				jsr MEM.CpyA1A2A4
 
-				pla
-				adc A2L+1
-				sta A2L+1
+				sta IO.CLRREADAUX
+				sta IO.CLRWRITEAUX
 
-				tya
-				bne .1
-				
-				dec A2L+1
-				
-.1				dey
-				sty A2L
-				
 				rts
 *--------------------------------------
-MEM.GetKBuf		pha
-				tya
-				clc
-				adc DevMgr.Free
+MEM.GetPtrYA	>STYA A1L
+
+				lda MEM.LastSlot
+
 				tax
-				pla
-				adc DevMgr.Free+1
-				bcs .99					we crossed $FFFF, out of mem
 
-				cpx #DevMgr.HiMem
-				pha
-				sbc /DevMgr.HiMem
-				pla
-				bcs .99					No More Room...
+				jsr MEM.GetMemByID
 
-				ldy DevMgr.Free
-				stx DevMgr.Free
-				ldx DevMgr.Free+1
-				sta DevMgr.Free+1
-				txa
-*				clc
+.1				ldy #S.MEM.PTR
+				lda (ZPMemMgrSPtr),y
+				cmp A1L
+				bne .2
+
+				iny
+				lda (ZPMemMgrSPtr),y
+				cmp A1L+1
+				beq .8
+
+.2				lda ZPMemMgrSPtr
+				sec
+				sbc #S.MEM
+				sta ZPMemMgrSPtr
+				bcs .3
+
+				dec ZPMemMgrSPtr+1
+
+.3				dex
+				bne .1
+
+				lda #E.BADPTR
+				sec
 				rts
 
-.99				lda #E.OOM
-*				sec
+.8				clc
+				rts
+*--------------------------------------
+MEM.GetBestBnk	lda A2osX.MaxBnk
+				beq .9					Only 1 ...
+
+				ldx A2osX.ActBnk
+				phx
+				stx MEM.BestSlot
+
+				ldx /U.LoMem
+				stx MEM.BestScore+1
+
+				sta IO.SETREADAUX
+
+.1				sta (pRWReg)
+
+				ldx MEM.Free+1
+				cpx /U.HiMem
+				bne .2
+
+				sta MEM.BestSlot
+
+				bra .8					free bank
+
+.2				cpx MEM.BestScore+1
+				bcs .7
+
+				sta MEM.BestSlot
+
+.7				dec
+				cmp #$ff
+				bne .1
+
+.8				sta IO.CLRREADAUX
+
+				pla
+				sta (pRWReg)
+
+				lda MEM.BestSlot
+
+.9				rts
+*--------------------------------------
+* A1L srcPtr
+* A2L dstPtr
+* A4L cnt
+*--------------------------------------
+MEM.CpyA1A2A4	lda A4L
+				eor #$ff
+				tax
+
+				lda A4L+1
+				eor #$ff
+				pha
+
+				ldy #0
+
+.1				inx
+				bne .2
+
+				pla
+				inc
+				beq .8
+
+				pha
+
+.2				lda (A1L),y
+				sta (A2L),y
+				iny
+				bne .1
+
+				inc A1L+1
+				inc A2L+1
+				bra .1
+
+.8				rts
+*--------------------------------------
+* Inputs
+*  Y,A = Src Ptr
+*  A3L srcBnk
+*  A3H dstBnk
+*--------------------------------------
+* Uses
+*  A1L srcPtr
+*  A2L dstPtr
+*  A4L cnt
+*--------------------------------------
+MEM.MBDupYA		sta IO.SETREADAUX
+				sta IO.SETWRITEAUX
+
+				pha
+				lda A3L
+				sta (pRWReg)
+				pla
+
+				jsr MEM.GetPtrYA		set A1L
+				bcs .9
+
+				ldy #S.MEM.LEN+1
+				lda (ZPMemMgrSPtr),y
+				pha
+				dey
+				lda (ZPMemMgrSPtr),y
+				tay
+
+				lda (ZPMemMgrSPtr)
+				and #$7F
+				tax
+
+				lda A3H
+				sta (pRWReg)
+
+				pla
+
+				>STYA A4L
+
+				jsr MEM.Malloc.YAX
+				bcs .9
+
+				>STYA A2L
+				pha
+
+				lda A4L
+				eor #$ff
+				tax
+
+				lda A4L+1
+				eor #$ff
+				pha
+
+				ldy #0
+
+.1				inx
+				bne .2
+
+				pla
+				inc
+				beq .8
+
+				pha
+
+.2				lda A3L
+				sta (pRWReg)
+
+				lda (A1L),y
+
+				pha
+
+				lda A3H
+				sta (pRWReg)
+
+				pla
+
+				sta (A2L),y
+				iny
+				bne .1
+
+				inc A1L+1
+				inc A2L+1
+				bra .1
+
+.8				pla
+				ldy A2L
+
+*				clc
+
+.9				sta IO.CLRREADAUX
+				sta IO.CLRWRITEAUX
+
 				rts
 *--------------------------------------
 MAN

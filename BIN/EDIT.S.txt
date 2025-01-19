@@ -47,20 +47,20 @@ ZS.END			.ED
 CS.START		cld
 				jmp (.1,x)
 				.DA #$61				6502,Level 1 (65c02)
-				.DA #1					BIN Layout Version 1
-				.DA #S.PS.F.EVENT		S.PS.F
+				.DA #2					BIN Layout Version 2
+				.DA #S.PS.SIG.T1SEC
 				.DA #0
-				.DA CS.END-CS.START		CS
-				.DA DS.END-DS.START		DS
+				.DA CS.END
+				.DA ID.END
+				.DA DS.END
 				.DA #64					SS
 				.DA #ZS.END-ZS.START	Zero Page Size
-				.DA 0
 *--------------------------------------
 * Relocation Table
 *--------------------------------------
 .1				.DA CS.INIT
 				.DA CS.RUN
-				.DA CS.DOEVENT
+				.DA CS.SIG
 				.DA	CS.QUIT
 L.SEQ.INIT		.DA SEQ.INIT
 L.SEQ.SCROLLRGN	.DA SEQ.SCROLLRGN
@@ -147,7 +147,7 @@ CS.INIT.RTS		rts
 *--------------------------------------
 CS.RUN			>PUSHW L.MSG.TERMCAP
 				>PUSHBI 0
-				>SYSCALL PrintF			Send Query for term W & H
+				>LIBC PrintF			Send Query for term W & H
 				bcs CS.INIT.RTS
 
 .1				jsr IO.GetCh
@@ -159,15 +159,13 @@ CS.RUN			>PUSHW L.MSG.TERMCAP
 				jsr SCRN.Init
 
 				>LDYAI 510+5+5+4+1		potentially 255*\\ NORM,INV,CEOL & \0
-				>SYSCALL GetMem
+				>LIBC Malloc
 				bcs CS.INIT.RTS
 
-				>STYA.G LineBufBase
-				txa
-				>STA.G hLineBuf
+				>STYA.G pLineBuf
 
 				lda #1
-				>SYSCALL ArgV
+				>LIBC ArgV
 				bcs .2					No arg, new file....
 
 				jsr FILE.Load
@@ -187,12 +185,12 @@ CS.RUN			>PUSHW L.MSG.TERMCAP
 				jsr CS.RUN.GetBuf64
 				bcs CS.RUN.RTS
 
-				>STA.G hFind
+				>STYA.G pFind
 
 				jsr CS.RUN.GetBuf64
 				bcs CS.RUN.RTS
 
-				>STA.G hReplace
+				>STYA.G pReplace
 *--------------------------------------
 CS.RUN.LOOP		jsr IO.GetCh
 				bcs CS.RUN.RTS			I/O error
@@ -210,7 +208,7 @@ CS.RUN.LOOP		jsr IO.GetCh
 .9				pha
 				>PUSHW L.SEQ.RESET
 				>PUSHBI 0
-				>SYSCALL PrintF
+				>LIBC PrintF
 				pla
 				sec
 CS.RUN.RTS		rts
@@ -239,53 +237,54 @@ CS.RUN.LOOP.CharIn
 .9				rts
 *--------------------------------------
 CS.RUN.GetBuf64	>LDYAI 64
-				>SYSCALL GetMem
+				>LIBC Malloc
 				bcs .9
 
 				>STYA ZPPTR1
 
+				pha
+
 				lda #0
 				sta (ZPPTR1)
 
-				txa
+				pla
 
 .9				rts
 *--------------------------------------
-CS.DOEVENT		lda (pEvent)
-				bpl .9					is it a TIMER event?
-
-				asl
-				bpl .9
+CS.SIG			lda #$ff
 
 				>STA.G bUpdateStatus
 
-.9				sec
+				sec
 				rts
 *--------------------------------------
-CS.QUIT			ldy #hLineBuf
+CS.QUIT			ldy #pLineBuf+1
 				jsr .7
 
-				ldy #hBuf
+				ldy #pBuf+1
 				jsr .7
 
-				ldy #hBufBackup
+				ldy #pClipBoard+1
 				jsr .7
 
-				ldy #hClipBoard
+				ldy #pFileName+1
 				jsr .7
 
-				ldy #hFileName
+				ldy #pFind+1
 				jsr .7
 
-				ldy #hFind
-				jsr .7
-
-				ldy #hReplace
+				ldy #pReplace+1
 
 .7				lda (pData),y
 				beq .8
+				
+				pha
+				dey
+				lda (pData),y
+				tay
+				pla
 
-				>SYSCALL FreeMem
+				>LIBC Free
 
 .8				clc
 				rts
@@ -297,7 +296,8 @@ CS.QUIT			ldy #hLineBuf
 				.INB usr/src/bin/edit.s.io
 				.INB usr/src/bin/edit.s.scrn
 *--------------------------------------
-CS.END
+CS.END			.EQ *
+*--------------------------------------
 SEQS			.EQ *
 SEQ.BAR			.CZ "\e[7m\e[37;40m"
 SEQ.DLG.TBAR	.CS "\e[0m\e[93;104m"
@@ -341,7 +341,7 @@ SEQ.SCROLLCURDN	.CS "\e[%d;%dr"
 SEQ.SCROLLDN	.CZ "\eM"
 *--------------------------------------
 MSG.TERMCAP		.CZ "\r\n\e[999;999H\e[6n"
-MSG.TOPBAR		.CZ "A2osX Edit %d.%d:%s  (%s)"
+MSG.TOPBAR		.CZ "A2osX-%d.%02d Edit:%s (%s)"
 MSG.TXTCR		.CZ "TXT/CR"
 MSG.TXTCRLF		.CZ "TXT/CRLF"
 MSG.ASM			.CZ "ASM"
@@ -419,7 +419,7 @@ DLG.SAVE.1		.DA #S.DLG.Ctrl.LBL,#2,#2
 				.AZ "Filename :"
 
 DLG.SAVE.2		.DA #S.DLG.Ctrl.TB,#2,#3
-				.DA #0,#64,#hFileName	CURPOS,MAXCHAR,hMem
+				.DA #0,#64,#pFileName	CURPOS,MAXCHAR,hMem
 
 DLG.SAVE.3		.DA #S.DLG.Ctrl.LBL,#2,#5
 				.AZ "Filetype :"
@@ -475,13 +475,13 @@ DLG.FIND.1		.DA #S.DLG.Ctrl.LBL,#2,#2
 				.AZ "Find :"
 
 DLG.FIND.2		.DA #S.DLG.Ctrl.TB,#2,#3
-				.DA #0,#63,#hFind
+				.DA #0,#63,#pFind
 
 DLG.FIND.3		.DA #S.DLG.Ctrl.LBL,#2,#5
 				.AZ "Replace :"
 
 DLG.FIND.4		.DA #S.DLG.Ctrl.TB,#2,#6
-				.DA #0,#63,#hReplace
+				.DA #0,#63,#pReplace
 
 DLG.FIND.5		.DA #S.DLG.Ctrl.BUT,#40,#8
 				.DA #C.CR
@@ -495,9 +495,11 @@ DLG.FIND.T		.AZ "Find/Replace..."	Title
 DLG.FIND.S		.AZ "CR:Find, Ctrl-C:Cancel"
 DLG.FIND.LEN	.EQ *-DLG.FIND
 *--------------------------------------
+ID.END			.EQ *
+*--------------------------------------
 				.DUMMY
 				.OR 0
-DS.START
+
 EscBuffer		.BS 16
 
 bEscMode		.BS 1
@@ -507,19 +509,17 @@ bUnSaved		.BS 1
 
 bUpdateStatus	.BS 1
 
-hFileName		.BS 1
+pFileName		.BS 2
 FileType		.BS 1
 
-hFind			.BS 1
-hReplace		.BS 1
+pFind			.BS 2
+pReplace		.BS 2
 
-hLineBuf		.BS 1
-LineBufBase		.BS 2
+pLineBuf		.BS 2
 
-hBuf			.BS 1
-BufBase			.BS 2
-hBufBackup		.BS 1
-hClipBoard		.BS 1
+pBuf			.BS 2
+
+pClipBoard		.BS 2
 ClipBoardLen	.BS 2
 
 SelStart		.BS 2
@@ -536,7 +536,7 @@ ScreenY			.BS 2
 CurX			.BS 1
 CurY			.BS 1
 
-hDLG			.BS 1
+pDLG			.BS 2
 
 STATBUF			.BS S.STAT
 DS.END

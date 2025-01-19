@@ -8,57 +8,49 @@ OUT.Init		lda #PAGE.LEN
 *---------------------------------------
 OUT.EmitByte	phy
 				phx
-				tax
+				>STA.G OUT.Byte
 
-				>LDA.G ASM.PASS
+				>LDA.G OUT.BufCnt
+				cmp #4
+				bne .4
+
+				jsr OUT.PrintBuf
+				bcs .9
+				
+.4				>LDA.G ASM.PASS
 				beq .1
 
 				>LDA.G ASM.DU.ON
 				bmi .1
 
-				>PUSHB.G DST.hREFNUM
-				txa
-				>PUSHA
-				phx
-				>SYSCALL FPutC
-				plx
+				>SS
+				>PUSHB 0
+				>PUSHB.G OUT.Byte
+				>PUSHW.G DST.pFILE
+				>LIBC FPutC
+				>SR
 				bcs .9
 
-.1				>INC.G ASM.PC
-				bne .2
-				>INC.G ASM.PC+1
-				bne .2
-				>INC.G ASM.PC+2
-				bne .2
-				>INC.G ASM.PC+3
+.1				ldy #ASM.PC
+				jsr CORE.IncDWordY
 
-.2				>LDA.G ASM.PH.ON
+				>LDA.G ASM.PH.ON
 				beq .3
 
-				>INC.G ASM.PC.PH
-				bne .3
-				>INC.G ASM.PC.PH+1
-				bne .3
-				>INC.G ASM.PC.PH+2
-				bne .3
-				>INC.G ASM.PC.PH+3
+				>LDA.G ASM.DU.ON
+				bmi .3
+				
+				ldy #ASM.PC.PH
+				jsr CORE.IncDWordY
 
-.3				>LDA.G OUT.Buf
-				cmp #3
-				bne .4
+.3				>LDA.G OUT.Byte
+				tax
 
-				phx
-				jsr OUT.PrintBuf
-				plx
-				bcs .9
-
-				ldy #OUT.Buf
-				lda #0
-
-.4				inc
+				>LDA.G OUT.BufCnt
+				inc
 				sta (pData),y
 				clc
-				adc #OUT.Buf
+				adc #OUT.Buf-1
 				tay
 				txa
 				sta (pData),y
@@ -77,12 +69,14 @@ OUT.PrintBuf	jsr OUT.PrintLineOn
 
 				jsr OUT.PrintLineOutBuf
 				bcs OUT.PrintBuf.RTS
+
 				jsr OUT.PrintCR
 				bcs OUT.PrintBuf.RTS
 
 OUT.PrintBufReset
-				>STZ.G OUT.Buf
-
+				>STZ.G OUT.BufCnt
+				>STZ.G OUT.bEquate
+				
 				ldx #4
 				ldy #ASM.PC
 
@@ -101,16 +95,14 @@ OUT.PrintBufReset
 				dex
 				bne .3
 
-.8				clc
+OUT.PrintBuf.CLCRTS
+				clc
 
 OUT.PrintBuf.RTS
 				rts
 *---------------------------------------
 OUT.PrintLine	jsr OUT.PrintLineOn
-				bcc OUT.PrintLine.1
-				
-				clc
-				rts
+				bcs OUT.PrintBuf.CLCRTS
 
 OUT.PrintLine.1	jsr OUT.PrintLineOutBuf
 				bcs OUT.PrintBuf.RTS
@@ -122,28 +114,33 @@ OUT.PrintLine.1	jsr OUT.PrintLineOutBuf
 
 				pha
 				lda #'>'
-				>SYSCALL PutChar
+				>LIBC PutChar
 				pla
 				bra .1
 
-.2				>PUSHW L.MSG.LINENUM
+.2				>SS
+				>PUSHW L.MSG.LINENUM
 				>PUSHW.G SRC.LINENUM
 				>PUSHBI 2
-				>SYSCALL PrintF
+				>LIBC PrintF
+				>SR
 
-				>LDA.G MAC.CtxStackPtr
+				>LDA.G MAC.StkPtr
+				lsr
+				lsr
+				lsr
 
 .3				dec
 				bmi .4
 
 				pha
 				lda #'>'
-				>SYSCALL PutChar
+				>LIBC PutChar
 				pla
 				bra .3
 
 .4				>LDYA ZPLineBuf
-				>SYSCALL PutS
+				>LIBC PutS
 
 				jmp OUT.PrintCR1
 *---------------------------------------
@@ -151,8 +148,8 @@ OUT.PrintLineOutBuf
 				>LDA.G OUT.bEquate
 				bne OUT.PrintLineEQU
 
-				>LDA.G OUT.Buf
-				pha
+				>SS
+				>LDA.G OUT.BufCnt
 				asl
 				tax
 				>PUSHB L.MSG.OUT0+1,x
@@ -163,17 +160,19 @@ OUT.PrintLineOutBuf
 				dey
 				>PUSHB (pData),y
 
-				pla
+				>LDA.G OUT.BufCnt
 				beq .2
-
+				
+				pha
 				tax
+
+				lda #0
+				sta (pData),y
 
 				ldy #OUT.Buf
 
-				pha
-
-.1				iny
-				>PUSHB (pData),y
+.1				>PUSHB (pData),y
+				iny
 				dex
 				bne .1
 
@@ -182,15 +181,17 @@ OUT.PrintLineOutBuf
 .2				inc
 				inc
 				>PUSHA					Byte Count+2 for PC
-				>SYSCALL PrintF
+				>LIBC PrintF
+				>SR
 
 				rts
 *---------------------------------------
 OUT.PrintLineEQU
+				>SS
+
 				lda SRC.ACC.SIZE
 				asl
 				tax
-
 				>PUSHB L.MSG.EQU0+1,x
 				>PUSHB L.MSG.EQU0,x
 
@@ -207,7 +208,9 @@ OUT.PrintLineEQU
 				lda SRC.ACC.SIZE
 
 .2				>PUSHA					Byte Count
-				>SYSCALL PrintF
+				>LIBC PrintF
+
+				>SR
 				rts
 *---------------------------------------
 OUT.PrintLineOn
@@ -217,14 +220,15 @@ OUT.PrintLineOn
 				>LDA.G ASM.LI.ON
 				bpl .9
 
-				>LDA.G ASM.MA.ON		MACRO Mode ?
+				>LDA.G MAC.bLearning	MACRO Mode ?
 				bmi .1
-				
-				>LDA.G MAC.CtxID		within MACRO ?
+
+				lda ZPMacroCtxID		within MACRO ?
 				beq .11
 
 .1				>LDA.G ASM.LI.MON
 				bpl .9
+
 				clc
 				rts
 
@@ -239,6 +243,7 @@ OUT.PrintLineOn
 
 				>LDA.G ASM.LI.CON		FALSE, check CON flag...
 				bpl .9
+
 				clc
 				rts
 
@@ -257,10 +262,12 @@ OUT.PrintLineErr
 				jsr OUT.PrintLine.1
 				bcs OUT.PrintLineOnRTS
 
+				>SS
 				>PUSHW L.MSG.ERROR
 				>PUSHB DIR.Byte
 				>PUSHBI 1
-				>SYSCALL PrintF
+				>LIBC PrintF
+				>SR
 
 				lda ZPLinePtr
 				sec
@@ -271,21 +278,18 @@ OUT.PrintLineErr
 				dec
 				jsr OUT.PrintLineErrDashA
 
-				>LDA.G MAC.CtxStackPtr
+				lda ZPMacroCtxID
 				jsr OUT.PrintLineErrDashA
 
 				lda #'^'
-				>SYSCALL PutChar
+				>LIBC PutChar
 				bcs OUT.PrintLineOnRTS
 
 				jsr OUT.PrintCR
 
-				>PUSHW L.MSG.PASS
-				>LDA.G ASM.PASS
-				inc
-				>PUSHA
-				>PUSHBI 1
-				jsr OUT.Print
+				jsr OUT.PrintPass
+
+				jsr OUT.PrintCR
 
 				jmp OUT.PrintCR
 *---------------------------------------
@@ -295,7 +299,7 @@ OUT.PrintLineErrDashA
 
 .1				phx
 				lda #'-'
-				>SYSCALL PutChar
+				>LIBC PutChar
 				plx
 				bcs .9
 
@@ -305,18 +309,45 @@ OUT.PrintLineErrDashA
 .8				clc
 .9				rts
 *---------------------------------------
-OUT.PrintWarn1	jsr OUT.PrintLine.1
+OUT.PrintStats	jsr OUT.PrintCR
 
-				>LDYA L.MSG.WARN1
-				>SYSCALL PutS
+				>SS
+				>PUSHW L.MSG.STATS
+				>PUSHL.G ASM.TotalLines
+				>PUSHL.G ASM.CodeLines
+				>PUSHBI 8
+				>LIBC PrintF
+				>SR
+				bcc OUT.PrintCR1
+
 				rts
 *---------------------------------------
-OUT.Print		>SYSCALL PrintF
-				bcs OUT.Print.RTS
+OUT.PrintPass	>SS
+				>PUSHW L.MSG.PASS
+				>LDA.G ASM.PASS
+				inc
+				>PUSHA
+				>PUSHBI 1
+				>LIBC PrintF
+				>SR
+				bcc OUT.PrintCR1
+
+				rts
 *---------------------------------------
-OUT.PrintCR		>PUSHW L.MSG.CRLF
+OUT.PrintWarn1	jsr OUT.PrintLine.1
+				bcs .9
+
+				>LDYA L.MSG.WARN1
+				>LIBC PutS
+				bcc OUT.PrintCR1
+
+.9				rts
+*---------------------------------------
+OUT.PrintCR		>SS
+				>PUSHW L.MSG.CRLF
 				>PUSHBI 0
-				>SYSCALL PrintF
+				>LIBC PrintF
+				>SR
 
 OUT.PrintCR1	>DEC.G OUT.LineCnt
 				bne .8

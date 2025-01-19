@@ -1,43 +1,10 @@
 # A2osX Multi-Tasking OS for Apple II  
 
-## News 2024-01-21
-
-A2osX 0.95 build 2666 has been released.
-
-New features:
-
-* First release of `netconfig` tool, a LIBTUI program for editing network configuration.
-* First release of LIBTUI-based `man` tool, and a few man pages to go along with it.
-
-Issues fixed:
-
-* [#211 - INCLUDE needs to be set in release profiles](https://github.com/A2osX/A2osX/issues/211)
-* [#210 - FOR loop crashes on LOOP ending](https://github.com/A2osX/A2osX/issues/210)
-* [#209 - PAKME running out of memory compressing kernel)(https://github.com/A2osX/A2osX/issues/209)
-* Several non-documented bugfixes and improvements.
-
-Build 2666 is available as 32MB, 800KB, 140KB, and net update.
-
- 
-
-## News 2024-01-17
-
-It has been a long time since the news has been updated, but that doesn't mean that development on A2osX has ceased in the last 4 years! We've actually had quite a number of releases over this time. In general, stability has been greatly improved but there have also been additions like BASIC.FX which is a ProDOS BASIC.SYSTEM environment which supports a number of ProDOS FX extensions (RamWorks III and extension commands for starters).
-
-As far as where things are going now, development is underway on Kernel 1.0 which will finally bring support for breaking past the 128KB barrier of the //e series by supporting RamWorks-type memory cards. In the past, RamWorks boards were supported but would only allow for /RAM type storage. With Kernel 1.0, up to 8MB of RAM can now be used for code and applications! Early builds of the new kernel are expected in 1H 2024.
-
-With current builds and all going forward, the distributions are only shipped with [ProDOS FX](ProDOS.md) by default. While 2.0.3tc is still available and can be used with A2osX, the recommendation is now to use FX because of the filename case handling in addition to the number of under-the-hood improvements that FX offers. Both FX and 2.0.3tc's clock tables have been updated for 2024.
-
-We are currently looking for volunteers to help with flushing out the C libraries! A C89-compliant compiler is available, however, the API needs some work to be compliant and can result in changing the kernel's APIs too, so "the sooner, the better" as the saying goes. Want to help? Reach out on the Slack server!
-
-Finally, we are always looking for people to help! A project as complicated at A2osX requires a lot of testing, but we always need help with creating new applications, libraries, and documentation. If you have some applicable skills, let us know!
-
-
-## News February 10, 2020
+### Updated February 10, 2020
 
 A2osX Version 0.93 Release Candidate has been finalized.  Media for this release, based on Build 193x are now available.  Future STABLE and BLEED builds will be based on work to complete 0.94.  Work has already started to make the A2osX API fully C compliant.  This will allow a new CSH shell and CC compiler to be added to A2osX as well as an enhanced web server (*httpd*) that can serve active server pages formed by user created CSH scripts.  In addition, Double High Graphics Resolution (DHGR) and Mouse drivers are being finalized which will allow developers to create games and new user interfaces for their A2osX applications.
 
-## News 2020-01-27
+## Latest News 2020-01-27
 
 Major update to A2osX 0.93
 
@@ -59,45 +26,45 @@ A great new networking utility, *httpget* is now available which can be used to 
 
 Media have been updated based on Build 1784.
 
-## News 2019-10-31
+## Latest News 2019-10-31
 
 Media have been updated based on Build 1694.  This version fixes issues with Piping of commands, adds new READ functionality.  Please note, KM.NSC is no longer loaded by default on any media.  If you have a No Slot Clock in your system, you should move the file KM.NSC from ./SYS/KM into ./SYS which will make it load on boot.
 
-## News 2019-10-26
+## Latest News 2019-10-26
 
 Starting with Build 1675, the SH(ell) command **TIME** has been removed and the **DATE** command will now return both the Date and Time.  Additionally, if DATE command has been updated to support options for returning formatted strings with just the portions of the date and time you desire.  Consult the Shell Developers Guide for syntax.
 
-## News 2019-10-24
+## Latest News 2019-10-24
 
 Created STABLE images with Build 1669 with improvements to TCP networking.  There is also a new DEBUG 140k disk image.  See the media guide for more info.
 
-## News 2019-10-22
+## Latest News 2019-10-22
 
 Updated RC images to Build 1664 which fixed RESTART SYSTEM bug on //GS.
 
-## News 2019-10-19
+## Latest News 2019-10-19
 
 Updated RC images to Build 1653 which fixed bugs in CUT and includes a patched version of ProDOS 2.03 to correct year display for ThunderClocks.
 
-## News 2019-10-18
+## Latest News 2019-10-18
 
 Updated A2osX Release Candidate based on Build No 1650 is now available and can be found in our **[Media directory](.Floppies)**.  In addition, a new disk image **TDBOOT** has been created that is preconfigured to automatically load Uthernet2 driver, start network services and launch the TelnetD server process (hence name TD for TelnetD Boot).
 
-## News 2019-10-15
+## Latest News 2019-10-15
 
 **The first A2osX Release Candidate is now available and can be found in our [Media directory](.Floppies)**.  
 
-## News 2019-04-19
+## Latest News 2019-04-19
 
 Major updates have occurred to the kernel and many of the A2osX API's to support a greatly enhanced shell that boasts significant new scripting capabilities since 0.92.  Also added is the the ability to redirect input and output, including errors, and the ability to pipe (|) the output of one command or operation to another (i.e. **ls \* | more** ).  A2osX now provides for multiple virtual terminals as well as users/terminals via TCP (through TELNETD) and serial devices (through a SSC driver).
 
 As great as the changes to A2osX itself, we are also please to report that great strides have been made in terms of documentation.  While much of it is in draft form, there is a new **[Users Guide](User%20Guide.md)**, **[Developers Guide](Developers%20Guide.md)**, **[Shell Developers Guide](Shell%20Developers%20Guide.md)**, **[Technical Spec](Technical%20Spec.md)** and **[Command Guide](Command%20Guide.md)**.  See the **[Documentation](#documentation)** Section below for more details.
 
-## News 2019-02-19
+## Latest News 2019-02-19
 
 Major updates have occurred to the kernel and many of the APIs to support an enhanced shell with support of many new scripting capabilities, the ability to redirect and eventually piping output.  Current kernel also supports multiple virtual terminals as well as TCP (via TELNETD) and serial (SSC driver) terminals.
 
-## News 2018-11-10
+## Latest News 2018-11-10
 
 My loneliness has been cured, new resources have signed onto the project.  I welcome Patrick Kloepfer who is helping with product management, recruitment, testing and feedback. 
 
@@ -290,4 +257,4 @@ The full A2osX license can be found **[Here](../LICENSE)**.
 
 ## Copyright
 
-Copyright 2015 - 2024, Remy Gibert and the A2osX contributors.
+Copyright 2015 - 2020, Remy Gibert and the A2osX contributors.

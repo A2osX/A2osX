@@ -8,7 +8,7 @@ Copyright 2015 - 2020, Remy Gibert and the A2osX contributors.
 ## ASM  
 A = argument index.  
 
-## RETURN VALUE   
+## RETURN VALUE  
 CC : success  
 Y,A = PTR To Arg[A]  
 CS : Out Of Bound  
@@ -18,7 +18,7 @@ CS : Out Of Bound
 ## ASM  
 A = argument index.  
 
-## RETURN VALUE   
+## RETURN VALUE  
 CC : success  
 Y,A = PTR To Arg[A]  
 CS : Out Of Bound  
@@ -37,15 +37,6 @@ short int arg2argv(char* args, char* argv[])
 ## RETURN VALUE  
 A = Arg count  
 
-# ArgVDup  
-
-## ASM  
- Y,A = Src StrV  
-
-## RETURN VALUE  
- X = hMem of new StrV  
- A = Str Count  
-
 # LoadDrv  
 
 ## ASM  
@@ -57,13 +48,13 @@ none
 # InsDrv  
 
 ## C  
-`void * insdrv (void * src, void * crvcsstart, void * drvcssize, void * drvend);`  
+`void * insdrv (void * src, void * drvcsstart, void * drvcsend, void * drvidend);`  
 
 ## ASM  
-`>PUSHW DRV.END`  
-`>PUSHW DRV.CS.SIZE`  
-`>PUSHW DRV.CS.START`  
-`>LDYA L.SRC`  
+`>PUSHW src  
+`>PUSHW drvcsstart  
+`>PUSHW drvcsend  
+`>PUSHW drvidend  
 `>SYSCALL insdrv`  
 
 ## RETURN VALUE  
@@ -80,20 +71,20 @@ X = hFD
 # MkFD  
 
 ## C  
-`short int mkfd(short int type, );`  
+`short int mkfd(short int type);`  
 
 ## ASM  
 `>PUSHB DevID`  
-`>PUSHW S.DIB`  
-`>SYSCALL MkFD`  
+`>SYSCALL MKFD`  
 
 ## RETURN VALUE  
+A = hFD  
 
 # MKDev  
-Create a hDEV  
+Create a CDEV or BDEV  
 
 ## C  
-`hDEV mkdev (S.FD *fd, const char *devname)`  
+`int mkdev (S.FD *fd, const char *devname)`  
 
 ## ASM  
 `>PUSHW fd`  
@@ -106,13 +97,15 @@ Create a hDEV
 # IOCTL  
 
 ## C  
-`int ioctl(short int hFD, short int request, void *param);`  
+`int ioctl(int fd, short int request, void *param);`  
 
 ## ASM  
-`>PUSHB hDEV`  
+`>SS`  
+`>PUSHW fd`  
 `>PUSHB request`  
 `>PUSHW param`  
 `>SYSCALL IOCTL`  
+`>SR`  
 
 ## RETURN VALUE  
  Y,A = ...  
@@ -120,31 +113,32 @@ Create a hDEV
 # OpenDir  
 
 ## C  
-`short int hDIR opendir (const char * dirpath);`  
+`#include <dirent.h>`  
+`DIR *opendir(const char *name);`  
 
 ## ASM  
-`>LDYA dirpath`  
+`>LDYA name`  
 `>SYSCALL opendir`  
 
 ## RETURN VALUE  
  CC : success  
-  A = hDIR  
+  Y,A = pDIR  
  CS : error  
   A = EC  
 
 # ReadDir  
 
 ## C  
-`struct dirent *readdir (short int hDIR);`  
+`#include <dirent.h>`  
+`struct dirent *readdir(DIR *dirp);`  
 
 ## ASM  
-`lda hDIR`  
+`>LDYA dirp`  
 `>SYSCALL readdir`  
 
 ## RETURN VALUE  
  CC : success  
-  X = hDIRENT  
-  Y,A = PTR to S.DIRENT  
+  Y,A = pDIRENT  
  CS : error  
   A = EC  
   note : A = 0 means no more entry  
@@ -152,85 +146,94 @@ Create a hDEV
 # CloseDir  
 
 ## C  
-`void closedir(hDIR);`  
+`#include <dirent.h>`  
+`int closedir(DIR *dirp);`  
 
 ## ASM  
-`lda hDIR`  
+`>LDYA dirp`  
 `>SYSCALL closedir`  
 
 ## RETURN VALUE  
  none, always succeed.  
 
-# SetEnv  
-Change or add an environment variable  
-
-## C / CSH  
-`int setenv(const char *name, const char *value);`  
-
-## ASM  
-`>PUSHW name`  
-`>PUSHW value`  
-`>SYSCALL setenv`  
-
-## RETURN VALUE  
-
-# GetEnv  
-searches the environment list to find the environment variable name,   
-and returns a pointer to the corresponding value string.  
-
-## C / CSH  
-`char *getenv(const char *name, char *value);`  
-
-## ASM  
-`>PUSHW name`  
-`>PUSHW value`  
-`>SYSCALL getenv`  
-
-## RETURN VALUE  
- CC : Y,A = PTR to VALUE (C-String)  
- CS : not found  
-
 # PutEnv  
 Change or add an environment variable, string is 'NAME=VALUE'  
 
 ## C / CSH  
+`#include <stdlib.h>`  
 `int putenv(char *string);`  
 
 ## ASM  
-`>PUSHW string`  
+`>LDYA string`  
 `>SYSCALL putenv`  
 
 ## RETURN VALUE  
+ CC, Y,A = 0  
+ CS, Y,A = -1, ERRNO  
+
+# SetEnv  
+Change or add an environment variable  
+
+## C / CSH  
+`#include <stdlib.h>`  
+`int setenv(const char *envname, const char *envval, int overwrite);`  
+
+## ASM  
+`>PUSHW envname`  
+`>PUSHW envval`  
+`>PUSHW overwrite`  
+`>SYSCALL setenv`  
+
+## RETURN VALUE  
+ CC, Y,A = 0  
+ CS, Y,A = -1, ERRNO  
+
+# GetEnv  
+searches the environment list to find the environment variable name,  
+and returns a pointer to the corresponding value string.  
+
+## C / CSH  
+`#include <stdlib.h>`  
+`char *getenv(const char *name);`  
+
+## ASM  
+`>LDYA name`  
+`>SYSCALL getenv`  
+
+## RETURN VALUE  
+ CC : Y,A = PTR to VALUE (C-String)  
+ CS : Y,A = NULL  
 
 # UnsetEnv  
 Remove an environment variable  
 
 ## C / CSH  
+`#include <stdlib.h>`  
 `int unsetenv(const char *name);`  
 
 ## ASM  
-`>PUSHW name`  
+`>LDYA name`  
 `>SYSCALL unsetenv`  
 
 ## RETURN VALUE  
+ CC, Y,A = 0  
+ CS, Y,A = -1, X=ERRNO  
 
-# Add32,Sub32,Mul32,IMul32,Div32,IDiv32,Mod32,IMod32,Cmp32,ICmp32  
-Return X+Y, X-Y, X*Y, X/Y, X mod Y....  
+# GetErrMsg  
+Get error description for this errcode  
+
+## C / CSH  
+`int geterrmsg(short int errcode, char *buf);`  
 
 ## ASM  
-`>PUSHL X (long)`  
-`>PUSHL Y (long)`  
-`>FPU add32`  
-`...`  
+`>PUSHB errcode`  
+`>PUSHW buf`  
+`>SYSCALL GetErrMsg`  
 
 ## RETURN VALUE  
- On stack (long)  
 
-# FAdd,FSub,FMul,FDiv,FPwr  
+# FAdd,FSub,FMul,FDiv,FMod  
 Return X*Y, X/Y, X+Y, X-Y  
-
-## C  
-`float pwr ( float x, float y);`  
 
 ## ASM  
 `>PUSHF X (float)`  
@@ -240,29 +243,9 @@ Return X*Y, X/Y, X+Y, X-Y
 `>FPU fmod`							TODO  
 `>FPU fadd`  
 `>FPU fsub`  
-`>FPU fpwr`  
 
 ## RETURN VALUE  
  On stack (float)  
-
-# Log,Sqr,Exp,Cos,Sin,Tan,ATan  
-Return Log(x), Sqr(x), E^X, Cos(x), Sin(X), Tan(x), ATan(x)  
-
-## C  
-`float log ( float x);`  
-`float sqr ( float x);`  
-`float exp ( float x);`  
-`float cos ( float x);`  
-`float sin ( float x);`  
-`float tan ( float x);`  
-`float atan ( float x);`  
-
-## ASM  
-`>PUSHF x (Float)`  
-`>FPU log`  
-
-## RETURN VALUE  
- On stack (Float)  
 
 # float  
 Return 'floated' long  
@@ -277,18 +260,103 @@ Return 'floated' long
 ## RETURN VALUE  
  On stack (float)  
 
+# Add32,Sub32,Mul32,IMul32,Div32,IDiv32,Mod32,IMod32,Cmp32,ICmp32  
+Return X+Y, X-Y, X*Y, X/Y, X mod Y....  
+
+## ASM  
+`>PUSHL X (long)`  
+`>PUSHL Y (long)`  
+`>FPU add32`  
+`...`  
+
+## RETURN VALUE  
+ On stack (long)  
+
 # lrintf  
 Return float rounded into a long  
 
 ## C  
+`#include <math.h>`  
 `long int lrintf (float x);`  
 
 ## ASM  
+`>SL`  
+`>SS`  
 `>PUSHF x`  
-`>FPU lrintf`  
+`>SYSCALL lrintf`  
+`>SR`  
 
 ## RETURN VALUE  
  On stack (long)  
+
+# Logf,sqrtf,Expf,Cosf,Sinf,Tanf,ATanf  
+Return Log(x), Sqr(x), E^X, Cos(x), Sin(X), Tan(x), ATan(x)  
+
+## C  
+`#include <math.h>`  
+`float logf ( float x);`  
+`float sqrtf ( float x);`  
+`float expf ( float x);`  
+`float cosf ( float x);`  
+`float sinf ( float x);`  
+`float tanf ( float x);`  
+`float atanf ( float x);`  
+
+## ASM  
+`>SF`  
+`>SS`  
+`>PUSHF x (Float)`  
+`>SYSCALL logf`  
+`>SR`  
+
+## RETURN VALUE  
+ On stack (Float)  
+
+# powf  
+Return the value of x raised to the power y  
+
+## C  
+`#include <math.h>`  
+`float powf(float x, float y);`  
+
+## ASM  
+`>SF`  
+`>SS`  
+`>PUSHF x`  
+`>PUSHF y`  
+`>SYSCALL powf`  
+`>SR`  
+
+## RETURN VALUE  
+ On stack (float)  
+
+# FAdd,FSub,FMul,FDiv,FMod  
+Return X*Y, X/Y, X+Y, X-Y  
+
+## ASM  
+`>PUSHF X (float)`  
+`>PUSHF Y (float)`  
+`>FPU fmul`  
+`>FPU fdiv`  
+`>FPU fmod`							TODO  
+`>FPU fadd`  
+`>FPU fsub`  
+
+## RETURN VALUE  
+ On stack (float)  
+
+# float  
+Return 'floated' long  
+
+## C  
+`float f = (float)l;  
+
+## ASM  
+`>PUSHL l` (long)  
+`>FPU float`  
+
+## RETURN VALUE  
+ On stack (float)  
 
 ## MD5  
 Return MD5 Hash for input String  
@@ -308,22 +376,22 @@ CC
 Initialize a MD5 computation  
 
 # C  
-`short int md5init();`  
+`void *md5init();`  
 
 # ASM  
 `>SYSCALL MD5Init`  
 
 ## RETURN VALUE  
-A = hMem To S.MD5  
+Y,A = pMD5  
 
 ## MD5Update  
 Add Data to MD5 computation  
 
 # C  
-`void md5update (short int md5, char* data, int len);`  
+`void md5update (void *md5, char *data, int len);`  
 
 # ASM  
-`>PUSHB md5`  
+`>PUSHW md5`  
 `>PUSHW data`  
 `>PUSHW len`  
 `>SYSCALL MD5Update`  
@@ -333,10 +401,10 @@ Add Data to MD5 computation
 ## MD5Finalize  
 
 # C  
-`void md5finalize (short int md5, char* digest);`  
+`void md5finalize (void *md5, char* digest);`  
 
 # ASM  
-`>PUSHB md5`  
+`>PUSHW md5`  
 `>PUSHW digest`  
 `>SYSCALL MD5Finalize`  
 
@@ -345,10 +413,11 @@ Add Data to MD5 computation
 # Realloc  
 
 ## C  
-`void *realloc(short int hMem, int size);`  
+`#include <stdlib.h>`  
+`void *realloc(void *ptr, size_t size);`  
 
 ## ASM  
-`>PUSHB hMem`  
+`>PUSHW ptr`  
 `>PUSHW size`  
 `>SYSCALL realloc`  
 
@@ -356,7 +425,7 @@ Add Data to MD5 computation
  YA = ptr  
  X = hMem  
 
-# GetMem  
+# Malloc  
  Y,A = Size Requested  
 
 ## RETURN VALUE  
@@ -372,45 +441,6 @@ Add Data to MD5 computation
 ## RETURN VALUE  
  none.  
  (X unmodified)  
-
-# FreeMem  
- A = hMem To Free  
-
-## RETURN VALUE  
- none.  
- (X unmodified)  
-
-# GetMemPtr  
-A = hMem  
-
-## RETURN VALUE  
-Y,A = PTR to MemBlock  
-(X unmodified)  
-
-# NewStkObj  
- Y,A = Size Requested  
-
-## RETURN VALUE  
- CC : success  
-  YA = PTR to Mem (Uninitialised)  
-*	X = hMem  
- CS :  
-  A = EC  
-
-# GetStkObjPtr  
-
-## ASM  
-`lda hStkObj`  
-`>SYSCALL GetStkObjPtr`  
-
-## RETURN VALUE  
-
-# FreeStkObj  
- A = hMem To Free (AUX Memory)  
-
-## RETURN VALUE  
- none.  
- (X,Y unmodified)  
 
 # Online  
 Get ProDOS Volume Info  
@@ -464,36 +494,43 @@ Change Attributes of a ProDOS File
 
 ## RETURN VALUE  
 
-# ExecL  
-
-## C / CSH  
-`short int execl(const char *cmdline, short int flags);`  
-
-## ASM  
-`>PUSHW cmdline`  
-`>PUSHB flags`  
-`>SYSCALL execl`  
-
-## RETURN VALUE  
-A = Child PSID  
-
 # ExecV  
 
 ## C / CSH  
-`short int execv(const char* argv[], short int flags);`  
+`#include <unistd.h>`  
+`int execv(const char* argv[], int flags);`  
 
 ## ASM  
+`>SS`  
 `>PUSHW argv`  
-`>PUSHB flags`  
+`>PUSHW flags`  
 `>SYSCALL execv`  
+`>SR`  
 
 ## RETURN VALUE  
-A = Child PSID  
+Y,A = Child PSID  
+
+# ExecL  
+
+## C / CSH  
+`#include <unistd.h>`  
+` int execl(const char *args, int flags);`  
+
+## ASM  
+`>SS`  
+`>PUSHW args`  
+`>PUSHW flags`  
+`>SYSCALL execl`  
+`>SR`  
+
+## RETURN VALUE  
+Y,A = Child PSID  
 
 # Fork  
 
-## C  
-`short int fork();`  
+## C / CSH  
+`#include <unistd.h>`  
+`pid_t fork(void);`  
 
 ## ASM  
 `>SYSCALL fork`  
@@ -504,34 +541,60 @@ A = Child PSID
 # Kill  
 
 ## C  
-`int kill(short int pid, short int sig);`  
+`int kill(int pid, int sig);`  
 
 ## ASM  
-`>PUSHB pid`  
-`>PUSHB sig`  
+`>SS`  
+`>PUSHW pid`  
+`>PUSHW sig`  
 `>SYSCALL kill`  
+`>SR`  
 
 ## RETURN VALUE  
+
+# GetPS(int PID)  
+*  
+
+## C  
+`void *getpslist (void);`  
+
+## ASM  
+`>SYSCALL GetPSList`  
+
+## RETURN VALUE  
+ Y,A = Ptr to PS list  
+
+# GetPS(int PID)  
+*  
+
+## C  
+`void *getps (int PID);`  
+
+## ASM  
+`>LDYA PID`  
+`>SYSCALL GetPS`  
+
+## RETURN VALUE  
+ Y,A = Ptr to PS struct  
 
 # LoadTxtFile  
 Load TXT a file in memory (with ending 0)  
 
 ## C  
-`int loadtxtfile ( const char * filename );`  
+`void *loadtxtfile ( const char * filename );`  
 
 ## ASM  
 `>LDYA filename`  
 `>SYSCALL loadtxtfile`  
 
 ## RETURN VALUE  
- Y,A = File Length (without ending 0)  
- X = hMem of Loaded File  
+ Y,A = Ptr to loaded file  
 
 # LoadFile  
 Load a file in memory  
 
 ## C  
-`int loadfile ( const char * filename, short int flags, short int ftype, int auxtype );`  
+`void *loadfile(const char *filename, short int flags, short int ftype, int auxtype);`  
 
 ## ASM  
 `>PUSHW filename`  
@@ -541,22 +604,23 @@ Load a file in memory
 `>SYSCALL loadfile`  
 
 ## RETURN VALUE  
- Y,A = File Length  
- X = hMem of Loaded File  
+ Y,A = Ptr to loaded file  
 
 # FileSearch  
 Search a file in the provided PATH list  
 And return, if found, the full path to it.  
 
 ## C  
-`int filesearch( char *filename, char *searchpath, char *fullpath, stat *filestat);`  
+`int filesearch(char *filename, char *searchpath, char *fullpath, stat *filestat);`  
 
 ## ASM  
+`>SS`  
 `>PUSHW filename`  
 `>PUSHW fullpath`  
 `>PUSHW searchpath`  
 `>PUSHW filestat`  
 `>SYSCALL filesearch`  
+`>SR`  
 
 ## RETURN VALUE  
 CC : success  
@@ -564,16 +628,11 @@ DstBuf = FilePath
 DstStat = S.STAT  
 CS : not found  
 
-# GetMemStat  
- Y,A = Ptr to 24 bytes buffer  
-
-## RETURN VALUE  
- Buffer filled with memory stats  
-
 # GetPWUID  
 
 ## C  
-`int getpwuid(short int uid, S.PW *passwd);`  
+`#include <pwd.h>`  
+`int getpwuid(int uid, S.PW *passwd);`  
 
 ## ASM  
 `PUSHB uid`  
@@ -585,41 +644,20 @@ CS : not found
 # GetGRGID  
 
 ## C  
-`int getgrgid(short int gid, S.GRP *group);`  
+`#include <pwd.h>`  
+`int getgrgid(int gid, S.GRP *group);`  
 
 ## ASM  
 `>PUSHB gid`  
 `>PUSHW group`  
-`>SYSCALL getpwname`  
-
-## RETURN VALUE  
-
-# CloseSession  
-
-## C  
-`int closesession(short int hSID);`  
-
-## ASM  
-`>PUSHB hSID`  
-`>SYSCALL CloseSession`  
-
-## RETURN VALUE  
-
-# OpenSession  
-
-## C  
-`short int hSID opensession(const char *name, const char *passwd);`  
-
-## ASM  
-`>PUSHW name`  
-`>PUSHW passwd`  
-`>SYSCALL OpenSession`  
+`>SYSCALL getgrgid`  
 
 ## RETURN VALUE  
 
 # GetPWName  
 
 ## C  
+`#include <pwd.h>`  
 `int getpwname(const char* name, S.PW *passwd);`  
 
 ## ASM  
@@ -632,22 +670,24 @@ CS : not found
 # GetGRName  
 
 ## C  
-`int getgrgid(const char* name, S.GRP *group);`  
+`#include <pwd.h>`  
+`int getgrname(const char* name, S.GRP *group);`  
 
 ## ASM  
 `>PUSHW name`  
 `>PUSHW group`  
-`>SYSCALL getpwname`  
+`>SYSCALL getgrname`  
 
 ## RETURN VALUE  
 
 # PutPW  
 
 ## C  
+`#include <pwd.h>`  
 `int putpw(S.PW* passwd);`  
 
 ## ASM  
-`>PUSHW passwd`  
+`>LDYA passwd`  
 `>SYSCALL putpw`  
 
 ## RETURN VALUE  
@@ -655,18 +695,44 @@ CS : not found
 # PutGR  
 
 ## C  
+`#include <pwd.h>`  
 `int putgr(S.GRP *group);`  
 
 ## ASM  
-`>PUSHW group`  
+`>LDYA group`  
 `>SYSCALL putgr`  
+
+## RETURN VALUE  
+
+# OpenSession  
+
+## C  
+`#include <pwd.h>`  
+`SESSION *opensession(const char *name, const char *passwd);`  
+
+## ASM  
+`>PUSHW name`  
+`>PUSHW passwd`  
+`>SYSCALL OpenSession`  
+
+## RETURN VALUE  
+
+# CloseSession  
+
+## C  
+`#include <pwd.h>`  
+`int closesession(SESSION *);`  
+
+## ASM  
+`>PUSHB hSID`  
+`>SYSCALL CloseSession`  
 
 ## RETURN VALUE  
 
 # SListGetData  
 
 ## ASM  
-`>PUSHB hSList`  
+`>PUSHW pSList`  
 `>PUSHW KeyID`  
 `>PUSHW DataPtr` (0 if KERNEL should allocate a buffer)  
 `>PUSHW DataLen` (Data bytes to return, 0 if String mode)  
@@ -674,13 +740,12 @@ CS : not found
 `>SYSCALL SListGetData`  
 
 ## RETURN VALUE  
- Y,A = Byte Count  
- X = hMem (if DataPtr = 0)  
+ Y,A = DataPtr  
 
 # SListAddData  
 
 ## ASM  
-`>PUSHB hSList`  
+`>PUSHW pSList`  
 `>PUSHW KeyID`  
 `>PUSHW DataPtr`  
 `>PUSHW DataLen` (Data bytes to add, 0 if String mode)  
@@ -691,7 +756,7 @@ CS : not found
 # SListSetData  
 
 ## ASM  
-`>PUSHB hSList`  
+`>PUSHW pSList`  
 `>PUSHW KeyID`  
 `>PUSHW DataPtr`  
 `>PUSHW DataLen` (Data bytes to set, 0 if String mode)  
@@ -702,7 +767,7 @@ CS : not found
 # SListGetByID  
 
 ## ASM  
-`>PUSHB hSList`  
+`>PUSHW pSList`  
 `>PUSHW KeyID`  
 `>PUSHW KeyPtr`  
 `>SYSCALL SListGetByID`  
@@ -713,31 +778,31 @@ CS : not found
 # SListNewKey  
 
 ## ASM  
-`>PUSHB hSList`  
+`>PUSHW pSList`  
 `>PUSHW KeyPtr`  
 `>PUSHW ScopeID`  
+`>PUSHWI NextPtr`  
 `>SYSCALL SListNewKey`  
 
 ## RETURN VALUE  
  Y,A = KeyID  
- X = KeyLen  
 
 # SListLookup  
 
 ## ASM  
-`>PUSHB hSList`  
+`>PUSHW pSList`  
 `>PUSHW KeyPtr`  
 `>PUSHW ScopeID`  
+`>PUSHWI NextPtr`  
 `>SYSCALL SListLookup`  
 
 ## RETURN VALUE  
  Y,A = KeyID  
- X = Key Length  
 
 # SListFree  
 
 ## ASM  
-`lda hSList`  
+`>LDYA pSList`  
 `>SYSCALL SListFree`  
 
 ## RETURN VALUE  
@@ -749,7 +814,7 @@ CS : not found
 `>SYSCALL SListNew`  
 
 ## RETURN VALUE  
-A=hSList  
+Y,A=pSList  
 
 # ChMod  
 change permissions of a file  
@@ -765,15 +830,18 @@ change permissions of a file
 ## RETURN VALUE  
 
 # FStat  
-Return information about a hFILE  
+Return information about a FD  
 
 ## C  
-`int fstat(short int hFILE, struct stat *statbuf);`  
+`#include <sys/stat.h>`  
+`int fstat(int fd, struct stat *statbuf);`  
 
 ## ASM  
-`>PUSHB hFILE`  
+`>SS`  
+`>PUSHW fd`  
 `>PUSHW statbuf`  
 `>SYSCALL fstat`  
+`>SR`  
 
 ## RETURN VALUE  
 
@@ -781,12 +849,15 @@ Return information about a hFILE
 Return information about a file  
 
 ## C  
+`#include <sys/stat.h>`  
 `int stat(const char *pathname, struct stat *statbuf);`  
 
 ## ASM  
+`>SS`  
 `>PUSHW pathname`  
 `>PUSHW statbuf`  
 `>SYSCALL stat`  
+`>SR`  
 
 ## RETURN VALUE  
 
@@ -797,9 +868,11 @@ create a directory
 `int mkdir(const char *pathname, int mode);`  
 
 ## ASM  
+`>SS`  
 `>PUSHW pathname`  
 `>PUSHW mode`  
 `>SYSCALL mkdir`  
+`>SR`  
 
 ## RETURN VALUE  
 CC : success  
@@ -810,29 +883,34 @@ A = EC
 return a pathname to a new FIFO  
 
 ## C  
-`hFILE mkfifo(const char *pathname, int mode);`  
+`#include <sys/stat.h>`  
+`int mkfifo(const char *path, mode_t mode);`  
 
 ## ASM  
-`>PUSHW pathname`  
+`>SS`  
+`>PUSHW path`  
 `>PUSHW mode`  
 `>SYSCALL mkfifo`  
+`>SR`  
 
 ## RETURN VALUE  
 CC = OK, CS = ERROR  
-A = hFILE  
 
 # MkNod  
 Create a special or ordinary file.  
 (CDEV, BDEV, DSOCK, SSOCK, PIPE)  
 
 ## C  
-`hFILE mknod(const char *pathname, int mode, hFD fd);`  
+`#include <sys/stat.h>`  
+`int mknod(const char *pathname, mode_t mode, dev_t dev);`  
 
 ## ASM  
+`>SS`  
 `>PUSHW pathname`  
 `>PUSHW mode`  
-`>PUSHB fd`  
+`>PUSHW dev`  
 `>SYSCALL mknod`  
+`>SR`  
 
 ## RETURN VALUE  
 CC = OK, CS = ERROR  
@@ -851,15 +929,37 @@ A = hFILE
 CC = OK, CS = ERROR  
 A = hFD  
 
+# GetMemStat  
+ Y,A = Ptr to 24 bytes buffer  
+
+## RETURN VALUE  
+ Buffer filled with memory stats  
+
+# fileno  
+map a stream pointer to a file descriptor  
+
+## C / CSH  
+`#include <stdio.h>`  
+`int fileno(FILE *stream);`  
+
+## ASM  
+`>LDYA stream`  
+`>SYSCALL fileno`  
+
+## RETURN VALUE  
+ CC = success  
+ YA = fildes  
+
 # fputc (BLOCKING)  
 Print A (char) to hFILE  
 
-## C  
-`int fputc ( hFILE stream , short int character );`  
+## C / CSH  
+`#include <stdio.h>`  
+`int fputc(int c, FILE *stream);`  
 
 ## ASM  
-`>PUSHB stream`  
-`>PUSHB character`  
+`>PUSHW character`  
+`>PUSHW stream`  
 `>SYSCALL fputc`  
 
 ## RETURN VALUE  
@@ -868,11 +968,12 @@ CC = success
 # putchar (BLOCKING)  
 Print A (char) to StdOut  
 
-## C  
-`int putchar ( short int character );`  
+## C / CSH  
+`#include <stdio.h>`  
+`int putchar ( int c );`  
 
 ## ASM  
-`lda character`  
+`lda c`  
 `>SYSCALL putchar`  
 
 ## RETURN VALUE  
@@ -881,7 +982,8 @@ CC = success
 # puts (BLOCKING)  
 Write Str to StdOut, appends '\r\n'  
 
-## C  
+## C / CSH  
+`#include <stdio.h>`  
 `int puts ( const char * str );`  
 
 ## ASM  
@@ -889,18 +991,22 @@ Write Str to StdOut, appends '\r\n'
 `>SYSCALL PutS`  
 
 ## RETURN VALUE  
-CC = success  
+CC : success Y,A > 0  
+CS : Y,A = EOF  
 
 # fputs (BLOCKING)  
-Write Str to hFILE  
+Write Str to FILE  
 
-## C  
-`int fputs (hFILE stream, const char * str );`  
+## C / CSH  
+`#include <stdio.h>`  
+`int fputs (const char *s, FILE *stream);`  
 
 ## ASM  
-`>PUSHB stream`  
-`>PUSHW str`  
+`>SS`  
+`>PUSHW s`  
+`>PUSHW stream`  
 `>SYSCALL fputs`  
+`>SR`  
 
 ## RETURN VALUE  
 CC = success  
@@ -911,13 +1017,14 @@ pointed to by s, until n-1 bytes are read, or a <newline> is read and
 transferred to s, or an end-of-file condition is encountered. The  
 string is then terminated with a null byte.  
 
-## C  
-`char *fgets(hFILE stream, char * s, int n);`  
+## C / CSH  
+`#include <stdio.h>`  
+`char *fgets(char *s, int n, FILE *stream);`  
 
 ## ASM  
-`>PUSHB hFILE`  
 `>PUSHW s`  
 `>PUSHW n`  
+`>PUSHW FILE`  
 `>SYSCALL fgets`  
 
 ## RETURN VALUE  
@@ -927,8 +1034,9 @@ CC = success
 # getchar (BLOCKING)  
 Get char from StdIn  
 
-## C  
-`short int getchar ( );`  
+## C / CSH  
+`#include <stdio.h>`  
+`int getchar (void);`  
 
 ## ASM  
 `>SYSCALL getchar`  
@@ -940,11 +1048,12 @@ Get char from StdIn
 # getc (BLOCKING)  
 Get char from Node  
 
-## C  
-`short int getc ( short int stream );`  
+## C / CSH  
+`#include <stdio.h>`  
+`int getc(FILE *stream);`  
 
 ## ASM  
-`lda stream`  
+`>LDYA pStream`  
 `>SYSCALL getc`  
 
 ## RETURN VALUE  
@@ -954,12 +1063,15 @@ Get char from Node
 # ungetc  
 push byte back into input stream  
 
-## C  
-`short int ungetc(short int c, short int stream);`  
+## C / CSH  
+`#include <stdio.h>`  
+`int ungetc(int c, FILE *stream);`  
 
 ## ASM  
-`>PUSHB c`  
-`>PUSHB stream`  
+`>SS`  
+`>PUSHW stream`  
+`>PUSHW c`  
+`>SR`  
 `>SYSCALL ungetc`  
 
 ## RETURN VALUE  
@@ -969,10 +1081,12 @@ push byte back into input stream
 # FOpen  
 Open a file  
 
-## C  
-`short int fopen ( const char *filename, short int flags, short int ftype, int auxtype );`  
+## C / CSH  
+`#include <stdio.h>`  
+`FILE *fopen ( const char *filename, short int flags, short int ftype, int auxtype );`  
 
 ## ASM  
+`>SS`  
 `>PUSHW filename`  
 `>PUSHB flags`  
  + O.RDONLY : if R and exists -> ERROR  
@@ -983,6 +1097,10 @@ Open a file
  + O.CREATE : Create if not exists  
 `>PUSHB ftype`  
 `>PUSHW auxtype`  
+`>SYSCALL FOpen`  
+`>SR`  
+
+## DESCRIPTION  
 TODO: replace flags/ftype/auxtype with mode="w+,t=TYP,x=AUXTYPE"  
  + r  = O_RDONLY  
  + r+ = O_RDWR  
@@ -994,17 +1112,18 @@ TODO: replace flags/ftype/auxtype with mode="w+,t=TYP,x=AUXTYPE"
  + ,x=12345 or x=$ffff  
 
 ## RETURN VALUE  
- CC : A = hFILE  
- CS : A = EC  
+ CC : YA = pFILE  
+ CS : YA = EC  
 
 # FClose  
 Close a file  
 
-## C  
-`int fclose ( short int stream );`  
+## C / CSH  
+`#include <stdio.h>`  
+`int fclose(FILE *stream);`  
 
 ## ASM  
-`lda stream`  
+`>LDYA stream`  
 `>SYSCALL FClose`  
 
 ## RETURN VALUE  
@@ -1013,13 +1132,14 @@ Close a file
 Read bytes from file  
 
 ## C  
-`int fread (short int stream, void * ptr, int count );`  
+`#include <stdio.h>`  
+`int fread (FILE *stream, void * ptr, int count );`  
 
 ## ASM  
-`>PUSHB stream`  
+`>PUSHW stream`  
 `>PUSHW ptr`  
 `>PUSHW count`  
-`>SYSCALL fread`  
+`>SYSCALL FRead`  
 
 ## RETURN VALUE  
  Y,A = Bytes Read  
@@ -1028,10 +1148,11 @@ Read bytes from file
 Write bytes to file  
 
 ## C  
-`int fwrite ( short int stream, const void * ptr, int count );`  
+`#include <stdio.h>`  
+`int fwrite (FILE *stream, const void *ptr, int count);`  
 
 ## ASM  
-`>PUSHB stream`  
+`>PUSHW stream`  
 `>PUSHW ptr`  
 `>PUSHW count`  
 `>SYSCALL fwrite`  
@@ -1042,32 +1163,37 @@ Write bytes to file
 # FFlush  
 
 ## C  
-`int fflush( short int stream );`  
+`#include <stdio.h>`  
+`int fflush(FILE *stream);`  
 
 ## ASM  
-`lda stream`  
+`>LDYA stream`  
 `>SYSCALL fflush`  
 
 # FSeek  
 Set the file-position indicator for hFILE  
 
-## C  
-`int fseek( short int stream, long offset, short int whence );`  
+## C / CSH  
+`#include <stdio.h>`  
+`int fseek(FILE *stream, long offset, int whence);`  
 
 ## ASM  
-`>PUSHB stream`  
+`>SS`  
+`>PUSHW stream`  
 `>PUSHL offset`  
-`>PUSHB whence`  
+`>PUSHW whence`  
 `>SYSCALL fseek`  
+`>SR`  
 
 # FEOF  
 Test the end-of-file indicator for hFILE  
 
-## C  
-`short int feof( short int stream );`  
+## C / CSH  
+`#include <stdio.h>`  
+`int feof(FILE *stream);`  
 
 ## ASM  
-`lda stream`  
+`>LDYA stream`  
 `>SYSCALL feof`  
 
 ## RETURN VALUE  
@@ -1079,11 +1205,12 @@ Test the end-of-file indicator for hFILE
 # FTell  
 Return the current value of the file-position indicator  
 
-## C  
-`long ftell( short int stream );`  
+## C / CSH  
+`#include <stdio.h>`  
+`long ftell(FILE *stream);`  
 
 ## ASM  
-`lda stream`  
+`>LDYA stream`  
 `>SYSCALL ftell`  
 
 ## RETURN VALUE  
@@ -1093,6 +1220,7 @@ On stack (long)
 Remove a file or directory  
 
 ## C  
+`#include <stdio.h>`  
 `int remove ( const char *pathname );`  
 
 ## ASM  
@@ -1105,6 +1233,7 @@ Remove a file or directory
 Rename a file  
 
 ## C  
+`#include <stdio.h>`  
 `int rename ( const char * oldpath, const char * newpath );`  
 
 ## ASM  
@@ -1121,9 +1250,10 @@ Rename a file
 # SPrintF  
 Prints C-Style String  
 
-## C  
+## C / CSH  
+`#include <stdio.h>`  
 `int printf ( const char *format, ... );`  
-`int fprintf ( short int stream, const char *format, ... );`  
+`int fprintf ( FILE *stream, const char *format, ... );`  
 `int sprintf ( char *str, const char *format, ... );`  
 
 ## ASM  
@@ -1134,7 +1264,7 @@ PrintF : (example is for printing Y,A as integer : format="%I", 2 bytes)
 `>PUSHBI 2`	#bytecount  
 `>SYSCALL PrintF`  
 FPrintF :  
-`>PUSHB hFILE`  
+`>PUSHW FILE`  
 `>PUSHW format`  
 `>PUSHW i`  
 `...`  
@@ -1152,6 +1282,7 @@ SPrintF :
 CC : success, Y,A = bytes sent  
 CS : error, A = code from Output  
 Specifiers :  
++ %% : print % char  
 + %b : pull 1 byte to Print BIN  
 + %d : pull 1 byte unsigned DEC 0..255  
 + %D : pull 2 bytes unsigned DEC 0..65535  
@@ -1184,7 +1315,7 @@ Read formatted data from string
 
 ## C  
 `int scanf( const char *format, ... );`  
-`int fscanf( short int stream, const char *format, ... );`  
+`int fscanf( FILE *stream, const char *format, ... );`  
 `int sscanf ( const char *s, const char *format, ... );`  
 
 ## ASM  
@@ -1227,53 +1358,65 @@ A = Number of arguments filled.
 # StrToF  
 Convert String to 40 bits Float  
 
-## C  
+## C / CSH  
+`#include <stdlib.h>`  
 `float strtof (const char* str, char** endptr );`  
 
 ## ASM  
+`>SF`  
+`>SS`  
 `>PUSHW str`  
 `>PUSHWI EndPtr`  
 `>SYSCALL StrToF`  
+`>SR`  
 
 ## RETURN VALUE  
-On stack (float)  
+On stack (float) at pBase  
 
 # AToF  
 Convert String to 40 bits Float  
 
-## C  
+## C / CSH  
+`#include <stdlib.h>`  
 `float atof ( const char* str );`  
 
 ## ASM  
+`>SF`  
 `>LDYA str`  
 `>SYSCALL atof`  
 
 ## RETURN VALUE  
-On stack (float)  
+On stack (float) at pBase  
 
 # StrToL/StrToUL  
 Convert String to 32 bits (unsigned) int  
 
-## C  
+## C / CSH  
+`#include <stdlib.h>`  
 `long strtol (const char* str, char** endptr, int base);`  
 `unsigned long strtoul (const char* str, char** endptr, int base);`  
 
 ## ASM  
+`>SL`  
+`>SS`  
 `>PUSHW str`  
 `>PUSHW EndPtr`  
-`>PUSHB Base`  
+`>PUSHW Base`  
 `>SYSCALL StrToL`  
+`>SR`  
 
 ## RETURN VALUE  
-On stack (long)  
+On stack (long) at pBase  
 
 # atol  
 Convert String to 32 bits long  
 
-## C  
+## C / CSH  
+`#include <stdlib.h>`  
 `long atol ( const char * str );`  
 
 ## ASM  
+`>SL`  
 `>LDYA str`  
 `>SYSCALL atol`  
 
@@ -1283,82 +1426,79 @@ On stack (long)
 # atoi  
 Convert String to 16 bits int  
 
-## C  
+## C /CSH  
+`#include <stdlib.h>`  
 `int atoi ( const char * str );`  
 
 ## ASM  
-`>LDYAI str`  
+`>LDYA str`  
 `>SYSCALL atoi`  
 
 ## RETURN VALUE  
  Y,A = int  
 
 # RealPath  
-Return the canonicalized absolute pathname  
 
 ## C / CSH  
+`#include <limits.h>`  
+`#include <stdlib.h>`  
 `char *realpath(const char *path, char *resolvedpath);`  
 
 ## ASM  
+`>SS`  
 `>PUSHW path`  
 `>PUSHW resolvedpath`  
 `>SYSCALL realpath`  
+`>SR`  
+
+## DESCRIPTION  
+Return the canonicalized absolute pathname.  
+If resolvedpath is specified as NULL, then realpath() uses  
+malloc() to allocate a buffer of PATH_MAX bytes to hold  
+the resolved pathname, and returns a pointer to this buffer.  
+The caller should deallocate this buffer using free().  
 
 ## RETURN VALUE  
-CC : success  
- Y,A = Ptr to Full Path (C-String Buffer, MLI.MAXPATH+1)  
- X = hMem of Full Path  
-CS : A = Error Code  
+CC : Y,A = Ptr to resolvedpath  
+CS : Y,A = NULL, ERRNO set  
 
 # Expand  
 
-## C  
+## C / CSH  
+`#include <stdlib.h>`  
 `char *expand(const char *str, char *expanded);`  
 
 ## ASM  
+`>SS`  
 `>PUSHW str`  
 `>PUSHW expanded`  
 `>SYSCALL expand`  
+`>SR`  
 
 ## RETURN VALUE  
-if expanded == null  
- Y,A = PTR to Expanded String  
- X = hMem to Expanded String  
-if expanded = null  
- Y,A = strlen  
+CC : Y,A = PTR to Expanded String  
+CS : Y,A = NULL, ERRNO  
 
-# LoadStkObj  
-Load a file in AUX memory (Stock Objects)  
- PUSHW = PATH (Handled by....  
- PUSHB = MODE  ...  
- PUSHB = TYPE  ...  
- PUSHW = AUXTYPE ...FOpen)  
-
-## RETURN VALUE  
- Y,A = File Length  
- X = hMem of Loaded Object in AUX mem  
-
-# GetStkObj  
+# StrDup  
+Create a new copy of this C-String  
 
 ## C  
-`int *ptr getstkobj (short int hStkObj);`  
+`#include <string.h>`  
+`char *strdup(const char *s);`  
 
 ## ASM  
-`lda hStkObj`  
-`>SYSCALL GetStkObj`  
-
-## RETURN VALUE  
- CC : success  
-  X = hMem  
-  Y,A = ptr  
- CS : error  
-  A = EC  
+Y,A = Ptr to source C-String  
+CC : success   
+ Y,A = PTR to String  
+CS : error  
+ A = SYS error code  
 
 # StrLen  
 Returns Length of C-String  
 
 ## C  
-`int strlen ( char * str);`  
+`#include <string.h>`  
+`size_t strlen(const char *s);`  
 
 ## ASM  
 `>LDYAI str`  
@@ -1371,6 +1511,7 @@ Y,A = String length
 Concatenate strings  
 
 ## C  
+`#include <string.h>`  
 `char * strcat ( char * destination, const char * source );`  
 
 ## ASM  
@@ -1382,10 +1523,11 @@ Concatenate strings
 Y,A = destination  
 
 # StrCpy  
-Copy string  
+`#include <string.h>`* Copy string  
 
 ## C  
-`char * strcpy ( char * destination, const char * source );`  
+`#include <string.h>`  
+`char *strcpy(char *restrict dst, const char *restrict src);`  
 
 ## ASM  
 `>PUSHWI destination`  
@@ -1395,24 +1537,11 @@ Copy string
 ## RETURN VALUE   
 Y,A = destination  
 
-# StrDup  
-Create a new copy of this C-String  
-
-## C  
-`char * strdup ( char * str);`  
-
-## ASM  
-Y,A = Ptr to source C-String  
-CC : success   
- Y,A = PTR to String  
- X = hMem (C-String)  
-CS : error  
- A = SYS error code  
-
 # StrUpr/StrLwr  
 Convert string to UPPERCASE/lowercase  
 
 ## C  
+`#include <string.h>`  
 `int strupr ( char * str);`  
 `int strlwr ( char * str);`  
 
@@ -1429,6 +1558,7 @@ Y,A = str
 Compare 2 strings  
 
 ## C  
+`#include <string.h>`  
 `int strcmp(const char *s1, const char *s2);`  
 
 ## ASM  
@@ -1446,6 +1576,7 @@ CS : no match
 Compare 2 strings, ignoring case  
 
 ## C  
+`#include <string.h>`  
 `int strcasecmp(const char *s1, const char *s2);`  
 
 ## ASM  
@@ -1459,10 +1590,18 @@ CS : no match
  CC, Y,A=0  
  CS, Y,A > 0 or < 0  
 
+# StrVNew  
+
+## ASM  
+`>LDYA size`  
+`>SYSCALL StrVNew`  
+
+## RETURN VALUE  
+
 # StrVSet  
 
 ## ASM  
-`>PUSHB hSTRV`  
+`>PUSHW pSTRV`  
 `>PUSHW id`  
 `>PUSHW ptr`  
 `>SYSCALL StrVSet`  
@@ -1472,30 +1611,14 @@ CS : no match
 # StrVGet  
 
 ## ASM  
-`>PUSHB hSTRV`  
+`>PUSHW pSTRV`  
 `>PUSHW id`  
 `>PUSHW ptr`  
 `>SYSCALL StrVGet`  
 
 ## RETURN VALUE  
  CC: Y,A = Ptr  
- CS: Y,A = NULL  
-
-# StrVNew  
-
-## ASM  
-`>LDYA size`  
-`>SYSCALL StrVNew`  
-
-## RETURN VALUE  
-
-# StrVFree  
-
-## ASM  
-`lda hSTRV`  
-`>SYSCALL StrVFree`  
-
-## RETURN VALUE  
+ CS: A = E.NOKEY  
 
 # Time  
 Get System Time in Buffer  
@@ -1504,11 +1627,24 @@ Get System Time in Buffer
 `void time (struct tm* timeptr);`  
 
 ## ASM  
-`>PUSHW timer`  
+`>LDYA timer`  
 `>SYSCALL time`  
 
 ## RETURN VALUE  
 S.TIME filled with System date/time  
+
+# PTime2Time  
+ Convert ProDOS Time To S.TIME  
+
+## C  
+`void PTime2Time (long ptime, const struct tm* timeptr );`  
+
+## ASM  
+`>PUSHL ptime`  
+`>PUSHW timer`  
+`>SYSCALL PTime2Time`  
+
+## RETURN VALUE  
 
 # StrFTime  
 
@@ -1520,38 +1656,25 @@ Convert S.TIME struct to CSTR
 `>PUSHW str`  
 `>PUSHW format`  
 + %a : Abbreviated weekday name : Thu  
-+ %A : Full weekday name : Thursday   
-+ %b : Abbreviated month name : Aug   
-+ %B : Full month name : August   
++ %A : Full weekday name : Thursday  
++ %b : Abbreviated month name : Aug  
++ %B : Full month name : August  
 + %d : Day of the month, zero-padded (01-31)  
-+ %H : Hour in 24h format (00-23) 14   
-+ %I : Hour in 12h format (01-12) 02   
-+ %m : Month as a decimal number (01-12) 08   
-+ %M : Minute (00-59) 55   
-+ %p : AM or PM designation PM   
-+ %S : Second (00-61) 02   
-+ %w : Weekday as a decimal number with Sunday as 0 (0-6)   
++ %H : Hour in 24h format (00-23) 14  
++ %I : Hour in 12h format (01-12) 02  
++ %m : Month as a decimal number (01-12) 08  
++ %M : Minute (00-59) 55  
++ %p : AM or PM designation PM  
++ %S : Second (00-61) 02  
++ %w : Weekday as a decimal number with Sunday as 0 (0-6)  
 + %y : Year, last two digits (00-99)  
-+ %Y : Year four digits 2001   
++ %Y : Year four digits 2001  
 
 `>PUSHW timeptr`  
 `>SYSCALL strftime`  
 
 ## RETURN VALUE  
   none. always succeed.  
-
-# PTime2Time  
- Convert ProDOS Time To S.TIME  
-
-## C  
-`void PTime2Time (long* ptime, const struct tm* timeptr );`  
-
-## ASM  
-`>PUSHW ptime`  
-`>PUSHW timer`  
-`>SYSCALL PTime2Time`  
-
-## RETURN VALUE  
 
 # CTime2Time  
  Convert CTime Time To S.TIME  
@@ -1568,8 +1691,8 @@ Convert S.TIME struct to CSTR
 
 # open  
 
-## C  
-`hFD open(const char *pathname, short int flags);`  
+## C / CSH  
+`int open(const char *pathname, short int flags);`  
 
 ## ASM  
 `>PUSHW pathname`  
@@ -1583,19 +1706,21 @@ REG File created on ProDOS : T=TXT,X=$0000
 # close  
 
 ## C  
-`int close(hFD fd);`  
+`#include <unistd.h>`  
+`int close(int fd);`  
 
 ## ASM  
-`lda fd`  
+`>LDYA fd`  
 `>SYSCALL close`  
 
 # read  
 
 ## C  
-`int read(hFD fd, void *buf, int count);`  
+`#include <unistd.h>`  
+`size_t read(int fd, void *buf, size_t count);`  
 
 ## ASM  
-`>PUSHB fd`  
+`>PUSHW fd`  
 `>PUSHW buf`  
 `>PUSHW count`  
 `>SYSCALL read`  
@@ -1607,10 +1732,11 @@ CS: A = EC
 # write  
 
 ## C  
-`int write(hFD fd, const void *buf, int count);`  
+`#include <unistd.h>`  
+`int write(int fd, const void *buf, int count);`  
 
 ## ASM  
-`>PUSHB fd`  
+`>PUSHW fd`  
 `>PUSHW buf`  
 `>PUSHW count`  
 `>SYSCALL write`  
@@ -1623,7 +1749,7 @@ CS: A = EC
 Set the file-position indicator for hFD  
 
 ## C  
-`int lseek( short int hFD, long offset, short int whence );`  
+`int lseek(off_t fildes, off_t offset, short int whence );`  
 
 ## ASM  
 `>PUSHB hFD`  
@@ -1634,15 +1760,79 @@ Set the file-position indicator for hFD
 # ChOwn  
 
 ## C  
- `short int chown(const char *pathname, short int owner, short int group);`  
+`#include <unistd.h>`  
+ `int chown(const char *pathname, uid_t owner, gid_t group);`  
 
 ## ASM  
+`>SS`  
 `>PUSHW pathname`  
-`>PUSHB owner`  
-`>PUSHB group`  
+`>PUSHW owner`  
+`>PUSHW group`  
+`>SYSCALL chown`  
+`>SR`  
+
+## RETURN VALUE  
+
+# GetCWD  
+
+## C  
+`#include <unistd.h>`  
+ `char *getcwd(char *buf, size_t size);`  
+
+## ASM  
+`>PUSHW buf`  
+`>PUSHW size`  
 `>SYSCALL chown`  
 
 ## RETURN VALUE  
+ NULL CS  
+ buf CC  
+
+# ChDir  
+
+## Description  
+chdir() changes the current working directory of the calling  
+        process to the directory specified in path.  
+
+## See also  
+getcwd()  
+
+## C  
+`#include <unistd.h>`  
+`int chdir(const char *path);`  
+
+## ASM  
+`>LDYA path`  
+`>SYSCALL chdir`  
+
+## RETURN VALUE  
+ CS : YA = int RC < 0 $FFxx  
+ CC : YA = 0  
+
+# GetHostName  
+
+## Description  
+gethostname() returns the null-terminated hostname in the  
+character array name, which has a length of len bytes.  If the  
+null-terminated hostname is too large to fit, then the name is  
+truncated, and no error is returned  
+
+## See also  
+
+## C  
+`#include <unistd.h>`  
+` int gethostname(char *name, size_t len);`  
+
+## ASM  
+`>SS`  
+`>PUSHW name`  
+`>PUSHW len`  
+`>SYSCALL GetHostName`  
+`>SR`  
+
+## RETURN VALUE  
+ CS : YA = -1, ERRNO  
+ CC : YA = 0  
 
 ## License
 A2osX is licensed under the GNU General Public License.

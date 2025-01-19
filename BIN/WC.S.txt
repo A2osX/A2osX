@@ -7,7 +7,6 @@ NEW
 *--------------------------------------
 				.INB inc/macros.i
 				.INB inc/a2osx.i
-				.INB inc/kernel.i
 				.INB inc/mli.i
 				.INB inc/mli.e.i
 *--------------------------------------
@@ -27,12 +26,9 @@ ZPFileStat		.BS 2
 ZPFullPath		.BS 2
 ZPRelPath		.BS 2
 ZPLineBuf		.BS 2
+pFile			.BS 2
 
 ArgIndex		.BS 1
-hSrcFullPath	.BS 1
-hFile			.BS 1
-hMem			.BS 1
-
 bTabbed			.BS 1
 
 bPause			.BS 1
@@ -51,19 +47,20 @@ ZS.END			.ED
 CS.START		cld
 				jmp (.1,x)
 				.DA #$61				6502,Level 1 (65c02)
-				.DA #1					BIN Layout Version 1
-				.DA 0
-				.DA CS.END-CS.START		Code Size (without Constants)
-				.DA DS.END-DS.START		Data SegmentSize
+				.DA #2					BIN Layout Version 2
+				.DA #0
+				.DA #0
+				.DA CS.END
+				.DA ID.END
+				.DA DS.END
 				.DA #64					Stack Size
 				.DA #ZS.END-ZS.START	Zero Page Size
-				.DA 0
 *--------------------------------------
 * Relocation Table
 *--------------------------------------
 .1				.DA CS.INIT
 				.DA CS.RUN
-				.DA CS.DOEVENT		
+				.DA CS.SIG		
 				.DA	CS.QUIT
 L.MSG.USAGE		.DA MSG.USAGE
 L.MSG.CRLF		.DA MSG.CRLF
@@ -78,31 +75,33 @@ CS.INIT			clc
 *--------------------------------------
 CS.RUN			inc ArgIndex
 				lda ArgIndex
-				>SYSCALL ArgV
+				>LIBC ArgV
 				bcs .5
 				
 				>STYA ZPPtr1
 				lda (ZPPtr1)
 				cmp #'-'
-				bne .4
-				
-				jsr CS.RUN.CheckOpt
-				bcc CS.RUN
+				beq .1
 
-.9				>LDYA L.MSG.USAGE
-				>SYSCALL PutS
-				lda #E.SYN
-				sec
-				rts
-
-.4				>LDA.G hSrcBasePath
-				bne .9
+				>LDA.G pSrcBasePath+1
+				bne .98
 
 				>LDYA ZPPtr1
 				jsr X.InitSrcDirYA
 				bcc CS.RUN
+				
+				rts
+				
+.1				jsr CS.RUN.CheckOpt
+				bcc CS.RUN
 
-.99				rts
+.98				>LDYA L.MSG.USAGE
+				>LIBC PutS
+
+				lda #E.SYN
+				sec
+
+				rts
 *--------------------------------------
 .5				lda bChar
 				ora bLine
@@ -114,33 +113,52 @@ CS.RUN			inc ArgIndex
 				sta bLine
 				sta bWord
 
-.51				>LDA.G hSrcBasePath
+.51				>LDYAI 256
+				>LIBC Malloc
+				bcs .99
+
+				>STYA ZPLineBuf
+				
+				>LDA.G pSrcBasePath+1
 				bne .6
 				
-				ldy #S.PS.hStdIn
-				lda (pPS),y
-				tay
-				ldx FILEs.hFD-1,y
-				lda FDs.pLO-1,x
-				sta ZPPtr1
-				lda FDs.pHI-1,x
-				sta ZPPtr1+1
-				
-				lda (ZPPtr1)
-				cmp #S.FD.T.PIPE
-				bne .9
-				
-				jmp CS.RUN.PIPE
+				ldy #S.PS.pStdIn
+				jsr A2osX.GetPSy
+				pha
+				iny
+				jsr A2osX.GetPSy
+				ply
 
+				>STYA ZPPtr1
+
+				>LIBC FileNo
+				bcs .99
+
+				>SS
+				>PUSHYA
+				>PUSHEA.G STATBUF
+				>LIBC FStat
+				>SR
+				bcs .99
+				
+				>LDA.G STATBUF+S.STAT.MODE+1
+				and #$F0
+
+				cmp /S.STAT.MODE.FIFO
+				bne .98
+				
+				>LDYA ZPPtr1
+				>STYA pFile
+
+				jmp CS.RUN.PIPE
+				
+.99				rts				
+*--------------------------------------
 .6				>LDYAI 256
-				>SYSCALL GetMem
+				>LIBC Malloc
 				bcs .99
 
 				>STYA ZPFullPath
-				stx hSrcFullPath
-
-				>LDA.G hSrcBasePath
-				>SYSCALL GetMemPtr
 				>STYA ZPPtr1
 
 				ldy #$ff
@@ -156,23 +174,20 @@ CS.RUN			inc ArgIndex
 				lda ZPFullPath+1
 				adc #0
 				sta ZPRelPath+1
-
-				>LDYAI 256
-				>SYSCALL GetMem
-				bcs .99
-
-				>STYA ZPLineBuf
-				stx hMem
 *--------------------------------------
-CS.RUN.LOOP		ldy #S.PS.hStdIn
-				lda (pPS),y
-				>SYSCALL FEOF
+CS.RUN.LOOP		ldy #S.PS.pStdIn
+				jsr A2osX.GetPSy
+				pha
+				iny
+				jsr A2osX.GetPSy
+				ply
+				>LIBC FEOF
 				bcs .99
 
 				tay
 				bne .10
 
-				>SYSCALL GetChar
+				>LIBC GetChar
 				bcs .99
 
 				cmp #$03				Ctrl-C
@@ -188,7 +203,7 @@ CS.RUN.LOOP		ldy #S.PS.hStdIn
 
 .10				lda bPause
 				bne CS.RUN.LOOP			Pause...
-	
+*--------------------------------------	
 				jsr X.GetEntry
 				bcs .9
 
@@ -225,23 +240,14 @@ CS.RUN.LOOP		ldy #S.PS.hStdIn
 				jmp CS.RUN.LOOP
 
 .90				jsr CS.RUN.PrintTstat
+
 				lda #0
 				sec
 .99				rts
 *--------------------------------------
-CS.RUN.PIPE		>LDYAI 256
-				>SYSCALL GetMem
+CS.RUN.PIPE		jsr CS.RUN.FILE.LOOP
 				bcs .99
-
-				>STYA ZPLineBuf
-				stx hMem
-
-				ldy #S.PS.hStdIn
-				lda (pPS),y
 				
-				sta hFile
-
-				jsr CS.RUN.FILE.LOOP
 				jsr CS.RUN.PrintFstat
 				
 				lda #0
@@ -308,10 +314,12 @@ CS.RUN.FILE		jsr X.IncludeMatch
 .99				rts
 *--------------------------------------
 CS.RUN.FILE.LOOP
-.1				>PUSHB hFile
+.1				>SS
 				>PUSHW ZPLineBuf
 				>PUSHWI 255
-				>SYSCALL FGetS
+				>PUSHW pFile
+				>LIBC FGetS
+				>SR
 				bcs .8
 
 				jsr CS.RUN.IncFLine
@@ -358,10 +366,15 @@ CS.RUN.FILE.LOOP
 CS.RUN.CheckErr	bcc .9
 
 				pha
+				tay
+				>SS
 				>PUSHW L.MSG.ERR
+				tya
 				>PUSHA
 				>PUSHBI 1
-				>SYSCALL PrintF
+				>LIBC PrintF
+				>SR
+				
 				lda bContinue
 				eor #$80
 				asl
@@ -370,15 +383,17 @@ CS.RUN.CheckErr	bcc .9
 .9				rts
 *--------------------------------------
 CS.RUN.GetFilePath
+				>SS
 				>PUSHW ZPFullPath
-				>LDA.G hSrcBasePath
-				>SYSCALL GetMemPtr
-				>PUSHYA
-				>SYSCALL StrCpy
+				>PUSHW.G pSrcBasePath
+				>LIBC StrCpy
+				>SR
 
+				>SS
 				>PUSHW ZPFullPath
 				>PUSHW ZPFileName
-				>SYSCALL StrCat
+				>LIBC StrCat
+				>SR
 				rts
 *--------------------------------------
 CS.RUN.OpenFile	ldx #12
@@ -391,23 +406,25 @@ CS.RUN.OpenFile	ldx #12
 				dex
 				bne .1
 				
+				>SS
 				>PUSHW ZPFullPath
 				>PUSHBI	O.RDONLY+O.TEXT
 				>PUSHBI 0				Type
 				>PUSHWZ					Aux type
-				>SYSCALL FOpen
+				>LIBC FOpen
+				>SR				
 				bcs .9
 
-				sta hFile
+				>STYA pFile
 
 .9				rts
 *--------------------------------------
 CS.RUN.CloseFile
-				lda hFile
-				>SYSCALL FClose
+				>LDYA pFile
+				>LIBC FClose
 				bcs .9
 				
-				stz hFile
+				stz pFile+1
 				
 .9				rts
 *--------------------------------------
@@ -483,40 +500,48 @@ CS.RUN.PrintFstat
 				bit bWord
 				bpl .1
 				
+				>SS
 				jsr CS.RUN.PUSHFMT
 				>PUSHL.G fWordCount
 				>PUSHBI 4
-				>SYSCALL PrintF
+				>LIBC PrintF
+				>SR
 				bcs .9
 				
 .1				bit bLine
 				bpl .2
 
+				>SS
 				jsr CS.RUN.PUSHFMT
 				>PUSHL.G fLineCount
 				>PUSHBI 4
-				>SYSCALL PrintF
+				>LIBC PrintF
+				>SR
 				bcs .9
 				
 .2				bit bChar
 				bpl .3
 				
+				>SS
 				jsr CS.RUN.PUSHFMT
 				>PUSHL.G fCharCount
 				>PUSHBI 4
-				>SYSCALL PrintF
+				>LIBC PrintF
+				>SR
 				bcs .9
 				
 .3				bit bTabbed
 				bpl .4
 
 				>LDYA ZPRelPath
-				>SYSCALL PutS
+				>LIBC PutS
 				rts
 				
-.4				>PUSHW L.MSG.CRLF
+.4				>SS
+				>PUSHW L.MSG.CRLF
 				>PUSHBI 0
-				>SYSCALL PrintF
+				>LIBC PrintF
+				>SR
 .9				
 CS.RUN.PrintFstat.RTS
 				rts
@@ -538,52 +563,67 @@ CS.RUN.PrintTstat
 				bit bWord
 				bpl .1
 				
+				>SS
 				>PUSHW L.MSG.LONGTAB
 				>PUSHL.G tWordCount
 				>PUSHBI 4
-				>SYSCALL PrintF
+				>LIBC PrintF
+				>SR
 				bcs .9
 				
 .1				bit bLine
 				bpl .2
 
+				>SS
 				>PUSHW L.MSG.LONGTAB
 				>PUSHL.G tLineCount
 				>PUSHBI 4
-				>SYSCALL PrintF
+				>LIBC PrintF
+				>SR
 				bcs .9
 				
 .2				bit bChar
 				bpl .3
 				
+				>SS
 				>PUSHW L.MSG.LONGTAB
 				>PUSHL.G tCharCount
 				>PUSHBI 4
-				>SYSCALL PrintF
+				>LIBC PrintF
+				>SR
 				bcs .9
 
 .3				>LDYA L.MSG.TOTAL
-				>SYSCALL PutS
+				>LIBC PutS
 .9				rts
 *--------------------------------------
-CS.DOEVENT		sec
+CS.SIG			sec
 				rts
 *--------------------------------------
 CS.QUIT			jsr X.LeaveSubDir
 				bcc CS.QUIT
 
-				>LDA.G hInclude
+				>LDYA.G pInclude
+				cmp #0
 				beq .1
 
-				>SYSCALL FreeMem
-.1				lda hSrcFullPath
+				>LIBC Free
+				
+.1				>LDYA.G pSrcBasePath
+				cmp #0
 				beq .2
 
-				>SYSCALL FreeMem
-.2				lda hMem
+				>LIBC Free
+				
+.2				>LDYA ZPFullPath
+				beq .3
+
+				>LIBC Free
+
+.3				>LDYA ZPLineBuf
 				beq .8
 
-				>SYSCALL FreeMem
+				>LIBC Free
 
 .8				clc
 				rts
@@ -610,7 +650,7 @@ CS.RUN.CheckOpt	ldy #1
 *--------------------------------------
 				.INB usr/src/shared/x.fileenum.s
 *--------------------------------------
-CS.END
+CS.END			.EQ *
 *--------------------------------------
 OptionList		.AS "CRMLWcrmlw"
 OptionVars		.DA #bContinue,#bRecurse,#bChar,#bLine,#bWord
@@ -628,9 +668,11 @@ MSG.LONG		.CZ "%L"
 MSG.LONGTAB		.CZ "%10L "
 MSG.TOTAL		.CZ "(total)"
 *--------------------------------------
+ID.END			.EQ *
+*--------------------------------------
 				.DUMMY
 				.OR 0
-DS.START
+
 fCharCount		.BS 4
 fLineCount		.BS 4
 fWordCount		.BS 4

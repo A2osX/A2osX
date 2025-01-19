@@ -8,13 +8,18 @@ NEW
 * ## ASM
 * `>PUSHW pathname`
 * `>PUSHW mode`
-* `>SYSCALL chmod`
+* `>LIBC chmod`
 * ## RETURN VALUE
 *\--------------------------------------
-K.ChMod			jsr PFT.CheckPath2
-				bcs STAT.RET4
+K.ChMod			jsr PFT.GetPath2
+				bcs .9
 
-				jsr STAT.PM
+				jsr PFT.CheckExtFS
+				bcs .9
+
+				ldy #0
+				jsr RAMSW.GetStkYW
+				>STYA K.S.STAT+S.STAT.MODE
 
 				stz K.MLI.PARAMS+3+S.FIEX.ACL		read mode
 
@@ -29,59 +34,60 @@ K.ChMod			jsr PFT.CheckPath2
 
 				>MLICALL MLI.ACL
 .9				rts
-
-STAT.RET4		inc pStack
-
-STAT.RET3		inc pStack
-				inc pStack
-				inc pStack
-				rts
 */--------------------------------------
 * # FStat
-* Return information about a hFILE
+* Return information about a FD
 * ## C
-* `int fstat(short int hFILE, struct stat *statbuf);`
+* `#include <sys/stat.h>`
+* `int fstat(int fd, struct stat *statbuf);`
 * ## ASM
-* `>PUSHB hFILE`
+* `>SS`
+* `>PUSHW fd`
 * `>PUSHW statbuf`
-* `>SYSCALL fstat`
+* `>LIBC fstat`
+* `>SR`
 * ## RETURN VALUE
 *\--------------------------------------
-K.FStat			ldy #2
-				jsr PFT.CheckNodeY
-				bcs STAT.RET3
+K.FStat			ldy #3					fd (hi byte)
+				jsr RAMSW.GetStkY
 
-				>PULLW K.Stat.Store.2+1
-
-				>PULLA
-				tax
-				lda FILEs.hName-1,x		get path
-				jsr K.GetMemPtr
-				jsr PFT.YAToMLIPATH
-
-				jsr FS.Stat.203
+				jsr SHARED.GethFDpFDA	Y = hFD
 				bcs STAT.RTS
 
-				ldy #S.FD.REG.REF
-				lda (pFD),y
-				sta K.MLI.PARAMS+1
+				jsr SHARED.GethFDPathBuf
 
-				>MLICALL MLI.GETEOF
+				jsr UNISTD.Stat
 				bcs STAT.RTS
 
-				ldx #2
+*				ldy #S.FD.REG.REF
+*				lda (pFD),y
+*				sta K.MLI.PARAMS+1
 
-.1				lda K.MLI.PARAMS+2,x
-				sta K.S.STAT+S.STAT.SIZE,x
-				dex
-				bpl .1
+*				>MLICALL MLI.GETEOF
+*				bcs STAT.RTS
 
-K.Stat.Store	ldy #S.STAT-1
+*				ldx #2
+
+*.1				lda K.MLI.PARAMS+2,x
+*				sta K.S.STAT+S.STAT.SIZE,x
+*				dex
+*				bpl .1
+*--------------------------------------
+K.Stat.Store	ldy #0
+				jsr RAMSW.GetStkYW
+				>STYA K.Stat.Store.2+1
+
+				ldy #S.STAT-1
+
+				sta IO.SETWRITEAUX
 
 K.Stat.Store.1	lda K.S.STAT,y
+
 K.Stat.Store.2	sta $ffff,y				SELF MODIFIED
 				dey
 				bpl K.Stat.Store.1
+
+				sta IO.CLRWRITEAUX
 
 *				clc
 STAT.RTS		rts
@@ -89,24 +95,60 @@ STAT.RTS		rts
 * # Stat
 * Return information about a file
 * ## C
+* `#include <sys/stat.h>`
 * `int stat(const char *pathname, struct stat *statbuf);`
 * ## ASM
+* `>SS`
 * `>PUSHW pathname`
 * `>PUSHW statbuf`
-* `>SYSCALL stat`
+* `>LIBC stat`
+* `>SR`
 * ## RETURN VALUE
 *\--------------------------------------
-K.Stat			jsr PFT.CheckPath2
-				bcs STAT.RET4			go discard statbuf
+K.Stat			jsr PFT.GetPath2		-> RealPath in Buf256
+				bcs STAT.RTS
 
-				>PULLW K.Stat.Store.2+1
-
-				inc pStack
-				inc pStack
-
-				jsr FS.Stat
+				jsr STAT.Stat
 				bcc K.Stat.Store
 
+				rts
+*--------------------------------------
+STAT.Stat		ldx #_Stat
+				jsr PFT.CheckExtFS
+				bcs .9
+			
+				jsr PFT.Translate
+				bcs .9
+
+				bvc .1					not a Special dir
+
+				jsr SHARED.ClrStat
+
+				lda #S.STAT.MODE.FO+S.STAT.MODE.XG+S.STAT.MODE.RG+S.STAT.MODE.XU+S.STAT.MODE.RU+S.STAT.MODE.DIR
+				sta K.S.STAT+S.STAT.MODE
+				lda /S.STAT.MODE.FO+S.STAT.MODE.XG+S.STAT.MODE.RG+S.STAT.MODE.XU+S.STAT.MODE.RU+S.STAT.MODE.DIR
+				sta K.S.STAT+S.STAT.MODE+1
+
+*				clc
+
+.9				rts
+
+.1				jmp (.7,x)
+
+.7				.DA STAT.StatDev
+				.DA STAT.StatMnt
+				.DA PRODOS.Stat
+*--------------------------------------
+STAT.StatDev	jsr DEV.Find
+				bcs .9
+
+				jmp DEV.Stat
+
+.9				rts
+*--------------------------------------
+STAT.StatMnt	lda #MLI.E.INVPATH
+
+				sec
 				rts
 */-------------------------------------
 * # MKDir
@@ -114,18 +156,33 @@ K.Stat			jsr PFT.CheckPath2
 * ## C
 * `int mkdir(const char *pathname, int mode);`
 * ## ASM
+* `>SS`
 * `>PUSHW pathname`
 * `>PUSHW mode`
-* `>SYSCALL mkdir`
+* `>LIBC mkdir`
+* `>SR`
 * ## RETURN VALUE
 * CC : success
 * CS : error
 * A = EC
 *\-------------------------------------
-K.MKDir			jsr PFT.CheckPath2
-				bcs STAT.RET4
+K.MKDir			jsr PFT.GetPath2
+				bcs .99
 
-				jsr STAT.PM
+				jsr PFT.CheckExtFS
+				bcs .99
+
+				jsr PFT.Translate
+				bcs .99
+
+				bvs .98
+				
+				cpx #4
+				bne .98
+
+				ldy #0
+				jsr RAMSW.GetStkYW
+				>STYA K.S.STAT+S.STAT.MODE
 
 				lda #S.FI.T.DIR
 				sta K.MLI.PARAMS+4
@@ -133,70 +190,114 @@ K.MKDir			jsr PFT.CheckPath2
 				stz K.MLI.PARAMS+6
 				lda #S.FI.ST.DIR
 				jmp FS.MLICREATE
+
+.98				lda #MLI.E.INVPATH
+				
+				sec
+
+.99				rts
 */--------------------------------------
 * # MKFIFO
 * return a pathname to a new FIFO
 * ## C
-* `hFILE mkfifo(const char *pathname, int mode);`
+* `#include <sys/stat.h>`
+* `int mkfifo(const char *path, mode_t mode);`
 * ## ASM
-* `>PUSHW pathname`
+* `>SS`
+* `>PUSHW path`
 * `>PUSHW mode`
-* `>SYSCALL mkfifo`
+* `>LIBC mkfifo`
+* `>SR`
 * ## RETURN VALUE
 * CC = OK, CS = ERROR
-* A = hFILE
 *\--------------------------------------
-K.MKFIFO		jsr STAT.PM
+K.MKFIFO		ldy #2					path
+				jsr RAMSW.GetStkYW
+				>STYA .3+1
+				jsr RAMSW.YA2PathBuf
+
+				ldy #0					mode
+				jsr RAMSW.GetStkYW
+				>STYA K.S.STAT+S.STAT.MODE
 
 				>LDYAI 512
-				jsr K.pipe
-				bcs STAT.RTS
+				jsr K.Pipe
+				bcs .9
+
+				lda K.PathBuf
+				bne .7
 
 				ldy #0
 
-.1				lda STAT.DEVFIFO,y
-				sta (ZPPtr1),y			fill pathname buffer
+.1				lda STAT.TMPFIFO,y
+				sta K.PathBuf,y
 				iny
 				cpy #9
 				bne .1
 
 				lda IO.hFD
-				jsr STDIO.A2HexAX
-				sta (ZPPtr1),y
+				jsr SHARED.A2HexAX
+				sta K.PathBuf,y
 				txa
 				iny
-				sta (ZPPtr1),y
+				sta K.PathBuf,y
 				iny
 				lda #0
-				sta (ZPPtr1),y
-				bra K.MkNod.I
+				sta K.PathBuf,y
+
+				sta IO.SETWRITEAUX
+
+.2				lda K.PathBuf,y
+.3				sta $FFFF,y				SELF MODIFIED
+				dey
+				bpl .2
+				
+				sta IO.CLRWRITEAUX
+
+.7				jsr DEV.AddName
+				bcc STAT.MKNod
+
+.9				rts
+*--------------------------------------
+STAT.TMPFIFO	.AS "/tmp/fifo"
 */--------------------------------------
 * # MkNod
 * Create a special or ordinary file.
 * (CDEV, BDEV, DSOCK, SSOCK, PIPE)
 * ## C
-* `hFILE mknod(const char *pathname, int mode, hFD fd);`
+* `#include <sys/stat.h>`
+* `int mknod(const char *pathname, mode_t mode, dev_t dev);`
 * ## ASM
+* `>SS`
 * `>PUSHW pathname`
 * `>PUSHW mode`
-* `>PUSHB fd`
-* `>SYSCALL mknod`
+* `>PUSHW dev`
+* `>LIBC mknod`
+* `>SR`
 * ## RETURN VALUE
 * CC = OK, CS = ERROR
 * A = hFILE
 *\--------------------------------------
-K.MkNod 		>PULLA
-				jsr DEV.GetPFD
+K.MKNod 		ldy #4					pathname
+				jsr RAMSW.GetStkYW
+				jsr RAMSW.YA2PathBuf
 
-				jsr STAT.PM
+				ldy #2					mode
+				jsr RAMSW.GetStkYW
+				>STYA K.S.STAT+S.STAT.MODE
 
-K.MkNod.I		ldx #1
+				ldy #0					dev
+				jsr RAMSW.GetStkYW
+				>STYA pFD
 
-.1				lda FILEs.hFD-1,x
+STAT.MKNod		ldx #0
+
+.1				lda pFILEs+1,x
 				beq .2
 
 				inx
-				cpx #K.FILE.MAX+1
+				inx
+				cpx #K.FILE.MAX*2
 				bcc .1
 
 				lda #E.OOH
@@ -205,30 +306,36 @@ K.MkNod.I		ldx #1
 
 				rts
 
-.2				stx IO.hFILE
+.2				stx .3+1
 
-				lda IO.hFD
-				sta FILEs.hFD-1,x
-
-				stz FILEs.oCnt-1,x
-
-				lda (pFD)
-				cmp #S.FD.T.CDEV
-				beq .8
-				
-				cmp #S.FD.T.BDEV
-				beq .8
-
-				>LDYA ZPPtr1
-				>SYSCALL2 StrDup
+				>LDYAI S.FILE
+				jsr MEM.Malloc
 				bcs .9
 
+				>STYA pFILE
+
+.3				ldx #$FF				SELF MODIFIED
+
+				sta pFILEs+1,x
+				tya
+				sta pFILEs,x
+
+				lda IO.hFD
+				sta (pFILE)				#S.FILE.hFD
+
 				txa
+				ldy #S.FILE.ID
+				sta (pFILE),y
 
-				ldx IO.hFILE
-				sta FILEs.hName-1,x		store path
+				lda #0
+				ldy #S.FILE.Mode
 
-.8				txa						hFILE
+.4				sta (pFILE),y
+				iny
+				cpy #S.FILE
+				bcc .4
+
+				>LDYA pFILE
 
 				clc
 
@@ -239,51 +346,47 @@ K.MkNod.I		ldx #1
 * `hFD pipe(int size);`
 * ## ASM
 * `>LDYA size`
-* `>SYSCALL pipe`
+* `>LIBC pipe`
 * ## RETURN VALUE
 * CC = OK, CS = ERROR
 * A = hFD
 *\--------------------------------------
-K.Pipe			sta .1+1				SIZE HI
+K.Pipe			>STYA A4L				SIZE HI
 
-				>SYSCALL2 NewStkObj
+				jsr MEM.Malloc
 				bcs .99
 
-				stx .8+1				save PIPE buffer
+				>STYA A1L				save PIPE buffer
 
 				lda #S.FD.T.PIPE
-				jsr DEV.MkFD
+				jsr DEV.NewFD
 				bcs .9
 
-.1				lda #$ff				SELF MODIFIED
+.1				lda A4L+1
 				ldy #S.FD.PIPE.Free+1
 				sta (pFD),y
 
 				ldy #S.FD.PIPE.Size+1
 				sta (pFD),y
 
-				ldy #S.FD.PIPE.hMem
-
-.8				lda #$ff				Self Modified
+				ldy #S.FD.PIPE.pBuf
+				lda A1L
 				sta (pFD),y
+				iny
+				lda A1L+1
+				sta (pFD),y
+
 				lda IO.hFD
 *				clc
 				rts
 
 .9				pha						save error code
-				lda .8+1				get back PIPE buffer
-
-				>SYSCALL2 FreeStkObj
+				>LDYA A1L
+				jsr K.Free
 
 				pla
 				sec
 .99				rts
-*--------------------------------------
-STAT.PM			>PULLW K.S.STAT+S.STAT.MODE
-				>PULLW ZPPtr1			pathname
-				rts
-*--------------------------------------
-STAT.DEVFIFO	.AS "/dev/fifo"
 *--------------------------------------
 MAN
 SAVE usr/src/sys/kernel.s.stat

@@ -7,7 +7,6 @@ NEW
 *--------------------------------------
 HISCNT.MAX		.EQ 10
 HISBUF.MAX		.EQ 256
-CORE.STACK.MAX	.EQ 128
 PUSHD.STACK.MAX	.EQ 4
 CODE.STACK.MAX	.EQ 4
 *--------------------------------------
@@ -76,13 +75,11 @@ CORE.TestResult	.BS 1
 CORE.PrevTestResult	.BS 1
 ZPTmpW			.BS 2
 
-ZPPtr1			.BS 2
-ZPPtr2			.BS 2
+*				.BS 2
+*				.BS 2
 
-LOAD.hCode		.BS 1
-LOAD.hArgs		.BS 1
-LOAD.ArgCnt		.BS 1
-
+pStk			.BS 2
+StkPtr			.BS 1
 bState			.BS 1
 
 bState.ExitOnEOF	.EQ %10000000
@@ -96,25 +93,25 @@ bState.SET.X		.EQ %00000001
 
 ZS.END			.ED
 *--------------------------------------
-*			File Header (16 Bytes)
+* File Header (16 Bytes)
 *--------------------------------------
 CS.START		cld
 				jmp (.1,x)
 				.DA #$61				6502,Level 1 (65c02)
-				.DA #1					BIN Layout Version 1
-				.DA #S.PS.F.EVENT		S.PS.F
+				.DA #2					BIN Layout Version 2
+				.DA #S.PS.SIG.T1SEC
 				.DA #0
-				.DA CS.END-CS.START		Code Size (without Constants)
-				.DA DS.END-DS.START		Data SegmentSize
+				.DA CS.END
+				.DA ID.END
+				.DA DS.END
 				.DA #64					Stack Size
 				.DA #ZS.END-ZS.START	Zero Page Size
-				.DA 0
 *--------------------------------------
 * Relocation Table
 *--------------------------------------
 .1				.DA CS.INIT
 				.DA CS.RUN
-				.DA CS.DOEVENT
+				.DA CS.SIG
 				.DA	CS.QUIT
 *--------------------------------------
 L.MSG.GREETINGS	.DA MSG.GREETINGS
@@ -207,36 +204,38 @@ CS.INIT			clc
 CS.RUN			jsr CL.Init
 				jsr CORE.Init
 
-*				lda #0
-*				jsr GetArgV
-*				>STYA.G SH
+				lda #0
+				jsr GetArgV
+				>STYA R1
 
-				ldy #S.PS.ARGC
-				lda (pPS),y
-				beq .2					no arg, continue starting interactive
+				>SS
+				>PUSHYA
+				ldy #S.PS.pCmdLine+1
+				jsr A2osX.GetPSy
+				>PUSHA
+				dey
+				jsr A2osX.GetPSy
+				>PUSHA
+				>LIBC strcmp
+				>SR
+				bcc .2					pCmdLine = Arg[0], interactive mode
 
 				lda #bState.ExitOnEOF
 				tsb bState
 
-				lda #0
-				jsr CMD.SHIFTA			Remove $0 = /bin/sh
-
-				jsr GetArgV
-				>STYA ZPPtr1
-
-				lda (ZPPtr1)
+				lda (R1)
 				cmp #'-'
 				bne .1
 
 				ldy #1
-				lda (ZPPtr1),y
+				lda (R1),y
 				jsr ToUpperCase
 
 				cmp #'C'
 				bne .19
 
 				iny
-				lda (ZPPtr1),y
+				lda (R1),y
 				bne .19
 
 *				lda #0
@@ -249,57 +248,62 @@ CS.RUN			jsr CL.Init
 				sec
 				rts
 *--------------------------------------
-.1				jsr GetArgV				Load SH batch file
-				>SYSCALL LoadTxtFile
+.1				>LDYA R1			Load SH batch file
+				>LIBC LoadTxtFile
 				bcs .9
 
-				phx						X = loaded file hMem
+				>STYA.G CORE.pNewCode
+
 				jsr GetArgV				Y,A = Args
-				plx
-				jsr CMD..EXEC.YAX		Execute . Batch file
+
+				jsr CMD..RunNewCode		Execute . Batch file
 				bcc CS.RUN.LOOP
 
 .9				rts
 *--------------------------------------
 .2				jsr CMD.CD.HOME
+				bcs .9
+
 				jsr HIS.Init
 				bcs .9
 
+				>SS
 				>PUSHW L.MSG.GREETINGS
 				>PUSHW A2osX.KVER
 				>PUSHBI 2
-				>SYSCALL PrintF
+				>LIBC PrintF
+				>SR
 				bcs .9
 
 				>LDYA L.HOME.PROFILE
-				>SYSCALL LoadTxtFile
+				>LIBC LoadTxtFile
 				bcs CS.RUN.LOOP			No profile...
 
-				phx						X = loaded file hMem
+				>STYA.G CORE.pNewCode
+
 				jsr GetArgV				Y,A = Args
-				plx
-				jsr CMD..EXEC.YAX		Execute . ${home}.profile
+
+				jsr CMD..RunNewCode		Execute . ${home}.profile
 *--------------------------------------
 CS.RUN.LOOP		>SLEEP
 
 .1				jsr CheckSleep
 				beq .3
 
-				ldy #S.PS.hStdIn
-				lda (pPS),y
-				>SYSCALL FEOF
+				jsr IO.GetStdIn
+				>LIBC FEOF
 				bcs .9
 
 				tay
 				bne CS.RUN.LOOP
 
-				>SYSCALL GetChar
+				>LIBC GetChar
 				bcs .9					I/O err
 
 				cmp #3					Ctrl-C
 				bne CS.RUN.LOOP
 
-				lda (pData)				batch mode ?
+				lda StkPtr				batch mode ?
 				beq CS.RUN.LOOP
 
 				lda bState
@@ -314,13 +318,13 @@ CS.RUN.LOOP		>SLEEP
 				and #bState.Pause
 				beq .6
 
-				>SYSCALL GetChar
+				>LIBC GetChar
 				bcs	.9					I/O err
 
 				cmp #3					Ctrl-C
 				bne .4
 
-				lda (pData)				batch mode ?
+				lda StkPtr				batch mode ?
 				beq .5
 
 				lda bState
@@ -345,7 +349,7 @@ CS.RUN.LOOP		>SLEEP
 .5				lda #bState.Pause
 				trb bState
 *--------------------------------------
-.6				lda (pData)				batch mode ?
+.6				lda StkPtr				batch mode ?
 				bne CS.RUN.BATCH
 *--------------------------------------
 CS.RUN.INTERACTIVE
@@ -358,7 +362,7 @@ CS.RUN.INTERACTIVE
 				jsr CL.PrintPrompt
 				bcs CS.RUN.CMDLINE.9
 
-.1				>SYSCALL GetChar
+.1				>LIBC GetChar
 				bcs CS.RUN.CMDLINE.9	I/O error
 
 .2				cmp #C.EOF				....or Ctrl-D
@@ -380,18 +384,18 @@ CS.RUN.INTERACTIVE
 
 				>LDYA ZPCLBuf
 
-CS.RUN.CMDLINE	>SYSCALL StrDup
+CS.RUN.CMDLINE	>LIBC StrDup
 				bcs CS.RUN.CMDLINE.9
 
-				phx
-				jsr GetArgV
-				plx						Y,A=ARGV, X=strdup
+				>STYA.G CORE.pNewCode
 
-				jsr CORE.Load.YAX		Exec CL
+				jsr GetArgV
+
+				jsr STK.PushCode		Exec CL
 				bcs CS.RUN.CMDLINE.9
 
 				lda #$C0+C.CLEXEC
-				jsr STK.Push
+				jsr STK.PushA
 
 				bra CS.RUN.LOOP.RUN
 
@@ -414,16 +418,18 @@ CS.RUN.BATCH	lda bState
 
 				sta (ZPCLBuf),y
 
-.4				>PUSHW L.MSG.TRACE
+.4				>SS
+				>PUSHW L.MSG.TRACE
 				>PUSHW ZPCLBuf
 				>PUSHBI 2
-				>SYSCALL PrintF
+				>LIBC PrintF
+				>SR
 				bcs CS.RUN.LOOP.RTS
 
 CS.RUN.LOOP.RUN	jsr CORE.Run
 
-CS.RUN.LOOP.END	ldy #S.PS.RC
-				sta (pPS),y
+CS.RUN.LOOP.END	ldy #S.PS.ERRNO
+				jsr A2osX.SetPSy
 				bcc CS.RUN.LOOP.80
 
 				tay
@@ -437,27 +443,28 @@ CS.RUN.LOOP.END	ldy #S.PS.RC
 				bcs .8
 
 				cmp #$C0+C.CLEXEC
-				beq .8
+				beq .3
 
 				cmp #$C0+C..			in . ?
-				beq .7
+				beq .2
 
 				cmp #$C0+C.CALL			in CALL ?
-				beq .7
+				beq .2
 
 				jsr STK.PopCtx
 				bcc .1
 
-.7				jsr IO.PrintBatchErrMsg
+.2				jsr IO.PrintBatchErrMsg
 				bcs CS.RUN.LOOP.RTS
 
-				jsr STK.Pull
-				jsr CMD.EXIT.FILE
+.3				jsr STK.PopA
+				jsr STK.PopCode
 
 .8				jsr IO.PrintErrMsg
+
 				bcs CS.RUN.LOOP.RTS
 
-CS.RUN.LOOP.80	lda (pData)				something on stack ?
+CS.RUN.LOOP.80	lda StkPtr				something on stack ?
 				bne CS.RUN.LOOP.88
 
 				lda bState
@@ -466,15 +473,12 @@ CS.RUN.LOOP.80	lda (pData)				something on stack ?
 
 CS.RUN.LOOP.88	jmp CS.RUN.LOOP
 CS.RUN.LOOP.EXIT
-				ldy #S.PS.RC
-				lda (pPS),y
+				ldy #S.PS.ERRNO
+				jsr A2osX.GetPSy
 				sec
 CS.RUN.LOOP.RTS	rts
 *--------------------------------------
-CS.DOEVENT		lda (pEvent)
-				bpl .9
-
-				jsr CheckSleep
+CS.SIG			jsr CheckSleep
 				beq .9
 
 *				ldy #Sleep				already set by CheckSleep
@@ -484,59 +488,67 @@ CS.DOEVENT		lda (pEvent)
 .1				lda (pData),y
 				sbc #0
 				sta (pData),y
+				bcs .9
 				iny
 				dex
 				bne .1
 
 .9				sec
+
 				rts
 *--------------------------------------
 CS.QUIT			jsr CORE.FUNCRESET
 
-				>LDA.G hAliases
-				beq .10
-
-				>SYSCALL SListFree
-
-.10				>LDA.G HIS.hBuf
+				>LDYA.G pAliases
+				cmp #0
 				beq .1
 
-				>SYSCALL StrVFree
+				>KAPI SListFree
 
-.1				ldy #CL.hBuf
-				jsr .7
+.1				>LDYA.G HIS.pBuf
+				cmp #0
+				beq .2
 
-.2				jsr CMD.POPD
-				bcc .2
+				>LIBC Free
 
-				ldy #CORE.hArgVBuf
+.2				>LDYA ZPCLBuf
+				beq .3
 
-.7				lda (pData),y
+				>LIBC Free
+
+.3				jsr CMD.POPD
+				bcc .3
+
+				>LDYA ZPArgVBuf
+				beq .4
+
+				>LIBC Free
+
+.4				>LDYA pStk
 				beq .8
 
-				>SYSCALL FreeMem
+				>LIBC Free
 
 .8				clc
 				rts
 *--------------------------------------
-GetCWD			ldy #S.PS.hCWD
-				bra GetArgV.1
-*--------------------------------------
-GetArgV			ldy #S.PS.hARGV
-
-GetArgV.1		lda (pPS),y
-				>SYSCALL GetMemPtr
+GetArgV			ldy #S.PS.pARGV
+				jsr A2osX.GetPSy
+				pha
+				iny
+				jsr A2osX.GetPSy
+				ply
 				rts
 *--------------------------------------
-CheckLFAfterCR	ldy #S.PS.hStdIn		Check for any extra LF
-				lda (pPS),y
-				>SYSCALL FEOF
+CheckLFAfterCR	jsr IO.GetStdIn			Check for any extra LF
+
+				>LIBC FEOF
 				bcs .9
 
 				tay
 				bne .9
 
-				>SYSCALL GetChar
+				>LIBC GetChar
 
 .9				rts
 *--------------------------------------
@@ -550,36 +562,23 @@ CheckSleep		ldy #Sleep+3
 				ora (pData),y
 				rts
 *--------------------------------------
-GetPtr1NextChar	lda (ZPPtr1)
+GetPtr1NextChar	lda (R1)
 				beq IncPtr1.8
 
-IncPtr1			inc ZPPtr1
+IncPtr1			inc R1
 				bne IncPtr1.8
 
-				inc ZPPtr1+1
+				inc R1+1
 
 IncPtr1.8		rts
 *--------------------------------------
 GetPtr1LenY		ldy #$ff
 
 .1				iny
-				lda (ZPPtr1),y
+				lda (R1),y
 				bne .1
 
 				rts
-*--------------------------------------
-GetPtr1NextString
-				jsr GetPtr1LenY
-*--------------------------------------
-				tya
-AddAp1Ptr1		sec
-
-				adc ZPPtr1
-				sta ZPPtr1
-				bcc .8
-
-				inc ZPPtr1+1
-.8				rts
 *--------------------------------------
 ToUpperCase		cmp #'a'
 				bcc .8
@@ -593,7 +592,7 @@ ToUpperCase		cmp #'a'
 				rts
 *--------------------------------------
 IncPStack4		inc pStack
-IncPStack3		inc pStack
+				inc pStack
 				inc pStack
 				inc pStack
 				rts
@@ -606,10 +605,10 @@ IncPStack3		inc pStack
 				.INB usr/src/bin/sh.s.io
 				.INB usr/src/bin/sh.s.stk
 *--------------------------------------
-CS.END
+CS.END			.EQ *
 *--------------------------------------
-MSG.GREETINGS	.CZ "\r\nA2osX-SH %d.%d\r\n\r\n"
-MSG.HIS			.CZ "\r\n%3d : %s"
+MSG.GREETINGS	.CZ "\r\nA2osX-%d.%02d SH\r\n\r\n"
+MSG.HIS			.CZ "\r\n %d : %S"
 MSG.HISPROMPT	.CZ "\r\n\r\n? "
 MSG.HISROMPTCLR .CZ "\b\b"
 MSG.PROMPT		.CZ "\e[?7h$ "			Enable Line Wrap
@@ -617,7 +616,7 @@ MSG.PROMPTCRLF	.CZ "\e[?7l\r\n"		Disable Line Wrap
 MSG.TRACE		.CS ">"
 MSG.BATCHLINE	.CZ "%s\r\n"
 MSG.BATCHERR	.CZ "%s^\r\nLine #%D:"
-MSG.ERROR		.CS "[$%h]:%s."
+MSG.ERROR		.CS "[%h]:%s."
 MSG.ECHOCRLF	.CZ "\r\n"
 MSG.PID			.CZ "PID=%d\r\n"
 MSG.ALIAS		.CZ '%s = "%s"\r\n'
@@ -743,21 +742,18 @@ EXP.OP.MATH.FPU	.DA #FPU.lMUL,#FPU.lDIV,#FPU.lMOD,#FPU.lADD,#FPU.lSUB
 SET.FLAGS		.AS "CEX"
 SET.VARS		.DA #bState.SET.C,#bState.SET.E,#bState.SET.X
 *--------------------------------------
+ID.END			.EQ *
+*--------------------------------------
 				.DUMMY
 				.OR 0
-DS.START
-CORE.STACK		.BS CORE.STACK.MAX+1	pData (0 = Stack Ptr)
-PUSHD.STACK		.BS PUSHD.STACK.MAX+1
-CODE.STACK		.BS CODE.STACK.MAX*7+1
+PUSHD.STACK		.BS PUSHD.STACK.MAX*2+1
+CODE.STACK		.BS CODE.STACK.MAX*10+1
 
-*SH				.BS 2
+pAliases		.BS 2
+pFunctions		.BS 2
 
-hAliases		.BS 1
-hFunctions		.BS 1
+CORE.pNewCode	.BS 2
 
-CORE.hArgVBuf	.BS 1
-
-CL.hBuf			.BS 1
 CL.Ptr			.BS 1
 CL.Len			.BS 1
 CL.bReady		.BS 1
@@ -765,14 +761,16 @@ CL.bEscMode		.BS 1
 CL.MaxCnt		.BS 1
 CL.bSilent		.BS 1
 
-HIS.hBuf		.BS 1
+HIS.pBuf		.BS 2
 HIS.Count		.BS 1
 HIS.Ptr			.BS 1
-HIS.Head		.BS 1
 
-IO.hIn			.BS 1
-IO.hOut			.BS 1
-IO.hErr			.BS 1
+IO.pStdIn		.BS 2
+IO.pStdOut		.BS 2
+IO.pStdErr		.BS 2
+
+IO.OpenFile		.BS 2
+IO.OpenMode		.BS 1
 
 Sleep			.BS 4
 

@@ -6,15 +6,17 @@ NEW
 				.TF bin/lsdev
 *--------------------------------------
 				.INB inc/macros.i
-				.INB inc/mli.i
 				.INB inc/a2osx.i
-				.INB inc/kernel.i
+				.INB inc/io.i
 *--------------------------------------
 				.DUMMY
 				.OR ZPBIN
 ZS.START
-ZPFDPtr			.BS 2
-hFD				.BS 1
+pFD				.BS 2
+pName			.BS 2
+hFD				.BS 2
+Tmp				.BS 1
+Err				.BS 1
 ZS.END			.ED
 *--------------------------------------
 *			File Header (16 Bytes)
@@ -22,20 +24,20 @@ ZS.END			.ED
 CS.START		cld
 				jmp (.1,x)
 				.DA #$61				6502,Level 1 (65c02)
-				.DA #1					BIN Layout Version 1
+				.DA #2					BIN Layout Version 2
 				.DA #0					S.PS.F.EVENT
 				.DA #0
-				.DA CS.END-CS.START		Code Size (without Constants)
-				.DA DS.END-DS.START		Data SegmentSize
+				.DA CS.END
+				.DA ID.END
+				.DA DS.END
 				.DA #64					Stack Size
 				.DA #ZS.END-ZS.START	Zero Page Size
-				.DA 0
 *--------------------------------------
 * Relocation Table
 *--------------------------------------
 .1				.DA CS.INIT
 				.DA CS.RUN
-				.DA CS.EVENT		
+				.DA CS.EVENT
 				.DA	CS.QUIT
 L.MSG.Header	.DA MSG.Header
 L.MSG.FD		.DA MSG.FD
@@ -66,131 +68,145 @@ CS.INIT			clc
 				rts
 *--------------------------------------
 CS.RUN			>LDYA L.MSG.Header
-				>SYSCALL PutS
+				>LIBC PutS
 
-				ldx #1
+				lda #0
 
-.1				stx hFD
-				lda FDs.pHI-1,x
+.1				sta hFD
+				>KAPI GetFDByID
+				bcs .7
+
+				>STYA pFD
+
+				stz pName
+				stz pName+1
+
+				lda hFD
+				>KAPI GetNameByID
+				bcs .4
+
+				>STYA pName
+
+.4				jsr DumpFD
+
+				>LDYA pFD
+				>LIBC Free
+
+				>LDYA pName
 				beq .7
 
-				sta ZPFDPtr+1
-				lda FDs.pLO-1,x
-				sta ZPFDPtr
+				>LIBC Free
 
-				jsr DumpFD
-				bcs .9
+.7				lda hFD
 
-				ldx hFD
+				inc
+				inc
+				cmp #K.FD.MAX*2
+				bcc .1
 
-.7				inx
-				cpx #K.FD.MAX+1
-				bne .1
+				lda #0
 
-.8				lda #0
-				sec
+*				sec
+
 .9				rts
 *--------------------------------------
-DumpFD			>PUSHW L.MSG.FD
+DumpFD			>SS
+				>PUSHW L.MSG.FD
 
 				>PUSHB hFD
 
 				ldy #S.FD.DEV.BUSID
-				lda (ZPFDPtr),y
+				lda (pFD),y
 				asl
 				asl
 				asl
 				asl
-				
+				sta Tmp
+
 				iny 					#S.FD.DEV.DEVID
-				ora (ZPFDPtr),y
+				lda (pFD),y
+
+				ora Tmp
 				>PUSHA
 
-				lda (ZPFDPtr)			S.FD.T	
+				ldy #S.FD.T
+				lda (pFD),y
 				tax
 				>PUSHW L.FD.T,x
 
-				ldy #S.FD.DEV.BUSPTR+1
-				>PUSHB (ZPFDPtr),y
+				ldy #S.FD.DEV.pBUS+1
+				lda (pFD),y
+				>PUSHA
 				dey
-				>PUSHB (ZPFDPtr),y
-				
+				lda (pFD),y
+				>PUSHA
+
 				>PUSHBI 6
-				
-				>SYSCALL PrintF
-				
-				lda (ZPFDPtr)
+
+				>LIBC PrintF
+				>SR
+				bcs .9
+
+				>SS
+				>PUSHW L.MSG.DEV
+				>PUSHW pName
+				>PUSHBI 2
+				>LIBC PrintF
+				>SR
+				bcs .9
+
+				lda (pFD)				#S.FD.T
+
 				tax
 				jmp (J.FD,x)
-*--------------------------------------
-DumpFD.CDEV
-DumpFD.BDEV		>PUSHW L.MSG.DEV
 
-				lda ZPFDPtr
-				clc
-				adc #S.FD.DEV
-				tay
-				lda ZPFDPtr+1
-				adc /S.FD.DEV
-
-				>PUSHYA
-				
-				>PUSHBI 2
-				
-				>SYSCALL PrintF
-				bcs .9
-				
-				ldy #DEV.DIB+S.DIB-1
-				ldx #S.DIB-1
-				
-.1				lda BLANK.DIB,x
-				sta (pData),y		
-				dey
-				dex
-				bpl .1
-
-				lda #S.IOCTL.S.GETDIB
-				>STA.G DEV.IOCTL+S.IOCTL.S
-				
-				>LEA.G DEV.DIB
-				>STYA.G DEV.IOCTL+S.IOCTL.BUFPTR
-
-				>PUSHB hFD
-				>PUSHBI IOCTL.STATUS
-				>PUSHEA.G DEV.IOCTL
-				>SYSCALL IOCTL
-				bcc DumpFD.DevDIB
-				
-				pha
-				>PUSHW L.MSG.DEV.ERR
-				pla
-				>PUSHA
-				>PUSHBI 1
-				>SYSCALL PrintF
-				
 .9				rts
 *--------------------------------------
-DumpFD.DevDIB	>PUSHW L.MSG.DEV.DIB
+DumpFD.CDEV
+DumpFD.BDEV		jsr GetDevDIB
+				bcc DumpDIB
+
+				sta Err
+
+				>SS
+				>PUSHB Err
+				>PUSHW pData			DATABUF
+				>LIBC GetErrMsg
+				>SR
+
+				>SS
+				>PUSHW L.MSG.DEV.ERR
+				>PUSHB Err
+				>PUSHW pData			DATABUF
+				>PUSHBI 3
+				>LIBC PrintF
+				>SR
+.9				rts
+*--------------------------------------
+DumpDIB			>SS
+				>PUSHW L.MSG.DEV.DIB
 
 				>LDA.G DEV.DIB+S.DIB.S
 
-				ldy #DEV.SFLAGS+7
-				ldx #7
+				ldy #7
 
 .1				lsr
 				pha
 				lda #'-'
 				bcc .2
 
-				lda MSG.SFLAGS,x
+				lda MSG.SFLAGS,y
 
-.2				sta (pData),y
+.2				sta (pData),y			DATABUF
 				pla
 				dey
-				dex
 				bpl .1
 				
-				>PUSHEA.G DEV.SFLAGS
+				ldy #8
+				lda #0
+				sta (pData),y			DATABUF
+
+				>PUSHW pData			DATABUF
 				>PUSHB.G DEV.DIB+S.DIB.T
 				>PUSHB.G DEV.DIB+S.DIB.ST
 				>PUSHEA.G DEV.DIB+S.DIB.IDS
@@ -199,32 +215,77 @@ DumpFD.DevDIB	>PUSHW L.MSG.DEV.DIB
 
 				>PUSHBI 8
 
-				>SYSCALL PrintF
+				>LIBC PrintF
+				>SR
 				bcs .9
 
 				>LDA.G DEV.DIB+S.DIB.S
 				bpl DumpFD.NA			char device...
 
+				>SS
 				>PUSHW L.MSG.DEV.B
-				
 				>PUSHBI 0
 				>PUSHB.G DEV.DIB+S.DIB.SIZE+2
 				>PUSHB.G DEV.DIB+S.DIB.SIZE+1
 				>PUSHB.G DEV.DIB+S.DIB.SIZE
 				>PUSHBI 4
-				>SYSCALL PrintF
+				>LIBC PrintF
+				>SR
+
 .9				rts
-*--------------------------------------				
+
+DumpFD.NA		>LDYA L.MSG.DEV.NA
+				>LIBC PutS
+				rts
+*--------------------------------------
 DumpFD.REG
 DumpFD.DIR
+
+				>LDYA L.MSG.DEV.NA
+				>LIBC PutS
+
+.9				rts
+*--------------------------------------
 DumpFD.LNK
 DumpFD.DSOCK
 DumpFD.SSOCK
+
+				>LDYA L.MSG.DEV.NA
+				>LIBC PutS
+
+.9				rts
+*--------------------------------------
 DumpFD.PIPE
 
-DumpFD.NA		>LDYA L.MSG.DEV.NA
-				>SYSCALL PutS
-				rts
+				>LDYA L.MSG.DEV.NA
+				>LIBC PutS
+
+.9				rts
+*--------------------------------------
+GetDevDIB		ldy #DEV.DIB+S.DIB-1
+				ldx #S.DIB-1
+
+.1				lda BLANK.DIB,x
+				sta (pData),y
+				dey
+				dex
+				bpl .1
+
+				lda #S.IOCTL.S.GETDIB
+				>STA.G DEV.IOCTL+S.IOCTL.S
+
+				>LEA.G DEV.DIB
+				>STYA.G DEV.IOCTL+S.IOCTL.BUFPTR
+
+				>SS
+				>PUSHBI 0
+				>PUSHB hFD
+				>PUSHBI IOCTL.STATUS
+				>PUSHEA.G DEV.IOCTL
+				>LIBC IOCTL
+				>SR
+
+.9				rts
 *--------------------------------------
 CS.EVENT		sec
 				rts
@@ -232,16 +293,17 @@ CS.EVENT		sec
 CS.QUIT			clc
 				rts
 *--------------------------------------
-CS.END
-MSG.Header		.CZ "hFD ID Type Addr Name         Status   TP.ST IDString         Version Size (BLK)"
-MSG.FD			.CZ " %2h %h %4s %H "
+CS.END			.EQ *
+*--------------------------------------
+MSG.Header		.CZ "FD ID Type Addr Name         Status   TP.ST ID String        Version Size (BLK)"
+MSG.FD			.CZ "%2h %h %4s %H "
 MSG.DEV			.CZ "%12s "
-MSG.DEV.ERR		.CZ "[%h] Device Error.\r\n"
-MSG.DEV.DIB		.CZ "%s %h.%h %16S %3d.%3d "
+MSG.DEV.ERR		.CZ "[%h] %s\r\n"
+MSG.DEV.DIB		.CZ "%s %h.%h %16S %3d.%03d "
 MSG.DEV.B		.CZ "%10u\r\n"
 MSG.DEV.NA		.CZ "n/a"
 *--------------------------------------
-MSG.SFLAGS		.AS "bwrlneio" 
+MSG.SFLAGS		.AS "bwrlneio"
 *--------------------------------------
 FD.T.REG		.AZ "REG"
 FD.T.DIR		.AZ "DIR"
@@ -254,17 +316,19 @@ FD.T.PIPE		.AZ "PIPE"
 *--------------------------------------
 BLANK.DIB		.DA #0					#S.DIB.S.BLOCK+S.DIB.S.WRITE+S.DIB.S.READ
 				.BS 3
-				.PS "(No IDS String!)"
+				.PS "(No ID String!) "
 				.DA #0
 				.DA #0
 				.DA 0					K.VER
 *--------------------------------------
+ID.END			.EQ *
+*--------------------------------------
 				.DUMMY
 				.OR 0
-DS.START
+
+DATABUF			.BS 64
 DEV.IOCTL		.BS S.IOCTL
 DEV.DIB			.BS S.DIB
-DEV.SFLAGS		.BS 9
 DS.END			.ED
 *--------------------------------------
 MAN

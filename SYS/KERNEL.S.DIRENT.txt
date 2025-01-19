@@ -3,34 +3,62 @@ NEW
 */--------------------------------------
 * # OpenDir
 * ## C
-* `short int hDIR opendir (const char * dirpath);`
+* `#include <dirent.h>`
+* `DIR *opendir(const char *name);`
 * ## ASM
-* `>LDYA dirpath`
-* `>SYSCALL opendir`
+* `>LDYA name`
+* `>LIBC opendir`
 * ## RETURN VALUE
 *  CC : success
-*   A = hDIR
+*   Y,A = pDIR
 *  CS : error
 *   A = EC
 *\--------------------------------------
-K.OpenDir		jsr PFT.CheckPathYA
-				bcs DIRENT.RTS
+K.OpenDir		jsr PFT.GetPathYA
+				bcs .99
+			
+				jsr PFT.CheckExtFS
+				bcs .99
 
-				jsr FS.OPEN.DIR
-				bcs DIRENT.RTS
-				
+				lda #S.FD.T.DIR
+				jsr DEV.NewNamedFD
+				bcs .99
+
+				jsr PFT.Translate
+				bcs .98
+
+				bvc .8					NOT special dir
+
+				txa						special dir ID
+
+				ora #$80
+				ldy #S.FD.REG.REF
+				sta (pFD),y
+
 				jmp K.FOpen.REGDIR
+
+.8				jsr PRODOS.OpenDir
+				bcs .98
+
+				jmp K.FOpen.REGDIR
+
+.98				pha
+				jsr DEV.FreeFD
+				pla
+				sec
+
+.99				rts
 */--------------------------------------
 * # ReadDir
 * ## C
-* `struct dirent *readdir (short int hDIR);`
+* `#include <dirent.h>`
+* `struct dirent *readdir(DIR *dirp);`
 * ## ASM
-* `lda hDIR`
-* `>SYSCALL readdir`
+* `>LDYA dirp`
+* `>LIBC readdir`
 * ## RETURN VALUE
 *  CC : success
-*   X = hDIRENT
-*   Y,A = PTR to S.DIRENT
+*   Y,A = pDIRENT
 *  CS : error
 *   A = EC
 *   note : A = 0 means no more entry
@@ -43,68 +71,369 @@ K.ReadDir.EL	.BS 1
 K.ReadDir.EPB	.BS 1
 K.ReadDir.EC	.BS 2
 
-K.ReadDir.BufS	.BS 2
-K.ReadDir.hBuf	.BS 1
+K.ReadDir.BufSize	.BS 2
+K.ReadDir.pBuf	.BS 2
 				.ED
 *--------------------------------------
-K.ReadDir		jsr PFT.CheckNodeA
-				bcs DIRENT.RTS
+K.ReadDir		jsr PFT.CheckNodeYA
+				bcs .9
 
 				ldy #S.FD.REG.REF
 				lda (pFD),y
-				beq K.ReadDir.ROOT
+				bpl K.ReadDir.DIR
 
+				tax
+				jmp (.1-$80,x)
+
+.1				.DA K.ReadDir.DEV
+				.DA K.ReadDir.MNT
+
+.9				rts
+*--------------------------------------
+K.ReadDir.DIR  	sta K.MLI.PARAMS+1		A=#S.DIR.PRODOS.REF
+
+				stz K.MLI.PARAMS+2
+				lda /K.Buf512
+				sta K.MLI.PARAMS+3
+
+				stz K.MLI.PARAMS+4
+				lda /512
+				sta K.MLI.PARAMS+5
+
+				>MLICALL MLI.READ		Read A block from directory
+				bcs .99
+
+				ldy #S.FD.DIR.EL		Check if first run....
+				lda (pFD),y
+				bne .2					no, we have all we need....
+
+				ldx #3
+
+.1				lda K.Buf512+$23,x		Get K.ReadDir.EL....	From Block
+				sta K.ReadDir.EL,x
+				dex
 				bpl .1
 
-				jmp K.ReadDir.DEV
+				ldx #7
 
-.1				jmp K.ReadDir.DIR
+				ldy #S.FD.DIR.ACL+7
+
+.20				lda K.Buf512+$14,x
+				cpy #S.FD.DIR.MODE+1
+				bne .30
+
+				and #$0F
+
+.30				sta (pFD),y
+				dey
+				dex
+				bpl .20
+
+				inc K.ReadDir.EC		Add one to EC because we include VOL/DIR Header
+				bne .4
+
+				inc K.ReadDir.EC+1		...and ProDOS does NOT include header entry in EC
+				bra .4
+
+.99				rts
+*--------------------------------------
+.2				ldy #S.FD.DIR.EL+3
+				ldx #3
+
+.3				lda (pFD),y				get this session parameters from S.DIR
+				sta K.ReadDir.EL,x
+				dey
+				dex
+				bpl .3
+
+.4				lda K.ReadDir.EC
+				eor #$ff
+				tax
+
+				lda K.ReadDir.EC+1
+				eor #$ff
+				tay
+
+				inx						Any entry remaining ?
+				bne .5
+
+				iny
+				bne .5
+
+				lda #MLI.E.EOF
+				sec
+				rts
+*--------------------------------------
+* pass #1 compute BufSize...
+*--------------------------------------
+.5				lda K.ReadDir.EPB
+				sta K.ReadDir.ECIB
+
+				lda #1					For Ending 0
+				sta K.ReadDir.BufSize
+				stz K.ReadDir.BufSize+1
+
+				jsr K.ReadDir.P3Init
+
+K.ReadDir.DIR1	lda (ZPPtr3)
+				beq .7					Free slot....goto next
+
+				and #$F0				get storage_type
+				cmp #$F0				Volume header ?
+				beq .1
+
+				cmp #$E0				directory header ?
+				beq .2
+
+				lda (ZPPtr3)			regular DIR or File, get LEN
+				and #$F					compute filename len
+				sec						add "#<filename>" + S.STAT
+				adc #S.STAT
+				.HS 2C					bit abs
+.1				lda #2+S.STAT			add "1." string + S.STAT
+				.HS 2C					bit abs
+.2				lda #2+S.STAT+3+S.STAT	add "1." + S.STAT + "2.." + S.STAT...
+
+				clc
+				adc K.ReadDir.BufSize
+				sta K.ReadDir.BufSize
+				bcc .3
+
+				inc K.ReadDir.BufSize+1
+
+.3				inx						X,Y = !Total entry Count
+				bne .7
+
+				iny
+				beq K.ReadDir.DIR2		we reached last entry in whole DIR
+
+.7				jsr K.ReadDir.P3Next
+				bne K.ReadDir.DIR1
+*--------------------------------------
+* pass #2 Fill Buffer...(ZPPtr1 & Ptr2 can now be trashed)
+*--------------------------------------
+K.ReadDir.DIR2	lda K.ReadDir.EPB
+				sta K.ReadDir.ECIB
+
+				>LDYA K.ReadDir.BufSize	Get a BufSize bytes buffer for storing results
+				jsr K.ReadDir.GetBuf
+				bcc .10
+
+				rts
+
+.10				jsr K.ReadDir.P3Init
+
+.1				lda (ZPPtr3)
+				beq .7					Empty slot, skip
+
+				and #$F0
+				cmp #$F0				Vol Header ?
+				bne .2
+
+				jsr K.ReadDir.ADD.
+				bra .4
+
+.2				cmp #$E0				Dir Header ?
+				bne .3
+
+				jsr K.ReadDir.ADD.
+				jsr K.ReadDir.AddStatACL
+
+				jsr K.ReadDir.ADD..
+				bra .4
+
+.3				jsr K.ReadDir.AddFNToBuf
+
+.4				jsr K.ReadDir.AddStatACL
+
+				lda K.ReadDir.EC			decrease global counter...
+				sec
+				sbc #1
+				sta K.ReadDir.EC
+				lda K.ReadDir.EC+1
+				sbc #0
+				sta K.ReadDir.EC+1
+				ora K.ReadDir.EC
+				beq .8						0! no more files in DIR
+
+.7				jsr K.ReadDir.P3Next
+				bne .1
+
+.8				ldx #3
+				ldy #S.FD.DIR.EL+3
+
+.81				lda K.ReadDir.EL,x		Store back this session parameters to S.DIR
+				sta (pFD),y
+				dey
+				dex
+				bpl .81
+
+				>LDYA K.ReadDir.pBuf
+				clc
+				rts
+*--------------------------------------
+K.ReadDir.DEV	ldy #S.FD.DIR.FC
+				lda (pFD),y
+
+				cmp #K.FD.MAX*2
+				bcs DIRENT.EOF
+
+				tax
+
+				lda pNames+1,x
+				beq .7
+
+				sta ZPPtr2+1
+				lda pNames,x
+				sta ZPPtr2
+
+				ldy #3
+
+.1				lda (ZPPtr2),y
+				cmp PFT.DEV,y
+				bne .7
+
+				dey
+				bne .1
+
+				txa
+				inc
+				inc
+
+				ldy #S.FD.DIR.FC
+				sta (pFD),y
+
+				lda pFDs+1,x
+				sta pFD+1
+				lda pFDs,x
+				sta pFD
+
+				>LDYAI S.STAT+K.PATH.MAX+1
+				jsr K.ReadDir.GetBuf
+				bcs DIRENT.RTS
+
+				ldy #4
+
+.2				iny
+				lda (ZPPtr2),y
+				jsr K.ReadDir.AddToBuf
+				tax
+				bne .2
+
+				jsr DEV.Stat
+				jsr K.ReadDir.AddStat
+
+				>LDYA K.ReadDir.pBuf
+				clc
+				rts
+
+.7				inx
+				inx
+				cpx #K.FD.MAX*2
+				bcc .1
 
 DIRENT.EOF		lda #MLI.E.EOF
 				sec
 DIRENT.RTS		rts
 *--------------------------------------
-K.ReadDir.ROOT	ldy #S.FD.DIR.FC		did we already returned something ?
+K.ReadDir.MNT	ldy #S.FD.DIR.FC		did we already returned something ?
 				lda (pFD),y
 				bne DIRENT.EOF
 
 				stz K.MLI.PARAMS+1		All Volumes
-				>LDYAI K.Buf256
+				>LDYAI $200
 				>STYA K.MLI.PARAMS+2
 				>STYA ZPPtr2
 
 				>MLICALL MLI.ONLINE
 				bcs DIRENT.RTS
-
-				>LDYAI 16+S.STAT*18+1	14*(Vols+Stat) + 4*(PFT+Stat) + \0
+*				(S.STAT + /mnt/ + VOLUMENAMEMAX15 +`0) (14 vols + 4 PFTs) + \0
+				>LDYAI 5+16+S.STAT*18+1
 
 				jsr K.ReadDir.GetBuf
 				bcs DIRENT.RTS
 
-.1				lda (ZPPtr2)
-				and #$0F
-				beq .4
+.1				ldy #1
 
-				tax
+				lda (ZPPtr2)
+				and #$0F
+				beq .2
+
+				jsr K.ReadDir.INT
+				bra .4
+				
+.2				lda (ZPPtr2),y
+				cmp #MLI.E.NOTPRODOS
+				bne .4
+				
+				jsr K.ReadDir.EXT
+				bra .4
+				
+.4				lda ZPPtr2
+				clc
+				adc #16
+				sta ZPPtr2
+				bne .1
+
+				jsr SHARED.ClrStat
+
+				lda /S.STAT.MODE.DIR
+				sta K.S.STAT+S.STAT.MODE+1
+
+				ldx #0
+
+.6				lda pPFTs+1,x
+				beq .8
+
+				sta ZPPtr2+1
+				lda pPFTs,x
+				sta ZPPtr2
+
+				ldy #$ff
+
+.7				iny
+				lda (ZPPtr2),y
+				jsr K.ReadDir.AddToBuf
+				eor #0
+				bne .7
+
+				jsr K.ReadDir.AddStat
+
+.8				inx
+				inx
+				cpx #K.PFT.MAX*2
+				bne .6
+
+*				lda #0					done by S.MEM.F.INIT0
+*				sta (ZPPtr4)			Ending 0
+
+				ldy #S.FD.DIR.FC
+				lda #255
+				sta (pFD),y				Flag that we returned something for next time
+
+				>LDYA K.ReadDir.pBuf
+				clc
+				rts
+*--------------------------------------
+K.ReadDir.INT	tax
 				inc
 				sta K.MLI.PATH
 				lda #'/'
 				sta K.MLI.PATH+1
-				ldy #1
 
 .2				lda (ZPPtr2),y
 				sta K.MLI.PATH+1,y
-				jsr K.ReadDir.Add2B
+				jsr K.ReadDir.AddToBuf
 				iny
 				dex
 				bne .2
 
 				txa						Add ending 0 for C String
-				jsr K.ReadDir.Add2B
+				jsr K.ReadDir.AddToBuf
 
-				jsr FS.ClrStat
+				jsr SHARED.ClrStat
 
-				lda /S.STAT.MODE.BDEV
+				lda /S.STAT.MODE.DIR
 				sta K.S.STAT+S.STAT.MODE+1
 
 				lda (ZPPtr2)
@@ -134,248 +463,78 @@ K.ReadDir.ROOT	ldy #S.FD.DIR.FC		did we already returned something ?
 				>LDYA K.MLI.PARAMS+8
 				>STYA K.S.STAT+S.STAT.BLOCKS
 
-.3				jsr K.ReadDir.AddStat
+.3				jmp K.ReadDir.AddStat
+*--------------------------------------
+K.ReadDir.EXT	lda (ZPPtr2)
+				sta K.MLI.PARAMS+1
+				>LDYAI K.Buf512
+				>STYA K.MLI.PARAMS+2
+				>LDYAI 2
+				>STYA K.MLI.PARAMS+4
+				>MLICALL MLI.READBLOCK
+				bcs .9
 
-.4				lda ZPPtr2
-				clc
-				adc #16
-				sta ZPPtr2
-				bne .1
+				ldx #5
+				
+.1				lda K.Buf512,x			
+				cmp .7,x
+				bne .9
+				
+				dex
+				bpl .1
+				
+				ldy K.Buf512+6
+				cpy #8
+				bcs .9
+				
+				ldx #0
 
-				jsr FS.ClrStat
+.2				lda K.Buf512+7,x
+				jsr K.ReadDir.AddToBuf
+				inx
+				dey
+				bne .2
+				
+				tya						Add ending 0 for C String
+				jsr K.ReadDir.AddToBuf
+
+				jsr SHARED.ClrStat
 
 				lda /S.STAT.MODE.DIR
 				sta K.S.STAT+S.STAT.MODE+1
 				
-				ldx #0
+				lda (ZPPtr2)
+				asl						DRIVE in Carry
+				pha
+				lda #0
+				rol
+				inc
+				sta K.S.STAT+S.STAT.P.DRIVE
+				pla
+				lsr						CC
+				lsr
+				lsr
+				lsr
+				lsr
+				sta K.S.STAT+S.STAT.P.SLOT
+				
+				lda K.Buf512+14
+				sta K.S.STAT+S.STAT.P.DEVBLOCKS
+				lda K.Buf512+15
+				sta K.S.STAT+S.STAT.P.DEVBLOCKS+1
+
+				jmp K.ReadDir.AddStat
 	
-.6				lda PFTs.pHI,x
-				beq .8
-				
-				sta ZPPtr2+1
-				lda PFTs.pLO,x
-				sta ZPPtr2
-				
-				ldy #$ff
-				
-.7				iny
-				lda (ZPPtr2),y
-				jsr K.ReadDir.Add2B
-				eor #0
-				bne .7
+.9				rts
 
-				jsr K.ReadDir.AddStat
-				
-.8				inx
-				cpx #K.PFT.MAX
-				bne .6
 
-*				lda #0					done by S.MEM.F.INIT0
-*				sta (ZPPtr4)			Ending 0
-
-				ldy #S.FD.DIR.FC
-				lda #255
-				sta (pFD),y				Flag that we returned something for next time
-				jmp K.ReadDir.EXIT
-*--------------------------------------
-K.ReadDir.DEV	jmp DIRENT.EOF			TODO : /dev
-*--------------------------------------
-K.ReadDir.DIR  	sta K.MLI.PARAMS+1		A=#S.DIR.PRODOS.REF
-
-				stz K.MLI.PARAMS+2
-				lda /K.Buf256			read in Buf256+IOBuf
-				sta K.MLI.PARAMS+3
-
-				stz K.MLI.PARAMS+4
-				lda /512
-				sta K.MLI.PARAMS+5
-				
-K.ReadDir.DIR0	>MLICALL MLI.READ		Read A block from directory
-				bcs .99
-
-				ldy #S.FD.DIR.EL		Check if first run....
-				lda (pFD),y
-				bne .2					no, we have all we need....
-
-				ldx #3
-
-.1				lda K.Buf256+$23,x		Get K.ReadDir.EL....	From Block
-				sta K.ReadDir.EL,x
-				dex
-				bpl .1
-
-				ldx #7
-
-				ldy #S.FD.DIR.ACL+7
-
-.20				lda K.Buf256+$14,x
-				cpy #S.FD.DIR.MODE+1
-				bne .30
-
-				and #$0F
-
-.30				sta (pFD),y
-				dey
-				dex
-				bpl .20
-
-				inc K.ReadDir.EC		Add one to EC because we include VOL/DIR Header
-				bne .4
-
-				inc K.ReadDir.EC+1		...and ProDOS does NOT include header entry in EC
-				bra .4
-
-.99				rts
-
-.2				ldy #S.FD.DIR.EL+3
-				ldx #3
-
-.3				lda (pFD),y				get this session parameters from S.DIR
-				sta K.ReadDir.EL,x
-				dey
-				dex
-				bpl .3
-
-.4				lda K.ReadDir.EC
-				eor #$ff
-				tax
-
-				lda K.ReadDir.EC+1
-				eor #$ff
-				tay
-
-				inx						Any entry remaining ?
-				bne K.ReadDir.DIR1
-
-				iny
-				bne K.ReadDir.DIR1
-				
-				lda #MLI.E.EOF
-				sec
-				rts
-*--------------------------------------
-* pass #1 compute BufS...
-*--------------------------------------
-K.ReadDir.DIR1	lda K.ReadDir.EPB
-				sta K.ReadDir.ECIB
-
-				lda #1					For Ending 0
-				sta K.ReadDir.BufS
-				stz K.ReadDir.BufS+1
-
-				jsr K.ReadDir.P3Init
-				
-				stz .8+1
-
-.10				lda (ZPPtr3)
-				beq .7					Free slot....goto next
-
-				inc .8+1
-
-				and #$F0				get storage_type
-				cmp #$F0				Volume header ?
-				beq .1
-
-				cmp #$E0				directory header ?
-				beq .2
-
-				lda (ZPPtr3)			regular DIR or File, get LEN
-				and #$F					compute filename len
-				sec						add "#<filename>" + S.STAT
-				adc #S.STAT
-				.HS 2C					bit abs
-.1				lda #2+S.STAT			add "1." string + S.STAT
-				.HS 2C					bit abs
-.2				lda #2+S.STAT+3+S.STAT	add "1." + S.STAT + "2.." + S.STAT...
-
-				clc
-				adc K.ReadDir.BufS
-				sta K.ReadDir.BufS
-				bcc .3
-
-				inc K.ReadDir.BufS+1
-
-.3				inx						X,Y = !Total entry Count
-				bne .7
-
-				iny
-				beq K.ReadDir.DIR2		we reached last entry in whole DIR
-
-.7				jsr K.ReadDir.P3Next
-				bne .10
-				
-.8				lda #$FF
-				bne K.ReadDir.DIR2
-				
-				jmp K.ReadDir.DIR0
-*--------------------------------------
-* pass #2 Fill Buffer...(ZPPtr1 & Ptr2 can now be trashed)
-*--------------------------------------
-K.ReadDir.DIR2	lda K.ReadDir.EPB
-				sta K.ReadDir.ECIB
-
-				>LDYA K.ReadDir.BufS	Get a BufS bytes buffer for storing results
-				jsr K.ReadDir.GetBuf
-				bcc .10
-
-				rts
-				
-.10				jsr K.ReadDir.P3Init
-				
-.1				lda (ZPPtr3)
-				beq .7					Empty slot, skip
-
-				and #$F0
-				cmp #$F0				Vol Header ?
-				bne .2
-
-				jsr K.ReadDir.ADD.
-				bra .4
-
-.2				cmp #$E0				Dir Header ?
-				bne .3
-
-				jsr K.ReadDir.ADD.
-				jsr K.ReadDir.SA2B
-
-				jsr K.ReadDir.ADD..
-				bra .4
-
-.3				jsr K.ReadDir.FN2B
-
-.4				jsr K.ReadDir.SA2B
-
-				lda K.ReadDir.EC			decrease global counter...
-				sec
-				sbc #1
-				sta K.ReadDir.EC
-				lda K.ReadDir.EC+1
-				sbc #0
-				sta K.ReadDir.EC+1
-				ora K.ReadDir.EC
-				beq .8						0! no more files in DIR
-
-.7				jsr K.ReadDir.P3Next
-				bne .1
-
-.8				ldx #3
-				ldy #S.FD.DIR.EL+3
-
-.81				lda K.ReadDir.EL,x		Store back this session parameters to S.DIR
-				sta (pFD),y
-				dey
-				dex
-				bpl .81
-
-K.ReadDir.EXIT	ldx K.ReadDir.hBuf
-				txa
-				jmp K.GetMemPtr
+.7				.HS 000006000000		Pascal VOLUME signature
 *--------------------------------------
 K.ReadDir.P3Init
 				ldy #4					Skip 4 bytes linked list
 				sty ZPPtr3
 
-				lda /K.Buf256
+				lda /K.Buf512
 				sta ZPPtr3+1
 				rts
 *--------------------------------------
@@ -388,15 +547,16 @@ K.ReadDir.P3Next
 
 				inc ZPPtr3+1
 
-.8				dec K.ReadDir.ECIB			0! no more file in block
+.8				dec K.ReadDir.ECIB		0! no more file in block
 
 				rts
 *--------------------------------------
 K.ReadDir.GetBuf
-				jsr K.GetMem0			make sure 0 filled
+				ldx #S.MEM.F.INIT0		make sure 0 filled
+				jsr MEM.MallocX.YAX
 				bcs .9
 
-				stx K.ReadDir.hBuf
+				>STYA K.ReadDir.pBuf
 				>STYA ZPPtr4
 
 .9				rts
@@ -407,14 +567,15 @@ K.ReadDir.ADD..
 				ldx #2					filename="2.."
 				lda #'.'
 
-.1				jsr K.ReadDir.Add2B		Add X dot(s)
+.1				jsr K.ReadDir.AddToBuf		Add X dot(s)
 				dex
 				bne .1
 
 				txa
-				jmp K.ReadDir.Add2B		Add Ending 0
+				jmp K.ReadDir.AddToBuf		Add Ending 0
 *--------------------------------------
-K.ReadDir.FN2B	ldy #$1D				version/min_version for lowercase bitmap
+K.ReadDir.AddFNToBuf
+				ldy #$1D				version/min_version for lowercase bitmap
 				lda (ZPPtr3),y			check bxxxxxxx.xxxxxxxx...
 				bpl	.7					not set, no lowercase bitmap present
 
@@ -453,17 +614,20 @@ K.ReadDir.FN2B	ldy #$1D				version/min_version for lowercase bitmap
 				ldy #1
 
 .8				lda (ZPPtr3),y
-				jsr K.ReadDir.Add2B
+				jsr K.ReadDir.AddToBuf
 				iny
 				dex
 				bne .8
 
 				txa
-*				jsr K.ReadDir.Add2B
+*				jsr K.ReadDir.AddToBuf
 
 *				rts
 *--------------------------------------
-K.ReadDir.Add2B	sta (ZPPtr4)
+K.ReadDir.AddToBuf
+				sta IO.SETWRITEAUX
+				sta (ZPPtr4)
+				sta IO.CLRWRITEAUX
 				inc ZPPtr4
 				bne .8
 
@@ -471,7 +635,8 @@ K.ReadDir.Add2B	sta (ZPPtr4)
 
 .8				rts
 *--------------------------------------
-K.ReadDir.SA2B	jsr FS.DirEnt2Stat
+K.ReadDir.AddStatACL
+				jsr FS.DirEnt2Stat
 
 				ldy #S.FD.DIR.UID
 				ldx #S.STAT.UID
@@ -497,7 +662,7 @@ K.ReadDir.AddStat
 				ldy #0
 
 .1				lda K.S.STAT,y
-				jsr K.ReadDir.Add2B
+				jsr K.ReadDir.AddToBuf
 				iny
 				cpy #S.STAT
 				bne .1
@@ -506,14 +671,40 @@ K.ReadDir.AddStat
 */-------------------------------------
 * # CloseDir
 * ## C
-* `void closedir(hDIR);`
+* `#include <dirent.h>`
+* `int closedir(DIR *dirp);`
 * ## ASM
-* `lda hDIR`
-* `>SYSCALL closedir`
+* `>LDYA dirp`
+* `>LIBC closedir`
 * ## RETURN VALUE
 *  none, always succeed.
 *\-------------------------------------
-*K.CloseDir		.EQ K.FClose
+*K.CloseDir		jsr PFT.CheckNodeYA
+*				bcs .9
+*
+*				jsr UNISTD.Close
+*				bcs .9
+*
+*				ldy #S.FILE.oCnt
+*				lda (pFILE),y
+*				dec
+*				sta (pFILE),y
+*
+**				clc
+*
+*				bne .9
+*
+*				ldy #S.FILE.ID
+*				lda (pFILE),y
+*				tax
+*
+*				stz pFILEs+1,x
+*				stz pFILEs,x
+*
+*				>LDYA pFILE
+*				jmp MEM.FreeYA
+*
+*.9				rts
 *--------------------------------------
 MAN
 SAVE usr/src/sys/kernel.s.dirent

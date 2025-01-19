@@ -231,10 +231,10 @@ XDOS.WriteBM	lda #$02			 	write command.
 
 				sta ZP.CMDNUM
 
-				lda GP.DEVNUM			save current dev #
+				lda MLI.DEVNUM			save current dev #
 				pha
 				lda XDOS.BM.DevID			 	get bitmap's dev #
-				sta GP.DEVNUM
+				sta MLI.DEVNUM
 				lda XDOS.BM.BlkNum				and disk address
 				sta ZP.BLKNUM
 				lda XDOS.BM.BlkNum+1
@@ -245,7 +245,7 @@ XDOS.WriteBM	lda #$02			 	write command.
 				jsr XDOS.RWBlock
 
 				plx						keep A=error code if CS
-				stx GP.DEVNUM
+				stx MLI.DEVNUM
 
 				rts
 *--------------------------------------
@@ -371,12 +371,12 @@ XDOS.PackGBuf	jsr XDOS.ZPT.InitGBuf
 
 				.FIN
 *--------------------------------------
-XDOS.GetMark	ldx XDOS.FCBPtr				index to open fcb.
+XDOS.GetMark	ldx XDOS.FCBPtr			index to open fcb.
 
 				ldy #$02				index to user's mark parameter.
 
-.1				lda XDOS.FCBs+FCB.MARK,x		transfer current position
-				sta (ZP.A3L),y				to user's parameter list
+.1				lda XDOS.FCBs+FCB.MARK,x	transfer current position
+				sta (ZP.A3L),y			to user's parameter list
 				inx
 				iny
 				cpy #$05				transfer 3 bytes
@@ -396,7 +396,7 @@ XDOS.SetMark	ldy #$04				index to user's desired position.
 				sec						indicate comparisons are necessary.
 
 .1				lda (ZP.A3L),y			move it to 'tpos'
-				sta XDOS.TmpPos-2,y
+				sta XDOS.NewMark-2,y
 				bcc .2					branch if mark < eof
 
 				cmp XDOS.FCBs+FCB.EOF,x
@@ -411,56 +411,58 @@ XDOS.SetMark	ldy #$04				index to user's desired position.
 				eor #$01				preserves carry status.
 				bne .1					branch if more.
 *--------------------------------------
-rdposn			ldy XDOS.FCBPtr			test to see if new position is
+XDOS.ReadAtNewMark
+				ldy XDOS.FCBPtr			test to see if new position is
 				lda XDOS.FCBs+FCB.MARK+1,y	within the same (current) data block.
 				and #$FE
 				sta scrtch
 
-				lda XDOS.TmpPos+1		middle byte of new position
+				lda XDOS.NewMark+1		middle byte of new position
 				sec
 				sbc scrtch
 				sta scrtch
-				bcc L3E44				branch if < current position.
+				bcc .1					branch if < current position.
 
 				cmp #$02				must be within 512 bytes of beginning
-				bcs L3E44				of current position.
+				bcs .1					of current position.
 
-				lda XDOS.TmpPos+2		make sure within the same 64k.
+				lda XDOS.NewMark+2		make sure within the same 64k.
 				cmp XDOS.FCBs+FCB.MARK+2,y
-				bne L3E44				branch if not.
+				bne .1					branch if not.
 
-				jmp	svmark				if so, adj fcb, position ptr and return.
+				jmp	XDOS.FCBSetMark		if so, adj fcb, position ptr and return.
+*--------------------------------------
+.1				lda XDOS.FCBs+FCB.STYPE,y	determine file type for positioning.
+				beq .2					0 = invalid file type.
 
-L3E44			lda XDOS.FCBs+FCB.STYPE,y	determine file type for positioning.
-				beq L3E50				0 = invalid file type.
-
-				cmp #$04				tree class file?
-				bcc L3E59				yes, go position.
+				cmp #$04				1,2 or 3 = file?
+				bcc .3					yes, go position.
 
 				jmp dirmark				no, test for dir type.
-
-L3E50  			
+*--------------------------------------
+.2
 *				ldy #$A4				??????? clear illegal filetype entry in fcb
 *				sta XDOS.FCBs,y			??????? WILL TRASH anther FCB
 				lda #MLI.E.BADREF	 	and report error
 				sec
 				rts
-
-L3E59  			lda XDOS.FCBs+FCB.STYPE,y	use storage type as # of index levels
+*--------------------------------------
+.3
+*				lda XDOS.FCBs+FCB.STYPE,y	use storage type as # of index levels
 				sta levels			 	since 1=seed, 2=sapling, 3=tree.
 				lda XDOS.FCBs+FCB.F,y
 				and #FCB.F.DBLKMOD	 	if previous data was modified then
-				beq L3E6B			  	disk must be updated.
+				beq .4
 
-				jsr XDOS.WriteDBLK
-
+				jsr XDOS.WriteDBLK		disk must be updated.
 				bcs L3ED4				if error.
 
-L3E6B  			ldy XDOS.FCBPtr				test to see if current index block
-				lda XDOS.FCBs+FCB.MARK+2,y	is usable by checking if new
+				ldy XDOS.FCBPtr			test to see if current index block
+
+.4				lda XDOS.FCBs+FCB.MARK+2,y	is usable by checking if new
 				and #$FE			 	position is within 128k of the
 				sta scrtch			 	beginning of current sapling level
-				lda XDOS.TmpPos+2			 	chunk.
+				lda XDOS.NewMark+2		chunk.
 				sec
 				sbc scrtch
 				bcc L3E9D				branch if a new index block is needed.
@@ -472,17 +474,17 @@ L3E6B  			ldy XDOS.FCBPtr				test to see if current index block
 				dex
 				bne datlevel1			no, use current indexes.
 
-L3E89  			lda XDOS.TmpPos+1				is new position < 512 ?
+L3E89  			lda XDOS.NewMark+1		is new position < 512 ?
 				lsr
-				ora XDOS.TmpPos+2
-				bne L3EEF				no, mark both data and index block as
+				ora XDOS.NewMark+2
+				bne L3EEF				no, mark both data and index block as unallocated.
 
-				lda XDOS.FCBs+FCB.1stBLK,y	unallocated. 1st block is only block
+				lda XDOS.FCBs+FCB.1stBLK,y	 1st block is only block
 				sta ZP.BLKNUM			and it's data.
 				lda XDOS.FCBs+FCB.1stBLK+1,y	high block address.
 				jmp rnewpos				go read in block and set statuses.
-
-L3E9D  			lda XDOS.FCBs+FCB.F,y		check to see if previous index block
+*--------------------------------------
+L3E9D  			lda XDOS.FCBs+FCB.F,y	check to see if previous index block
 				and #FCB.F.IBLKMOD		was modified.
 				beq L3EA9				read in over it if current up to date.
 
@@ -493,7 +495,7 @@ L3EA9  			ldx levels				be sure there is a top index
 				cpx #$03			 	before reading it...
 				beq posindex			branch if file is a tree.
 
-				lda XDOS.TmpPos+2			 	is new position within range of a
+				lda XDOS.NewMark+2		is new position within range of a
 				lsr			  			sapling file (less than 128k) ?
 				php		 				save results
 				lda #$07			 	(no level is allocated for new pos'n)
@@ -518,7 +520,7 @@ posindex 		jsr XDOS.ClrFCBStatus	clr all alloc requirements for previous
 				jsr rfcbfst				position. get highest level index block
 				bcs L3ED4
 
-				lda XDOS.TmpPos+2			 	then test for a sap level index block
+				lda XDOS.NewMark+2		then test for a sap level index block
 				lsr
 				tay
 				lda (zpt),y
@@ -568,25 +570,10 @@ L3F18  			jsr XDOS.SetFCBStatus	set status to show what's missing
 				lsr			  			discard bit that says data block
 				lsr			  			unallocated because carry indicates if
 				jsr XDOS.ZeroData		index block is invalid and needs to be zeroed.
-				bcc svmark			  	branch if it doesn't need zeroed
+				bcc XDOS.FCBSetMark	  	branch if it doesn't need zeroed
 
 				jsr XDOS.ZeroIndex		zero index block in user's i/o buffer
-				bra svmark
-*--------------------------------------
-XDOS.ZeroData	lda #$00
-				tay
-
-				inc ZP.DataPtr+1
-
-				jsr .1
-
-				dec ZP.DataPtr+1
-
-.1  			sta (ZP.DataPtr),y
-				iny
-				bne .1
-
-				rts
+				bra XDOS.FCBSetMark
 *--------------------------------------
 L3F51  			sta ZP.BLKNUM			get data block of new position
 				lda (zpt),y				(high address)
@@ -598,43 +585,44 @@ rnewpos			sta ZP.BLKNUM+1
 
 				jsr XDOS.ClrFCBStatus	show whole chain is allocated.
 *--------------------------------------
-svmark			ldy XDOS.FCBPtr			update position in fcb
+XDOS.FCBSetMark	ldy XDOS.FCBPtr			update position in fcb
 				iny
 				iny
 				ldx #$02
 
-L3F68  			lda XDOS.FCBs+FCB.MARK,y	save old mark in case calling routine
-				sta oldmark,x			fails later.
-				lda XDOS.TmpPos,x
+.1  			lda XDOS.FCBs+FCB.MARK,y	save old mark in case calling routine
+				sta XDOS.OldMark,x			fails later.
+				lda XDOS.NewMark,x
 				sta XDOS.FCBs+FCB.MARK,y
 				dey
 				dex		 				move 3 byte position marker
-				bpl L3F68
+				bpl .1
 
 				clc		 				set up indirect address to buffer
 				lda ZP.DataPtr			page pointed to by the current
 				sta sos			  		position marker.
-				lda XDOS.TmpPos+1
+				lda XDOS.NewMark+1
 				and #$01
 				adc ZP.DataPtr+1
 				sta sos+1
+
 L3F86  			rts						carry set if error
 *--------------------------------------
 dirmark			cmp #$0D				is it a directory ?
 				beq L3F9C			  	yes...
 
 				lda #MLI.E.INCFF	 	no, so compatability problem.
-				jsr GP.SYSERR		 	should not have been opened !!!
+				jsr MLI.SYSERR		 	should not have been opened !!!
 
 L3F9C  			lda scrtch			 	recover results of previous subtraction.
 				lsr						use difference as counter for how many
 				sta cntent			 	blocks must be read to get to new pos'n.
 
 				lda XDOS.FCBs+FCB.MARK+1,y	test for positive direction
-				cmp XDOS.TmpPos+1			 	indicated by carry.
+				cmp XDOS.NewMark+1		indicated by carry.
 
 				lda XDOS.FCBs+FCB.MARK+2,y
-				sbc XDOS.TmpPos+2
+				sbc XDOS.NewMark+2
 
 				bcc L3FB9			  	if set, position forward. otherwise,
 
@@ -645,7 +633,7 @@ L3FAB  			ldy #$00			 	read directory file in reverse order.
 				inc cntent				count up to 128.
 				bpl L3FAB			  	loop if more blocks to pass over.
 
-				bmi svmark			  	always.
+				bmi XDOS.FCBSetMark	  	always.
 
 L3FB9  			ldy #$02			 	position is forward from current.
 				jsr XDOS.DirSeek		read next directory block
@@ -654,11 +642,11 @@ L3FB9  			ldy #$02			 	position is forward from current.
 				dec cntent
 				bne L3FB9			  	loop if position not found in this block
 
-				beq svmark			  	branch always.
+				beq XDOS.FCBSetMark	  	branch always.
 *--------------------------------------
 XDOS.DirSeek	lda (ZP.DataPtr),y		get link address of previous or next
 				sta ZP.BLKNUM			directory block.
-				iny		 				
+				iny
 				lda (ZP.DataPtr),y		get the rest of the link.
 				sta ZP.BLKNUM+1
 				ora ZP.BLKNUM			but first be sure there is a link.
@@ -672,19 +660,41 @@ XDOS.ReadFCB.DBLK
 				lda #$01				read command
 				sta ZP.CMDNUM
 
-				ldx #ZP.DataPtr			points at address  of data buffer.
-				jsr XDOS.FileIOPtrX		go do file input.
-				bcs .9				  	error.
+				ldx #ZP.DataPtr			points at address of data buffer.
 
-				ldy XDOS.FCBPtr
+				.DO IOBANK=1
+
+				lda XDOS.DirectIO
+				beq .1
+
+				jsr XDOS.SetBufPtrX
+				jsr XDOS.FCBDevIDSelect
+
+				lda MLI.DEVNUM
+				sta ZP.UNITNUM
+				stz MLI.ERROR
+				jsr XDOS.DevCallX
+				bcc .8
+
+				rts
+
+				.FIN
+
+.1				jsr XDOS.FileIOPtrX		go do file input.
+				bcs L3FD6			  	error.
+
+.8				lda #FCB.DBLK
+				.HS 2C					BIT ABS
+*--------------------------------------
+XDOS.UpdateFCBIBlk
+				lda #FCB.IBLK
+				ora XDOS.FCBPtr
+				tay
 				lda ZP.BLKNUM
-				sta XDOS.FCBs+FCB.DBLK,y		save block # just read in fcb.
+				sta XDOS.FCBs,y		save block address of this index in fcb
 				lda ZP.BLKNUM+1
-				sta XDOS.FCBs+FCB.DBLK+1,y
-
-*				clc
-
-.9  			rts
+				sta XDOS.FCBs+1,y
+				rts
 *--------------------------------------
 wfcbfst			jsr XDOS.FlushBM		update the bitmap and write file's 1st block.
 
@@ -711,23 +721,18 @@ XDOS.FileIOPtrXCmdABlkY
 				bne .2
 
 				lda #$0C			 	Block = $0000, allocation error.
-				jsr GP.SYSDEATH			doesn't return...
+				jsr MLI.SYSDEATH			doesn't return...
 
 .1  			lda XDOS.FCBs+1,y
 .2				sta ZP.BLKNUM+1
 *--------------------------------------
-XDOS.FileIOPtrX	lda $00,x			  	get memory address of buffer from
-				sta ZP.BUFPTR			page zero pointed to by x register
-				lda $01,x
-				sta ZP.BUFPTR+1			and pass address to device handler
+XDOS.FileIOPtrX	jsr XDOS.SetBufPtrX
 
 				jsr XDOS.FCBDevIDSelect
 
-XDOS.FileIO2	sec					 	also, set to indicate reg call made to
-				ror ioaccess			device handler.
-				lda GP.DEVNUM			transfer device # for dispatcher
+XDOS.FileIO2	lda MLI.DEVNUM			transfer device # for dispatcher
 				sta ZP.UNITNUM			to convert to unit #.
-				stz GP.ERROR			clear global error code.
+				stz MLI.ERROR			clear global error code.
 				jmp XDOS.DevCall	 	call the driver.
 *--------------------------------------
 XDOS.WriteDBLK	ldx #ZP.DataPtr			point at memory address with x and
@@ -760,6 +765,12 @@ XDOS.ResetFCBStatus
 
 L4096  			rts
 *--------------------------------------
+XDOS.SetBufPtrX	lda $00,x			  	get memory address of buffer from
+				sta ZP.BUFPTR			page zero pointed to by x register
+				lda $01,x
+				sta ZP.BUFPTR+1			and pass address to device handler
+				rts
+*--------------------------------------
 XDOS.Open		jsr XDOS.FindFileOrVol	look up the file.
 				bcs L4096			  	if not, then error.
 
@@ -777,11 +788,11 @@ L40AB			lda #MLI.E.FCBFULL	 	fcb full error.
 L40AD  			lda fcbflg				if this byte <> 0 then free fcb found
 				beq L40AB			 	and available for use.
 
-				ldx XDOS.FCBPtr				get address of 1st free fcb found.
+				ldx XDOS.FCBPtr			get address of 1st free fcb found.
 
 L40B9  			ldy #FCB
 
-L40BD  			stz XDOS.FCBs,x		 		but clean it first.
+L40BD  			stz XDOS.FCBs,x		 	but clean it first.
 				inx
 				dey
 				bne L40BD
@@ -790,18 +801,18 @@ L40BD  			stz XDOS.FCBs,x		 		but clean it first.
 
 				ldx XDOS.FCBPtr
 
-L40CB  			lda XDOS.DE.DevID,y				move ownership info.
+L40CB  			lda XDOS.DE.DevID,y		move ownership info.
 				sta XDOS.FCBs+FCB.DEVID,x	note: this code depends upon the defined
 				inx						order of both the fcb and directory entry buffer.
 				iny
 				cpy #6
 				bne L40CB
 
-				lda XDOS.DE.Filename			 	get storage type and
+				lda XDOS.DE.Filename	get storage type and
 				jsr XDOS.SetFCBSType
 				tax		 				save in x for later comparison
 
-				lda XDOS.DE.Access			 	get file's attributes and use it
+				lda XDOS.DE.Access		get file's attributes and use it
 				and #$03				as a default access request.
 				cpx #$0D			 	if directory, don't allow write enable.
 				bne L40EB
@@ -841,7 +852,7 @@ L4101  			sta ZP.BLKNUM+1			of file and current usage count.
 
 				ldx XDOS.FCBPtr
 				jsr XDOS.GetFCBBufX		rtn addr of bufs in data & index ptrs.
-				lda GP.FLEVEL		 	mark level at which
+				lda MLI.FLEVEL		 	mark level at which
 				sta XDOS.FCBs+FCB.FLEVEL,x	file was opened.
 
 				lda XDOS.FCBs+FCB.STYPE,x	file must be positioned at beginning.
@@ -854,17 +865,17 @@ L4101  			sta ZP.BLKNUM+1			of file and current usage count.
 				ldy #$02			 	etc. set desired position to 0.
 				lda #$00
 
-L413C  			sta XDOS.TmpPos,y
+L413C  			sta XDOS.NewMark,y
 				dey
 				bpl L413C
 
-				jsr rdposn			 	let tree position routine do the rest.
+				jsr XDOS.ReadAtNewMark 	let tree position routine do the rest.
 				bcc L4163			  	if successful.
 
 L4147  			pha		 				save error code.
 
-				ldx XDOS.FCBPtr			 	free buffer space.
-				stz XDOS.FCBs,x				necessary to release fcb also.
+				ldx XDOS.FCBPtr			free buffer space.
+				stz XDOS.FCBs,x			necessary to release fcb also.
 				lda XDOS.FCBs+FCB.BUFID,x
 				beq L4156			  	if no bufnum, ok because never alloc'd.
 
@@ -938,14 +949,6 @@ L41C1  			tya						calc position of next fcb.
 				bcc L4188			  	branch if more to compare.
 
 				clc		 				report no conflicts.
-				rts
-*--------------------------------------
-XDOS.UpdateFCBIBlk
-				ldy XDOS.FCBPtr
-				lda ZP.BLKNUM
-				sta XDOS.FCBs+FCB.IBLK,y		save block address of this index in fcb
-				lda ZP.BLKNUM+1
-				sta XDOS.FCBs+FCB.IBLK+1,y
 				rts
 *--------------------------------------
 MAN

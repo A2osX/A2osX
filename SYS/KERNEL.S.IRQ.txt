@@ -1,13 +1,43 @@
 NEW
   AUTO 3,1
 *--------------------------------------
+IRQ				cld
+
+				bit IRQ.Skip			After A2osX IRQ.H ?
+				bmi IRQ.Exit
+
+*				sta IO.SETALTZP			switch to aux LC
+*				tsx
+*				stx SaveSM
+*				ldx	SaveSX
+*				txs
+
+IRQ.JSR1		jsr IRQ.DEVs			SELF MODIFIED
+
+*				tsx						go back to Main
+*				stx SaveSX
+*				ldx	SaveSM
+*				txs
+*				sta IO.CLRALTZP
+
+				rts
+
+IRQ.Exit		stz IRQ.Skip			reset flag
+				sec
+				rts
+*--------------------------------------
+*GO.Reset		jsr LCSW.2Kernel
+*				jmp CORE.Run
+*--------------------------------------
+*BrkHandler		bra *
+*--------------------------------------
 * called directly by IRQ Vector $FFFE in AuxLC
 * Must keep:
 *  A,X,Y
 *   IO.SETREADAUX
 *  if we are here, Aux ZP/Stack already On
 * Exit with RTI
-* if A2osX Drivers cannot clear IRQ, 
+* if A2osX Drivers cannot clear IRQ,
 * must call regular System Handler
 *--------------------------------------
 MSLOT			.EQ $7f8
@@ -25,7 +55,7 @@ IRQ.Handler		cld
 
 				stx	IRQ.5+1
 				sty IRQ.4+1
-				
+
 				lda IO.RD80STORE
 				and IO.RDPAGE2
 				pha
@@ -46,7 +76,7 @@ IRQ.Handler		cld
 *				pha
 *				sta IO.CLRCXROM			Enable access to slot C100-C7ff space
 
-IRQ.JSR			jsr CORE.IRQ.DEV		SELF MODIFIED
+IRQ.JSR2		jsr IRQ.DEVs			SELF MODIFIED
 
 *				ldx #IO.CLRCXROM
 
@@ -54,7 +84,7 @@ IRQ.JSR			jsr CORE.IRQ.DEV		SELF MODIFIED
 *				bpl .3
 
 *				inx						X = SETCXROM
-				
+
 *.3				sta $C000,x
 
 				lda IRQ.2+2				Get back MSLOT
@@ -65,7 +95,7 @@ IRQ.JSR			jsr CORE.IRQ.DEV		SELF MODIFIED
 				bne IRQ.3
 
 				sta	IO.CLRC8ROM			Release $C800
-				
+
 IRQ.2			lda $ff00				SELF MODIFIED
 
 IRQ.3			pla						Must keep Carry
@@ -92,7 +122,7 @@ IRQ.3			pla						Must keep Carry
 				bcs .8					in CORE.Run or CORE.Dispatch
 
 				lda $103,x
-				cmp /A2osX.SYSCALL
+				cmp #$C0
 				bcs .8					we are in kernel GP or LC
 
 				php
@@ -105,7 +135,7 @@ IRQ.3			pla						Must keep Carry
 
 				dec $105,x				adjust RTI PC HI
 
-.4				dec $104,x				back one byte, to make it a "RTS" return adddress 
+.4				dec $104,x				back one byte, to make it a "RTS" return adddress
 
 				lda $103,x				get IRQ pushed P
 				sta $101,x				down 2 bytes
@@ -125,6 +155,176 @@ IRQ.6			lda #$ff				Self Modified
 IRQ.JMP			jmp $FFFF				SELF MODIFIED	Not handled, pass to ProDOS
 
 IRQ.8			rti
+*--------------------------------------
+* Called by IIgs formware, Native Mode, 8bits
+*--------------------------------------
+IRQ.GS			.OP 65816
+
+				pha
+				phb
+				phx
+				phy
+
+				phk
+				plb
+
+				stz IO.GS.CLRVBLINT
+
+				jsr IRQ.Switch
+
+				ply
+				plx
+				plb
+				pla
+
+*				clc
+				rtl
+
+*				bra IRQ.Switch
+				.OP 65C02
+*--------------------------------------
+* Called by :
+*  - Kernel IRQ Manager (AuxLC)
+*  - ProDOS IRQ Manager (GP)
+*--------------------------------------
+IRQ.TC			ldy IRQ.n0
+
+				lda $c080,y
+				and #$20
+				beq IRQ.DEVs
+
+				lda $c088,y
+				lda $c080,y
+
+				bra IRQ.Switch
+*--------------------------------------
+IRQ.M			jsr $FFFF				SELF MODIFIED,SERVEMOUSE
+				bcs IRQ.DEVs			Not From Mouse
+
+				ldx IRQ.0n
+				lda MOUSESTSx,x
+				and #MOUSESTSx.INTVBL	IRQ was caused by VBL ?
+				beq IRQ.DEVs
+
+				ldx IRQ.M2+2			$Cn
+				ldy IRQ.n0
+
+IRQ.M2			jsr $FFFF				SELF MODIFIED,READMOUSE
+*--------------------------------------
+IRQ.Switch		inc IRQ.Tick
+
+				dec IRQ.CPUStatCnt
+				bne .2
+
+				lda #100
+				sta IRQ.CPUStatCnt
+
+				ldx #0
+
+.1				lda PSStats+1,x
+				stz PSStats+1,x
+				sta PSStats,x
+				inx
+				inx
+				cpx #K.PS.MAX*2
+				bcc .1
+
+.2				lda IRQ.InKernel
+				bpl .3
+
+				inc PSStats+1
+
+.9				clv
+				clc
+				rts
+
+.3				ldx CORE.PSIndex
+				inc PSStats+1,x
+
+				bit A2osX.F				A2osX.F.PMODE .EQ %01000000
+				bvc .8
+
+				ldy #S.PS.S
+				lda (pPS),y
+				eor #S.PS.S.RUN
+				bne .9
+
+				lda IRQ.InLib
+				bmi .9					we are in LIB, no switching
+
+.8				clc						exit with V flag set
+				rts
+*--------------------------------------
+IRQ.DEVs		ldx #0
+
+.1				lda IRQ.Vectors+1,x
+				beq .9
+
+				sta .10+2
+				lda IRQ.Vectors,x
+				sta .10+1
+
+				phx
+
+.10				jsr $ffff				SELF MODIFIED
+
+				plx
+				bcc .8					CC, IRQ cleared by device
+
+.2				inx
+				inx
+.3				cpx #K.IRQDEV.MAX*2
+				bne .1
+
+.9				sec
+
+.8				clv						clear V (no task switching)
+				rts
+*--------------------------------------
+IRQ.GSOff		.OP 65816
+
+				clc
+				xce		  				go to native mode
+				rep #$30				long M,X
+
+				pea $0003				Disable vertical blanking interrupts
+				>TKCALL IntSource
+			bcs *
+
+				pea $000C				Vertical blanking interrupt handler
+				lda IRQ.GSVect+2
+				pha
+				lda IRQ.GSVect
+				pha
+				>TKCALL SetVector
+			bcs *
+
+				sep #$30				short M,X
+				sec
+				xce		  				back to emulation mode
+
+				.OP 65C02
+
+				rts
+*--------------------------------------
+IRQ.TCOff		ldx IRQ.n0
+				stz $c080,x
+
+				lda $c088,x
+				lda $c080,x
+
+				ldx IRQ.0n
+				stz $478,x
+				stz $7f8,x
+*--------------------------------------
+IRQ.Off			rts
+*--------------------------------------
+IRQ.MOff		ldy IRQ.MOff1+2			Cn
+				ldy IRQ.n0
+				lda #0
+IRQ.MOff1		jmp $ffff				SELF MODIFIED
+*--------------------------------------
+IRQ.CPUStatCnt	.DA #100
 *--------------------------------------
 MAN
 SAVE usr/src/sys/kernel.s.irq

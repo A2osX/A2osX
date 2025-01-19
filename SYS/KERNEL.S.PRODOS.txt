@@ -8,13 +8,41 @@ NEW
 * ## ASM
 * `>PUSHB volid`
 * `>PUSHW buf`
-* `>SYSCALL Online`
+* `>LIBC Online`
 * ## RETURN VALUE
 *\--------------------------------------
-K.Online		>PULLW K.MLI.PARAMS+2
-				>PULLB K.MLI.PARAMS+1
+K.Online		ldy #2
+				jsr RAMSW.GetStkY
+				sta K.MLI.PARAMS+1
+
+				>LDYAI K.IOBuf
+				>STYA K.MLI.PARAMS+2
+
 				>MLICALL MLI.ONLINE
-				rts
+				bcs .9
+				
+				ldy #0
+				jsr RAMSW.GetStkYW
+				>STYA ZPPtr1
+				
+				sta IO.SETWRITEAUX
+				
+				ldy K.MLI.PARAMS+1
+				beq .1
+	
+				ldy #16
+
+.1				dey
+				lda K.IOBuf,y
+				sta (ZPPtr1),y
+				tya
+				bne .1
+
+*				sta IO.CLRWRITEAUX
+
+*				clc
+
+.9				rts
 */--------------------------------------
 * # ChTyp
 * Change Type of a ProDOS File
@@ -23,17 +51,26 @@ K.Online		>PULLW K.MLI.PARAMS+2
 * ## ASM
 * `>PUSHW filepath`
 * `>PUSHB filetype`
-* `>SYSCALL ChTyp`
+* `>LIBC ChTyp`
 * ## RETURN VALUE
 *\--------------------------------------
-K.ChTyp			jsr PFT.CheckPath1
-				bcs PRODOS.RET3
+K.ChTyp			jsr PFT.GetPath1
+				bcs .9
+
+				jsr PFT.CheckExtFS
+				bcs .9
 
 				>MLICALL MLI.GFINFO
-				bcs PRODOS.RET3
+				bcs .9
 
-				>PULLB K.MLI.PARAMS+S.FI.T
-				bra PRODOS.SFIRET2
+				ldy #0
+				jsr RAMSW.GetStkY
+
+				sta K.MLI.PARAMS+S.FI.T
+
+				>MLICALL MLI.SFINFO
+
+.9				rts
 */--------------------------------------
 * # ChAux
 * Change AuxType of a ProDOS File
@@ -42,17 +79,26 @@ K.ChTyp			jsr PFT.CheckPath1
 * ## ASM
 * `>PUSHW filepath`
 * `>PUSHW auxtype`
-* `>SYSCALL ChAux`
+* `>LIBC ChAux`
 * ## RETURN VALUE
 *\--------------------------------------
-K.ChAux			jsr PFT.CheckPath2
-				bcs PRODOS.RET4
+K.ChAux			jsr PFT.GetPath2
+				bcs .9
+
+				jsr PFT.CheckExtFS
+				bcs .9
 
 				>MLICALL MLI.GFINFO
-				bcs PRODOS.RET4
+				bcs .9
 
-				>PULLW K.MLI.PARAMS+S.FI.AUXTYPE
-				bra PRODOS.SFIRET2
+				ldy #0
+				jsr RAMSW.GetStkYW
+
+				>STYA K.MLI.PARAMS+S.FI.AUXTYPE
+
+				>MLICALL MLI.SFINFO
+
+.9				rts
 */--------------------------------------
 * # SetAttr
 * Change Attributes of a ProDOS File
@@ -61,25 +107,407 @@ K.ChAux			jsr PFT.CheckPath2
 * ## ASM
 * `>PUSHW filepath`
 * `>PUSHB attributes`
-* `>SYSCALL setattr`
+* `>LIBC setattr`
 * ## RETURN VALUE
 *\--------------------------------------
-K.SetAttr		jsr PFT.CheckPath1
-				bcs PRODOS.RET3
-				
-				>MLICALL MLI.GFINFO
-				bcs PRODOS.RET3
-				
-				>PULLB K.MLI.PARAMS+S.FI.A
+K.SetAttr		jsr PFT.GetPath1
+				bcs .9
 
-PRODOS.SFIRET2	>MLICALL MLI.SFINFO
-				bra PRODOS.RET2
-				
-PRODOS.RET4		inc pStack
-PRODOS.RET3		inc pStack
-PRODOS.RET2		inc pStack
-				inc pStack
-				
+				jsr PFT.CheckExtFS
+				bcs .9
+
+				>MLICALL MLI.GFINFO
+				bcs .9
+
+				ldy #0
+				jsr RAMSW.GetStkY
+				sta K.MLI.PARAMS+S.FI.A
+
+				>MLICALL MLI.SFINFO
+
+.9				rts
+*--------------------------------------
+PRODOS.OpenReg	>MLICALL MLI.GFINFO
+				bcs .10
+
+				lda IO.Type				Already Exists
+				beq .2
+
+				cmp K.MLI.PARAMS+S.FI.T
+				beq .2
+
+				lda #MLI.E.INCFF
+				sec
+				rts
+
+.10				bit IO.Flags			Create if not exists ?
+				bpl .9					No, return MLI error
+
+				ldx #2					Yes, Create...
+
+.1				lda IO.Type,x
+				sta K.MLI.PARAMS+4,x	File type,Aux type
+				dex
+				bpl .1
+
+				lda #S.FI.ST.STD
+				jsr FS.MLICREATE
+				bcs .9
+
+.2				jsr FS.MLIOPEN
+				bcs FS.OPEN.ERR
+
+				lda IO.Flags
+				bit #O.WRONLY
+				beq .5					Write mode ?
+
+				and #O.APPEND			Append ?
+				bne .3					yes, go to end of file
+
+				stz K.MLI.PARAMS+2
+				stz K.MLI.PARAMS+3
+				stz K.MLI.PARAMS+4
+				>MLICALL MLI.SETEOF		no, reset size to 0
+				bra .4
+
+.3				>MLICALL MLI.GETEOF
+				bcs FS.OPEN.ERR
+
+				>MLICALL MLI.SETMARK
+.4				bcs FS.OPEN.ERR
+
+.5				lda IO.Flags
+				and #O.TEXT				Text Mode ?
+				beq .8
+
+				lda #$FF
+				sta K.MLI.PARAMS+2
+				lda #C.CR
+				sta K.MLI.PARAMS+3
+				>MLICALL MLI.NEWLINE
+				bcs FS.OPEN.ERR
+
+.8
+*				clc
+.9				rts
+*--------------------------------------
+FS.OPEN.ERR		pha						Save Error Code
+				jsr FS.MLICLOSE
+
+				pla
+				sec
+				rts
+*--------------------------------------
+PRODOS.OpenDir	>MLICALL MLI.GFINFO
+				bcs .9
+
+				lda K.MLI.PARAMS+S.FI.T
+				cmp #S.FI.T.DIR
+				bne .99
+
+				jsr FS.MLIOPEN
+				bcs FS.OPEN.ERR
+
+.8
+*				clc
+				rts
+
+.99				lda #MLI.E.UNSUPST
+				sec
+.9				rts
+*--------------------------------------
+PRODOS.Read		ldx #MLI.READ
+
+				.HS 2C					BIT ABS
+*--------------------------------------
+PRODOS.Write	ldx #MLI.WRITE
+
+				stx .8
+
+				ldy #2
+				jsr RAMSW.GetStkYW
+				>STYA K.MLI.PARAMS+2	buf
+
+				ldy #0
+				jsr RAMSW.GetStkYW
+				>STYA K.MLI.PARAMS+4	count
+
+				ldy #S.FD.REG.REF
+				lda (pFD),y
+				sta K.MLI.PARAMS+1
+
+				lda #4					Param Count = 4 for MLIREAD & MLIWRITE
+				sta K.MLI.PARAMS
+
+				lda A2osX.IOOpt				AUX ?
+				sta MLI.IOBANK
+
+				jsr MLI
+.8				.BS 1
+				.DA K.MLI.PARAMS
+
+				stz MLI.IOBANK
+
+				bcs .9
+
+				>LDYA K.MLI.PARAMS+6
+
+.9				rts
+*--------------------------------------
+PRODOS.EOF		>MLICALL MLI.GETMARK
+				bcs .9
+
+				ldy #2
+
+.1				lda K.MLI.PARAMS+2,y
+				sta ACC32,y
+				dey
+				bpl .1
+
+				>MLICALL MLI.GETEOF
+				bcs .9
+
+				ldy #2
+
+.2				lda K.MLI.PARAMS+2,y
+				eor ACC32,y
+				bne .8					FALSE
+
+				dey
+				bpl .2
+
+				lda #$ff				TRUE
+*				clc
+				rts
+
+.8				lda #0
+*				clc
+.9				rts
+*--------------------------------------
+PRODOS.Close	jsr FS.MLICLOSE
+				bcs FS.RTS
+
+				jmp DEV.FreeFD
+*--------------------------------------
+FS.MLICREATE	sta K.MLI.PARAMS+7		Storage Type
+				ldx #3
+
+.1				lda MLI.DATE,x
+				sta K.MLI.PARAMS+8,x	Create Date/Time
+				dex
+				bpl .1
+
+				lda #S.FI.A.FULL
+				sta K.MLI.PARAMS+3		Access
+				>MLICALL MLI.CREATE
+				rts
+*--------------------------------------
+FS.MLIOPEN		>LDYAI 1024				get a ProDOS IOBUF
+				ldx #S.MEM.F.ALIGN
+				jsr MEM.Malloc.YAX
+				bcs FS.RTS
+
+				>STYA K.MLI.PARAMS+3	Save Ptr to IOBUF for MLIOPEN call
+				ldy #S.FD.REG.IOBUF
+				sta (pFD),y				save HI byte only
+
+				>MLICALL MLI.OPEN
+				bcs FS.RTS
+
+				lda K.MLI.PARAMS+5		get ref_num
+				ldy #S.FD.REG.REF
+				sta (pFD),y
+
+				sta K.MLI.PARAMS+1		Next MLI Calls are REF_NUM based
+
+*				clc
+
+FS.RTS			rts
+*--------------------------------------
+FS.MLICLOSE		ldy #S.FD.REG.REF
+				lda (pFD),y
+				bmi .1					if special DIR
+
+				sta K.MLI.PARAMS+1
+				>MLICALL MLI.CLOSE
+				bcs FS.RTS
+
+.1				ldy #S.FD.REG.IOBUF		HI byte only, page aligned
+				lda (pFD),y
+				beq .8
+
+				ldy #0					LO byte always 0
+				jmp MEM.FreeYA
+
+.8				clc
+				rts
+*--------------------------------------
+FS.Stat.203		>MLICALL MLI.GFINFO
+				bcs FS.RTS
+
+				jsr SHARED.ClrStat
+
+				lda K.MLI.PARAMS+S.FI.T
+				cmp #S.FI.T.DIR
+				bne .1
+
+				lda /S.STAT.MODE.DIR
+				sta K.S.STAT+S.STAT.MODE+1
+
+.1				lda K.MLI.PARAMS+S.FI.A
+				sta K.S.STAT+S.STAT.P.ACCESS
+
+				ldx #FS.GFI.Cnt
+
+.3				ldy FS.GFI.Src-1,x
+				lda K.MLI.PARAMS,y
+				ldy FS.Stat.Dst-1,x
+				sta K.S.STAT,y
+				dex
+				bne .3
+
+				>LDYAI K.MLI.PARAMS+S.FI.CDATE
+				ldx #K.S.STAT+S.STAT.CTIME
+				jsr FS.PTime2StatYAX
+
+				>LDYAI K.MLI.PARAMS+S.FI.MDATE
+				ldx #K.S.STAT+S.STAT.MTIME
+				jmp FS.PTime2StatYAX
+*--------------------------------------
+PRODOS.Stat		>MLICALL MLI.GFINFOEX
+				bcc .1
+
+				cmp #MLI.E.BADCALL
+				beq FS.Stat.203			Apple WS CARD
+
+				sec
+.9				rts
+
+.1				>LDYAI K.MLI.PARAMS+3
+				>STYA ZPPtr3
+*--------------------------------------
+FS.DirEnt2Stat	jsr SHARED.ClrStat
+
+				ldx #FS.DirEnt.Cnt
+
+.1				ldy FS.DirEnt.Src-1,x
+				lda (ZPPtr3),y
+				ldy FS.Stat.Dst-1,x
+				sta K.S.STAT,y
+				dex
+				bne .1
+
+				ldy #S.FIEX.ACCESS
+				lda (ZPPtr3),y
+				sta K.S.STAT+S.STAT.P.ACCESS
+
+				lda (ZPPtr3)
+				and #$F0
+				cmp #$D0					Dir Hdr or Dir ?
+				bcc .3
+
+				cmp #$F0					Vol Hdr ?
+				bne .2
+
+				stz K.S.STAT+S.STAT.SIZE
+
+				ldy #S.FIEX.AUXTYPE
+				lda (ZPPtr3),y
+				sta K.S.STAT+S.STAT.BLOCKS
+				asl
+				sta K.S.STAT+S.STAT.SIZE+1
+
+				iny
+
+				lda (ZPPtr3),y
+				sta K.S.STAT+S.STAT.BLOCKS+1
+				rol
+				sta K.S.STAT+S.STAT.SIZE+2
+
+				lda #0
+				rol K.S.STAT+S.STAT.SIZE+3
+
+.2				lda /S.STAT.MODE.DIR
+				tsb K.S.STAT+S.STAT.MODE+1
+
+.3				ldy #S.FIEX.ACL
+				lda (ZPPtr3),y
+				cmp #$57
+				bne .7
+
+				iny
+				lda (ZPPtr3),y
+				bne .7
+
+				ldy #S.FIEX.ACL.UID
+				lda (ZPPtr3),y
+				sta K.S.STAT+S.STAT.UID
+
+				ldy #S.FIEX.ACL.GID
+				lda (ZPPtr3),y
+				sta K.S.STAT+S.STAT.GID
+
+				ldy #S.FIEX.ACL.MOD
+				lda (ZPPtr3),y
+				tsb K.S.STAT+S.STAT.MODE
+				iny
+				lda (ZPPtr3),y
+				tsb K.S.STAT+S.STAT.MODE+1
+
+.7				lda #S.FIEX.CTIME
+				ldx #K.S.STAT+S.STAT.CTIME
+				jsr FS.PTime2StatAX
+
+				lda #S.FIEX.MTIME
+				ldx #K.S.STAT+S.STAT.MTIME
+*				jmp FS.PTime2StatAX
+*--------------------------------------
+FS.PTime2StatAX	clc
+				adc ZPPtr3
+				tay
+				lda ZPPtr3+1
+				adc #0
+FS.PTime2StatYAX
+				>STYA TXTPTR
+				stx FORPNT
+				lda /K.S.STAT
+				sta FORPNT+1
+
+				jsr TIME.PTime2Time
+				clc						ignore bad date error
+
+				rts
+*--------------------------------------
+FS.GFI.Src		.DA #S.FI.T,#S.FI.AUXTYPE,#S.FI.AUXTYPE+1
+				.DA #S.FI.UBLKS,#S.FI.UBLKS+1
+FS.GFI.Cnt		.EQ *-FS.GFI.Src
+*--------------------------------------
+FS.DirEnt.Src	.DA #S.FIEX.TYPE,#S.FIEX.AUXTYPE,#S.FIEX.AUXTYPE+1
+				.DA #S.FIEX.BLKUSED,#S.FIEX.BLKUSED+1
+				.DA #S.FIEX.EOF,#S.FIEX.EOF+1,#S.FIEX.EOF+2
+FS.DirEnt.Cnt	.EQ *-FS.DirEnt.Src
+*--------------------------------------
+FS.Stat.Dst		.DA #S.STAT.P.TYPE,#S.STAT.P.AUXTYPE,#S.STAT.P.AUXTYPE+1
+				.DA #S.STAT.BLOCKS,#S.STAT.BLOCKS+1
+				.DA #S.STAT.SIZE,#S.STAT.SIZE+1,#S.STAT.SIZE+2
+*--------------------------------------
+PRODOS.MLICall	stx .1
+				sta K.MLI.PARAMS
+
+				jsr MLI
+
+.1				.BS 1					SELF MODIFIED
+				.DA K.MLI.PARAMS
+
+				stz MLI.IOBANK			RESET ProDOS.FX to R/W to/from MAIN MEM
+
+				rts
+*--------------------------------------
+PRODOS.AtkCall	jsr MLI
+
+				.DA #MLI.ATALK
+				.DA K.MLI.PARAMS
+
 				rts
 *--------------------------------------
 MAN

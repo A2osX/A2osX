@@ -7,13 +7,11 @@ NEW
 *--------------------------------------
 				.INB inc/macros.i
 				.INB inc/a2osx.i
-				.INB inc/kernel.i
 				.INB inc/mli.i
 *--------------------------------------
 				.DUMMY
 				.OR ZPBIN
 ZS.START
-ZPhBuf			.BS 1
 ZPBufPtr		.BS 2
 
 ZPRetryCnt		.BS 1
@@ -26,13 +24,10 @@ ZPbEsc			.BS 1
 ZPGetLineLen	.BS 1
 ZPGetLineMax	.BS 1
 
-ZPNewSID		.BS 1
-ZPOldSID		.BS 1
+ZPpNewSession	.BS 2
+ZPpOldSession	.BS 2
 
-ZPNewSession	.BS 1
-ZPOldSession	.BS 1
-
-ZPhFile			.BS 1
+ZPpFile			.BS 2
 
 ZS.END			.ED
 *--------------------------------------
@@ -41,20 +36,20 @@ ZS.END			.ED
 CS.START		cld
 				jmp (.1,x)
 				.DA #$61				6502,Level 1 (65c02)
-				.DA #1					BIN Layout Version 1
-				.DA #S.PS.F.EVENT		S.PS.F
+				.DA #2					BIN Layout Version 2
 				.DA #0
-				.DA CS.END-CS.START		Code Size (without Constants)
-				.DA DS.END-DS.START		Data Segment Size
+				.DA #0
+				.DA CS.END
+				.DA ID.END
+				.DA DS.END
 				.DA #16					Stack Size
 				.DA #ZS.END-ZS.START	Zero Page Size
-				.DA 0
 *--------------------------------------
 * Relocation Table
 *--------------------------------------
 .1				.DA CS.INIT
 				.DA CS.RUN
-				.DA CS.DOEVENT
+				.DA CS.SIG
 				.DA	CS.QUIT
 L.MSG.LOGIN		.DA MSG.LOGIN
 L.MSG.PASSWORD	.DA MSG.PASSWORD
@@ -75,11 +70,12 @@ CS.INIT.RTS		rts
 CS.RUN			>LDYA L.ETCISSUE
 				jsr CS.RUN.DumpFile
 
-				lda #0
-				>PUSHA					ROOT user
+				>SS
+				>PUSHBI 0				ROOT user
 				>PUSHA
 				>PUSHA					Dry Run, no output
-				>SYSCALL GetPWUID
+				>LIBC GetPWUID
+				>SR
 				bcc CS.RUN.AUTH			
 *--------------------------------------
 				>LDYA L.ETCNOAUTH
@@ -88,8 +84,8 @@ CS.RUN			>LDYA L.ETCISSUE
 				jsr CS.RUN.EXECPS
 				bcs .9
 				
-				ldy #S.PS.RC
-				lda (pPS),y
+				ldy #S.PS.ERRNO
+				jsr A2osX.GetPSy
 
 				sec
 
@@ -119,19 +115,19 @@ CS.RUN.AUTH		lda #3
 				bcs .9
 
 				>LDYA L.MSG.CRLF
-				>SYSCALL PutS
+				>LIBC PutS
 				bcs .9
 				
 				>PUSHW pData				>PUSHEA.G Password
 				>PUSHW pData				>PUSHEA.G Password
 				
-				>SYSCALL MD5
+				>LIBC MD5
 				
 				jsr CS.RUN.EXEC
 				bcc .9
 
 				>LDYA L.MSG.BAD
-				>SYSCALL PutS
+				>LIBC PutS
 				bcs .9
 
 				dec ZPRetryCnt
@@ -144,57 +140,43 @@ CS.RUN.AUTH		lda #3
 CS.RUN.EXEC		>PUSHEA.G Username
 				>PUSHW pData				>PUSHEA.G Password
 
-				>SYSCALL OpenSession
+				>LIBC OpenSession
 				bcs .9
 
-				sta ZPNewSID
+				>STYA ZPpNewSession
 
-				ldx #1
+				ldy #S.PS.pSession
+				jsr A2osX.GetPSy
+				sta ZPpOldSession
+				lda ZPpNewSession
+				jsr A2osX.SetPSy
 
-.1				lda USRs.hSID-1,x
-				beq .2
+				iny
+				jsr A2osX.GetPSy
+				sta ZPpOldSession+1
+				lda ZPpNewSession+1
+				jsr A2osX.SetPSy
 
-				inx
-				cpx #K.USR.MAX+1
-				bne .1
-
-				lda #E.OOH
-*				sec
-				rts	
-
-.2				stx ZPNewSession
-				ldy #S.PS.hSession
-				lda (pPS),y
-				sta ZPOldSession
-				
-				txa
-				sta (pPS),y
-
-				lda ZPNewSID
-				sta USRs.hSID-1,x
-
-				ldy #S.PS.hStdIn
-				lda (pPS),y
-				sta USRs.hFile-1,x
+*				ldy #S.PS.hStdIn
+*				jsr A2osX.GetPSy
+*				sta USRs.hFile-1,x
 
 				jsr CS.RUN.EXECPS
 				
-				lda ZPNewSID
+				>LDYA ZPpNewSession
+				>LIBC CloseSession
 				
-				>SYSCALL CloseSession
+				stz ZPpNewSession+1
+			
+				ldy #S.PS.pSession
+				lda ZPpOldSession
+				jsr A2osX.SetPSy
+				iny
+				lda ZPpOldSession+1
+				jsr A2osX.SetPSy
 				
-				stz ZPNewSID
-				
-.8				ldx ZPNewSession
-				stz USRs.hSID-1,x
-				stz USRs.hFile-1,x
-				
-				ldy #S.PS.hSession
-				lda ZPOldSession
-				sta (pPS),y
-				
-				ldy #S.PS.RC
-				lda (pPS),y
+				ldy #S.PS.ERRNO
+				jsr A2osX.GetPSy
 
 				sec
 
@@ -203,9 +185,12 @@ CS.RUN.EXEC		>PUSHEA.G Username
 CS.RUN.EXECPS	>LDYA L.ETCMOTD
 				jsr CS.RUN.DumpFile
 
+				>SS
 				>PUSHW L.SHELL
+				>PUSHBI 0
 				>PUSHBI S.PS.F.HOLD
-				>SYSCALL ExecL
+				>LIBC ExecL
+				>SR
 				bcs .9
 
 				>SLEEP
@@ -219,7 +204,7 @@ CS.RUN.GetLine	>STYA ZPGetLinePtr
 				stz ZPGetLineLen
 				stz ZPbEsc
 
-.1				>SYSCALL GetChar
+.1				>LIBC GetChar
 				bcs .9
 
 				bit ZPbEsc
@@ -247,7 +232,7 @@ CS.RUN.GetLine	>STYA ZPGetLinePtr
 				bit ZPbGetLineSecret
 				bmi .1
 
-				>SYSCALL PutChar
+				>LIBC PutChar
 				bra .1
 
 .2				cmp #3					Ctrl-C
@@ -280,61 +265,65 @@ CS.RUN.GetLine	>STYA ZPGetLinePtr
 				clc
 .9				rts	
 *--------------------------------------
-CS.RUN.printf	>PUSHYA
+CS.RUN.printf	>SS
+				>PUSHYA
 				>PUSHBI 0
-				>SYSCALL PrintF
-				rts
+				>LIBC PrintF
+				>SR
+CS.RUN.RTS		rts
 *--------------------------------------
-CS.RUN.DumpFile	>PUSHYA
+CS.RUN.DumpFile	>SS
+				>PUSHYA
 				>PUSHBI	O.RDONLY+O.TEXT
 				>PUSHBI S.FI.T.TXT
 				>PUSHWZ				Aux type
-				>SYSCALL FOpen
-				bcs .99
+				>LIBC FOpen
+				>SR
+				bcs CS.RUN.RTS
 
-				stx ZPhFile		
+				>STYA ZPpFile
 
 				>LDYAI 256
-				>SYSCALL GetMem
+				>LIBC Malloc
 				bcs .9
 
 				>STYA ZPBufPtr
-				stx ZPhBuf
 
-.1				>PUSHB ZPhFile
-				jsr .7
+.1				>SS
+				>PUSHW ZPBufPtr
 				>PUSHWI	255
-				>SYSCALL FGetS
+				>PUSHW ZPpFile
+				>LIBC FGetS
+				>SR
 				bcs .8
 
-				jsr .7
-				jsr .7
-				>SYSCALL Expand
+				>SS
+				>PUSHW ZPBufPtr
+				>PUSHW ZPBufPtr
+				>LIBC Expand
+				>SR
 
 				>LDYA ZPBufPtr
-				>SYSCALL PutS
+				>LIBC PutS
 				bra .1
 
-.8 				lda ZPhBuf
-				>SYSCALL FreeMem
+.8 				>LDYA ZPBufPtr
+				>LIBC Free
 				
 *				clc
 
 .9				php
 				pha
-				lda ZPhFile
-				>SYSCALL FClose
+				>LDYA ZPpFile
+				>LIBC FClose
 				pla
 				plp
-.99				rts
-
-.7				>PUSHW ZPBufPtr
 				rts
 *--------------------------------------
-CS.DOEVENT		sec
+CS.SIG			sec
 				rts		
 *--------------------------------------
-CS.END
+CS.END			.EQ *
 *--------------------------------------
 MSG.LOGIN		.CZ "\r\nlogin:"
 MSG.PASSWORD	.CZ "\r\npassword:"
@@ -347,9 +336,10 @@ ETCISSUE		.AZ "${ROOT}etc/issue"
 ETCMOTD			.AZ "${ROOT}etc/motd"
 SHELL			.AZ "${SHELL}"
 *--------------------------------------
+ID.END			.EQ *
+*--------------------------------------
 				.DUMMY
 				.OR 0
-DS.START		
 Password		.BS 33
 Username		.BS 17
 DS.END			.ED

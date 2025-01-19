@@ -1,414 +1,16 @@
 NEW
   AUTO 3,1
 *--------------------------------------
-GP.Sleep		php
-				sei
-
-				phy
-				ldy #S.PS.A
-				sta (pPS),y
-
-				txa
-				iny						#S.PS.X
-				sta (pPS),y
-
-				pla
-				iny						#S.PS.Y
-				sta (pPS),y
-
-				pla
-				iny						#S.PS.P
-				sta (pPS),y
-
-				pla						get PC LO
-				plx						get PC HI
-
-				inc						Advance one byte because of return by RTI
-				bne GP.Sleep2
-
-				inx
-
-GP.Sleep2		ldy #S.PS.PC
-				sta (pPS),y
-
-				txa
-				iny						#S.PS.PC+1
-				sta (pPS),y
-
-				tsx
-
-				inx
-
-				inx						keep PC HI,LO from KERNEL jsr PSExec/PSResume
-				inx						Stack Ptr is $1ff if empty
-
-				txa
-				beq .3
-
-				tay						Save !Byte count for later
-
-.2				pla
-				>PUSHA
-				inx
-				bne .2
-
-				tya
-
-.3				>PUSHA					push CPU Stack BC to restore on top of Soft Stack
-
-				inc $1fe				PC=PC+1
-				bne .4
-
-				inc $1ff				because of RTI
-
-.4				lda (pPS)
-				ora #S.PS.F.SLEEP
-				sta (pPS)
-				lda #0					cld,clc,cli
-				pha
-				rti						exit to kernel with CC
-*--------------------------------------
-*     *** MUST BE REINTRANT ***
-*--------------------------------------
-GP.SysCall		dec IRQ.InKernel
-
-				pha
-				phy
-				ldy #S.PS.A
-				sta (pPS),y
-				txa
-				iny						#S.PS.X
-				sta (pPS),y
-				pla
-				iny						#S.PS.Y
-				sta (pPS),y
-				tay
-				pla
-				jsr JMP.2
-				bcc .2					no error quit...
-
-				tax						CS,A=0 ?
-				beq .3					Yes, BLOCKING I/O
-
-.2				inc IRQ.InKernel
-				rts						Unmodified Carry
-
-.3				sei
-				inc IRQ.InKernel
-
-GO.Sleep2		pla						get PC LO
-				plx						get PC HI
-*				sec
-				sbc #2
-				bcs GP.Sleep2
-
-				dex
-
-.1				bra GP.Sleep2
-*--------------------------------------
-GP.LibCall		dec IRQ.InLib
-
-				pha
-				phy
-				ldy #S.PS.A
-				sta (pPS),y
-				txa
-				iny						#S.PS.X
-				sta (pPS),y
-				pla
-				iny						#S.PS.Y
-				sta (pPS),y
-
-				jsr K.GetMemPtr			Get LIB Code Segment (MemMgr in $E000, no BNK change)
-				>STYA .1+1
-				pla
-
-.1				jsr $FFFF				SELF MODIFIED
-
-				bcc .2
-
-				tax
-				beq .3
-
-.2				inc IRQ.InLib
-				rts
-
-.3				sei
-				inc IRQ.InLib
-
-				bra GO.Sleep2
-*--------------------------------------
-GP.AtkCall		dec IRQ.InKernel
-
-				>STYA .1
-
-				jsr GO.MainIC
-
-				jsr MLI
-				.DA #MLI.ATALK
-.1				.DA *
-
-				jsr GO.AuxLC
-
-				inc IRQ.InKernel
-				rts
-*/--------------------------------------
-* # Add32,Sub32,Mul32,IMul32,Div32,IDiv32,Mod32,IMod32,Cmp32,ICmp32
-* Return X+Y, X-Y, X*Y, X/Y, X mod Y....
-* ## ASM
-* `>PUSHL X (long)`
-* `>PUSHL Y (long)`
-* `>FPU add32`
-* `...`
-* ## RETURN VALUE
-*  On stack (long)
-*\--------------------------------------
-GP.FpuCall		dec IRQ.InKernel
-				cpx #FPU.FMUL
-				bcs .1
-
-				jsr MATH				math16 & math32, direct JMP
-
-				inc IRQ.InKernel
-				rts
-
-.1				phx
-				jsr GP.SetFAC			Get float from stack
-				plx
-				cpx #FPU.PWR+1
-				bcs GP.GetFAC
-*/--------------------------------------
-* # FAdd,FSub,FMul,FDiv,FPwr
-* Return X*Y, X/Y, X+Y, X-Y
-* ## C
-* `float pwr ( float x, float y);`
-* ## ASM
-* `>PUSHF X (float)`
-* `>PUSHF Y (float)`
-* `>FPU fmul`
-* `>FPU fdiv`
-* `>FPU fmod`							TODO
-* `>FPU fadd`
-* `>FPU fsub`
-* `>FPU fpwr`
-* ## RETURN VALUE
-*  On stack (float)
-*\--------------------------------------
-				lda pStack
-				clc
-				adc #5
-				sta pStack
-				phx
-				jsr GP.SetARG
-				plx
-*/--------------------------------------
-* # Log,Sqr,Exp,Cos,Sin,Tan,ATan
-* Return Log(x), Sqr(x), E^X, Cos(x), Sin(X), Tan(x), ATan(x)
-* ## C
-* `float log ( float x);`
-* `float sqr ( float x);`
-* `float exp ( float x);`
-* `float cos ( float x);`
-* `float sin ( float x);`
-* `float tan ( float x);`
-* `float atan ( float x);`
-* ## ASM
-* `>PUSHF x (Float)`
-* `>FPU log`
-* ## RETURN VALUE
-*  On stack (Float)
-*\--------------------------------------
-GP.GetFAC		jsr GP.ROMCALL
-
-				lda pStack
-				ldy pStack+1
-				sta FORPNT				Ptr to dst buffer
-				sty FORPNT+1
-				ldx #FPU.GETFAC
-*--------------------------------------
-GP.RomCall		phx
-				ldx $D000
-				stx .8+1
-				bit	IO.RROMBNK1
-				plx
-
-				jsr MATHF
-
-.8				ldx #$ff
-				bit $C000,x
-*				bit $C000,x
-				rts
-*--------------------------------------
-GP.SetARG		ldx #FPU.SETARG
-				.HS 2C					BIT ABS
-GP.SetFAC		ldx #FPU.SETFAC
-				lda pStack
-				ldy pStack+1
-				bra GP.RomCall
-*/--------------------------------------
-* # float
-* Return 'floated' long
-* ## C
-* `float f = (float)l;
-* ## ASM
-* `>PUSHL l` (long)
-* `>FPU float`
-* ## RETURN VALUE
-*  On stack (float)
-*\--------------------------------------
-GP.Float		ldy #3
-
-.1				lda (pStack),y
-				sta FAC+1,y				Reverse Order
-				dey
-				bpl .1
-
-				dec pStack				keep 5 bytes on stack
-				stz	FAC.SIGN
-				lda #$80+32
-				sta FAC					Positive + Exp=32
-				ldx #FPU.LTOF
-
-				bra GP.GetFAC
-*/--------------------------------------
-* # lrintf
-* Return float rounded into a long
-* ## C
-* `long int lrintf (float x);`
-* ## ASM
-* `>PUSHF x`
-* `>FPU lrintf`
-* ## RETURN VALUE
-*  On stack (long)
-*\--------------------------------------
-GP.lrintf		jsr GP.SetFAC
-				inc pStack				keep 4 bytes on stack
-				ldx #FPU.QINT
-				jsr GP.ROMCALL
-
-				ldy #3
-
-.1				lda FAC+1,y
-				sta (pStack),y
-				dey
-				bpl .1
-
-				rts
-*--------------------------------------
-* MLI : From Kernel Aux LC to Main LC
-*--------------------------------------
-GP.MLICall		stx .1
-				sta K.MLI.PARAMS
-				jsr GO.MainIC
-				jsr MLI
-.1				.BS 1
-				.DA K.MLI.PARAMS
-				jsr GO.AuxLC
-				rts
-*--------------------------------------
-GO.MainIC		pha
-				lda $D000				We re coming from AUXLC, saving bank...
-				sta GO.AuxLC.BNK+1
-				pla
-				php
-				clc
-				.HS	2C					BIT ABS
-GO.AuxLC		php
-				sec
-
-				sei
-				sta GO.EXIT.SaveA+1
-				stx GO.EXIT.SaveX+1
-				sty GO.EXIT.SaveY+1
-				pla						Restore P in A for later
-				plx						Get PC and add 1 for return
-				ply
-				inx
-				bne .1
-
-				iny
-
-.1				stx GO.EXIT.JMP+1
-				sty GO.EXIT.JMP+2
-
-				bcs .2					if CS, go AUXLC
-
-				tsx
-				stx SaveSX
-				ldx	SaveSM
-				txs
-				sta IO.CLRALTZP
-
-				ldx #IO.RRAMWRAMBNK1	Go MAINLC (ProDOS), always BNK1
-				bra GO.EXIT
-
-.2				sta IO.SETALTZP
-				tsx
-				stx SaveSM
-				ldx	SaveSX
-				txs
-
-GO.AuxLC.BNK	ldx #$FF				Self Modified, initialized to BNK1 for INIT3
-*--------------------------------------
-GO.EXIT			bit $C000,x				Select Proper LC bank
-*				bit $C000,x
-
-				pha						push P on stack
-GO.EXIT.SaveY	ldy #$ff
-GO.EXIT.SaveX	ldx #$ff
-GO.EXIT.SaveA	lda #$ff
-				plp
-
-GO.EXIT.JMP		jmp $FFFF				SELF MODIFIED
-*--------------------------------------
-* Called from ProDOS IRQ Manager (LCBNK1)
-* A,X,Y, $FA->$FF Already Saved
-* Main RAM,ZP/LC selected
-* must begin with CLD
-* must exit with RTS
-* - CC if IRQ cleared, CS if NOT
-*--------------------------------------
-GP.IRQ			cld
-
-				bit IRQ.Skip			After A2osX IRQ.H ?
-				bmi GP.IRQ.Exit
-
-				sta IO.SETALTZP			switch to aux LC
-				tsx
-				stx SaveSM
-				ldx	SaveSX
-				txs
-
-GP.IRQ.JSR		jsr CORE.IRQ.DEV		SELF MODIFIED
-
-				tsx						go back to Main
-				stx SaveSX
-				ldx	SaveSM
-				txs
-				sta IO.CLRALTZP
-
-				rts
-
-GP.IRQ.Exit		stz IRQ.Skip			reset flag
-				sec
-				rts
-*--------------------------------------
-*GO.Reset		jsr GO.AuxLC
-*				jmp CORE.Run
-*--------------------------------------
-*BrkHandler		bra *
-*--------------------------------------
-CORE.Run		ldx #1
-
-				bra .80					Skip PS0
+CORE.Run		ldx #2					Skip PS0
 
 .1				stx CORE.PSIndex
 
-				lda PSs.hPS,x
-				beq .8
+				lda pPSs+1,x
+				beq .80
 
-				jsr K.GetMemPtr
-				>STYA pPs
+				ldy pPSs,x
+				>STYA pPS
+
 				lda (pPS)				get S.PS.F
 *				bit #S.PS.F.HOLD		Waiting for Another Task to Terminate?
 *				beq .2
@@ -416,8 +18,8 @@ CORE.Run		ldx #1
 				bpl .2
 
 				ldy #S.PS.CPID
-				lda (pPS),y
-				jsr CORE.GetPS
+				jsr PS.GetYw
+				jsr PS.FindYA
 				bcc .8					yes, still running....
 
 				lda (pPS)				get S.PS.F again
@@ -426,9 +28,19 @@ CORE.Run		ldx #1
 
 .2				jsr CORE.PSSelect		Restore ZP & Ptrs
 
-.3				jsr CORE.PSExec			INIT/RUN/QUIT/RESUME
-				dec IRQ.InKernel
-				bcc .4					INIT/RUN Exit ?
+.3				lda (pPS)
+				bit #S.PS.F.SLEEP
+				beq .30
+
+				eor #S.PS.F.SLEEP		unmark as SLEEP
+				sta (pPS)
+
+				jsr RAMSW.PSResume
+				bra .31
+
+.30				jsr RAMSW.PSExec
+
+.31				bcc .4					INIT/RUN Exit ?
 
 				jsr CORE.UpdPPS			Yes, go Update Parent PS
 
@@ -453,51 +65,34 @@ CORE.Run		ldx #1
 				bne .7
 
 				ldy #S.PS.PID
-				lda (pPS),y
-				cmp #1					INITD ?
+				jsr PS.GetYw			INITD ?
 				bne .6
 
 				jmp CORE.Quit
 
-.6				>PUSHA					PID
-				>PUSHBI 2				SIG
-				>SYSCALL2 Kill
+.6				ldx CORE.PSIndex
+				jsr PS.DestroyX
 				bra .8
 
 .7				jsr CORE.PSLeave		Save ZP & Ptrs
 
 .8				ldx CORE.PSIndex
+
+.80				inx
 				inx
-.80				cpx CORE.PSCount
-				bne .1
+				cpx #K.PS.MAX*2
+				bcc .1
 *--------------------------------------
-CORE.Events		jsr CORE.GetEvents
-				bcs .4					CS=no event
+CORE.Sig		jsr CORE.GetSig
+				beq .4
 
 				jsr CORE.Dispatch
-				bcc .4					CC=All Events Dispatched
 
-				lda PSs.PID		Select PS0
-				jsr K.GetMemPtr
-				>STYA pPs
+				>LDYA pPSs
+				>STYA pPS
+
 				>LDYAI K.STACKTOP
 				>STYA pStack
-				lda #K.S.EVT
-				sta pEvent
-
-.1				lda (pEvent)
-				beq .3
-
-				bpl .3
-
-				jsr CORE.DestroyEvent	Discard any timer event
-
-.3				lda pEvent
-				clc
-				adc #S.EVT
-				sta pEvent
-				lda CORE.EvtCount
-				bne .1
 *--------------------------------------
 .4				bit IO.OPENAPPLE
 				bpl .8
@@ -522,19 +117,24 @@ CORE.Events		jsr CORE.GetEvents
 				lda A2osX.SCRNDEVS,x	Get DevID
 				beq .8					No device claimed this screen
 
-				>PUSHA
-				>PUSHBI IOCTL.CONTROL	request
-				>PUSHWZ					Param
-				>SYSCALL2 IOCTL
+				tax
+				>LDYA pFDs,x
+				>STYA pFD
+
+				jsr DEV.GetPDrv
+
+				ldx #IOCTL.CONTROL
+				jsr DEV.pDrvJmp
+
 .8				jmp CORE.Run
 *--------------------------------------
 CORE.Quit		php
 				sei
-				jsr CORE.IRQOff
+				jsr IRQ.Off				SELF MODIFIED
 
 				plp
 
-				lda IRQ.INTNUM
+				lda IRQ.IntNum
 				sta K.MLI.PARAMS+1
 
 				>MLICALL MLI.DEALLOCIRQ
@@ -554,15 +154,15 @@ CORE.Quit		php
 
 				lda #4
 				ldx #MLI.QUIT
-				jmp GP.MLICall
+				jmp PRODOS.MLICall
 *--------------------------------------
-CORE.UpdPPS		tax						save RC From INIT or RUN
+CORE.UpdPPS		sta .1+1				save RC From INIT or RUN
 
 				ldy #S.PS.PPID			Notify Parent Process for exit code...
-				lda (pPS),y
+				jsr PS.GetYw
 				beq .8					no parent process
 
-				jsr CORE.GetPSByID		X unmodified
+				jsr PS.FindYA			X unmodified
 				bcs .8					parent is dead.....skipping...
 
 				>STYA ZPPtr1
@@ -575,33 +175,27 @@ CORE.UpdPPS		tax						save RC From INIT or RUN
 
 				ldy #S.PS.CPID
 				lda (ZPPtr1),y
-				dey						#S.PS.PID
+				ldy	#S.PS.PID
 				cmp (pPS),y
+				bne .8
+
+				iny
+				lda (pPS),y
+				ldy #S.PS.CPID+1
+				cmp (ZPPtr1),y
 				bne .8					Hold, but not waiting this PS
 
-				txa						waiting for this PS to terminate....
-				ldy #S.PS.RC			give it RC
+.1				lda #$FF				SELF MODIFIED
+				ldy #S.PS.ERRNO			give it ERRNO
 				sta (ZPPtr1),y
 
 				lda (ZPPtr1)
 				eor #S.PS.F.HOLD		release Parent PS HOLD...
 				sta (ZPPtr1)
 
-*				clc
-
 .8				rts
 *--------------------------------------
-* CORE.GetEvents :
-*  IN :
-*  OUT :
-*   CS = no event, A = ERROR
-*   CC * event in YA
-*   (pEvent)
-*--------------------------------------
-CORE.GetEvents	lda #K.S.EVT
-				sta	pEvent				point to start of event list
-				stz CORE.EvtCount		reset Size
-				bit A2osX.IRQMode		do we have IRQ enabled for Ticks ?
+CORE.GetSig		bit A2osX.bIRQ			do we have IRQ enabled for Ticks ?
 				bpl .1					no, regular poll
 
 				lda IRQ.Tick			a Tick ?
@@ -623,26 +217,25 @@ CORE.GetEvents	lda #K.S.EVT
 				dec CORE.TickSec
 				bne .3					not yet One Sec
 
-				lda IRQ.Mode
+				lda A2osX.IrqMode
 				eor #$C0
-				sta IRQ.Mode
+				sta A2osX.IrqMode
 
-				ldx A2osX.ASCREEN		/DEV/CONSOLE
+				ldx A2osX.ASCREEN		/dev/console
 				bne .22
 
-				sta SYS.BASL0+38
+				sta $400+38				Screen Line 0
 
 .22				ldx CORE.TickPerSec
 				stx CORE.TickSec
 
-				lda #S.EVT.F.T1SEC
+				lda #S.PS.SIG.T1SEC
 				bra .4					Force Resync T1 & T10...
 
 .3				dec CORE.Tick10t
 				bne .6
 
-.4				inc DevMgr.Timer
-				inc A2osX.T16
+.4				inc A2osX.T16
 				bne .5
 
 				inc A2osX.T16+1
@@ -650,419 +243,95 @@ CORE.GetEvents	lda #K.S.EVT
 .5				ldx CORE.TickPer10t
 				stx CORE.Tick10t
 
-				ora #S.EVT.F.T10TH
+				ora #S.PS.SIG.T10TH
+
+				rts						NZ
+
 .6				tax						Finally, do we have an event ?
-				beq .8					no....
 
-				sta (pEvent)
-				inc CORE.EvtCount		Add one event to Queue
-
-*				lda pEvent
-*				clc
-*				adc #S.EVT
-*				sta pEvent				if CS, EVT queue full!!! ($100)
-
-*				MORE EVENT PROCESSING HERE
-
-.8				lda CORE.EvtCount		if 0, exit with CS (from cmp), and A=0 "no event"
-				beq .9
-
-				clc
 				rts
 
-.9				sec
-				rts
+.8				lda #0
+
+				rts						Z
 *--------------------------------------
-* CORE.Dispatch
-*  IN:
-*  OUT:
-*	CS: Not Dispatched
-*	CC: Event Cleared
+* A = ClockMask
 *--------------------------------------
-CORE.Dispatch	ldx #1					skip PS0
-				bra .80
+CORE.Dispatch	sta .2+1
+
+				ldx #2					skip PS0
 
 .1				stx CORE.PSIndex
 
-				lda PSs.hPS,x
-				beq .5
+				lda pPSs+1,x
+				beq .7
 
-				jsr K.GetMemPtr
+				ldy pPSs,x
 				>STYA pPS
 
-				lda (pPS)
-				bit #S.PS.F.EVENT		Accept Events ?
-				beq .5
+				ldy #S.PS.SIG
+				lda (pPS),y
+				and .2+1
+				beq .7
 
 				ldy #S.PS.S
 				lda (pPS),y
 				cmp #S.PS.S.RUN
-				bne .5
+				bne .7
 
-				lda #S.PS.S.DOEVENT		Flag this PS for IRQ Mgr
+				stx CORE.PSIndex
+
+				lda #S.PS.S.SIG			Flag this PS for IRQ Mgr
 				sta (pPS),y
 				jsr CORE.PSSelect
 
-				lda #K.S.EVT
-				sta pEvent				Select first event in list
-				lda CORE.EvtCount
-				sta CORE.EvtIndex
+.2				lda #$FF				SELF MODIFIED
 
-.2				lda (pEvent)			Empty event, select next
-				beq .3
+				ldx #S.PS.S.SIG
+				jsr RAMSW.PSExecX
 
-				ldx #S.PS.S.DOEVENT
-				jsr CORE.PSExecX
-				dec IRQ.InKernel
-
-				bcs .3					not for this PS, try next event in list
-				jsr CORE.DestroyEvent	this PS handled the EVT, destroy it...
-
-				lda CORE.EvtCount
-				beq .4					no more event, exit
-
-.3				dec CORE.EvtIndex
-				beq .4					all EVT submitted to this PS, try other PS
-
-				lda pEvent				try next EVT to this PS
-				clc
-				adc #S.EVT
-				sta pEvent
-				bra .2
-
-.4				ldy #S.PS.S
+				ldy #S.PS.S
 				lda #S.PS.S.RUN
 				sta (pPS),y
 				jsr CORE.PSLeave
 
-.5				ldx CORE.PSIndex
+				ldx CORE.PSIndex
+
+.7				inx
 				inx
-.80				cpx CORE.PSCount
-				bne .1
+				cpx #K.PS.MAX*2
+				bcc .1
 
 *				sec
 
 				rts
 *--------------------------------------
-* X unmodified
-*--------------------------------------
-CORE.GetPSByID	jsr CORE.GetPS
-				bcs .9
-
-				lda PSs.hPS,y
-				jmp K.GetMemPtr
-				
-.9				rts				
-*--------------------------------------
-* X,A unmodified
-*--------------------------------------
-CORE.GetPS		tay
-				beq .8					PS0 requested
-
-				ldy #0
-				bra .2					Skip PS0
-
-.1				cmp PSs.PID,y
-				beq .8
-
-.2				iny
-				cpy CORE.PSCount
-				bne .1
-
-.9				lda #E.NSP
-*				sec
-				rts
-
-.8				clc
-				rts
-*--------------------------------------
-CORE.DestroyEvent
-				lda (pEvent)
-				beq .9
-
-				bit #S.EVT.F.hMEM1
-				beq .1
-				pha
-				ldy #S.EVT.B1
-				lda (pEvent),y
-				jsr K.FreeMem
-				pla
-.1				bit #S.EVT.F.hMEM2
-				beq .2
-				ldy #S.EVT.B2
-				lda (pEvent),y
-				jsr K.FreeMem
-.2				lda #0
-				sta (pEvent)
-				dec CORE.EvtCount
-.9				rts
-*--------------------------------------
-CORE.PSSelect	ldy #S.PS.ZP.CODE+PSCTX.SIZE-1
-				ldx #PSCTX.SIZE-1
+CORE.PSSelect	ldy #S.PS.ZP+$30-1
+				ldx #$30-1
 
 .1				lda (pPS),y
-				sta pCode,x
+				sta R1,x
 				dey
 				dex
 				bpl .1
 
+				ldy #S.PS.Bnk
+				lda (pPS),y
+				sta (pRWReg)
+				sta A2osX.ActBnk
+
 				rts
 *--------------------------------------
-CORE.PSLeave	ldx #PSCTX.SIZE-1
-				ldy #S.PS.ZP.CODE+PSCTX.SIZE-1
+CORE.PSLeave	ldx #$30-1
+				ldy #S.PS.ZP+$30-1
 
-.1				lda pCode,x
+.1				lda R1,x
 				sta (pPS),y
 				dey
 				dex
 				bpl .1
 
 				rts
-*--------------------------------------
-CORE.PSExec		lda (pPS)
-				bit #S.PS.F.SLEEP
-				bne CORE.PSResume
-
-				ldy #S.PS.S
-				lda (pPS),y
-				tax
-
-CORE.PSExecX	lda pCode+1
-				pha
-				lda pCode
-				pha
-				php
-				sei
-				inc IRQ.InKernel
-				rti
-*--------------------------------------
-CORE.PSResume	sei
-
-				eor #S.PS.F.SLEEP		unmark as SLEEP
-				sta (pPS)
-
-				>PULLA					Get !BC
-				tax
-
-				beq .2
-
-.1				>PULLA
-				pha
-
-				inx
-				bne .1
-
-.2				ldy #S.PS.PC+1
-				lda (pPS),y
-				pha
-				dey						#S.PS.PC
-				lda (pPS),y
-				pha
-				dey						#S.PS.P
-				lda (pPS),y
-				pha
-				dey						#S.PS.Y
-				lda (pPS),y
-				pha
-				dey						#S.PS.X
-				lda (pPS),y
-				tax
-				dey						#S.PS.A
-				lda (pPS),y
-
-				ply
-				inc IRQ.InKernel
-				rti
-*--------------------------------------
-CORE.VBLState	.BS 1
-CORE.TickPerSec	.BS 1
-CORE.TickPer10t	.BS 1
-CORE.TickSec	.BS 1
-CORE.Tick10t	.BS 1
-CORE.CPUStatCnt	.DA #100
-CORE.LastPSID	.DA #0
-*--------------------------------------
-CORE.EvtIndex	.BS 1
-CORE.EvtCount	.BS 1
-*--------------------------------------
-* Called by IIgs formware, Native Mode, 8bits
-*--------------------------------------
-CORE.IRQGS		.OP 65816
-
-				pha
-				phb
-				phx
-				phy
-
-				phk
-				plb
-
-				stz IO.GS.CLRVBLINT
-
-				jsr CORE.IRQ.Switch
-				
-				ply
-				plx
-				plb
-				pla
-				
-*				clc
-				rtl
-				
-*				bra CORE.IRQ.Switch
-				.OP 65C02
-*--------------------------------------
-* Called by :
-*  - Kernel IRQ Manager (AuxLC)
-*  - ProDOS IRQ Manager (GP)
-*--------------------------------------
-CORE.IRQTK		ldy IRQ.n0
-
-				lda $c080,y
-				and #$20
-				beq CORE.IRQ.DEV
-
-				lda $c088,y
-				lda $c080,y
-
-				bra CORE.IRQ.Switch
-*--------------------------------------
-CORE.IRQM		jsr $FFFF				SELF MODIFIED,SERVEMOUSE
-				bcs CORE.IRQ.DEV		Not From Mouse
-
-				ldx IRQ.0n
-				lda MOUSESTSx,x
-				and #MOUSESTSx.INTVBL	IRQ was caused by VBL ?
-				beq CORE.IRQ.DEV
-
-				ldx CORE.IRQM.2+2		$Cn
-				ldy IRQ.n0
-
-CORE.IRQM.2		jsr $FFFF				SELF MODIFIED,READMOUSE
-*--------------------------------------
-CORE.IRQ.Switch	inc IRQ.Tick
-
-				dec CORE.CPUStatCnt
-				bne .2
-
-				lda #100
-				sta CORE.CPUStatCnt
-				ldx #K.PS.MAX-1
-
-.1				lda PSs.Hits,x
-				stz PSs.Hits,x
-				sta PSs.Stats,x
-				dex
-				bpl .1
-
-.2				lda IRQ.InKernel
-				bpl .3
-
-				inc PSs.Hits
-
-.9				clv
-				clc
-				rts
-
-.3				ldx CORE.PSIndex
-				inc PSs.Hits,x
-
-				bit A2osX.F				A2osX.F.PMODE .EQ %01000000
-				bvc .8
-
-				ldy #S.PS.S
-				lda (pPS),y
-				eor #S.PS.S.RUN
-				bne .9
-
-				lda IRQ.InLib
-				bmi .9					we are in LIB, no switching
-
-.8				clc						exit with V flag set
-				rts
-*--------------------------------------
-CORE.IRQ.DEV	ldx #0
-
-.1				lda IRQ.Vectors+1,x
-				beq .9
-
-				sta .10+2
-				lda IRQ.Vectors,x
-				sta .10+1
-
-				phx
-
-.10				jsr $ffff				SELF MODIFIED
-
-				plx
-				bcc .8					CC, IRQ cleared by device
-
-.2				inx
-				inx
-.3				cpx #K.IRQDEV.MAX*2
-				bne .1
-
-.9				sec
-
-.8				clv						clear V (no task switching)
-				rts
-*--------------------------------------
-CORE.IRQGSOff	.OP 65816
-
-				clc
-				xce		  				go to native mode
-				rep #$30				long M,X
-
-				pea $0003				Disable vertical blanking interrupts
-				>TKCALL IntSource
-			bcs *
-			
-				pea $000C				Vertical blanking interrupt handler
-				lda IRQ.GSVect+2
-				pha
-				lda IRQ.GSVect
-				pha
-				>TKCALL SetVector
-			bcs *	
-				
-				sep #$30				short M,X
-				sec
-				xce		  				back to emulation mode
-
-				.OP 65C02
-
-				rts
-*--------------------------------------
-CORE.IRQTKOff	ldx IRQ.n0
-				stz $c080,x
-
-				lda $c088,x
-				lda $c080,x
-
-				ldx IRQ.0n
-				stz $478,x
-				stz $7f8,x
-*--------------------------------------
-CORE.IRQOff		rts
-*--------------------------------------
-CORE.IRQMOff	ldy CORE.IRQMOff.1+2	Cn
-				ldy IRQ.n0
-				lda #0
-CORE.IRQMOff.1	jmp $ffff				SELF MODIFIED
-*--------------------------------------
-IRQ.InKernel	.BS 1
-IRQ.InLib		.BS 1
-IRQ.Skip		.BS 1
-
-IRQ.GSVect		.BS 4
-
-IRQ.IntNum		.BS 1
-IRQ.n0			.BS 1
-IRQ.0n			.BS 1
-IRQ.Mode		.BS 1
-IRQ.Tick		.BS 1
-*--------------------------------------
-IRQ.Vectors		.BS K.IRQDEV.MAX*2
 *--------------------------------------
 MAN
 SAVE usr/src/sys/kernel.s.core

@@ -1,22 +1,254 @@
 NEW
   AUTO 3,1
+*--------------------------------------
+* https://www.cise.ufl.edu/~cop4600/cgi-bin/lxr/http/source.cgi/lib/ansi/gmtime.c
+*--------------------------------------
+SECSDAY			.EQ 86400				60*60*24
+CENT0			.EQ 19
+YEAR0			.EQ 70
+DAY0			.EQ 4					day 0 was a thursday
 */--------------------------------------
 * # Time
 * Get System Time in Buffer
 * ## C
 * `void time (struct tm* timeptr);`
 * ## ASM
-* `>PUSHW timer`
-* `>SYSCALL time`
+* `>LDYA timer`
+* `>LIBC time`
 * ## RETURN VALUE
 * S.TIME filled with System date/time
 *\--------------------------------------
-K.Time			>PULLW FORPNT
+K.Time			>STYA .2+1				timeptr
+
 				>MLICALL MLI.GETTIME
-				>LDYAI GP.DATE
+
+				>LDYAI MLI.DATE
 				>STYA TXTPTR
-				ldx #_PTime2Time
-				jmp JMP.X
+
+				>LDYAI TIME.TimeBuf
+				>STYA FORPNT
+
+				jsr TIME.PTime2Time
+
+				sta IO.SETWRITEAUX
+
+				ldy #S.TIME-1
+
+.1				lda TIME.TimeBuf,y
+
+.2				sta $FFFF,y				SELF MODIFIED
+				dey
+				bpl .1
+
+				sta IO.CLRWRITEAUX
+
+				rts
+*/--------------------------------------
+* # PTime2Time
+*  Convert ProDOS Time To S.TIME
+* ## C
+* `void PTime2Time (long ptime, const struct tm* timeptr );`
+* ## ASM
+* `>PUSHL ptime`
+* `>PUSHW timer`
+* `>LIBC PTime2Time`
+* ## RETURN VALUE
+*\--------------------------------------
+K.PTime2Time	ldy #2					ptime
+
+.10				jsr RAMSW.GetStkY
+				sta TIME.PTimeBuf,y
+				iny
+				cpy #6
+				bcc .10
+
+				>LDYAI TIME.PTimeBuf
+				>STYA TXTPTR
+
+				ldy #2
+				jsr RAMSW.GetStkYW
+				>STYA .2+1
+
+				>LDYAI TIME.TimeBuf
+				>STYA FORPNT
+
+				jsr TIME.PTime2Time
+
+				sta IO.SETWRITEAUX
+
+				ldy #S.TIME-1
+
+.1				lda TIME.TimeBuf,y
+
+.2				sta $FFFF,y				SELF MODIFIED
+				dey
+				bpl .1
+
+				sta IO.CLRWRITEAUX
+
+				rts
+*--------------------------------------
+TIME.OOB		lda #E.OOB
+				sec
+				rts
+*--------------------------------------
+TIME.PTime2Time	ldy #3
+				lda (TXTPTR),Y
+				and #%11100000
+				bne TIME.OOB
+
+				dey
+				lda (TXTPTR),Y
+				and #%11000000
+				bne TIME.OOB
+
+				dey						ldy #1
+
+				lda (TXTPTR),Y			Get Year
+				lsr						C is high bit of month
+				ldy #S.TIME.YEAR
+				sta (FORPNT),y			set year
+				sta ARG32+3				for computing Century/WDAY later
+
+				lda (TXTPTR)			Get Month/day
+
+				tax						save Day
+				ror						C is high bit of month
+				lsr
+				lsr
+				lsr
+				lsr
+				beq TIME.OOB
+
+				cmp #13
+				bcs TIME.OOB
+
+				ldy #S.TIME.MONTH
+				sta (FORPNT),y			set month
+				sta K.ComputeWDAY.1+1
+
+				txa						get back day
+				beq TIME.OOB
+
+				and #$1F
+				cmp #32
+				bcs TIME.OOB
+
+				iny
+				sta (FORPNT),y			set day
+
+				dec						adjust range 0.30 for MOD 7
+				sta ARG32.Sign			For later...
+
+				lda ARG32+3				get back year
+				cmp #100
+				bcs TIME.OOB
+
+				cmp #69					if before 70 CC,if > 70, CS
+				lda #0
+				rol						get back C in bit 0
+				eor #1					toggle C
+				adc #19					set date before 1970 -> 20xx
+				ldy #S.TIME.CENTURY
+				sta (FORPNT),y			set Century
+				sta ARG32+2				for computing WDAY later
+
+				ldy #2
+				lda (TXTPTR),Y			Get Min
+				tax
+				iny
+				lda (TXTPTR),Y			Get Hour
+				ldy #S.TIME.HOUR
+				sta (FORPNT),y			set hour
+				iny
+				txa
+				sta (FORPNT),y			set min
+				iny
+				lda #0
+				sta (FORPNT),y			set seconds (ProDOS does not provide it)
+*--------------------------------------
+* 1/1/1970 was Thursday...if not leap, add one, if leap add 2
+*--------------------------------------
+K.ComputeWDAY	lda #DAY0-1				Thursday : 4 (-1 for mod 7)
+				pha
+
+				lda #CENT0				Starts at 1970
+				sta ARG32
+				lda #YEAR0
+				sta ARG32+1
+
+.1				ldy ARG32
+				lda ARG32+1
+
+				cpy ARG32+2
+				bne .2
+
+				cmp ARG32+3
+				beq K.ComputeWDAY.1
+
+.2				jsr TIME.IsLeap			CS = Leap
+
+				pla
+				adc #1					365 mod 7
+				cmp #7
+				bcc .3
+
+				sbc #7					MOD 7
+
+.3				pha
+				inc ARG32+1
+				lda ARG32+1
+				cmp #100
+				bne .1
+
+				stz ARG32+1
+				inc ARG32
+				bra .1
+*--------------------------------------
+K.ComputeWDAY.1	ldx #$ff				SELF MODIFIED : month
+
+				dex						don't include actual month
+				beq .71
+
+.5				clc						assume NO leap
+
+				lda TIME.MDAY-1,x		get day count in this month
+				bne	.6					february ?
+
+				ldy ARG32+2
+				lda ARG32+3
+				jsr TIME.IsLeap			CS = Leap
+
+.6				pla
+				adc TIME.MDAY-1,x
+
+				cmp #7
+				bcc .7
+
+				sbc #7
+
+.7				pha
+				dex
+				bne .5
+
+.71				pla
+				clc
+
+				adc ARG32.Sign			get day in month (0..30)
+
+.8				cmp #7					MOD 7
+				bcc .80
+
+				sbc #7
+				bra .8
+
+.80				inc						adjust range 1..7
+				ldy #S.TIME.WDAY
+				sta (FORPNT),y
+
+*				clc
+
+				rts
 */--------------------------------------
 * # StrFTime
 * ## C
@@ -26,44 +258,198 @@ K.Time			>PULLW FORPNT
 * `>PUSHW str`
 * `>PUSHW format`
 * + %a : Abbreviated weekday name : Thu
-* + %A : Full weekday name : Thursday 
-* + %b : Abbreviated month name : Aug 
-* + %B : Full month name : August 
+* + %A : Full weekday name : Thursday
+* + %b : Abbreviated month name : Aug
+* + %B : Full month name : August
 * + %d : Day of the month, zero-padded (01-31)
-* + %H : Hour in 24h format (00-23) 14 
-* + %I : Hour in 12h format (01-12) 02 
-* + %m : Month as a decimal number (01-12) 08 
-* + %M : Minute (00-59) 55 
-* + %p : AM or PM designation PM 
-* + %S : Second (00-61) 02 
-* + %w : Weekday as a decimal number with Sunday as 0 (0-6) 
+* + %H : Hour in 24h format (00-23) 14
+* + %I : Hour in 12h format (01-12) 02
+* + %m : Month as a decimal number (01-12) 08
+* + %M : Minute (00-59) 55
+* + %p : AM or PM designation PM
+* + %S : Second (00-61) 02
+* + %w : Weekday as a decimal number with Sunday as 0 (0-6)
 * + %y : Year, last two digits (00-99)
-* + %Y : Year four digits 2001 
+* + %Y : Year four digits 2001
 * `>PUSHW timeptr`
-* `>SYSCALL strftime`
+* `>LIBC strftime`
 * ## RETURN VALUE
 *   none. always succeed.
 *\--------------------------------------
-K.StrFTime		>PULLW ZPPtr3			S.TIME
-				>PULLW TXTPTR			format
-				>PULLW FORPNT			str
-				jmp JMP.X
-*/--------------------------------------
-* # PTime2Time
-*  Convert ProDOS Time To S.TIME
-* ## C
-* `void PTime2Time (long* ptime, const struct tm* timeptr );`
-* ## ASM
-* `>PUSHW ptime`
-* `>PUSHW timer`
-* `>SYSCALL PTime2Time`
-* ## RETURN VALUE
-*\--------------------------------------
-K.PTime2Time	.EQ JMP.X2
+K.StrFTime		ldy #0					S.TIME
+				jsr RAMSW.GetStkYW
+				>STYA ZPPtr3
 
-*				>PULLW FORPNT			S.TIME
-*				>PULLW TXTPTR			ptime
-*				jmp JMP.X
+				ldy #2					format
+				jsr RAMSW.StkY2TXTPTR
+
+				ldy #4					str
+				jsr RAMSW.StkY2FORPNT
+
+.1				jsr RAMSW.xTXTPTRgn
+				beq .8
+
+				cmp #'%'
+				beq .2
+
+				jsr SHARED.xFORPNTpn
+				bra .1
+
+.2				ldx #K.StrFTime.Cnt-1
+				jsr RAMSW.xTXTPTRgn
+				beq .8
+
+.3				cmp K.StrFTime.Tbl,x
+				beq .4
+
+				dex
+				bpl .3
+
+				bra .1
+
+.4				cpx #7
+				bcc .5
+
+				jsr K.StrFTime.AtX
+				bra .1
+
+.5				txa
+				asl
+				tax
+				jsr .7
+
+				bra .1
+
+.7				jmp (K.StrFTime.JMP,x)
+
+.8				lda #0					Terminate C string
+				jsr SHARED.xFORPNTpn
+				clc
+				rts
+*--------------------------------------
+K.StrFTime.Tbl	.AS "aAbBIpYydHSwmM"
+K.StrFTime.Cnt	.EQ *-K.StrFTime.Tbl
+K.StrFTime.OfsX	.DA #S.TIME.YEAR,#S.TIME.DAY,#S.TIME.HOUR,#S.TIME.SECOND,#S.TIME.WDAY,#S.TIME.MONTH,#S.TIME.MINUTE
+K.StrFTime.JMP	.DA K.StrFTime.A
+				.DA K.StrFTime.AA
+				.DA K.StrFTime.B
+				.DA K.StrFTime.BB
+				.DA K.StrFTime.II
+				.DA K.StrFTime.P
+				.DA K.StrFTime.YY
+*--------------------------------------
+K.StrFTime.A	sec						Short day of week, 3 chars...
+				.HS	90					BCC
+
+K.StrFTime.AA	clc						full DoW
+				lda #TIME.DAY
+				ldx /TIME.DAY
+				ldy #S.TIME.WDAY
+				bra K.StrFTime.STR
+
+K.StrFTime.B	sec						Short Month, 3 chars....
+				.HS	90					BCC
+K.StrFTime.BB	clc						full Month....
+				lda #TIME.MON
+				ldx /TIME.MON
+				ldy #S.TIME.MONTH
+K.StrFTime.STR	sta ZPPtr4
+				stx ZPPtr4+1
+
+				ldx #15
+				bcc .10
+
+				ldx #3
+
+.10				jsr RAMSW.xP3gY			get required S.Time field value
+
+				tay
+				beq .2					Illegal value, print ???
+
+.1				lda (ZPPtr4)
+				sec
+				adc ZPPtr4
+				sta ZPPtr4
+				bcc .11
+
+				inc ZPPtr4+1
+
+.11				dey
+				bne .1
+.2
+*				ldy #0					Y is already 0
+
+.3				iny
+				lda (ZPPtr4),y
+				jsr SHARED.xFORPNTpn
+				tya
+				cmp (ZPPtr4)
+				beq .8
+
+				dex
+				bne .3
+
+.8				rts
+*--------------------------------------
+K.StrFTime.II	ldy #S.TIME.HOUR
+				jsr RAMSW.xP3gY
+				cmp #12
+				bcc K.StrFTime.addDecA
+
+				sbc #12
+				bra K.StrFTime.addDecA
+
+K.StrFTime.P	ldy #S.TIME.HOUR
+				jsr RAMSW.xP3gY
+				cmp #12
+				bcc .1
+
+				lda #'p'
+				.HS 2C					bit abs
+.1				lda #'a'
+				jsr SHARED.xFORPNTpn
+				lda #'m'
+				jmp SHARED.xFORPNTpn
+t
+K.StrFTime.YY	ldy #S.TIME.CENTURY
+				jsr K.StrFTime.addDecPtr3Y
+				ldx #7					"y"
+K.StrFTime.AtX	ldy K.StrFTime.OfsX-7,x
+*--------------------------------------
+K.StrFTime.addDecPtr3Y
+				jsr RAMSW.xP3gY
+K.StrFTime.addDecA
+				ldx #2
+				ldy #'0'
+				clc
+				jsr MATH.A2STR10
+				lda FOUTBuf
+				jsr SHARED.xFORPNTpn
+				lda FOUTBuf+1
+				jmp SHARED.xFORPNTpn
+*--------------------------------------
+TIME.DAY		.PS "???"
+				.PS "Monday"
+				.PS "Tuesday"
+				.PS "Wednesday"
+				.PS "Thursday"
+				.PS "Friday"
+				.PS "Saturday"
+				.PS "Sunday"
+*--------------------------------------
+TIME.MON		.PS "???"
+				.PS "January"
+				.PS "February"
+				.PS "March"
+				.PS "April"
+				.PS "May"
+				.PS "June"
+				.PS "July"
+				.PS "August"
+				.PS "September"
+				.PS "October"
+				.PS "November"
+				.PS "December"
 */--------------------------------------
 * # CTime2Time
 *  Convert CTime Time To S.TIME
@@ -72,14 +458,201 @@ K.PTime2Time	.EQ JMP.X2
 * ## ASM
 * `>PUSHW ctime`
 * `>PUSHW timer`
-* `>SYSCALL CTime2Time`
+* `>LIBC CTime2Time`
 * ## RETURN VALUE
 *\--------------------------------------
-K.CTime2Time	.EQ JMP.X2
+K.CTime2Time	ldy #2					ctime
+				jsr RAMSW.StkY2TXTPTR
 
-*				>PULLW FORPNT			S.TIME
-*				>PULLW TXTPTR			ctime
-*				jmp JMP.X
+				ldy #0					S.TIME
+				jsr RAMSW.StkY2FORPNT
+
+				ldy #3
+
+.1				jsr RAMSW.xTXTPTRgY
+				sta ARG32,y				ARG = ctime
+				dey
+				bpl .1
+
+				lda #SECSDAY			ACC = SECSDAY
+				sta ACC32
+				lda /SECSDAY
+				sta ACC32+1
+				lda ^SECSDAY
+				sta ACC32+2
+				stz ACC32+3
+				jsr M32.DIVMOD  		ARG32 = Days, TMP32 = remaining secs
+
+				lda ARG32				WDAY computation : (ARG32 + DAY0) mod 7
+				clc
+				adc #DAY0
+				pha
+				lda ARG32+1				65535 days = 179 years
+				adc /DAY0
+				eor #$ff
+				tax
+				pla
+
+.2				tay
+				sec
+				sbc #7
+				bcs .2
+
+				inx
+				bne .2
+
+				sta IO.SETWRITEAUX
+
+				tya
+				ldy #S.TIME.WDAY
+				sta (FORPNT),y
+
+				ldy #CENT0
+				sty ZPPtr3
+				lda #YEAR0
+				sta ZPPtr3+1
+K.CTime2Time.Y
+.1				ldy ZPPtr3
+				lda ZPPtr3+1
+				jsr TIME.IsLeap 		if Leap year CS
+				rol						Toggle Carry
+				eor #1
+				lsr
+				lda ARG32
+				sbc #365
+				pha
+				lda ARG32+1
+				sbc /365
+				bcc .2
+
+				sta ARG32+1
+				pla
+				sta ARG32
+				inc ZPPtr3+1
+				lda ZPPtr3+1
+				cmp #100
+				bne .1
+
+				stz ZPPtr3+1
+				inc ZPPtr3
+				bra .1
+
+.2				pla
+
+				lda ZPPtr3
+				ldy #S.TIME.CENTURY
+				sta (FORPNT),y
+
+				ldy #S.TIME.YEAR
+				lda ZPPtr3+1
+				sta (FORPNT),y
+K.CTime2Time.MD
+				ldx #1					X = January
+
+.1				clc
+				txa
+				eor #2
+
+				bne .2
+
+				>LDYA ZPPtr3			Current Year
+				jsr TIME.IsLeap
+
+.2				lda TIME.MDAY-1,x
+				adc #28					A = days of X
+
+				sta .3+1
+
+				lda ARG32				ARG32/ARG32+1 = 0 .. 364 or 365
+				sec
+
+.3				sbc #$ff				SELF MODIFIED
+				pha
+				lda ARG32+1
+				sbc #0
+				bcc .4
+
+				sta ARG32+1
+				pla
+				sta ARG32
+				inx
+				bra .1
+
+.4				pla
+				ldy #S.TIME.MONTH
+				txa
+				sta (FORPNT),y
+
+				iny						S.TIME.DAY
+
+				lda ARG32
+				inc
+				sta (FORPNT),y
+
+K.CTime2Time.HMS
+				ldx #3
+
+.1				lda TMP32,x
+				sta ARG32,x
+				dex
+				bpl .1
+
+				ldy #S.TIME.SECOND
+				jsr .2
+
+				dey						#S.TIME.MINUTE
+
+				jsr .2
+
+				dey						#S.TIME.HOUR
+				lda ARG32
+				sta (FORPNT),y
+
+				sta IO.CLRWRITEAUX
+
+				clc
+				rts
+*--------------------------------------
+.2				phy
+
+				lda #60
+				jsr M32.A2ACC32
+				jsr M32.DIVMOD
+
+				ply
+
+				lda TMP32
+				sta (FORPNT),y
+				rts
+*--------------------------------------
+* In :
+*  Y = Century
+*  A = Year (0..99)
+*    if (year mod 400 = 0)
+*      or
+*    if  not (year mod 100 = 0) and (year mod 4 = 0)
+* Out :
+*  CS = Leap
+*  CC = Not Leap
+*--------------------------------------
+TIME.IsLeap		cmp #0					Year = 00 ?
+				bne .1					no
+
+				tya						year = 00, get century in A
+
+				and #$3					Century mod 4 = 0 ?
+				beq .9					leap year (2000)
+
+.8				clc						not leap (1900)
+				rts
+
+.1				and #$3					mod 4 = 0 ?
+				bne .8
+
+.9				sec						Leap
+				rts
+*--------------------------------------
+TIME.MDAY		.DA #3,#0,#3,#2,#3,#2,#3,#3,#2,#3,#2,#3
 *--------------------------------------
 MAN
 SAVE usr/src/sys/kernel.s.time

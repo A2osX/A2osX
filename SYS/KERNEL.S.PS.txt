@@ -1,388 +1,408 @@
 NEW
   AUTO 3,1
 */--------------------------------------
-* # ExecL
-* ## C / CSH
-* `short int execl(const char *cmdline, short int flags);`
-* ## ASM
-* `>PUSHW cmdline`
-* `>PUSHB flags`
-* `>SYSCALL execl`
-* ## RETURN VALUE
-* A = Child PSID
-*\--------------------------------------
-K.ExecL			clc
-				.HS B0					BCS
-*/--------------------------------------
 * # ExecV
 * ## C / CSH
-* `short int execv(const char* argv[], short int flags);`
+* `#include <unistd.h>`
+* `int execv(const char* argv[], int flags);`
 * ## ASM
+* `>SS`
 * `>PUSHW argv`
-* `>PUSHB flags`
-* `>SYSCALL execv`
+* `>PUSHW flags`
+* `>LIBC execv`
+* `>SR`
 * ## RETURN VALUE
-* A = Child PSID
+* Y,A = Child PSID
 *\--------------------------------------
-K.ExecV			sec
-				php
-				
-				>PULLB PS.Flags
+K.ExecV			ldy #2
+				jsr RAMSW.StkY2TXTPTR	TXTPTR = argv[]
 
-				>LDYAI 256
-				jsr K.GetMem
+				jsr ARG.ArgV2Args
+				bra PS.Exec
+*/--------------------------------------
+* # ExecL
+* ## C / CSH
+* `#include <unistd.h>`
+* ` int execl(const char *args, int flags);`
+* ## ASM
+* `>SS`
+* `>PUSHW args`
+* `>PUSHW flags`
+* `>LIBC execl`
+* `>SR`
+* ## RETURN VALUE
+* Y,A = Child PSID
+*\--------------------------------------
+K.ExecL			ldy #2
+				jsr RAMSW.StkY2PathBuf	args
+
+PS.Exec			jsr STDLIB.Expand
+
+				jsr RAMSW.GetStk
+				sta PS.Flags
+
+				jsr PS.CreateChild
 				bcs .99
 
-				stx .90+1
-				>STYA PS.ArgV
+				jsr ARG.Args2ArgV		Args in Buf256 -> argv[] in Buf256
 
-				plp
-				bcc .2
+				jsr ARG.MakeArgV		Y,A = argv[]
+				bcs .90
 
-				>PULLW ZPPtr1			pull arg[] from stack
-
-				ldy #$FF				copy to target buffer
-				
-.1				iny
-				lda (ZPPtr1),y
-				sta (PS.ArgV),y
-				bne .1
-				
-				iny
-				lda (ZPPtr1),y
-				sta (PS.ArgV),y
-				bne .1
-
-				bra .8
-
-.2				>PUSHW PS.ArgV
-				jsr K.Arg2ArgV			cmdline on stack, push target buffer
-				bcs .9
-
-.8				jsr PS.Exec
-
-.9				php
-				pha
-.90				lda #$ff				SELF MODIFIED
-				jsr K.FreeMem
+				phy
+				ldy #S.PS.pARGV+1
+				sta (PS.pTmpPS),y
+				dey
 				pla
-				plp
-				rts
-				
-.99				plp
-				sec
-				>RET 2
-*--------------------------------------
-PS.Exec			jsr PS.CreateChild		A=PID,Child S.PS at PS.NewPSPtr,PS.Load.hMem
-				bcs .9
+				sta (PS.pTmpPS),y
 
-				sta .8+1
+				ldy #S.PS.ARGC
+				txa
+				dec						exclude ARG[0] from cnt
+				sta (PS.pTmpPS),y
 
-				stz K.IOBuf				If !=0 after PS.Load, it's a script
+				jsr PS.SetOwner
 
 				jsr PS.Load
 				bcs .90
 
-				jsr PS.AddArgV			K.IOBuf= /.../SHELL, K.Buf256=/.../SCRIPT
-				bcc .8					or K.IOBuf= 0, K.Buf256=/.../BINFILE
+				lda #S.PS.F.HOLD
+				bit PS.Flags
+				beq .1
+
+				ora (PS.pParentPS)
+				sta (PS.pParentPS)		HOLD parent PS
+
+				ldy #S.PS.CPID
+				lda CORE.LastPSID
+				sta (PS.pParentPS),y
+				iny
+				lda CORE.LastPSID+1
+				sta (PS.pParentPS),y
+
+.1				ldx PS.NewIndex
+
+				lda PS.pTmpPS
+				sta pPSs,x
+				lda PS.pTmpPS+1
+				sta pPSs+1,x
+
+				lda CORE.LastPSID
+				sta PIDs,x
+				tay
+				lda CORE.LastPSID+1
+				sta PIDs+1,x
+
+.8				lda A2osX.ActBnk
+				sta (pRWReg)
+
+				clc
+				rts
 
 .90				pha						save error code
-				>PUSHB .8+1				PID
-				>PUSHBI 2				SIG
-				jsr K.Kill
+
+				jsr PS.Destroy
+
+				lda A2osX.ActBnk
+				sta (pRWReg)
+
 				pla						get back error code
 				sec
-				rts
-
-.8				lda #$ff				SELF MODIFIED
-*				clc
-.9
-				rts
+.99				rts
 */--------------------------------------
 * # Fork
-* ## C
-* `short int fork();`
+* ## C / CSH
+* `#include <unistd.h>`
+* `pid_t fork(void);`
 * ## ASM
-* `>SYSCALL fork`
+* `>LIBC fork`
 * ## RETURN VALUE
 * A = Child PSID
 *\--------------------------------------
-K.Fork			jsr PS.CreateChild		A=PID,Child S.PS at PS.NewPSPtr,PS.Load.hMem
-				bcs .99
-
-				sta .8+1
-
-				ldy #S.PS.S
-				lda #S.PS.S.RUN
-				sta (PS.NewPSPtr),y
-
-				ldy #S.PS.hCS
-				lda (ZPPtr1),y
-				sta (PS.NewPSPtr),y
-				jsr MEM.GetMemByID
-				jsr Mem.IncRefCnt
-
-				ldy #S.MEM.PTR+1
-				lda (ZPMemMgrSPtr),y
-				pha
-				dey
-				lda (ZPMemMgrSPtr),y
-				ldy #S.PS.ZP.CODE+1
-				sta (PS.NewPSPtr),y
-				dey
-				pla
-				sta (PS.NewPSPtr),y
-
-				ldy #S.PS.hDS
-				lda (ZPPtr1),y
-				jsr MEM.Dup
-.99				bcs .9
-
-				ldy #S.PS.hDS
-				sta (PS.NewPSPtr),y
-				jsr K.GetMemPtr
-				phy
-				ldy #S.PS.ZP.DATA+1
-				sta (PS.NewPSPtr),y
-				dey
-				pla
-				sta (PS.NewPSPtr),y
-
-				ldy #S.PS.hSS
-				lda (ZPPtr1),y
-				jsr MEM.Dup
-				bcs .9
-
-				ldy #S.PS.hSS
-				sta (PS.NewPSPtr),y
-				jsr K.GetMemPtr
-				phy
-				ldy #S.PS.ZP.STACK+1
-				sta (PS.NewPSPtr),y
-				dey
-				pla
-				sta (PS.NewPSPtr),y
-
-				ldy #S.PS.hARGV
-				lda (ZPPtr1),y
-				jsr MEM.Dup
-				bcs .9
-
-				ldy #S.PS.hARGV
-				sta (PS.NewPSPtr),y
-
-				dey						S.PS.ARGC
-
-				lda (ZPPtr1),y
-				sta (PS.NewPSPtr),y
-
-				ldy #S.PS.A
-				lda #0
-				sta (PS.NewPSPtr),y		Forked PS will get A=PSID=0
-				iny
-
-.1				lda (ZPPtr1),y
-				sta (PS.NewPSPtr),y
-				iny
-				cpy #S.PS.hSession
-				bne .1
-
-				ldy #S.PS.ZP.LOCAL
-
-.2				lda (ZPPtr1),y
-				sta (PS.NewPSPtr),y
-				iny
-				cpy #S.PS
-				bne .2
-
-.8				lda #$ff				SELF MODIFIED
+K.Fork			jsr PS.CreateChild		A=PID,Child S.PS at PS.pTmpPS,PS.Load.hMem
+*				bcs .99
+*
+*				sta .8+1
+*
+*				ldy #S.PS.S
+*				lda #S.PS.S.RUN
+*				sta (PS.pTmpPS),y
+*
+*				ldy #S.PS.hCS
+*				lda (ZPPtr1),y
+*				sta (PS.pTmpPS),y
+*				jsr MEM.GetMemByID
+*				jsr Mem.IncRefCnt
+*
+*				ldy #S.MEM.PTR+1
+*				lda (ZPMemMgrSPtr),y
+*				pha
+*				dey
+*				lda (ZPMemMgrSPtr),y
+*				ldy #S.PS.ZP.CODE+1
+*				sta (PS.pTmpPS),y
+*				dey
+*				pla
+*				sta (PS.pTmpPS),y
+*
+*				ldy #S.PS.hDS
+*				lda (ZPPtr1),y
+*				jsr MEM.Dup
+*.99				bcs .9
+*
+*				ldy #S.PS.hDS
+*				sta (PS.pTmpPS),y
+*				jsr K.GetMemPtr
+*				phy
+*				ldy #S.PS.ZP.DATA+1
+*				sta (PS.pTmpPS),y
+*				dey
+*				pla
+*				sta (PS.pTmpPS),y
+*
+*				ldy #S.PS.hSS
+*				lda (ZPPtr1),y
+*				jsr MEM.Dup
+*				bcs .9
+*
+*				ldy #S.PS.hSS
+*				sta (PS.pTmpPS),y
+*				jsr K.GetMemPtr
+*				phy
+*				ldy #S.PS.ZP.STACK+1
+*				sta (PS.pTmpPS),y
+*				dey
+*				pla
+*				sta (PS.pTmpPS),y
+*
+*				ldy #S.PS.hARGV
+*				lda (ZPPtr1),y
+*				jsr MEM.Dup
+*				bcs .9
+*
+*				ldy #S.PS.hARGV
+*				sta (PS.pTmpPS),y
+*
+*				dey						S.PS.ARGC
+*
+*				lda (ZPPtr1),y
+*				sta (PS.pTmpPS),y
+*
+*				ldy #S.PS.A
+*				lda #0
+*				sta (PS.pTmpPS),y		Forked PS will get A=PSID=0
+*				iny
+*
+*.1				lda (ZPPtr1),y
+*				sta (PS.pTmpPS),y
+*				iny
+*				cpy #S.PS.hSession
+*				bne .1
+*
+*				ldy #S.PS.ZP.LOCAL
+*
+*.2				lda (ZPPtr1),y
+*				sta (PS.pTmpPS),y
+*				iny
+*				cpy #S.PS
+*				bne .2
+*
+*.8				lda #$ff				SELF MODIFIED
 *				clc
 .9				rts
 *--------------------------------------
-* PS.CreateChild
-*  in :
-*  out :
-*   A = PSID
-*--------------------------------------
-PS.CreateChild	ldx #0
-				bra .2					Skip PS0
-
-.1				lda PSs.PID,x
-				beq .4					Found an empty slot
-
-.2				inx
-				cpx CORE.PSCount
-				bne .1
-
-				cpx #K.PS.MAX
-				bne .3
-
-				lda #E.OOH
-				sec
-				rts
-
-.99				plx
-				rts
-
-.3				inc CORE.PSCount
-
-.4				inc CORE.LastPSID		Get a PSID not already running
-				beq .4					not = 0
-
-				lda CORE.LastPSID
-				jsr CORE.GetPS			Y=PS Index, X,A unmodified
-				bcc .4					running...loop
-
-				lda CORE.LastPSID
-				sta PSs.PID,x
-				phx						save PS Index
-				>LDYAI S.PS
-				jsr K.GetMem0			Blank Everything in this S.PS
+PS.CreateChild	jsr PS.New
 				bcs .99
 
-				>STYA PS.NewPSPtr
-				txa
-				plx
-				sta PSs.hPS,x
-				jsr Mem.SetOwner		Set Ownership
+				ldy #S.PS.Bnk
+				lda (PS.pParentPS),y
+				sta A3L
+
+				lda (PS.pTmpPS),y
+				sta A3H
+				sta (pRWReg)
+
+				ldy #S.PS.pCWD			copy CWD...
+				jsr PS.GetParentY
+
+				jsr MEM.MBDupYA
+				bcs .9
+
+				phy
+				ldy #S.PS.pCWD+1
+				sta (PS.pTmpPS),y
+				dey
+				pla
+				sta (PS.pTmpPS),y
+
+				jsr PS.SetOwner
+
+				ldy #S.PS.EnvSize
+				jsr PS.Copy2NewY
+
+				ldy #S.PS.pENV
+				jsr PS.GetParentY
+
+				jsr MEM.MBDupYA
+				bcs .9
+
+				phy
+				ldy #S.PS.pENV+1
+				sta (PS.pTmpPS),y
+				dey
+				pla
+				sta (PS.pTmpPS),y
+
+				jmp PS.SetOwner
+
+.9				pha
+				jsr PS.Destroy
+
+				pla
+				sec
+
+.99				rts
+*--------------------------------------
+PS.New 			ldx #2					Skip PS0
+
+.1				lda pPSs+1,x
+				beq .2					Found an empty slot
+
+				inx
+				inx
+				cpx #K.PS.MAX*2
+				bcc .1
+
+				lda #E.OOH
+*				sec
+				rts
+
+.2				stx PS.NewIndex
+
+.3				inc CORE.LastPSID		Get a PSID not already running
+				bne .4
+
+				inc CORE.LastPSID+1
+				beq .3					not = 0
+
+.4				>LDYA CORE.LastPSID
+				jsr PS.FindYA
+				bcc .3					running...loop
+
+				>LDYAI S.PS
+				ldx #S.MEM.F.INIT0		Blank Everything in this S.PS
+				jsr MEM.Malloc.YAX
+				bcs .9
+
+				>STYA PS.pTmpPS
 
 				lda PS.Flags
 				and #S.PS.F.CLOSEONX
-				sta (PS.NewPSPtr)
-
-				lda CORE.LastPSID
-				ldy #S.PS.PID
-				sta (PS.NewPSPtr),y
+				sta (PS.pTmpPS)
 
 				lda #S.PS.F.NOHUP
 				bit PS.Flags
 				beq .5
 
-				lda PSs.hPS		Select PS0
-				jsr K.GetMemPtr
+				jsr MEM.GetBestBnk
+				ldy #S.PS.Bnk
+				sta (PS.pTmpPS),y
+
+				>LDYA pPSs				Parent is PS0
 				bra .6
 
-.5				>LDYA pPs
+.5				lda A2osX.ActBnk
+				ldy #S.PS.Bnk
+				sta (PS.pTmpPS),y
 
-.6				>STYA ZPPtr1			= Parent process
+				>LDYA pPS				Parent is active PS
+
+.6				>STYA PS.pParentPS
+
+				lda CORE.LastPSID
 				ldy #S.PS.PID
-				lda (ZPPtr1),y
-				dey						#S.PS.PPID
-				sta (PS.NewPSPtr),y
+				sta (PS.pTmpPS),y
+				lda (PS.pParentPS),y
+				ldy	#S.PS.PPID
+				sta (PS.pTmpPS),y
 
-				ldy #S.PS.hCWD			copy hPREFIX...
-				lda (ZPPtr1),y
-				jsr K.GetMemPtr
+				lda CORE.LastPSID+1
+				ldy #S.PS.PID+1
+				sta (PS.pTmpPS),y
+				lda (PS.pParentPS),y
+				ldy	#S.PS.PPID+1
+				sta (PS.pTmpPS),y
 
-				jsr K.StrDup
-				bcs .9
+				ldy #S.PS.pStdIn
 
-				jsr Mem.SetOwner		Set Ownership
-
-				txa
-				ldy #S.PS.hCWD
-				sta (PS.NewPSPtr),y
-
-				ldy #S.PS.hENV
-				lda (ZPPtr1),y
-
-				jsr MEM.DupX			dup hENV from parent PS
-				bcs .9
-
-				ldy #S.PS.hENV
-				sta (PS.NewPSPtr),y
-
-				sta IO.SETWRITEAUX
-				jsr Mem.SetOwner		Set Ownership
-				sta IO.CLRWRITEAUX
-
-				ldy #S.PS.hStdIn
-
-.7				lda (ZPPtr1),y
-				sta (PS.NewPSPtr),y
+.7				jsr PS.Copy2NewY
 				iny
-				cpy #S.PS.hStdErr+1
-				bne .7
+				cpy #S.PS.pStdErr+2
+				bcc .7
 
-				ldy #S.PS.hSession
-				lda (ZPPtr1),y
-				sta (PS.NewPSPtr),y
+				ldy #S.PS.pSession
+				jsr PS.Copy2NewY
 
 *				tax
 *				lda USRs.hSID-1,x
 *				jsr MEM.GetMemByID
 *				jsr MEM.IncRefCnt
 
-				lda #S.PS.F.HOLD
-				bit PS.Flags
-				beq .8
 
-				ora (ZPPtr1)
-				sta (ZPPtr1)			HOLD parent PS
-
-				lda CORE.LastPSID
-				ldy #S.PS.CPID
-				sta (ZPPtr1),y
-.8
 *				lda #S.PS.S.INIT
 *				ldy #S.PS.S
-*				sta (PS.NewPSPtr),y		Make this PS Init....
+*				sta (PS.pTmpPS),y		Make this PS Init....
 
-				lda CORE.LastPSID		Exit with A=PSID
 				clc
-				rts
 
-.9				pha
-				>PUSHB CORE.LastPSID
-				>PUSHBI 2				SIG
-				jsr K.Kill
-				pla
-				sec
+.9				rts
+*--------------------------------------
+PS.GetParentY	lda (PS.pParentPS),y
+				pha
+				iny
+				lda (PS.pParentPS),y
+				ply
 				rts
 *--------------------------------------
-PS.Load			ldy #$ff
+PS.Copy2NewY	lda (PS.pParentPS),y
+				sta (PS.pTmpPS),y
+				iny
+				lda (PS.pParentPS),y
+				sta (PS.pTmpPS),y
+				rts
+*--------------------------------------
+* ZPPtr1 = K.PathBuf = ARGV[0] expanded
+*--------------------------------------
+PS.Load			ldx #$ff
 
-.1				iny
-				lda (PS.ArgV),y
+.1				inx
+				lda K.PathBuf,x
 				beq .2					no / in path...try search in PATH
 
 				cmp #'/'
 				bne .1
 
-				>LDYA PS.ArgV			found /, some path specified, no search
-				jsr PS.STAT.YA
-				bcc .6					REAL path in K.Buf256
-				
+				jsr STAT.Stat			found /, some path specified, no search
+				bcc .6					REAL path in K.PathBuf
+
 				rts						file not found
-
-.2				>LDYA PS.ArgV
-
-				jsr PS.Find.PATH		Get fullpath in K.Buf256
+*--------------------------------------
+.2				jsr PS.Find.PATH		Get fullpath in K.PathBuf
 				bcc .6
 
-				>LDYA PS.ArgV
 				jsr PS.Find.CWD
 				bcs PS.RTS
-
+*--------------------------------------
 .6				lda K.S.STAT+S.STAT.P.TYPE
+
 				cmp #S.FI.T.BIN
 				beq .8
 
 				cmp #S.FI.T.TXT
-				beq PS.Load.SCRIPT
+				beq PS.LoadTXT
 
 				cmp #S.FI.T.SYS
 				bne PS.Load.IPATH
-
-				jsr PS.Buf2IO			.SYSTEM -> IOBUF
-
-*				ldy #$ff
-
-*.8				iny
-*				inx
-*				lda PS.T,y
-*				sta K.IOBuf-1,x
-*				bne .8
 
 				>LDYAI PS.SHUTDOWN
 				jsr PS.Find.PATH
@@ -396,105 +416,95 @@ PS.Load.IBIN	lda #E.IBIN
 				sec
 PS.RTS			rts
 *--------------------------------------
-PS.Load.SCRIPT	jsr PS.Buf2IO
-
-				jsr PS.LoadGetHeader
+PS.LoadTXT		jsr PS.LoadGetHeader
 				bcs PS.RTS
 
-				>PUSHWI PS.Load.ROOT
-				>PUSHWI K.Buf256		K.Buf256 = "$ROOT"
-				>SYSCALL2 GetEnv
-				bcs PS.Load.IPATH
+				ldx #0
 
-				ldx #$ff
+.3				lda K.IOBuf,x			Check HEADER= "#!"
+				cmp PS.HEADER,x
+				bne PS.Load.IBIN
 
-.1				inx
-				lda K.Buf256,x
-				bne .1
+				inx
+				cpx #2
+				bne .3
 
 				ldy #0
 
-.3				lda K.IOBuf+128,y		Check HEADER= "#!/"
-				cmp PS.Load.HEADER,y
-				bne PS.Load.IBIN
-
+.4				inx
 				iny
-				cpy #3
-				bne .3
-
-.4				iny
-				inx
-				lda K.IOBuf+128-1,y
-				sta K.Buf256-1,x		K.Buf256 = "${ROOT}BIN/SHELL"
+				lda K.IOBuf-1,x
+				sta K.PathBuf-1,y		K.PathBuf = "/bin/shell"
 				beq .5
 
 				eor #C.CR
 				bne .4
 
-				sta K.Buf256-1,x		K.Buf256 = "${ROOT}BIN/SHELL\0"
+				sta K.PathBuf-1,y
 
-.5				jsr PS.STAT.256
+.5				jsr STAT.Stat
 				bcs PS.RTS
 
 				lda K.S.STAT+S.STAT.P.TYPE
 				cmp #S.FI.T.BIN
 				bne PS.Load.IBIN
 *--------------------------------------
-PS.LoadBIN		jsr BIN.Load			K.Buf256= "${ROOT}BIN/SH\0", K.IOBuf=/.../SCRIPT
-				bcs .9
+PS.LoadBIN		sec						load in User Memory
 
-				>STYA ZPPtr4			save PTR to Code Segment
+				jsr BIN.Load			K.PathBuf= "/BIN/SH\0", K.IOBuf=/.../SCRIPT
+				bcs PS.RTS
+
+* PS.pBuf = PTR to Code Segment, A1L = CmdLine
 
 				phy
-				ldy #S.PS.ZP.CODE+1
-				sta (PS.NewPSPtr),y		save pCode HI...
+				ldy #S.PS.pCode+1
+				sta (PS.pTmpPS),y		save pCode HI...
 				dey
 				pla
-				sta (PS.NewPSPtr),y		save pCode LO...
-				txa
-				ldy #S.PS.hCS
-				sta (PS.NewPSPtr),y		save CS hMem in S.PS
+				sta (PS.pTmpPS),y		save pCode LO...
+				
+				lda A1L
+				ldy #S.PS.pCmdLine
+				sta (PS.pTmpPS),y
+				iny
+				lda A1L+1
+				sta (PS.pTmpPS),y
 
-*				jsr MEM.GetMemByID
-*				jsr Mem.SetOwner		Set Ownership
+				ldy #H.BIN.SIG
+				jsr RAMSW.pBufgY
 
-				ldy #H.BIN.F			Get Bin S.PS.F
-				lda (ZPPtr4),y
-				beq .1
-
-				ldy #S.PS.F				update PS S.PS.F
-				ora (PS.NewPSPtr),y
-				sta (PS.NewPSPtr),y
+				ldy #S.PS.SIG
+				sta (PS.pTmpPS),y
 
 .1				ldy #H.BIN.DS.SIZE+1
-				lda (ZPPtr4),y			Load DS.SIZE HI
-				tax
+				jsr RAMSW.pBufgY		Load DS.SIZE HI
 				dey
-				ora (ZPPtr4),y
+				tax
+				bne .22
+
+				jsr RAMSW.pBufgY
 				beq .2					DS.SIZE=0...
 
-				lda (ZPPtr4),y
+.22				jsr RAMSW.pBufgY
 				tay
 				txa						Y,A = DS.SIZE
+
 				ldx #S.MEM.F.INIT0+S.MEM.F.DATA
-				jsr MEM.GetMem.YAX
+				jsr MEM.MallocX.YAX
 				bcs .9
 
 				phy
-				ldy #S.PS.ZP.DATA+1
-				sta (PS.NewPSPtr),y		save pData HI...
+				ldy #S.PS.pData+1
+				sta (PS.pTmpPS),y		save pData HI...
 				dey
 				pla
-				sta (PS.NewPSPtr),y		save pData LO...
+				sta (PS.pTmpPS),y		save pData LO...
 
-				txa
-				ldy #S.PS.hDS
-				sta (PS.NewPSPtr),y		save DS hMem in S.PS
-
-				jsr Mem.SetOwner		Set Ownership
+				jsr PS.SetOwner
 
 .2				ldy #H.BIN.SS.SIZE
-				lda (ZPPtr4),y			Load SS.SIZE
+				jsr RAMSW.pBufgY		Load SS.SIZE
+				sta .4+1
 
 				tay
 				beq .3					SS.SIZE.LO=0, set as default $100
@@ -504,202 +514,104 @@ PS.LoadBIN		jsr BIN.Load			K.Buf256= "${ROOT}BIN/SH\0", K.IOBuf=/.../SCRIPT
 .3				inc
 
 				ldx #S.MEM.F.NOCROSS+S.MEM.F.STACK
-				jsr MEM.GetMem.YAX
+				jsr MEM.MallocX.YAX
 				bcs .9
 
-				phy						save pStack base LO
-				ldy #S.PS.ZP.STACK+1
-				sta (PS.NewPSPtr),y		save pStack HI...
+				phy
 
-				ldy #S.PS.ZP.LOCAL+1
-				sta (PS.NewPSPtr),y		save pLocal HI...
+				ldy #S.PS.pSS+1
+				sta (PS.pTmpPS),y
 
-				pla						make pStack = Base...
-				ldy #H.BIN.SS.SIZE		...plus Stack size
+				ldy #S.PS.pStack+1
+				sta (PS.pTmpPS),y		save pStack HI...
+
+				ldy #S.PS.pBase+1
+				sta (PS.pTmpPS),y		save pLocal HI...
+
+				pla
+				ldy #S.PS.pSS
+				sta (PS.pTmpPS),y
+
 *				clc
-				adc (ZPPtr4),y
 
-				ldy #S.PS.ZP.STACK
-				sta (PS.NewPSPtr),y
+.4				adc #$ff				SELF MODIFIED
 
-				txa
-				ldy #S.PS.hSS
-				sta (PS.NewPSPtr),y		save SS hMem in S.PS
-				clc						Potentially CS from ADC (ZPPtr4),y
-				jmp Mem.SetOwner		Set Ownership
+				ldy #S.PS.pStack
+				sta (PS.pTmpPS),y		...plus Stack size
+
+				ldy #S.PS.pBase
+				sta (PS.pTmpPS),y
+
+				clc
+
+				jmp PS.SetOwner
+
 .9				rts
+*--------------------------------------
+PS.SetOwner		sta IO.SETWRITEAUX
+
+				ldy #S.MEM.OWNER
+				lda CORE.LastPSID
+				sta (ZPMemMgrSPtr),y
+				iny
+				lda CORE.LastPSID+1
+				sta (ZPMemMgrSPtr),y
+
+				sta IO.CLRWRITEAUX
+				rts
 *--------------------------------------
 PS.LoadGetHeader
+				lda #O.RDONLY
+				sta IO.Flags
+				lda #S.FI.T.TXT
+				sta IO.Type
+				stz IO.AuxType
+				stz IO.AuxType+1
+
+				lda #$FF				TXT
+				sta IO.bTXT
+				clc						MAIN
+				ror A2osX.IOOpt
+
+				jsr STDIO.FOpen
+				bcs .9
+
+*				>STYA pFILE
+*				>PUSHW pFILE
+				>SS
+				sta IO.SETWRITEAUX
+				>PUSHYA
 				>PUSHWI K.IOBuf
-				>PUSHBI	O.RDONLY
-				>PUSHBI S.FI.T.TXT
-				>PUSHWZ					Aux type
-				>SYSCALL2 fopen
-				bcs .9
+				>PUSHWI 256
+				sta IO.CLRWRITEAUX
+				jsr K.FRead.PFT
+				>SR
 
-				>PUSHA					a = hFILE
-				>PUSHWI K.IOBuf+128
-				>PUSHWI 128
-				
-				>SYSCALL2 fread
-
-				php
-				pha
-				lda IO.hFILE			set by fopen / fread
-				>SYSCALL2 fclose
-				pla
-				plp
+				jmp BIN.FClose
 
 .9				rts
-*--------------------------------------
-PS.Load.ROOT	.AZ "ROOT"
-PS.Load.HEADER	.AZ "#!/"
-*--------------------------------------
-* K.Buf256= /.../SHELL, K.IOBuf=/.../SCRIPT
-* - or -
-* K.Buf256=/.../BINFILE,K.IOBuf=0
-* Buf256+IOBUF(?)+PS.ArgV[1,...] -> #S.PS.hARGV
-*--------------------------------------
-PS.AddArgV		ldy #$ff				In both cases, remove ARGV[0]
-
-.60				iny
-				lda (PS.ArgV),y
-				bne .60
-
-				tya
-				sec
-				adc PS.ArgV
-				sta PS.ArgV
-				bcc .70
-
-				inc PS.ArgV+1			Skip old ARGV[0] = scriptename
-
-.70				>LDYAI K.Buf256
-				jsr K.strlen
-
-				>STYA PS.ArgSize
-
-				lda K.IOBuf				is there a /BIN/SHELL ?
-				beq .10
-
-				>LDYAI K.IOBuf
-				jsr K.strlen
-				jsr PS.AddYAp12ArgSize
-
-.10				ldx #0					For now, 0 args...
-				lda K.IOBuf
-				beq .11					+1 for scriptpath
-
-				inx
-
-.11				>LDYA PS.ArgV
-				>STYA ZPPtr1
-
-.1				lda (ZPPtr1)
-				beq .4
-
-				inx
-
-				ldy #0
-
-.2				iny
-				lda (ZPPtr1),y
-				bne .2
-
-*				lda #0
-				jsr PS.AddYAp12ArgSize
-				jsr SHARED.AddYp12P1
-				bra .1
-
-.4				txa
-				ldy #S.PS.ARGC
-				sta (PS.NewPSPtr),y
-
-				lda PS.ArgSize
-				clc
-				adc #2					Add 2 for ending \0\0
-				tay
-				
-				lda PS.ArgSize+1
-				adc #0
-				
-				jsr K.GetMem
-				bcs .9
-
-				>STYA ZPPtr2			Target Buffer
-				txa
-				ldy #S.PS.hARGV
-				sta (PS.NewPSPtr),y
-
-				jsr Mem.SetOwner		Set Ownership
-
-				>LDYAI K.Buf256
-				jsr PS.AddYAToStrV
-				lda K.IOBuf
-				beq .6
-
-				>LDYAI K.IOBuf
-				jsr PS.AddYAToStrV
-
-.6				>LDYA PS.ArgV
-				>STYA ZPPtr1
-
-.7				lda (ZPPtr1)
-				sta (ZPPtr2)
-				beq .8					Ending \0
-
-				jsr PS.AddPtr1ToStrV
-				bra .7
-
-.8				clc
-.9				rts
-*--------------------------------------
-PS.AddYAToStrV	>STYA ZPPtr1
-PS.AddPtr1ToStrV
-				ldy #$ff
-
-.2				iny
-				lda (ZPPtr1),y
-				sta (ZPPtr2),y
-				bne .2
-
-				jsr SHARED.AddYp12P1
-				jmp SHARED.AddYp12P2
-*--------------------------------------
-PS.AddYAp12ArgSize
-				pha
-				tya
-				sec						+1 for \0
-				adc PS.ArgSize
-				sta PS.ArgSize
-				pla
-				adc PS.ArgSize+1
-				sta PS.ArgSize+1
-				rts
 */--------------------------------------
 * # Kill
 * ## C
-* `int kill(short int pid, short int sig);`
+* `int kill(int pid, int sig);`
 * ## ASM
-* `>PUSHB pid`
-* `>PUSHB sig`
-* `>SYSCALL kill`
+* `>SS`
+* `>PUSHW pid`
+* `>PUSHW sig`
+* `>LIBC kill`
+* `>SR`
 * ## RETURN VALUE
 *\--------------------------------------
-K.Kill.PID		.BS 1
-*--------------------------------------
-K.Kill			>PULLB .10+1			SIG
-				>PULLA					PID
-				cmp #0
-				beq .9					CS
+K.Kill			ldy #2
+				jsr RAMSW.GetStkYW		pid
 
-				sta K.Kill.PID
-				jsr CORE.GetPSByID
+				jsr PS.FindYA
 				bcs .99
 
-				>STYA ZPPtr1
-				
-.10				lda #$ff				SELF MODIFIED
+				>STYA PS.pTmpPS
+				stx PS.DestroyIdx
+
+				jsr RAMSW.GetStk		sig
 				cmp #2+1
 				bcs .9
 
@@ -709,241 +621,361 @@ K.Kill			>PULLB .10+1			SIG
 
 .1				.DA K.Kill.0
 				.DA K.Kill.1
-				.DA K.Kill.2
+				.DA PS.Destroy
 
 .9				lda #E.SYN
 *				sec
 .99				rts
 *--------------------------------------
-K.Kill.1		lda (ZPPtr1)
+K.Kill.1		lda (PS.pTmpPS)
 				and #S.PS.F.SLEEP^$FF
-				sta (ZPPtr1)
+				sta (PS.pTmpPS)
 
 				ldy #S.PS.S
 				lda #S.PS.S.QUIT
-				sta (ZPPtr1),y
+				sta (PS.pTmpPS),y
 
 K.Kill.0		clc
 				rts
+*--------------------------------------
+PS.DestroyX		stx PS.DestroyIdx
 
-K.Kill.2		ldy #S.PS.hSession
-				lda (ZPPtr1),y
-				tax
-*				lda USRs.hSID-1,x
-*				jsr K.FreeMem
+				>LDYA pPSs,x
+				>STYA PS.pTmpPS
 
-				ldy #S.PS.hENV
-				lda (ZPPtr1),y
-				>SYSCALL2 FreeStkObj
-
-				ldx #4
-
-.11				ldy .10,x
-				lda (ZPPtr1),y
-				beq .12
-
-				phx
-				jsr K.FreeMem
-				plx
-
-.12				dex
-				bpl .11
-
-				lda (ZPPtr1)
+				lda (PS.pTmpPS)
 				bit #S.PS.F.CLOSEONX
 				beq .1
 
-				ldy #S.PS.hStdOut
-				lda (ZPPtr1),y
-				>SYSCALL2 fclose
+				ldy #S.PS.pStdOut
+				lda (PS.pTmpPS),y
+				pha
+				iny
+				lda (PS.pTmpPS),y
+				ply
+				jsr K.FClose
 
-.1				lda K.Kill.PID
+.1				jsr PS.Destroy
 
-				ldx #0
-.2				cmp PSs.PID,x
-				beq .3
+				ldx PS.DestroyIdx
+				stz PIDs,x
+				stz PIDs+1,x
+				stz pPSs,x
+				stz pPSs+1,x
 
+				rts
+*--------------------------------------
+PS.Destroy		ldx #5
+
+.1				ldy .10,x
+				lda (PS.pTmpPS),y
+				beq .2
+
+				pha
+				dey
+				lda (PS.pTmpPS),y
+				tay
+				pla
+
+				phx
+				jsr K.Free
+				plx
+
+.2				dex
+				bpl .1
+
+				>LDYA PS.pTmpPS
+				jmp MEM.FreeYA
+
+.10				.DA #S.PS.pSS+1,#S.PS.pData+1,#S.PS.pCode+1
+				.DA #S.PS.pARGV+1,#S.PS.pCWD+1,#S.PS.pENV+1
+
+PS.DestroyIdx	.BS 1
+*/--------------------------------------
+* # GetPS(int PID)
+*
+* ## C
+* `void *getps (int PID);`
+* ## ASM
+* `>LDYA PID`
+* `>LIBC GetPS`
+* ## RETURN VALUE
+*  Y,A = Ptr to PS struct
+*\--------------------------------------
+K.GetPS			jsr PS.FindYA
+				bcc PS.GetYAX
+				
+				rts
+
+PS.GetYAX		stx .4+1
+
+				>STYA ZPPtr1
+
+				>LDYAI S.PS
+				jsr K.Malloc
+				bcs .9
+
+				>STYA ZPPtr2
+
+				ldy #S.PS-1
+
+				sta IO.SETWRITEAUX
+
+.3				lda (ZPPtr1),y
+				sta (ZPPtr2),y
+				dey
+				bpl .3
+
+.4				ldx #$ff				SELF MODIFIED
+
+				lda PSStats,x
+
+				ldy #S.PS.CPU
+				sta (ZPPtr2),y
+
+				>LDYA ZPPtr2
+
+*				sta IO.CLRWRITEAUX
+
+*				clc
+
+.9				rts
+*--------------------------------------
+* Y,A = PID
+*--------------------------------------
+PS.FindYA		ldx #2					Skip PS0
+				sty .2+1
+
+.1				ldy PIDs,x
+
+.2				cpy #$ff				SELF MODIFIED
+				bne .3
+
+				cmp PIDs+1,x
+				beq .8
+
+.3				inx
 				inx
-				cpx CORE.PSCount
-				bne .2
+				cpx #K.PS.MAX*2
+				bcc .1
 
-				bra *
+				lda #E.NSP
+*				sec
+				rts
 
-.3				stz PSs.PID,x
-				lda PSs.hPS,x
-				stz PSs.hPS,x
-				jmp K.FreeMem
+.8				>LDYA pPSs,x
 
-.10				.DA #S.PS.hSS,#S.PS.hDS,#S.PS.hCS
-				.DA #S.PS.hARGV,#S.PS.hCWD
+				clc
+PS.RTS2			rts
 */--------------------------------------
 * # LoadTxtFile
 * Load TXT a file in memory (with ending 0)
 * ## C
-* `int loadtxtfile ( const char * filename );`
+* `void *loadtxtfile ( const char * filename );`
 * ## ASM
 * `>LDYA filename`
-* `>SYSCALL loadtxtfile`
+* `>LIBC loadtxtfile`
 * ## RETURN VALUE
-*  Y,A = File Length (without ending 0)
-*  X = hMem of Loaded File
+*  Y,A = Ptr to loaded file
 *\--------------------------------------
-K.LoadTxtFile	>PUSHYA
-				>PUSHBI	O.RDONLY
-				>PUSHBI S.FI.T.TXT
-				>PUSHWZ					Aux type
-				
-K.LoadFile0		sec
-				.HS 90					BCC
+K.LoadTxtFile	jsr PFT.GetPathYA
+				bcs PS.RTS2
+
+				lda #O.RDONLY
+				sta IO.Flags
+				lda #S.FI.T.TXT
+				sta IO.Type
+				stz IO.AuxType
+				stz IO.AuxType+1
+
+				lda #$FF
+				sta IO.bTXT				TXT
+				sec						AUX
+				bra PS.LoadFileA
 */--------------------------------------
 * # LoadFile
 * Load a file in memory
 * ## C
-* `int loadfile ( const char * filename, short int flags, short int ftype, int auxtype );`
+* `void *loadfile(const char *filename, short int flags, short int ftype, int auxtype);`
 * ## ASM
 * `>PUSHW filename`
 * `>PUSHB flags`
 * `>PUSHB ftype`
 * `>PUSHW auxtype`
-* `>SYSCALL loadfile`
+* `>LIBC loadfile`
 * ## RETURN VALUE
-*  Y,A = File Length
-*  X = hMem of Loaded File
+*  Y,A = Ptr to loaded file
 *\--------------------------------------
-K.LoadFile		clc
+K.LoadFile		jsr PFT.GetPath4
+				bcs PS.RTS2
 
-				ror PS.bTXT
+				jsr STDIO.GetOpenP
 
-				>SYSCALL2 FOpen
-				bcs .99
+				stz IO.bTXT				BIN
+				sec						AUX
 
-				sta PS.hFILE
-				>PUSHA
-				>PUSHWI K.S.Stat
-				>SYSCALL2 FStat
-				bcs .98
+PS.LoadFileA	ror A2osX.IOOpt
 
-				lda K.S.Stat+S.STAT.SIZE+3
-				ora K.S.Stat+S.STAT.SIZE+2
+				jsr STAT.Stat
+				bcs PS.RTS2
+
+PS.LoadFile		lda K.S.STAT+S.STAT.SIZE+3
+				ora K.S.STAT+S.STAT.SIZE+2
 				bne .97
 
-				>LDYA K.S.Stat+S.STAT.SIZE
+				>LDYA K.S.STAT+S.STAT.SIZE
 
-				bit PS.bTXT		Add 1 to buffer size for ending 0
+				bit IO.bTXT				TXT: Add 1 to buffer size for ending 0
 				bpl .1
 
 				iny
 				bne .1
 
 				inc
-				bne .1
+				bra .1
+*--------------------------------------
+.95				jsr BIN.FClose
+
+.96				jmp BIN.FreeBuf
 
 .97				lda #E.FTB
-
-.98				pha
-				lda PS.hFILE
-				>SYSCALL2 FClose
-				pla
 				sec
 .99				rts
 *--------------------------------------
-.1				jsr K.GetMem
+.1				bit A2osX.IOOpt
+				bmi .2
+
+				jsr MEM.Malloc
+				bcc .3
+
+				rts
+
+.2				jsr K.Malloc
+
+.3				bcs .9
+
+				>STYA PS.pBuf
+				stx PS.hBuf
+
+				jsr STDIO.FOpen
 				bcs .96
 
-				>STYA PS.MemPtr
-				stx PS.hMem
-
-				>PUSHB PS.hFILE
-				>PUSHW PS.MemPtr
+*				>STYA pFILE
+*				>PUSHW pFILE
+				>SS
+				sta IO.SETWRITEAUX
+				>PUSHYA
+				>PUSHW PS.pBuf
 				>PUSHWI $ffff
-				>SYSCALL2 fread
-				bcs .96
+				sta IO.CLRWRITEAUX
 
-				sty .7+1
-				sta .8+1
-				bit PS.bTXT
+				lda A2osX.IOOpt			AUX ?
+				sta MLI.IOBANK
+
+				jsr K.FRead.PFT
+				>SR
+				bcs .95
+
+				bit IO.bTXT				TXT: set ending 0
 				bpl .5
 
-				pha						set ending 0
+				pha
 				tya
 
 *				clc
 
-				adc PS.MemPtr
+				adc PS.pBuf
 				sta .4+1
 				pla
-				adc PS.MemPtr+1
+				adc PS.pBuf+1
 				sta .4+2
-.4				stz $ffff				Self Modified
 
-.5				jsr .98					FClose
+				bit A2osX.IOOpt			AUX ?
+				bpl .4
 
-.7				ldy #$ff				SELFMODIFIED
-.8				lda #$ff				SELFMODIFIED
-				ldx PS.hMem
-				clc
-				rts
+				sta IO.SETWRITEAUX
 
-.96				pha
+.4				stz $ffff				SELF MODIFIED
 
-				jsr .98					FClose
+				sta IO.CLRWRITEAUX
 
-				lda PS.hMem
-				jsr K.FreeMem
-				pla
-				sec
+.5				jsr BIN.FClose
+
+				>LDYA PS.pBuf
+
+*				clc
+
 .9				rts
 */--------------------------------------
 * # FileSearch
 * Search a file in the provided PATH list
 * And return, if found, the full path to it.
 * ## C
-* `int filesearch( char *filename, char *searchpath, char *fullpath, stat *filestat);`
+* `int filesearch(char *filename, char *searchpath, char *fullpath, stat *filestat);`
 * ## ASM
+* `>SS`
 * `>PUSHW filename`
 * `>PUSHW fullpath`
 * `>PUSHW searchpath`
 * `>PUSHW filestat`
-* `>SYSCALL filesearch`
+* `>LIBC filesearch`
+* `>SR`
 * ## RETURN VALUE
 * CC : success
 * DstBuf = FilePath
 * DstStat = S.STAT
 * CS : not found
 *\--------------------------------------
-K.FileSearch	>PULLW .4+1				DstStat
-				>PULLW .2+1				DstBuf
-				>PULLW PS.Find.2+1	path to search
-				>PULLW PS.Find.4+1	filename to find
+K.FileSearch	ldy #6					filename to find
+				jsr RAMSW.GetStkYW
+				>STYA ZPPtr1
 
-				stz PS.Find.98+1
+				ldy #4					path to search
+				jsr RAMSW.GetStkYW
+				>STYA ZPPtr3
+
+				ldy #2					DstBuf
+				jsr RAMSW.GetStkYW
+				>STYA .2+1
+
+				ldy #0					DstStat
+				jsr RAMSW.GetStkYW
+				>STYA .4+1
 
 				jsr PS.Find
 				bcs .9
 
+				sta IO.SETWRITEAUX
+
 				ldx #$ff
+
 .1				inx
-				lda K.Buf256,x
+				lda K.PathBuf,x
 .2				sta $ffff,x				Self Modified
 				bne .1
 
 				ldx #S.STAT-1
+
 .3				lda K.S.STAT,x
 .4				sta $ffff,x				Self Modified
 				dex
 				bpl .3
 
+				sta IO.CLRWRITEAUX
+
 *				clc
 .9				rts
 *--------------------------------------
-PS.Find.CWD		>STYA PS.Find.4+1	filename to find
-				ldy #S.PS.hCWD
-				lda (PS.NewPSPtr),y
-				jsr K.GetMemPtr
-				>STYA PS.Find.2+1
+PS.Find.CWD		ldy #S.PS.pCWD
+				lda (PS.pTmpPS),y
+				sta ZPPtr3
+				iny
+				lda (PS.pTmpPS),y
+				sta ZPPtr3+1
 
-				stz PS.Find.98+1
 				bra PS.Find
+*--------------------------------------
+* File to find in ZPPtr1
 *--------------------------------------
 PS.Find.LIB		ldx #0
 				.HS 2C					BIT ABS
@@ -951,86 +983,94 @@ PS.Find.DRV		ldx #2
 				.HS 2C					BIT ABS
 PS.Find.PATH	ldx #4
 
-				>STYA PS.Find.4+1		filename to find
-
-				>PUSHW PS.VARS,x
-				>PUSHWZ					allocate...
-				>SYSCALL2 GetEnv		get value for Search Path
+				>LDYA PS.VARS,x
+				jsr ENV.GetEnvP3		get value for Search Path
 				bcs PS.Find.RTS
 
-				>STYA PS.Find.2+1
-				stx PS.Find.98+1
+PS.Find			stz .1+1				Index in Search list string
 
-PS.Find			stz PS.Find.1+1
-
-PS.Find.1		ldy #0					Self Modified Index in Search list string
+.1				ldy #0					SELF MODIFIED
 
 				ldx #0
 
-PS.Find.2		lda $ffff,y				SELF MODIFIED
-
-				beq PS.Find.3			end of string, try it....
+.2				jsr RAMSW.xP3gY
+				beq .3					end of string, try it....
 
 				iny
 				cmp #':'
-				beq PS.Find.3
+				beq .3
 
-				sta K.Buf256,x
+				sta K.PathBuf,x
 				inx
-				bra PS.Find.2
+				bra .2
+*--------------------------------------
+.3				txa
+				beq .98					String is empty....nothing to try
 
-PS.Find.3		txa
-				beq PS.Find.98		String is empty....nothing to try
-
-				sty PS.Find.1+1		save current index
+				sty .1+1				save current index
 
 				ldy #0
 
-PS.Find.4		lda $ffff,y				Self Modified, Append Filename...
-				sta K.Buf256,x
-				beq PS.Find.5
+.4				jsr RAMSW.xP1gY			Append cmdline...
+				sta K.PathBuf,x
+				beq .5
 
 				iny
 				inx
-				bra PS.Find.4
-
-PS.Find.5		jsr PS.STAT.256
-				bcs PS.Find.1			Failed...retry next path...
+				bra .4
+*--------------------------------------
+.5				jsr PS.Stat
+				bcs .1					Failed...retry next path...
 
 				lda K.S.STAT+S.STAT.MODE+1
 				cmp /S.STAT.MODE.DIR	Dir ?
-				beq PS.Find.1
-
-				jsr PS.Find.98			Discard Expanded hSrch list
-
-				clc
-PS.Find.RTS		rts
-
-PS.Find.98		lda #$ff				SELF MODIFIED : Discard  Search list
 				beq .1
 
-				jsr K.FreeMem
-
-.1				lda #MLI.E.FNOTFND
-				sec
+				clc
 				rts
-*--------------------------------------
-PS.Buf2IO		ldx #$ff
 
-.1				inx						Save Script name in IOBuf
-				lda K.Buf256,x
-				sta K.IOBuf,x
+.98				lda #MLI.E.FNOTFND
+				sec
+PS.Find.RTS		rts
+*--------------------------------------
+PS.Buf2IO		ldy #$ff
+
+.1				iny						Save Script name in IOBuf
+				lda K.PathBuf,y
+				sta K.IOBuf,y
 				bne .1
 
 				rts
 *--------------------------------------
-PS.STAT.256		>LDYAI K.Buf256
-				
-PS.STAT.YA		>PUSHYA
-				>PUSHWI K.S.STAT
-				>SYSCALL2 Stat
+PS.GetYw		lda (pPS),y
+				pha
+				iny
+				lda (pPS),y
+				ply
+				bne .8
+
+				cmp #0
+
+.8				rts
+*--------------------------------------
+PS.Stat			ldx ZPPtr3
+				phx
+				ldx ZPPtr3+1
+				phx
+
+				jsr STDLIB.Expand
+				bcs .1
+
+				jsr STAT.Stat
+
+.1				plx
+				stx ZPPtr3+1
+				plx
+				stx ZPPtr3
+
 				rts
 *--------------------------------------
+PS.HEADER		.AS "#!"
 PS.SHUTDOWN		.AZ "shutdown"
 PS.VARS			.DA .1
 				.DA .2
@@ -1038,39 +1078,6 @@ PS.VARS			.DA .1
 .1				.AZ "LIB"
 .2				.AZ "DRV"
 .3				.AZ "PATH"
-*/--------------------------------------
-* # GetMemStat
-*  Y,A = Ptr to 24 bytes buffer
-* ## RETURN VALUE
-*  Buffer filled with memory stats
-*\--------------------------------------
-K.GetMemStat	>STYA ZPPtr1
-
-				ldy #23
-				ldx #7
-
-.1				lda DevMgr.Stat,x
-				sta (ZPPtr1),y
-				dey
-				dex
-				bpl .1
-
-				sta IO.SETREADAUX
-
-				jsr .2
-
-				sta IO.CLRREADAUX
-
-.2				ldx #7
-
-.3				lda Mem.Table,x
-				sta (ZPPtr1),y
-				dey
-				dex
-				bpl .3
-
-				clc
-				rts
 *--------------------------------------
 MAN
 SAVE usr/src/sys/kernel.s.ps

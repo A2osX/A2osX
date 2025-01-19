@@ -1,14 +1,19 @@
 NEW
   AUTO 3,1
 *--------------------------------------
-PIPE.SRCBUF		.EQ ZPDRV
-PIPE.DSTBUF		.EQ ZPDRV+2
-PIPE.CNT		.EQ ZPDRV+4
-PIPE.BASEH		.EQ ZPDRV+6
-PIPE.BUFH		.EQ ZPDRV+7
-PIPE.SIZEH		.EQ ZPDRV+8
+				.DUMMY
+				.OR ZPDRV+4
+
+pPipeBuf		.BS 2
+
+PIPE.BASEH		.BS 1
+PIPE.PTRH		.BS 1
+PIPE.TOPH		.BS 1
+
+				.ED
 *--------------------------------------
-PIPE.OPEN		ldy #S.FD.PIPE.S
+PIPE.Open		ldy #S.FD.PIPE.S
+
 				lda (pFD),y
 				inc
 				sta (pFD),y
@@ -17,7 +22,8 @@ PIPE.OPEN		ldy #S.FD.PIPE.S
 				clc
 				rts
 *--------------------------------------
-PIPE.CLOSE		ldy #S.FD.PIPE.S
+PIPE.Close		ldy #S.FD.PIPE.S
+
 				lda (pFD),y
 				bmi .1					remote PS closed its end
 
@@ -26,55 +32,60 @@ PIPE.CLOSE		ldy #S.FD.PIPE.S
 				clc
 				rts
 
-.1				ldy #S.FD.PIPE.hMem
+.1				ldy #S.FD.PIPE.pBuf+1
 				lda (pFD),y
 				beq .2
 
-				>SYSCALL2 FreeStkObj
+				pha
+				dey
+				lda (pFD),y
+				tay
+				pla
+
+				jsr MEM.FreeYA
 
 .2				jmp DEV.FreeFD
 *--------------------------------------
 * (pStack)+2	buf
 * (pStack)+0	count
 *--------------------------------------
-PIPE.WRITE		ldy #S.FD.PIPE.S
+PIPE.Write		ldy #S.FD.PIPE.S
+
 				lda (pFD),y
 				bpl .10
 
 				jmp PIPE.eEOF			Remote PS closed the Pipe
 
-.10				ldy #S.FD.PIPE.Free
-				lda (pFD),y
-				cmp (pStack)
+.10				ldy #0
+				jsr RAMSW.GetStkYW		get cnt
+				>STYA ZPCnt
 
-				ldy #S.FD.PIPE.Free+1
+				ldy #S.FD.PIPE.Free
 				lda (pFD),y
-				ldy #1
-				sbc (pStack),y
+				cmp ZPCnt
+				iny
+				lda (pFD),y
+				sbc ZPCnt+1
 				bcc PIPE.eNODATA		not enough room in PIPE
 
 				ldy #S.FD.PIPE.Head+1
-				jsr PIPE.GetBuf
-				
-				>STYA PIPE.DSTBUF
+				jsr PIPE.GetpPipeBufY
 
-				>PULLA					get cnt lo
-				sta PIPE.CNT
+				lda ZPCnt
 				eor #$ff
 				tax
 
-				>PULLA					get cnt hi
-				sta PIPE.CNT+1
+				lda ZPCnt+1
 				eor #$ff
-				pha 
+				pha
 
-				>PULLW PIPE.SRCBUF
+				ldy #2						get src buf
+				jsr RAMSW.GetStkYW
+				>STYA ZPpBuf
 
 				ldy #S.FD.PIPE.Head
 				lda (pFD),y
 				tay
-
-				sta IO.SETWRITEAUX
 
 .1				inx
 				bne .2
@@ -82,56 +93,55 @@ PIPE.WRITE		ldy #S.FD.PIPE.S
 				pla
 				inc
 				beq .8
-				
-				pha
-				
-.2				lda (PIPE.SRCBUF)
-				sta (PIPE.DSTBUF),y
 
-				inc PIPE.SRCBUF
-				bne .4
-				
-				inc PIPE.SRCBUF+1
-.4				iny
+				pha
+
+.2				jsr RAMSW.GetZPpBuf
+				sta (pPipeBuf),y
+
+				>INCW ZPpBuf
+
+				iny
 				bne .1
-				
-				lda PIPE.BUFH
+
+				lda PIPE.PTRH
 				inc
-				cmp PIPE.SIZEH
+				cmp PIPE.TOPH
 				beq .6
-				
-				sta PIPE.BUFH
-				inc PIPE.DSTBUF+1
+
+				sta PIPE.PTRH
+				inc pPipeBuf+1
 				bra .1
-				
-.6				stz PIPE.BUFH
+
+.6				stz PIPE.PTRH
 				lda PIPE.BASEH			Pipe Buffer Base
-				sta PIPE.DSTBUF+1
+				sta pPipeBuf+1
 				bra .1
-				
-.8				sta IO.CLRWRITEAUX
-				
-				tya
+
+.8				tya
 				ldy #S.FD.PIPE.Head
 				sta (pFD),y
 				iny
-				lda PIPE.BUFH
+				lda PIPE.PTRH
 				sta (pFD),y
 				ldy #S.FD.PIPE.Free
 				jsr PIPE.SubCnt
-			
+
 				iny						#S.FD.PIPE.Used
 
 				jsr PIPE.AddCnt
-				jmp PIPE.EXIT
+				>LDYA ZPCnt
+				clc
+				rts
 
 PIPE.eEOF		lda #MLI.E.EOF
 				.HS 2C					BIT ABS
 PIPE.eNODATA	lda #E.NODATA
 				sec
-				>RET 5
+				rts
 *--------------------------------------
-PIPE.READ		ldy #S.FD.PIPE.Used+1
+PIPE.Read		ldy #S.FD.PIPE.Used+1
+
 				lda (pFD),y				Data ?
 				dey
 				ora (pFD),y
@@ -142,18 +152,17 @@ PIPE.READ		ldy #S.FD.PIPE.Used+1
 				bmi PIPE.eEOF			Remote PS closed the Pipe
 
 				bpl PIPE.eNODATA
-				
+
 .10				ldy #S.FD.PIPE.Tail+1
-				jsr PIPE.GetBuf
+				jsr PIPE.GetpPipeBufY
 
-				>STYA PIPE.SRCBUF
-
-				>PULLA					get cnt lo
+				jsr RAMSW.GetStk		get cnt lo
 				tax
 				ldy #S.FD.PIPE.Used
 				cmp (pFD),y
 
-				>PULLA					get cnt hi
+				ldy #1
+				jsr RAMSW.GetStkY		get cnt hi
 				pha
 				iny						#S.FD.PIPE.Used+1
 				sbc (pFD),y
@@ -166,8 +175,8 @@ PIPE.READ		ldy #S.FD.PIPE.Used+1
 				iny
 				lda (pFD),y				X,A = Used
 
-.12				stx PIPE.CNT
-				sta PIPE.CNT+1
+.12				stx ZPCnt
+				sta ZPCnt+1
 
 				eor #$ff
 				pha
@@ -175,109 +184,130 @@ PIPE.READ		ldy #S.FD.PIPE.Used+1
 				eor #$ff
 				tax
 
-				>PULLW PIPE.DSTBUF	get dest buf
+				ldy #2					get dest buf
+				jsr RAMSW.GetStkYW
+				>STYA ZPpBuf
 
 				ldy #S.FD.PIPE.Tail
 				lda (pFD),y
 				tay
 
-				sta IO.SETREADAUX
+				bit A2osX.IOOpt
+				bpl .1
+
+				sta IO.SETWRITEAUX
 
 .1				inx
 				bne .2
-				
+
 				pla
 				inc
 				beq .8
-				
+
 				pha
 
-.2				lda (PIPE.SRCBUF),y
-				sta (PIPE.DSTBUF)
+.2				lda (pPipeBuf),y
+				sta (ZPpBuf)
 
-				inc PIPE.DSTBUF
-				bne .4
-				
-				inc PIPE.DSTBUF+1
-.4				iny
+				>INCW ZPpBuf
+
+				iny
 				bne .1
-				
-				lda PIPE.BUFH
+
+				lda PIPE.PTRH
 				inc
-				cmp PIPE.SIZEH
+				cmp PIPE.TOPH
 				beq .6
-				
-				sta PIPE.BUFH
-				inc PIPE.SRCBUF+1
+
+				sta PIPE.PTRH
+				inc pPipeBuf+1
 				bra .1
-				
-.6				stz PIPE.BUFH
+
+.6				stz PIPE.PTRH
 				lda PIPE.BASEH
-				sta PIPE.SRCBUF+1		Restore Pipe Buf base
+				sta pPipeBuf+1			Restore Pipe Buf base
 				bra .1
-	
-.8				sta IO.CLRREADAUX
-				
+*--------------------------------------
+.8				sta IO.CLRWRITEAUX
+
 				tya
 				ldy #S.FD.PIPE.Tail
 				sta (pFD),y
 				iny
-				lda PIPE.BUFH
+				lda PIPE.PTRH
 				sta (pFD),y
 				ldy #S.FD.PIPE.Free
 				jsr PIPE.AddCnt
-			
+
 				iny						#S.FD.PIPE.Used
 
 				jsr PIPE.SubCnt
 
-PIPE.EXIT		>LDYA PIPE.CNT			Y,A = bytes written
-				inc pStack				Discard hFILE
+				>LDYA ZPCnt
+
 				clc
 				rts
 *--------------------------------------
-PIPE.GetBuf		lda (pFD),y
-				sta PIPE.BUFH
+PIPE.Stat		jsr SHARED.ClrStat
+
+				lda #S.STAT.MODE.FO+S.STAT.MODE.XG+S.STAT.MODE.RG+S.STAT.MODE.XU+S.STAT.MODE.RU+S.STAT.MODE.FIFO
+				sta K.S.STAT+S.STAT.MODE
+				lda /S.STAT.MODE.FO+S.STAT.MODE.XG+S.STAT.MODE.RG+S.STAT.MODE.XU+S.STAT.MODE.RU+S.STAT.MODE.FIFO
+				sta K.S.STAT+S.STAT.MODE+1
+
+*				clc
+
+.9				rts
+*--------------------------------------
+PIPE.GetpPipeBufY
+				lda (pFD),y				Y=Head+1 or Tail+1
+				sta PIPE.PTRH
 
 				ldy #S.FD.PIPE.Size+1
 				lda (pFD),y
-				sta PIPE.SIZEH
+				sta PIPE.TOPH
 
-				ldy #S.FD.PIPE.hMem
+				ldy #S.FD.PIPE.pBuf+1
 				lda (pFD),y
-				
-				>SYSCALL2 GetStkObjPtr
 
 				sta PIPE.BASEH			Pipe Buffer Base
-*				clc
-				adc PIPE.BUFH
+				clc
+				adc PIPE.PTRH
+				sta pPipeBuf+1
+
+				dey
+
+				lda (pFD),y
+				sta pPipeBuf
+
 				rts
 *--------------------------------------
 PIPE.AddCnt		clc
 				lda (pFD),y
-				adc PIPE.CNT
+				adc ZPCnt
 				sta (pFD),y
 
 				iny
 
 				lda (pFD),y
-				adc PIPE.CNT+1
+				adc ZPCnt+1
 				sta (pFD),y
 				rts
 *--------------------------------------
-PIPE.SubCnt		sec 
+PIPE.SubCnt		sec
 				lda (pFD),y
-				sbc PIPE.CNT
+				sbc ZPCnt
 				sta (pFD),y
 
 				iny
 
 				lda (pFD),y
-				sbc PIPE.CNT+1
+				sbc ZPCnt+1
 				sta (pFD),y
 				rts
 *--------------------------------------
 PIPE.EOF		clc
+
 				ldy #S.FD.PIPE.Used
 				lda (pFD),y
 				iny
@@ -290,7 +320,7 @@ PIPE.EOF		clc
 
 .8				dec						lda #$ff
 *				clc
-				rts			
+				rts
 *--------------------------------------
 MAN
 SAVE usr/src/sys/kernel.s.pipe

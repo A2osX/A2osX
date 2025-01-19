@@ -7,7 +7,6 @@ NEW
 *--------------------------------------
 				.INB inc/macros.i
 				.INB inc/a2osx.i
-				.INB inc/kernel.i
 				.INB inc/mli.i
 				.INB inc/mli.e.i
 *--------------------------------------
@@ -21,6 +20,7 @@ MAX.COLC		.EQ 4
 COLOR.ENTER		.EQ 32
 COLOR.REG		.EQ 93
 COLOR.DIR		.EQ 92
+COLOR.CDEV		.EQ 95
 COLOR.BDEV		.EQ 96
 *--------------------------------------
 				.DUMMY
@@ -32,22 +32,20 @@ ZPFileName		.BS 2
 ZPFileStat		.BS 2
 
 ZPPWBuf			.BS 2
+ZPLineBuf		.BS 2
+ZPLineBufPtr	.BS 2
 ArgCount		.BS 1
 ColCount		.BS 1
-hLineBuf        .BS 1
-hPWBuf          .BS 1
 
-bPass2			.BS 1
-bPause			.BS 1
 bAllmostAll		.BS 1
 bColumn			.BS 1
 bFullPath		.BS 1
 bLong			.BS 1
 bRecurse		.BS 1
-bToFile			.BS 1
 
-ZPLineBuf		.BS 2
-ZPLineBufPtr	.BS 2
+bToFile			.BS 1
+bPass2			.BS 1
+bPause			.BS 1
 
 ZS.END			.ED
 *--------------------------------------
@@ -56,25 +54,26 @@ ZS.END			.ED
 CS.START        cld
 				jmp (.1,x)
 				.DA #$61				6502,Level 1 (65c02)
-				.DA #1					BIN Layout Version 1
+				.DA #2					BIN Layout Version 2
 				.DA #0					S.PS.F.EVENT
 				.DA #0
-				.DA CS.END-CS.START		Code Size (without Constants)
-				.DA DS.END-DS.START		Data SegmentSize
+				.DA CS.END
+				.DA ID.END
+				.DA DS.END
 				.DA #64					Stack Size
 				.DA #ZS.END-ZS.START	Zero Page Size
-				.DA 0
 *--------------------------------------
 * Relocation Table
 *--------------------------------------
 .1				.DA CS.INIT
 				.DA CS.RUN
-				.DA CS.DOEVENT
+				.DA CS.SIG
 				.DA CS.QUIT
 L.MSG.USAGE		.DA MSG.USAGE
 L.MSG.ENTER		.DA MSG.ENTER
 L.MSG.REGEXT	.DA MSG.REGEXT
 L.MSG.DIREXT	.DA MSG.DIREXT
+L.MSG.CDEVEXT	.DA MSG.CDEVEXT
 L.MSG.BDEVEXT	.DA MSG.BDEVEXT
 L.MSG.SETCOLOR	.DA MSG.SETCOLOR
 L.PRODOS.FT.TXT	.DA PRODOS.FT.TXT
@@ -95,31 +94,40 @@ J.CS.RUN.PRINT	.DA CS.RUN.PRINT.REG
 CS.INIT			clc
 				rts
 *--------------------------------------
-CS.RUN			ldy #S.PS.hStdOut
-				lda (pPS),y
-				tay
-				ldx FILEs.hFD-1,y
-				lda FDs.pLO-1,x
-				sta ZPPtr1
-				lda FDs.pHI-1,x
-				sta ZPPtr1+1
+CS.RUN			ldy #S.PS.pStdOut
+				jsr A2osX.GetPSy
+				pha
+				iny
+				jsr A2osX.GetPSy
+				ply
 
-				lda (ZPPtr1)
-*				cmp	#S.FD.T.REG
+				>LIBC FileNo
+				bcs .99
+
+				>PUSHYA
+				>PUSHEA.G STATBUF
+				>LIBC FStat
+				bcs .99
+				
+				>LDA.G STATBUF+S.STAT.MODE+1
+				and #$F0
+				
+*				cmp /S.STAT.MODE.REG
 				beq .10
 
-				cmp #S.FD.T.PIPE
+				cmp /S.STAT.MODE.FIFO
 				bne .1
 
 .10				dec bToFile
-
+*--------------------------------------
 .1				inc ArgCount
 
 				lda ArgCount
-				>SYSCALL ArgV
+				>LIBC ArgV
 				bcs .6
 
 				>STYA ZPPtr1
+				
 				lda (ZPPtr1)
 				cmp #'-'
 				bne .4
@@ -136,10 +144,12 @@ CS.RUN			ldy #S.PS.hStdOut
 				dex
 				bpl .2
 
-.99				>PUSHW L.MSG.USAGE
+.99				>SS
+				>PUSHW L.MSG.USAGE
 				>PUSHBI 0
-				>SYSCALL PrintF
-
+				>LIBC PrintF
+				>SR
+				
 				lda #E.SYN
 				sec
 				rts
@@ -154,7 +164,7 @@ CS.RUN			ldy #S.PS.hStdOut
 				bne .20
 				
 				bra .1
-
+*--------------------------------------
 .4				>LDYA ZPPtr1
 				jsr X.InitSrcDirYA
 				bcc .1					scan for any other args
@@ -164,43 +174,49 @@ CS.RUN			ldy #S.PS.hStdOut
 .6				>LDA.G index            do we have a Source dir ?
 				bne .8
 
-				ldy #S.PS.hCWD
-				lda (pPS),y
-				>SYSCALL GetMemPtr
+				ldy #S.PS.pCWD
+				jsr A2osX.GetPSy
+				pha
+				iny
+				jsr A2osX.GetPSy
+				ply
+				
 				jsr X.InitSrcDirYA
 				bcs .9
 
-.8				>PUSHEA.G TIME.SysTime
-				>SYSCALL Time
+.8				>LEA.G TIME.SysTime
+				>LIBC Time
 
 				>LDYAI S.PW
-				>SYSCALL GetMem
+				>LIBC Malloc
 				bcs .9
 
 				>STYA ZPPWBuf
-				stx hPWBuf
 
 				>LDYAI 256
-				>SYSCALL GetMem
+				>LIBC Malloc
 				bcs .9
 
 				>STYA ZPLineBuf
 				>STYA ZPLineBufPtr
-				stx hLineBuf
 *--------------------------------------
 CS.RUN.LOOP		stz bPass2
 
 .1				>SLEEP
 
-				ldy #S.PS.hStdIn
-				lda (pPS),y
-				>SYSCALL FEOF
+				ldy #S.PS.pStdIn
+				jsr A2osX.GetPSy
+				pha
+				iny
+				jsr A2osX.GetPSy
+				ply
+				>LIBC FEOF
 				bcs .99					I/O error
 
 				tay
 				bne .2					no char
 
-				>SYSCALL GetChar
+				>LIBC GetChar
 				cmp #$03				Ctrl-C
 				beq .99					Abort....
 
@@ -214,7 +230,7 @@ CS.RUN.LOOP		stz bPass2
 
 .2				bit bPause
 				bmi .1
-
+*--------------------------------------
 				jsr X.GetEntry
 				bcs .6
 
@@ -230,13 +246,14 @@ CS.RUN.LOOP		stz bPass2
 
 .4				ldy #S.STAT.MODE+1
 				lda (ZPFileStat),y
-
+			
 				and #$70
 				lsr
 				lsr
 				lsr
 				tax
 				jsr CS.RUN.PRINT.JMP
+
 				bcs .99
 
 .5				jsr X.GetNextEntry
@@ -245,8 +262,8 @@ CS.RUN.LOOP		stz bPass2
 				bit bPass2
 				bmi .6
 
-				jsr CS.RUN.CheckRoot
-				beq .6
+*				jsr CS.RUN.CheckRoot
+*				beq .6
 
 				jsr X.ResetSrcDir
 				bcs .99
@@ -275,13 +292,12 @@ CS.RUN.LOOP		stz bPass2
 				sec
 .99				rts
 *--------------------------------------
-CS.RUN.CheckRoot
-				>LDA.G hSrcBasePath
-				>SYSCALL GetMemPtr
-				>STYA ZPPtr1
-				ldy #1
-				lda (ZPPtr1),y
-				rts
+*CS.RUN.CheckRoot
+*				>LDYA.G pSrcBasePath
+*				>STYA ZPPtr1
+*				ldy #1
+*				lda (ZPPtr1),y
+*				rts
 *--------------------------------------
 CS.RUN.PRINT.JMP
 				jmp (J.CS.RUN.PRINT,x)
@@ -318,6 +334,7 @@ CS.RUN.PRINT.REGEXT
 				jsr CS.RUN.PrintMod
 				jsr CS.RUN.PrintUidGid
 
+				>SS
 				>PUSHW ZPLineBufPtr
 				>PUSHW L.MSG.REGEXT
 
@@ -331,7 +348,9 @@ CS.RUN.PRINT.REGEXT
 				bne .2
 
 				>PUSHBI 4
+
 				jsr CS.RUN.ToLineBuf
+				>SR
 
 				jsr CS.RUN.PrintTypeAux
 				jsr CS.RUN.PrintDates
@@ -399,9 +418,64 @@ CS.RUN.PRINT.DIR1
 .9				rts
 *--------------------------------------
 CS.RUN.PRINT.CDEV
-				lda #MLI.E.UNSUPST
-				sec
-				rts
+				clc
+				bit bPass2
+				bmi .9
+
+				bit bLong
+				bmi CS.RUN.PRINT.CDEVEXT
+
+				ldy #COLOR.CDEV
+				jsr CS.RUN.SetColorY
+
+				bit bColumn
+				bpl .1
+				
+				jmp CS.RUN.PRINT.CDEV1
+
+.1				bit bFullPath
+				bpl .2
+
+				jsr CS.RUN.SrcPathOut
+				bra CS.RUN.PRINT.CDEV1
+
+.2				ldx #MAX.COLW-1
+				clc
+				jsr CS.RUN.FN2LineBuf
+				jsr CS.RUN.IncColCnt
+				bcs .9
+				
+				jmp CS.RUN.PRINT.CDEVEND
+
+.9				rts
+*--------------------------------------
+CS.RUN.PRINT.CDEVEXT
+				jsr CS.RUN.PrintMod
+				jsr CS.RUN.PrintUidGid
+
+				>SS
+				>PUSHW ZPLineBufPtr
+				>PUSHW L.MSG.CDEVEXT
+
+				>PUSHBI 0
+				jsr CS.RUN.ToLineBuf
+				>SR
+
+				jsr CS.RUN.PrintDates
+			
+				ldy #COLOR.CDEV
+				jsr CS.RUN.SetColorY
+
+CS.RUN.PRINT.CDEV1
+				ldx #0
+				clc
+				jsr CS.RUN.FN2LineBuf
+				jsr CS.RUN.LineBufOut
+				bcs .9
+				
+				jmp CS.RUN.PRINT.CDEVEND
+
+.9				rts				
 *--------------------------------------
 CS.RUN.PRINT.BDEV
 				clc
@@ -421,16 +495,13 @@ CS.RUN.PRINT.BDEV
 				bpl .2
 
 				jsr CS.RUN.SrcPathOut
-				bra CS.RUN.PRINT.BDEV2
+				bra CS.RUN.PRINT.BDEV1
 
-.2				lda #'/'
-				jsr CS.RUN.LineBufCOut
-
-				ldx #MAX.COLW-1
-				sec
+.2				ldx #MAX.COLW-1
+				clc
 				jsr CS.RUN.FN2LineBuf
 				jsr CS.RUN.IncColCnt
-				bcc CS.RUN.PRINT.BDEVEND
+				bcc CS.RUN.PRINT.CDEVEND
 
 .9				rts
 *--------------------------------------
@@ -438,6 +509,7 @@ CS.RUN.PRINT.BDEVEXT
 				jsr CS.RUN.PrintMod
 				jsr CS.RUN.PrintUidGid
 
+				>SS
 				>PUSHW ZPLineBufPtr
 				>PUSHW L.MSG.BDEVEXT
 
@@ -451,13 +523,9 @@ CS.RUN.PRINT.BDEVEXT
 				dey
 				>PUSHB (ZPFileStat),y
 
-				ldy #S.STAT.P.SLOT
-				>PUSHB (ZPFileStat),y
-				iny						DRIVE
-				>PUSHB (ZPFileStat),y
-
-				>PUSHBI 6
+				>PUSHBI 4
 				jsr CS.RUN.ToLineBuf
+				>SR
 
 				jsr CS.RUN.PrintDates
 
@@ -465,12 +533,8 @@ CS.RUN.PRINT.BDEVEXT
 				jsr CS.RUN.SetColorY
 
 CS.RUN.PRINT.BDEV1
-				lda #'/'
-				jsr CS.RUN.LineBufCOut
-
-CS.RUN.PRINT.BDEV2
 				ldx #0
-				sec
+				clc
 				jsr CS.RUN.FN2LineBuf
 				jsr CS.RUN.LineBufOut
 				bcc CS.RUN.PRINT.BDEVEND
@@ -486,6 +550,7 @@ CS.RUN.PRINT.PIPE
 				rts
 *--------------------------------------
 CS.RUN.PRINT.DIREND
+CS.RUN.PRINT.CDEVEND
 CS.RUN.PRINT.BDEVEND
 				bit bRecurse
 				bpl .8
@@ -527,9 +592,8 @@ CS.RUN.ENTER.MSG
 				>LDYA L.MSG.ENTER
 				jsr CS.RUN.LineBufYAOut
 
-				ldy #hSrcBasePath
-				lda (pData),y
-				>SYSCALL GetMemPtr
+				>LDYA.G pSrcBasePath
+				
 				jsr CS.RUN.LineBufYAOut
 
 				ldy #0
@@ -575,9 +639,11 @@ CS.RUN.PrintMod	ldy #S.STAT.MODE+1
 CS.RUN.PrintUidGid
 				ldy #S.STAT.UID
 				lda (ZPFileStat),y
+				>SS
 				>PUSHA
 				>PUSHW ZPPWBuf
-				>SYSCALL GetPWUID
+				>LIBC GetPWUID
+				>SR
 				bcs .2
 
 				jsr .8
@@ -588,14 +654,17 @@ CS.RUN.PrintUidGid
 *--------------------------------------
 .3				ldy #S.STAT.GID
 				lda (ZPFileStat),y
+				>SS
 				>PUSHA
 				>PUSHW ZPPWBuf
-				>SYSCALL GetGRGID
+				>LIBC GetGRGID
+				>SR
 				bcc .8
 
 				ldy #S.STAT.GID+1
 
-.7				>PUSHW ZPLineBufPtr
+.7				>SS
+				>PUSHW ZPLineBufPtr
 				>PUSHW L.FMT.int16
 
 				lda (ZPFileStat),y
@@ -605,7 +674,9 @@ CS.RUN.PrintUidGid
 				>PUSHA
 
 				>PUSHBI 2
-				jmp CS.RUN.ToLineBuf
+				jsr CS.RUN.ToLineBuf
+				>SR
+				rts
 
 .8				>LDYA ZPPWBuf
 				ldx #5
@@ -636,6 +707,7 @@ CS.RUN.PrintDates
 				adc ZPFileStat+1
 				sta ZPPtr1+1
 				
+				>SS
 				>PUSHW ZPLineBufPtr
 
 				ldx #0
@@ -655,7 +727,8 @@ CS.RUN.PrintDates
 .7				>PUSHW L.FMT.Date,x
 
 				>PUSHW ZPPtr1
-				>SYSCALL StrFTime
+				>LIBC StrFTime
+				>SR
 
 				lda #10
 				jmp CS.RUN.LineBufPtrAddA
@@ -753,14 +826,18 @@ CS.RUN.SetColorY
 				bit bToFile
 				bmi CS.RUN.IncColCnt.8
 
+				>SS
 				>PUSHW ZPLineBufPtr
 				>PUSHW L.MSG.SETCOLOR
 				tya
 				>PUSHA
 				>PUSHBI 1
+				jsr CS.RUN.ToLineBuf
+				>SR
+				rts
 *--------------------------------------
 CS.RUN.ToLineBuf
-				>SYSCALL SPrintF
+				>LIBC SPrintF
 *--------------------------------------
 CS.RUN.LineBufPtrAddY
 				tya
@@ -803,22 +880,25 @@ CS.RUN.LineBufOut
 .1				lda #0
 				sta (ZPLineBufPtr)
 
-				ldy #S.PS.hStdOut
-				lda (pPS),y
-				>PUSHA
-
+				>SS
+				
 				>LDYA ZPLineBuf
 				>STYA ZPLineBufPtr
-
 				>PUSHYA
 
-				>SYSCALL FPutS
+				ldy #S.PS.pStdOut+1
+				jsr A2osX.GetPSy
+				>PUSHA
+				dey
+				jsr A2osX.GetPSy
+				>PUSHA
+				
+				>LIBC FPutS
+				>SR
 				rts
 *--------------------------------------
 CS.RUN.SrcPathOut
-				ldy #hSrcBasePath
-				lda (pData),y
-				>SYSCALL GetMemPtr
+				>LDYA.G pSrcBasePath
 *--------------------------------------
 CS.RUN.LineBufYAOut
 				ldx #0
@@ -865,39 +945,40 @@ CS.RUN.LineBufCOut
 
 .8				rts
 *--------------------------------------
-CS.DOEVENT		sec
+CS.SIG			sec
 				rts
 *--------------------------------------
 CS.QUIT			jsr X.LeaveSubDir
 				bcc CS.QUIT
 
-				>LDA.G hInclude
+				>LDYA.G pInclude
+				cmp #0
 				jsr .7
 
-				lda hPWBuf
+				>LDYA ZPPWBuf
 				jsr .7
 
-				lda hLineBuf
+				>LDYA ZPLineBuf
 
 .7				beq .8
 
-				>SYSCALL FreeMem
+				>LIBC Free
 
 .8				clc
 				rts
 *--------------------------------------
 				.INB usr/src/shared/x.fileenum.s
 *--------------------------------------
-CS.END
+CS.END			.EQ *
 *--------------------------------------
 OptionList		.AS "ACFLRacflr"
 OptionVars		.DA #bAllmostAll,#bColumn,#bFullPath,#bLong,#bRecurse,#bAllmostAll,#bColumn,#bFullPath,#bLong,#bRecurse
 *--------------------------------------
-MSG.USAGE       .CS "Usage : LS [-A] [-C] [-F] [-L] [-R] [filespec]\r\n"
+MSG.USAGE       .CS "Usage : LS [-A] [-C] [-F] [-I filespec] [-L] [-R] [filespec]\r\n"
                 .CS "   -A : Show all files\r\n"
                 .CS "   -C : List in one column\r\n"
                 .CS "   -F : Show full paths\r\n"
-				.CS "   -I <*,? wildcards allowed> : Ignore matching files\r\n"
+				.CS "   -I filespec : Ignore matching files\r\n"
                 .CS "   -L : Use long listing format\r\n"
                 .CZ "   -R : Recursively list subdirectories\r\n"
 *--------------------------------------
@@ -905,7 +986,8 @@ MSG.ENTER       .CZ "Directory:"
 *--------------------------------------
 MSG.REGEXT      .CZ "  %10u "
 MSG.DIREXT      .CZ "              <dir>   "
-MSG.BDEVEXT     .CZ " %5D/%5D     s%dd%d "
+MSG.CDEVEXT     .CZ "              <cdev>  "
+MSG.BDEVEXT     .CZ " %5D/%5D  <bdev>  "
 *--------------------------------------
 MSG.SETCOLOR	.CZ "\e[1;%dm"
 PRODOS.FT.HEX   .HS 0406FAFCFDCBCCCFFF
@@ -925,9 +1007,11 @@ FMT.int16       .AZ "%6D"
 TYPES           .AS "-dcblssp"
 ACCESS          .AS "xwrxwrxwr"
 *--------------------------------------
+ID.END			.EQ *
+*--------------------------------------
 				.DUMMY
 				.OR 0
-DS.START
+
 TIME.SysTime    .BS S.TIME
 
 				.INB usr/src/shared/x.fileenum.g

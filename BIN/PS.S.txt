@@ -7,16 +7,15 @@ NEW
 *--------------------------------------
 				.INB inc/macros.i
 				.INB inc/a2osx.i
-				.INB inc/kernel.i
 *--------------------------------------
 				.DUMMY
 				.OR ZPBIN
 ZS.START
 ZPPSPtr			.BS 2
+ZPCmdLinePtr	.BS 2
 ZPSessionPtr	.BS 2
 ZPArgV			.BS 2
 Index			.BS 1
-hSession		.BS 1
 ZS.END
 				.ED
 *--------------------------------------
@@ -25,20 +24,20 @@ ZS.END
 CS.START		cld
 				jmp (.1,x)
 				.DA #$61				6502,Level 1 (65c02)
-				.DA #1					BIN Layout Version 1
-				.DA #0					S.PS.F.EVENT
+				.DA #2					BIN Layout Version 2
+				.DA #0					S.PS.F.SIG
 				.DA #0
-				.DA CS.END-CS.START		Code Size (without Constants)
-				.DA DS.END-DS.START		Data SegmentSize
+				.DA CS.END
+				.DA ID.END
+				.DA DS.END
 				.DA #32					Stack Size
 				.DA #ZS.END-ZS.START	Zero Page Size
-				.DA 0
 *--------------------------------------
 * Relocation Table
 *--------------------------------------
 .1				.DA CS.INIT
 				.DA CS.RUN
-				.DA CS.DOEVENT		
+				.DA CS.SIG
 				.DA	CS.QUIT
 L.MSG0			.DA MSG0
 L.MSG1			.DA MSG1
@@ -46,7 +45,7 @@ L.MSG2			.DA MSG2
 L.MSG3			.DA MSG3
 L.STATUS		.DA MSG.INIT
 				.DA MSG.RUN
-				.DA MSG.EVENT
+				.DA MSG.SIG
 				.DA MSG.QUIT
 				.DA 0
 *--------------------------------------
@@ -54,112 +53,131 @@ CS.INIT			clc
 				rts
 *--------------------------------------
 CS.RUN			lda #1
-				>SYSCALL ArgV
-				bcs .10
+				>LIBC ArgV
+				bcs CS.RUN.AllPSs
 
-				>SYSCALL AToI
+				>LIBC AToI
 				bcs .90
 
-				tax
-				bne .90
+				>LIBC GetPS
+				bcs .99
 
-				tya
+				>STYA ZPPSPtr
 
-*				ldx #0
-
-.11				cmp PSs.PID,x	
-				beq .12
-
-				inx
-				cpx #K.PS.MAX
-				bne .11
-
-				lda #E.NSP
-*				sec
-				rts
-
-.12				lda PSs.hPS,x
 				jsr CS.RUN.DUMP
-				bcs .9
+				bcs .99
+
+*				jsr CS.RUN.PrintArgs
+*				bcs .9
+
+				>LDYA L.MSG3
+				>LIBC PutS
 
 				lda #0
 				sec
 				rts
 
-.10				>LDYA L.MSG0
-				>SYSCALL PutS
-				ldx Index
+.90				lda #E.SYN
+				sec
+.99				rts
+*--------------------------------------
+CS.RUN.AllPSs	>LDYA L.MSG0
+				>LIBC PutS
 
-.1				lda PSs.hPS,x
-				beq .7
+				lda #2					skip PS 0
+
+.1				sta Index
+				>KAPI GetPSByID
+				bcs .7
+
+				>STYA ZPPSPtr
 
 				jsr CS.RUN.DUMP
+				bcs .9
+
+*				jsr CS.RUN.PrintArgs
+*				bcs .9
+
+				>LDYA L.MSG3
+				>LIBC PutS
+
+				>LDYA ZPPSPtr
+				>LIBC Free
+
 				>SLEEP
 
 .7				inc Index
-				ldx Index
-				cpx #K.PS.MAX
-				bne .1
+				inc Index
 
-.8				lda #0					tell Kernel that all done ok, but 
-				sec						we do not want to stay in memory
-.9				rts
+				lda Index
+				cmp #K.PS.MAX+2
+				bcc .1
 
-.90				lda #E.SYN
+				lda #0
 				sec
-				rts
-*--------------------------------------
-CS.RUN.DUMP		>SYSCALL GetMemPtr
-				>STYA ZPPSPtr
 
+.9				rts
+*--------------------------------------
+CS.RUN.DUMP		jsr CS.RUN.DecodeFlags
+
+				jsr CS.RUN.GetCmdLine
+
+				>SS
 				>PUSHW L.MSG1
-				
-				ldx Index
-				lda PSs.hPS,x
+				ldy #S.PS.Bnk
+				lda (ZPPSPtr),y
 				>PUSHA
 
 				ldy #S.PS.PPID
 
-.1				lda (ZPPSPtr),y
+.1				iny
+				lda (ZPPSPtr),y
+				>PUSHA
+				dey
+				lda (ZPPSPtr),y
 				>PUSHA
 				iny
-				cpy #S.PS.CPID+1
+				iny
+				cpy #S.PS.CPID+2
 				bne .1
-				
-				lda PSs.Stats,x
-				>PUSHA					CPU%
 
+				ldy #S.PS.CPU
+				lda (ZPPSPtr),y
+				>PUSHA
 				ldy #S.PS.S
 				lda (ZPPSPtr),y
 				tax
-
 				>PUSHW L.STATUS,x
 
-				jsr CS.RUN.DecodeFlags
 				>PUSHEA.G PS.FLAGS
 
-				ldy #S.PS.hSession
+				ldy #S.PS.pSession+1
 				lda (ZPPSPtr),y
-				tax
-				lda USRs.hSID-1,x
-				>SYSCALL GetStkObj
-				bcs .9
-				
+				pha
+				dey
+				lda (ZPPSPtr),y
+				ply
+
 				>STYA ZPSessionPtr
-				stx hSession
-				
-				ldy #S.SESSION.UID
+
+				ldy #S.SESSION.UID+1
 				lda (ZPSessionPtr),y
 				>PUSHA
+				dey
+				lda (ZPSessionPtr),y
+				>PUSHA
+
+				>PUSHW ZPCmdLinePtr
+
+				>PUSHBI 16
+				>LIBC PrintF
+				>SR
 				
-				>PUSHBI 10
-			
-				>SYSCALL PrintF
-
-				lda hSession
-				>SYSCALL FreeMem
-
-				jmp CS.RUN.PrintArgs
+				>LDYA ZPCmdLinePtr
+				beq .9
+				
+				>LIBC Free
+				
 .9				rts
 *--------------------------------------
 CS.RUN.DecodeFlags
@@ -178,31 +196,53 @@ CS.RUN.DecodeFlags
 				pla
 				dey
 				dex
-				bpl .2	
+				bpl .2
 
 				rts
 *--------------------------------------
+CS.RUN.GetCmdLine
+				stz ZPCmdLinePtr+1
+				
+				ldy #S.PS.PID
+				lda (ZPPSPtr),y
+				pha
+				iny
+				lda (ZPPSPtr),y
+				ply
+
+				>KAPI GetPSCmdLine
+				bcs .9
+				
+				>STYA ZPCmdLinePtr
+				
+.9				rts				
+*--------------------------------------
 CS.RUN.PrintArgs
-				ldy #S.PS.hARGV
+				ldy #S.PS.pARGV+1
 				lda (ZPPSPtr),y
 				beq .8					NO ARGV in PS0
 
-				>SYSCALL GetMemPtr
-				>STYA ZPArgV
+				sta ZPArgV+1
+				dey
+				lda (ZPPSPtr),y
+				sta ZPArgV
 
 .1				lda (ZPArgV)
 				beq .8
 
+				>SS
 				>PUSHW L.MSG2
 				>PUSHW ZPArgV
 				>PUSHBI 2
-				>SYSCALL PrintF
+				>LIBC PrintF
+				>SR
 				bcs .9
 
 .2				inc ZPArgV
 				bne .3
 
 				inc ZPArgV+1
+
 .3				lda (ZPArgV)
 				bne .2
 
@@ -212,33 +252,34 @@ CS.RUN.PrintArgs
 				inc ZPArgV+1
 				bra .1
 
-.8				>LDYA L.MSG3
-				>SYSCALL PutS
+.8				clc
+
 .9				rts
 *--------------------------------------
-CS.DOEVENT		sec
+CS.SIG			sec
 				rts
 *--------------------------------------
 CS.QUIT			clc
 				rts
 *--------------------------------------
-CS.END			
-MSG0			.CZ "\e[?7lhPS pPID  PID cPID CPU% Status Flags    UID Args"
-MSG1			.CZ "%3d  %3d  %3d  %3d %3d\% %6s %s %3d"
+CS.END			.EQ *
+*--------------------------------------
+MSG0			.CZ "\e[?7lBnk pPID  PID   cPID   CPU% Status Flags    UID   CmdLine"
+MSG1			.CZ "%3d %5D %5D %5D  %3d%% %6s %s %5D %s"
 MSG2			.CS " %s"
 MSG3			.DA #0
 MSG.FLAGS		.AS "HS???XEN"
 MSG.INIT		.AZ "Init"
 MSG.RUN			.AZ "Run"
-MSG.EVENT		.AZ "Event"
+MSG.SIG			.AZ "Signal"
 MSG.QUIT		.AZ "Quit"
+*--------------------------------------
+ID.END			.EQ *
 *--------------------------------------
 				.DUMMY
 				.OR 0
-DS.START
 PS.FLAGS		.BS 9
-DS.END
-				.ED
+DS.END			.ED
 *--------------------------------------
 MAN
 SAVE usr/src/bin/ps.s

@@ -1,4 +1,4 @@
-# A2osX Macro Assembler (0.95)
+# A2osX Macro Assembler (0.94)
 
 ## Description
 
@@ -33,7 +33,7 @@ Table-driven, add your favorite CPU creating a new CPU asm.xxxx file.
 | .BS  | Block (Byte) Storage | S-C, A2osX     | Working     | `.BS count[,value]` | Reserves `count` bytes in output and sets them to `value` (or zero if omitted) |
 | .CS  | C-string | S-C 3.1, A2osX     | Working     | `.CS "text\a\b\e\f\n\r\n\r\t\v"` | |
 | .CZ  | C-String Zero terminated| S-C 3.1, A2osX     | Working     | (same as above) | ZERO-terminated |
-| .DA  | DAta value | S-C, A2osX     | Working | `.DA value` | 2-byte address: `.DA $1234` (see expressions) |
+| .DA  | DAta value | S-C, A2osX     | Working | `.DA value` | 2-byte address: `.DA $1234` only high byte: `.DA /$1234` only low byte: `.DA #$1234` |
 | .DO  | conditional start | S-C, A2osX     | Working |             | |
 | .DU,.DUMMY | begin DUmmy section | S-C, A2osX     | Working |             | |
 | .ED  | End Dummy section | S-C, A2osX     | Working |             | |
@@ -59,26 +59,6 @@ Table-driven, add your favorite CPU creating a new CPU asm.xxxx file.
 | .TI  | TItle | S-C, A2osX     | IGNORED |             | |
 | .US  | USer defined | S-C, A2osX     | IGNORED |             | |
 
-## Expressions
-
-| Code | Description | Scope |
-|-|-|-|
-| \- | Negate : `.AS -"String"` output  | .AS .AT .AZ .CS .CZ |
-| \' | Char, MSB=0 `lda #'a | OPCODES |
-| \" | Char, MSB=1 `lda #"a | OPCODES |
-| \# | Immediate LO byte : `.DA #$1234` output 34 | .DA |
-| \/ | Immediate HI byte : `.DA /$1234` output 12 | .DA  
-| \^ | Immediate 3rd byte : `.DA ^$123456` output 12 | .DA |
-| \< | Force 24 bits output LO : `.DA <$123456` output 56 34 12 | .DA |
-| \> | Force 32 bits output LO : `.DA >$123456` output 00 56 34 12 | .DA |
-|-|-|-|
-| \> | Force 16 bits operand : `ldx >ZP.A1L` output AE 3C 00 | OPCODES |
-| \>\> | Force 24 bits operand : `lda >>ZP.A1L` output AF 3C 00 00 | OPCODES |
-|-|-|-|
-| \#\# | Immediate word LO : `lda ##IMMVAL` | 65816 OPCODES |
-| \/\/ | Immediate word MID : `lda //IMMVAL` | 65816 OPCODES |
-| \^\^ | Immediate word HI: `lda ^^IMMVAL` | 65816 OPCODES |
-
 ## License
 A2osX is licensed under the GNU General Pulic License.
 
@@ -96,4 +76,4 @@ The full A2osX license can be found **[Here](../LICENSE)**.
 
 ## Copyright
 
-Copyright 2015 - 2024, Remy Gibert and the A2osX contributors.
+Copyright 2015 - 2022, Remy Gibert and the A2osX contributors.

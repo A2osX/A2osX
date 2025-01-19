@@ -7,7 +7,6 @@ NEW
 *--------------------------------------
 				.INB inc/macros.i
 				.INB inc/a2osx.i
-				.INB inc/kernel.i
 				.INB inc/mli.i
 				.INB inc/mli.e.i
 *--------------------------------------
@@ -25,7 +24,7 @@ bLineNum		.BS 1
 bSuppressBlankLine	.BS 1
 ArgIndex		.BS 1
 hBuf			.BS 1
-hFile			.BS 1
+pFile			.BS 2
 LineNum			.BS 2
 bPrintedBlankLine	.BS 1
 ZS.END			.ED	
@@ -35,14 +34,14 @@ ZS.END			.ED
 CS.START		cld
 				jmp (.1,x)
 				.DA #$61				6502,Level 1 (65c02)
-				.DA #1					BIN Layout Version 1
-				.DA #S.PS.F.EVENT		S.PS.F
+				.DA #2					BIN Layout Version 2
+				.DA #0					S.PS.F.EVENT
 				.DA #0
-				.DA CS.END-CS.START		CS
-				.DA DS.END-DS.START		DS
-				.DA #64					SS
+				.DA CS.END
+				.DA ID.END
+				.DA DS.END
+				.DA #64					Stack Size
 				.DA #ZS.END-ZS.START	Zero Page Size
-				.DA 0
 *--------------------------------------
 * Relocation Table
 *--------------------------------------
@@ -63,7 +62,7 @@ CS.INIT			clc
 *--------------------------------------
 CS.RUN			inc ArgCount
 				lda ArgCount
-				>SYSCALL ArgV
+				>LIBC ArgV
 				bcs .7
 
 				>STYA ZPPtr1
@@ -85,7 +84,7 @@ CS.RUN			inc ArgCount
 				bpl .2
 
 .99				>LDYA L.MSG.USAGE
-				>SYSCALL PutS
+				>LIBC PutS
 				lda #E.SYN
 				sec
 .9				rts
@@ -107,40 +106,55 @@ CS.RUN			inc ArgCount
 				beq .99
 
 				>LDYAI 256
-				>SYSCALL GetMem
+				>LIBC Malloc
 				bcs .9
 
 				>STYA ZPBufPtr
-				stx hBuf
 				
-				ldy #S.PS.hStdOut
-				lda (pPS),y
-				tay
-				ldx FILEs.hFD-1,y
-				ldy FDs.pLO-1,x
-				lda FDs.pHI-1,x
-				>STYA ZPPtr1
+				ldy #S.PS.pStdOut
+				jsr A2osX.GetPSy
+				pha
+				iny
+				jsr A2osX.GetPSy
+				ply
 
-				lda (ZPPtr1)
+				>LIBC FileNo
+				bcs .9
+
+				>SS
+				>PUSHYA
+				>PUSHEA.G STATBUF
+				>LIBC FStat
+				>SR
+				bcs .9
+				
+				>LDA.G STATBUF+S.STAT.MODE+1
+				and #$F0
 
 				beq CS.RUN.LOOP
 
-				cmp #S.FD.T.PIPE
+				cmp /S.STAT.MODE.FIFO
 				beq CS.RUN.LOOP
 			
+				>SS
 				>PUSHW L.MSG.INIT
 				>PUSHBI 0
-				>SYSCALL PrintF
+				>LIBC PrintF
+				>SR
 *--------------------------------------
-CS.RUN.LOOP		ldy #S.PS.hStdIn
-				lda (pPS),y
-				>SYSCALL FEOF
+CS.RUN.LOOP		ldy #S.PS.pStdIn
+				jsr A2osX.GetPSy
+				pha
+				iny
+				jsr A2osX.GetPSy
+				ply
+				>LIBC FEOF
 				bcs .90					IO error
 
 				tay
 				bne .10					no char
 
-				>SYSCALL GetChar
+				>LIBC GetChar
 				bcs .9					IO error
 
 				cmp #$03				Ctrl-C
@@ -157,12 +171,12 @@ CS.RUN.LOOP		ldy #S.PS.hStdIn
 .10				lda bPause
 				bne CS.RUN.LOOP			Pause...
 
-.11				lda hFile
+.11				lda pFile+1
 				bne .2
 
 .1				inc ArgIndex
 				lda ArgIndex
-				>SYSCALL ArgV
+				>LIBC ArgV
 				bcs .99					No more arg...the end!
 
 				>STYA ZPPtr1
@@ -174,17 +188,20 @@ CS.RUN.LOOP		ldy #S.PS.hStdIn
 				jsr CS.RUN.OPEN
 .90				bcs .9
 
-				sta hFile
+				>STYA pFile
 
-.2				>PUSHA
+.2				>SS
 				>PUSHW ZPBufPtr
 				>PUSHWI	254				Leave room for CRLF
-				>SYSCALL FGetS
+				>PUSHW pFile
+				>LIBC FGetS
+				>SR
 				bcs .7
 
 				jsr CS.RUN.PRINT
-				bcc CS.RUN.LOOP
-				rts
+				bcs .9
+				
+				jmp CS.RUN.LOOP
 
 .7				cmp #MLI.E.EOF
 				bne .9
@@ -197,11 +214,14 @@ CS.RUN.LOOP		ldy #S.PS.hStdIn
 				rts
 *--------------------------------------
 CS.RUN.OPEN		stz bPrintedBlankLine	Reset this flag for the new file
+				
+				>SS
 				>PUSHYA
 				>PUSHBI	O.RDONLY+O.TEXT
 				>PUSHBI S.FI.T.TXT
 				>PUSHWZ				Aux type
-				>SYSCALL FOpen
+				>LIBC FOpen
+				>SR
 				rts
 *--------------------------------------
 CS.RUN.PRINT	inc LineNum
@@ -244,7 +264,7 @@ CS.RUN.PRINT	inc LineNum
 				bra .20
 	
 .21				>LDYA ZPBufPtr
-				>SYSCALL PutS
+				>LIBC PutS
 				rts
 *--------------------------------------
 .3				stz ByteIndex
@@ -256,7 +276,7 @@ CS.RUN.PRINT	inc LineNum
 				cmp #C.SPACE
 				bcc .5
 
-				>SYSCALL PutChar
+				>LIBC PutChar
 .99				bcs .9
 
 				bra .62
@@ -280,48 +300,54 @@ CS.RUN.PRINT	inc LineNum
 				inc ZPPtr1+1
 				bra .6
 
-.61				>PUSHW L.MSG.CTRLCHAR
+.61				>SS
+				>PUSHW L.MSG.CTRLCHAR
 				>PUSHW ZPPtr1
 				>PUSHBI 2
-				>SYSCALL PrintF
+				>LIBC PrintF
+				>SR
 				bcs .9
 
 .62				inc ByteIndex
 				bne .4
 				
-.7				>PUSHW L.MSG.CRLF
+.7				>SS
+				>PUSHW L.MSG.CRLF
 				>PUSHBI 0
-				>SYSCALL PrintF
-
+				>LIBC PrintF
+				>SR
 .9				rts
 *--------------------------------------
 CS.RUN.PRINTNUM	clc
 				lda bLineNum
 				bpl .8
 
+				>SS
 				>PUSHW L.MSG.LINENUM
 				>PUSHW LineNum
 				>PUSHBI 2
-				>SYSCALL PrintF
+				>LIBC PrintF
+				>SR
 .8				rts
 *--------------------------------------
-CS.QUIT			lda hBuf
+CS.QUIT			>LDYA ZPBufPtr
 				beq CS.RUN.CLOSE
-				>SYSCALL FreeMem
+				
+				>LIBC Free
 
-CS.RUN.CLOSE	lda hFile
+CS.RUN.CLOSE	>LDYA pFile
 				beq .8
 
-				stz hFile
+				stz pFile+1
 
-				>SYSCALL FClose
+				>LIBC FClose
 .8				clc
 				rts
 *--------------------------------------
 CS.DOEVENT		sec
 				rts
 *--------------------------------------
-CS.END
+CS.END			.EQ *
 *--------------------------------------
 OptionList		.AS "ANSans"
 OptionVars		.DA #bPrintAll,#bLineNum,#bSuppressBlankLine,#bPrintAll,#bLineNum,#bSuppressBlankLine
@@ -368,9 +394,12 @@ ASCII			.PS "NUL"
 				.PS "RS"
 				.PS "US"
 *--------------------------------------
+ID.END			.EQ *
+*--------------------------------------
 				.DUMMY
 				.OR 0
-DS.START
+
+StatBuf			.BS S.STAT
 DS.END			.ED
 *--------------------------------------
 MAN
