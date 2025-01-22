@@ -1,0 +1,536 @@
+NEW
+  AUTO 3,1
+*--------------------------------------
+VEDRIVE.MACInit	ldx #5
+
+.1				lda CONF.SRCMAC,x
+
+				sta DHCP.DISC.SRCMAC,x
+				sta DHCP.REQ.SRCMAC,x
+
+				sta DHCP.DISC.CHADDR,x
+				sta DHCP.REQ.CHADDR,x
+				
+				sta ARP.REQ.SRCMAC,x
+				sta ARP.REQ.SHA,x
+				
+				sta ARP.REP.SRCMAC,x
+				sta ARP.REP.SHA,x
+
+				sta ADT.REQ.SRCMAC,x
+
+				dex
+				bpl .1
+
+				rts
+*--------------------------------------
+VEDRIVE.IPInit	ldx #3
+
+.1				lda CONF.ADDRESS,x
+
+				sta ARP.REQ.SPA,x
+				sta ARP.REP.SPA,x
+				sta ADT.REQ.IP.SRC,x
+				
+				lda CONF.SERVER,x
+				sta ARP.REQ.TPA,x
+				sta ADT.REQ.IP.DST,x
+
+				sta ARP.REP.TPA,x
+				
+				dex
+				bpl .1
+				
+				rts
+*--------------------------------------
+VEDRIVE.DHCPReq	>LDYAI DHCP.DISC
+				>STYA ZPBufPtr
+				>LDYAI DHCP.DISC.LEN
+				>STYA ZPBufCnt
+				jsr VEDRIVE.SendUDP
+				bcs .9
+
+				jsr VEDRIVE.InitTimer
+
+.2				jsr VEDRIVE.READ
+				bcc .3
+
+				jsr VEDRIVE.Wait
+				bcc .2
+
+				rts
+
+.3				jsr VEDRIVE.CheckDHCPOffer
+				bcs .2
+
+				>LDYAI DHCP.REQ
+				>STYA ZPBufPtr
+				>LDYAI DHCP.REQ.LEN
+				>STYA ZPBufCnt
+				jsr VEDRIVE.SendUDP
+				bcs .9
+
+				jsr VEDRIVE.InitTimer
+
+.4				jsr VEDRIVE.READ
+				bcc .5
+
+				jsr VEDRIVE.Wait
+				bcc .4
+
+				rts
+
+.5				>LDYAI FRAMEBUF
+				>STYA ZPBufPtr
+
+				jsr VEDRIVE.CheckDHCPFrame
+				bcs .4
+
+				eor #S.DHCP.OPTIONS.DHCPAck
+				bne .4
+
+*				clc
+				rts
+
+.9				sec
+				rts
+*--------------------------------------
+VEDRIVE.IPChecksum
+				ldy #S.IP.TOTAL.LENGTH+1
+				lda ZPBufCnt
+				sec
+				sbc #S.ETH.EII
+				sta (ZPBufPtr),y
+				dey
+				lda ZPBufCnt+1
+				sbc /S.ETH.EII
+				sta (ZPBufPtr),y
+				lda #0
+				ldy #S.IP.HDR.CHECKSUM
+				sta (ZPBufPtr),y
+				iny
+				sta (ZPBufPtr),y
+
+				stz ZPCheckSum			RESET IP CHECKSUM
+				stz ZPCheckSum+1
+
+				clc
+
+				ldy #S.IP.V.IHL
+
+				ldx #10					10 words for IP Header
+
+.2				lda (ZPBufPtr),y
+				adc ZPCheckSum
+				sta ZPCheckSum
+				iny
+				lda (ZPBufPtr),y
+				adc ZPCheckSum+1
+				sta ZPCheckSum+1
+				iny
+				dex
+				bne .2
+
+				ldy #S.IP.HDR.CHECKSUM
+				lda ZPCheckSum
+				adc #0
+				eor #$FF
+				sta (ZPBufPtr),y
+				iny
+				lda ZPCheckSum+1
+				adc #0
+				eor #$FF
+				sta (ZPBufPtr),y
+				rts
+*--------------------------------------
+VEDRIVE.UDPChecksum
+				clc
+
+				ldy #S.UDP.LENGTH+1
+				lda (ZPBufPtr),y
+				adc #S.IP.PROTOCOL.UDP
+				sta ZPCheckSum+1
+
+				dey
+				lda (ZPBufPtr),y
+				adc /S.IP.PROTOCOL.UDP	(all zero)
+				sta ZPCheckSum
+
+				ldy #S.IP.SRC
+				ldx #4					4 words for SRC & DST IP
+
+.1				lda (ZPBufPtr),y
+				adc ZPCheckSum
+				sta ZPCheckSum
+				iny
+				lda (ZPBufPtr),y
+				adc ZPCheckSum+1
+				sta ZPCheckSum+1
+				iny
+				dex
+				bne .1
+
+				ldy #S.UDP.LENGTH+1
+				lda (ZPBufPtr),y
+				eor #$ff
+				tax
+
+				dey
+				lda (ZPBufPtr),y
+				eor #$ff
+				ldy #S.UDP.CHECKSUM
+*--------------------------------------
+* X,A = !ByteCount, Y = Offset in Frame
+*--------------------------------------
+VEDRIVE.ComputeChecksum
+				phy						Save Offset
+				pha						Save !ByteCount.HI
+
+				lda #0					Reset Checksum
+				sta (ZPBufPtr),y
+				iny
+				sta (ZPBufPtr),y
+
+				>LDYA ZPBufPtr
+				>STYA ZPPtr1
+
+				ldy #S.IP
+
+.1				inx
+				bne .11
+
+				pla
+				inc
+				beq .8
+
+				pha
+.11				lda (ZPPtr1),y
+				adc ZPCheckSum
+				sta ZPCheckSum
+
+				iny
+				bne .20
+
+				inc ZPPtr1+1
+.20				inx
+				bne .2
+
+				pla
+				inc
+				beq .7
+
+				pha
+
+.2				lda (ZPPtr1),y
+
+				adc ZPCheckSum+1
+				sta ZPCheckSum+1
+				iny
+				bne .1
+
+				inc ZPPtr1+1
+				bra .1
+
+.7				adc ZPCheckSum+1		A=0 from beq .7
+				sta ZPCheckSum+1
+
+.8				ply
+				lda ZPCheckSum
+				adc #0					Don't forget to add last carry!!!
+				eor #$FF
+				sta (ZPBufPtr),y
+				iny
+				lda ZPCheckSum+1
+				adc #0					Don't forget to add last carry!!!
+				eor #$FF
+				sta (ZPBufPtr),y
+				rts
+*--------------------------------------
+VEDRIVE.CheckDHCPOffer
+				>LDYAI FRAMEBUF
+				>STYA ZPBufPtr
+
+				jsr VEDRIVE.CheckDHCPFrame
+				bcs .9
+
+				cmp #S.DHCP.OPTIONS.DHCPOffer
+				bne .9
+
+				ldy #S.DHCP.YIADDR+3
+				ldx #3
+
+.2				lda (ZPBufPtr),y
+				sta DHCP.REQ.OPT.REQIP,x
+				sta CONF.ADDRESS,x
+				dey
+				dex
+				bpl .2
+
+				ldy #S.DHCP.SIADDR+3
+				lda (ZPBufPtr),y
+				bne .3
+
+				ldy #S.IP.SRC+3
+
+.3				ldx #3
+
+.4				lda (ZPBufPtr),y
+				sta DHCP.REQ.OPT.SVRIP,x
+				dey
+				dex
+				bpl .4
+
+.5				inc	ZPPtr1				skip Option 53 (DHCPOffer:530102)
+				bne .6
+
+				inc ZPPtr1+1
+
+.6				lda (ZPPtr1)
+				sec
+				adc ZPPtr1			add option len + 1
+				sta ZPPtr1
+				bcc .7
+
+				inc ZPPtr1+1
+
+.7				lda (ZPPtr1)
+				cmp #S.DHCP.OPTIONS.END
+				beq .8
+
+				jsr VEDRIVE.GetDHCPOption
+				bra .5
+
+.8				clc
+				rts
+
+.9				sec
+				rts
+*--------------------------------------
+VEDRIVE.CheckDHCPFrame
+				jsr VEDRIVE.CheckUDPFrame
+				bcs .9
+
+				ldy #S.DHCP.XID+3
+				ldx #3
+
+.1				lda (ZPBufPtr),y
+				cmp DHCP.DISC.XID,x	same XID ?
+				bne .9
+
+				dey
+				dex
+				bpl .1
+
+				lda ZPBufPtr
+				clc
+				adc #S.DHCP.OPTIONS
+				sta ZPPtr1
+
+				lda ZPBufPtr+1
+				adc /S.DHCP.OPTIONS
+				sta ZPPtr1+1
+
+				lda (ZPPtr1)
+				cmp #S.DHCP.OPTIONS.MSGTYPE
+				bne .9
+
+				ldy #2
+				lda (ZPPtr1),y
+
+				clc
+				rts
+
+.9				sec
+				rts
+*--------------------------------------
+VEDRIVE.GetDHCPOption
+				cmp #S.DHCP.OPTIONS.MASK
+				bne .1
+
+				ldx #CONF.MASK-CONF.IPCFG
+				bra .5
+
+.1				cmp #S.DHCP.OPTIONS.GW
+				bne .2
+
+				ldx #CONF.GATEWAY-CONF.IPCFG
+				bra .5
+
+.2				cmp #S.DHCP.OPTIONS.SRVID
+				bne .9
+
+				ldy #5
+				ldx #3
+
+.3				lda (ZPPtr1),y
+				sta DHCP.REQ.OPT.SVRIP,x
+				dey
+				dex
+				bpl .3
+
+				rts
+
+.5				ldy #2					Skip Byte count
+				lda #4
+
+.6				pha
+				lda (ZPPtr1),y
+				sta CONF.IPCFG,x
+				iny
+				inx
+				pla
+				dec
+				bne .6
+
+.9				rts
+*--------------------------------------
+VEDRIVE.CheckADTRep
+				jsr VEDRIVE.CheckUDPFrame
+				bcs .9
+
+				ldy #S.TCPUDP.DSTPORT
+				lda (ZPBufPtr),y
+				cmp #$C0
+				bne .9
+
+				iny
+				lda (ZPBufPtr),y
+				bne .9
+
+				clc
+				rts
+
+.9				sec
+				rts
+*--------------------------------------
+VEDRIVE.CheckUDPFrame
+				ldy #S.ETH.EII.TYPE
+				lda (ZPBufPtr),y
+				cmp /S.ETH.EII.TYPE.IP
+				bne .9
+
+				iny
+				lda (ZPBufPtr),y
+				cmp #S.ETH.EII.TYPE.IP
+				bne .9
+
+				ldy #S.IP.PROTOCOL
+				lda (ZPBufPtr),y
+				cmp #S.IP.PROTOCOL.UDP
+				bne .9
+
+				clc
+				rts
+
+.9				sec
+				rts
+*--------------------------------------
+VEDRIVE.ARPReq	>LDYAI ARP.REQ
+				>STYA ZPBufPtr
+				>LDYAI S.ARP
+				>STYA ZPBufCnt
+				jsr VEDRIVE.SendARP
+				bcs .9
+
+				jsr VEDRIVE.InitTimer
+				
+				stz bRemoteMac
+
+.2				jsr VEDRIVE.READ
+				bcc .3
+
+				jsr VEDRIVE.Wait
+				bcc .2
+
+				rts
+
+.3				jsr VEDRIVE.CheckARPFrame
+				
+				bit bRemoteMac
+				bpl .2
+
+				clc
+.9				rts
+*--------------------------------------
+VEDRIVE.CheckARPFrame
+				ldy #S.ETH.EII.TYPE
+				lda (ZPBufPtr),y
+				cmp /S.ETH.EII.TYPE.ARP
+				bne .9
+
+				iny
+				lda (ZPBufPtr),y
+				cmp #S.ETH.EII.TYPE.ARP
+				bne .9
+
+				ldy #S.ARP.OPERATION+1
+				lda (ZPBufPtr),y
+				cmp #S.ARP.OPERATION.REP
+				bne .5
+*--------------------------------------
+				ldy #S.ARP.SPA+3
+				ldx #3
+
+.1				lda (ZPBufPtr),y
+				cmp CONF.SERVER,x
+				bne .8
+
+				dey
+				dex
+				bpl .1
+
+				ldy #S.ARP.SHA+5
+				ldx #5
+
+.2				lda (ZPBufPtr),y
+				sta ADT.REQ.DSTMAC,x
+				sta ARP.REP.DSTMAC,x
+				sta ARP.REP.THA,x
+				dey
+				dex
+				bpl .2
+
+				dec bRemoteMac
+
+				clc
+				rts
+*--------------------------------------
+.5				cmp #S.ARP.OPERATION.REQ
+				bne .8
+
+				ldy #S.ARP.TPA+3
+				ldx #3
+
+.6				lda (ZPBufPtr),y
+				cmp CONF.ADDRESS,x
+				bne .8
+
+				dey
+				dex
+				bpl .6
+
+				ldy #S.ARP.SHA+9
+				ldx #9
+
+.7				lda (ZPBufPtr),y
+				sta ARP.REP.THA,x
+				dey
+				dex
+				bpl .7
+
+				>LDYAI ARP.REP
+				>STYA ZPBufPtr
+				>LDYAI S.ARP
+				>STYA ZPBufCnt
+				jsr VEDRIVE.SendARP
+
+.8				clc
+				rts
+				
+.9				sec
+				rts
+*--------------------------------------
+MAN
+SAVE usr/src/prodos.fx/pm.vedrive.s.ip
+LOAD usr/src/prodos.fx/pm.vedrive.s
+ASM

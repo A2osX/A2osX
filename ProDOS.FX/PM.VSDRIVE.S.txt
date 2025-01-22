@@ -1,0 +1,622 @@
+NEW
+  AUTO 3,1
+				.LIST OFF
+				.OP	65C02
+				.OR	$2000
+				.TF pm.vsdrive
+*--------------------------------------
+				.INB inc/macros.i
+				.INB inc/io.i
+				.INB inc/monitor.i
+				.INB inc/mli.i
+				.INB inc/mli.e.i
+				.INB inc/com.6551.i
+*--------------------------------------
+TmpPtr1			.EQ	$0
+ADT.CMD.VSD		.EQ $C5					"E": Virtual Drive Command Envelope
+ADT.CMD.PING	.EQ $D9					"Y": PING
+DRV.EntryPoint	.EQ $BF41
+*--------------------------------------
+VSDRIVE.Init	>LDYAI VSDRIVE.MSG0
+				jsr X.PrintF
+
+				jsr VSDRIVE.Check
+				bcs .90
+
+				stz TmpPtr1
+				lda #$C1
+				sta TmpPtr1+1
+
+.2				jsr SSC.Detect
+				bcs .99
+
+				lda TmpPtr1+1			Slot Cn
+				and #$0F
+				pha						slot n
+				>LDYAI VSDRIVE.SSCOK
+				jsr X.PrintF
+
+				jsr VSDRIVE.Ping
+				bcs .92
+
+				>LDYAI VSDRIVE.SRVOK
+				jsr X.PrintF
+
+				jsr VSDRIVE.SetSlot
+				bcs .91
+
+				pha						Push slot
+				pha						2 times
+				>LDYAI VSDRIVE.DEVOK
+				jsr X.PrintF
+
+				jsr VSDRIVE.Install
+				>LDYAI VSDRIVE.OK
+				jsr X.PrintF
+				rts
+
+.90				>LDYAI VSDRIVE.DRVKO
+				jsr X.PrintF
+				rts
+
+.91				>LDYAI VSDRIVE.NOSLOT
+				jsr X.PrintF
+				rts
+
+.92				pha						Push EC
+				>LDYAI VSDRIVE.SRVKO
+				jsr X.PrintF
+
+				inc TmpPtr1+1
+				lda TmpPtr1+1
+				cmp #$C8
+				bne .2					Go try next SSC....
+
+.99				>LDYAI VSDRIVE.SSCKO
+				jsr X.PrintF
+				rts
+*--------------------------------------
+VSDRIVE.Check	ldx #COPYRIGHT.LEN
+
+				sec
+
+.1				lda DRV.EntryPoint-1,x
+				eor COPYRIGHT-1,x
+				bne .9
+
+				dex
+				bne .1
+
+				clc
+
+.9				rts
+*--------------------------------------
+SSC.Detect
+.1				ldx #DEVSIG.Value-DEVSIG.Offset-1
+
+.2				ldy DEVSIG.Offset,x
+				lda (TmpPtr1),y
+				cmp DEVSIG.Value,x
+				bne .3
+
+				dex
+				bpl .2
+
+				clc
+				rts
+
+.3				inc TmpPtr1+1			no match, try next slot....
+				lda TmpPtr1+1
+				cmp #$C8
+				bne .1
+
+				sec
+				rts
+*--------------------------------------
+VSDRIVE.Ping	lda TmpPtr1+1			A=SlotCN
+				asl
+				asl
+				asl
+				asl
+				clc
+				adc #$8F
+				tax						X=SlotN0
+
+				php
+				sei
+
+				stz SSC.RESET-$8F,x
+
+				lda #SSC.CTL.1S+SSC.CTL.8D+SSC.CTL.CLKINT+SSC.CTL.B115200
+				sta SSC.CTL-$8F,x
+				
+				lda #SSC.CMD.NOP+SSC.CMD.RIRQDIS+SSC.CMD.TE+SSC.CMD.DTR
+				sta SSC.CMD-$8F,x
+
+				lda SSC.DATA-$8F,x		discard any garbage byte
+				lda SSC.STATUS-$8F,x	clear any IRQ pending
+
+				stz VSDRIVE.Ping.TO
+				stz VSDRIVE.Ping.TO+1
+				
+.10				jsr	VSDRIVE.IncTimer	Wait.......
+				bne .10
+
+				ldy #10
+
+.1				lda SSC.STATUS-$8F,x
+				and #SSC.STATUS.nDCD	Ready for transmit?
+				beq .20
+
+				jsr	VSDRIVE.IncTimer	Wait.......
+				bne .1
+
+				dey
+				bne .1
+
+				lda #1
+				bra	.9					Time Out.....
+
+.20				ldy #5					5 bytes to send
+
+.2				lda VSDRIVE.CMDS-1,y
+				sta SSC.DATA-$8F,x
+
+.3				lda SSC.STATUS-$8F,x
+				and #SSC.STATUS.TDRE	char transmitted?
+				bne .4
+
+				jsr	VSDRIVE.IncTimer
+				bne .3
+
+				lda #2
+				bra .9
+
+.4				dey
+				bne .2					next byte
+
+				lda #521^$ffff			522 bytes to receive
+				sta VSDRIVE.Ping.BC
+				lda /521^$ffff
+				sta VSDRIVE.Ping.BC+1
+
+				stz VSDRIVE.Ping.TO
+				stz VSDRIVE.Ping.TO+1
+
+				ldy #3					EC=3 if no byte received
+
+.5				lda SSC.STATUS-$8F,x
+				and #SSC.STATUS.RDRF	incoming char?
+				bne .6
+
+				jsr	VSDRIVE.IncTimer
+				bne .5
+
+				tya
+
+.9				stz SSC.CMD-$8F,x			Applewin Bug ???
+
+				stz SSC.RESET-$8F,x
+				
+				plp
+				sec
+				rts
+
+.6				ldy #4					EC=4 if recieved only partial reply
+
+				lda SSC.DATA-$8F,x
+				inc VSDRIVE.Ping.BC
+				bne .5
+
+				inc VSDRIVE.Ping.BC+1
+				bne .5
+
+				lda #SSC.CMD.NOP+SSC.CMD.RIRQDIS+SSC.CMD.TE
+				sta SSC.CMD-$8F,x
+
+				plp
+				clc
+				rts
+*--------------------------------------
+VSDRIVE.IncTimer
+				inc VSDRIVE.Ping.TO
+				bne .8
+
+				inc VSDRIVE.Ping.TO+1
+.8				rts
+*--------------------------------------
+VSDRIVE.CMDS	.HS C6.00.00.03
+				.DA #ADT.CMD.VSD
+*				C6=C5 eor 03 eor 00 eor 00
+VSDRIVE.Ping.TO	.BS 2
+VSDRIVE.Ping.BC	.BS 2
+*--------------------------------------
+* Find 2 free slots in MLI.DEVPTRS (D1 & D2)
+*--------------------------------------
+VSDRIVE.SetSlot	ldx #2					Starts at Slot1
+
+.1				lda MLI.DEVPTRS,x		Drive1
+				cmp MLI.DEVPTRS			pointing to S0D1 NODEV ?
+				bne .2
+
+				lda MLI.DEVPTRS+1,x
+				cmp MLI.DEVPTRS+1
+				bne .2
+
+				lda MLI.DEVPTRS+16,x	Drive2
+				cmp MLI.DEVPTRS
+				bne .2
+
+				lda MLI.DEVPTRS+17,x
+				cmp MLI.DEVPTRS+1
+				bne .2
+
+				lda #DRV.EntryPoint
+				sta MLI.DEVPTRS,x
+				sta MLI.DEVPTRS+16,x
+				lda /DRV.EntryPoint
+				sta MLI.DEVPTRS+1,x
+				sta MLI.DEVPTRS+17,x
+				txa
+				asl
+				asl
+				asl
+				ora #$0D
+				ldy MLI.DEVCNT
+				iny
+				sta MLI.DEVLST,y		add Drv1
+				ora #$80
+				iny
+				sta MLI.DEVLST,y		add Drv2
+				sty MLI.DEVCNT
+				txa
+				lsr						exit with A=SLOT
+				clc
+				rts
+
+.2				inx
+				inx
+				cpx #16
+				bne .1
+
+				rts						sec from CPX
+*--------------------------------------
+VSDRIVE.Install	ldx #PATCH.LEN
+
+.1				lda PATCH-1,x
+				sta DRV.EntryPoint-1,x
+				dex
+				bne .1
+
+				bit IO.RRAMWRAMBNK2
+				bit IO.RRAMWRAMBNK2
+
+				ldx #DRV.SIZE
+
+.2				lda DRV-1,x
+				sta $D000,x
+				dex
+				bne .2
+
+				lda TmpPtr1+1			A=SlotCN
+				asl
+				asl
+				asl
+				asl
+				
+				ora #SSC.DATA
+				sta DRV.SSCWrite.D+1
+				sta DRV.SSCSend.D+1
+				sta DRV.SSCGet.D+1
+				
+				inc						#SSC.STATUS
+				
+				sta DRV.SSCWrite.S+1
+				sta DRV.SSCSend.S+1
+				sta DRV.SSCGet.S+1
+				sta DRV.SSCClose.S+1
+				
+				inc						#SSC.CMD
+				
+				sta DRV.INIT.C+1
+				sta DRV.SSCClose.C+1
+				
+				lda TmpPtr1+1			A=SlotCN
+				and #$0F
+				sta DRV.START
+
+				bit IO.RROMBNK1
+
+				clc
+				rts
+*--------------------------------------
+				.INB usr/src/shared/x.printf.s
+*--------------------------------------
+DEVSIG.Offset	.HS 05070B0C
+DEVSIG.Value	.HS 38180131
+VSDRIVE.MSG0	.CZ "VSDRIVE (ADTPro Virtual Serial HD) Driver For A2osX\r"
+VSDRIVE.DRVKO	.CZ "VSDRIVE (Or other custom Driver) Already Installed.\r"
+VSDRIVE.SSCKO	.CZ "SSC Not Detected.\r"
+VSDRIVE.SSCOK	.CZ "SSC Found At Slot %d.\rContacting ADTPro Server..."
+VSDRIVE.SRVKO	.CZ "No Response From ADTPro Server (EC=%d).\r"
+VSDRIVE.SRVOK	.CZ "ADTPro Server Is Online.\r"
+VSDRIVE.NOSLOT	.CZ "No ProDOS device slot available.\r"
+VSDRIVE.DEVOK	.CZ "VSDRIVE Installed 2 devices at S%d,D1 & S%d,D2.\r"
+VSDRIVE.OK		.CZ "VSDRIVE Driver Successfully Installed.\r"
+*--------------------------------------
+* ProDOS $BE41->$BE4B Patch for switching to BANK2 (10 bytes)
+*--------------------------------------
+COPYRIGHT		.AS "(C)APPLE  "
+COPYRIGHT.LEN	.EQ *-COPYRIGHT
+PATCH			.PH DRV.EntryPoint
+				bit IO.RRAMWRAMBNK2
+				jsr $D002
+				bit IO.RRAMWRAMBNK1
+				rts
+				.EP
+PATCH.LEN		.EQ *-PATCH
+*--------------------------------------
+* Driver
+*--------------------------------------
+* OP = 2 : Write drv1
+* OP = 3 : Read  drv1
+* OP = 4 : Write drv2
+* OP = 5 : Read  drv2
+* CMD = $C5+OP+BLKLO+BLKHI+CHKSUM
+* DO NOT trash DRV.COMMAND...DRV.BLKNUM as ProDOS
+* reuses them after Block operation
+* PC,A1,A2 are used by Disk II Driver,
+* so we use it safely as Tmp Ptr
+*--------------------------------------
+*DRV.PCL			.EQ $3A
+*DRV.PCH			.EQ $3B
+DRV.A1L			.EQ $3C
+DRV.A1H			.EQ $3D
+*DRV.A2L			.EQ $3E
+*DRV.A2H			.EQ $3F
+*--------------------------------------
+				.DUMMY
+				.OR $3A
+DRV.CmdBuf.Sum	.BS 1					Reverse order for dey
+DRV.CmdBuf.BlkH	.BS 1
+DRV.CmdBuf.BlkL	.BS 1
+DRV.CmdBuf.Cmd	.BS 1
+DRV.CmdBuf.Env	.BS 1
+				.ED
+*--------------------------------------
+DRV.COMMAND 	.EQ $42
+DRV.UNITNUM		.EQ $43
+DRV.BUFF		.EQ $44
+DRV.BLKNUM		.EQ $46
+*--------------------------------------
+DRV				.PH	$D001				Main LC Bnk 2 $D001->$DFFF
+
+DRV.START		.BS 1					SELF MODIFIED slot 0n
+
+				lda DRV.COMMAND			S=0,R=1,W=2,F=3
+				bne .1
+
+				ldx #$ff				return Status
+				ldy #$ff
+
+.8				lda #0
+				clc
+				rts
+
+.1				cmp #3
+				beq .8					Format ....
+				bcc DRV.START.OK
+
+DRV.START.IO	lda #MLI.E.IO
+				sec
+				rts
+				
+DRV.START.OK	tax
+
+				ora	#2					W=2,R=3
+
+				bit DRV.UNITNUM
+				bpl .2
+
+				adc #2					CC from bcs
+
+.2				sta DRV.CmdBuf.Cmd		store cmd
+
+				lda #ADT.CMD.VSD
+				sta DRV.CmdBuf.Env
+				
+				lda DRV.BLKNUM
+				sta DRV.CmdBuf.BlkL
+
+				lda DRV.BLKNUM+1
+				sta DRV.CmdBuf.BlkH
+				
+				stz DRV.CmdBuf.Sum
+*--------------------------------------
+* send CMD+CS
+*--------------------------------------
+				php
+				sei
+
+				phx
+
+				ldy #DRV.200.LEN-1
+
+.1				lda DRV.200,y
+				sta $200,y
+				dey
+				bpl .1
+				
+*				lda #SSC.CMD.NOP+SSC.CMD.RIRQDIS+SSC.CMD.TE+SSC.CMD.DTR
+DRV.INIT.C		inc SSC.CMD				SELF MODIFIED
+
+				ldy #4					Send 5 bytes including Sum
+
+.3				lda DRV.CmdBuf.Sum,y
+				jsr DRV.SSCSend
+				eor DRV.CmdBuf.Sum
+				sta DRV.CmdBuf.Sum
+				dey
+				bne .3
+
+				jsr DRV.SSCSend			A = Sum
+*--------------------------------------
+				plx
+				dex						1-1=0 if read
+				bne DRV.DO.CMD.W		go write
+*--------------------------------------
+* Read block
+*--------------------------------------
+DRV.DO.CMD.R	ldy #4					Read Back and check 4 bytes
+
+.1				jsr DRV.SSCGet
+				eor DRV.CmdBuf.Sum,y
+				bne DRV.DO.CMD.ERR
+
+				dey
+				bne .1
+
+				ldy #4					Read 4 bytes DATE/TIME + 1 Byte Checksum
+
+.2				jsr DRV.SSCGet
+
+				eor DRV.CmdBuf.Sum
+				sta DRV.CmdBuf.Sum
+				dey
+				bpl .2
+
+				tay						Last EOR was with Checksum, must be 0
+				bne DRV.DO.CMD.ERR
+
+* Y=0 from TAY
+
+*				stz DRV.CmdBuf.Sum
+
+				sec
+				.HS 90					BCC
+.3				clc
+				
+.4				jsr DRV.SSCGet
+				jsr $200
+				eor DRV.CmdBuf.Sum
+				sta DRV.CmdBuf.Sum
+				iny
+				bne .4
+
+				inc DRV.BUFF+1
+				bcs .3
+				
+				dec DRV.BUFF+1
+				dec DRV.BUFF+1
+
+				jsr DRV.SSCGet
+				eor DRV.CmdBuf.Sum
+				beq DRV.DO.CMD.OK
+*--------------------------------------
+DRV.DO.CMD.ERR	jsr	DRV.SSCClose
+				jmp DRV.START.IO
+*--------------------------------------
+* Write Block
+*--------------------------------------
+DRV.DO.CMD.W	lda #$B1				lda (),y
+
+				sta $203
+
+				ldy #0
+
+				stz DRV.CmdBuf.Sum
+
+				sec
+				.HS 90					BCC
+DRV.SSCWrite.1	clc
+
+DRV.SSCWrite.2	jsr $200
+
+				tax
+
+DRV.SSCWrite.S	lda SSC.STATUS			SELF MODIFIED
+				and #SSC.STATUS.TDRE	Outgoing char?
+				beq DRV.SSCWrite.S
+
+DRV.SSCWrite.D	stx SSC.DATA			SELF MODIFIED
+				
+				txa
+				
+				eor DRV.CmdBuf.Sum
+				sta DRV.CmdBuf.Sum
+				iny
+				bne DRV.SSCWrite.2
+
+				inc DRV.BUFF+1
+				bcs DRV.SSCWrite.1
+				
+				dec DRV.BUFF+1
+				dec DRV.BUFF+1			
+
+* A = DRV.CmdBuf.Sum
+
+				jsr DRV.SSCSend
+
+* read back CMD
+				ldy #4					Read 5 bytes (echo from server)
+
+.3				jsr DRV.SSCGet
+				eor DRV.CmdBuf.Sum,y	Check 5 bytes (including block Sum)
+				bne DRV.DO.CMD.ERR
+
+				dey
+				bpl .3
+*--------------------------------------
+DRV.DO.CMD.OK
+*--------------------------------------
+DRV.SSCClose				
+*				lda #SSC.CMD.NOP+SSC.CMD.RIRQDIS+SSC.CMD.TE
+DRV.SSCClose.C	dec SSC.CMD				SELF MODIFIED
+DRV.SSCClose.S	bit SSC.STATUS			SELF MODIFIED
+				bmi DRV.SSCClose.S
+
+				plp
+				clc
+				rts	
+*--------------------------------------
+DRV.SSCSend		tax
+
+DRV.SSCSend.S	lda SSC.STATUS			SELF MODIFIED
+				and #SSC.STATUS.TDRE	Outgoing char?
+				beq DRV.SSCSend.S
+
+DRV.SSCSend.D	stx SSC.DATA			SELF MODIFIED
+
+				txa						Restore A for checksumming
+				
+				rts
+*--------------------------------------
+DRV.SSCGet
+DRV.SSCGet.S	lda SSC.STATUS			SELF MODIFIED
+				and #SSC.STATUS.RDRF	incoming char?
+				beq	DRV.SSCGet
+
+DRV.SSCGet.D	lda SSC.DATA			SELF MODIFIED
+				rts
+*--------------------------------------
+DRV.200			bit IO.RRAMWRAMBNK1
+				sta (DRV.BUFF),y
+				bit IO.RRAMWRAMBNK2
+				rts	
+DRV.200.LEN		.EQ *-DRV.200
+*--------------------------------------
+				.EP
+*--------------------------------------
+				.LIST ON
+DRV.SIZE		.EQ *-DRV
+				.LIST OFF
+*--------------------------------------
+* CONTROL SECTION :
+*--------------------------------------
+				.DO DRV.SIZE>255
+*				ERROR:DRV.SIZE too big
+				.FIN
+*--------------------------------------
+MAN
+SAVE usr/src/prodos.fx/pm.vsdrive.s
+ASM

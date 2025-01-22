@@ -1,0 +1,803 @@
+NEW
+  AUTO 3,1
+				.LIST OFF
+				.OP	65C02
+				.OR	$2000
+				.TF pm.ramworks
+*--------------------------------------
+				.INB inc/macros.i
+				.INB inc/io.i
+				.INB inc/monitor.i
+				.INB inc/mli.i
+				.INB inc/mli.e.i
+*--------------------------------------
+TmpPtr1			.EQ	$0
+TmpPtr2			.EQ	$2
+Type			.EQ $4
+*--------------------------------------
+RW.SAVEZP0		.EQ $2800
+RW.SAVEZP1		.EQ $2900
+*--------------------------------------
+RW.BLOCK		.EQ $2A00
+RW.ONLINEBUFFER	.EQ $2C00
+*--------------------------------------
+* A2OSX.SYSTEM relocated at $1000 !!!
+*--------------------------------------
+SEBankSelect	.EQ $C071
+RWBankSelect	.EQ $C073
+*--------------------------------------
+RW.Init			>LDYAI RW.MSG
+				jsr X.PrintF
+
+				jsr RW.CheckRAM3
+				bcs .5
+
+				>LDYAI RW.MSG.RAM3OK
+				jsr X.PrintF
+				rts
+
+.5				jsr RW.DisableRAM
+				bcc .10
+
+				>LDYAI RW.MSG.RAMDISKO
+				jsr X.PrintF
+				rts
+
+.10				>LDYAI RW.MSG.RAMDISOK
+				jsr X.PrintF
+
+				lda #RWBankSelect
+				jsr RW.DetectHW
+				bne .1
+
+				lda #SEBankSelect
+				jsr RW.DetectHW
+				bne .1
+
+				>LDYAI RW.MSG.KO1
+				bra .9
+*--------------------------------------
+.1				sta	RW.PGMAX			PGMAX = last detected page
+
+				pha						Last page detected [1..255]
+
+				lsr						divide by 4 to compute KB size
+				ror .12+1
+				lsr
+				ror .12+1
+
+.12				ldx #$00				X,A = RAM drive size
+
+				phx						Push Kbyte LO
+				pha						Push Kbyte HI
+
+				clc
+				ldx #0
+				lda RW.PGMAX
+				inc						+ 1 page AUX mem
+				bne .13
+
+				sec
+				inx
+
+.13				stx .11+1
+
+				pha						Total page detected [1..256]
+				phx
+
+				ror						divide by 4 to compute KB size
+				ror .11+1
+				lsr
+				ror .11+1
+
+.11				ldx #$00				X,A = Total KB detected
+
+				phx						Push Kbyte LO
+				pha						Push Kbyte HI
+
+				>LDYAI RW.MSG.OK1
+				jsr X.PrintF
+
+				jsr RW.Install
+				bcc .2
+
+				>LDYAI RW.MSG.KO2
+				bra .9
+
+.2				>LDYAI RW.MSG.OK2
+				jsr X.PrintF
+
+				jsr RW.Format
+				bcc .3
+
+				>LDYAI RW.MSG.KO3
+				bra .9
+
+.3				>LDYAI RW.MSG.OK3
+
+.9				jsr X.PrintF
+				rts
+*--------------------------------------
+RW.CheckRAM3	jsr RW.ONLINE			MLI Online at S3D2
+				bcs .9
+
+				lda RW.ONLINEBUFFER
+				and #$0F
+
+				cmp #4					'RAM3' ?
+				sec
+				bne .9
+
+				tax
+
+.1				lda RW.ONLINEBUFFER,x
+				eor RW.MSG.RAM3OK,x
+				asl						ignore b7
+				bne .9
+
+				dex
+				bne .1
+
+				clc
+.9				rts
+*--------------------------------------
+RW.DisableRAM	lda MLI.DEVPTRS3D2
+				cmp MLI.DEVPTRS			S0D1=NOVEV
+				bne .1
+
+				lda MLI.DEVPTRS3D2+1
+				cmp MLI.DEVPTRS+1		S0D1=NODEV
+				beq .8					S3D2=NODEV, nothing to do
+
+.1				ldx MLI.DEVCNT
+
+.2				lda MLI.DEVLST,x		LOOKING FOR $BF, $BB, $B7, $B3
+				and #$F3
+				cmp #$B3
+				beq .3
+
+				dex
+				bpl .2
+
+				sec						No device found, exit with error
+				rts
+
+.3				cpx MLI.DEVCNT
+				beq .5
+
+.4				lda MLI.DEVLST+1,x
+				sta MLI.DEVLST,x
+				inx
+				cpx MLI.DEVCNT
+				bne .4
+
+.5				ldx MLI.DEVCNT
+				stz MLI.DEVLST,x
+				dec MLI.DEVCNT
+				lda MLI.DEVPTRS
+				sta MLI.DEVPTRS3D2
+				lda MLI.DEVPTRS+1
+				sta MLI.DEVPTRS3D2+1
+
+				jsr RW.ONLINE
+
+.8				clc						Success!!
+				rts
+*--------------------------------------
+RW.ONLINE		jsr MLI
+				.DA #MLI.ONLINE
+				.DA RW.ONLINEPARAM
+				rts
+*--------------------------------------
+RW.ONLINEPARAM	.DA #2
+				.DA #$B0				Slot 3,Drive 2
+				.DA RW.ONLINEBUFFER
+*--------------------------------------
+RW.DetectHW		php
+				sei
+				sta Type
+
+				sta .2+1
+				sta .3+1
+				sta .7+1
+
+				sta IO.SETALTZP
+
+				ldx #0					start detection at page $00
+
+.1				dex
+
+.2				stx RWBankSelect
+
+				pha						waste time...
+				pla
+
+				lda 0
+				sta RW.SAVEZP0,x		save Bank 0 $0000 to prevent ALTZP trash
+				lda 1
+				sta RW.SAVEZP1,x
+
+				txa
+				sta 0
+				eor #$FF
+				sta 1
+				eor #$FF
+				bne .1
+
+				ldx #0					start detection at page $00
+
+.3				stx RWBankSelect
+
+				txa
+
+				pha						waste time...
+				pla
+
+				cmp 0
+				bne .4
+
+				eor #$FF
+				cmp 1
+				bne .4
+
+				inx
+				bne .3
+
+.4				dex						256 banks
+
+				ldy #0
+
+.6				dey
+
+.7				sty RWBankSelect
+
+				pha						waste time...
+				pla
+
+				lda RW.SAVEZP0,y
+				sta 0
+				lda RW.SAVEZP1,y
+				sta 1
+				tya
+				bne .6
+
+				sta IO.CLRALTZP
+				plp
+
+				txa						set Z
+
+				rts
+*--------------------------------------
+RW.Install		lda IO.RRAMWRAMBNK1
+				lda IO.RRAMWRAMBNK1
+
+				ldx #RWDRV.SIZE
+
+.1				lda RWDRV.B.START-1,x
+				sta RWDRV.START-1,x
+				dex
+				bne .1
+
+				lda RW.PGMAX
+				lsr
+				sta RWDRV.MAXHI+1
+
+				lda #0
+				ror
+				sta RWDRV.MAXLO+1
+
+				lda Type
+				sta RWDRV.IO1+1
+				sta RWDRV.EXIT+1
+
+				lda IO.RROMBNK1
+
+				sta IO.SETWRITEAUX
+
+				ldx #RWDRVX.SIZE
+
+.2				lda RWDRVX.B.START-1,x
+				sta RWDRVX.START-1,x
+				dex
+				bne .2
+
+				lda Type
+				sta RWDRVX.XM.IO1+1
+				sta RWDRVX.XM.IO2+1
+				sta RWDRVX.XM.IO3+1
+
+				sta IO.CLRWRITEAUX
+				inc MLI.DEVCNT
+				ldx MLI.DEVCNT
+				lda #$B0				Slot 3,Drive 2,0=Not Removable, 0=no int, 00=1 Volume
+				sta MLI.DEVLST,x
+
+				lda #RWDRV.START
+				sta MLI.DEVPTRS3D2
+				lda /RWDRV.START
+				sta MLI.DEVPTRS3D2+1
+
+				clc
+				rts
+*--------------------------------------
+RW.Format		jsr RW.BLOCK.SET00
+				lda RW.PGMAX
+				lsr
+				sta RW.BLOCK2.TB+1
+				lda #0
+				ror
+				sta RW.BLOCK2.TB
+
+				jsr MLI
+				.DA #MLI.GETTIME
+				.DA 0
+
+				ldx #3
+
+.1				lda MLI.DATE,x
+				sta RW.BLOCK2.CT,x
+				dex
+				bpl .1
+
+				ldx #RW.BLOCK2.END-RW.BLOCK2
+
+.2				lda RW.BLOCK2-1,x
+				sta RW.BLOCK-1,x
+				dex
+				bne .2
+
+				jsr MLI					Write Block 2,First VOL directory block
+				.DA #MLI.WRITEBLOCK
+				.DA RW.MLIWRITEBLOCK
+				bcc .22
+
+				rts
+*--------------------------------------
+.22				jsr RW.BLOCK.SET00
+
+				lda #2
+				sta RW.BLOCK			LO byte of previous block pointer
+
+				inc RW.MLIWRITEBLOCK.BLK
+				jsr MLI					Write Block 3,Last VOL directory block
+				.DA #MLI.WRITEBLOCK
+				.DA RW.MLIWRITEBLOCK
+				bcc .33
+
+				rts
+*--------------------------------------
+.33				lda RW.PGMAX			divide RW.PGMAX by 32 to get how many bitmap
+				lsr						blocks we need :
+				lsr						1 page = 128 blocks = 16 bytes
+				lsr						32 pages = 512 bytes = 1 Block
+				lsr
+				lsr
+				sta RW.FBITMAPCNT		store FULL bitmap block count needed
+
+				tax
+				lda RW.PGMAX
+				and #$1F				need an extra incomplete bitmap block?
+				beq .3
+
+				inx
+.3				stx RW.BITMAPCNT		store TOTAL bitmap block needed
+
+.4				lda RW.FBITMAPCNT
+				beq .49
+
+				dec RW.FBITMAPCNT
+				jsr RW.BLOCK.SETFF
+
+				bra .5
+
+.49				jsr RW.BLOCK.SET00
+				lda RW.PGMAX
+				and #$1F				compute incomplete bitmap block
+				asl
+				asl
+				asl
+				asl						times 16 for byte count
+				tay
+				lda #$FF
+				bcc	.42					first half of block only
+
+				ldx #0
+.40				sta RW.BLOCK,x
+				inx
+				bne .40
+
+				cpy #0
+				beq .5
+
+.41				sta RW.BLOCK+$ff,y
+				dey
+				bne .41
+
+				bra .5
+
+.42				sta RW.BLOCK-1,y
+				dey
+				bne .42
+
+.5				inc RW.MLIWRITEBLOCK.BLK
+				lda RW.MLIWRITEBLOCK.BLK
+				cmp #4					Are we writing first volume bitmap ?
+				bne .63					no, regular one
+
+*				lda #$CF				Mark Block 0 & 1 free, 2,3 used (vol hdr)
+				lda #$0F
+				sta RW.BLOCK
+
+				ldy #0
+				lda #$8					Start a BLOCK 4 (%00001000)
+				ldx RW.BITMAPCNT
+
+.62				pha
+				eor RW.BLOCK,y			Mark bitmap blocks as "used"
+				sta RW.BLOCK,y
+				pla
+				dex
+				beq .63
+
+				lsr
+				bne .62
+
+				lda #$80
+				iny
+				bra .62
+
+.63				jsr MLI					Write Block 4,5...
+				.DA #MLI.WRITEBLOCK
+				.DA RW.MLIWRITEBLOCK
+				bcs .9
+
+				dec RW.BITMAPCNT		another bitmap block needed ?
+				bne .4
+
+				clc
+.9				rts
+*--------------------------------------
+RW.BLOCK.SETFF	lda #$FF
+				.HS 2C					BIT ABS
+
+RW.BLOCK.SET00	lda #$00
+
+				ldx #0
+
+.1				sta	RW.BLOCK,x
+				sta RW.BLOCK+$100,x
+				inx
+				bne .1
+
+				rts
+*--------------------------------------
+RW.MLIWRITEBLOCK
+				.DA #3
+				.DA #$B0				Slot 3,Drive 2
+				.DA RW.BLOCK
+RW.MLIWRITEBLOCK.BLK
+				.DA 2					Start writing block at #2
+*--------------------------------------
+RW.PGMAX		.BS 1
+RW.FBITMAPCNT	.BS 1
+RW.BITMAPCNT	.BS 1
+*--------------------------------------
+RW.BLOCK2		.DA 0					pointer to previous block
+				.DA 3					pointer to next block
+				.DA #$F4				$F=Vol Dir Header, 4=name len
+				.AS 'RAM3'
+				.BS 11					(RAM3 len=4, fill to 15)
+				.HS 0000000000000000
+RW.BLOCK2.CT	.BS 4					Creation time
+				.HS 0100C3270D			version/min version/access/EL/EPB
+				.DA 0					File Count
+				.DA 4					bitmap pointer (Block 2&3 are Volume directory)
+RW.BLOCK2.TB	.BS 2					Total Blocks
+RW.BLOCK2.END	.EQ *
+*--------------------------------------
+				.INB usr/src/shared/x.printf.s
+*--------------------------------------
+RW.MSG			.CZ "SuperExpander E, RAMWorks (I,II,III,z-Ram) Driver.\r"
+RW.MSG.RAMDISOK	.CZ "/RAM Device Disabled/Not Present.\r"
+RW.MSG.RAMDISKO	.CZ "Problem Disabling /RAM Device.\r"
+RW.MSG.RAM3OK	.CZ "/RAM3 Device Already Installed.\r"
+RW.MSG.OK1		.CZ "%D KB Detected (%D Banks), %D KB (%d Banks) Available for /RAM3.\r"
+RW.MSG.KO1		.CZ "Not Detected.\r"
+RW.MSG.OK2		.CZ "RamWorks Driver Installed.\r"
+RW.MSG.KO2		.CZ "RamWorks Driver Install Error.\r"
+RW.MSG.OK3		.CZ "RamWorks Drive Formatted as /RAM3.\r"
+RW.MSG.KO3		.CZ "RamWorks Drive Format Error.\r"
+*--------------------------------------
+* Driver for Ramworks in main LC
+* $FF00 -> $FF9A (Inclusive)
+* $FF58	MUST BE $60 (RTS)
+* DO NOT trash DRV.COMMAND...DRV.BLKNUM as ProDOS
+* reuses it after Block operation
+* A1,A2 are used by Disk II Driver,
+* so we use it safely as Tmp Ptr
+*--------------------------------------
+DRV.A2L			.EQ $3E
+DRV.A2H			.EQ $3F
+DRV.COMMAND 	.EQ $42
+DRV.BUFF		.EQ $44
+DRV.BLKNUM		.EQ $46
+*--------------------------------------
+RWDRV.B.START	.PH	$FF00
+RWDRV.START		ldy DRV.COMMAND			0 = Status ?
+				beq RMDRV.CMDSTATUS
+
+				cpy #3
+
+				beq RWDRV.EXITOK		3 = Format : nothing to do, exit with no error
+				bcs RWDRV.IOERR			> 3 = Invalid OP, IO error
+
+				ldx DRV.BLKNUM
+				cpx RWDRV.MAXLO+1
+				lda DRV.BLKNUM+1
+				sbc RWDRV.MAXHI+1
+				bcs	RWDRV.IOERR			DRV.BLKNUM >= RW.DRV.SIZE, IO error
+
+				bit IO.RD80STORE		save 80 Store status
+
+				php						Disable IRQ as no vector set in RW Banks
+				sei
+
+				sta IO.CLR80STORE		make sure SETREADAUX/SETWRITEAUX effective everywhere
+
+				txa						Get Back DRV.BLKNUM
+				asl						compute PAGE = blocknumLO *2
+				pha
+				lda DRV.BLKNUM+1		compute BANK = blocknumHI *2
+				rol
+				inc 					+1 for skipping Aux BANK 0
+
+				plx						move page into X
+				beq RWDRV.GOAUX			move from/to aux page0/1
+
+				cpx #$C0
+				bcs RWDRV.GOAUX			move from/to aux LC
+*--------------------------------------
+* X=Page($02 -> $BF),A=Bank,Y=CMD
+*--------------------------------------
+RWDRV.IO1		sta RWBankSelect		Select RAMWorks Bank
+
+				inx						second 256 bytes first
+				stx DRV.A2H				Use DRV.A1L/H for RAM PTR
+				stz DRV.A2L
+				inc DRV.BUFF+1
+				dey						Y=CMD, zero if read
+				bne RWDRV.W				non zero, go write
+
+				sta IO.SETREADAUX
+				ldx #DRV.A2L			READ:copy from RAM to BUFF
+				lda #DRV.BUFF
+				bra RWDRV.RW
+
+RWDRV.W			sta IO.SETWRITEAUX
+				ldx #DRV.BUFF
+				lda #DRV.A2L			WRITE:copy from BUFF to RAM
+				dey						Make sure Y=0 for main loop below
+
+RWDRV.RW		stx RWDRV.RW.SRC+1
+				sta RWDRV.RW.DST+1
+
+*				clc						2 pages to copy
+				.HS B0					BCS
+RWDRV.RW.LOOP	sec
+
+RWDRV.RW.SRC	lda ($FF),y
+RWDRV.RW.DST	sta ($FF),y
+				iny
+				bne RWDRV.RW.SRC
+
+				dec DRV.BUFF+1
+				dec DRV.A2H
+				bcc RWDRV.RW.LOOP
+
+RWDRV.EXIT		stz RWBankSelect
+				sta IO.CLRREADAUX
+				sta IO.CLRWRITEAUX
+
+				plp						restore IRQ
+
+				bpl RMDRV.CMDSTATUS
+				sta IO.SET80STORE
+
+RMDRV.CMDSTATUS
+RWDRV.MAXLO		ldx #$FF				return device block count in X,Y...
+RWDRV.MAXHI		ldy #$FF
+RWDRV.EXITOK	lda #0					make A=0
+				clc
+				rts
+
+RWDRV.IOERR		lda #MLI.E.IO			Carry already set
+				rts
+*--------------------------------------
+* X=Page(0/1 or LC),A=Bank
+*--------------------------------------
+RWDRV.GOAUX		pha						save BANK
+				sta IO.SETWRITEAUX
+
+				ldy #RWDRVX.XM.SIZE		Backup begining of $300 to generate move code
+
+.1				lda RWDRV.XM.RUN-1,y
+				sta RWDRVX.XM.SAVE-1,y
+				dey
+				bne .1
+
+				pla						restore BANK
+
+				sta IO.SETREADAUX
+				jsr RWDRVX.START		Setup Code in main mem at $300 for data move
+*										returns : CC=WRITE, CS=READ
+				sta IO.CLRREADAUX		IO.CLRWRITEAUX already triggered by code copy
+				jsr RWDRV.XM.RUN		Now execute generated code in main memory
+
+				sta IO.SETREADAUX
+				jmp RWDRVX.RESTORE
+
+RWDRV.END		.EP
+RWDRV.B.END
+				.LIST ON
+RWDRV.SIZE		.EQ RWDRV.B.END-RWDRV.B.START
+				.LIST OFF
+*--------------------------------------
+* Driver for Ramworks in aux memory
+* $0200 -> $02FF TMP buffer for PAGE copy
+* $0300 -> $03FD (Inclusive)
+* do not trash $03FE-$03FF (IRQ Vector)
+* X=Page(0/1 or LC),A=Bank
+*--------------------------------------
+RMDRVX.TMP		.EQ $200
+RWDRV.XM.RUN	.EQ $300
+*--------------------------------------
+RWDRVX.B.START	.PH	$0300
+RWDRVX.START	sta RWDRVX.XM.BANK+1	setup BANK
+
+				lda	DRV.COMMAND			DRV.COMMAND: 1=READ,2=WRITE
+				lsr
+				php
+
+				ldy #IO.RRAMWRAMBNK1
+
+				txa
+				beq .1					page 0/1, no need to check BANK
+
+				cmp #$D0				$C0 <= PAGE < $D0 ?
+				bcs .1					no, store in BNK1
+
+				ora #$10				Remap $C0 page to $D0 BNK2
+
+				ldy #IO.RRAMWRAMBNK2
+
+.1				sty RWDRVX.XM.RWLC+1	Save to select proper RW bank later
+
+				ldy DRV.BUFF
+				ldx DRV.BUFF+1
+
+				plp
+				bcc .2					CC=WRITE, CS=READ
+
+				stz RWDRVX.XM.SRC+1		READ from src LO = 0
+				sta RWDRVX.XM.SRC+2		READ from src HI = PAGE
+
+				sty RWDRVX.XM.DST+1		WRITE to DRV.BUFF
+				stx RWDRVX.XM.DST+2
+				bra .3
+
+.2				sty RWDRVX.XM.SRC+1		READ from DRV.BUFF
+				stx RWDRVX.XM.SRC+2
+
+				stz RWDRVX.XM.DST+1		WRITE to dst LO = 0
+				sta RWDRVX.XM.DST+2		WRITE to dst HI = PAGE
+
+.3				sta IO.CLRWRITEAUX
+
+				ldy #RWDRVX.XM.SIZE
+
+.4				lda RWDRVX.XM.START-1,y
+				sta RWDRV.XM.RUN-1,y
+				dey
+				bne .4
+
+				rts
+*--------------------------------------
+* Called form Main LC after RWDRVX.XM execution
+*--------------------------------------
+RWDRVX.RESTORE	ldy #RWDRVX.XM.SIZE		Now, restore begining of $300
+
+.1				lda RWDRVX.XM.SAVE-1,y
+				sta RWDRV.XM.RUN-1,y
+				dey
+				bne .1
+
+				jmp RWDRV.EXIT
+*--------------------------------------
+* LC Copy Code, moved from Aux to main $300
+* $0200 -> $02FF TMP buffer for 2 steps move between LCs
+* CC=WRITE :
+* CS=READ :
+*--------------------------------------
+RWDRVX.XM.START	ldy #2					2 pages to copy
+
+RWDRVX.XM.COPY	sta IO.CLRALTZP
+
+				jsr RWDRV.XM.RUN+RWDRVX.XM.SRCLC-RWDRVX.XM.START
+				sta $C000,x				select proper Main/Aux ZP/LC
+RWDRVX.XM.IO1	sta RWBankSelect
+
+				ldx #0
+
+RWDRVX.XM.SRC	lda $FFFF,x
+				sta RMDRVX.TMP,x
+				inx
+				bne RWDRVX.XM.SRC
+
+				sta IO.CLRALTZP
+
+				jsr RWDRV.XM.RUN+RWDRVX.XM.DSTLC-RWDRVX.XM.START
+				sta $C000,x				select proper Main/Aux ZP/LC
+RWDRVX.XM.IO2	sta RWBankSelect
+
+				ldx #0
+
+RWDRVX.XM.2		lda RMDRVX.TMP,x
+RWDRVX.XM.DST	sta $FFFF,x
+				inx
+				bne RWDRVX.XM.2
+
+				inc RWDRV.XM.RUN+RWDRVX.XM.SRC+2-RWDRVX.XM.START
+				inc RWDRV.XM.RUN+RWDRVX.XM.DST+2-RWDRVX.XM.START
+				dey
+				bne RWDRVX.XM.COPY
+
+				sta IO.CLRALTZP
+RWDRVX.XM.IO3	stz RWBankSelect
+*--------------------------------------
+RWDRVX.XM.MNLC	bit IO.RRAMWRAMBNK1		ProDOS always uses LCBANK1
+
+				lda #0
+
+				ldx #IO.CLRALTZP
+
+				rts
+*--------------------------------------
+RWDRVX.XM.SRCLC	bcc RWDRVX.XM.MNLC		CC=WRITE,CS=READ?
+				.HS 2C					BIT ABS
+RWDRVX.XM.DSTLC	bcs RWDRVX.XM.MNLC		CC=WRITE,CS=READ?
+*--------------------------------------
+RWDRVX.XM.RWLC	bit $C000
+
+RWDRVX.XM.BANK	lda #$FF
+
+				ldx #IO.SETALTZP
+
+				rts
+*--------------------------------------
+				.LIST ON
+RWDRVX.XM.SIZE	.EQ	*-RWDRVX.XM.START
+				.LIST OFF
+*--------------------------------------
+RWDRVX.XM.SAVE	.BS RWDRVX.XM.SIZE
+*--------------------------------------
+				.EP
+*--------------------------------------
+RWDRVX.B.END	.LIST ON
+RWDRVX.SIZE		.EQ	RWDRVX.B.END-RWDRVX.B.START
+				.LIST OFF
+*--------------------------------------
+* CONTROL SECTION :
+*--------------------------------------
+				.DO RWDRV.SIZE>$9B
+				ERROR:RWDRV.SIZE too big
+				.FIN
+				.DO RWDRVX.SIZE>$FE
+				ERROR:RWDRVX.SIZE too big
+				.FIN
+				.DO RWDRVX.XM.SIZE>$F0
+				ERROR:RWDRVX.XM.SIZE too big
+				.FIN
+*--------------------------------------
+MAN
+SAVE usr/src/prodos.fx/pm.ramworks.s
+ASM
