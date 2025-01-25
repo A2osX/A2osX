@@ -16,15 +16,17 @@ ZS.START
 ZPPtr1			.BS 2
 ZPBuf			.BS 2
 ZPBufPtr		.BS 2
+pFILEtoClose	.BS 2
+
 ArgIndex		.BS 1
 ArgLine			.BS 1
+
 OptionIdx		.BS 1
-hBuf			.BS 1
 FieldNum		.BS 1
+
 StartChar		.BS 1
 EndChar			.BS 1
 Separator		.BS 1
-hToClose		.BS 1
 ZS.END			.ED
 *--------------------------------------
 *			File Header (16 Bytes)
@@ -32,20 +34,20 @@ ZS.END			.ED
 CS.START		cld
 				jmp (.1,x)
 				.DA #$61				6502,Level 1 (65c02)
-				.DA #1					BIN Layout Version 1
+				.DA #2					BIN Layout Version 2
 				.DA #0					S.PS.F.EVENT
 				.DA #0
-				.DA CS.END-CS.START		Code Size (without Constants)
-				.DA DS.END-DS.START		Data SegmentSize
+				.DA CS.END
+				.DA ID.END
+				.DA DS.END
 				.DA #32					Stack Size
 				.DA #ZS.END-ZS.START	Zero Page Size
-				.DA 0
 *--------------------------------------
 * Relocation Table
 *--------------------------------------
 .1				.DA CS.INIT
 				.DA CS.RUN
-				.DA CS.DOEVENT
+				.DA CS.SIG
 				.DA	CS.QUIT
 L.MSG.USAGE		.DA MSG.USAGE
 L.MSG.CRLF		.DA MSG.CRLF
@@ -57,117 +59,66 @@ CS.INIT			clc
 CS.RUN			lda #C.SPACE
 				sta Separator
 
-.10				jsr CS.RUN.NextArg
+.1				jsr CS.RUN.NextArg
 				bcs .8
 
 				lda (ZPPtr1)
 				cmp #'-'
-				beq .1
+				beq .2
 
 				lda ArgIndex
 				sta ArgLine
-				bra .10
+				bra .1
 
-.1				ldy #1
-				lda (ZPPtr1),y
+.2				jsr CS.RUN.CheckOp
+				bcc .1					scan for any other args
 
-				ldx #OptionList.Cnt-1
-
-.2				cmp OptionList,x
-				beq .3
-
-				dex
-				bpl .2
-
-.97				lda #E.SYN
 .98				pha
 				>LDYA L.MSG.USAGE
 				>LIBC PutS
 				pla
 				sec
-.9				rts
-
-.3				txa
-				lsr
-				beq .98					-H
-
-				cmp #4					-S
-				bne .4
-
-				jsr CS.RUN.NextArg
-				bcs .97
-
-				lda (ZPPtr1)
-				sta Separator
-				bra .10
-
-.4				sta OptionIdx
-				jsr CS.RUN.NextArg
-				bcs .97
-
-				>LIBC AToI
-				bcs .97
-
-				tax
-				bne .97
-
-				tya
-				ldx OptionIdx
-				sta FieldNum-1,x
-				bra .10					scan for any other args
-
+.99				rts
+*--------------------------------------
 .8				>LDYAI 256
-				>LIBC GetMem
-				bcs .9
+				>LIBC Malloc
+				bcs .99
 
 				>STYA ZPBuf
 				>STYA ZPBufPtr
-				stx hBuf
 
 				lda ArgLine
 				beq .80
 
+				>SS
 				>PUSHW ZPBufPtr
 				lda ArgLine
 				>LIBC ArgV
 				>PUSHYA
 				>LIBC StrCpy
+				>SR
 
 				jsr CS.RUN.OUT
-				bcs .9
+				bcs .99
 
 				lda #0					Exit with no Error
 				sec
 				rts
-
-.80				ldy #S.PS.hStdIn
-				lda (pPS),y
-				tay
-				ldx FILEs.hFD-1,y
-				ldy FDs.pLO-1,x
-				lda FDs.pHI-1,x
-				>STYA ZPPtr1
-
-				lda (ZPPtr1)
-				cmp #S.FD.T.PIPE
-				bne CS.RUN.LOOP
-
-				ldy #S.PS.hStdIn
-				lda (pPS),y
-				sta hToClose
+*--------------------------------------
+.80				jsr CS.RUN.CheckPipe
+				bcs .98
 *--------------------------------------
 CS.RUN.LOOP		>SLEEP
 
-				ldy #S.PS.hStdIn
-				lda (pPS),y
-				>PUSHA
-
 				>LDYA ZPBuf
 				>STYA ZPBufPtr
-				>PUSHYA
-
-				>PUSHWI	255
+				
+				>SS
+				>PUSHW ZPBuf
+				>PUSHWI	256
+				>PUSHW pFILEtoClose
 				>LIBC FGetS
+				>SR
 				bcs	.8
 
 				lda (ZPBufPtr)
@@ -224,10 +175,11 @@ CS.RUN.OUT		ldx FieldNum
 
 				rts
 *--------------------------------------
-CS.RUN.PRINTCR	>PUSHW L.MSG.CRLF
+CS.RUN.PRINTCR	>SS
+				>PUSHW L.MSG.CRLF
 				>PUSHBI 0
 				>LIBC PrintF
-
+				>SR
 				rts
 *--------------------------------------
 CS.RUN.OUT.MN	ldy #0
@@ -279,6 +231,89 @@ CS.RUN.NextArg	inc ArgIndex
 
 .9				rts
 *--------------------------------------
+CS.RUN.CheckOp	ldy #1
+				lda (ZPPtr1),y
+
+				ldx #OptionList.Cnt-1
+
+.2				cmp OptionList,x
+				beq .3
+
+				dex
+				bpl .2
+
+.98				lda #E.SYN
+				sec
+.99				rts
+				
+.3				txa
+				lsr
+				beq .98					-H
+
+				cmp #4					-S
+				bne .4
+
+				jsr CS.RUN.NextArg
+				bcs .98
+
+				lda (ZPPtr1)
+				sta Separator
+				clc
+				rts
+
+.4				sta OptionIdx
+				jsr CS.RUN.NextArg
+				bcs .98
+
+				>LIBC AToI
+				bcs .99
+
+				tax
+				bne .98
+
+				tya
+				ldx OptionIdx
+				sta FieldNum-1,x
+				
+				clc
+				rts
+*--------------------------------------
+CS.RUN.CheckPipe
+				ldy #S.PS.pStdIn
+				jsr A2osX.GetPSy
+				pha
+				iny
+				jsr A2osX.GetPSy
+				ply
+
+				>STYA ZPPtr1
+
+				>LIBC FileNo
+				bcs .99
+
+				>SS
+				>PUSHYA
+				>PUSHEA.G STATBUF
+				>LIBC FStat
+				>SR
+				bcs .99
+				
+				>LDA.G STATBUF+S.STAT.MODE+1
+				and #$F0
+
+				cmp /S.STAT.MODE.FIFO
+				bne .98
+
+				>LDYA ZPPtr1
+				>STYA pFILEtoClose
+
+				clc
+				rts
+				
+.98				lda #E.SYN
+				sec			
+.99				rts
+*--------------------------------------
 CS.RUN.AddYToBufPtr
 				tya
 				clc
@@ -289,23 +324,23 @@ CS.RUN.AddYToBufPtr
 				inc ZPBufPtr+1
 .8				rts
 *--------------------------------------
-CS.QUIT			lda hToClose
+CS.QUIT			>LDYA pFILEtoClose
 				beq .1
 
 				>LIBC FClose			Close the pipe
 
-.1				lda hBuf
+.1				>LDYA ZPBuf
 				beq .8
 
-				>LIBC FreeMem
+				>LIBC Free
 
 .8				clc
 				rts
 *--------------------------------------
-CS.DOEVENT		sec
+CS.SIG			sec
 				rts
 *--------------------------------------
-CS.END
+CS.END			.EQ *
 *--------------------------------------
 OptionList		.AS "HhFfMmNnSs"
 OptionList.Cnt	.EQ *-OptionList
@@ -318,9 +353,11 @@ MSG.USAGE		.CS 'Usage : CUT "line of text"\r\n'
 				.CS "   -S ch : Change default SPACE separator to 'ch'"
 MSG.CRLF		.CZ "\r\n"
 *--------------------------------------
+ID.END			.EQ *
+*--------------------------------------
 				.DUMMY
 				.OR 0
-DS.START
+STATBUF			.BS S.STAT
 DS.END			.ED
 *--------------------------------------
 MAN

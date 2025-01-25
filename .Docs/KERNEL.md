@@ -32,7 +32,7 @@ short int arg2argv(char* args, char* argv[])
 ## ASM  
 `>PUSHW args`  
 `>PUSHW argv`  
-`>SYSCALL Arg2ArgV`  
+`>LIBC Arg2ArgV`  
 
 ## RETURN VALUE  
 A = Arg count  
@@ -47,15 +47,12 @@ none
 
 # InsDrv  
 
-## C  
-`void * insdrv (void * src, void * drvcsstart, void * drvcsend, void * drvidend);`  
-
 ## ASM  
 `>PUSHW src  
 `>PUSHW drvcsstart  
 `>PUSHW drvcsend  
 `>PUSHW drvidend  
-`>SYSCALL insdrv`  
+`>LIBC insdrv`  
 
 ## RETURN VALUE  
 Y,A = Ptr to installed driver  
@@ -65,8 +62,7 @@ Y,A = Ptr to installed driver
 
 ## RETURN VALUE  
 CC = OK, CS = ERROR  
-Y,A = FD  
-X = hFD  
+A = hFD  
 
 # MkFD  
 
@@ -75,7 +71,7 @@ X = hFD
 
 ## ASM  
 `>PUSHB DevID`  
-`>SYSCALL MKFD`  
+`>LIBC MKFD`  
 
 ## RETURN VALUE  
 A = hFD  
@@ -89,7 +85,7 @@ Create a CDEV or BDEV
 ## ASM  
 `>PUSHW fd`  
 `>PUSHW devname`  
-`>SYSCALL mkdev`  
+`>LIBC mkdev`  
 
 ## RETURN VALUE  
  A = hDEV  
@@ -104,7 +100,7 @@ Create a CDEV or BDEV
 `>PUSHW fd`  
 `>PUSHB request`  
 `>PUSHW param`  
-`>SYSCALL IOCTL`  
+`>LIBC IOCTL`  
 `>SR`  
 
 ## RETURN VALUE  
@@ -118,7 +114,7 @@ Create a CDEV or BDEV
 
 ## ASM  
 `>LDYA name`  
-`>SYSCALL opendir`  
+`>LIBC opendir`  
 
 ## RETURN VALUE  
  CC : success  
@@ -134,7 +130,7 @@ Create a CDEV or BDEV
 
 ## ASM  
 `>LDYA dirp`  
-`>SYSCALL readdir`  
+`>LIBC readdir`  
 
 ## RETURN VALUE  
  CC : success  
@@ -151,7 +147,7 @@ Create a CDEV or BDEV
 
 ## ASM  
 `>LDYA dirp`  
-`>SYSCALL closedir`  
+`>LIBC closedir`  
 
 ## RETURN VALUE  
  none, always succeed.  
@@ -165,7 +161,7 @@ Change or add an environment variable, string is 'NAME=VALUE'
 
 ## ASM  
 `>LDYA string`  
-`>SYSCALL putenv`  
+`>LIBC putenv`  
 
 ## RETURN VALUE  
  CC, Y,A = 0  
@@ -182,7 +178,7 @@ Change or add an environment variable
 `>PUSHW envname`  
 `>PUSHW envval`  
 `>PUSHW overwrite`  
-`>SYSCALL setenv`  
+`>LIBC setenv`  
 
 ## RETURN VALUE  
  CC, Y,A = 0  
@@ -198,7 +194,7 @@ and returns a pointer to the corresponding value string.
 
 ## ASM  
 `>LDYA name`  
-`>SYSCALL getenv`  
+`>LIBC getenv`  
 
 ## RETURN VALUE  
  CC : Y,A = PTR to VALUE (C-String)  
@@ -213,7 +209,7 @@ Remove an environment variable
 
 ## ASM  
 `>LDYA name`  
-`>SYSCALL unsetenv`  
+`>LIBC unsetenv`  
 
 ## RETURN VALUE  
  CC, Y,A = 0  
@@ -228,7 +224,7 @@ Get error description for this errcode
 ## ASM  
 `>PUSHB errcode`  
 `>PUSHW buf`  
-`>SYSCALL GetErrMsg`  
+`>LIBC GetErrMsg`  
 
 ## RETURN VALUE  
 
@@ -272,6 +268,12 @@ Return X+Y, X-Y, X*Y, X/Y, X mod Y....
 ## RETURN VALUE  
  On stack (long)  
 
+# GetMemStat  
+ Y,A = Ptr to 24 bytes buffer  
+
+## RETURN VALUE  
+ Buffer filled with memory stats  
+
 # lrintf  
 Return float rounded into a long  
 
@@ -283,7 +285,7 @@ Return float rounded into a long
 `>SL`  
 `>SS`  
 `>PUSHF x`  
-`>SYSCALL lrintf`  
+`>LIBC lrintf`  
 `>SR`  
 
 ## RETURN VALUE  
@@ -306,7 +308,7 @@ Return Log(x), Sqr(x), E^X, Cos(x), Sin(X), Tan(x), ATan(x)
 `>SF`  
 `>SS`  
 `>PUSHF x (Float)`  
-`>SYSCALL logf`  
+`>LIBC logf`  
 `>SR`  
 
 ## RETURN VALUE  
@@ -324,36 +326,8 @@ Return the value of x raised to the power y
 `>SS`  
 `>PUSHF x`  
 `>PUSHF y`  
-`>SYSCALL powf`  
+`>LIBC powf`  
 `>SR`  
-
-## RETURN VALUE  
- On stack (float)  
-
-# FAdd,FSub,FMul,FDiv,FMod  
-Return X*Y, X/Y, X+Y, X-Y  
-
-## ASM  
-`>PUSHF X (float)`  
-`>PUSHF Y (float)`  
-`>FPU fmul`  
-`>FPU fdiv`  
-`>FPU fmod`							TODO  
-`>FPU fadd`  
-`>FPU fsub`  
-
-## RETURN VALUE  
- On stack (float)  
-
-# float  
-Return 'floated' long  
-
-## C  
-`float f = (float)l;  
-
-## ASM  
-`>PUSHL l` (long)  
-`>FPU float`  
 
 ## RETURN VALUE  
  On stack (float)  
@@ -367,7 +341,7 @@ Return MD5 Hash for input String
 # ASM  
 `>PUSHW str`  
 `>PUSHW digest`  
-`>SYSCALL md5`  
+`>LIBC md5`  
 
 ## RETURN VALUE  
 CC  
@@ -379,7 +353,7 @@ Initialize a MD5 computation
 `void *md5init();`  
 
 # ASM  
-`>SYSCALL MD5Init`  
+`>LIBC MD5Init`  
 
 ## RETURN VALUE  
 Y,A = pMD5  
@@ -394,7 +368,7 @@ Add Data to MD5 computation
 `>PUSHW md5`  
 `>PUSHW data`  
 `>PUSHW len`  
-`>SYSCALL MD5Update`  
+`>LIBC MD5Update`  
 
 ## RETURN VALUE  
 
@@ -406,27 +380,36 @@ Add Data to MD5 computation
 # ASM  
 `>PUSHW md5`  
 `>PUSHW digest`  
-`>SYSCALL MD5Finalize`  
+`>LIBC MD5Finalize`  
 
 ## RETURN VALUE  
 
 # Realloc  
 
-## C  
+## C / CSH  
 `#include <stdlib.h>`  
 `void *realloc(void *ptr, size_t size);`  
 
 ## ASM  
+`>SS`  
 `>PUSHW ptr`  
 `>PUSHW size`  
-`>SYSCALL realloc`  
+`>LIBC realloc`  
+`>SR`  
 
 ## RETURN VALUE  
  YA = ptr  
  X = hMem  
 
 # Malloc  
- Y,A = Size Requested  
+
+## C / CSH  
+`#include <stdlib.h>`  
+`void *malloc(size_t size);`  
+
+## ASM  
+`>LDYA ptr`  
+`>LIBC malloc`  
 
 ## RETURN VALUE  
  CC : success  
@@ -436,11 +419,17 @@ Add Data to MD5 computation
   A = EC  
 
 # Free  
- Y,A = Ptr To Free  
+
+## C / CSH  
+`#include <stdlib.h>`  
+`void free(void *ptr);`  
+
+## ASM  
+`>LDYA ptr`  
+`>LIBC free`  
 
 ## RETURN VALUE  
  none.  
- (X unmodified)  
 
 # Online  
 Get ProDOS Volume Info  
@@ -451,7 +440,7 @@ Get ProDOS Volume Info
 ## ASM  
 `>PUSHB volid`  
 `>PUSHW buf`  
-`>SYSCALL Online`  
+`>LIBC Online`  
 
 ## RETURN VALUE  
 
@@ -464,7 +453,7 @@ Change Type of a ProDOS File
 ## ASM  
 `>PUSHW filepath`  
 `>PUSHB filetype`  
-`>SYSCALL ChTyp`  
+`>LIBC ChTyp`  
 
 ## RETURN VALUE  
 
@@ -477,7 +466,7 @@ Change AuxType of a ProDOS File
 ## ASM  
 `>PUSHW filepath`  
 `>PUSHW auxtype`  
-`>SYSCALL ChAux`  
+`>LIBC ChAux`  
 
 ## RETURN VALUE  
 
@@ -490,7 +479,7 @@ Change Attributes of a ProDOS File
 ## ASM  
 `>PUSHW filepath`  
 `>PUSHB attributes`  
-`>SYSCALL setattr`  
+`>LIBC setattr`  
 
 ## RETURN VALUE  
 
@@ -504,7 +493,7 @@ Change Attributes of a ProDOS File
 `>SS`  
 `>PUSHW argv`  
 `>PUSHW flags`  
-`>SYSCALL execv`  
+`>LIBC execv`  
 `>SR`  
 
 ## RETURN VALUE  
@@ -520,7 +509,7 @@ Y,A = Child PSID
 `>SS`  
 `>PUSHW args`  
 `>PUSHW flags`  
-`>SYSCALL execl`  
+`>LIBC execl`  
 `>SR`  
 
 ## RETURN VALUE  
@@ -533,7 +522,7 @@ Y,A = Child PSID
 `pid_t fork(void);`  
 
 ## ASM  
-`>SYSCALL fork`  
+`>LIBC fork`  
 
 ## RETURN VALUE  
 A = Child PSID  
@@ -547,22 +536,10 @@ A = Child PSID
 `>SS`  
 `>PUSHW pid`  
 `>PUSHW sig`  
-`>SYSCALL kill`  
+`>LIBC kill`  
 `>SR`  
 
 ## RETURN VALUE  
-
-# GetPS(int PID)  
-*  
-
-## C  
-`void *getpslist (void);`  
-
-## ASM  
-`>SYSCALL GetPSList`  
-
-## RETURN VALUE  
- Y,A = Ptr to PS list  
 
 # GetPS(int PID)  
 *  
@@ -572,7 +549,7 @@ A = Child PSID
 
 ## ASM  
 `>LDYA PID`  
-`>SYSCALL GetPS`  
+`>LIBC GetPS`  
 
 ## RETURN VALUE  
  Y,A = Ptr to PS struct  
@@ -585,7 +562,7 @@ Load TXT a file in memory (with ending 0)
 
 ## ASM  
 `>LDYA filename`  
-`>SYSCALL loadtxtfile`  
+`>LIBC loadtxtfile`  
 
 ## RETURN VALUE  
  Y,A = Ptr to loaded file  
@@ -601,7 +578,7 @@ Load a file in memory
 `>PUSHB flags`  
 `>PUSHB ftype`  
 `>PUSHW auxtype`  
-`>SYSCALL loadfile`  
+`>LIBC loadfile`  
 
 ## RETURN VALUE  
  Y,A = Ptr to loaded file  
@@ -619,7 +596,7 @@ And return, if found, the full path to it.
 `>PUSHW fullpath`  
 `>PUSHW searchpath`  
 `>PUSHW filestat`  
-`>SYSCALL filesearch`  
+`>LIBC filesearch`  
 `>SR`  
 
 ## RETURN VALUE  
@@ -637,7 +614,7 @@ CS : not found
 ## ASM  
 `PUSHB uid`  
 `>PUSHW passwd`  
-`>SYSCALL getpwuid`  
+`>LIBC getpwuid`  
 
 ## RETURN VALUE  
 
@@ -650,7 +627,7 @@ CS : not found
 ## ASM  
 `>PUSHB gid`  
 `>PUSHW group`  
-`>SYSCALL getgrgid`  
+`>LIBC getgrgid`  
 
 ## RETURN VALUE  
 
@@ -663,7 +640,7 @@ CS : not found
 ## ASM  
 `>PUSHW name`  
 `>PUSHW passwd`  
-`>SYSCALL getpwname`  
+`>LIBC getpwname`  
 
 ## RETURN VALUE  
 
@@ -676,7 +653,7 @@ CS : not found
 ## ASM  
 `>PUSHW name`  
 `>PUSHW group`  
-`>SYSCALL getgrname`  
+`>LIBC getgrname`  
 
 ## RETURN VALUE  
 
@@ -688,7 +665,7 @@ CS : not found
 
 ## ASM  
 `>LDYA passwd`  
-`>SYSCALL putpw`  
+`>LIBC putpw`  
 
 ## RETURN VALUE  
 
@@ -700,7 +677,7 @@ CS : not found
 
 ## ASM  
 `>LDYA group`  
-`>SYSCALL putgr`  
+`>LIBC putgr`  
 
 ## RETURN VALUE  
 
@@ -713,7 +690,7 @@ CS : not found
 ## ASM  
 `>PUSHW name`  
 `>PUSHW passwd`  
-`>SYSCALL OpenSession`  
+`>LIBC OpenSession`  
 
 ## RETURN VALUE  
 
@@ -725,19 +702,21 @@ CS : not found
 
 ## ASM  
 `>PUSHB hSID`  
-`>SYSCALL CloseSession`  
+`>LIBC CloseSession`  
 
 ## RETURN VALUE  
 
 # SListGetData  
 
 ## ASM  
+`>SS`  
 `>PUSHW pSList`  
 `>PUSHW KeyID`  
 `>PUSHW DataPtr` (0 if KERNEL should allocate a buffer)  
 `>PUSHW DataLen` (Data bytes to return, 0 if String mode)  
 `>PUSHW DataOfs` (Start offset in Data)  
-`>SYSCALL SListGetData`  
+`>KAPI SListGetData`  
+`>SR`  
 
 ## RETURN VALUE  
  Y,A = DataPtr  
@@ -745,32 +724,38 @@ CS : not found
 # SListAddData  
 
 ## ASM  
+`>SS`  
 `>PUSHW pSList`  
 `>PUSHW KeyID`  
 `>PUSHW DataPtr`  
 `>PUSHW DataLen` (Data bytes to add, 0 if String mode)  
-`>SYSCALL SListAddData`  
+`>KAPI SListAddData`  
+`>SR`  
 
 ## RETURN VALUE  
 
 # SListSetData  
 
 ## ASM  
+`>SS`  
 `>PUSHW pSList`  
 `>PUSHW KeyID`  
 `>PUSHW DataPtr`  
 `>PUSHW DataLen` (Data bytes to set, 0 if String mode)  
-`>SYSCALL SListSetData`  
+`>KAPI SListSetData`  
+`>SR`  
 
 ## RETURN VALUE  
 
 # SListGetByID  
 
 ## ASM  
+`>SS`  
 `>PUSHW pSList`  
 `>PUSHW KeyID`  
 `>PUSHW KeyPtr`  
-`>SYSCALL SListGetByID`  
+`>KAPI SListGetByID`  
+`>SR`  
 
 ## RETURN VALUE  
  Y,A = Next KeyID  
@@ -778,11 +763,13 @@ CS : not found
 # SListNewKey  
 
 ## ASM  
+`>SS`  
 `>PUSHW pSList`  
 `>PUSHW KeyPtr`  
 `>PUSHW ScopeID`  
 `>PUSHWI NextPtr`  
-`>SYSCALL SListNewKey`  
+`>KAPI SListNewKey`  
+`>SR`  
 
 ## RETURN VALUE  
  Y,A = KeyID  
@@ -790,11 +777,13 @@ CS : not found
 # SListLookup  
 
 ## ASM  
+`>SS`  
 `>PUSHW pSList`  
 `>PUSHW KeyPtr`  
 `>PUSHW ScopeID`  
 `>PUSHWI NextPtr`  
-`>SYSCALL SListLookup`  
+`>KAPI SListLookup`  
+`>SR`  
 
 ## RETURN VALUE  
  Y,A = KeyID  
@@ -803,7 +792,7 @@ CS : not found
 
 ## ASM  
 `>LDYA pSList`  
-`>SYSCALL SListFree`  
+`>KAPI SListFree`  
 
 ## RETURN VALUE  
 
@@ -811,10 +800,98 @@ CS : not found
 
 ## ASM  
 `lda Opt`  
-`>SYSCALL SListNew`  
+`>KAPI SListNew`  
 
 ## RETURN VALUE  
 Y,A=pSList  
+
+# Socket  
+
+## C / CSH  
+`#include <sys/socket.h>`  
+`int socket(int socket_family, int socket_type, int protocol);`  
+
+## ASM  
+`>SS`  
+`>PUSHWI AF_`  
+`>PUSHWI SOCK_`  
+`>PUSHWI Protocol`  
+`>LIBC Socket`  
+`>SR`  
+
+## RETURN VALUE  
+ CC = success  
+ YA = sockfd  
+
+# Bind  
+
+## C / CSH  
+`#include <sys/socket.h>`  
+`int bind(int socket, const struct sockaddr *address, socklen_t address_len);`  
+
+## ASM  
+`>SS`  
+`>PUSHW socket`  
+`>PUSHW address`  
+`>PUSHWI address_len`  
+`>LIBC Bind`  
+`>SR`  
+
+## RETURN VALUE  
+ CC = success  
+
+# Connect  
+
+## C / CSH  
+`#include <sys/socket.h>`  
+`int connect(int socket, const struct sockaddr *address, socklen_t address_len);`  
+
+## ASM  
+`>SS`  
+`>PUSHW socket`  
+`>PUSHW address`  
+`>PUSHWI address_len`  
+`>LIBC Bind`  
+`>SR`  
+
+## RETURN VALUE  
+ CC = success  
+
+# Listen  
+
+## C / CSH  
+`#include <sys/socket.h>`  
+`int listen(int socket, int backlog);`  
+
+## ASM  
+`>SS`  
+`>PUSHW socket`  
+`>PUSHWI backlog`  
+`>LIBC Listen`  
+`>SR`  
+
+## RETURN VALUE  
+ CC = success  
+
+# Accept  
+
+## C / CSH  
+`#include <sys/socket.h>`  
+`int accept(int socket, struct sockaddr *restrict address, socklen_t *restrict address_len);`  
+
+## ASM  
+`>SS`  
+`>PUSHW socket`  
+`>PUSHW address`  
+`>PUSHWI address_len`  
+`>LIBC Accept`  
+`>SR`  
+
+## RETURN VALUE  
+ CC = success  
+ YA = hFD  
+ CS = error  
+ YA = -1 (ERRNO)  
 
 # ChMod  
 change permissions of a file  
@@ -825,7 +902,7 @@ change permissions of a file
 ## ASM  
 `>PUSHW pathname`  
 `>PUSHW mode`  
-`>SYSCALL chmod`  
+`>LIBC chmod`  
 
 ## RETURN VALUE  
 
@@ -840,7 +917,7 @@ Return information about a FD
 `>SS`  
 `>PUSHW fd`  
 `>PUSHW statbuf`  
-`>SYSCALL fstat`  
+`>LIBC fstat`  
 `>SR`  
 
 ## RETURN VALUE  
@@ -856,7 +933,7 @@ Return information about a file
 `>SS`  
 `>PUSHW pathname`  
 `>PUSHW statbuf`  
-`>SYSCALL stat`  
+`>LIBC stat`  
 `>SR`  
 
 ## RETURN VALUE  
@@ -871,7 +948,7 @@ create a directory
 `>SS`  
 `>PUSHW pathname`  
 `>PUSHW mode`  
-`>SYSCALL mkdir`  
+`>LIBC mkdir`  
 `>SR`  
 
 ## RETURN VALUE  
@@ -890,7 +967,7 @@ return a pathname to a new FIFO
 `>SS`  
 `>PUSHW path`  
 `>PUSHW mode`  
-`>SYSCALL mkfifo`  
+`>LIBC mkfifo`  
 `>SR`  
 
 ## RETURN VALUE  
@@ -909,7 +986,7 @@ Create a special or ordinary file.
 `>PUSHW pathname`  
 `>PUSHW mode`  
 `>PUSHW dev`  
-`>SYSCALL mknod`  
+`>LIBC mknod`  
 `>SR`  
 
 ## RETURN VALUE  
@@ -923,17 +1000,11 @@ A = hFILE
 
 ## ASM  
 `>LDYA size`  
-`>SYSCALL pipe`  
+`>LIBC pipe`  
 
 ## RETURN VALUE  
 CC = OK, CS = ERROR  
 A = hFD  
-
-# GetMemStat  
- Y,A = Ptr to 24 bytes buffer  
-
-## RETURN VALUE  
- Buffer filled with memory stats  
 
 # fileno  
 map a stream pointer to a file descriptor  
@@ -944,7 +1015,7 @@ map a stream pointer to a file descriptor
 
 ## ASM  
 `>LDYA stream`  
-`>SYSCALL fileno`  
+`>LIBC fileno`  
 
 ## RETURN VALUE  
  CC = success  
@@ -960,7 +1031,7 @@ Print A (char) to hFILE
 ## ASM  
 `>PUSHW character`  
 `>PUSHW stream`  
-`>SYSCALL fputc`  
+`>LIBC fputc`  
 
 ## RETURN VALUE  
 CC = success  
@@ -974,7 +1045,7 @@ Print A (char) to StdOut
 
 ## ASM  
 `lda c`  
-`>SYSCALL putchar`  
+`>LIBC putchar`  
 
 ## RETURN VALUE  
 CC = success  
@@ -988,7 +1059,7 @@ Write Str to StdOut, appends '\r\n'
 
 ## ASM  
 `>LDYAI str`  
-`>SYSCALL PutS`  
+`>LIBC PutS`  
 
 ## RETURN VALUE  
 CC : success Y,A > 0  
@@ -1005,7 +1076,7 @@ Write Str to FILE
 `>SS`  
 `>PUSHW s`  
 `>PUSHW stream`  
-`>SYSCALL fputs`  
+`>LIBC fputs`  
 `>SR`  
 
 ## RETURN VALUE  
@@ -1025,7 +1096,7 @@ string is then terminated with a null byte.
 `>PUSHW s`  
 `>PUSHW n`  
 `>PUSHW FILE`  
-`>SYSCALL fgets`  
+`>LIBC fgets`  
 
 ## RETURN VALUE  
  Y,A: s  
@@ -1039,7 +1110,7 @@ Get char from StdIn
 `int getchar (void);`  
 
 ## ASM  
-`>SYSCALL getchar`  
+`>LIBC getchar`  
 
 ## RETURN VALUE  
  CC = success  
@@ -1054,7 +1125,7 @@ Get char from Node
 
 ## ASM  
 `>LDYA pStream`  
-`>SYSCALL getc`  
+`>LIBC getc`  
 
 ## RETURN VALUE  
  CC = success  
@@ -1072,7 +1143,7 @@ push byte back into input stream
 `>PUSHW stream`  
 `>PUSHW c`  
 `>SR`  
-`>SYSCALL ungetc`  
+`>LIBC ungetc`  
 
 ## RETURN VALUE  
  CC = success  
@@ -1097,7 +1168,7 @@ Open a file
  + O.CREATE : Create if not exists  
 `>PUSHB ftype`  
 `>PUSHW auxtype`  
-`>SYSCALL FOpen`  
+`>LIBC FOpen`  
 `>SR`  
 
 ## DESCRIPTION  
@@ -1124,7 +1195,7 @@ Close a file
 
 ## ASM  
 `>LDYA stream`  
-`>SYSCALL FClose`  
+`>LIBC FClose`  
 
 ## RETURN VALUE  
 
@@ -1139,7 +1210,7 @@ Read bytes from file
 `>PUSHW stream`  
 `>PUSHW ptr`  
 `>PUSHW count`  
-`>SYSCALL FRead`  
+`>LIBC FRead`  
 
 ## RETURN VALUE  
  Y,A = Bytes Read  
@@ -1155,7 +1226,7 @@ Write bytes to file
 `>PUSHW stream`  
 `>PUSHW ptr`  
 `>PUSHW count`  
-`>SYSCALL fwrite`  
+`>LIBC fwrite`  
 
 ## RETURN VALUE  
  Y,A = Bytes Written  
@@ -1168,7 +1239,7 @@ Write bytes to file
 
 ## ASM  
 `>LDYA stream`  
-`>SYSCALL fflush`  
+`>LIBC fflush`  
 
 # FSeek  
 Set the file-position indicator for hFILE  
@@ -1182,7 +1253,7 @@ Set the file-position indicator for hFILE
 `>PUSHW stream`  
 `>PUSHL offset`  
 `>PUSHW whence`  
-`>SYSCALL fseek`  
+`>LIBC fseek`  
 `>SR`  
 
 # FEOF  
@@ -1194,7 +1265,7 @@ Test the end-of-file indicator for hFILE
 
 ## ASM  
 `>LDYA stream`  
-`>SYSCALL feof`  
+`>LIBC feof`  
 
 ## RETURN VALUE  
  CC :  
@@ -1211,7 +1282,7 @@ Return the current value of the file-position indicator
 
 ## ASM  
 `>LDYA stream`  
-`>SYSCALL ftell`  
+`>LIBC ftell`  
 
 ## RETURN VALUE  
 On stack (long)  
@@ -1225,7 +1296,7 @@ Remove a file or directory
 
 ## ASM  
 `>LDYA pathname`  
-`>SYSCALL remove`  
+`>LIBC remove`  
 
 ## RETURN VALUE  
 
@@ -1237,9 +1308,11 @@ Rename a file
 `int rename ( const char * oldpath, const char * newpath );`  
 
 ## ASM  
+`>SS`  
 `>PUSHW oldpath`  
 `>PUSHW newpath`  
-`>SYSCALL rename`  
+`>LIBC rename`  
+`>SR`  
 
 ## RETURN VALUE  
 
@@ -1262,21 +1335,21 @@ PrintF : (example is for printing Y,A as integer : format="%I", 2 bytes)
 `>PUSHW i`  
 `...`  
 `>PUSHBI 2`	#bytecount  
-`>SYSCALL PrintF`  
+`>LIBC PrintF`  
 FPrintF :  
 `>PUSHW FILE`  
 `>PUSHW format`  
 `>PUSHW i`  
 `...`  
 `>PUSHBI 2`	#bytecount  
-`>SYSCALL fprintf`  
+`>LIBC fprintf`  
 SPrintF :  
 `>PUSHW str`  
 `>PUSHW format`  
 `>PUSHW i`  
 `...`  
 `>PUSHBI 2`	#bytecount  
-`>SYSCALL sprintf`  
+`>LIBC sprintf`  
 
 ## RETURN VALUE  
 CC : success, Y,A = bytes sent  
@@ -1324,21 +1397,21 @@ ScanF :
 `>PUSHW ptr`  
 `...`  
 `>PUSHB bytecount`  
-`>SYSCALL scanf`  
+`>LIBC scanf`  
 FScanF :  
 `>PUSHB stream`  
 `>PUSHW format`  
 `>PUSHW ptr`  
 `...`  
 `>PUSHB bytecount`  
-`>SYSCALL fscanf`  
+`>LIBC fscanf`  
 SScanF :  
 `>PUSHW s`  
 `>PUSHW format`  
 `>PUSHW ptr`  
 `...`  
 `>PUSHB bytecount`  
-`>SYSCALL sscanf`  
+`>LIBC sscanf`  
 Specifiers :  
 + %i : short int  
 + %d : byte  
@@ -1355,6 +1428,12 @@ TODO : %10s
 ## RETURN VALUE  
 A = Number of arguments filled.  
 
+# Random  
+
+## C / CSH  
+`#include <stdlib.h>`  
+`long random(void);`  
+
 # StrToF  
 Convert String to 40 bits Float  
 
@@ -1367,7 +1446,7 @@ Convert String to 40 bits Float
 `>SS`  
 `>PUSHW str`  
 `>PUSHWI EndPtr`  
-`>SYSCALL StrToF`  
+`>LIBC StrToF`  
 `>SR`  
 
 ## RETURN VALUE  
@@ -1383,7 +1462,7 @@ Convert String to 40 bits Float
 ## ASM  
 `>SF`  
 `>LDYA str`  
-`>SYSCALL atof`  
+`>LIBC atof`  
 
 ## RETURN VALUE  
 On stack (float) at pBase  
@@ -1402,7 +1481,7 @@ Convert String to 32 bits (unsigned) int
 `>PUSHW str`  
 `>PUSHW EndPtr`  
 `>PUSHW Base`  
-`>SYSCALL StrToL`  
+`>LIBC StrToL`  
 `>SR`  
 
 ## RETURN VALUE  
@@ -1418,7 +1497,7 @@ Convert String to 32 bits long
 ## ASM  
 `>SL`  
 `>LDYA str`  
-`>SYSCALL atol`  
+`>LIBC atol`  
 
 ## RETURN VALUE  
 On stack (long)  
@@ -1432,7 +1511,7 @@ Convert String to 16 bits int
 
 ## ASM  
 `>LDYA str`  
-`>SYSCALL atoi`  
+`>LIBC atoi`  
 
 ## RETURN VALUE  
  Y,A = int  
@@ -1448,7 +1527,7 @@ Convert String to 16 bits int
 `>SS`  
 `>PUSHW path`  
 `>PUSHW resolvedpath`  
-`>SYSCALL realpath`  
+`>LIBC realpath`  
 `>SR`  
 
 ## DESCRIPTION  
@@ -1472,7 +1551,7 @@ CS : Y,A = NULL, ERRNO set
 `>SS`  
 `>PUSHW str`  
 `>PUSHW expanded`  
-`>SYSCALL expand`  
+`>LIBC expand`  
 `>SR`  
 
 ## RETURN VALUE  
@@ -1502,7 +1581,7 @@ Returns Length of C-String
 
 ## ASM  
 `>LDYAI str`  
-`>SYSCALL strlen`  
+`>LIBC strlen`  
 
 ## RETURN VALUE   
 Y,A = String length  
@@ -1517,7 +1596,7 @@ Concatenate strings
 ## ASM  
 `>PUSHWI destination`  
 `>PUSHWI source`  
-`>SYSCALL strcat`  
+`>LIBC strcat`  
 
 ## RETURN VALUE   
 Y,A = destination  
@@ -1532,7 +1611,7 @@ Y,A = destination
 ## ASM  
 `>PUSHWI destination`  
 `>PUSHWI source`  
-`>SYSCALL strcpy`  
+`>LIBC strcpy`  
 
 ## RETURN VALUE   
 Y,A = destination  
@@ -1547,8 +1626,8 @@ Convert string to UPPERCASE/lowercase
 
 ## ASM  
 `>LDYAI str`  
-`>SYSCALL strupr`  
-`>SYSCALL strlwr`  
+`>LIBC strupr`  
+`>LIBC strlwr`  
 
 ## RETURN VALUE   
 Uppercased/lowercased String in Buffer  
@@ -1564,7 +1643,7 @@ Compare 2 strings
 ## ASM  
 `>PUSHWI s1`  
 `>PUSHWI s2`  
-`>SYSCALL strcmp`  
+`>LIBC strcmp`  
 
 ## RETURN VALUE   
 CC : match  
@@ -1582,7 +1661,7 @@ Compare 2 strings, ignoring case
 ## ASM  
 `>PUSHWI s1`  
 `>PUSHWI s2`  
-`>SYSCALL strcasecmp`  
+`>LIBC strcasecmp`  
 
 ## RETURN VALUE   
 CC : match  
@@ -1594,7 +1673,7 @@ CS : no match
 
 ## ASM  
 `>LDYA size`  
-`>SYSCALL StrVNew`  
+`>LIBC StrVNew`  
 
 ## RETURN VALUE  
 
@@ -1604,7 +1683,7 @@ CS : no match
 `>PUSHW pSTRV`  
 `>PUSHW id`  
 `>PUSHW ptr`  
-`>SYSCALL StrVSet`  
+`>LIBC StrVSet`  
 
 ## RETURN VALUE  
 
@@ -1614,11 +1693,76 @@ CS : no match
 `>PUSHW pSTRV`  
 `>PUSHW id`  
 `>PUSHW ptr`  
-`>SYSCALL StrVGet`  
+`>LIBC StrVGet`  
 
 ## RETURN VALUE  
  CC: Y,A = Ptr  
  CS: A = E.NOKEY  
+
+# TBufGetL  
+
+## ASM  
+`>SS`  
+`>PUSHW pTBuf`  
+`>PUSHW LineNum`  
+`>PUSHW DataPtr`  
+`>KAPI TBufGetL`  
+`>SR`  
+
+## RETURN VALUE  
+
+# TBufGetB  
+
+## ASM  
+`>SS`  
+`>PUSHW pTBuf`  
+`>PUSHW DataOfs`  
+`>PUSHW DataPtr`  
+`>PUSHW DataLen`  
+`>KAPI TBufGetB`  
+`>SR`  
+
+## RETURN VALUE  
+
+# TBufIns  
+
+## ASM  
+`>SS`  
+`>PUSHW pTBuf`  
+`>PUSHW DataOfs`  
+`>PUSHW DataPtr`  
+`>PUSHW DataLen`  
+`>KAPI TBufIns`  
+`>SR`  
+
+## RETURN VALUE  
+
+# TBufDel  
+
+## ASM  
+`>SS`  
+`>PUSHW pTBuf`  
+`>PUSHW DataOfs`  
+`>PUSHW DataLen`  
+`>KAPI TBufDel`  
+`>SR`  
+
+## RETURN VALUE  
+
+# TBufNew  
+
+## ASM  
+`>KAPI TBufNew`  
+
+## RETURN VALUE  
+
+# TBufFree  
+
+## ASM  
+`>LDYA pTBuf`  
+`>KAPI TBufFree`  
+
+## RETURN VALUE  
 
 # Time  
 Get System Time in Buffer  
@@ -1628,7 +1772,7 @@ Get System Time in Buffer
 
 ## ASM  
 `>LDYA timer`  
-`>SYSCALL time`  
+`>LIBC time`  
 
 ## RETURN VALUE  
 S.TIME filled with System date/time  
@@ -1642,7 +1786,7 @@ S.TIME filled with System date/time
 ## ASM  
 `>PUSHL ptime`  
 `>PUSHW timer`  
-`>SYSCALL PTime2Time`  
+`>LIBC PTime2Time`  
 
 ## RETURN VALUE  
 
@@ -1671,7 +1815,7 @@ Convert S.TIME struct to CSTR
 + %Y : Year four digits 2001  
 
 `>PUSHW timeptr`  
-`>SYSCALL strftime`  
+`>LIBC strftime`  
 
 ## RETURN VALUE  
   none. always succeed.  
@@ -1685,7 +1829,7 @@ Convert S.TIME struct to CSTR
 ## ASM  
 `>PUSHW ctime`  
 `>PUSHW timer`  
-`>SYSCALL CTime2Time`  
+`>LIBC CTime2Time`  
 
 ## RETURN VALUE  
 
@@ -1697,7 +1841,7 @@ Convert S.TIME struct to CSTR
 ## ASM  
 `>PUSHW pathname`  
 `>PUSHB flags`  
-`>SYSCALL open`  
+`>LIBC open`  
 
 ## RETURN VALUE  
 A = hFD  
@@ -1711,7 +1855,7 @@ REG File created on ProDOS : T=TXT,X=$0000
 
 ## ASM  
 `>LDYA fd`  
-`>SYSCALL close`  
+`>LIBC close`  
 
 # read  
 
@@ -1723,7 +1867,7 @@ REG File created on ProDOS : T=TXT,X=$0000
 `>PUSHW fd`  
 `>PUSHW buf`  
 `>PUSHW count`  
-`>SYSCALL read`  
+`>LIBC read`  
 
 ## RETURN VALUE  
 CC: Y,A = bytes read  
@@ -1739,7 +1883,7 @@ CS: A = EC
 `>PUSHW fd`  
 `>PUSHW buf`  
 `>PUSHW count`  
-`>SYSCALL write`  
+`>LIBC write`  
 
 ## RETURN VALUE  
 CC: Y,A = bytes written  
@@ -1755,7 +1899,7 @@ Set the file-position indicator for hFD
 `>PUSHB hFD`  
 `>PUSHL offset`  
 `>PUSHB whence`  
-`>SYSCALL fseek`  
+`>LIBC fseek`  
 
 # ChOwn  
 
@@ -1768,7 +1912,7 @@ Set the file-position indicator for hFD
 `>PUSHW pathname`  
 `>PUSHW owner`  
 `>PUSHW group`  
-`>SYSCALL chown`  
+`>LIBC chown`  
 `>SR`  
 
 ## RETURN VALUE  
@@ -1782,7 +1926,7 @@ Set the file-position indicator for hFD
 ## ASM  
 `>PUSHW buf`  
 `>PUSHW size`  
-`>SYSCALL chown`  
+`>LIBC chown`  
 
 ## RETURN VALUE  
  NULL CS  
@@ -1803,7 +1947,7 @@ getcwd()
 
 ## ASM  
 `>LDYA path`  
-`>SYSCALL chdir`  
+`>LIBC chdir`  
 
 ## RETURN VALUE  
  CS : YA = int RC < 0 $FFxx  
@@ -1827,7 +1971,7 @@ truncated, and no error is returned
 `>SS`  
 `>PUSHW name`  
 `>PUSHW len`  
-`>SYSCALL GetHostName`  
+`>LIBC GetHostName`  
 `>SR`  
 
 ## RETURN VALUE  

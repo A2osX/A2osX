@@ -3,6 +3,42 @@
 ## Copyright 
 Copyright 2015 - 2020, Remy Gibert and the A2osX contributors. 
 
+# D2MotorControl  
+Switch On/off Drive Motor  
+ PUSHB DSSS0000  
+ PUSHB on/off  
+
+## RETURN VALUE  
+ CC : success  
+ CS : A = Error  
+
+# D2Recalibrate  
+Reset Drive head position  
+ PUSHB DSSS0000  
+
+## RETURN VALUE  
+ CC : success  
+ CS : A = Error  
+
+# D2MoveHead  
+Select Drive head  
+ PUSHB DSSS0000  
+ PUSHB HeadNum  
+
+## RETURN VALUE  
+ CC : success  
+ CS : A = Error  
+
+# D2MoveHead  
+Move Drive head  
+ PUSHB DSSS0000  
+ PUSHB FromTrk  
+ PUSHB ToTrk  
+
+## RETURN VALUE  
+ CC : success  
+ CS : A = Error  
+
 # D2TrkFmt16s  
 Write a track (16 sectors)  
  PUSHB DSSS0000  
@@ -56,10 +92,8 @@ int getprodoscatsize (short int options, short int catsize, int devsize );
 ## ASM  
  PUSHW = DevSize (in 512b blocks)  
  PUSHB = Catalog Size (in blocks)  
- PUSHB = Options  
 
 ## RETURN VALUE  
- X=BlockCount (max 22)  
  Y,A=BufSize  (max $4400)  
 
 # BuildProDOSCat  

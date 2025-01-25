@@ -26,7 +26,6 @@ NEW
 *\-------------------------------------
 				.INB inc/macros.i
 				.INB inc/a2osx.i
-				.INB inc/kernel.i
 				.INB inc/mli.i
 				.INB inc/mli.e.i
 *--------------------------------------
@@ -40,8 +39,7 @@ ZPBufPtr		.BS 2
 ArgIndex		.BS 1
 ArgPattern		.BS 1
 
-hFile			.BS 1
-hBuf			.BS 1
+pFILE			.BS 2
 
 LineNum			.BS 2
 char			.BS 1
@@ -61,20 +59,20 @@ ZS.END			.ED
 CS.START		cld
 				jmp (.1,x)
 				.DA #$61				6502,Level 1 (65c02)
-				.DA #1					BIN Layout Version 1
+				.DA #2					BIN Layout Version 2
 				.DA #0					S.PS.F.EVENT
 				.DA #0
-				.DA CS.END-CS.START		Code Size (without Constants)
-				.DA DS.END-DS.START		Data SegmentSize
-				.DA #16					Stack Size
-				.DA #ZS.END-ZS.START	Zero Page Size
-				.DA 0
+				.DA CS.END
+				.DA ID.END
+				.DA DS.END
+				.DA #64					Stack Size
+				.DA #ZS.END-ZS.START	Zero Page Size	
 *--------------------------------------
 * Relocation Table
 *--------------------------------------
 .1				.DA CS.INIT
 				.DA CS.RUN
-				.DA CS.DOEVENT		
+				.DA CS.SIG
 				.DA	CS.QUIT
 L.MSG.USAGE		.DA MSG.USAGE
 L.MSG.CRLF		.DA MSG.CRLF
@@ -88,18 +86,19 @@ CS.RUN			jsr CS.RUN.CheckArgs
 				bcs .99
 
 				>LDYAI 256
-				>LIBC GetMem
+				>LIBC Malloc
 				bcs .99
 
 				>STYA ZPBufPtr
-				stx hBuf
 
 .1				>SLEEP
 
-				>PUSHB hFile
+				>SS
 				>PUSHW ZPBufPtr
 				>PUSHWI	256
+				>PUSHW pFILE
 				>LIBC FGetS
+				>SR
 				bcs	.7
 
 				inc LineNum
@@ -112,7 +111,7 @@ CS.RUN			jsr CS.RUN.CheckArgs
 				bcc .1
 
 				rts
-
+*--------------------------------------
 .7				cmp #MLI.E.EOF
 				bne .98
 				
@@ -147,14 +146,14 @@ CS.RUN.CheckArgs
 				>STYA ZPPatternPtr
 				bra CS.RUN.CheckArgs
 
-.11				lda hFile
+.11				lda pFILE+1
 				bne .97
 
 				>LDYA ZPPtr1
 				jsr CS.RUN.OPEN
 				bcs .9
 
-				sta hFile
+				>STYA pFILE
 				bra CS.RUN.CheckArgs
 *--------------------------------------
 .1				ldy #1 
@@ -184,23 +183,13 @@ CS.RUN.CheckArgs
 				
 				bra CS.RUN.CheckArgs
 *--------------------------------------
-.7				lda hFile
+.7				lda pFILE+1
 				bne .8
 
-				ldy #S.PS.hStdIn
-				lda (pPS),y
-				tay
-				ldx FILEs.hFD-1,y
-				lda FDs.pLO-1,x
-				sta ZPPtr1
-				lda FDs.pHI-1,x
-				sta ZPPtr1+1
-
-				lda (ZPPtr1)
-				cmp #S.FD.T.PIPE
-				bne .97
+				jsr CS.RUN.CheckPipe
+				bcs .98
 				
-				sty hFile
+				>STYA pFILE
 	
 .8				clc
 
@@ -209,9 +198,11 @@ CS.RUN.CheckArgs
 .97				lda #E.SYN
 
 .98				pha
+				>SS
 				>PUSHW L.MSG.USAGE
 				>PUSHBI 0
 				>LIBC PrintF
+				>SR
 				pla
 				sec
 				rts
@@ -225,14 +216,16 @@ CS.RUN.NextArg	inc ArgIndex
 
 .9				rts
 *--------------------------------------
-CS.RUN.OPEN		>PUSHYA
+CS.RUN.OPEN		>SS
+				>PUSHYA
 				>PUSHBI	O.RDONLY+O.TEXT
 				>PUSHBI S.FI.T.TXT
 				>PUSHWZ				Aux type
 				>LIBC FOpen
+				>SR
 				bcs .9
 
-				sta hFile
+				>STYA pFILE
 
 .9				rts
 *--------------------------------------
@@ -287,10 +280,12 @@ CS.RUN.PRINT	>LDYA ZPBufPtr
 				bit bLineNum
 				bpl .7
 
+				>SS
 				>PUSHW L.MSG.NUMLINE
 				>PUSHW LineNum
 				>PUSHBI 2
 				>LIBC PrintF
+				>SR
 				bcs .9
 
 .7				>LDYA ZPBufPtr
@@ -299,6 +294,41 @@ CS.RUN.PRINT	>LDYA ZPBufPtr
 
 .8				clc
 .9				rts
+*--------------------------------------
+CS.RUN.CheckPipe
+				ldy #S.PS.pStdIn
+				jsr A2osX.GetPSy
+				pha
+				iny
+				jsr A2osX.GetPSy
+				ply
+
+				>STYA ZPPtr1
+
+				>LIBC FileNo
+				bcs .99
+
+				>SS
+				>PUSHYA
+				>PUSHEA.G STATBUF
+				>LIBC FStat
+				>SR
+				bcs .99
+				
+				>LDA.G STATBUF+S.STAT.MODE+1
+				and #$F0
+
+				cmp /S.STAT.MODE.FIFO
+				bne .98
+
+				>LDYA ZPPtr1
+
+				clc
+				rts
+				
+.98				lda #E.SYN
+				sec			
+.99				rts
 *--------------------------------------
 CS.RUN.toUpper	bit bIgnoreCase
 				bpl .9
@@ -313,23 +343,23 @@ CS.RUN.toUpper	bit bIgnoreCase
 
 .9				rts	
 *--------------------------------------
-CS.QUIT			lda hFile
+CS.QUIT			>LDYA pFILE
 				beq .1
 
 				>LIBC FClose
 
-.1				lda hBuf
+.1				>LDYA ZPBufPtr
 				beq .8
 
-				>LIBC FreeMem
+				>LIBC Free
 
 .8				clc
 				rts
 *--------------------------------------
-CS.DOEVENT		sec
+CS.SIG			sec
 				rts
 *--------------------------------------
-CS.END
+CS.END			.EQ *
 *--------------------------------------
 OptionList		.AS "HhIiNnQqSsVv"
 OptionList.Cnt	.EQ *-OptionList
@@ -344,9 +374,11 @@ MSG.USAGE		.CS "Usage : GREP <pattern> <File> or CMD|GREP <pattern>\r\n"
 MSG.CRLF		.CZ "\r\n"
 MSG.NUMLINE		.CZ "%5D:"
 *--------------------------------------
+ID.END			.EQ *
+*--------------------------------------
 				.DUMMY
 				.OR 0
-DS.START
+STATBUF			.BS S.STAT
 DS.END			.ED
 *--------------------------------------
 MAN
