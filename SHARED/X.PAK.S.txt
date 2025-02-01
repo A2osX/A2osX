@@ -1,0 +1,605 @@
+NEW
+  AUTO 3,1
+*--------------------------------------
+* Y,A = ULEN
+* X.Pak.SrcPtr = Ptr to Uncompressed Data
+* X.Pak.DstPtr = Ptr to Shunk Data
+*--------------------------------------
+* ZPSrcBufPtr
+* ZPDstBufPtr
+* ZPSrcBLPtr
+* ZPCount
+* ZPBLCnt
+ *--------------------------------------
+X.Pak			>STYA X.Pak.Shnk+S.PAKSHNK.ULEN
+
+* Reset Byte counters
+
+				ldx #0
+
+.1				stz	X.Pak.CntL,x
+				stz X.Pak.CntH,x
+				inx
+				bne .1
+
+				ldx #S.PAKSTAT.PASS2+1
+
+.2				stz X.Pak.Stat,x			Reset Stats
+				dex
+				bpl .2
+
+* PASS #1 : no store, update byte counters
+
+				stz X.Pak.bPass2
+
+				jsr X.Pak.Out.Init		Initialize properly for first "PutBit" Call
+				bcs .9
+
+				jsr X.Pak.Run
+
+				jsr X.Pak.ComputeLenBits
+				jsr X.Pak.BuildTOPTable
+
+* PASS #2 : store with TOP bytes
+
+				dec X.Pak.bPass2
+				
+				jsr X.Pak.Out.Init		Initialize properly for first "PutBit" Call
+				bcs .9
+
+				jsr X.Pak.Run
+				bcs .9
+
+				jsr X.Pak.Out.Close
+				bcs .9
+
+				>LDYA X.Pak.Stat+S.PAKSTAT.PASS2
+
+				clc
+				rts
+
+.9				sec
+				rts
+*--------------------------------------
+X.Pak.Out.Init	lda X.Pak.Shnk+S.PAKSHNK.ULEN
+				eor #$ff
+				sta X.Pak.SrcCnt
+				sta X.Pak.DstCnt
+
+				lda X.Pak.Shnk+S.PAKSHNK.ULEN+1
+				eor #$ff
+				sta X.Pak.SrcCnt+1
+				sta X.Pak.DstCnt+1
+
+				bit X.Pak.bPass2
+				bpl .8
+
+				>LDYA X.Pak.DstPtr
+				>STYA ZPDstBufPtr
+
+				lda X.Pak.Shnk+S.PAKSHNK.BLBITS
+				jsr X.Pak.Out.PutByte
+				bcs .9
+
+				lda X.Pak.Shnk+S.PAKSHNK.ULEN
+				jsr X.Pak.Out.PutByte
+				bcs .9
+
+				lda X.Pak.Shnk+S.PAKSHNK.ULEN+1
+				jsr X.Pak.Out.PutByte
+				bcs .9
+
+				lda X.Pak.Shnk+S.PAKSHNK.TOPCNT
+				jsr X.Pak.Out.PutByte
+				bcs .9
+
+				tax
+
+				ldy #0
+
+.1				lda X.Pak.Shnk+S.PAKSHNK.TOPBYTES,y
+				jsr X.Pak.Out.PutByte
+				bcs .9
+
+				iny
+				dex
+				bne .1
+
+				lda #$80
+				sta X.Pak.Out.Mask
+				stz X.Pak.Out.Byte
+
+.8				clc
+.9				rts
+*--------------------------------------
+X.Pak.Run		>LDYA X.Pak.SrcPtr
+				>STYA ZPSrcBufPtr
+
+				stz X.Pak.BL.Longest
+				stz X.Pak.BL.Farest
+				stz X.Pak.BL.Farest+1
+
+				ldx #S.PAKSTAT.TOP8
+
+.1				stz X.Pak.Stat,x		Reset Stats
+				inx
+				cpx #S.PAKSTAT
+				bne .1
+
+X.Pak.Run.1		inc X.Pak.SrcCnt
+				bne .1
+
+				inc X.Pak.SrcCnt+1
+				beq .8					0 byte left...
+
+.1				jsr X.Pak.ScanBL
+				bcs .20
+
+				jsr X.Pak.PutBL
+				bcs .9
+
+				ldy X.Pak.BestBLLen
+
+.6				tya
+				clc
+				adc ZPSrcBufPtr
+				sta ZPSrcBufPtr
+				bcc .7
+				inc ZPSrcBufPtr+1
+
+.7				tya
+				clc
+				adc X.Pak.SrcCnt
+				sta X.Pak.SrcCnt
+				bcc .1
+
+				inc X.Pak.SrcCnt+1
+				bmi .1
+
+.8				clc
+
+.9				rts
+
+.20				lda (ZPSrcBufPtr)		Not found...
+				jsr X.Pak.PutByte8
+				bcs .9
+
+				inc ZPSrcBufPtr
+				bne X.Pak.Run.1
+				inc ZPSrcBufPtr+1
+				bra X.Pak.Run.1
+*--------------------------------------
+X.Pak.ScanBL	>LDYA X.Pak.SrcPtr		Start at beginning of Src buf
+				>STYA ZPSrcBLPtr
+
+				lda #$ff
+				sta X.Pak.bBLFound
+				stz X.Pak.BestBLLen
+
+.1				lda ZPSrcBLPtr
+				sec
+				sbc ZPSrcBufPtr
+				sta ZPBLCnt
+
+				lda ZPSrcBLPtr+1
+				sbc ZPSrcBufPtr+1
+				sta ZPBLCnt+1			ZPSrcBLPtr < !BlCnt < ZPSrcBufPtr
+				bcs .8					ZPSrcBLPtr = ZPSrcBufPtr, exit
+
+				>LDYA X.Pak.SrcCnt		make sure not going past End Buffer
+				>STYA ZPCount			while reading ahead
+
+				ldy #0					...or Y = BL.MAX
+
+.2				inc ZPBLCnt
+				bne .3
+
+				inc ZPBLCnt+1
+				beq .6					ZPSrcBLPtr = ZPSrcBufPtr
+
+.3				inc ZPCount
+				bne .4
+
+				inc ZPCount+1
+				beq .6					Last Src Data
+
+.4				lda (ZPSrcBufPtr),y
+				cmp (ZPSrcBLPtr),y
+				bne .6					End of string matching
+
+.5				iny
+				cpy #BL.MAX
+				bne .2					Max BL len
+
+.6				cpy #BL.MIN
+				bcc .7					not long enough
+
+				cpy X.Pak.BestBLLen
+				bcc .7					not better ...
+*				beq .7					!!! same...but closer !!!
+
+				sty X.Pak.BestBLLen
+
+				lda ZPSrcBufPtr
+				sec
+				sbc ZPSrcBLPtr
+				sta X.Pak.BestBL
+
+				lda ZPSrcBufPtr+1
+				sbc ZPSrcBLPtr+1
+				sta X.Pak.BestBL+1
+
+				stz X.Pak.bBLFound
+
+.7				inc ZPSrcBLPtr
+				bne .1
+
+				inc ZPSrcBLPtr+1
+				bra .1
+
+.8				rol X.Pak.bBLFound
+
+				rts
+*--------------------------------------
+X.Pak.ComputeLenBits
+				ldx #0
+				lda X.Pak.BL.Longest
+				beq .10
+
+				ldx #3
+
+				dec
+				dec
+				dec
+				beq .10
+
+				ldx #8
+
+.1				asl
+				bcs .10
+
+				dex
+				bra .1
+
+.10				stx X.Pak.BL.LenBits
+
+				ldx #0
+				ldy #0
+
+				lda X.Pak.BL.Farest+1
+				beq .22
+
+				ldy #8
+				ldx #8
+
+.2				asl
+				bcs .4
+
+				dey
+				bra .2
+
+.22				lda X.Pak.BL.Farest
+				beq .4
+
+				ldx #8
+
+.3				asl
+				bcs .4
+
+				dex
+				bra .3
+
+.4				stx X.Pak.BL.OfsBitsL
+				sty X.Pak.BL.OfsBitsH
+
+				lda X.Pak.BL.LenBits
+				asl
+				asl
+				asl
+				asl
+
+				adc X.Pak.BL.OfsBitsL
+				adc X.Pak.BL.OfsBitsH
+				ora #$80
+				sta X.Pak.Shnk+S.PAKSHNK.BLBITS
+
+				rts
+*--------------------------------------
+X.Pak.BuildTOPTable
+				ldy #0
+
+.1				stz X.Pak.Cnt			Init best score to 0
+				stz X.Pak.Cnt+1
+
+				sec
+				ror X.Pak.bStop
+
+				ldx #0
+
+.2				lda X.Pak.CntL,x
+				ora X.Pak.CntH,x
+				beq .3
+
+				stz X.Pak.bStop
+
+				lda X.Pak.Cnt
+				cmp X.Pak.CntL,x		is it better at X
+				lda X.Pak.Cnt+1
+				sbc X.Pak.CntH,x
+				bcs .3					not better or equal...
+
+				stx X.Pak.Top.Best		save new score index...
+
+				lda X.Pak.CntL,x
+				sta X.Pak.Cnt			...and value
+				lda X.Pak.CntH,x
+				sta X.Pak.Cnt+1
+
+.3				inx
+				bne .2
+
+				bit X.Pak.bStop
+				bmi .8
+
+				lda X.Pak.Top.Best
+				sta X.Pak.Shnk+S.PAKSHNK.TOPBYTES,y
+				tax
+				stz X.Pak.CntL,x		Discard this entry
+				stz X.Pak.CntH,x
+				iny
+				cpy #TOP.MAX
+				bne .1
+
+.8				sty X.Pak.Shnk+S.PAKSHNK.TOPCNT
+X.Pak.BuildTOPTable.RTS
+				rts
+*--------------------------------------
+X.Pak.PutBL		ldx #S.PAKSTAT.BL
+				jsr X.Pak.UpdateStats
+
+				lda X.Pak.BestBLLen
+				cmp X.Pak.BL.Longest
+				bcc .1
+
+				sta X.Pak.BL.Longest
+
+.1				ldy X.Pak.BestBL
+				cpy X.Pak.BL.Farest
+
+				lda X.Pak.BestBL+1
+				pha
+				sbc X.Pak.BL.Farest+1
+				pla
+				bcc .2
+
+				>STYA X.Pak.BL.Farest
+
+.2				bit X.Pak.bPass2
+				bmi .3
+
+				ldx #S.PAKSTAT.PASS1	Assume 1 BL worse case is 3 bytes
+				jsr X.Pak.UpdateStats
+				jsr X.Pak.UpdateStats
+				jsr X.Pak.UpdateStats
+				clc
+				rts
+
+.3				ldy #PAK.B.BL.W
+				lda #PAK.B.BL
+				jsr X.Pak.Out.PutYBits
+				bcs X.Pak.BuildTOPTable.RTS
+
+				ldy X.Pak.BL.OfsBitsL
+				lda X.Pak.BestBL
+				jsr X.Pak.Out.PutYBits
+				bcs X.Pak.BuildTOPTable.RTS
+
+				ldy X.Pak.BL.OfsBitsH
+				beq .4
+
+				lda X.Pak.BestBL+1
+				jsr X.Pak.Out.PutYBits
+				bcs X.Pak.BuildTOPTable.RTS
+
+.4				ldy X.Pak.BL.LenBits
+				lda X.Pak.BestBLLen
+				dec
+				dec
+				dec
+				jmp X.Pak.Out.PutYBits
+*--------------------------------------
+X.Pak.PutByte8	bit X.Pak.bPass2
+				bmi X.Pak.PutByte8.2
+
+.5				tax
+				inc X.Pak.CntL,x
+				bne .6
+
+				inc X.Pak.CntH,x
+
+.6				ldx #S.PAKSTAT.BYTE8
+				jsr X.Pak.UpdateStats
+
+				ldx #S.PAKSTAT.PASS1
+				jsr X.Pak.UpdateStats
+
+				clc
+				rts
+
+X.Pak.PutByte8.2
+				ldy X.Pak.Shnk+S.PAKSHNK.TOPCNT
+				beq .2					No TOP Table
+
+.1				cmp X.Pak.Shnk+S.PAKSHNK.TOPBYTES-1,y
+				beq .3
+				dey
+				bne .1
+
+.2				ldx #S.PAKSTAT.BYTE8
+				jsr X.Pak.UpdateStats
+
+				pha
+				ldy #PAK.B.BYTE8.W
+				lda #PAK.B.BYTE8
+				jsr X.Pak.Out.PutYBits
+				pla
+				bcs .9
+
+				ldy #8
+				jmp X.Pak.Out.PutYBits
+
+.3				dey						Range 0-31
+
+				tya
+				lsr
+				lsr
+				lsr
+				tax						Range 0-3
+
+				tya
+				and #7
+				ora TOP.Bits,x
+				ldy TOP.BitCnt,x
+
+.4				pha
+
+				lda TOP.Stat,x
+				tax
+				jsr X.Pak.UpdateStats
+
+				pla
+				jmp X.Pak.Out.PutYBits
+
+.9				rts
+*--------------------------------------
+X.Pak.Out.Close	bit X.Pak.Out.Mask
+				bmi .8
+
+				lda X.Pak.Out.Byte
+				bra X.Pak.Out.PutByte
+
+.8				clc
+				rts
+*--------------------------------------
+X.Pak.Out.PutYBits
+				phy
+
+.1				cpy #8
+				beq .2
+
+				asl
+				iny
+				bra .1
+
+.2				ply
+
+.3				asl
+
+				pha
+
+				bcc .4
+
+				lda X.Pak.Out.Mask
+				tsb X.Pak.Out.Byte
+
+.4				lsr X.Pak.Out.Mask
+				bcc .5
+
+				ror X.Pak.Out.Mask
+
+				lda X.Pak.Out.Byte
+				stz X.Pak.Out.Byte
+
+				jsr X.Pak.Out.PutByte
+
+.5				pla
+				bcs .9
+
+				dey
+				bne .3
+
+*				clc
+
+				rts
+
+.9				lda #E.BUF
+				sec
+				rts
+*--------------------------------------
+X.Pak.Out.PutByte	
+				inc X.Pak.DstCnt
+				bne .1
+
+				inc X.Pak.DstCnt+1
+				beq .9
+
+.1				sta (ZPDstBufPtr)
+
+				inc ZPDstBufPtr
+
+				bne .2
+
+				inc ZPDstBufPtr+1
+
+.2				inc X.Pak.Stat+S.PAKSTAT.PASS2
+				bne .8
+
+				inc X.Pak.Stat+S.PAKSTAT.PASS2+1
+
+.8				clc
+				rts
+
+.9				lda #E.BUF
+				sec
+				rts
+*--------------------------------------
+X.Pak.UpdateStats
+				inc X.Pak.Stat,x
+				bne .8
+
+				inc X.Pak.Stat+1,x
+
+.8				rts
+*--------------------------------------
+CS.END			.EQ *
+*--------------------------------------
+TOP.Bits		.DA #PAK.B.TOP8,#PAK.B.TOP16,#PAK.B.TOP24,#PAK.B.TOP32
+TOP.BitCnt		.DA #PAK.B.TOP8.W,#PAK.B.TOP16.W,#PAK.B.TOP24.W,#PAK.B.TOP32.W
+TOP.Stat		.DA #S.PAKSTAT.TOP8,#S.PAKSTAT.TOP16,#S.PAKSTAT.TOP24,#S.PAKSTAT.TOP32
+*--------------------------------------
+X.Pak.SrcPtr	.BS 2
+X.Pak.DstPtr	.BS 2
+
+X.Pak.SrcCnt	.BS 2
+X.Pak.DstCnt	.BS 2
+
+X.Pak.bPass2	.BS 1
+
+X.Pak.BL.Longest	.BS 1
+X.Pak.BL.Farest	.BS 2
+
+X.Pak.BL.LenBits	.BS 1
+X.Pak.BL.OfsBitsL	.BS 1
+X.Pak.BL.OfsBitsH	.BS 1
+
+X.Pak.bBLFound	.BS 1
+X.Pak.BestBLLen	.BS 1
+X.Pak.BestBL	.BS 2
+
+X.Pak.Top.Best	.BS 1
+
+X.Pak.Cnt		.BS 2
+X.Pak.bStop		.BS 1
+
+X.Pak.Out.Byte	.BS 1
+X.Pak.Out.Mask	.BS 1
+*--------------------------------------
+X.Pak.CntL		.BS 256
+X.Pak.CntH		.BS 256
+X.Pak.Shnk		.BS S.PAKSHNK
+X.Pak.Stat		.BS S.PAKSTAT
+*--------------------------------------
+MAN
+SAVE usr/src/shared/x.pak.s
+LOAD usr/src/bin/pak.s
+ASM

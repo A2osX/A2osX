@@ -7,15 +7,15 @@ NEW
 *--------------------------------------
 				.INB inc/macros.i
 				.INB inc/a2osx.i
-				.INB inc/kernel.i
 				.INB inc/pak.i
-				.INB inc/libpak.i
 				.INB inc/mli.e.i
 *--------------------------------------
 X.ENTER.SUBDIR	.EQ 0
 X.COPY.TO.DEST	.EQ 0
 X.DELETE.SOURCE	.EQ 0
 X.RESET.SRC.DIR	.EQ 0					single pass
+*--------------------------------------
+DBG				.EQ 0
 *--------------------------------------
 				.DUMMY
 				.OR ZPBIN
@@ -28,12 +28,16 @@ ZPFileStat		.BS 2
 ZPFullPath		.BS 2
 ZPRelPath		.BS 2
 
-ZPSrcBufPtr		.BS 2
-ZPDstBufPtr		.BS 2
-
+ArgIndex		.BS 1
 bAppend			.BS 1
 bRecurse		.BS 1
 bPause			.BS 1
+
+ZPSrcBufPtr		.BS 2
+ZPDstBufPtr		.BS 2
+ZPSrcBLPtr		.BS 2
+ZPCount			.BS 2
+ZPBLCnt			.BS 2
 
 ZS.END			.ED
 *--------------------------------------
@@ -55,9 +59,8 @@ CS.START		cld
 *--------------------------------------
 .1				.DA CS.INIT
 				.DA CS.RUN
-				.DA CS.DOEVENT
+				.DA CS.SIG
 				.DA	CS.QUIT
-L.LIBPAK		.DA LIBPAK
 L.MSG.USAGE		.DA MSG.USAGE
 L.MSG.DIR		.DA MSG.DIR
 L.MSG.FILE		.DA MSG.FILE
@@ -65,17 +68,17 @@ L.MSG.OK		.DA MSG.OK
 L.MSG.ERR		.DA MSG.ERR
 L.MSG.E.IARC	.DA MSG.E.IARC
 L.ARC.Header	.DA ARC.Header
+				.DO DBG=1
+L.MSG.Stats		.DA MSG.Stats
+L.MSG.TopBytes	.DA MSG.TopBytes
+				.FIN
 				.DA 0
 *--------------------------------------
-CS.INIT			>LDYA L.LIBPAK
-				>LIBC LoadLib
-				bcs .9
-
-				sta hLIB
-
-.9				rts
+CS.INIT			clc
+				rts
 *--------------------------------------
-CS.RUN			>INC.G ArgIndex
+CS.RUN			inc ArgIndex
+				lda ArgIndex
 				>LIBC ArgV
 				bcs .8
 
@@ -86,58 +89,49 @@ CS.RUN			>INC.G ArgIndex
 				bne .4
 
 				jsr CS.RUN.CheckOpt
-				bcs .9
-
-				bne CS.RUN
-
-				>INC.G ArgIndex			-X
-				>LIBC ArgV
-				bcs .9
-
-				>LIBC StrDup
-				bcs .9
-
-				txa
-				>STA.G hIgnore
-				bra CS.RUN
+				bcc CS.RUN
 
 .9				>LDYA L.MSG.USAGE
 				>LIBC PutS
 				lda #E.SYN
 				sec
-.99				rts
+				rts
 *--------------------------------------
-.4				>LDA.G ArcName
+.4				>LDA.G pArcName+1
 				bne .5
 
-				>LDA.G ArgIndex
-				>STA.G ArcName
+				>SS
+				>PUSHW ZPPtr1
+				>PUSHWI 0
+				>LIBC RealPath
+				>SR
+				bcs .99
+				
+				>STYA.G pArcName
 				bra CS.RUN
-
-.5				>LDA.G hSrcBasePath
+*--------------------------------------
+.5				>LDA.G pSrcBasePath+1
 				bne .9
 
 				>LDYA ZPPtr1
 				jsr X.InitSrcDirYA
 				bcc CS.RUN
-				rts
 
-.8				>LDA.G ArcName
+.99				rts
+*--------------------------------------
+.8				>LDA.G pArcName+1
 				beq .9
 
-				>LDA.G hSrcBasePath
+				>LDA.G pSrcBasePath+1
 				beq .9
 *--------------------------------------
 				>LDYAI 256
-				>LIBC GetMem
+				>LIBC Malloc
 				bcs .99
 
 				>STYA ZPFullPath
-				txa
-				>STA.G hSrcFullPath
 
-				>LDA.G hSrcBasePath
-				>LIBC GetMemPtr
+				>LDYA.G pSrcBasePath
 				>STYA ZPPtr1
 
 				ldy #$ff
@@ -155,49 +149,27 @@ CS.RUN			>INC.G ArgIndex
 				sta ZPRelPath+1
 
 				jsr CS.RUN.OpenArc
-.98				bcs .99
-
-				>LDYAI CHNK.SIZE
-				>LIBC GetMem
-				bcs .98
-
-				>STYA ZPSrcBufPtr
-				txa
-				>STA.G hSrcBuf
-
-				>LDYAI CHNK.SIZE
-				>LIBC GetMem
-				bcs .98
-
-				>STYA ZPDstBufPtr
-				txa
-				>STA.G hDstBuf
-*--------------------------------------
-CS.RUN.LOOP		ldy #S.PS.hStdIn
-				lda (pPS),y
-				>LIBC FEOF
 				bcs .99
 
-				tay
-				bne .1
-
-				>LIBC GetChar
+				>LDYAI CHNK.SIZE
+				>LIBC Malloc
 				bcs .99
 
-				cmp #$03				Ctrl-C
-				beq .99					Abort....
+				>STYA X.Pak.SrcPtr
 
-				cmp #$13				Ctrl-S
-				bne .1
+				>LDYAI CHNK.SIZE
+				>LIBC Malloc
+				bcs .99
 
-				lda bPause
-				eor	#$ff
-				sta bPause
-				bne CS.RUN.LOOP
-
-.1				lda bPause
-				bne CS.RUN.LOOP			Pause...
+				>STYA X.Pak.DstPtr
 *--------------------------------------
+CS.RUN.LOOP		>SLEEP
+	
+				jsr X.CheckCtrl
+				bcs .99
+
+				bvs CS.RUN.LOOP			Pause...
+
 				jsr X.GetEntry
 				bcs .9
 
@@ -237,10 +209,6 @@ CS.RUN.LOOP		ldy #S.PS.hStdIn
 				sec
 .99				rts
 *--------------------------------------
-CS.RUN.DEV		lda #E.BADPATH
-				sec
-				rts
-*--------------------------------------
 CS.RUN.DIR		lda bRecurse
 				bpl .8
 
@@ -261,11 +229,12 @@ CS.RUN.DIR		lda bRecurse
 
 .1				jsr CS.RUN.BuildFilePath
 
+				>SS
 				>PUSHW L.MSG.DIR
 				>PUSHW ZPRelPath
-
 				>PUSHBI 2
 				>LIBC PrintF
+				>SR
 				bcs .9
 
 				jsr CS.RUN.WriteArcHdrDir
@@ -281,20 +250,19 @@ CS.RUN.DIR		lda bRecurse
 *--------------------------------------
 CS.RUN.FILE		jsr CS.RUN.BuildFilePath
 
+				>SS
 				>PUSHW ZPFullPath
-				>LDA.G hArcFile
-				tay
-				lda FILEs.hName-1,y
-				>LIBC GetMemPtr
-				>PUSHYA
+				>PUSHW.G pArcName
 				>LIBC StrCmp
+				>SR
 				bcc .8
 
+				>SS
 				>PUSHW L.MSG.FILE
 				>PUSHW ZPRelPath
-
 				>PUSHBI 2
 				>LIBC PrintF
+				>SR
 				bcs .9
 
 				jsr CS.RUN.WriteArcHdrFile
@@ -316,8 +284,15 @@ CS.RUN.FILE		jsr CS.RUN.BuildFilePath
 
 				bra .9
 
-.2				jsr CS.RUN.Pak
+.2				>LDYA.G Shunk.SrcSize
+				jsr X.Pak
 				bcs .3
+
+				>STYA.G Shunk.DstSize
+
+				.DO DBG=1
+				jsr X.Pak.PrintStats
+				.FIN
 
 				jsr CS.RUN.WritePakData
 				bcc .1
@@ -338,50 +313,61 @@ CS.RUN.FILE		jsr CS.RUN.BuildFilePath
 				rts
 *--------------------------------------
 CS.RUN.CheckErr	bcs .1
+
 				>LDYA L.MSG.OK
 				>LIBC PutS
 				rts
 
 .1				pha
+
+				tay
+				>SS
 				>PUSHW L.MSG.ERR
-				pla
-				pha
+				tya
 				>PUSHA
 				>PUSHBI 1
-
 				>LIBC PrintF
+				>SR
 
 				pla
 				sec
 				rts
 *--------------------------------------
 CS.RUN.BuildFilePath
+				>SS
 				>PUSHW ZPFullPath
-				>LDA.G hSrcBasePath
-				>LIBC GetMemPtr
+				>LDYA.G pSrcBasePath
 				>PUSHYA
 				>LIBC StrCpy
+				>SR
 
+				>SS
 				>PUSHW ZPFullPath
 				>PUSHW ZPFileName
 				>LIBC StrCat
+				>SR
+
 				rts
 *--------------------------------------
-CS.RUN.OpenFile	>PUSHW ZPFullPath
+CS.RUN.OpenFile	>SS
+				>PUSHW ZPFullPath
 				>PUSHBI	O.RDONLY
 				>PUSHBI 0				Type
 				>PUSHWZ					Aux type
 				>LIBC FOpen
+				>SR
 				bcs .9
 
-				>STA.G hFile
+				>STYA.G pFile
 
 .9				rts
 *--------------------------------------
-CS.RUN.ReadFile >PUSHB.G hFile
-				>PUSHW ZPSrcBufPtr
+CS.RUN.ReadFile >SS
+				>PUSHW.G pFile
+				>PUSHW X.Pak.SrcPtr
 				>PUSHWI CHNK.SIZE
 				>LIBC FRead
+				>SR
 				bcs .9
 
 				>STYA.G Shunk.SrcSize
@@ -389,67 +375,65 @@ CS.RUN.ReadFile >PUSHB.G hFile
 .9				rts
 *--------------------------------------
 CS.RUN.CloseFile
-				>LDA.G hFile
+				>LDYA.G pFile
 				>LIBC FClose
 				bcs .9
 
-				>STZ.G hFile
+				>STZ.G pFile+1
 
 .9				rts
 *--------------------------------------
-CS.RUN.Pak		>PUSHEA.G PAKSTAT
-				>PUSHW ZPDstBufPtr
-				>PUSHW.G Shunk.SrcSize
-				>PUSHW ZPSrcBufPtr
-				>LIBCALL hLIB,LIBPAK.Pak
-				bcs .9
-
-				>STYA.G Shunk.DstSize
-
-.9				rts
-*--------------------------------------
-CS.RUN.OpenArc	>LDA.G ArcName
-				>LIBC ArgV
-				>PUSHYA
-
-				bit bAppend
+CS.RUN.OpenArc	bit bAppend
 				bmi CS.RUN.AppendArc
 
+				>SS
+				>PUSHW.G pArcName
 				>PUSHBI	O.CREATE+O.WRONLY
 				>PUSHBI $CF				PAK
 				>PUSHWZ					Aux type
-
 				>LIBC FOpen
+				>SR
 				bcs .9
 
-				>STA.G hArcFile
+				>STYA.G pArcFile
 
-				>PUSHB.G hArcFile
+				>SS
 				>PUSHW L.ARC.Header
+				>PUSHW.G pArcFile
 				>LIBC FPutS
+				>SR
 .9
 CS.RUN.OpenArc.RTS
 				rts
 *--------------------------------------
 CS.RUN.AppendArc
+				>SS
+				>PUSHW.G pArcName
 				>PUSHBI	O.RDWR+O.APPEND
 				>PUSHBI $CF				PAK
 				>PUSHWZ					Aux type
-
 				>LIBC FOpen
+				>SR
 				bcs CS.RUN.OpenArc.RTS
-				>STA.G hArcFile
 
-				>PUSHB.G hArcFile
+				>STYA.G pArcFile
+
+				>SS
+				>PUSHW.G pArcFile
 				>PUSHLZ
-				>PUSHBI SEEK.SET
+				>PUSHWI SEEK.SET
 				>LIBC FSeek
+				>SR
 				bcs CS.RUN.OpenArc.RTS
 
-				>PUSHB.G hArcFile
-				>PUSHW ZPSrcBufPtr
+				>SS
+				>PUSHW.G pArcFile
+				>LEA.G HeaderBuf
+				>STYA ZPPtr1
+				>PUSHYA
 				>PUSHWI 3
 				>LIBC FRead
+				>SR
 				bcs .9
 
 				cpy #3
@@ -458,16 +442,19 @@ CS.RUN.AppendArc
 				dey
 
 .2				lda ARC.Header,y
-				cmp (ZPSrcBufPtr),y
+				cmp (ZPPtr1),y
 				bne .99
 
 				dey
 				bpl .2
 
-				>PUSHB.G hArcFile
+				>SS
+				>PUSHW.G pArcFile
 				>PUSHLZ
-				>PUSHBI SEEK.END
+				>PUSHWI SEEK.END
 				>LIBC FSeek
+				>SR
+
 .9				rts
 
 .99				>LDYA L.MSG.E.IARC
@@ -481,7 +468,7 @@ CS.RUN.WriteArcHdrDir
 				jsr CS.RUN.WriteArcByteA
 				bcc CS.RUN.WriteArcHdr
 				rts
-
+*--------------------------------------
 CS.RUN.WriteArcHdrFile
 				lda #CHNK.T.FILE
 				jsr CS.RUN.WriteArcByteA
@@ -510,9 +497,11 @@ CS.RUN.WriteArcHdr
 				jsr CS.RUN.WriteArcByteA
 				bcs CS.RUN.WriteArcHdr.9
 
-				>PUSHB.G hArcFile
+				>SS
 				>PUSHW ZPRelPath
+				>PUSHW.G pArcFile
 				>LIBC FPutS
+				>SR
 
 CS.RUN.WriteArcHdr.9
 				rts
@@ -550,10 +539,13 @@ CS.RUN.WriteSrcData
 				jsr CS.RUN.WriteArcByteA
 				bcs .9
 
-				>PUSHB.G hArcFile
-				>PUSHW ZPSrcBufPtr
+				>SS
+				>PUSHW.G pArcFile
+				>PUSHW X.Pak.SrcPtr
 				>PUSHW.G Shunk.SrcSize
 				>LIBC FWrite
+				>SR
+				
 .9				rts
 *--------------------------------------
 CS.RUN.WritePakData
@@ -569,63 +561,65 @@ CS.RUN.WritePakData
 				jsr CS.RUN.WriteArcByteA
 				bcs .9
 
-				>PUSHB.G hArcFile
-				>PUSHW ZPDstBufPtr
+				>SS
+				>PUSHW.G pArcFile
+				>PUSHW X.Pak.DstPtr
 				>PUSHW.G Shunk.DstSize
 				>LIBC FWrite
+				>SR
+				
 .9				rts
 *--------------------------------------
 CS.RUN.WriteArcByteY
 				lda (ZPFileStat),y
 
 CS.RUN.WriteArcByteA
-				pha
-				>PUSHB.G hArcFile
-				pla
+				>SS
+				tay
+				>PUSHB 0
+				tya
 				>PUSHA
+				>PUSHW.G pArcFile
 				>LIBC FPutC
+				>SR
+				
 				rts
 *--------------------------------------
-CS.DOEVENT		sec
+CS.SIG			sec
 				rts
 *--------------------------------------
-CS.QUIT			jsr X.LeaveSubDir
-				bcc CS.QUIT
+CS.QUIT			jsr X.Quit
 
-				ldy #hIgnore
-				jsr .7
-
-				ldy #hInclude
-				jsr .7
-
-				ldy #hSrcFullPath
-				jsr .7
-
-				ldy #hDstBuf
-				jsr .7
-
-				ldy #hSrcBuf
-				jsr .7
-
-				>LDA.G hArcFile
+				>LDYA ZPFullPath
 				beq .1
-
-				>LIBC FClose
-
-.1				lda hLIB
+				
+				>LIBC Free
+				
+.1				>LDYA.G pArcFile
+				cmp #0
 				beq .2
 
-				>LIBC UnloadLib
+				>LIBC FClose
+				
+.2				ldy #pArcName+1
+				jsr .7
 
-.2				clc
+				clc
 				rts
 
 .7				lda (pData),y
-				beq .8
+				beq .9
 
-				>LIBC FreeMem
+				pha
+				dey
+				lda (pData),y
+				tay
+				pla
 
-.8				rts
+				>LIBC Free
+				
+.9				clc
+				rts
 *--------------------------------------
 CS.RUN.CheckOpt	ldy #1
 				lda (ZPPtr1),y
@@ -642,17 +636,81 @@ CS.RUN.CheckOpt	ldy #1
 				rts
 
 .2				ldy OptionVars,x
-				beq .8
+				beq .3					-X
 
 				lda #$ff
 				sta 0,y
-
-.8				clc
+				clc
 				rts
+				
+.3				inc ArgIndex
+				lda ArgIndex
+				>LIBC ArgV
+				bcs .99
+
+				>LIBC StrDup
+				bcs .99
+
+				>STYA.G pIgnore
+
+				clc
+				
+.99				rts
 *--------------------------------------
+				.DO DBG=1
+X.Pak.PrintStats
+				>SS
+				>PUSHW L.MSG.Stats
+				>PUSHW X.Pak.Shnk+S.PAKSHNK.ULEN
+
+				ldx #S.PAKSTAT.PASS1
+
+.1				>PUSHW X.Pak.Stat,x
+				inx
+				inx
+				cpx #S.PAKSTAT.BYTE8+2
+				bcc .1
+
+				>PUSHW X.Pak.Stat+S.PAKSTAT.BL
+				>PUSHB X.Pak.BL.Longest
+				>PUSHB X.Pak.BL.LenBits
+				>PUSHW X.Pak.BL.Farest
+				lda X.Pak.BL.OfsBitsL
+				clc
+				adc X.Pak.BL.OfsBitsH
+				>PUSHA
+
+				>PUSHBI 23
+
+				>LIBC PrintF
+				>SR
+*--------------------------------------
+				>SS
+				>PUSHW L.MSG.TopBytes
+				>PUSHB X.Pak.Shnk+S.PAKSHNK.TOPCNT
+
+				ldx #0
+				
+.2				>PUSHB X.Pak.Shnk+S.PAKSHNK.TOPBYTES,x
+				inx
+				cpx #TOP.MAX
+				bcc .2
+
+				>PUSHBI TOP.MAX+1
+				>LIBC PrintF
+				>SR
+
+				bit X.Pak.bPass2
+				bpl .9
+
+				>DEBUG
+
+.9				rts
+				.FIN
+*--------------------------------------
+				.INB usr/src/shared/x.checkctrl.s
 				.INB usr/src/shared/x.fileenum.s
-*--------------------------------------
-CS.END			.EQ *
+				.INB usr/src/shared/x.pak.s
 *--------------------------------------
 OptionList		.AS "AaRrXx"
 OptionVars		.DA #bAppend,#bAppend,#bRecurse,#bRecurse,#0,#0
@@ -660,35 +718,39 @@ OptionVars		.DA #bAppend,#bAppend,#bRecurse,#bRecurse,#0,#0
 MSG.USAGE		.CS "Usage : PAK Archive [File *,? wildcards allowed]\r\n"
 				.CS "   -A : Append to archive\r\n"
 				.CS "   -R : Recurse subdirectories\r\n"
-				.CZ "   -X <*,? wildcards allowed> : exclude files \r\n"
+				.CZ "   -X <*,? wildcards allowed> : exclude files\r\n"
 MSG.OK			.CZ "[OK]"
 MSG.ERR			.CZ "[%h]\r\n"
 MSG.E.IARC		.CZ "Invalid/corrupt archive"
 MSG.DIR			.CZ "Reading Dir:%s..."
 MSG.FILE		.CZ "Adding File:%s..."
 ARC.Header		.CZ "PAK"
-*--------------------------------------
-LIBPAK			.AZ "libpak"
-hLIB			.BS 1
+				.DO DBG=1
+MSG.Stats		.CS "\r\nLength : %5D\r\n"
+				.CS "Pass 1 : %5D\r\n"
+				.CS "Pass 2 : %5D\r\n"
+				.CS "Top  8 : %5D\r\n"
+				.CS "Top 16 : %5D\r\n"
+				.CS "Top 24 : %5D\r\n"
+				.CS "Top 32 : %5D\r\n"
+				.CS "Byte 8 : %5D\r\n"
+				.CZ "BL     : %5D, Longest : %d (%d bits), Farest : %D (%d bits)\r\n"
+MSG.TopBytes	.CS "Top    : (%2d) %h.%h.%h.%h.%h.%h.%h.%h %h.%h.%h.%h.%h.%h.%h.%h\r\n"
+				.CZ "              %h.%h.%h.%h.%h.%h.%h.%h %h.%h.%h.%h.%h.%h.%h.%h\r\n"
+				.FIN
 *--------------------------------------
 ID.END			.EQ *
 *--------------------------------------
 				.DUMMY
 				.OR 0
-ArgIndex		.BS 1
-ArcName			.BS 1
-hSrcFullPath	.BS 1
+pArcName		.BS 2
+pArcFile		.BS 2
+pFile			.BS 2
 
-hFile			.BS 1
-hArcFile		.BS 1
-
-hSrcBuf			.BS 1
-hDstBuf			.BS 1
+HeaderBuf		.BS 3
 
 Shunk.SrcSize	.BS 2
 Shunk.DstSize	.BS 2
-
-PAKSTAT			.BS S.PAKSTAT
 
 				.INB usr/src/shared/x.fileenum.g
 DS.END			.ED

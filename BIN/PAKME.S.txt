@@ -7,9 +7,7 @@ NEW
 *--------------------------------------
 				.INB inc/macros.i
 				.INB inc/a2osx.i
-				.INB inc/kernel.i
 				.INB inc/pak.i
-				.INB inc/libpak.i
 				.INB inc/mli.e.i
 *--------------------------------------
 CHUNK.MAX		.EQ 32
@@ -22,19 +20,21 @@ ZPPtr2			.BS 2
 ZPSrcFileSize	.BS 2
 ZPDstTableOfs	.BS 2
 
-hSrcFile		.BS 1
-hDstFile		.BS 1
-ZPChunkIndex	.BS 1
-ZPChunkCnt		.BS 1
 ZPChunkOfs		.BS 2
 ZPChunkLen		.BS 2
-
 ZPChunkPakedLen	.BS 2
 ZPChunkNewOfs	.BS 2
-hSrcBuf			.BS 1
-hDstBuf			.BS 1
+
+ZPChunkIndex	.BS 1
+ZPChunkCnt		.BS 1
+
+ZPCopyBuf		.BS 2
+
 ZPSrcBufPtr		.BS 2
 ZPDstBufPtr		.BS 2
+ZPSrcBLPtr		.BS 2
+ZPCount			.BS 2
+ZPBLCnt			.BS 2
 
 bPause			.BS 1
 
@@ -45,21 +45,21 @@ ZS.END			.ED
 CS.START		cld
 				jmp (.1,x)
 				.DA #$61				6502,Level 1 (65c02)
-				.DA #1					BIN Layout Version 1
-				.DA 0
-				.DA CS.END-CS.START		Code Size (without Constants)
-				.DA DS.END-DS.START		Data SegmentSize
+				.DA #2					BIN Layout Version 2
+				.DA #0
+				.DA #0
+				.DA CS.END
+				.DA ID.END
+				.DA DS.END
 				.DA #64					Stack Size
 				.DA #ZS.END-ZS.START	Zero Page Size
-				.DA 0
 *--------------------------------------
 * Relocation Table
 *--------------------------------------
 .1				.DA CS.INIT
 				.DA CS.RUN
-				.DA CS.DOEVENT
+				.DA CS.SIG
 				.DA	CS.QUIT
-L.LIBPAK		.DA LIBPAK
 L.MSG.USAGE		.DA MSG.USAGE
 L.MSG.SRCFILE	.DA MSG.SRCFILE
 L.MSG.CHUNK		.DA MSG.CHUNK
@@ -69,17 +69,11 @@ L.MSG.E.IARC	.DA MSG.E.IARC
 L.TAG			.DA TAG
 				.DA 0
 *--------------------------------------
-CS.INIT			>LDYA L.LIBPAK
-				>LIBC LoadLib
-				bcs .9
-
-				sta hLIB
-
-.9				rts
+CS.INIT			clc
+				rts
 *--------------------------------------
 CS.RUN			ldy #S.PS.ARGC
-				lda (pPS),y
-
+				jsr A2osX.GetPSy
 				cmp #2
 				bne .9
 
@@ -88,17 +82,34 @@ CS.RUN			ldy #S.PS.ARGC
 
 				lda #2
 				>LIBC ArgV
+				>SS
 				>PUSHYA
 				>PUSHBI	O.CREATE+O.WRONLY
 				>PUSHB.G STATBUF+S.STAT.P.TYPE
 				>PUSHW.G STATBUF+S.STAT.P.AUXTYPE
-
 				>LIBC FOpen
+				>SR
 				bcs .99
 
-				sta hDstFile
+				>STYA.G pDstFile
 
-				bra CS.RUN.START
+				jsr CS.RUN.START
+				bcs .99
+				
+				jsr CS.RUN.WriteTable	Write Fake table
+				bcs .99
+
+				jsr CS.RUN.LOOP
+				bcs .99
+				
+.8				jsr CS.RUN.RewriteTable	Write modified Table
+				bcs .99
+
+				lda #0
+
+				sec
+
+				rts				
 
 .9				>LDYA L.MSG.USAGE
 				>LIBC PutS
@@ -106,7 +117,8 @@ CS.RUN			ldy #S.PS.ARGC
 				sec
 .99				rts
 *--------------------------------------
-CS.RUN.START	>PUSHW L.MSG.SRCFILE
+CS.RUN.START	>SS
+				>PUSHW L.MSG.SRCFILE
 				lda #1
 				>LIBC ArgV
 				>PUSHYA
@@ -116,65 +128,56 @@ CS.RUN.START	>PUSHW L.MSG.SRCFILE
 				>PUSHW ZPDstTableOfs
 				>PUSHBI 9
 				>LIBC PrintF
+				>SR
 
 				>LDYA ZPDstTableOfs
-				jsr CS.RUN.GetSrcBufYA
-				bcs CS.RUN.RTS
+				>LIBC Malloc
+				bcs .9
+				
+				>STYA ZPCopyBuf
 
-				>PUSHB hSrcFile
+				>SS
+				>PUSHW.G pSrcFile
 				>PUSHLZ
-				>PUSHBI SEEK.SET
+				>PUSHWI SEEK.SET
 				>LIBC FSeek
+				>SR
 				bcs CS.RUN.RTS
 
-				>PUSHB hSrcFile
-				>PUSHW ZPSrcBufPtr
+				>SS
+				>PUSHW.G pSrcFile
+				>PUSHW ZPCopyBuf
 				>PUSHW ZPDstTableOfs
 				>LIBC FRead
-				bcs CS.RUN.RTS
+				>SR
+.9				bcs CS.RUN.RTS
 
-				>PUSHB hDstFile
-				>PUSHW ZPSrcBufPtr
+				>SS
+				>PUSHW.G pDstFile
+				>PUSHW ZPCopyBuf
 				>PUSHW ZPDstTableOfs
 				>LIBC FWrite
+				>SR
 				bcs CS.RUN.RTS
 
-				jsr CS.QUIT.BUF
-
-				jsr CS.RUN.WriteTable	Write Fake table
-
-				bcc CS.RUN.LOOP
+				>LDYA ZPCopyBuf
+				>LIBC Free
+				
+				stz ZPCopyBuf+1
 
 CS.RUN.RTS		rts
 *--------------------------------------
-CS.RUN.LOOP		ldy #S.PS.hStdIn
-				lda (pPS),y
-				>LIBC FEOF
+CS.RUN.LOOP		>SLEEP
+	
+				jsr X.CheckCtrl
 				bcs CS.RUN.RTS
 
-				tay
-				bne .1
+				bvs CS.RUN.LOOP			Pause...
 
-				>LIBC GetChar
-				bcs CS.RUN.RTS
-
-				cmp #$03				Ctrl-C
-				beq CS.RUN.RTS			Abort....
-
-				cmp #$13				Ctrl-S
-				bne .1
-
-				lda bPause
-				eor	#$ff
-				sta bPause
-				bne CS.RUN.LOOP
-
-.1				lda bPause
-				bne CS.RUN.LOOP			Pause...
-*--------------------------------------
 				jsr CS.RUN.GetChunk
 				bcs CS.RUN.RTS
 
+				>SS
 				>PUSHW L.MSG.CHUNK
 				lda ZPChunkIndex
 				inc
@@ -183,6 +186,7 @@ CS.RUN.LOOP		ldy #S.PS.hStdIn
 				>PUSHW ZPChunkLen
 				>PUSHBI 5
 				>LIBC PrintF
+				>SR
 				bcs .9
 
 				jsr CS.RUN.Pak
@@ -190,6 +194,7 @@ CS.RUN.LOOP		ldy #S.PS.hStdIn
 
 				jsr CS.RUN.WritePak
 				bcc .7
+
 				rts
 
 .2				jsr CS.RUN.WriteStore
@@ -198,35 +203,37 @@ CS.RUN.LOOP		ldy #S.PS.hStdIn
 .7				jsr CS.QUIT.BUF
 
 				jsr CS.RUN.UpdateTable
+
 				inc ZPChunkIndex
 				dec ZPChunkCnt
-				beq .8
+				bne CS.RUN.LOOP
 
-				jmp CS.RUN.LOOP
-
-.8				jsr CS.RUN.RewriteTable	Write modified Table
-				bcs .9
-
-				lda #0
-				sec
+				clc
 .9				rts
 *--------------------------------------
 CS.RUN.CheckSrcFile
 				lda #1
 				>LIBC ArgV
+
+				>SS
 				>PUSHYA
 				>PUSHBI	O.RDONLY
 				>PUSHBI 0				Type
 				>PUSHWZ					Aux type
-
 				>LIBC FOpen
+				>SR
 				bcs .99
 
-				sta hSrcFile
+				>STYA.G pSrcFile
 
-				>PUSHB hSrcFile
+				>SS
+				lda #1
+				>LIBC ArgV
+				>PUSHYA
 				>PUSHEA.G STATBUF
-				>LIBC FStat
+				>LIBC Stat
+				>SR
+
 .99				bcs .9
 
 				>LDA.G STATBUF+S.STAT.SIZE+3
@@ -257,9 +264,9 @@ CS.RUN.CheckSrcFile
 CS.RUN.CheckSrcFile.RTS
 				rts
 *--------------------------------------
-CS.RUN.CheckTAG	>PUSHB hSrcFile
+CS.RUN.CheckTAG	>SS
+				>PUSHW.G pSrcFile
 				>PUSHWZ
-
 				lda ZPSrcFileSize
 				sec
 				sbc #10
@@ -267,16 +274,19 @@ CS.RUN.CheckTAG	>PUSHB hSrcFile
 				lda ZPSrcFileSize+1
 				sbc #0
 				>PUSHYA
-
-				>PUSHBI SEEK.SET
+				>PUSHWI SEEK.SET
 				>LIBC FSeek
+				>SR
+
 				bcs CS.RUN.CheckSrcFile.RTS
 
-				>PUSHB hSrcFile
+				>SS
+				>PUSHW.G pSrcFile
 				>PUSHEA.G PAKME.HEADER
 				>PUSHWI 10
 				>LIBC FRead
-				bcs CS.RUN.CheckSrcFile.RTS
+				>SR
+				bcs .9
 
 				ldx #4
 
@@ -305,14 +315,18 @@ CS.RUN.GetTable	>LDA.G PAKME.HEADER+8
 				>SBC.G PAKME.HEADER+6
 				sta ZPDstTableOfs+1
 
-				>PUSHB hSrcFile
+				>SS
+				>PUSHW.G pSrcFile
 				>PUSHWZ
 				>PUSHW ZPDstTableOfs
-				>PUSHBI SEEK.SET
+				>PUSHWI SEEK.SET
 				>LIBC FSeek
+				>SR
+
 				bcs .9
 
-				>PUSHB hSrcFile
+				>SS
+				>PUSHW.G pSrcFile
 				>PUSHEA.G PAKME.TABLE
 				>LDA.G PAKME.HEADER+7
 				sta ZPChunkCnt
@@ -323,6 +337,7 @@ CS.RUN.GetTable	>LDA.G PAKME.HEADER+8
 				>PUSHYA
 
 				>LIBC FRead
+				>SR
 
 .9				rts
 *--------------------------------------
@@ -346,17 +361,22 @@ CS.RUN.GetChunk	lda ZPChunkIndex
 				sbc (pData),y
 				sta ZPChunkOfs+1
 
-				>PUSHB hSrcFile
+				>SS
+				>PUSHW.G pSrcFile
 				>PUSHWZ
 				>PUSHW ZPChunkOfs
-				>PUSHBI SEEK.SET
+				>PUSHWI SEEK.SET
 				>LIBC FSeek
-				bcs .9
+				>SR
 
-				>PUSHB hSrcFile
+				bcs .91
+
+				>SS
+				>PUSHW.G pSrcFile
 				>PUSHEA.G CHUNK.HEADER
 				>PUSHWI 3
 				>LIBC FRead
+				>SR
 				bcs .9
 
 				>LDA.G CHUNK.HEADER
@@ -370,13 +390,17 @@ CS.RUN.GetChunk	lda ZPChunkIndex
 				sta ZPChunkLen+1
 				ply
 
-				jsr CS.RUN.GetSrcBufYA
-				bcs .9
+				>LIBC Malloc
+.91				bcs .9
 
-				>PUSHB hSrcFile
-				>PUSHW ZPSrcBufPtr
+				>STYA X.Pak.SrcPtr
+
+				>SS
+				>PUSHW.G pSrcFile
+				>PUSHW X.Pak.SrcPtr
 				>PUSHW ZPChunkLen
 				>LIBC FRead
+				>SR
 				bcs .9
 
 *				clc
@@ -387,38 +411,33 @@ CS.RUN.GetChunk	lda ZPChunkIndex
 
 .9				rts
 *--------------------------------------
-CS.RUN.GetSrcBufYA
-				>LIBC GetMem
-				bcs .9
-				stx hSrcBuf
-				>STYA ZPSrcBufPtr
-.9				rts
-*--------------------------------------
 CS.RUN.Pak		>LDYA ZPChunkLen
-				>LIBC GetMem
+				>LIBC Malloc
 				bcs .9
-				stx hDstBuf
-				>STYA ZPDstBufPtr
 
-				>PUSHEA.G PAKSTAT
-				>PUSHW ZPDstBufPtr
-				>PUSHW ZPChunkLen
-				>PUSHW ZPSrcBufPtr
-				>LIBCALL hLIB,LIBPAK.Pak
+				>STYA X.Pak.DstPtr
+				
+				>LDYA ZPChunkLen
+				jsr X.Pak
 				bcs .9
+
 				>STYA ZPChunkPakedLen
+
 .9				rts
 *--------------------------------------
 CS.RUN.RewriteTable
-				>PUSHB hDstFile
+				>SS
+				>PUSHW.G pDstFile
 				>PUSHWZ
 				>PUSHW ZPDstTableOfs
-				>PUSHBI SEEK.SET
+				>PUSHWI SEEK.SET
 				>LIBC FSeek
+				>SR
 				bcs CS.RUN.WriteTable.RTS
 *--------------------------------------
 CS.RUN.WriteTable
-				>PUSHB hDstFile
+				>SS
+				>PUSHW.G pDstFile
 				>PUSHEA.G PAKME.TABLE
 				>LDA.G PAKME.HEADER+7
 				asl
@@ -426,59 +445,82 @@ CS.RUN.WriteTable
 				lda #0
 				>PUSHYA
 				>LIBC FWrite
+				>SR
+
 CS.RUN.WriteTable.RTS
 				rts
 *--------------------------------------
-CS.RUN.WritePak	lda hDstFile
+CS.RUN.WritePak	>SL
+				>LDYA.G pDstFile
 				>LIBC FTell
 				bcs .9
 
-				>PULLW ZPChunkNewOfs
+				lda (pStack)
+				inc pStack
+				sta ZPChunkNewOfs
+				lda (pStack)
+				inc pStack
+				sta ZPChunkNewOfs+1
 				inc pStack
 				inc pStack
 
-				>PUSHB hDstFile
-				>PUSHW ZPDstBufPtr
+				>SS
+				>PUSHW.G pDstFile
+				>PUSHW X.Pak.DstPtr
 				>PUSHW ZPChunkPakedLen
 				>LIBC FWrite
+				>SR
 				bcs .9
 
+				>SS
 				>PUSHW L.MSG.PAKED
 				>PUSHW ZPChunkPakedLen
 				>PUSHW ZPChunkNewOfs
 				>PUSHBI 4
 				>LIBC PrintF
-
+				>SR
 .9
 CS.RUN.WritePak.RTS
 				rts
 *--------------------------------------
 CS.RUN.WriteStore
-				lda hDstFile
+				>SL
+				>LDYA.G pDstFile
 				>LIBC FTell
 				bcs CS.RUN.WritePak.RTS
 
-				>PULLW ZPChunkNewOfs
+				lda (pStack)
+				inc pStack
+				sta ZPChunkNewOfs
+				lda (pStack)
+				inc pStack
+				sta ZPChunkNewOfs+1
 				inc pStack
 				inc pStack
 
-				>PUSHB hDstFile
+				>SS
+				>PUSHW.G pDstFile
 				>PUSHEA.G CHUNK.HEADER
 				>PUSHWI 3
 				>LIBC FWrite
+				>SR
 				bcs .9
 
-				>PUSHB hDstFile
-				>PUSHW ZPSrcBufPtr
+				>SS
+				>PUSHW.G pDstFile
+				>PUSHW X.Pak.SrcPtr
 				>PUSHW ZPChunkLen
 				>LIBC FWrite
+				>SR
 				bcs .9
 
+				>SS
 				>PUSHW L.MSG.STORE
 				>PUSHW ZPChunkLen
 				>PUSHW ZPChunkNewOfs
 				>PUSHBI 4
 				>LIBC PrintF
+				>SR
 
 .9				rts
 *--------------------------------------
@@ -510,40 +552,45 @@ CS.RUN.UpdateTable
 				sta (pData),y
 				rts
 *--------------------------------------
-CS.DOEVENT		sec
+CS.SIG			sec
 				rts
 *--------------------------------------
-CS.QUIT			lda hDstFile
+CS.QUIT			>LDYA.G pDstFile
+				cmp #0
 				beq .2
+
 				>LIBC FClose
 
-.2				lda hSrcFile
+.2				>LDYA.G pSrcFile
+				cmp #0
 				beq .3
+
 				>LIBC FClose
 
-.3				jsr CS.QUIT.BUF
+.3				>LDYA ZPCopyBuf
+				beq CS.QUIT.BUF
 
-				lda hLIB
+				>LIBC Free
+*--------------------------------------
+CS.QUIT.BUF		>LDYA X.Pak.DstPtr
+				beq .1
+
+				>LIBC Free
+
+				stz X.Pak.DstPtr+1
+
+.1				>LDYA X.Pak.SrcPtr
 				beq .8
 
-				>LIBC UnloadLib
+				>LIBC Free
+
+				stz X.Pak.SrcPtr+1
 
 .8				clc
 				rts
 *--------------------------------------
-CS.QUIT.BUF		lda hDstBuf
-				beq .1
-				stz hDstBuf
-				>LIBC FreeMem
-
-.1				lda hSrcBuf
-				beq .8
-				stz hSrcBuf
-				>LIBC FreeMem
-
-.8				rts
-*--------------------------------------
-CS.END
+				.INB usr/src/shared/x.checkctrl.s
+				.INB usr/src/shared/x.pak.s
 *--------------------------------------
 MSG.USAGE		.CZ "Usage : PAKME SourceBIN PackedBIN\r\n"
 MSG.SRCFILE		.CZ "Source File : %s, Size=%5D, Org=$%H, %d Chunks at $%H.\r\n"
@@ -553,17 +600,18 @@ MSG.STORE		.CZ "Store : %5D Bytes, New Ofs=$%H\r\n"
 MSG.E.IARC		.CZ "Invalid/corrupt archive"
 TAG				.CZ "PAKME"
 *--------------------------------------
-LIBPAK			.AZ "libpak"
-hLIB			.BS 1
+ID.END			.EQ *
 *--------------------------------------
 				.DUMMY
 				.OR 0
-DS.START
 STATBUF			.BS S.STAT
 PAKME.HEADER	.BS 10
 PAKME.TABLE		.BS CHUNK.MAX*2
 CHUNK.HEADER	.BS 3
-PAKSTAT			.BS S.PAKSTAT
+
+pSrcFile		.BS 2
+pDstFile		.BS 2
+
 DS.END			.ED
 *--------------------------------------
 MAN
