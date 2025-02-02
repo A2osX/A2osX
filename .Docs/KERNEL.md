@@ -1281,6 +1281,7 @@ Return the current value of the file-position indicator
 `long ftell(FILE *stream);`  
 
 ## ASM  
+`>SL`  
 `>LDYA stream`  
 `>LIBC ftell`  
 
@@ -1331,25 +1332,31 @@ Prints C-Style String
 
 ## ASM  
 PrintF : (example is for printing Y,A as integer : format="%I", 2 bytes)  
+`>SS`  
 `>PUSHW format`  
 `>PUSHW i`  
 `...`  
 `>PUSHBI 2`	#bytecount  
 `>LIBC PrintF`  
+`>SR`  
 FPrintF :  
+`>SS`  
 `>PUSHW FILE`  
 `>PUSHW format`  
 `>PUSHW i`  
 `...`  
 `>PUSHBI 2`	#bytecount  
 `>LIBC fprintf`  
+`>SR`  
 SPrintF :  
+`>SS`  
 `>PUSHW str`  
 `>PUSHW format`  
 `>PUSHW i`  
 `...`  
 `>PUSHBI 2`	#bytecount  
 `>LIBC sprintf`  
+`>SR`  
 
 ## RETURN VALUE  
 CC : success, Y,A = bytes sent  
@@ -1393,25 +1400,31 @@ Read formatted data from string
 
 ## ASM  
 ScanF :  
+`>SS`  
 `>PUSHW format`  
 `>PUSHW ptr`  
 `...`  
 `>PUSHB bytecount`  
 `>LIBC scanf`  
+`>SR`  
 FScanF :  
+`>SS`  
 `>PUSHB stream`  
 `>PUSHW format`  
 `>PUSHW ptr`  
 `...`  
 `>PUSHB bytecount`  
 `>LIBC fscanf`  
+`>SR`  
 SScanF :  
+`>SS`  
 `>PUSHW s`  
 `>PUSHW format`  
 `>PUSHW ptr`  
 `...`  
 `>PUSHB bytecount`  
 `>LIBC sscanf`  
+`>SR`  
 Specifiers :  
 + %i : short int  
 + %d : byte  

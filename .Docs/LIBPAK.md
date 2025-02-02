@@ -3,19 +3,6 @@
 ## Copyright 
 Copyright 2015 - 2020, Remy Gibert and the A2osX contributors. 
 
-# Pak  
-
-##ASM   
-`>PUSHW StatPtr`  
-`>PUSHW DstPtr`  
-`>PUSHW SrcLen`  
-`>PUSHW SrcPtr`  
-`>LIBCALL hLIBPAK,Pak`  
-
-## RETURN VALUE   
-CC, Y,A = CLEN  
-CS, Pak failure  
-
 ## License
 A2osX is licensed under the GNU General Public License.
 
