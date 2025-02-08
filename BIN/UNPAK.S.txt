@@ -31,7 +31,10 @@ ZPOutBufLen		.BS 2
 ZPFullPathPtr	.BS 2
 ZPRelPathPtr	.BS 2
 
-ZPProgress		.BS 1
+index			.BS 1
+bList			.BS 1
+bSpinner		.BS 1
+
 ZPSpinState		.BS 1
 
 ZS.END			.ED
@@ -66,48 +69,43 @@ L.MSG.E.IARC	.DA MSG.E.IARC
 CS.INIT         clc
 CS.INIT.RTS     rts
 *--------------------------------------
-CS.RUN			lda #1
+CS.RUN			inc Index
+				lda Index
 				>LIBC ArgV
-				bcs .99
+				bcs .3
 
-				>STYA ZPPtr1			See if first arg is -p
-				pha
+				>STYA ZPPtr1
+
 				lda (ZPPtr1)
 				cmp #'-'
-				bne .1					No dash-arguments
+				bne .1
 
-				pla
-				ldy #1
-				lda (ZPPtr1),y
-				cmp #'p'
-				bne .99					-p is only valid argument
+				jsr CS.RUN.CheckOpt
+				bcc CS.RUN
 
-				sty ZPProgress
-
-				lda #2
-				>LIBC ArgV
 				bcs .99
 
-				bra .11
+.1				>LDA.G pArcFile+1
+				bne .2
 
-.1				pla
+				jsr CS.RUN.OpenArc
+				bcc CS.RUN
 
-.11				jsr CS.RUN.OpenArc
 				bcs .9
 
-				lda ZPProgress			See if -p was provided
-				beq .2
+.2				lda ZPFullPathPtr+1
+				bne .99
 
-				lda #' '				Space for spinner to eat
-				>LIBC PutChar
+				jsr CS.RUN.SetupPath1
+				bcc CS.RUN
 
-				lda #3					Have dash-args, check arg #3
-				bra .3
+				bcs .9
+*--------------------------------------
+.3				>LDA.G pArcFile+1
+				beq .99
 
-.2				lda #2					No dash-args, check arg #2
-
-.3				>LIBC ArgV
-				bcc .4
+				lda ZPFullPathPtr+1
+				bne .5
 
 				ldy #S.PS.pCWD
 				jsr A2osX.GetPSy
@@ -116,13 +114,19 @@ CS.RUN			lda #1
 				jsr A2osX.GetPSy
 				ply
 
-.4				jsr CS.RUN.SetupPath
+				jsr CS.RUN.SetupPath
 				bcs .9
 
-				jsr CS.RUN.SetupBufs
+.5				jsr CS.RUN.SetupBufs
 				bcs .9
 
-				jsr CS.RUN.LOOP
+				lda bSpinner
+				beq .6
+
+				lda #' '				Space for spinner to eat
+				>LIBC PutChar
+
+.6				jsr CS.RUN.LOOP
 				bcs .9
 
 				jsr CS.RUN.TidyUp
@@ -137,9 +141,29 @@ CS.RUN			lda #1
 				sec
 				rts
 *--------------------------------------
+CS.RUN.CheckOpt	ldy #1
+				lda (ZPPtr1),y
+
+				ldx #OptionVars-OptionList-1
+
+.2				cmp OptionList,x
+				beq .3
+
+				dex
+				bpl .2
+
+				sec
+				rts
+
+.3				ldy OptionVars,x
+				ldx #$ff
+				stx 0,y
+				clc
+				rts
+*--------------------------------------
 CS.RUN.SetupPath
 				>STYA ZPPtr1
-
+CS.RUN.SetupPath1
 				>LDYAI 256
 				>LIBC Malloc
 				bcs .9
@@ -205,7 +229,7 @@ CS.RUN.LOOP		jsr CS.RUN.GetByte
 				jsr CS.RUN.CheckDir
 				bcs .99
 
-				lda ZPProgress
+				lda bSpinner
 				bne CS.RUN.LOOP
 
 				>LDYA L.MSG.OK
@@ -236,7 +260,7 @@ CS.RUN.LOOP		jsr CS.RUN.GetByte
 .2				cmp #CHNK.T.DATA
 				bne .3					Could be a 0 byte file
 
-.20				lda ZPProgress
+.20				lda bSpinner
 				beq .21
 
 				jsr CS.RUN.Spinner
@@ -287,12 +311,16 @@ CS.RUN.LOOP		jsr CS.RUN.GetByte
 
 				jmp .10
 *--------------------------------------
-CS.RUN.Exit		>LDYA.G pFile
+CS.RUN.Exit		bit bList
+				clc
+				bmi .8
+				
+				>LDYA.G pFile
 				>LIBC FClose
 
 				>STZ.G pFile+1
 
-				lda ZPProgress
+.8				lda bSpinner
 				bne .9
 
 				>LDYA L.MSG.OK
@@ -300,7 +328,7 @@ CS.RUN.Exit		>LDYA.G pFile
 
 .9				rts
 *--------------------------------------
-CS.RUN.PrintFN  lda ZPProgress
+CS.RUN.PrintFN  lda bSpinner
 				bne .9
 
 				>SS
@@ -321,6 +349,7 @@ CS.RUN.Spinner  lda #C.BS
 				inc
 				and #3
 				sta ZPSpinState
+				tax
 
 				lda MSG.SPINNER,x
 
@@ -334,7 +363,7 @@ CS.RUN.NewLine  lda #C.CR
 				>LIBC PutChar
 				rts
 *--------------------------------------
-CS.RUN.TidyUp	lda ZPProgress
+CS.RUN.TidyUp	lda bSpinner
 				beq .9
 
 				lda #8
@@ -348,7 +377,7 @@ CS.RUN.TidyUp	lda ZPProgress
 .9				rts
 *--------------------------------------
 CS.RUN.OpenArc  >SS
-				>PUSHYA
+				>PUSHW ZPPtr1
 				>PUSHBI O.RDONLY
 				>PUSHBI $CF				PAK
 				>PUSHWZ					Aux type
@@ -432,7 +461,11 @@ CS.RUN.GetByte  >LDYA.G pArcFile
 				>LIBC GetC
 				rts
 *--------------------------------------
-CS.RUN.CheckDir >SS
+CS.RUN.CheckDir bit bList
+				clc
+				bmi .9
+				
+				>SS
 				>PUSHW ZPFullPathPtr
 				>PUSHEA.G STATBUF
 				>LIBC Stat
@@ -460,7 +493,11 @@ CS.RUN.CheckDir >SS
 				sec
 .9				rts
 *--------------------------------------
-CS.RUN.OpenFile >SS
+CS.RUN.OpenFile bit bList
+				clc
+				bmi .9
+				
+				>SS
 				>PUSHW ZPFullPathPtr
 				>PUSHBI O.CREATE+O.WRONLY+O.TRUNC
 				>PUSHB.G FileType
@@ -474,13 +511,18 @@ CS.RUN.OpenFile >SS
 .9				rts
 *--------------------------------------
 CS.RUN.WriteFile
+				bit bList
+				clc
+				bmi .9
+				
 				>SS
 				>PUSHW.G pFile
 				>PUSHW.G pOutBuf
 				>PUSHW ZPOutBufLen
 				>LIBC FWrite
 				>SR
-				rts
+				
+.9				rts
 *--------------------------------------
 CS.SIG			sec
 				rts
@@ -521,8 +563,12 @@ CS.QUIT			>LDYA.G pFile
 *--------------------------------------
 CS.END			.EQ *
 *--------------------------------------
-MSG.USAGE		.CS "Usage : UNPAK [-p] Archive [DstDir]\r\n"
-				.CZ "   -p : Show progress spinner\r\n"
+OptionList		.AS "LlPp"
+OptionVars		.DA #bList,#bList,#bSpinner,#bSpinner
+*--------------------------------------
+MSG.USAGE		.CS "Usage : UNPAK Archive [DstDir]\r\n"
+				.CS "   -L : List content only\r\n"
+				.CZ "   -P : Show progress spinner\r\n"
 MSG.DIR			.CZ "Creating Dir:%s..."
 MSG.FILE		.CZ "Extracting File:%s..."
 MSG.OK			.CZ "[OK]"
