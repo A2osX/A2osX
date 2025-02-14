@@ -7,7 +7,6 @@ NEW
 *--------------------------------------
                 .INB inc/macros.i
                 .INB inc/a2osx.i
-                .INB inc/kernel.i
                 .INB inc/mli.i
                 .INB inc/mli.e.i
 *--------------------------------------
@@ -18,15 +17,15 @@ ArgIndex        .BS 1
 ArgPattern      .BS 1
 ZPPtr1          .BS 2
 ZPBufPtr        .BS 2
-hFile           .BS 1
-hBuf            .BS 1
+pFile           .BS 2
+
 char            .BS 1
 LineCount       .BS 2
+
 bPause          .BS 1
-bPipe           .BS 1
+
 bIsTTY          .BS 1
 bNewLine        .BS 1
-bDummy          .BS 1
 
 ZS.END          .ED
 *--------------------------------------
@@ -34,21 +33,21 @@ ZS.END          .ED
 *--------------------------------------
 CS.START        cld
                 jmp (.1,x)
-                .DA #$61                  6502,Level 1 (65c02)
-                .DA #1                    BIN Layout Version 1
-                .DA #0                    S.PS.F.EVENT
-                .DA #0
-                .DA CS.END-CS.START       Code Size (without Constants)
-                .DA DS.END-DS.START       Data Segment Size
-                .DA #16                   Stack Size
-                .DA #ZS.END-ZS.START      Zero Page Size
-                .DA 0
+				.DA #$61				6502,Level 1 (65c02)
+				.DA #2					BIN Layout Version 2
+				.DA #0
+				.DA #0
+				.DA CS.END
+				.DA ID.END
+				.DA DS.END
+				.DA #64					Stack Size
+				.DA #ZS.END-ZS.START	Zero Page Size
 *--------------------------------------
 * Relocation Table
 *--------------------------------------
 .1              .DA CS.INIT
                 .DA CS.RUN
-                .DA CS.DOEVENT
+                .DA CS.SIG
                 .DA CS.QUIT
 L.MSG.USAGE     .DA MSG.USAGE
 L.MSG.CRLF      .DA MSG.CRLF
@@ -58,11 +57,9 @@ L.MSG.LINENUM   .DA MSG.LINENUM
 CS.INIT         clc
                 rts
 *--------------------------------------
-CS.RUN          stz bPipe
-                stz bIsTTY
-                stz bNewLine
-                inc bNewLine
-                jsr CS.RUN.ISATTY
+CS.RUN          inc bNewLine
+                
+				jsr CS.RUN.ISATTY
                 jsr CS.RUN.CheckArgs
                 bcs CS.RUN.LOOP.RTS
 
@@ -70,37 +67,14 @@ CS.RUN          stz bPipe
                 stz LineCount+1
                 inc LineCount
 
-CS.RUN.LOOP     lda bPipe                If reading from pipe
-                bne .2                   No ^C/^S handling
+CS.RUN.LOOP		>SLEEP
 
-                ldy #S.PS.hStdIn
-                lda (pPS),y
-                >LIBC FEOF
-                bcs .9                   I/O Error
+				jsr X.CheckCtrl
+				bcs .9
+				
+				bvs CS.RUN.LOOP
 
-                tay
-                bne .1                   No char
-
-                >LIBC GetChar
-                bcs .9                   I/O error
-
-                cmp #$03                 Ctrl-C
-                beq .9
-
-                cmp #$13                 Ctrl-S
-                bne .1
-
-                lda bPause
-                eor #$ff
-                sta bPause
-                bne CS.RUN.LOOP
-
-.1              lda bPause
-                bne CS.RUN.LOOP
-
-.2              >SLEEP
-
-                lda hFile
+                >LDYA pFile
                 >LIBC GetC
                 bcs .7
 
@@ -154,32 +128,22 @@ CS.RUN.CheckArgs
                 lda #$80
                 sta bDummy-1,x
                 bra CS.RUN.CheckArgs
-
-.4              lda hFile
+*--------------------------------------
+.4              lda pFile+1
                 bne .80
 
-                ldy #S.PS.hStdIn
-                lda (pPS),y
-                tay
-				ldx FILEs.hFD-1,y
-				lda FDs.pLO-1,x
-				sta ZPPtr1
-				lda FDs.pHI-1,x
-				sta ZPPtr1+1
+                jsr X.IsPipeIn
+				bcs .99
 				
-                lda (ZPPtr1)
-                cmp #S.FD.T.PIPE
-                bne .97
-
-                sty hFile
-                inc bPipe
+				bvc .97
+				
+                >STYA pFile
 
 .80             >LDYAI 256
-                >LIBC GetMem
+                >LIBC Malloc
                 bcs .9
 
                 >STYA ZPBufPtr
-                stx hBuf
 
 *               clc
 
@@ -193,7 +157,7 @@ CS.RUN.CheckArgs
                 >LIBC PrintF
                 pla
                 sec
-                rts
+.99             rts
 *--------------------------------------
 CS.RUN.NextArg  inc ArgIndex
                 lda ArgIndex
@@ -204,14 +168,16 @@ CS.RUN.NextArg  inc ArgIndex
 
 .9              rts
 *--------------------------------------
-CS.RUN.OPEN     >PUSHYA
+CS.RUN.OPEN     >SS
+				>PUSHYA
                 >PUSHBI O.RDONLY+O.TEXT
                 >PUSHBI S.FI.T.TXT
                 >PUSHWZ                         Aux type
                 >LIBC FOpen
-                bcs .9
+                >SR
+				bcs .9
 
-                sta hFile
+                >STYA pFile
 
 .9              rts
 *--------------------------------------
@@ -274,21 +240,26 @@ CS.RUN.PRINTBYTE
                 inc LineCount+1
 .9              rts
 *--------------------------------------
-CS.DOEVENT      sec
+CS.SIG			sec
                 rts
 *--------------------------------------
-CS.END
+				.INB usr/src/shared/x.ispipein.s
+				.INB usr/src/shared/x.checkctrl.s
 *--------------------------------------
-OptionList      .AS "x"
+CS.END			.EQ *
+*--------------------------------------
+OptionList      .AS "Xx"
 OptionList.Cnt  .EQ *-OptionList
 *--------------------------------------
 MSG.USAGE       .CS "Usage : NL <File> or CMD|NL"
 MSG.CRLF        .CZ "\r\n"
 MSG.LINENUM     .CZ "%5D "
 *--------------------------------------
+ID.END			.EQ *
+*--------------------------------------
                 .DUMMY
                 .OR 0
-DS.START
+STATBUF			.BS S.STAT
 DS.END          .ED
 *--------------------------------------
 MAN
