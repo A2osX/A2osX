@@ -435,6 +435,7 @@ Add Data to MD5 computation
 Get ProDOS Volume Info  
 
 ## C  
+`#include <prodos.h>`  
 `int online(short int volid, void *buf);`  
 
 ## ASM  
@@ -448,6 +449,7 @@ Get ProDOS Volume Info
 Change Type of a ProDOS File  
 
 ## C  
+`#include <prodos.h>`  
 `int chtyp(const char *filepath, short int filetype);`  
 
 ## ASM  
@@ -461,6 +463,7 @@ Change Type of a ProDOS File
 Change AuxType of a ProDOS File  
 
 ## C  
+`#include <prodos.h>`  
 `int chaux(const char *filepath, int auxtype);`  
 
 ## ASM  
@@ -474,6 +477,7 @@ Change AuxType of a ProDOS File
 Change Attributes of a ProDOS File  
 
 ## C  
+`#include <prodos.h>`  
 `int setattr(const char *filepath, short int attributes);`  
 
 ## ASM  
@@ -530,13 +534,14 @@ A = Child PSID
 # Kill  
 
 ## C  
+`#include <signal.h>`  
 `int kill(int pid, int sig);`  
 
 ## ASM  
 `>SS`  
 `>PUSHW pid`  
 `>PUSHW sig`  
-`>LIBC kill`  
+`>LIBC Kill`  
 `>SR`  
 
 ## RETURN VALUE  
@@ -1253,7 +1258,7 @@ Set the file-position indicator for hFILE
 `>PUSHW stream`  
 `>PUSHL offset`  
 `>PUSHW whence`  
-`>LIBC fseek`  
+`>LIBC FSeek`  
 `>SR`  
 
 # FEOF  
@@ -1762,6 +1767,16 @@ CS : no match
 
 ## RETURN VALUE  
 
+# TBufAddL  
+
+## ASM  
+`>SS`  
+`>PUSHW pTBuf`  
+`>PUSHW DataPtr`  
+`>SR`  
+
+## RETURN VALUE  
+
 # TBufNew  
 
 ## ASM  
@@ -1849,6 +1864,7 @@ Convert S.TIME struct to CSTR
 # open  
 
 ## C / CSH  
+`#include <unistd.h>`  
 `int open(const char *pathname, short int flags);`  
 
 ## ASM  
@@ -1906,13 +1922,14 @@ CS: A = EC
 Set the file-position indicator for hFD  
 
 ## C  
+`#include <unistd.h>`  
 `int lseek(off_t fildes, off_t offset, short int whence );`  
 
 ## ASM  
 `>PUSHB hFD`  
 `>PUSHL offset`  
 `>PUSHB whence`  
-`>LIBC fseek`  
+`>LIBC LSeek`  
 
 # ChOwn  
 

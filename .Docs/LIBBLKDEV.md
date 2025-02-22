@@ -53,8 +53,10 @@ Write a track (16 sectors)
 # D2TrkRead16s  
 Write a track (16 sectors)  
  PUSHB DSSS0000  
+ PUSHB HeadNum (0,1)  
  PUSHB TrackNum  
- PUSHW Ptr to 16*256 buffer  
+ PUSHW Ptr to 16b buffer   
+ PUSHW Ptr to 16*256b buffer  
 
 ## RETURN VALUE  
  CC : success, A = VolNum  
