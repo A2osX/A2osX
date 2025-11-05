@@ -6,11 +6,16 @@ NEW
 INIT3			jsr INIT3.CDevs
 				bcs *
 
+				sta IO.CLR80STORE
+				sta IO.CLRMIXED
+				sta IO.SETTEXT
+
 				>SS
 				>PUSHWI DEV.CONSOLE
 				>PUSHBI	O.RDWR
 				>PUSHBI S.FI.T.TXT
 				>PUSHWZ					Aux type
+
 				>LIBC FOpen
 				>SR
 				bcs *
@@ -47,6 +52,13 @@ INIT3			jsr INIT3.CDevs
 *--------------------------------------
 Kernel.Init3C	dec IRQ.InKernel		Back To KERNEL
 
+				>SS
+				>PUSHWI 2
+				>PUSHBI IOCTL.CONTROL
+				>PUSHWZ
+				>LIBC IOCTL
+				>SR
+
 				>LDYAI MSG.Init3
 				>LIBC PutS
 
@@ -61,10 +73,14 @@ Kernel.Init3C	dec IRQ.InKernel		Back To KERNEL
 				jsr INIT3.IrqMgr
 				bcs *
 
+				jsr INIT3.PwdMgr
+
 				jsr INIT3.TskMgr
 				bcs *
 
-				jsr INIT3.PwdMgr
+				jsr INIT3.Hostname
+
+				jsr INIT3.KMs
 
 				>SS
 				>PUSHWI MSG.EXEC
@@ -81,6 +97,7 @@ Kernel.Init3C	dec IRQ.InKernel		Back To KERNEL
 
 				bcs .9
 
+				jsr INIT3.OK
 				>LDYAI MSG.Init3.OK
 				>LIBC PutS
 				>DEBUGOA
@@ -91,14 +108,8 @@ Kernel.Init3C	dec IRQ.InKernel		Back To KERNEL
 				pha
 				jmp RAMSW.2MAINRTS
 
-.9				>SS
-				pha
-				>PUSHWI MSG.Init3.KO
-				pla
-				>PUSHA
-				>PUSHBI 1
-				>LIBC PrintF
-				>SR
+.9				jsr INIT3.KO
+
 				bra *					No need to discard Expanded CMDLINE
 *--------------------------------------
 INIT3.CDevs		>SS
@@ -108,8 +119,6 @@ INIT3.CDevs		>SS
 				>SR
 				bcs .9
 
-				jsr INIT3.CDevsInit
-
 				>SS
 				>PUSHWI FD.TTY
 				>PUSHWI DEV.CONSOLE
@@ -117,7 +126,8 @@ INIT3.CDevs		>SS
 				>SR
 				bcs .9
 
-.1				jsr INIT3.CDevsNext
+.1				inc FD.TTY+S.FD.DEV.DEVID
+				inc DEV.TTY+8
 
 				>SS
 				>PUSHWI FD.TTY
@@ -130,45 +140,13 @@ INIT3.CDevs		>SS
 				cmp A2osX.TTYDEVS
 				bne .1
 
+				sta IO.CLRWRITEAUX
+				stz K.LC				Mark AUXLC0 as used
+				sta IO.SETWRITEAUX
+
 				clc
 
 .9				rts
-*--------------------------------------
-INIT3.CDevsNext	lda FD.TTY+S.FD.DEV.pDCB
-				clc
-				adc #80*24+S.DCB.TTY
-				sta FD.TTY+S.FD.DEV.pDCB
-
-				lda FD.TTY+S.FD.DEV.pDCB+1
-				adc /80*24+S.DCB.TTY
-				sta FD.TTY+S.FD.DEV.pDCB+1
-
-				inc FD.TTY+S.FD.DEV.DEVID
-
-				inc DEV.TTY+8
-*--------------------------------------
-INIT3.CDevsInit	lda FD.TTY+S.FD.DEV.pDCB
-				sta ZPPtr1
-
-				lda FD.TTY+S.FD.DEV.pDCB+1
-				sta ZPPtr1+1
-
-				sta IO.CLRWRITEAUX
-
-				ldy #S.DCB.TTY-1
-
-				lda #0
-
-.1				sta (ZPPtr1),y
-				dey
-				bne .1
-
-				lda FD.TTY+S.FD.DEV.DEVID
-				sta (ZPPtr1)			#S.DCB.TTY.DEVID
-
-				sta IO.SETWRITEAUX
-
-				rts
 *--------------------------------------
 * http://www.1000bit.it/support/manuali/apple/technotes/misc/tn.misc.02.html
 * https://mirrors.apple2.org.za/apple.cabi.net/FAQs.and.INFO/A2.TECH.NOTES.ETC/A2.CLASSIC.TNTS/a2misc007(1).htm
@@ -235,7 +213,7 @@ INIT3.HWDetect	>SS
 				>SR
 				rts
 *--------------------------------------
-* Out in A2osX.CPUTYPE 
+* Out in A2osX.CPUTYPE
 *  $60, 6502
 *  $61, 65C02
 *  $62, 65R02
@@ -386,7 +364,7 @@ INIT3.DevMgr	>LDYAI MSG.DEV
 				lda $211,x				MLI.DEVPTRS+1,x
 				sta FD.BDEV+S.FD.DEV.pBUS+1
 
-				sta IO.SETREADAUX
+*				sta IO.SETREADAUX
 
 				sta ZPPtr1+1
 				stz ZPPtr1				Cn00
@@ -488,58 +466,68 @@ INIT3.DevMgr	>LDYAI MSG.DEV
 .80				clc
 				rts
 *--------------------------------------
-INIT3.DevMgrVXD	>LDYAI VSD.PATCH
-
-				jsr .10
-				bcc .8
-
-				>LDYAI VED.PATCH
-				jsr .10
-				bcs .9
-
-.8				ldy #4
-				lda (ZPPtr1),y
-				sec
-				sbc #1
-				sta .81+1
-
-				iny
-				lda (ZPPtr1),y
-				sbc #0
-				sta .81+2
-
-				php
-				sei
-
-				bit IO.RRAMWRAMBNK2
-
-.81				ldx $FFFF				SELF MODIFIED : Slot0n
-
-				bit IO.RRAMWRAMBNK1
-
-				lda #A2osX.S.VXD
-				sta A2osX.S-1,x
-
-				plp
-
-.9				rts
+*INIT3.DevMgrVXD	>LDYAI VSD.PATCH
+*
+*				jsr .10
+*				bcc .8
+*
+*				>LDYAI VED.PATCH
+*				jsr .10
+*				bcs .9
+*
+*.8				ldy #4
+*				lda (ZPPtr1),y
+*				sec
+*				sbc #1
+*				sta .81+1
+*
+*				iny
+*				lda (ZPPtr1),y
+*				sbc #0
+*				sta .81+2
+*
+*				php
+*				sei
+*
+*				bit IO.RRAMWRAMBNK2
+*
+*.81				ldx $FFFF				SELF MODIFIED : Slot0n
+*
+*				bit IO.RRAMWRAMBNK1
+*
+*				lda #A2osX.S.VXD
+*				sta A2osX.S-1,x
+*
+*				plp
+*
+*.9				rts
+**--------------------------------------
+*.10				>STYA ZPPtr1
+*
+*				ldy #9					10 bytes
+*
+*.11				lda $BF41,y
+*				cmp (ZPPtr1),y
+*				bne .19
+*
+*				dey
+*				bpl .11
+*
+*				clc
+*				rts
+*
+*.19				sec
+*				rts
 *--------------------------------------
-.10				>STYA ZPPtr1
-
-				ldy #9					10 bytes
-
-.11				lda $BF41,y
-				cmp (ZPPtr1),y
-				bne .19
-
-				dey
-				bpl .11
-
-				clc
-				rts
-
-.19				sec
-				rts
+*VSD.PATCH		bit IO.RRAMWRAMBNK2
+*				jsr $D002
+*				bit IO.RRAMWRAMBNK1
+*				rts
+**--------------------------------------
+*VED.PATCH		bit IO.RRAMWRAMBNK2
+*				jsr $D401
+*				bit IO.RRAMWRAMBNK1
+*				rts
 *--------------------------------------
 INIT3.DevMgrAdd	stx FD.BDEV+S.FD.DEV.T
 				stx .1+1
@@ -567,16 +555,6 @@ INIT3.DevMgrAdd	stx FD.BDEV+S.FD.DEV.T
 				>SR
 				rts
 *--------------------------------------
-VSD.PATCH		bit IO.RRAMWRAMBNK2
-				jsr $D002
-				bit IO.RRAMWRAMBNK1
-				rts
-*--------------------------------------
-VED.PATCH		bit IO.RRAMWRAMBNK2
-				jsr $D401
-				bit IO.RRAMWRAMBNK1
-				rts
-*--------------------------------------
 * Setup KernelLC $FFFE->Kernel IRQ Handler
 * if irq not handled, jmp (S.IrqMgrOldFFFE)
 *--------------------------------------
@@ -585,6 +563,13 @@ INIT3.IrqMgr	>LDYAI MSG.IRQ
 
 				php
 				sei
+
+				sta IO.SETALTZP
+				>LDYA $FFFE
+				>STYA IRQX.JMP+1
+				>LDYAI IRQX
+				>STYA $FFFE
+				sta IO.CLRALTZP
 
 				lda A2osX.HWT
 				cmp #A2osX.HWT.IIgs
@@ -608,7 +593,9 @@ INIT3.IrqMgr	>LDYAI MSG.IRQ
 				sec
 				bra .8
 *--------------------------------------
-.2				lda #$60
+.2				sta IO.CLRWRITEAUX
+
+				lda #$60
 				sta $5fa				//c EXTINT COM1:Dont buffer but get IRQ
 				sta $5fb				//c EXTINT COM2:Dont buffer but get IRQ
 
@@ -617,6 +604,8 @@ INIT3.IrqMgr	>LDYAI MSG.IRQ
 				stz $4FF				//c ROM FF: no ACIABUF
 				stz $4FC				//c ROM 0X: no ACIABUF
 
+				sta IO.SETWRITEAUX
+*--------------------------------------
 .3				jsr IrqMgr.M
 				bcs .7
 
@@ -624,7 +613,7 @@ INIT3.IrqMgr	>LDYAI MSG.IRQ
 				ldx #"V"
 				sec
 				bra .8
-*--------------------------------------
+
 .7				sta IO.CLRWRITEAUX
 
 				jsr IrqMgr.HZ2Tick
@@ -634,7 +623,7 @@ INIT3.IrqMgr	>LDYAI MSG.IRQ
 				ldx #"P"
 				>LDYAI MSG.IRQP
 				clc
-
+*--------------------------------------
 .8				ror A2osX.bIRQ
 				stx A2osX.IrqMode
 				>LIBC PutS
@@ -662,7 +651,7 @@ IrqMgr.GS		.OP 65816
 
 				pla
 				sta IRQ.GSVect
-				
+
 				sta IO.SETWRITEAUX
 
 				pea $000C				Vertical blanking interrupt handler
@@ -682,14 +671,14 @@ IrqMgr.GS		.OP 65816
 				.OP 65C02
 
 				sta IO.CLRWRITEAUX
-				
+
 				jsr IrqMgr.HZ2Tick
 
 				>LDYAI IRQ.GS
 				jsr IrqMgr.SetVOn
 
 				>LDYAI IRQ.GSOff
-				jsr IrqMgr.SetVOff
+				>STYA CORE.Quit+3
 
 				sta IO.SETWRITEAUX
 
@@ -753,8 +742,8 @@ IrqMgr.TC		stz ZPPtr1				Try finding a TClock Card...
 				jsr IrqMgr.SetVOn
 
 				>LDYAI IRQ.TCOff
-				jsr IrqMgr.SetVOff
-				
+				>STYA CORE.Quit+3
+
 				sta IO.SETWRITEAUX
 
 				clc
@@ -787,9 +776,9 @@ IrqMgr.M		stz ZPPtr1				Try finding a Mouse Card...
 .4				lda ZPPtr1+1
 
 				sta .12+2				jsr $CnXX
-				
+
 				sta IO.CLRWRITEAUX
-				
+
 				sta IRQ.M+2
 				sta IRQ.M2+2
 				sta IRQ.MOff1+2
@@ -803,7 +792,7 @@ IrqMgr.M		stz ZPPtr1				Try finding a Mouse Card...
 				sta IRQ.n0
 
 				sta IO.SETWRITEAUX
-				
+
 				sta .11+1				ldy #Cn
 
 				bit IO.RROMWRAMBNK2		Renable ROM to allow MOUSE II firmware works properly
@@ -816,13 +805,13 @@ IrqMgr.M		stz ZPPtr1				Try finding a Mouse Card...
 				ldy #SETMOUSE
 				lda (ZPPtr1),y
 				sta .12+1
-				
+
 				sta IO.CLRWRITEAUX
-				
+
 				sta IRQ.MOff1+1
-				
+
 				sta IO.SETWRITEAUX
-				
+
 				lda #MOUSEMODx.INTVBL+MOUSEMODx.ACTIVE
 				jsr .10
 
@@ -844,7 +833,7 @@ IrqMgr.M		stz ZPPtr1				Try finding a Mouse Card...
 				jsr IrqMgr.SetVOn
 
 				>LDYAI IRQ.MOff
-				jsr IrqMgr.SetVOff
+				>STYA CORE.Quit+3
 
 				sta IO.SETWRITEAUX
 
@@ -872,13 +861,68 @@ IrqMgr.HZ2Tick	lda A2osX.HZ
 
 				rts
 *--------------------------------------
-IrqMgr.SetVOn	>STYA IRQ.JSR1+1
- 				>STYA IRQ.JSR2+1
-				rts
-*--------------------------------------
-IrqMgr.SetVOff	>STYA CORE.Quit+3
+IrqMgr.SetVOn	>STYA IRQ.JSR+1
+
+				sta IO.SETALTZP
+ 				>STYA IRQX.JSR+1
+				sta IO.CLRALTZP
 
 IrqMgr.RTS		rts
+*--------------------------------------
+INIT3.PwdMgr	>LDYAI MSG.PWD
+				>LIBC PutS
+
+				>LDYAI PWD.USR.L
+				>LIBC Malloc
+				bcs .9
+
+				>STYA PWDX.pUsrDB
+				>STYA ZPPtr1
+
+				ldy #PWD.USR.L-1
+
+.1				lda PWD.USR,y
+				sta (ZPPtr1),y
+				dey
+				bpl .1
+
+				>LDYAI PWD.GRP.L
+				>LIBC Malloc
+				bcs .9
+
+				>STYA PWDX.pGrpDB
+				>STYA ZPPtr1
+
+				ldy #PWD.GRP.L-1
+
+.2				lda PWD.GRP,y
+				sta (ZPPtr1),y
+				dey
+				bpl .2
+
+*				clc
+
+.9				rts
+
+*				>LDYAI PWD.ETCGROUP
+*				>LIBC LoadTxtFile
+*				bcs .9
+*
+*				>STYA PWD.pGrpDB
+*				jsr X.StrLenYA
+*				>STYA PWD.GrpDBSize
+*
+*				>LDYAI PWD.ETCPASSWD
+*				>LIBC LoadTxtFile
+*				bcs .9
+*
+*				>STYA PWD.pUsrDB
+*				jsr X.StrLenYA
+*				>STYA PWD.UsrDBSize
+
+*				clc
+
+*.9				rts
 *--------------------------------------
 INIT3.TskMgr	>LDYAI MSG.TSK
 				>LIBC PutS
@@ -893,7 +937,7 @@ INIT3.TskMgr	>LDYAI MSG.TSK
 				ply
 
 				>LIBC Malloc
-				bcs IrqMgr.RTS
+				bcs .99
 
 				>STYA ZPPtr1
 
@@ -908,15 +952,8 @@ INIT3.TskMgr	>LDYAI MSG.TSK
 				lda #0
 				sta (ZPPtr1)			make sure blank!!
 
-				>SS
-				>PUSHWZ
-				>PUSHWZ
-				>LIBC OpenSession
-				>SR
-				bcs IrqMgr.RTS
-
 				phy
-				ldy #S.PS.pSession+1
+				ldy #S.PS.UID+1
 				jsr RAMSW.SetPSy
 				dey
 				pla
@@ -924,7 +961,7 @@ INIT3.TskMgr	>LDYAI MSG.TSK
 
 				>LDYAI I.CWD
 				>LIBC StrDup
-				bcs IrqMgr.RTS
+.99				bcs .9
 
 				phy
 				ldy #S.PS.pCWD+1
@@ -939,12 +976,6 @@ INIT3.TskMgr	>LDYAI MSG.TSK
 				>PUSHWZ
 				>LIBC SetEnv
 				>SR
-				bcs .9
-
-				jsr INIT3.Hostname
-
-				>LDYAI I.ENV.HOSTNAME
-				>LIBC PutEnv
 				bcs .9
 
 				>LDYAI I.ENV.PATH
@@ -967,7 +998,7 @@ INIT3.Hostname	>SS
 				>PUSHWZ					Aux type
 				>LIBC FOpen
 				>SR
-				bcs .4
+				bcs .9
 
 *				>STYA pFILE
 
@@ -985,56 +1016,125 @@ INIT3.Hostname	>SS
 				cmp #'#'
 				beq .1
 
-				ldy #$ff
+				sta IO.CLRWRITEAUX
 
-.2				iny
-				lda Buf256,y
-				bne .2
+				ldy #0
 
-				cpy #16
+.2				lda Buf256,y
+				sta K.Hostname,y
+				beq .3
 
-.3				php
-				pha
+				iny
+				cpy #15
+				bcc .2
+
+.3				sta IO.SETWRITEAUX
 
 				>LDYA pFILE
 				>LIBC FClose
 
-				pla
-				plp
-				bcc .8
-
-.4				ldy #$FF
-
-.5				iny
-				lda LOCALHOST,y
-				sta Buf256,y
-				bne .5
-
-.8				rts
+.9
+INIY3.9			rts
 *--------------------------------------
-INIT3.PwdMgr	>LDYAI MSG.PWD
-				>LIBC PutS
-			rts
+INIT3.KMs		>LDYAI SYS
+				>LIBC OpenDir
+				bcs INIY3.9
 
-				>LDYAI PWD.ETCPASSWD
-				>LIBC LoadTxtFile
-				bcs .9
+				>STYA pDIR
 
-				>STYA PWD.pUsrDB
-				jsr SHARED.StrLenYA
-				>STYA PWD.UsrDBSize
+.1				>LDYA pDIR
+				>LIBC ReadDir
+				bcs .8
 
-				>LDYAI PWD.ETCGROUP
-				>LIBC LoadTxtFile
-				bcs .9
+				>STYA pDIRENT
+				>STYA pENT
 
-				>STYA PWD.pGrpDB
-				jsr SHARED.StrLenYA
-				>STYA PWD.GrpDBSize
+.2				>LDYA pENT
+				>STYA pKM
+				>STYA ZPPtr1
 
-*				clc
+				ldy #$ff
+
+.3				iny
+				lda (ZPPtr1),y
+				bne .3
+
+				tya
+				beq .7
+
+				sec
+				adc ZPPtr1				filename
+				sta ZPPtr2				stat
+				lda #0
+				adc ZPPtr1+1
+				sta ZPPtr2+1
+
+				lda ZPPtr2
+				clc
+				adc #S.STAT
+				sta pENT
+				lda ZPPtr2+1
+				adc /S.STAT
+				sta pENT+1
+
+				cpy #3
+				bcc .2					not "km."
+
+				ldy #S.STAT.MODE
+				lda (ZPPtr2),y
+				and #$F0
+				bne .2					not REG
+
+				ldy #2
+
+.4				lda (ZPPtr1),y
+				cmp KM.,y
+				bne .2
+
+				dey
+				bpl .4
+
+				jsr INIT3.KM
+				bra .2
+
+.7				>LDYA pDIRENT
+				>LIBC Free
+				bra .1
+
+.8				>LDYA pDIR
+				>LIBC CloseDir
 
 .9				rts
+*--------------------------------------
+INIT3.KM		>SS
+				>PUSHWI MSG.KM
+				>PUSHW pKM
+				>PUSHBI 2
+				>LIBC PrintF
+				>SR
+
+				>LDYA pKM
+				>KAPI LoadDrv
+				bcs INIT3.KO
+*--------------------------------------
+INIT3.OK		>LDYAI MSG.OK
+				>LIBC PutS
+				rts
+*--------------------------------------
+INIT3.KO		>SS
+				pha
+				>PUSHWI MSG.KO
+				pla
+				>PUSHA
+				>PUSHBI 1
+				>LIBC PrintF
+				>SR
+				rts
+*--------------------------------------
+pDIR			.BS 2
+pDIRENT			.BS 2
+pENT			.BS 2
+pKM				.BS 2
 *--------------------------------------
 Mouse.OFS		.HS 05070B0CFB
 Mouse.SIG		.HS 38180120D6
@@ -1045,23 +1145,25 @@ TClock.SIG		.HS	08285870
 BDEV.OFS		.HS 010305
 BDEV.SIG		.HS 200003
 *--------------------------------------
-MSG.Init3		.CZ "A2osX[Stage3]:Init *** Press Ctrl-R for entering ROOT Mode ***"
+MSG.Init3		.CZ "\ecA2osX[Stage3]:Init *** Press Ctrl-R for entering ROOT Mode ***"
 MSG.DEV			.AZ "Device Manager..."
 MSG.BDEV		.CZ "  Adding Device: %s, Addr: %H, Type: %s\r\n"
-MSG.BDEVs		.DA MSG.BDEV.D2
-				.DA MSG.BDEV.RAM
-				.DA MSG.BDEV.USR
-				.DA MSG.BDEV.BLK
-				.DA MSG.BDEV.RBLK
-				.DA MSG.BDEV.SP
-				.DA MSG.BDEV.RSP
-MSG.BDEV.D2		.AZ "Disk ]["
-MSG.BDEV.RAM	.AZ "/RAM Disk"
-MSG.BDEV.USR	.AZ "User Block"
-MSG.BDEV.BLK	.AZ "Generic Block"
-MSG.BDEV.RBLK	.AZ "Generic Block (Remapped)"
-MSG.BDEV.SP		.AZ "SmartPort"
-MSG.BDEV.RSP	.AZ "SmartPort (Remapped)"
+MSG.BDEVs		.DA .1
+				.DA .2
+				.DA .3
+				.DA .4
+				.DA .5
+				.DA .6
+				.DA .7
+.1				.AZ "Disk ]["
+.2				.AZ "/RAM Disk"
+.3				.AZ "User Block"
+.4				.AZ "Generic Block"
+.5				.AZ "Generic Block (Remapped)"
+.6				.AZ "SmartPort"
+.7				.AZ "SmartPort (Remapped)"
+MSG.KM			.CZ "Loading KM:%s..."
+*--------------------------------------
 DRV.BDEVs		.DA DRV.BLK				D2
 				.DA DRV.BLK				RAM
 				.DA DRV.BLK				USR
@@ -1078,25 +1180,26 @@ MSG.IRQP		.AZ "  Polling Mode."
 MSG.TSK			.AZ "Task Manager..."
 MSG.PWD			.AZ "Password Manager..."
 MSG.EXEC		.AZ "Executing %s..."
-MSG.Init3.KO	.CZ "Failed : [%h]\r\n"
-MSG.Init3.OK	.CZ "[OK]\r\nA2osX[Stage3]:Complete."
+MSG.KO			.CZ "Failed:[%h]\r\n"
+MSG.OK			.CZ "[OK]\r\n"
+MSG.Init3.OK	.CZ "A2osX[Stage3]:Complete."
 *--------------------------------------
 MSG.HW			.AZ "Checking Hardware..."
 MSG.HW.TypeSubT	.CZ "Type=%h,SubT=%h\r\n"
 MSG.CPU			.AZ "Checking CPU..."
-MSG.CPUTYPE		.DA MSG.6502
-				.DA MSG.65C02
-				.DA MSG.65R02
-				.DA MSG.65816
-MSG.6502		.AZ "6502."
-MSG.65C02		.AZ "65C02."
-MSG.65R02		.AZ "65R02."
-MSG.65816		.AZ "65816."
+MSG.CPUTYPE		.DA .1
+				.DA .2
+				.DA .3
+				.DA .4
+.1				.AZ "6502."
+.2				.AZ "65C02."
+.3				.AZ "65R02."
+.4				.AZ "65816."
 MSG.Z80			.AZ "Checking Z80 CPU..."
 MSG.Z80.OK		.CZ "Detected In Slot %d.\r\n"
 MSG.Z80.KO		.AZ "Not Detected."
 *--------------------------------------
-RAMx			.AZ "/RAMx"
+*RAMx			.AZ "/RAMx"
 I.ENV.BOOT		.AZ "BOOT"
 I.CWD			.AZ "/"
 I.ENV.PATH		.AZ "PATH=/sbin/:/bin/"
@@ -1112,7 +1215,8 @@ FD.NULL			.DA #S.FD.T.CDEV
 				.DA NULL.DRV
 				.DA 0					DCBPTR
 				.DA 0					BUFPTR
-				.BS 4
+				.DA 0					SIZE
+				.DA 0
 *--------------------------------------
 FD.TTY			.DA #S.FD.T.CDEV
 				.DA #0					HANDLER
@@ -1120,9 +1224,10 @@ FD.TTY			.DA #S.FD.T.CDEV
 				.DA #0					DEVID
 				.DA 0					BUSPTR
 				.DA TERM.DRV
-				.BS 2					DCBPTR
-				.BS 2					BUFPTR
-				.BS 4
+				.DA 0					DCBPTR
+				.DA 0					BUFPTR
+				.DA 0					SIZE
+				.DA 0
 *--------------------------------------
 FD.BDEV			.DA #S.FD.T.BDEV
 				.DA #0					HANDLER
@@ -1139,9 +1244,6 @@ DEV.NULL		.AZ "/dev/null"
 DEV.CONSOLE		.AZ "/dev/console"
 DEV.TTY			.AZ "/dev/tty0"
 DEV.BDEV		.AZ "/dev/s1d1"
-*--------------------------------------
-ETC.HOSTNAME	.AZ "/etc/hostname"
-LOCALHOST		.AZ "localhost"
 *--------------------------------------
 * Z80 Reserved
 *--------------------------------------
@@ -1160,8 +1262,40 @@ Z80.1000		.HS	31CFF3				START:	LD SP,0F3CFh		Init Stack
 				.HS 00					FLAG:	.DB 0
 Z80.1000.L		.EQ *-Z80.1000
 *--------------------------------------
-I.ENV.HOSTNAME	.AS "HOSTNAME="
-Buf256			.EQ *
+PWD.USR			.DA .1-PWD.USR
+				.DA .2-PWD.USR
+				.DA 0					UID
+				.DA 0					GID
+				.DA .3-PWD.USR
+				.DA .4-PWD.USR
+				.DA .5-PWD.USR
+
+.1				.AZ "root"				LOGNAME
+.2				.AZ ""					PASSWORD
+.3				.AZ "Root User"			GECOS
+.4				.AZ "/root/"			HOME
+.5				.AZ "/bin/sh"			SHELL
+
+				.DA #0
+
+PWD.USR.L		.EQ	*-PWD.USR
+*--------------------------------------
+PWD.GRP			.DA .1-PWD.GRP
+				.DA 0					GID
+				.DA .2-PWD.GRP
+
+.1				.AZ "root"				GRPNAME
+.2				.AZ "root"				MEMBERS
+
+				.DA #0
+
+PWD.GRP.L		.EQ *-PWD.GRP
+*--------------------------------------
+ETC.HOSTNAME	.AZ "/etc/hostname"
+SYS				.AZ "/sys/"
+KM.				.AS "km."
+*--------------------------------------
+Buf256			.EQ *					/etc/hostname file read here
 *--------------------------------------
 MAN
 SAVE usr/src/sys/kernel.s.init3

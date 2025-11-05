@@ -8,20 +8,19 @@ NEW
 				.INB inc/macros.i
 				.INB inc/a2osx.i
 				.INB inc/eth.i
-				.INB inc/libtcpip.i
+				.INB inc/net.tcpip.i
 				.INB inc/net.telnet.i
+				.INB inc/net.db.i
 *--------------------------------------
-TIMEOUT.MAX		.EQ 200					20 sec.
+TIMEOUT.MAX		.EQ 20					20 sec.
 BUFSIZE			.EQ 256
 *--------------------------------------
 				.DUMMY
 				.OR ZPBIN
 ZS.START
-ZPIPCfgPtr		.BS 2
-ZPBufPtr		.BS 2
-ZPBufLen		.BS 2
-hBuf			.BS 1
-hSocket			.BS 1
+BufLen			.BS 2
+pBuf			.BS 2
+hSocket			.BS 2
 TimeOut			.BS 1
 ZS.END			.ED
 *--------------------------------------
@@ -30,23 +29,22 @@ ZS.END			.ED
 CS.START		cld
 				jmp (.1,x)
 				.DA #$61				6502,Level 1 (65c02)
-				.DA #1					BIN Layout Version 1
-				.DA #S.PS.F.EVENT		S.PS.F
+				.DA #2					BIN Layout Version 2
+				.DA #S.PS.SIG.T1SEC
 				.DA #0
-				.DA CS.END-CS.START		Code Size (without Constants)
-				.DA DS.END-DS.START		Data Segment Size
+				.DA CS.END
+				.DA ID.END
+				.DA DS.END
 				.DA #64					Stack Size
 				.DA #ZS.END-ZS.START	Zero Page Size
-				.DA 0
 *--------------------------------------
 .1				.DA CS.INIT
 				.DA CS.RUN
-				.DA CS.DOEVENT
+				.DA CS.SIG
 				.DA	CS.QUIT
-L.LIBTCPIP		.DA LIBTCPIP
-L.SA.LOCAL		.DA SA.LOCAL
-L.SA.REMOTE		.DA SA.REMOTE
-L.SA.REMOTE.AD	.DA SA.REMOTE+S.SOCKADDR.ADDR
+*--------------------------------------
+L.AI.HINTS		.DA AI.HINTS
+*--------------------------------------
 L.MSG.IPKO		.DA MSG.IPKO
 L.MSG.USAGE		.DA MSG.USAGE
 L.MSG.UNKNOWN	.DA MSG.UNKNOWN
@@ -57,179 +55,189 @@ L.MSG.IOERR		.DA MSG.IOERR
 L.MSG.USER		.DA MSG.USER
 				.DA 0
 *--------------------------------------
-CS.INIT			>LDYA L.LIBTCPIP
-				>KAPI LoadLib
-				bcs .9
-
-				sta hLIBTCPIP
-
-.9				rts
-*--------------------------------------
-CS.RUN			>LIBCALL hLIBTCPIP,LIBTCPIP.GETCFG	is TCPIP loaded ?
-				>STYA ZPIPCfgPtr
-				lda (ZPIPCfgPtr)		Configured ?
-				bmi CS.RUN.IPOK
-
-				>LDYA L.MSG.IPKO
-				>LIBC PutS
-				lda #E.SYN
-				sec
+CS.INIT			clc
 				rts
-
-CS.RUN.IPOK		ldy #S.PS.ARGC
-				lda (pPS),y
-				cmp #1
-				bcc .9
-
-				ldy #S.IPCFG.IP+3
-				ldx #3
-
-.1				lda (ZPIPCfgPtr),y
-				sta SA.LOCAL+S.SOCKADDR.ADDR,x
-				dey
-				dex
-				bpl .1
-
-				lda #TIMEOUT.MAX
+*--------------------------------------
+CS.RUN			lda #TIMEOUT.MAX
 				sta TimeOut
 
 .2				>SLEEP
 
-				>PUSHW L.SA.REMOTE.AD
 				lda #1
 				>KAPI ArgV
+				bcs .9
+				
+				>SS
 				>PUSHYA
-				>LIBCALL hLIBTCPIP,LIBTCPIP.HST.GetByName
+				>PUSHWZ
+				>PUSHW L.AI.HINTS
+				>PUSHEA.G pAI
+				>LIBC GetAddrInfo
+				>SR
 				bcc CS.RUN.HOSTOK
+
 				lda TimeOut
 				bne .2
 
+				>SS
 				>PUSHW L.MSG.UNKNOWN
 				lda #1
 				>KAPI ArgV
 				>PUSHYA
 				>PUSHBI 2
 				>LIBC PrintF
-				bra .99
+				>SR
+				bra .98
 
 .9				>LDYA L.MSG.USAGE
 				>LIBC PutS
 
-.99				lda #E.SYN
+.98				lda #E.SYN
 				sec
-				rts
+.99				rts
 
-CS.RUN.HOSTOK	lda #2
+CS.RUN.HOSTOK	>LDYA.G pAI
+				>STYA R1
+
+				ldy #S.ADDRINFO.pSOCKADDR
+				lda (R1),y
+				sta R2
+				iny
+				lda (R1),y
+				sta R2+1
+				
+				>LEA.G SA
+				>STYA R3
+				
+				ldy #S.SOCKADDR-1
+				
+.1				lda (R2),y
+				sta (R3),y
+				dey
+				bpl .1
+			
+				lda #2
 				>KAPI ArgV
 				bcs CS.RUN.PORTOK
 
 				>LIBC AToI
-				>STYA SA.REMOTE+S.SOCKADDR.PORT
+				bra .3
+	
+.2				>LDYAI TCP.PORT.TELNET
+		
+.3				>STYA.G SA+S.SOCKADDR.PORT
 
-CS.RUN.PORTOK	>PUSHW L.MSG.HOSTOK
-				ldx #0
+CS.RUN.PORTOK	>SS
+				>PUSHW L.MSG.HOSTOK
 
-.1				>PUSHB SA.REMOTE+S.SOCKADDR.ADDR,x
-				inx
-				cpx #4
+				ldx #4
+				ldy #S.SOCKADDR.ADDR
+
+.1				>PUSHB (R3),y
+				iny
+				dex
 				bne .1
 
-				>PUSHW SA.REMOTE+S.SOCKADDR.PORT
+				ldy #S.SOCKADDR.PORT
+				>PUSHB (R3),y
+				iny
+				>PUSHB (R3),y
+
 				lda #1
 				>KAPI ArgV
 				>PUSHYA
 
 				>PUSHBI 8
 				>LIBC PrintF
-
-CS.RUN.OPENSKT	>PUSHBI S.SOCKET.T.STREAM
-				>PUSHBI 0				no protocol
-				>LIBCALL hLIBTCPIP,LIBTCPIP.Socket
+				>SR
+*--------------------------------------
+CS.RUN.CONNECT	>SS
+				>PUSHWI AF_INET
+				>PUSHWI SOCK_STREAM
+				>PUSHWI IPPROTO_TCP
+				>LIBC Socket
+				>SR
 				bcs .9
 
-.1				sta hSocket
+				>STYA hSocket
 
-				>PUSHA
-				>PUSHW L.SA.LOCAL
-				>LIBCALL hLIBTCPIP,LIBTCPIP.Bind
-				bcc .2
-
-.9				jmp CS.RUN.SKTERR
-
-.2				lda #TIMEOUT.MAX
+				lda #TIMEOUT.MAX
 				sta TimeOut
 
 .3				>SLEEP
 
-				>PUSHB hSocket
-				>PUSHW L.SA.REMOTE
-				>LIBCALL hLIBTCPIP,LIBTCPIP.Connect
+				>SS
+				>PUSHW hSocket
+				>PUSHW.G SA
+				>LIBC Connect
+				>SR
 				bcc .4
 
-				cmp #ERR.SKT.NOCONN
+				cmp #E.SKT.NOCONN
 				bne .9
 
 				lda TimeOut
 				bne .3
 
-				lda #ERR.SKT.NOCONN
+				lda #E.SKT.NOCONN
 				bra .9
 
 .4				>LDYA L.MSG.SKTOK
 				>LIBC PutS
 
 				>LDYAI BUFSIZE
-				>LIBC GetMem
+				>LIBC Malloc
 				bcc .5
 
-.5				>STYA ZPBufPtr
-				stx hBuf
+.9				rts
+
+.5				>STYA pBuf
+				
 *--------------------------------------
 CS.RUN.LOOP		>SLEEP
 
-				lda hSocket
-				>LIBCALL hLIBTCPIP,LIBTCPIP.EOF
-				bcs CS.RUN.SKTERR
-
-				tay
-				bne .2					EOF, no char
-
-				lda hSocket
+				>SS
+				>LDYA hSocket
 				jsr CS.RUN.PushRead
-				>LIBCALL hLIBTCPIP,LIBTCPIP.Read
-				bcs CS.RUN.SKTERR
+				>LIBC Recv
+				>SR
+				bcc .1
+				
+				cmp #E.NODATA
+				bne CS.RUN.SKTERR
+				
+				bra .2
 
-				>STYA ZPBufLen
+.1				>STYA BufLen
 
-				ldy #S.PS.hStdOut
-				lda (pPS),y
+				jsr CS.RUN.GetStdOut
 				jsr CS.RUN.PushWrite
 				>LIBC FWrite
 				bcs CS.RUN.IOERR
 
-.2				ldy #S.PS.hStdIn
-				lda (pPS),y
+.2				jsr CS.RUN.GetStdIn
 				>LIBC FEOF
 				bcs CS.RUN.IOERR
 
 				tay
 				bne CS.RUN.LOOP			EOF = true, no char from STDIN
 
-				ldy #S.PS.hStdIn
-				lda (pPS),y
+				jsr CS.RUN.GetStdIn
 				jsr CS.RUN.PushRead
 				>LIBC FRead
 				bcs CS.RUN.IOERR
 
-				>STYA ZPBufLen
+				>STYA BufLen
 
-				lda (ZPBufPtr)
+				lda (pBuf)
 				cmp #$14				Ctrl-T
 				beq CS.RUN.USERINT
 
-				lda hSocket
+				>SS
+				>LDYA hSocket
 				jsr CS.RUN.PushWrite
-				>LIBCALL hLIBTCPIP,LIBTCPIP.Write
+				>LIBC Send
+				>SR
 				bcc CS.RUN.LOOP
 *--------------------------------------
 CS.RUN.SKTERR	ldx #0
@@ -239,12 +247,14 @@ CS.RUN.SKTERR	ldx #0
 CS.RUN.IOERR	ldx #2
 
 CS.RUN.ERR		pha
+				tay
+				>SS
 				>PUSHW L.MSG.SKTERR,x
-				pla
-				pha
+				tya
 				>PUSHA
 				>PUSHBI 1
 				>LIBC PrintF
+				>SR
 				pla
 				sec
 				rts
@@ -255,21 +265,35 @@ CS.RUN.USERINT	>LDYA L.MSG.USER
 				sec
 				rts
 *--------------------------------------
-CS.RUN.PushRead	>PUSHA
-				>PUSHW ZPBufPtr
+CS.RUN.GetStdIn	ldy #S.PS.pStdIn
+				jsr A2osX.GetPSy
+				pha
+				iny
+				jsr A2osX.GetPSy
+				ply
+				rts
+*--------------------------------------
+CS.RUN.GetStdOut
+				ldy #S.PS.pStdOut
+				jsr A2osX.GetPSy
+				pha
+				iny
+				jsr A2osX.GetPSy
+				ply
+				rts
+*--------------------------------------
+CS.RUN.PushRead	>PUSHYA
+				>PUSHW pBuf
 				>PUSHWI BUFSIZE
 				rts
 *--------------------------------------
 CS.RUN.PushWrite
-				>PUSHA
-				>PUSHW ZPBufPtr
-				>PUSHW ZPBufLen
+				>PUSHYA
+				>PUSHW pBuf
+				>PUSHW BufLen
 				rts
 *--------------------------------------
-CS.DOEVENT		lda (pEvent)
-				bpl .9					is it a TIMER event?
-
-				lda TimeOut
+CS.SIG			lda TimeOut
 				beq .9
 
 				dec TimeOut
@@ -277,27 +301,21 @@ CS.DOEVENT		lda (pEvent)
 .9				sec						do not discard TIMER event
 				rts
 *--------------------------------------
-CS.QUIT			lda hSocket
+CS.QUIT			>LDYA hSocket
 				beq .1
 
-				>LIBCALL hLIBTCPIP,LIBTCPIP.Shutdown
+				>LIBC Shutdown
 
-.1				lda hBuf
-				beq .2
-
-				>LIBC FreeMem
-
-.2				lda hLIBTCPIP
+.1				>LDYA pBuf
 				beq .8
 
-				>KAPI UnloadLib
+				>LIBC Free
 
 .8				clc
 				rts
 *--------------------------------------
-CS.END
-LIBTCPIP		.AZ "libtcpip"
-hLIBTCPIP		.BS 1
+CS.END			.EQ *
+*--------------------------------------
 MSG.IPKO		.CZ "TCP/IP Not Loaded/Configured."
 MSG.USAGE		.CZ "Usage : TELNET <ip|host> [port]"
 MSG.UNKNOWN		.CZ "%s: Unknown host\r\n"
@@ -308,19 +326,27 @@ MSG.SKTERR		.CZ "Socket Error : $%h\r\n"
 MSG.IOERR		.CZ "I/O Error : $%h\r\n"
 MSG.USER		.CZ "User interrupt."
 *--------------------------------------
-SA.LOCAL		.DA #AF.INET			S.SOCKADDR.AF
-				.BS 1
-				.BS 4					S.SOCKADDR.ADDR
-				.BS 2					S.SOCKADDR.PORT
+AI.HINTS		.DA 0					S.ADDRINFO.F			
+				.DA AF_INET             S.ADDRINFO.AF			
+				.DA 0                   S.ADDRINFO.SOCKTYPE		
+				.DA 0                   S.ADDRINFO.PROTO		
+				.DA 0                   S.ADDRINFO.ALEN			
+				.DA 0                   S.ADDRINFO.pSOCKADDR	
+				.DA 0                   S.ADDRINFO.pNAME		
+				.DA 0                   S.ADDRINFO.pNEXT		
 *--------------------------------------
-SA.REMOTE		.DA #AF.INET			S.SOCKADDR.AF
-				.BS 1
+SA.REMOTE		.DA AF_INET				S.SOCKADDR.AF
 				.BS 4					S.SOCKADDR.ADDR
 				.DA TCP.PORT.TELNET
 *--------------------------------------
+ID.END			.EQ *
+*--------------------------------------
 				.DUMMY
 				.OR 0
-DS.START
+				
+pAI				.BS 2
+SA				.BS S.SOCKADDR
+*--------------------------------------
 DS.END			.ED
 *--------------------------------------
 MAN

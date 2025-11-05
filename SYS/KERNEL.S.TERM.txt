@@ -5,97 +5,92 @@ CURBLNK.SPEED	.EQ 2
 *--------------------------------------
 				.DUMMY
 				.OR ZPDRV+4
+ZPpDCB			.BS 2
+ZPL1			.BS 2
+ZPL2			.BS 2
 
-ZPDCBPtr		.BS 2
-ZPBufBL1		.BS 2
-ZPBufBL2		.BS 2
-ZPScrBL1		.BS 2
-ZPScrBL2		.BS 2
-*--------------------------------------
 bActive			.BS 1
-
 ZPTmpX			.BS 1
 ZPTmpChar		.BS 1
-
 CsiH			.BS 1
 CsiPCnt			.BS 1
 CsiP			.BS 4
+CsiF			.BS 1
 				.ED
 *--------------------------------------
-TERM.DRV		ldy #S.FD.DEV.pDCB
+TERM.FB			.BS 1
+TERM.bCurOn		.BS 1
+TERM.CurSave	.BS 1
+TERM.bL0		.BS 1
+TERM.L0			.EQ	$DF00				AUXLC,B2
+*--------------------------------------
+TERM.DRV		ldy #S.FD.DEV.DEVID
 				lda (pFD),y
-				sta ZPDCBPtr
-				iny
-				lda (pFD),y
-				sta ZPDCBPtr+1
-
-				lda A2osX.ASCREEN
-
-				cmp (ZPDCBPtr)			#S.DCB.TTY.DEVID
+				cmp A2osX.ASCREEN
 				beq .1					CS
 
 				clc
 
 .1				ror bActive
 
+				tay
+				lda TERM.FBs,y
+				sta TERM.FB
+
 				jmp (.2,x)
 
 .2				.DA TERM.STATUS
-				.DA A2osX.BADCALL		IOCTL.READBLOCK
-				.DA A2osX.BADCALL       IOCTL.WRITEBLOCK
-				.DA A2osX.BADCALL       IOCTL.FORMAT
+				.DA A2osX.BADCALL		READBLOCK
+				.DA A2osX.BADCALL       WRITEBLOCK
+				.DA A2osX.BADCALL       FORMAT
 				.DA TERM.CONTROL
-				.DA A2osX.BADCALL		IOCTL.INIT
+				.DA A2osX.BADCALL		INIT
 				.DA TERM.OPEN
 				.DA TERM.CLOSE
 				.DA TERM.READ
 				.DA TERM.WRITE
 *--------------------------------------
-TERM.STATUS		jsr DRV.GetnCntpBuf
+TERM.STATUS		>LDYAI TERM.DIB
 
-				lda K.DRV.IOCTL+S.IOCTL.S
-				beq .1
+				jsr DRV.STATUS.YA
+				bcs .4
 
-				cmp #S.IOCTL.S.GETDIB
-				bne .3
-
-				ldy #S.DIB-1
-				.HS 2C					BIT ABS
-.1				ldy #3
-
-				jsr DRV.GetpBuf
+				ldy #S.FD.DEV.pDCB+1
+				lda (pFD),y
+				beq .9					CC
 
 				bit A2osX.IOOpt
 				bpl .2
 
 				sta IO.SETWRITEAUX
 
-.2				lda TERM.DIB,y
-				sta (ZPpBuf),y
-				dey
-				bne .2
-
-				ldy #S.DCB.TTY.S
-				lda (ZPDCBPtr),y
+.2				lda TERM.DIB
+				ora #S.DIB.S.OPENED
 				sta (ZPpBuf)
 
 				sta IO.CLRWRITEAUX
 
-				clc
+*				clc
+
 				rts
 
-.3				cmp #S.IOCTL.S.EOF
-				bne .9
+.4				cpy #S.IOCTL.S.EOF
+				sec
+				bne .9					A = #MLI.E.BADCTL
 
-				jsr TERM.ISOPENED
+				ldy #S.FD.DEV.pDCB+1
+				lda (pFD),y
 				beq TERM.OPEN.E
 
-				jsr TERM.CBLNK
+				sta ZPpDCB+1
+				dey
+				lda (pFD),y
+				sta ZPpDCB
 
 				ldy #S.DCB.TTY.OUTTAIL
-				lda (ZPDCBPtr),y
+				lda (ZPpDCB),y
 				iny
-				eor (ZPDCBPtr),y		OUTHEAD
+				eor (ZPpDCB),y			OUTHEAD
 				bne .8
 
 				bit bActive
@@ -104,60 +99,114 @@ TERM.STATUS		jsr DRV.GetnCntpBuf
 				jsr TERM.CheckOA
 				bmi .7
 
+				jsr TERM.CBLNK
+
 				bit IO.KBD
 				bmi .8
 
-.7				lda #$ff				EOF = TRUE
+.7				lda #$ff				TRUE
 				.HS 2C					BIT ABS
-.8				lda #0					EOF = FALSE
-				clc
-				rts
+.8				lda #0					FALSE
 
-.9				lda #MLI.E.BADCTL
-				.HS 2C					BIT ABS
+				clc
+
+.9				rts
+
 TERM.OPEN.E		lda #MLI.E.OPEN
 				sec
 				rts
 *--------------------------------------
-TERM.OPEN		jsr TERM.ISOPENED
+TERM.OPEN		ldy #S.FD.DEV.pDCB+1
+				lda (pFD),y
 				bne TERM.OPEN.E
 
-				lda (ZPDCBPtr)			#S.DCB.TTY.DEVID
+				>LDYAI S.DCB.TTY
+				jsr MEM.Malloc
+				bcs .9
+
+				>STYA ZPpDCB
+
+				phy
+				ldy #S.FD.DEV.pDCB+1
+				sta (pFD),y
+				dey
+				pla
+				sta (pFD),y
+
+				ldy #S.FD.DEV.DEVID
+				lda (pFD),y
 				tax
 
 				lda IO.hFD				in ZPTMP
-
 				sta A2osX.SCRNDEVS,x
 
-				ldy #S.DCB.TTY.S
-				lda (ZPDCBPtr),y
-				ora #S.DIB.S.OPENED
-				ora TERM.DIB+S.DIB.S
-				sta (ZPDCBPtr),y
-				jsr TERM.RIS
-*--------------------------------------
-TERM.CONTROL	lda (ZPDCBPtr)			#S.DCB.TTY.DEVID
+				jmp TERM.RESET
 
+.9				rts
+*--------------------------------------
+TERM.CONTROL	bit bActive
+				bmi .8
+
+				ldx A2osX.ASCREEN
+				cpx #9
+				beq .7					GFX
+*			>DEBUG
+				jsr TERM.CurHide
+				jsr TERM.L0Off
+
+				ldy #S.FD.DEV.DEVID
+				lda (pFD),y
+				tay						Y = this device
+				lda TERM.FBs,y
+				bmi .7
+
+				ldx A2osX.ASCREEN
+				sta TERM.FBs,x			move active screen to this buffer
+				sta TERM.FB				for FB.Swap...
+				
+				lda #$ff
+				sta TERM.FBs,y
+				
+				lda #0
+				sta (pRWReg)
+
+				sei
+				sta IO.SETALTZP
+				jsr FB.Swap
+				sta IO.CLRALTZP
+				cli
+
+				lda A2osX.ActBnk
+				sta (pRWReg)
+
+.7				sta IO.SETTEXT
+
+				ldy #S.FD.DEV.DEVID
+				lda (pFD),y
 				sta A2osX.ASCREEN
 
-				sta IO.SETTEXT
-
-				ldx #23
-				jsr TERM.BUF2SCR
-
-				lda #0
-				ldy	#S.DCB.TTY.bTITLE
-				sta (ZPDCBPtr),y
-				clc
+.8				clc
 				rts
 *--------------------------------------
-TERM.CLOSE		jsr TERM.ISOPENED
+TERM.CLOSE		ldy #S.FD.DEV.pDCB+1
+				lda (pFD),y
 				beq .9
 
-				lda TERM.DIB+S.DIB.S
-				sta (ZPDCBPtr),y
+				ldy #S.FD.DEV.pDCB
+				lda (pFD),y
+				pha
+				iny
+				lda (pFD),y
+				ply
 
-				lda (ZPDCBPtr)			#S.DCB.TTY.DEVID
+				jsr MEM.FreeYA
+
+				ldy #S.FD.DEV.pDCB+1
+				lda #0
+				sta (pFD),y
+
+				ldy #S.FD.DEV.DEVID
+				lda (pFD),y
 				tax
 
 				stz A2osX.SCRNDEVS,x
@@ -169,23 +218,27 @@ TERM.CLOSE		jsr TERM.ISOPENED
 				sec
 				rts
 *--------------------------------------
-TERM.ISOPENED	ldy #S.DCB.TTY.S
-				lda (ZPDCBPtr),y
-				bit #S.DIB.S.OPENED
-				rts
-*--------------------------------------
-TERM.READ		jsr DRV.GetnCntpBuf
+TERM.READ		ldy #S.FD.DEV.pDCB+1
+				lda (pFD),y
+*				beq TERM.OPEN.E
+
+				sta ZPpDCB+1
+				dey
+				lda (pFD),y
+				sta ZPpDCB
+
+				jsr DRV.GetnCntpBuf
 
 				stz K.DRV.IOCTL+S.IOCTL.BYTECNT
 				stz K.DRV.IOCTL+S.IOCTL.BYTECNT+1
 
-				bit bActive				is screen active?
-				bpl .6					no....go check flush...
+				bit bActive
+				bpl .6
 
 				jsr TERM.CBLNK
 
 				jsr TERM.CheckOA
-				bmi .6					Open apple key, not for us...
+				bmi .6
 
 				lda IO.KBD
 				bpl .6
@@ -211,7 +264,7 @@ TERM.READ		jsr DRV.GetnCntpBuf
 
 				jsr TERM.COUT
 				ldy #S.DCB.TTY.bLNM
-				lda (ZPDCBPtr),y
+				lda (ZPpDCB),y
 				bpl .70
 
 				lda #C.LF
@@ -227,9 +280,9 @@ TERM.READ		jsr DRV.GetnCntpBuf
 				bra .70
 
 .6				ldy #S.DCB.TTY.OUTTAIL
-				lda (ZPDCBPtr),y
+				lda (ZPpDCB),y
 				iny
-				cmp (ZPDCBPtr),y		OUTHEAD
+				cmp (ZPpDCB),y			OUTHEAD
 				beq .9					no char in output buffer...
 
 .70				inc ZPCnt
@@ -239,13 +292,13 @@ TERM.READ		jsr DRV.GetnCntpBuf
 				beq .8
 
 .71				ldy #S.DCB.TTY.OUTTAIL
-				lda (ZPDCBPtr),y
+				lda (ZPpDCB),y
 				iny						OUTHEAD
-				cmp (ZPDCBPtr),y
+				cmp (ZPpDCB),y
 				beq .8
 
 				tay
-				lda (ZPDCBPtr),y
+				lda (ZPpDCB),y
 				pha
 				tya
 				inc
@@ -255,7 +308,7 @@ TERM.READ		jsr DRV.GetnCntpBuf
 				lda #S.DCB.TTY.OUTBUF
 
 .72				ldy #S.DCB.TTY.OUTTAIL
-				sta (ZPDCBPtr),y
+				sta (ZPpDCB),y
 				pla
 
 				ldy K.DRV.IOCTL+S.IOCTL.BYTECNT
@@ -270,9 +323,18 @@ TERM.READ		jsr DRV.GetnCntpBuf
 *				sec
 				rts
 *--------------------------------------
-TERM.WRITE		jsr DRV.GetnCntpBuf
+TERM.WRITE		ldy #S.FD.DEV.pDCB+1
+				lda (pFD),y
+*				beq TERM.OPEN.E
 
-				jsr TERM.CUROFF
+				sta ZPpDCB+1
+				dey
+				lda (pFD),y
+				sta ZPpDCB
+
+				jsr DRV.GetnCntpBuf
+
+				jsr TERM.CurHide
 
 .1				inc ZPCnt
 				bne .2
@@ -281,7 +343,7 @@ TERM.WRITE		jsr DRV.GetnCntpBuf
 				beq .8
 
 .2				ldy #S.DCB.TTY.M
-				lda (ZPDCBPtr),y
+				lda (ZPpDCB),y
 				tax
 				jsr .3
 
@@ -342,10 +404,10 @@ TERM.CIN		jsr RAMSW.GetZPpBuf
 				.DA TERM.SI
 				.DA TERM.SETM.ESC
 *--------------------------------------
-.8				jsr SetCharAtCurPos
+.8				jsr TERM.SetC
 *--------------------------------------
 TERM.FS			ldy #S.DCB.TTY.bDECAWM
-				lda (ZPDCBPtr),y
+				lda (ZPpDCB),y
 				asl
 
 				.HS 89					BIT IMM
@@ -355,9 +417,9 @@ TERM.CUF		clc
 				php
 
 				ldy #S.DCB.TTY.CH
-				lda (ZPDCBPtr),y
+				lda (ZPpDCB),y
 				inc
-				sta (ZPDCBPtr),y
+				sta (ZPpDCB),y
 				cmp #80
 				bcc .7
 
@@ -377,17 +439,18 @@ TERM.CUB		sec						no wrap
 
 TERM.BS			clc						wrap
 
-				jsr TERM.BS1
+*				jsr TERM.BS1
 
-				clc
-				rts
+*				clc
+*				rts
 *--------------------------------------
-TERM.BS1		ldy #S.DCB.TTY.CH
-				lda (ZPDCBPtr),y
+*TERM.BS1
+				ldy #S.DCB.TTY.CH
+				lda (ZPpDCB),y
 				beq .1
 
 				dec
-				sta (ZPDCBPtr),y
+				sta (ZPpDCB),y
 
 				clc
 				rts
@@ -395,31 +458,32 @@ TERM.BS1		ldy #S.DCB.TTY.CH
 .1				bcs .9					no wrap
 
 				ldy #S.DCB.TTY.CV
-				lda (ZPDCBPtr),y
+				lda (ZPpDCB),y
 				sec
 				beq .9
 
 				dec
-				sta (ZPDCBPtr),y
+				sta (ZPpDCB),y
 
 				ldy #S.DCB.TTY.CH
 				lda #79
-				sta (ZPDCBPtr),y
+				sta (ZPpDCB),y
 
 				clc
 
 .9				rts
 *--------------------------------------
-TERM.DEL		clc						wrap
-				jsr TERM.BS1
+TERM.DEL		jsr TERM.BS
+*				clc						wrap
+*				jsr TERM.BS1
 				bcs TERM.CR.8
 
 				lda #C.SPACE
-				jmp SetCharAtCurPos
+				jmp TERM.SetC
 *--------------------------------------
 TERM.CR			lda #0
 				ldy #S.DCB.TTY.CH
-				sta (ZPDCBPtr),y
+				sta (ZPpDCB),y
 
 TERM.CR.8		clc
 				rts
@@ -430,7 +494,7 @@ TERM.SO			sec
 TERM.SI			clc
 				ldy #S.DCB.TTY.bG0G1
 				ror
-				sta (ZPDCBPtr),y
+				sta (ZPpDCB),y
 				clc
 				rts
 *--------------------------------------
@@ -471,41 +535,42 @@ TERM.SETM.ESC	lda #S.DCB.TTY.M.ESC
 				.HS 2C					BIT ABS
 TERM.SETM.0		lda #0
 TERM.SETM		ldy #S.DCB.TTY.M
-				sta (ZPDCBPtr),y
+				sta (ZPpDCB),y
 				ldy #S.DCB.TTY.INBUF
 				tya
-				sta (ZPDCBPtr),y
+				sta (ZPpDCB),y
 
-TERM.SETM.8		clc
+				clc
 				rts
 *--------------------------------------
 TERM.CSI		ldy #S.DCB.TTY.INBUF
-				lda (ZPDCBPtr),y
+				lda (ZPpDCB),y
 				inc
-				sta (ZPDCBPtr),y
+				sta (ZPpDCB),y
 				tay
 
 				jsr RAMSW.GetZPpBuf
 
-				sta (ZPDCBPtr),y
+				sta (ZPpDCB),y
 				cmp #64					End of Seq ?
 				bcs TERM.CSI.Exec
 
 				cpy #S.DCB.TTY.INBUF.MAX-1	buffer full?
-				bne TERM.SETM.8
+				bcs TERM.SETM.0
 
-				jmp TERM.SETM.0
+				rts
 
 TERM.CSI.Exec	stz CsiH
 				stz CsiPCnt
+				stz CsiF
 
-				lda #S.DCB.TTY.INBUF+1		EscSeq Ptr
+				lda #S.DCB.TTY.INBUF+1	EscSeq Ptr
 				clc
-				adc ZPDCBPtr
+				adc ZPpDCB
 				sta ZPPtr2
 
 				lda /S.DCB.TTY.INBUF+1
-				adc ZPDCBPtr+1
+				adc ZPpDCB+1
 				sta ZPPtr2+1
 
 				lda (ZPPtr2)
@@ -514,16 +579,20 @@ TERM.CSI.Exec	stz CsiH
 
 				sta CsiH
 
-.1				inc ZPPtr2
-				bne .2
-
-				inc ZPPtr2+1
+.1				>INCW ZPPtr2
 
 .2				jsr MATH.Dec2ACC32
 				bcs .5
 
-				jsr SHARED.AddY2P2
-				lda #255
+*				clc
+				tya
+				adc ZPPtr2
+				sta ZPPtr2
+				bcc .20
+
+				inc ZPPtr2+1
+
+.20				lda #255
 				ldx ACC32+1
 				bne .3
 
@@ -536,6 +605,13 @@ TERM.CSI.Exec	stz CsiH
 				lda (ZPPtr2)
 				cmp #';'
 				beq .1
+
+				cmp #C.SPACE
+				bne .5
+
+				sta CsiF
+
+				>INCW ZPPtr2
 
 .5				jsr TERM.SETM.0
 
@@ -568,6 +644,7 @@ TERM.CSI.Exec	stz CsiH
 				.DA TERM.RM				l
 				.DA TERM.SGR			m
 				.DA TERM.DSR			n
+				.DA TERM.DECSCUSR		q
 				.DA TERM.DECSTBM		r
 *--------------------------------------
 * LNM : ESC [ 20
@@ -585,9 +662,10 @@ TERM.RM			clc
 				dex
 				bne .99
 
+				php
+
 				lda CsiP
 				ldx CsiH
-				php
 				bne .1
 
 				cmp #20					bLNM
@@ -610,24 +688,23 @@ TERM.RM			clc
 
 				ldy #S.DCB.TTY.bCURON
 				plp
-
 				ror						A = 0
-				sta (ZPDCBPtr),y
-				bmi .3					let it starts blinking..
+				sta (ZPpDCB),y
+				bmi .3
 
-				jsr TERM.CUROFF
+				jmp TERM.CurOff
 
-.3				clc
-				rts
+.3				jmp TERM.CurOn
 
 .8				plp
 				ror
-				sta (ZPDCBPtr),y
+				sta (ZPpDCB),y
 
 				clc
 				rts
 
 .98				plp
+
 .99				clc
 				rts
 *--------------------------------------
@@ -661,7 +738,7 @@ TERM.SGR		lda CsiPCnt
 				lda #0
 				ror
 				ldy #S.DCB.TTY.bNORMAL
-				sta (ZPDCBPtr),y
+				sta (ZPpDCB),y
 
 				rts
 *--------------------------------------
@@ -677,18 +754,46 @@ TERM.DSR		ldx CsiPCnt
 
 				jsr TERM.ESCCSI
 				ldy #S.DCB.TTY.CV
-				lda (ZPDCBPtr),y
+				lda (ZPpDCB),y
 				inc
 				jsr TERM.10OUT
 				lda #';'
 				jsr TERM.COUT
 
 				ldy #S.DCB.TTY.CH
-				lda (ZPDCBPtr),y
+				lda (ZPpDCB),y
 				inc
 				jsr TERM.10OUT
 				lda #'R'
-				jsr TERM.COUT
+				jmp TERM.COUT
+
+.8				clc
+				rts
+*--------------------------------------
+*ESC [ 0 SP q Terminal default
+*ESC [ 1 SP q Blinking Block
+*ESC [ 2 SP q Steady Block
+*ESC [ 3 SP q Blinking Underline
+*ESC [ 4 SP q Steady Underline
+*ESC [ 5 SP q Blinking Bar
+*ESC [ 6 SP q Steady Bar
+*--------------------------------------
+TERM.DECSCUSR	lda CsiF
+				cmp #C.SPACE
+				bne .8
+
+				lda CsiPCnt
+				cmp #1
+				bne .8
+
+				ldy CsiP
+				cpy #7
+				bcs .8
+
+				lda TERM.Curs,y
+
+				ldy #S.DCB.TTY.CURCHAR
+				sta (ZPpDCB),y
 
 .8				clc
 				rts
@@ -722,10 +827,10 @@ TERM.DECSTBM	lda #0
 				plx
 
 .8				ldy #S.DCB.TTY.SCROLLTOP
-				sta (ZPDCBPtr),y
+				sta (ZPpDCB),y
 				iny						S.DCB.TTY.SCROLLBOT
 				txa
-				sta (ZPDCBPtr),y
+				sta (ZPpDCB),y
 
 .9				clc
 				rts
@@ -779,7 +884,7 @@ TERM.HVP		lda CsiPCnt
 .2				dex
 				txa
 				ldy #S.DCB.TTY.CV
-				sta (ZPDCBPtr),y
+				sta (ZPpDCB),y
 				dec CsiPCnt
 				beq .8
 
@@ -796,17 +901,17 @@ TERM.HVP		lda CsiPCnt
 .3				dex
 				txa
 				ldy #S.DCB.TTY.CH
-				sta (ZPDCBPtr),y
+				sta (ZPpDCB),y
 
 .8				clc
 				rts
 *--------------------------------------
 TERM.HOME		lda #0
 				ldy #S.DCB.TTY.CV
-				sta (ZPDCBPtr),y
+				sta (ZPpDCB),y
 
 				ldy #S.DCB.TTY.CH
-				sta (ZPDCBPtr),y
+				sta (ZPpDCB),y
 
 				clc
 				rts
@@ -823,23 +928,16 @@ TERM.G1			ldx #$40
 
 				txa
 				eor #$ff
-				and (ZPDCBPtr),y
+				and (ZPpDCB),y
 				bra .8
 
 .1				txa
-				ora (ZPDCBPtr),y
-.8				sta (ZPDCBPtr),y
+				ora (ZPpDCB),y
+.8				sta (ZPpDCB),y
 
 				jmp TERM.SETM.0
 *--------------------------------------
-TERM.RIS		ldy #S.DCB.TTY.M
-
-.1				lda RESET.VALUES-S.DCB.TTY.M,y
-				sta (ZPDCBPtr),y
-				iny
-				cpy #S.DCB.TTY.INBUF+1
-				bne .1
-
+TERM.RIS		jsr TERM.RESET
 				jmp TERM.ED2			Erase Screen
 *--------------------------------------
 TERM.ENQ		ldx #0
@@ -855,7 +953,7 @@ TERM.ENQ		ldx #0
 				rts
 *--------------------------------------
 TERM.LF			ldy #S.DCB.TTY.bLNM
-				lda (ZPDCBPtr),y
+				lda (ZPpDCB),y
 				bpl TERM.IND
 
 TERM.NEL		jsr TERM.CR
@@ -866,14 +964,14 @@ TERM.CUD		clc						no scroll
 
 				php
 				ldy #S.DCB.TTY.CV
-				lda (ZPDCBPtr),y
+				lda (ZPpDCB),y
 				ldy #S.DCB.TTY.SCROLLBOT
-				cmp (ZPDCBPtr),y
+				cmp (ZPpDCB),y
 				bcs .1
 
 				inc
 				ldy #S.DCB.TTY.CV
-				sta (ZPDCBPtr),y
+				sta (ZPpDCB),y
 
 				plp
 
@@ -884,18 +982,16 @@ TERM.CUD		clc						no scroll
 				bcc .8
 
 				ldy #S.DCB.TTY.SCROLLTOP
-				lda (ZPDCBPtr),y
+				lda (ZPpDCB),y
 
 				tax
 
-.2				jsr TERM.SETUP.L1X
-
-				inx
-				jsr TERM.COPY.XtoL1
+.2				clc
+				jsr TERM.CPLX
 
 				txa
 				ldy #S.DCB.TTY.SCROLLBOT
-				cmp (ZPDCBPtr),y
+				cmp (ZPpDCB),y
 				bne .2
 
 				bra TERM.EL2
@@ -916,7 +1012,7 @@ TERM.EL.8		clc
 				rts
 *--------------------------------------
 TERM.EL1		ldy #S.DCB.TTY.CH		End
-				lda (ZPDCBPtr),y
+				lda (ZPpDCB),y
 				cmp #80
 				bcc TERM.EL2.1
 
@@ -926,7 +1022,7 @@ TERM.EL2.1		ldy #0					Start
 				bra TERM.EL0.1
 
 TERM.EL0		ldy #S.DCB.TTY.CH
-				lda (ZPDCBPtr),y
+				lda (ZPpDCB),y
 				tay						Start
 				cpy #80
 				bcs TERM.EL.8
@@ -937,7 +1033,7 @@ TERM.EL0.1		sty .1+1				Save Start
 				sta .2+1				Save End
 
 				ldy #S.DCB.TTY.CV
-				lda (ZPDCBPtr),y
+				lda (ZPpDCB),y
 				tax
 
 .1				ldy #$ff				SELF MODIFIED
@@ -945,7 +1041,7 @@ TERM.EL0.1		sty .1+1				Save Start
 				bcs TERM.EL.8
 
 				lda #" "
-				jsr SetCharAtYX			X unmodified
+				jsr TERM.SetCYX			X unmodified
 
 				inc .1+1
 				bra .1
@@ -956,22 +1052,20 @@ TERM.DECSC		ldy #S.DCB.TTY.CH
 
 				iny
 
-.1				lda (ZPDCBPtr),y
+.1				lda (ZPpDCB),y
 				iny
-				sta (ZPDCBPtr),y
+				sta (ZPpDCB),y
 				rts
 *--------------------------------------
-TERM.DECRC		jsr TERM.CUROFF
-
-				ldy #S.DCB.TTY.CV.SAVE
+TERM.DECRC		ldy #S.DCB.TTY.CV.SAVE
 
 				jsr .1
 
 				dey
 
-.1				lda (ZPDCBPtr),y
+.1				lda (ZPpDCB),y
 				dey
-				sta (ZPDCBPtr),y
+				sta (ZPpDCB),y
 				rts
 *--------------------------------------
 TERM.RI			sec						scroll
@@ -980,15 +1074,15 @@ TERM.CUU		clc						no scroll
 				php
 
 				ldy #S.DCB.TTY.SCROLLTOP
-				lda (ZPDCBPtr),y
+				lda (ZPpDCB),y
 
 				ldy #S.DCB.TTY.CV
-				cmp (ZPDCBPtr),y
+				cmp (ZPpDCB),y
 				bcs .1
 
-				lda (ZPDCBPtr),y
+				lda (ZPpDCB),y
 				dec
-				sta (ZPDCBPtr),y
+				sta (ZPpDCB),y
 
 				plp
 
@@ -999,68 +1093,84 @@ TERM.CUU		clc						no scroll
 				bcc .8
 
 				ldy #S.DCB.TTY.SCROLLBOT
-				lda (ZPDCBPtr),y
+				lda (ZPpDCB),y
 
 				tax
 
-.2				jsr TERM.SETUP.L1X
-
-				dex
-				jsr TERM.COPY.XtoL1
+.2				sec
+				jsr TERM.CPLX
 
 				txa
 				ldy #S.DCB.TTY.SCROLLTOP
-				cmp (ZPDCBPtr),y
+				cmp (ZPpDCB),y
 				bne .2
 
 				bra TERM.EL2
 *--------------------------------------
-TERM.CBLNK		jsr TERM.CCheck
-				bcs TERM.RTS
+TERM.CBLNK		ldy #S.DCB.TTY.bCURON
+				lda (ZPpDCB),y
+				bpl TERM.RTS
 
-*				ldy #S.DCB.TTY.bCURON
+				iny						#S.DCB.TTY.CURCHAR
+				lda (ZPpDCB),y
+				bpl TERM.CurShow
 
 				lda A2osX.T16
 				and #CURBLNK.SPEED
-				eor (ZPDCBPtr),y
-				asl
-				beq TERM.RTS
+				beq TERM.CurHide
 
-				lda (ZPDCBPtr),y
-				eor #CURBLNK.SPEED
-				sta (ZPDCBPtr),y
-				asl
-				beq TERM.CUROFF.1
+				bne TERM.CurShow
 
-TERM.CURON		jsr GetCharAtCurPos
-				bcs TERM.RTS			Out of screen
-
-				and #$80
-				eor #" "
-				jmp SetCharAtY.SCR
+TERM.RTS		clc
+				rts
 *--------------------------------------
-TERM.CUROFF		jsr TERM.CCheck
-				bcs TERM.RTS
-
-TERM.CUROFF.1	jsr GetCharAtCurPos
-				bcs TERM.RTS			Out of screen
-
-				jmp SetCharAtY.SCR
-*--------------------------------------
-TERM.CCheck		sec
-
-				bit bActive
-				bpl .9
-
+TERM.CurOn		lda bActive
 				ldy #S.DCB.TTY.bCURON
-				lda (ZPDCBPtr),y
-				bpl .9
+				and (ZPpDCB),y
+				bpl TERM.RTS
 
-				clc
+TERM.CurShow	bit TERM.bCurOn
+				bmi TERM.RTS
 
-.9
+				jsr TERM.GetC
+				bcs TERM.RTS			Out of screen
 
-TERM.RTS		rts
+				sta TERM.CurSave
+				dec TERM.bCurOn
+
+				ldy #S.DCB.TTY.CURCHAR
+				lda (ZPpDCB),y
+				and #$7F
+				cmp #C.SPACE
+				bne .1
+
+				lda TERM.CurSave
+				eor #$80
+				bra .8
+
+.1				bit TERM.CurSave
+				bpl .8
+
+				ora #$80
+
+.8				pha
+				ldy #S.DCB.TTY.CH
+				lda (ZPpDCB),y
+				tay
+				pla
+				jmp TERM.SetCY
+*--------------------------------------
+TERM.CurOff		lda bActive
+				ldy #S.DCB.TTY.bCURON
+				and (ZPpDCB),y
+				bpl TERM.RTS
+
+TERM.CurHide	bit TERM.bCurOn
+				bpl TERM.RTS
+
+				stz TERM.bCurOn
+				lda TERM.CurSave
+				jmp TERM.SetC
 *--------------------------------------
 TERM.10OUT		jsr MATH.A2STR10NP
 
@@ -1080,7 +1190,7 @@ TERM.ESCCSI		lda #C.ESC
 TERM.COUT		pha						save char
 
 				ldy #S.DCB.TTY.OUTHEAD
-				lda (ZPDCBPtr),y
+				lda (ZPpDCB),y
 				pha						save actual HEAD
 				inc
 				cmp #S.DCB.TTY.OUTBUF.MAX
@@ -1089,14 +1199,14 @@ TERM.COUT		pha						save char
 				lda #S.DCB.TTY.OUTBUF
 
 .1				dey						OUTTAIL
-				cmp (ZPDCBPtr),y		HEAD+1 = TAIL ?
+				cmp (ZPpDCB),y			HEAD+1 = TAIL ?
 				beq .9					CS, full!
 
 				iny
-				sta (ZPDCBPtr),y		new head
+				sta (ZPpDCB),y			new head
 				ply						old head
 				pla
-				sta (ZPDCBPtr),y
+				sta (ZPpDCB),y
 				clc
 				rts
 
@@ -1113,148 +1223,155 @@ TERM.ED			ldx CsiPCnt
 				dec						1 ?
 				beq TERM.ED1
 
-.2				dec						2 ?
+				dec						2 ?
 				beq TERM.ED2
 
-TERM.ED.8		clc
+				clc
 				rts
 *--------------------------------------
 TERM.ED0		ldy #S.DCB.TTY.CV		Erase Cursor -> Bottom
-				sta (ZPDCBPtr),y
+				lda (ZPpDCB),y
 				tax
-				bra TERM.ED.1
+				ldy #24
+				bra TERM.EDXY
 
 TERM.ED1		ldx #0					Erase Top -> Cursor
 				ldy #S.DCB.TTY.CV
-				sta (ZPDCBPtr),y
+				lda (ZPpDCB),y
 				tay
-				bra TERM.ED.2
+				bra TERM.EDXY
 
 TERM.FF			jsr TERM.HOME
 
 TERM.ED2		ldx #0					Erase Screen
+				ldy #24
 
-TERM.ED.1		ldy #24
+TERM.EDXY		lda #0
+				sta (pRWReg)
 
-TERM.ED.2		sty .1+1
-
-.1				cpx #$ff				SELF MODIFIED
-				beq .9
-
-				jsr TERM.SETUP.L1X
-
-				bit bActive
+				bit TERM.FB
 				bpl .4
 
-				lda #0
-				sta (pRWReg)
+				sty ZPTmpX
+
+.1				cpx ZPTmpX
+				bcs .8
+
+				lda TERM.BL,x
+				sta ZPL1
+				lda TERM.BH,x
+				sta ZPL1+1
 
 				lda #" "
 
-				sta IO.SETPAGE2
-				jsr .7
+				sta IO.SETWRITEAUX
+				ldy #39
 
-				sta IO.CLRPAGE2
-				jsr .7
-
-				lda A2osX.ActBnk
-				sta (pRWReg)
-
-.4				ldy #79
-
-				lda #" "
-
-.5				sta (ZPBufBL1),y
+.2				sta (ZPL1),y
 				dey
-				bpl .5
+				bpl .2
+
+				sta IO.CLRWRITEAUX
+
+				ldy #39
+
+.3				sta (ZPL1),y
+				dey
+				bpl .3
 
 				inx
 				bra .1
+*--------------------------------------
+.4				sei
+				sta IO.SETALTZP
+				jsr FB.EDXY
+				sta IO.CLRALTZP
+				cli
 
-.7				ldy #39
+.8				lda A2osX.ActBnk
+				sta (pRWReg)
 
-.8				sta (ZPScrBL1),y
-				dey
-				bpl .8
-
-.9				rts
+				rts
 *--------------------------------------
 TERM.IAC		ldy #S.DCB.TTY.INBUF
-				lda (ZPDCBPtr),y
+				lda (ZPpDCB),y
 				inc
-				sta (ZPDCBPtr),y
+				sta (ZPpDCB),y
 				tay
 
 				jsr RAMSW.GetZPpBuf
 
-				sta (ZPDCBPtr),y
+				sta (ZPpDCB),y
 				cpy #S.DCB.TTY.INBUF+1	CMD ?
-				beq TERM.ED.8			yes, wait for additional bytes
+				beq .8					yes, wait for additional bytes
 
 				ldy #S.DCB.TTY.INBUF+1
-				lda (ZPDCBPtr),y		get back CMD
+				lda (ZPpDCB),y			get back CMD
 				cmp #SB
 				bne .1					not a SB/SE....stop with CMD/SUBCMD
 
 				jsr RAMSW.GetZPpBuf
 
 				cmp #SE
-				bne TERM.ED.8			wait for ending SE....keep bIACMode
+				bne .8					wait for ending SE....keep bIACMode
 
 				bra TERM.IAC.SB
 
 				ldy #S.DCB.TTY.INBUF+1
-				lda (ZPDCBPtr),y		get back CMD
+				lda (ZPpDCB),y			get back CMD
 
 .1				cmp #IAC
-				beq TERM.IAC.SB.9
+				beq TERM.IAC.9
 
 				sec
 				sbc #WILL
-				bcc TERM.IAC.SB.9
+				bcc TERM.IAC.9
 
 				asl
 				tax
 
 				ldy #S.DCB.TTY.INBUF+2
-				lda (ZPDCBPtr),y			Get SUBCMD in A
+				lda (ZPpDCB),y			Get SUBCMD in A
 
-				jmp (.8,x)
+				jmp (.7,x)
 
-.8				.DA TERM.IAC.RWILL
+.7				.DA TERM.IAC.RWILL
 				.DA TERM.IAC.RWONT
 				.DA TERM.IAC.RDO
 				.DA TERM.IAC.RDONT
+
+.8				clc
+				rts
 *--------------------------------------
 TERM.IAC.SB		ldy #S.DCB.TTY.INBUF+2
-				lda (ZPDCBPtr),y			Get SUBCMD in A
+				lda (ZPpDCB),y			Get SUBCMD in A
 
 				cmp #TN.O.TTYPE
-				bne TERM.IAC.SB.9
+				bne TERM.IAC.9
 
 				iny
-				lda (ZPDCBPtr),y
+				lda (ZPpDCB),y
 				cmp #SB.SEND
-				bne TERM.IAC.SB.9
+				bne TERM.IAC.9
 
 				ldx #0
 
-.1				lda SB.IS.TTYPE,x
+.1				lda TERM.TTYPE,x
 				jsr TERM.COUT
 				inx
-				cpx #SB.IS.TTYPE.L
+				cpx #TERM.TTYPE.L
 				bne .1
 
-TERM.IAC.SB.9	jmp TERM.SETM.0
+TERM.IAC.9		jmp TERM.SETM.0
 *--------------------------------------
 TERM.IAC.RWILL	cmp #TN.O.ECHO
 *				beq TERM.IAC.SDO
-				beq TERM.IAC.SB.9
+				beq TERM.IAC.9
 
 				ldx #TERM.IAC1.L-1
 
 .1				cmp TERM.IAC1,x
-				beq TERM.IAC.SB.9
+				beq TERM.IAC.9
 
 				dex
 				bpl .1
@@ -1317,14 +1434,51 @@ TERM.IAC.SDONT	ldx #DONT
 *--------------------------------------
 TERM.CheckOA	lda IO.OPENAPPLE
 				php
-				bpl .5					Restore Title
+				bpl .5
 
-				ldy #S.DCB.TTY.bTITLE
-				lda (ZPDCBPtr),y
+				bit TERM.bL0
 				bmi .8
 
-				dec
-				sta (ZPDCBPtr),y
+				lda #0
+				sta (pRWReg)
+
+				sei
+				sta IO.SETALTZP
+
+				lda TERM.BL
+				sta ZPL1
+				lda TERM.BH
+				sta ZPL1+1
+
+				sta IO.SET80STORE
+				sta IO.SETPAGE2
+				ldy #39
+
+.10				lda (ZPL1),y
+				sta TERM.L0+40,y
+				lda #C.SPACE
+				sta (ZPL1),y
+				dey
+				bpl .10
+
+				sta IO.CLRPAGE2
+				sta IO.CLR80STORE
+
+				ldy #39
+
+.11				lda (ZPL1),y
+				sta TERM.L0,y
+				lda #C.SPACE
+				sta (ZPL1),y
+				dey
+				bpl .11
+
+				sta IO.CLRALTZP
+
+				lda A2osX.ActBnk
+				sta (pRWReg)
+
+				cli
 
 				ldx IO.hFD
 				lda pNames,x
@@ -1332,10 +1486,10 @@ TERM.CheckOA	lda IO.OPENAPPLE
 				lda pNames+1,x
 				sta TXTPTR+1
 
-				lda SCR.BL				Screen Line 0
-				sta ZPScrBL1
-				lda SCR.BH
-				sta ZPScrBL1+1
+				lda TERM.BL
+				sta ZPL1
+				lda TERM.BH
+				sta ZPL1+1
 
 				ldy #0
 
@@ -1351,142 +1505,133 @@ TERM.CheckOA	lda IO.OPENAPPLE
 				and #$1F				remap UPPERCASE
 
 .2				phy
-				jsr SetCharAtY.SCR
+				jsr TERM.SetCY
 				ply
 				iny
-				bne .1
+				bra .1
 
-.3				lda #C.SPACE
-
-.4				phy
-				jsr SetCharAtY.SCR
-				ply
-				iny
-				cpy #80
-				bne .4
+.3				dec TERM.bL0
 
 				plp
 				rts
 
-.5				ldy #S.DCB.TTY.bTITLE
-				lda (ZPDCBPtr),y
-				bpl .8
-
-				inc
-				sta (ZPDCBPtr),y
-
-				ldx #0
-				jsr TERM.BUF2SCR
+.5				jsr TERM.L0Off
 
 .8				plp
 				rts
 *--------------------------------------
-TERM.BUF2SCR	lda #0
+TERM.L0Off		bit TERM.bL0
+				bpl .8
+
+				lda #0
 				sta (pRWReg)
 
-.1				lda ZPDCBPtr
-				clc
-				adc BUF.BL,x
-				sta .80+1
-				lda ZPDCBPtr+1
-				adc BUF.BH,x
-				sta .80+2
+				sei
+				sta IO.SETALTZP
 
-				lda SCR.BL,x
-				sta ZPScrBL1
-				lda SCR.BH,x
-				sta ZPScrBL1+1
+				lda TERM.BL
+				sta ZPL1
+				lda TERM.BH
+				sta ZPL1+1
 
-				phx
+				sta IO.SETWRITEAUX
 
-				ldx #78
+				ldy #39
 
-				sta IO.SETPAGE2
-
-				jsr .8
-
-				ldx #79
-				sta IO.CLRPAGE2
-
-				jsr .8
-
-				plx
-				dex
+.1				lda TERM.L0+40,y
+				sta (ZPL1),y
+				dey
 				bpl .1
+
+				sta IO.CLRWRITEAUX
+
+				ldy #39
+
+.2				lda TERM.L0,y
+				sta (ZPL1),y
+				dey
+				bpl .2
+
+				sta IO.CLRALTZP
+				cli
+
+				lda A2osX.ActBnk
+				sta (pRWReg)
+
+				stz TERM.bL0
+
+.8				rts
+*--------------------------------------
+TERM.CPLX		lda #0
+				sta (pRWReg)
+
+				bit TERM.FB
+				bmi .4
+
+				sei
+				sta IO.SETALTZP
+				jsr FB.CPLX
+				sta IO.CLRALTZP
+				cli
 
 				lda A2osX.ActBnk
 				sta (pRWReg)
 
 				rts
-
-.8				ldy #39
-
-.80				lda $ffff,x				SELF MODIFIED
-
-				sta (ZPScrBL1),y
-				dex
-				dex
-				dey
-				bpl .80
-
-				rts
 *--------------------------------------
-TERM.COPY.XtoL1	lda ZPDCBPtr
-				clc
-				adc BUF.BL,x
-				sta ZPBufBL2
+.4				lda TERM.BL,x
+				sta ZPL2
+				lda TERM.BH,x
+				sta ZPL2+1
+				bcs .5
 
-				lda ZPDCBPtr+1
-				adc BUF.BH,x
-				sta ZPBufBL2+1
+				inx
+				.HS B0					BCS
 
-				ldy #79
+.5				dex
+				lda TERM.BL,x
+				sta ZPL1
+				lda TERM.BH,x
+				sta ZPL1+1
 
-.1				lda (ZPBufBL2),y
-				sta (ZPBufBL1),y
-				dey
-				bpl .1
-
-				bit bActive
-				bpl .8
-
-				lda SCR.BL,x
-				sta ZPScrBL2
-				lda SCR.BH,x
-				sta ZPScrBL2+1
-
-				lda #0
-				sta (pRWReg)
-
+				sei
+				sta IO.SET80STORE
 				sta IO.SETPAGE2
+
 				jsr .6
 
 				sta IO.CLRPAGE2
+				sta IO.CLR80STORE
+				cli
 
 				lda A2osX.ActBnk
 				sta (pRWReg)
 
 .6				ldy #39
 
-.7				lda (ZPScrBL2),y
-				sta (ZPScrBL1),y
+.7				lda (ZPL1),y
+				sta (ZPL2),y
 				dey
 				bpl .7
 
-.8				rts
+				rts
 *--------------------------------------
-SetCharAtCurPos	pha
+TERM.SetC		pha
 				ldy #S.DCB.TTY.CV
-				lda (ZPDCBPtr),y
+				lda (ZPpDCB),y
 				tax
 				ldy #S.DCB.TTY.CH
-				lda (ZPDCBPtr),y
+				lda (ZPpDCB),y
 				tay
 				pla
-				cpy #80
-				bcs SetCharAtYX.8
 *--------------------------------------
-SetCharAtYX		sty ZPTmpX
+TERM.SetCYX		cpx #24
+				bcs .8
+
+				cpy #80
+				bcs .8
+
+				sty ZPTmpX
 
 				cmp #$40
 				bcc .1
@@ -1497,11 +1642,11 @@ SetCharAtYX		sty ZPTmpX
 				and #$1F				remap UPPERCASE
 
 .1				ldy #S.DCB.TTY.bNORMAL
-				ora (ZPDCBPtr),y
+				ora (ZPpDCB),y
 				sta ZPTmpChar
 
 				ldy #S.DCB.TTY.bG0G1	Select Active Font
-				lda (ZPDCBPtr),y
+				lda (ZPpDCB),y
 				clc
 				bpl .2
 
@@ -1513,95 +1658,151 @@ SetCharAtYX		sty ZPTmpX
 				lsr
 
 .21				iny						#S.DCB.TTY.bG0G1ALT
-				and (ZPDCBPtr),y
+				and (ZPpDCB),y
 				beq .3					not Graphic mode
 
-				lda ZPTmpChar
-				cmp #$E0				Normal lowercase ?
+				ldy ZPTmpChar
+				cpy #$E0				Normal lowercase ?
 				bcc .3
 
-				tay
-				lda REMAP.E0.FF-$E0,y
+				lda TERM.E0FF-$E0,y
 				sta ZPTmpChar
 
-.3				jsr TERM.SETUP.L1X
+.3				bit TERM.FB
+				bmi .6
+
+				lda #0
+				sta (pRWReg)
 
 				ldy ZPTmpX
 				lda ZPTmpChar
-				sta (ZPBufBL1),y
 
-				bit bActive
-				bmi SetCharAtY.SCR1
+				sei
+				sta IO.SETALTZP
+				jsr FB.SetCYX
+				sta IO.CLRALTZP
+				cli
 
-				rts
-
-SetCharAtY.SCR	sty ZPTmpX
-
-SetCharAtY.SCR1	lsr ZPTmpX
-				ldy ZPTmpX
-
-				bcs .2
-
-				pha
-				lda #0
-				sta (pRWReg)
-				pla
-				sta IO.SETPAGE2
-				sta (ZPScrBL1),y
-				sta IO.CLRPAGE2
-				pha
 				lda A2osX.ActBnk
 				sta (pRWReg)
-				pla
+
+.8				rts
+*--------------------------------------
+.6				lda TERM.BL,x
+				sta ZPL1
+				lda TERM.BH,x
+				sta ZPL1+1
+
+				bra TERM.SetCSCR
+*--------------------------------------
+TERM.SetCY		sta ZPTmpChar
+				sty ZPTmpX
+
+TERM.SetCSCR	lsr ZPTmpX
+				ldy ZPTmpX
+				bcs .2
+
+				lda #0
+				sta (pRWReg)
+
+				sei
+				sta IO.SETWRITEAUX
+
+				lda ZPTmpChar
+				sta (ZPL1),y
+
+				sta IO.CLRWRITEAUX
+				cli
+
+				lda A2osX.ActBnk
+				sta (pRWReg)
+
 				rts
 
-.2				sta (ZPScrBL1),y
+.2				lda ZPTmpChar
+				sta (ZPL1),y
 
-SetCharAtYX.8	rts
+				rts
 *--------------------------------------
-GetCharAtCurPos	ldy #S.DCB.TTY.CV
-				lda (ZPDCBPtr),y
+TERM.GetC		ldy #S.DCB.TTY.CV
+				lda (ZPpDCB),y
 				cmp #24
 				bcs .9					Out of screen
 
 				tax
-				jsr TERM.SETUP.L1X
+				lda TERM.BL,x
+				sta ZPL1
+				lda TERM.BH,x
+				sta ZPL1+1
 
 				ldy #S.DCB.TTY.CH
-				lda (ZPDCBPtr),y
+				lda (ZPpDCB),y
 				cmp #80
 				bcs .9					Out of screen
 
+				lsr
 				tay
-				lda (ZPBufBL1),y
-				cmp #$20
+				bcs .2
+
+				lda #0
+				sta (pRWReg)
+
+				sei
+				sta IO.SET80STORE
+				sta IO.SETPAGE2
+				lda (ZPL1),y
+				sta IO.CLRPAGE2
+				sta IO.CLR80STORE
+				cli
+
+				pha
+				lda A2osX.ActBnk
+				sta (pRWReg)
+				pla
+				bra .7
+
+.2				lda (ZPL1),y
+
+.7				cmp #$20
 				bcs .8
 
 *				clc
-				adc #40					remap $00-$1F uppercase
+				adc #$40				remap $00-$1F uppercase
+
 .8				clc
 
 .9				rts
 *--------------------------------------
-TERM.SETUP.L1X	lda ZPDCBPtr
+TERM.RESET		ldy #S.DCB.TTY.M
+
+.1				lda .8-S.DCB.TTY.M,y
+				sta (ZPpDCB),y
+				iny
+				cpy #S.DCB.TTY.INBUF+1
+				bcc .1
+
 				clc
-				adc BUF.BL,x
-				sta ZPBufBL1
-				lda ZPDCBPtr+1
-				adc BUF.BH,x
-				sta ZPBufBL1+1
+				rts
 
-				bit bActive
-				bpl .8
-
-				lda SCR.BL,x
-				sta ZPScrBL1
-				lda SCR.BH,x
-				sta ZPScrBL1+1
-
-.8				rts
+.8				.DA #0					MODE
+				.DA #0					CH
+				.DA #0					CH.SAVE
+				.DA #0					CV
+				.DA #0					CV.SAVE
+				.DA #0					SCROLLTOP
+				.DA #23					SCROLLBOT
+				.DA #$80				bCURON
+				.DA #" "				CURCHAR
+				.DA #$80				bNORMAL
+				.DA #$80				bDECAWM
+				.DA #$80				bLNM
+				.DA #0					bG0G1
+				.DA #0					bG0G1ALT
+				.DA #S.DCB.TTY.OUTBUF	OUTTAIL
+				.DA #S.DCB.TTY.OUTBUF	OUTHEAD
+				.DA #S.DCB.TTY.INBUF	INBUFFER
 *--------------------------------------
-KeyMap			.DA #11,#10,#21,#8		esc[A,esc[B,esc[C,esc[D
+KeyMap			.DA #11,#10,#21,#8		esc[A,B,C,D
 KeyMap.L		.EQ *-KeyMap
 *--------------------------------------
 CtrlChars		.DA #C.ENQ,#C.BS,#C.LF,#C.FF,#C.CR,#C.SO,#C.SI,#C.ESC
@@ -1611,7 +1812,7 @@ EscCodes		.AZ "78DEMc[()"
 EscCodes.L		.EQ *-EscCodes
 EscModes		.DA #0,#0,#0,#0,#0,#0,#S.DCB.TTY.M.CSI,#S.DCB.TTY.M.G0,#S.DCB.TTY.M.G1
 *--------------------------------------
-CsiCodes		.AS "ABCDHJKfhlmnr"
+CsiCodes		.AS "ABCDHJKfhlmnqr"
 CsiCodes.L		.EQ *-CsiCodes
 *--------------------------------------
 * Enabled both sides
@@ -1631,39 +1832,17 @@ TERM.IAC1.L		.EQ *-TERM.IAC1
 *TERM.IAC10		.DA #TN.O.ECHO
 *TERM.IAC10.L	.EQ *-TERM.IAC10
 *--------------------------------------
-SB.IS.TTYPE		.DA #IAC,#SB,#TN.O.TTYPE,#SB.IS
+TERM.TTYPE		.DA #IAC,#SB,#TN.O.TTYPE,#SB.IS
 TERM.ENQ.REP	.AS "vt100"
 TERM.ENQ.REP.L	.EQ *-TERM.ENQ.REP
 				.DA #IAC,#SE
-SB.IS.TTYPE.L	.EQ *-SB.IS.TTYPE
+TERM.TTYPE.L	.EQ *-TERM.TTYPE
 *--------------------------------------
 *SB.IS.NAWS		.DA #IAC,#SB,#TN.O.NAWS,#SB.IS
 *				.DA 80
 *				.DA 24
 *				.DA #IAC,#SE
 *SB.IS.NAWS.L	.EQ *-SB.IS.NAWS
-*--------------------------------------
-RESET.VALUES	.DA #0					MODE
-				.DA #0					CH
-				.DA #0					CH.SAVE
-				.DA #0					CV
-				.DA #0					CV.SAVE
-
-				.DA #0					SCROLLTOP
-				.DA #23					SCROLLBOT
-				.DA #$80				bCURON
-				.DA #0					bTITLE
-
-				.DA #$80				bNORMAL
-				.DA #$80				bDECAWM
-				.DA #$80				bLNM
-
-				.DA #0					bG0G1
-				.DA #0					bG0G1ALT
-
-				.DA #S.DCB.TTY.OUTBUF	OUTTAIL
-				.DA #S.DCB.TTY.OUTBUF	OUTHEAD
-				.DA #S.DCB.TTY.INBUF	INBUFFER
 *--------------------------------------
 TERM.DIB		.DA #S.DIB.S.WRITE+S.DIB.S.READ
 				.DA #0,#0,#0
@@ -1672,68 +1851,19 @@ TERM.DIB		.DA #S.DIB.S.WRITE+S.DIB.S.READ
 				.DA #0
 				.DA K.VER
 *--------------------------------------
+TERM.Curs		.DA #" ",#" ",#' ',#"_",#'_',#"|",#'|'
+*--------------------------------------
 *					`  a  b  c  d  e  f  g  h  i  j  k  l  m  n  o
-REMAP.E0.FF		.HS 5b.41.42.43.44.45.46.47.48.49.20.5e.5a.5a.4e.4f
+TERM.E0FF		.HS 5b.41.42.43.44.45.46.47.48.49.20.5e.5a.5a.4e.4f
 *					p  q  r  s  t  u  v  w  x  y  z  {  |  }  ~  DEL
-				.HS 50.5c.52.53.54.55.56.57.5a.59.5a.5b.5c.5d.5e.5f
+				.HS 50.5c.52.53.54.55.56.57.5a.59.5a.40.51.5d.4b.5f
 *--------------------------------------
-SCR.BL			.HS	00.80.00.80.00.80.00.80.28.A8.28.A8.28.A8.28.A8.50.D0.50.D0.50.D0.50.D0
-SCR.BH			.HS	04.04.05.05.06.06.07.07.04.04.05.05.06.06.07.07.04.04.05.05.06.06.07.07
+TERM.FBs		.HS FF					console
+				.HS 0001020304050607	tty1-8
+				.HS FF					gfx
 *--------------------------------------
-BUF.LCBase		.HS C0C8C0C8D0D8E0E8
-BUF.LCBnk		.DA #IO.RRAMWRAMBNK1,#IO.RRAMWRAMBNK1
-				.DA #IO.RRAMWRAMBNK2,#IO.RRAMWRAMBNK2
-				.DA #IO.RRAMWRAMBNK2,#IO.RRAMWRAMBNK2
-				.DA #IO.RRAMWRAMBNK2,#IO.RRAMWRAMBNK2
-*--------------------------------------
-BUF.BL			.DA #S.DCB.TTY+0
-				.DA #S.DCB.TTY+80
-				.DA #S.DCB.TTY+160
-				.DA #S.DCB.TTY+240
-				.DA #S.DCB.TTY+320
-				.DA #S.DCB.TTY+400
-				.DA #S.DCB.TTY+480
-				.DA #S.DCB.TTY+560
-				.DA #S.DCB.TTY+640
-				.DA #S.DCB.TTY+720
-				.DA #S.DCB.TTY+800
-				.DA #S.DCB.TTY+880
-				.DA #S.DCB.TTY+960
-				.DA #S.DCB.TTY+1040
-				.DA #S.DCB.TTY+1120
-				.DA #S.DCB.TTY+1200
-				.DA #S.DCB.TTY+1280
-				.DA #S.DCB.TTY+1360
-				.DA #S.DCB.TTY+1440
-				.DA #S.DCB.TTY+1520
-				.DA #S.DCB.TTY+1600
-				.DA #S.DCB.TTY+1680
-				.DA #S.DCB.TTY+1760
-				.DA #S.DCB.TTY+1840
-BUF.BH			.DA /S.DCB.TTY+0
-				.DA /S.DCB.TTY+80
-				.DA /S.DCB.TTY+160
-				.DA /S.DCB.TTY+240
-				.DA /S.DCB.TTY+320
-				.DA /S.DCB.TTY+400
-				.DA /S.DCB.TTY+480
-				.DA /S.DCB.TTY+560
-				.DA /S.DCB.TTY+640
-				.DA /S.DCB.TTY+720
-				.DA /S.DCB.TTY+800
-				.DA /S.DCB.TTY+880
-				.DA /S.DCB.TTY+960
-				.DA /S.DCB.TTY+1040
-				.DA /S.DCB.TTY+1120
-				.DA /S.DCB.TTY+1200
-				.DA /S.DCB.TTY+1280
-				.DA /S.DCB.TTY+1360
-				.DA /S.DCB.TTY+1440
-				.DA /S.DCB.TTY+1520
-				.DA /S.DCB.TTY+1600
-				.DA /S.DCB.TTY+1680
-				.DA /S.DCB.TTY+1760
-				.DA /S.DCB.TTY+1840
+TERM.BL			.HS	00.80.00.80.00.80.00.80.28.A8.28.A8.28.A8.28.A8.50.D0.50.D0.50.D0.50.D0
+TERM.BH			.HS	04.04.05.05.06.06.07.07.04.04.05.05.06.06.07.07.04.04.05.05.06.06.07.07
 *--------------------------------------
 MAN
 SAVE usr/src/sys/kernel.s.term

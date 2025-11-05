@@ -7,6 +7,7 @@ NEW
 *--------------------------------------
 				.INB inc/macros.i
 				.INB inc/a2osx.i
+				.INB inc/io.i				
 				.INB inc/mli.e.i
 				.INB inc/nic.i
 				.INB inc/nic.8900a.i
@@ -24,10 +25,10 @@ ZS.END			.ED
 CS.START		cld
 				jmp Dev.Detect			cld,jmp abs=DRV
 				.DA #$61				6502,Level 1 (65c02)
-				.DA #1					DRV Layout Version 1
+				.DA #2					DRV Layout Version 2
 				.DA 0
-				.DA CS.END-CS.START			Code Length
-				.DA 0
+				.DA CS.END
+				.DA ID.END
 				.DA 0
 				.DA 0
 *--------------------------------------
@@ -56,7 +57,7 @@ Dev.Detect		>STYA ZPArgPtr
 				ldx #$70
 				ldy #7
 
-.1				lda A2osX.S-1,y		IO based detection, avoid scanning in Disk Controller IO!!!!
+.1				lda A2osX.S-1,y			IO based detection, avoid scanning in Disk Controller IO!!!!
 				bne .2
 
 				lda /PP.ID
@@ -72,7 +73,7 @@ Dev.Detect		>STYA ZPArgPtr
 				cmp	#CS8900A.DEVID
 				beq	.3
 
-.2				dec FD.DEV.NAME+3
+.2				dec FD.DEV.NAME+8
 				txa
 				sec
 				sbc #$10
@@ -85,7 +86,7 @@ Dev.Detect		>STYA ZPArgPtr
 
 				lda #MLI.E.NODEV
 				sec
-.99				rts
+				rts
 
 .3				stx DEVSLOTx0
 				sty DEVSLOT0x
@@ -97,26 +98,34 @@ Dev.Detect		>STYA ZPArgPtr
 				sta DIB+S.DIB.VERSION+1	set Hardware version
 				lda PacketPageDATA,x
 				sta DIB+S.DIB.VERSION
-				jsr Dev.ParseArgs
-				bcs .99
-
-.8				>PUSHW L.MSG.DETECT.OK
+*--------------------------------------
+Dev.Setup		>SS
+				>PUSHW L.MSG.DETECT.OK
 				>PUSHW L.FD.DEV.NAME
 				>PUSHBI 2
 				>LIBC PrintF
-
-				>PUSHWI DRV.END
-				>PUSHWI DRV.CS.END-DRV.CS.START
-				>PUSHWI DRV.CS.START
-				>LDYA L.DRV.CS.START
-				>KAPI InsDrv
+				>SR
 				bcs .9
 
-				>STYA FD.DEV+S.FD.DEV.DRVPTR
+				jsr Dev.ParseArgs
+				bcs .9
 
+				>SS
+				>PUSHW L.DRV.CS.START
+				>PUSHWI DRV.CS.START
+				>PUSHWI DRV.CS.END
+				>PUSHWI DRV.ID.END
+				>KAPI InsDrv
+				>SR
+				bcs .9
+
+				>STYA FD.DEV+S.FD.DEV.pDRV
+
+				>SS
 				>PUSHW L.FD.DEV
 				>PUSHW L.FD.DEV.NAME
 				>LIBC MKDev
+				>SR
 				bcs .9
 
 				ldx DEVSLOT0x
@@ -138,7 +147,8 @@ Dev.ParseArgs	lda (ZPArgPtr)
 				clc
 				rts
 
-.1				>PUSHW ZPArgPtr
+.1				>SS
+				>PUSHW ZPArgPtr
 				>PUSHW L.SSCANF.MAC
 
 				ldx #0
@@ -147,17 +157,19 @@ Dev.ParseArgs	lda (ZPArgPtr)
 				inx
 				inx
 				cpx #12
-				bne .2
+				bcc .2
 
 				>PUSHBI 12				6 x byte PTRs
 				>LIBC SScanF
+				>SR
 				bcc .8
 
 				lda #E.SYN
 *				sec
 .8				rts
 *--------------------------------------
-CS.END
+CS.END			.EQ *
+*--------------------------------------
 MSG.DETECT		.CZ "UtherNet/CS8900A Driver."
 MSG.DETECT.OK	.CZ "UtherNet/CS8900A Installed As Device : %s\r\n"
 MSG.DETECT.KO	.CZ "Hardware Not Found."
@@ -171,13 +183,16 @@ FD.DEV			.DA #S.FD.T.CDEV
 				.BS 2					DRVPTR
 				.DA 0					DCBPTR
 				.DA 0					BUFPTR
-FD.DEV.NAME		.AZ "eth7"
+FD.DEV.NAME		.AZ "/dev/eth7"
 *--------------------------------------
 *			Driver Code
 *--------------------------------------
-ZPIOCTL			.EQ ZPDRV
-ZPBufPtr		.EQ ZPDRV+2
-Counter			.EQ ZPDRV+4
+				.DUMMY
+				.OR ZPDRV+4
+				
+ZPIOCTL			.BS 2
+
+				.ED
 *--------------------------------------
 DRV.CS.START	cld
 				jmp (.1,x)
@@ -195,6 +210,13 @@ DRV.CS.START	cld
 *--------------------------------------
 STATUS			>STYA ZPIOCTL
 
+				ldy #S.IOCTL.BUFPTR
+				lda (ZPIOCTL),y
+				sta ZPpBuf
+				iny 
+				lda (ZPIOCTL),y
+				sta ZPpBuf+1
+
 				ldy #S.IOCTL.S
 				lda (ZPIOCTL),y
 				beq .1
@@ -202,33 +224,33 @@ STATUS			>STYA ZPIOCTL
 				cmp #S.IOCTL.S.GETDIB
 				bne STATUS.DCB
 
-				ldx #S.DIB-1
+				ldy #S.DIB-1
 
 				.HS 2C					BIT ABS
 
-.1				ldx #3
+.1				ldy #3
 
-				ldy #S.IOCTL.BUFPTR
-				lda (ZPIOCTL),y
-				sta .3+1
-				iny
-				lda (ZPIOCTL),y
-				sta .3+2
+				bit A2osX.IOOpt
+				bpl .2
+				
+				sta IO.SETWRITEAUX
 
-.2				lda DIB,x
-
-.3				sta $ffff,x				SELF MODIFIED
-				dex
+.2				lda DIB,y
+				sta (ZPpBuf),y
+				dey
 				bpl .2
 
+				sta IO.CLRWRITEAUX
+				
 				clc
 				rts
 
 STATUS.DCB		cmp #S.IOCTL.S.GETDCB
-				bne STATUS.9
+				bne .9
 
 				stz DCB+S.DCB.NIC.LINK
 				ldx DEVSLOTx0
+
 				lda /PP.LineST
 				sta PacketPagePTR+1,x
 				lda #PP.LineST
@@ -246,6 +268,7 @@ STATUS.DCB		cmp #S.IOCTL.S.GETDCB
 				sta PacketPagePTR+1,x
 				lda #PP.TestCTL
 				sta PacketPagePTR,x
+	
 				lda PacketPageDATA+1,x
 				ldy PacketPageDATA,x
 				and /PP.TestCTL.FDX
@@ -254,24 +277,24 @@ STATUS.DCB		cmp #S.IOCTL.S.GETDCB
 				lda #S.DCB.NIC.LINK.FD
 				tsb DCB+S.DCB.NIC.LINK
 
-.1				ldy #S.IOCTL.BUFPTR
-				lda (ZPIOCTL),y
-				sta .3+1
-				iny
-				lda (ZPIOCTL),y
-				sta .3+2
-				ldx #S.DCB.NIC-1
+				ldy #S.DCB.NIC-1
 
-.2				lda DCB,x
+				bit A2osX.IOOpt
+				bpl .1
+				
+				sta IO.SETWRITEAUX
 
-.3				sta $ffff,x				SELF MODIFIED
-				dex
-				bpl .2
+.1				lda DCB,y
+				sta (ZPpBuf),y
+				dey
+				bpl .1
+
+				sta IO.CLRWRITEAUX
 
 				clc
 				rts
 
-STATUS.9		lda #MLI.E.BADCTL
+.9				lda #MLI.E.BADCTL
 				sec
 				rts
 *--------------------------------------
@@ -294,6 +317,7 @@ OPEN			lda #S.DIB.S.OPENED
 				sta PacketPagePTR+1,x
 				lda #PP.RxCTL
 				sta PacketPagePTR,x
+
 				lda /PP.RxCTL.LID+PP.RxCTL.IAHashA+PP.RxCTL.RxOKA+PP.RxCTL.IA+PP.RxCTL.MulticastA+PP.RxCTL.BroadcastA+PP.RxCTL.RuntA
 				sta PacketPageDATA+1,x
 				lda #PP.RxCTL.LID+PP.RxCTL.IAHashA+PP.RxCTL.RxOKA+PP.RxCTL.IA+PP.RxCTL.MulticastA+PP.RxCTL.BroadcastA+PP.RxCTL.RuntA
@@ -386,15 +410,17 @@ OPEN			lda #S.DIB.S.OPENED
 				rts
 *--------------------------------------
 CLOSE			ldx DEVSLOTx0
+
 				lda /PP.SelfCTL
 				sta PacketPagePTR+1,x
 				lda #PP.SelfCTL
 				sta PacketPagePTR,x
+
 				lda /PP.SelfCTL.LID+PP.SelfCTL.RESET
 				sta PacketPageDATA+1,x
-
 				lda #PP.SelfCTL.LID+PP.SelfCTL.RESET
 				sta PacketPageDATA,x
+
 				lda /PP.SelfST
 				sta PacketPagePTR+1,x
 				lda #PP.SelfST
@@ -421,6 +447,7 @@ READ			php
 				>STYA ZPIOCTL
 
 				ldx DEVSLOTx0
+
 				lda /PP.RxEvent
 				sta PacketPagePTR+1,x
 				lda #PP.RxEvent
@@ -438,7 +465,7 @@ READ			php
 				sta (ZPIOCTL),y
 				pha
 				eor #$ff
-				sta Counter+1
+				sta ZPCnt+1
 
 				dey
 				lda RTDATA,x
@@ -446,14 +473,14 @@ READ			php
 				tay
 
 				eor #$ff
-				sta Counter
+				sta ZPCnt
 
 				pla
-				>SYSCALL2 GetMem
+				>KAPI KMalloc
 				bcs READWRITE.99
 
-				>STYA ZPBufPtr
-				phx
+				>STYA ZPpBuf
+
 				phy
 				ldy #S.IOCTL.BUFPTR+1
 				sta (ZPIOCTL),y
@@ -464,32 +491,32 @@ READ			php
 
 				ldy #0
 
-.1				inc Counter
+.1				inc ZPCnt
 				bne .2
 
-				inc Counter+1
+				inc ZPCnt+1
 				beq .8
 
 .2				lda RTDATA,x
-				sta	(ZPBufPtr),y
+				sta	(ZPpBuf),y
 
 				iny
 
-				inc Counter
+				inc ZPCnt
 				bne .3
 
-				inc Counter+1
+				inc ZPCnt+1
 				beq .8
 
 .3				lda RTDATA+1,x
-				sta	(ZPBufPtr),y
+				sta	(ZPpBuf),y
 				iny
 				bne .1
 
-				inc ZPBufPtr+1
+				inc ZPpBuf+1
 				bra .1
 
-.8				pla						hMem
+.8				>LDYA ZPpBuf
 
 				plp
 				clc
@@ -511,17 +538,18 @@ WRITE			php
 				sta TxCMD+1,x
 				lda #PP.TxCMD.LID+PP.TxCMD.TxStartFULL
 				sta TxCMD,x
+
 				ldy #S.IOCTL.BYTECNT+1
 				lda (ZPIOCTL),y
 				sta TxLength+1,x
 				eor #$ff
-				sta Counter+1
+				sta ZPCnt+1
 
 				dey
 				lda (ZPIOCTL),y
 				sta TxLength,x
 				eor #$ff
-				sta Counter
+				sta ZPCnt
 
 				lda /PP.BusST
 				sta PacketPagePTR+1,x
@@ -535,16 +563,16 @@ WRITE			php
 
 				ldy #S.IOCTL.BUFPTR
 				lda (ZPIOCTL),y
-				sta ZPBufPtr
+				sta ZPpBuf
 				iny
 				lda (ZPIOCTL),y
-				sta ZPBufPtr+1
+				sta ZPpBuf+1
 
 				ldx #5
 				ldy #S.ETH.SRCMAC+5
 
 .1				lda DCB+S.DCB.NIC.MAC,x
-				sta (ZPBufPtr),y
+				sta (ZPpBuf),y
 				dey
 				dex
 				bpl .1
@@ -553,37 +581,38 @@ WRITE			php
 
 				ldy #0
 
-.2				inc Counter
+.2				inc ZPCnt
 				bne .3
 
-				inc Counter+1
+				inc ZPCnt+1
 				beq .8
 
-.3				lda	(ZPBufPtr),y
+.3				lda	(ZPpBuf),y
 				sta RTDATA,x
 
 				iny
 
-				inc Counter
+				inc ZPCnt
 				bne .4
 
-				inc Counter+1
+				inc ZPCnt+1
 				beq .8
 
-.4				lda	(ZPBufPtr),y
+.4				lda	(ZPpBuf),y
 				sta RTDATA+1,x
 
 				iny
 				bne .2
 
-				inc ZPBufPtr+1
+				inc ZPpBuf+1
 				bne .2
 
 .8				plp
 				clc
 				rts
 *--------------------------------------
-DRV.CS.END
+DRV.CS.END		.EQ *
+*--------------------------------------
 DEVSLOTx0		.BS 1
 *--------------------------------------
 DIB				.DA #0
@@ -600,7 +629,10 @@ DCB				.DA #S.DCB.T.NIC
 				.HS 000E3A123456		MAC
 				.BS 12					IP/MASK/GW
 *--------------------------------------
-DRV.END
+DRV.ID.END		.EQ *
+*--------------------------------------
+ID.END			.EQ *
+*--------------------------------------
 MAN
 SAVE usr/src/drv/uthernet.drv.s
 ASM

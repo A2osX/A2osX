@@ -16,7 +16,7 @@ NEW
 *\--------------------------------------
 K.OpenDir		jsr PFT.GetPathYA
 				bcs .99
-			
+
 				jsr PFT.CheckExtFS
 				bcs .99
 
@@ -35,12 +35,16 @@ K.OpenDir		jsr PFT.GetPathYA
 				ldy #S.FD.REG.REF
 				sta (pFD),y
 
-				jmp K.FOpen.REGDIR
+.7				jmp K.FOpen.MKNod
 
 .8				jsr PRODOS.OpenDir
-				bcs .98
-
-				jmp K.FOpen.REGDIR
+				bcc .7
+				
+				cmp #MLI.E.VNOTFND
+				bne .98
+				
+				jsr PASCAL.OpenDir
+				bcc .7
 
 .98				pha
 				jsr DEV.FreeFD
@@ -66,12 +70,10 @@ K.OpenDir		jsr PFT.GetPathYA
 				.DUMMY					ZPTMP,9
 				.OR ZPTMP				9 Bytes
 K.ReadDir.ECIB	.BS 1
-
 K.ReadDir.EL	.BS 1
 K.ReadDir.EPB	.BS 1
 K.ReadDir.EC	.BS 2
-
-K.ReadDir.BufSize	.BS 2
+K.ReadDir.BufS	.BS 2
 K.ReadDir.pBuf	.BS 2
 				.ED
 *--------------------------------------
@@ -80,13 +82,14 @@ K.ReadDir		jsr PFT.CheckNodeYA
 
 				ldy #S.FD.REG.REF
 				lda (pFD),y
-				bpl K.ReadDir.DIR
+				bpl K.ReadDir.DIR		regular ProDOS FileID
 
 				tax
 				jmp (.1-$80,x)
 
 .1				.DA K.ReadDir.DEV
 				.DA K.ReadDir.MNT
+				.DA PASCAL.ReadDir
 
 .9				rts
 *--------------------------------------
@@ -170,8 +173,8 @@ K.ReadDir.DIR  	sta K.MLI.PARAMS+1		A=#S.DIR.PRODOS.REF
 				sta K.ReadDir.ECIB
 
 				lda #1					For Ending 0
-				sta K.ReadDir.BufSize
-				stz K.ReadDir.BufSize+1
+				sta K.ReadDir.BufS
+				stz K.ReadDir.BufS+1
 
 				jsr K.ReadDir.P3Init
 
@@ -195,11 +198,11 @@ K.ReadDir.DIR1	lda (ZPPtr3)
 .2				lda #2+S.STAT+3+S.STAT	add "1." + S.STAT + "2.." + S.STAT...
 
 				clc
-				adc K.ReadDir.BufSize
-				sta K.ReadDir.BufSize
+				adc K.ReadDir.BufS
+				sta K.ReadDir.BufS
 				bcc .3
 
-				inc K.ReadDir.BufSize+1
+				inc K.ReadDir.BufS+1
 
 .3				inx						X,Y = !Total entry Count
 				bne .7
@@ -215,13 +218,11 @@ K.ReadDir.DIR1	lda (ZPPtr3)
 K.ReadDir.DIR2	lda K.ReadDir.EPB
 				sta K.ReadDir.ECIB
 
-				>LDYA K.ReadDir.BufSize	Get a BufSize bytes buffer for storing results
+				>LDYA K.ReadDir.BufS	Get BufSize bytes buffer for storing results
 				jsr K.ReadDir.GetBuf
-				bcc .10
+				bcs .9
 
-				rts
-
-.10				jsr K.ReadDir.P3Init
+				jsr K.ReadDir.P3Init
 
 .1				lda (ZPPtr3)
 				beq .7					Empty slot, skip
@@ -270,7 +271,7 @@ K.ReadDir.DIR2	lda K.ReadDir.EPB
 
 				>LDYA K.ReadDir.pBuf
 				clc
-				rts
+.9				rts
 *--------------------------------------
 K.ReadDir.DEV	ldy #S.FD.DIR.FC
 				lda (pFD),y
@@ -340,47 +341,43 @@ K.ReadDir.MNT	ldy #S.FD.DIR.FC		did we already returned something ?
 				lda (pFD),y
 				bne DIRENT.EOF
 
-				stz K.MLI.PARAMS+1		All Volumes
-				>LDYAI K.OnlineBuf
+				>LDYAI K.OLBuf
 				>STYA K.MLI.PARAMS+2
+
 				>STYA ZPPtr2
 
-				>MLICALL MLI.ONLINE
-				bcs DIRENT.RTS
-* (S.STAT + /mnt/ + VOLUMENAMEMAX15 +`0) (14 vols + 4 PFTs) + \0
-				>LDYAI 5+16+S.STAT*18+1
+				stz K.MLI.PARAMS+1		All Volumes
 
+				>MLICALL MLI.ONLINE
+				bcs .5
+
+* (S.STAT + /mnt/ + VOLUMENAMEMAX15 +`0) (14 vols + 4 PFTs) + \0
+
+				>LDYAI 5+16+S.STAT*18+1
 				jsr K.ReadDir.GetBuf
 				bcs DIRENT.RTS
 
-.1				ldy #1
-
-				lda (ZPPtr2)
+.1				lda (ZPPtr2)
 				and #$0F
-				beq .2
+				beq .3
 
-				jsr K.ReadDir.INT
+				jsr K.ReadDir.VOL
 				bra .4
-				
-.2				lda (ZPPtr2),y
+
+.3				ldy #1
+				lda (ZPPtr2),y
 				cmp #MLI.E.NOTPRODOS
 				bne .4
-				
+
 				jsr K.ReadDir.EXT
-				bra .4
-				
+
 .4				lda ZPPtr2
 				clc
 				adc #16
 				sta ZPPtr2
-				bne .1
+				bcc .1
 
-				jsr SHARED.ClrStat
-
-				lda /S.STAT.MODE.DIR
-				sta K.S.STAT+S.STAT.MODE+1
-
-				ldx #0
+.5				ldx #0
 
 .6				lda pPFTs+1,x
 				beq .8
@@ -397,12 +394,17 @@ K.ReadDir.MNT	ldy #S.FD.DIR.FC		did we already returned something ?
 				eor #0
 				bne .7
 
+				jsr X.ClrStat
+
+				lda /S.STAT.MODE.DIR
+				sta K.S.STAT+S.STAT.MODE+1
+
 				jsr K.ReadDir.AddStat
 
 .8				inx
 				inx
 				cpx #K.PFT.MAX*2
-				bne .6
+				bcc .6
 
 *				lda #0					done by S.MEM.F.INIT0
 *				sta (ZPPtr4)			Ending 0
@@ -415,120 +417,85 @@ K.ReadDir.MNT	ldy #S.FD.DIR.FC		did we already returned something ?
 				clc
 				rts
 *--------------------------------------
-K.ReadDir.INT	tax
+K.ReadDir.VOL	tax
 				inc
 				sta K.MLI.PATH
 				lda #'/'
 				sta K.MLI.PATH+1
 
-.2				lda (ZPPtr2),y
+				ldy #1
+
+.1				lda (ZPPtr2),y
 				sta K.MLI.PATH+1,y
 				jsr K.ReadDir.AddToBuf
 				iny
 				dex
-				bne .2
+				bne .1
 
 				txa						Add ending 0 for C String
 				jsr K.ReadDir.AddToBuf
 
-				jsr SHARED.ClrStat
-
-				lda /S.STAT.MODE.DIR
-				sta K.S.STAT+S.STAT.MODE+1
-
-				lda (ZPPtr2)
-				asl						DRIVE in Carry
-				pha
-				lda #0
-				rol
-				inc
-				sta K.S.STAT+S.STAT.P.DRIVE
-				pla
-				lsr						CC
-				lsr
-				lsr
-				lsr
-				lsr
-				sta K.S.STAT+S.STAT.P.SLOT
+				lda (ZPPtr2)			DSSS0000
+				jsr K.ReadDir.SD
 
 				>LDYAI K.MLI.PATH
 				>STYA K.MLI.PARAMS+1
 				>MLICALL MLI.GFINFO
 				sta K.S.STAT+S.STAT.P.DEVSTATUS
 
-				bcs .3
+				bcs .8
 
 				>LDYA K.MLI.PARAMS+5		AUXTYPE=TOTAL BLOCKS
 				>STYA K.S.STAT+S.STAT.P.DEVBLOCKS
 				>LDYA K.MLI.PARAMS+8
 				>STYA K.S.STAT+S.STAT.BLOCKS
 
-.3				jmp K.ReadDir.AddStat
+.8				jmp K.ReadDir.AddStat
 *--------------------------------------
 K.ReadDir.EXT	lda (ZPPtr2)
-				sta K.MLI.PARAMS+1
-				>LDYAI K.Buf512
-				>STYA K.MLI.PARAMS+2
-				>LDYAI 2
-				>STYA K.MLI.PARAMS+4
-				>MLICALL MLI.READBLOCK
-				bcs .9
+				jsr PASCAL.ChkVolA
+				bcs .99
 
-				ldx #5
-				
-.1				lda K.Buf512,x			
-				cmp .7,x
-				bne .9
-				
-				dex
-				bpl .1
-				
-				ldy K.Buf512+6
-				cpy #8
-				bcs .9
-				
 				ldx #0
+*				ldy K.Buf512+6			vol name len
 
 .2				lda K.Buf512+7,x
 				jsr K.ReadDir.AddToBuf
 				inx
 				dey
 				bne .2
-				
+
 				tya						Add ending 0 for C String
 				jsr K.ReadDir.AddToBuf
 
-				jsr SHARED.ClrStat
+				lda (ZPPtr2)			DSSS0000
+				jsr PASCAL.StatVol
+
+				jmp K.ReadDir.AddStat
+
+.99				rts
+*--------------------------------------
+K.ReadDir.SD	pha
+				jsr X.ClrStat
 
 				lda /S.STAT.MODE.DIR
 				sta K.S.STAT+S.STAT.MODE+1
-				
-				lda (ZPPtr2)
-				asl						DRIVE in Carry
-				pha
-				lda #0
-				rol
-				inc
-				sta K.S.STAT+S.STAT.P.DRIVE
-				pla
-				lsr						CC
-				lsr
+
+				inc K.S.STAT+S.STAT.P.DRIVE
+
+				pla						DSSS0000
+				bpl .2
+
+				inc K.S.STAT+S.STAT.P.DRIVE
+				and #$70
+
+.2				lsr
 				lsr
 				lsr
 				lsr
 				sta K.S.STAT+S.STAT.P.SLOT
-				
-				lda K.Buf512+14
-				sta K.S.STAT+S.STAT.P.DEVBLOCKS
-				lda K.Buf512+15
-				sta K.S.STAT+S.STAT.P.DEVBLOCKS+1
 
-				jmp K.ReadDir.AddStat
-	
-.9				rts
-
-
-.7				.HS 000006000000		Pascal VOLUME signature
+				rts
 *--------------------------------------
 K.ReadDir.P3Init
 				ldy #4					Skip 4 bytes linked list
@@ -628,12 +595,9 @@ K.ReadDir.AddToBuf
 				sta IO.SETWRITEAUX
 				sta (ZPPtr4)
 				sta IO.CLRWRITEAUX
-				inc ZPPtr4
-				bne .8
+				>INCW ZPPtr4
 
-				inc ZPPtr4+1
-
-.8				rts
+				rts
 *--------------------------------------
 K.ReadDir.AddStatACL
 				jsr FS.DirEnt2Stat

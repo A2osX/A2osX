@@ -92,8 +92,10 @@ DEV.GetDevX		lda pFDs+1,x
 * ## C
 * `short int mkfd(short int type);`
 * ## ASM
+* `>SS`
 * `>PUSHB DevID`
 * `>LIBC MKFD`
+* `>SR`
 * ## RETURN VALUE
 * A = hFD
 *\--------------------------------------
@@ -111,9 +113,11 @@ K.MKFD			jsr DEV.NewFD
 * ## C
 * `int mkdev (S.FD *fd, const char *devname)`
 * ## ASM
+* `>SS`
 * `>PUSHW fd`
 * `>PUSHW devname`
 * `>LIBC mkdev`
+* `>SR`
 * ## RETURN VALUE
 *  A = hDEV
 *\--------------------------------------
@@ -164,12 +168,12 @@ K.MKDev			jsr PFT.GetPath0		devname
 
 				ldx #0
 
-.6				lda	IRQ.Vectors+1,x
+.6				lda	pIRQVs+1,x
 				beq .7
 
 				inx
 				inx
-				cpx #K.IRQDEV.MAX*2
+				cpx #K.IRQV.MAX*2
 				bcc .6
 
 				lda #E.OOH
@@ -180,12 +184,13 @@ K.MKDev			jsr PFT.GetPath0		devname
 
 .7				ldy #IOCTL.IRQ+4
 				lda (pDRV),y
-				sta IRQ.Vectors,x
+				sta pIRQVs,x
 				iny
 				lda (pDRV),y
-				sta IRQ.Vectors+1,x
+				sta pIRQVs+1,x
 
-.8				>LDYA pFD
+.8
+*				>LDYA pFD
 
 *				clc
 
@@ -204,12 +209,12 @@ K.MKDev			jsr PFT.GetPath0		devname
 * ## RETURN VALUE
 *  Y,A = ...
 *\--------------------------------------
-K.IOCTL			ldy #3
+K.IOCTL			ldy #3					FD
 				jsr RAMSW.GetStkYW
 				tax
 				bne .99
 
-				cpy #K.FILE.MAX*2
+				cpy #K.FD.MAX*2
 				bcs .99
 
 				tya
@@ -251,7 +256,8 @@ K.IOCTL			ldy #3
 				sta $113
 				tax
 
-				jsr RAMSW.GetStkW		param
+				ldy #0					param
+				jsr RAMSW.GetStkYW
 				>STYA TXTPTR
 				>STYA $114
 
@@ -266,21 +272,25 @@ K.IOCTL			ldy #3
 
 				lda #$60				RTS
 				sta $116
- 
-				jmp RAMSW.SPJmp			Native SP ROM call
+
+				>LDYAI $110
+				>STYA RAMSW.2AUX
+
+				jmp RAMSW.2AUXJSR		Native SP ROM call
 
 .99				lda #MLI.E.NODEV
 				sec
 				rts
 *--------------------------------------
-.10				jsr DEV.GetPDrv
-
-				ldy #2					request
+.10				ldy #2					request
 				jsr RAMSW.GetStkY
 				tax
 
-				jsr RAMSW.GetStkW		param
+				ldy #0					param
+				jsr RAMSW.GetStkYW
 				>STYA TXTPTR
+				tay
+				beq .2
 
 				ldy #S.IOCTL-1
 
@@ -289,17 +299,29 @@ K.IOCTL			ldy #3
 				dey
 				bpl .1
 
-				jsr DEV.pDrvJmp
+.2				jsr DEV.pDrvJmp
 				bcs .9
+
+				pha
+				phy
+				
+				ldy #0					param
+				jsr RAMSW.GetStkYW
+				>STYA TXTPTR
+				tay
+				beq .8
 
 				sta IO.SETWRITEAUX
 
 				ldy #S.IOCTL-1
 
-.2				lda K.DRV.IOCTL,y
+.3				lda K.DRV.IOCTL,y
 				sta (TXTPTR),y
 				dey
-				bpl .2
+				bpl .3
+
+.8				ply
+				pla
 
 *				sta IO.CLRWRITEAUX
 
@@ -307,26 +329,27 @@ K.IOCTL			ldy #3
 
 .9				rts
 *--------------------------------------
-DEV.Stat		jsr SHARED.ClrStat
-
+DEV.Stat		jsr X.ClrStat
+				
 				lda (pFD)				#S.FD.T
 				tax
 
 				asl
 				asl
 				asl
+*				ora #S.STAT.MODE.FU
 				sta K.S.STAT+S.STAT.MODE+1
-
+								
 				jmp (.1,x)
 
-.1				.DA .10					S.FD.T.REG	
-				.DA .20					S.FD.T.DIR	
-				.DA .30					S.FD.T.CDEV	
-				.DA .40					S.FD.T.BDEV	
-				.DA .50					S.FD.T.LNK	
+.1				.DA .10					S.FD.T.REG
+				.DA .20					S.FD.T.DIR
+				.DA .30					S.FD.T.CDEV
+				.DA .40					S.FD.T.BDEV
+				.DA .50					S.FD.T.LNK
 				.DA .60					S.FD.T.DSOCK
 				.DA .70					S.FD.T.SSOCK
-				.DA .80					S.FD.T.PIPE	
+				.DA .80					S.FD.T.PIPE
 *--------------------------------------
 .10				clc
 				rts
@@ -362,10 +385,13 @@ DEV.Stat		jsr SHARED.ClrStat
 DEV.Open		ldx #IOCTL.OPEN
 
 				lda IO.hFD
-				jsr DEV.pDrvJmp
+				jsr DEV.pDrvJmp1
 				bcs .9
 
-				lda IO.hFD
+				ldy IO.hFD
+				lda #0					return int
+
+*				clc
 
 .9				rts
 *--------------------------------------
@@ -398,8 +424,11 @@ DEV.GetStatus	sta K.DRV.IOCTL+S.IOCTL.S
 *--------------------------------------
 DEV.Close		ldx #IOCTL.CLOSE
 *--------------------------------------
-DEV.pDrvJmp		>LDYAI K.DRV.IOCTL
-				jmp (pDRV)
+DEV.pDrvJmp		jsr DEV.GetPDrv
+
+				>LDYAI K.DRV.IOCTL
+
+DEV.pDrvJmp1	jmp (pDRV)
 *--------------------------------------
 DEV.NewNamedFD	jsr DEV.NewFD
 				bcs DEV.RTS

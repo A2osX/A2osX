@@ -1,0 +1,327 @@
+NEW
+  AUTO 3,1
+*--------------------------------------
+* https://www.cise.ufl.edu/~cop4600/cgi-bin/lxr/http/source.cgi/lib/ansi/gmtime.c
+*--------------------------------------
+SECSDAY			.EQ 86400				60*60*24
+CENT0			.EQ 19
+YEAR0			.EQ 70
+DAY0			.EQ 4					day 0 was a thursday
+*--------------------------------------
+TIMEX.PT		.EQ $102
+TIMEX.ST		.EQ $106
+*--------------------------------------
+TIMEX.E			lda #E.OOB
+				sec
+				rts
+*--------------------------------------
+TIMEX.PT2ST		lda TIMEX.PT+3
+				and #%11100000
+				bne TIMEX.E
+
+				lda TIMEX.PT+2
+				and #%11000000
+				bne TIMEX.E
+
+				lda TIMEX.PT+1			Get Year
+				lsr						C is high bit of month
+				sta TIMEX.ST+S.TIME.YEAR
+
+				sta ARG32+3				for computing Century/WDAY later
+
+				lda TIMEX.PT+0			Get Month/day
+
+				tax						save Day
+				ror						C is high bit of month
+				lsr
+				lsr
+				lsr
+				lsr
+				beq TIMEX.E
+
+				cmp #13
+				bcs TIMEX.E				range not in 1..12
+
+				sta TIMEX.ST+S.TIME.MONTH
+
+				txa						get back day
+				and #$1F
+				beq TIMEX.E				range not in 1..31
+
+				sta TIMEX.ST+S.TIME.DAY
+
+				dec						adjust range 0.30 for MOD 7
+				sta ARG32S			For later...
+
+				lda ARG32+3				get back year
+				cmp #100
+				bcs TIMEX.E
+
+				cmp #69					if before 70 CC,if > 70, CS
+				lda #0
+				rol						get back C in bit 0
+				eor #1					toggle C
+				adc #19					set date before 1970 -> 20xx
+				sta TIMEX.ST+S.TIME.CENTURY
+				sta ARG32+2				for computing WDAY later
+
+				lda TIMEX.PT+3			Get Hour
+				cmp #24
+				bcs TIMEX.E
+
+				sta TIMEX.ST+S.TIME.HOUR
+
+				lda TIMEX.PT+2			Get Min
+				cmp #60
+				bcs TIMEX.E
+
+				sta TIMEX.ST+S.TIME.MINUTE
+
+				stz TIMEX.ST+S.TIME.SECOND	set seconds (ProDOS does not provide it)
+*--------------------------------------
+* 1/1/1970 was Thursday...if not leap, add one, if leap add 2
+*--------------------------------------
+TIMEX.PT2STWDAY	lda #DAY0-1				Thursday : 4 (-1 for mod 7)
+				pha
+
+				lda #CENT0				Starts at 1970
+				sta ARG32
+				lda #YEAR0
+				sta ARG32+1
+
+.1				ldy ARG32
+				lda ARG32+1
+
+				cpy ARG32+2
+				bne .2
+
+				cmp ARG32+3
+				beq .4
+
+.2				jsr TIMEX.IsLeap		CS = Leap
+
+				pla
+				adc #1					365 mod 7
+				cmp #7
+				bcc .3
+
+				sbc #7					MOD 7
+
+.3				pha
+				inc ARG32+1
+				lda ARG32+1
+				cmp #100
+				bne .1
+
+				stz ARG32+1
+				inc ARG32
+				bra .1
+*--------------------------------------
+.4				ldx TIMEX.ST+S.TIME.MONTH
+
+				dex						don't include actual month
+				beq .71
+
+.5				clc						assume NO leap
+
+				lda TIMEX.MDAY-1,x		get day count in this month
+				bne	.6					february ?
+
+				ldy ARG32+2
+				lda ARG32+3
+				jsr TIMEX.IsLeap		CS = Leap
+
+.6				pla
+				adc TIMEX.MDAY-1,x
+
+				cmp #7
+				bcc .7
+
+				sbc #7
+
+.7				pha
+				dex
+				bne .5
+*--------------------------------------
+.71				pla
+				clc
+
+				adc ARG32S			get day in month (0..30)
+
+.8				cmp #7					MOD 7
+				bcc .80
+
+				sbc #7
+				bra .8
+
+.80				inc						adjust range 1..7
+				sta TIMEX.ST+S.TIME.WDAY
+
+*				clc
+
+				rts
+*--------------------------------------
+TIMEX.CT2ST		lda #SECSDAY			ACC = SECSDAY
+				sta ACC32
+				lda /SECSDAY
+				sta ACC32+1
+				lda ^SECSDAY
+				sta ACC32+2
+				stz ACC32+3
+				jsr M32.DIVMOD  		ARG32 = Days, TMP32 = remaining secs
+
+				lda ARG32				WDAY computation : (ARG32 + DAY0) mod 7
+				clc
+				adc #DAY0
+				pha
+				lda ARG32+1				65535 days = 179 years
+				adc /DAY0
+				eor #$ff
+				tax
+				pla
+
+.2				tay
+				sec
+				sbc #7
+				bcs .2
+
+				inx
+				bne .2
+
+				sty TIMEX.ST+S.TIME.WDAY
+
+				ldy #CENT0
+				sty ZPPtr3
+				lda #YEAR0
+				sta ZPPtr3+1
+TIMEX.CT2ST.Y
+.1				ldy ZPPtr3
+				lda ZPPtr3+1
+				jsr TIMEX.IsLeap 		if Leap year CS
+				rol						Toggle Carry
+				eor #1
+				lsr
+				lda ARG32
+				sbc #365
+				pha
+				lda ARG32+1
+				sbc /365
+				bcc .2
+
+				sta ARG32+1
+				pla
+				sta ARG32
+				inc ZPPtr3+1
+				lda ZPPtr3+1
+				cmp #100
+				bne .1
+
+				stz ZPPtr3+1
+				inc ZPPtr3
+				bra .1
+
+.2				pla
+
+				lda ZPPtr3
+				sta TIMEX.ST+S.TIME.CENTURY
+				lda ZPPtr3+1
+				sta TIMEX.ST+S.TIME.YEAR
+
+TIMEX.CT2ST.MD	ldx #1					X = January
+
+.1				clc
+				txa
+				eor #2
+
+				bne .2
+
+				>LDYA ZPPtr3			Current Year
+				jsr TIMEX.IsLeap
+
+.2				lda TIMEX.MDAY-1,x
+				adc #28					A = days of X
+
+				sta .3+1
+
+				lda ARG32				ARG32/ARG32+1 = 0 .. 364 or 365
+				sec
+
+.3				sbc #$ff				SELF MODIFIED
+				pha
+				lda ARG32+1
+				sbc #0
+				bcc .4
+
+				sta ARG32+1
+				pla
+				sta ARG32
+				inx
+				bra .1
+
+.4				pla
+				stx TIMEX.ST+S.TIME.MONTH
+
+				lda ARG32
+				inc
+				sta TIMEX.ST+S.TIME.DAY
+
+TIMEX.CT2ST.HMS	ldx #3
+
+.1				lda TMP32,x
+				sta ARG32,x
+				dex
+				bpl .1
+
+				lda #60
+				jsr M32.A2ACC32
+				jsr M32.DIVMOD
+				lda TMP32
+				sta TIMEX.ST+S.TIME.SECOND
+
+				lda #60
+				jsr M32.A2ACC32
+				jsr M32.DIVMOD
+				lda TMP32
+				sta TIMEX.ST+S.TIME.MINUTE
+
+				lda ARG32
+				sta TIMEX.ST+S.TIME.HOUR
+
+				clc
+				rts
+*--------------------------------------
+* In :
+*  Y = Century
+*  A = Year (0..99)
+*    if (year mod 400 = 0)
+*      or
+*    if  not (year mod 100 = 0) and (year mod 4 = 0)
+* Out :
+*  CS = Leap
+*  CC = Not Leap
+*--------------------------------------
+TIMEX.IsLeap	cmp #0					Year = 00 ?
+				bne .1					no
+
+				tya						year = 00, get century in A
+
+				and #$3					Century mod 4 = 0 ?
+				beq .9					leap year (2000)
+
+.8				clc						not leap (1900)
+				rts
+
+.1				and #$3					mod 4 = 0 ?
+				bne .8
+
+.9				sec						Leap
+				rts
+*--------------------------------------
+TIMEX.MDAY		.DA #3,#0,#3,#2,#3,#2,#3,#3,#2,#3,#2,#3
+*--------------------------------------
+TIMEX.ST2S
+*--------------------------------------
+MAN
+SAVE usr/src/sys/kernel.s.timex
+LOAD usr/src/sys/kernel.s
+ASM

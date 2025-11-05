@@ -46,17 +46,18 @@ K.Random
 * ## RETURN VALUE
 * On stack (float) at pBase
 *\--------------------------------------
-K.StrToF		jsr RAMSW.GetStkW		EndPtr
+K.StrToF		ldy #0
+				jsr RAMSW.GetStkYW		EndPtr
 				>STYA ZPPtr1
 
 				ldy #2
 				jsr RAMSW.GetStkYW		str
 				>STYA TXTPTR
 
-				jsr MF.Str2FAC
-				
+				jsr FPU.Str2FAC
+
 				ldy #4					ret value
-				jsr MF.FAC2pStackY
+				jsr FPU.FAC2pStackY
 
 				lda ZPPtr1+1
 				beq .9					NULL ptr
@@ -69,7 +70,7 @@ K.StrToF		jsr RAMSW.GetStkW		EndPtr
 				lda TXTPTR+1
 				sta (ZPPtr1),y
 
-				sta IO.CLRWRITEAUX
+*				sta IO.CLRWRITEAUX
 
 *				clc
 
@@ -89,10 +90,10 @@ K.StrToF		jsr RAMSW.GetStkW		EndPtr
 *\--------------------------------------
 K.AToF			>STYA TXTPTR			Ptr to source string
 
-				jsr MF.Str2FAC
-				
+				jsr FPU.Str2FAC
+
 				ldy #0
-				jmp MF.FAC2pStackY
+				jmp FPU.FAC2pStackY
 */--------------------------------------
 * # StrToL/StrToUL
 * Convert String to 32 bits (unsigned) int
@@ -216,18 +217,19 @@ K.AToI			sec						signed
 * CS : Y,A = NULL, ERRNO set
 *\--------------------------------------
 K.RealPath		ldy #2					get path
-				jsr RAMSW.StkY2PathBuf
+				jsr RAMSW.GetStkYW
+				jsr RAMSW.YA2PathBuf
 
 				ldy #0					get resolvedpath
 				jsr RAMSW.StkY2FORPNT
-				
+
 				jsr STDLIB.Expand
 				bcs .9
-				
+
 				jsr STDLIB.RealPath
 				bcs .9
-				
-				jsr SHARED.PathBuf2FORPNT
+
+				jsr X.PathBuf2FORPNT
 				bcc .8
 
 .9				ldy #S.PS.ERRNO			set ERRNO...
@@ -239,7 +241,7 @@ K.RealPath		ldy #2					get path
 
 *				sec
 
-.8				rts				
+.8				rts
 */--------------------------------------
 * # Expand
 * ## C / CSH
@@ -256,7 +258,8 @@ K.RealPath		ldy #2					get path
 * CS : Y,A = NULL, ERRNO
 *\--------------------------------------
 K.Expand		ldy #2					get str
-				jsr RAMSW.StkY2PathBuf
+				jsr RAMSW.GetStkYW
+				jsr RAMSW.YA2PathBuf
 
 				ldy #0					get expanded
 				jsr RAMSW.StkY2FORPNT
@@ -264,11 +267,11 @@ K.Expand		ldy #2					get str
 				jsr STDLIB.Expand
 				bcs .9
 
-				jsr SHARED.PathBuf2FORPNT
+				jsr X.PathBuf2FORPNT
 				bcc .8
-				
+
 				.HS 2C					BIT ABS
-				
+
 .9				lda #E.BADPATH
 
 				ldy #S.PS.ERRNO
@@ -278,7 +281,7 @@ K.Expand		ldy #2					get str
 				tay						NULL
 
 				sec
-.8				rts	
+.8				rts
 *--------------------------------------
 STDLIB.iBufPtr	.BS 1
 STDLIB.oBufPtr	.BS 1
@@ -286,7 +289,7 @@ ENV.VarEndChar	.BS 1
 ENV.bNoExp		.BS 1
 ENV.bExp		.BS 1
 *--------------------------------------
-STDLIB.Expand	jsr SHARED.Path2IO
+STDLIB.Expand	jsr STDLIB.Path2IO
 
 				stz STDLIB.iBufPtr
 
@@ -347,7 +350,7 @@ STDLIB.Expand	jsr SHARED.Path2IO
 .40				jsr STDLIB.StrVar		CWD...
 				bcc .70
 
-				jsr STDLIB.SIDVar		HOME...
+				jsr STDLIB.PWVar		HOME...
 				bcc .70
 
 				jsr STDLIB.EnvVar
@@ -357,7 +360,7 @@ STDLIB.Expand	jsr SHARED.Path2IO
 .71				lda K.IOBuf,y
 				beq .72
 
-				jsr SHARED.IsIDValid
+				jsr X.IsIDValid
 				bcs .72
 
 				iny
@@ -379,7 +382,7 @@ STDLIB.Expand	jsr SHARED.Path2IO
 .8				clc
 				rts
 *--------------------------------------
-STDLIB.SysVar	jsr ZP.IsDigit			$0 ... $9 ?
+STDLIB.SysVar	jsr X.IsDigit			$0 ... $9 ?
 				bcs .1
 
 				and #$0f
@@ -425,9 +428,9 @@ STDLIB.SysVar	jsr ZP.IsDigit			$0 ... $9 ?
 .5				ldy STDLIB.PSVars.Y,x
 				lda (pPS),y
 				jmp STDLIB.AddNumAToBuf
-				
+
 .8				clc
-				rts			
+				rts
 *--------------------------------------
 STDLIB.PSVars	.AS "#?@$!"
 STDLIB.PSVars.C	.EQ *-STDLIB.PSVars
@@ -440,10 +443,12 @@ STDLIB.StrVar	>LDYAI STDLIB.StrVars
 				jmp (.8,x)
 
 .8				.DA STDLIB.StrVarsCWD
+				.DA STDLIB.StrVarsHN
 
 .9				rts
 *--------------------------------------
-STDLIB.StrVars	.AZ "CWD"				TODO: more vars ?
+STDLIB.StrVars	.AZ "CWD"
+				.AZ "HOSTNAME"
 				.DA #0
 *--------------------------------------
 STDLIB.StrVarsCWD
@@ -454,7 +459,7 @@ STDLIB.AddxYAToBuf
 *--------------------------------------
 STDLIB.AddxP3ToBuf
 				ldy #$ff
-				
+
 				ldx STDLIB.oBufPtr
 				dex
 
@@ -467,35 +472,47 @@ STDLIB.AddxP3ToBuf
 				stx STDLIB.oBufPtr
 				rts
 *--------------------------------------
+STDLIB.StrVarsHN
+				>LDYAI K.HOSTNAME
+				bra STDLIB.AddYAToBuf
+*--------------------------------------
 STDLIB.AddA2PathBuf
 				ldx STDLIB.oBufPtr
 				sta K.PathBuf,x
 				inc STDLIB.oBufPtr
 				rts
 *--------------------------------------
-STDLIB.SIDVar	>LDYAI STDLIB.SIDVars
+STDLIB.PWVar	>LDYAI STDLIB.PWVars
 				jsr STDLIB.CheckName
 				bcs .9
 
-				ldy #S.PS.pSession
+				phx
+
+				ldy #S.PS.UID
 				lda (pPS),y
-				sta ZPPtr3
+				pha
 				iny
 				lda (pPS),y
-				sta ZPPtr3+1
+				ply
+
+				jsr PWD.GetPWUID		S.PASSWD at K.S.STAT
+
+				plx
+
+				bcs .9
 
 				jmp (.8,x)
 
-.8				.DA STDLIB.SIDVarsSTR
-				.DA STDLIB.SIDVarsSTR
-				.DA STDLIB.SIDVarsSTR
-				.DA STDLIB.SIDVarsSTR
-				.DA STDLIB.SIDVarsUID
-				.DA STDLIB.SIDVarsGID
+.8				.DA STDLIB.PWVarsSTR
+				.DA STDLIB.PWVarsSTR
+				.DA STDLIB.PWVarsSTR
+				.DA STDLIB.PWVarsSTR
+				.DA STDLIB.PWVarsUID
+				.DA STDLIB.PWVarsGID
 
 .9				rts
 *--------------------------------------
-STDLIB.SIDVars	.AZ "LOGNAME"
+STDLIB.PWVars	.AZ "LOGNAME"
 				.AZ "GECOS"
 				.AZ "HOME"
 				.AZ "SHELL"
@@ -503,40 +520,33 @@ STDLIB.SIDVars	.AZ "LOGNAME"
 				.AZ "GID"
 				.DA #0
 *--------------------------------------
-STDLIB.SIDVarsSTR
-				lda ZPPtr3
+STDLIB.PWVarsSTR
+				ldy .8,x
 				clc
-				adc #S.SESSION.NAME
-				sta ZPPtr3
-				lda ZPPtr3+1
-				adc /S.SESSION.NAME
-				sta ZPPtr3+1
+				lda K.S.STAT,y
+				adc #K.S.STAT
+				pha
+				lda K.S.STAT+1,y
+				adc /K.S.STAT
+				ply
 
-.1				dex
-				dex
-				bmi STDLIB.AddP3ToBuf
+				bra STDLIB.AddYAToBuf
 
-				ldy #$ff
-
-.2				iny
-				lda (ZPPtr3),y
-				bne .2
-
-				jsr ENV.NextEnvP3Y
-				bra .1
+.8				.DA S.PW.pNAME,S.PW.pGECOS,S.PW.pDIR,S.PW.pSHELL
 *--------------------------------------
-STDLIB.SIDVarsUID
-				ldy #S.SESSION.UID
+STDLIB.PWVarsUID
+				ldy #S.PW.UID
 				.HS 2C
-STDLIB.SIDVarsGID
-				ldy #S.SESSION.GID
+STDLIB.PWVarsGID
+				ldy #S.PW.GID
 
-				lda (ZPPtr3),y
+				lda K.S.STAT,y
 *--------------------------------------
 STDLIB.AddNumAToBuf
 				jsr MATH.A2STR10NP
 
 				>LDYAI FOUTBuf
+STDLIB.AddYAToBuf
 				>STYA ZPPtr3
 *--------------------------------------
 STDLIB.AddP3ToBuf
@@ -572,7 +582,7 @@ STDLIB.CheckName
 .30				lda K.IOBuf,y			SELF MODIFIED
 				beq .3
 
-				jsr SHARED.IsIDValid
+				jsr X.IsIDValid
 				bcs .3
 
 				cmp (ZPPtr3),y
@@ -603,7 +613,7 @@ STDLIB.CheckName
 *--------------------------------------
 STDLIB.EnvVar	lda STDLIB.iBufPtr
 				sta .30+1
-				
+
 				jsr ENV.InitEnvP3		Store ENV
 
 .1				jsr RAMSW.xP3g
@@ -616,7 +626,7 @@ STDLIB.EnvVar	lda STDLIB.iBufPtr
 .30				lda K.IOBuf,y			SELF MODIFIED
 				beq .3
 
-				jsr SHARED.IsIDValid
+				jsr X.IsIDValid
 				bcs .3
 
 				jsr RAMSW.xP3cY
@@ -637,7 +647,7 @@ STDLIB.EnvVar	lda STDLIB.iBufPtr
 
 .9				rts
 *--------------------------------------
-STDLIB.RealPath	jsr SHARED.Path2IO
+STDLIB.RealPath	jsr STDLIB.Path2IO
 
 				ldx #$ff
 
@@ -651,7 +661,7 @@ STDLIB.RealPath	jsr SHARED.Path2IO
 
 				ldy #$ff
 				ldx #$ff
-				
+
 .2				iny
 				inx
 
@@ -725,7 +735,7 @@ STDLIB.RealPath	jsr SHARED.Path2IO
 
 .81				clc
 				rts
-				
+
 .99				lda #E.BADPATH
 				sec
 				rts
@@ -759,6 +769,21 @@ STDLIB.RealPath..
 .8				plx						restore X
 
 				rts
+*--------------------------------------
+STDLIB.Path2IO	ldy #$ff
+
+.1				iny						Save Script name in IOBuf
+				lda K.PathBuf,y
+				sta K.IOBuf,y
+				beq .8
+
+				cmp #'/'
+				bne .1
+
+				tax
+				bra .1
+
+.8				rts
 *--------------------------------------
 MAN
 SAVE usr/src/sys/kernel.s.stdlib

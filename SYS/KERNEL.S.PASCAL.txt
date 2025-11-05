@@ -1,0 +1,358 @@
+NEW
+  AUTO 3,1
+*--------------------------------------
+PASCAL.OpenDir	jsr PASCAL.FindVol
+				bcs .99
+
+				bvc .9					extra path...error
+
+				lda #$84
+				ldy #S.FD.REG.REF
+				sta (pFD),y
+
+				ldy #S.FD.DIR.FC
+				lda K.Buf512+16
+				sta (pFD),y
+				iny
+				lda K.Buf512+17
+				sta (pFD),y
+
+				>LDYAI 2048				store whole catalog (4 blocks)
+				ldx #S.MEM.F.ALIGN
+				jsr MEM.Malloc.YAX
+				bcs .9
+
+				>STYA ZPPtr3
+
+				ldy #S.FD.REG.IOBUF
+				sta (pFD),y				HI byte only
+
+.1				ldy #0
+
+.2				lda K.Buf512,y
+				sta (ZPPtr3),y
+				iny
+				bne .2
+
+				inc ZPPtr3+1
+
+.3				lda K.Buf512+$100,y
+				sta (ZPPtr3),y
+				iny
+				bne .3
+
+				inc ZPPtr3+1
+
+				inc K.MLI.PARAMS+4
+				lda K.MLI.PARAMS+4
+				cmp #6
+				beq .8
+
+				>MLICALL MLI.READBLOCK
+				bcc .1
+
+				rts
+
+.8				clc
+
+				rts
+
+.9				lda #MLI.E.PNOTFND
+				sec
+.99				rts
+*--------------------------------------
+* +$00 / 2: system area start block number (always 0)
+* +$02 / 2: next block (first block after directory; always 6)
+* +$04 / 2: file type ($00)
+* +$06 / 8: volume name, prefixed with length byte
+* +$0e / 2: number of blocks in volume
+* +$10 / 2: number of files in directory
+* +$12 / 2: last access time (declared as "integer", definition unclear; always zero?)
+* +$14 / 2: most recently set date value
+* +$16 / 4: (reserved)
+
+* +$00 / 2: file start block number
+* +$02 / 2: first block past end of file (i.e. last block + 1)
+* +$04 / 2: file type in bits 0-3; bit 15 used "for filer wildcards"; other bits reserved
+* +$06 /16: file name, prefixed with length byte
+* +$16 / 2: number of bytes used in last block
+* +$18 / 2: modification date
+
+* 0 untypedfile - used for the volume directory header entry
+* 1 xdskfile / .BAD - used to mark physically damaged disk blocks
+* 2 codefile / .CODE - machine-executable code
+* 3 textfile / .TEXT - human-readable text
+* 4 infofile / .INFO - (not used)
+* 5 datafile / .DATA - arbitrary data
+* 6 graffile / .GRAF - (not used)
+* 7 fotofile / .FOTO - (not used)
+* 8 securedir - (unknown)
+
+* YYYYYYY DDDDD MMMM
+*--------------------------------------
+PASCAL.ReadDir	ldy #S.FD.DIR.FC
+				lda (pFD),y
+				bne .1
+
+				lda #MLI.E.EOF
+				sec
+				rts
+
+.1				>LDYAI 16+S.STAT*77+1
+				jsr K.ReadDir.GetBuf
+				bcs .99
+
+				>STYA K.ReadDir.pBuf
+				>STYA ZPPtr4
+
+				ldy #S.FD.REG.IOBUF
+				lda (pFD),y
+				sta ZPPtr3+1
+
+				lda #26					skip VOL header
+				sta ZPPtr3
+
+.2				ldy #S.FD.DIR.FC
+				lda (pFD),y
+				beq .8
+
+				dec
+				sta (pFD),y
+
+				ldy #6					Filename len
+				lda (ZPPtr3),y
+				tax
+
+.3				iny
+
+				lda (ZPPtr3),y
+				jsr K.ReadDir.AddToBuf
+				dex
+				bne .3
+				
+				txa
+				jsr K.ReadDir.AddToBuf
+
+				jsr X.ClrStat
+
+				ldy #4
+				lda (ZPPtr3),y
+				and #$f
+				sta K.S.STAT+S.STAT.P.TYPE
+
+				ldy #2
+				lda (ZPPtr3),y
+				clc
+				sbc (ZPPtr3)
+				sta K.S.STAT+S.STAT.SIZE+1
+				iny
+				lda (ZPPtr3),y
+				ldy #1
+				sbc (ZPPtr3),y
+				asl K.S.STAT+S.STAT.SIZE+1
+				rol
+				sta K.S.STAT+S.STAT.SIZE+2
+				
+				ldy #22
+				lda (ZPPtr3),y
+				adc K.S.STAT+S.STAT.SIZE
+				sta K.S.STAT+S.STAT.SIZE
+				iny
+				lda (ZPPtr3),y
+				adc K.S.STAT+S.STAT.SIZE+1
+				sta K.S.STAT+S.STAT.SIZE+1
+
+				jsr PASCAL.AddMDate
+			
+				jsr K.ReadDir.AddStat
+				lda ZPPtr3
+				clc
+				adc #26
+				sta ZPPtr3
+				bcc .2
+
+				inc ZPPtr3+1
+				bra .2
+
+.8				>LDYA K.ReadDir.pBuf
+
+				clc
+
+.99				rts
+*--------------------------------------
+PASCAL.AddMDate	ldy #24
+				lda (ZPPtr3),y
+				and #$f
+				beq .8
+				
+				cmp #13
+				beq .8
+				
+				sta K.S.STAT+S.STAT.MTIME+S.TIME.MONTH
+				
+				iny
+				lda (ZPPtr3),y
+				lsr
+				sta K.S.STAT+S.STAT.MTIME+S.TIME.YEAR
+				tax
+				dey
+				lda (ZPPtr3),y
+				ror
+				lsr
+				lsr
+				lsr
+				sta K.S.STAT+S.STAT.MTIME+S.TIME.DAY
+				lda #20
+				cpx #40
+				sbc #255
+				sta K.S.STAT+S.STAT.MTIME*S.TIME.CENTURY
+				
+.8				rts
+*--------------------------------------
+PASCAL.CloseDir
+
+
+				lda #MLI.E.NOTPRODOS
+				sec
+				rts
+*--------------------------------------
+PASCAL.Stat		jsr PASCAL.FindVol
+				bcs .9
+
+				bvc .1
+
+				jmp PASCAL.StatVol
+
+
+.1				jsr PASCAL.FindFile
+
+
+
+.9				lda #MLI.E.NOTPRODOS
+*				sec
+				rts
+*--------------------------------------
+* In: K.MLI.PATH
+* Out:
+*  CC,VC : /PASCALVOL/FILE
+*  CC,VS : /PASCALVOL/
+*--------------------------------------
+PASCAL.FindVol	ldx #0
+
+.1				stx .7+1
+
+				lda K.OLBuf,x
+				and #$0F
+				bne .7
+
+				lda K.OLBuf+1,x
+				cmp #MLI.E.NOTPRODOS
+				bne .7
+
+				lda K.OLBuf,x
+
+				jsr PASCAL.ChkVolA
+				bcs .7
+
+				ldx #0
+
+.2				inx
+				lda K.Buf512+6,x		skip LEN
+				cmp K.MLI.PATH+1,x		skip LEN + /
+				bne .7
+
+				cpx K.Buf512+6			PASCAL volname len
+				bne .2
+
+				bit .9					Set V, K.MLI.PATH=/VOL/ or /VOL
+
+				inx
+				cpx K.MLI.PATH
+				beq .8					K.MLI.PATH=/VOL
+
+				lda K.MLI.PATH+1,x
+				cmp #'/'
+				bne .7
+
+				inx
+
+				cpx K.MLI.PATH
+				beq .8					K.MLI.PATH=/VOL/
+
+				inx						skip /
+
+				clv						Clr V, K.MLI.PATH=/VOL/FILE
+
+.8				ldy .7+1
+				lda K.OLBuf,y
+
+				clc						X = Filename Ptr in K.MLI.PATH
+				rts
+
+.7				lda #$FF				SELF MODIFIED
+				clc
+				adc #16
+				tax
+				bcc .1
+
+				lda #MLI.E.VNOTFND
+*				sec
+.9				rts
+*--------------------------------------
+PASCAL.StatVol	jsr K.ReadDir.SD
+
+				lda K.Buf512+14
+				sta K.S.STAT+S.STAT.BLOCKS
+				sta K.S.STAT+S.STAT.SIZE+1
+
+				lda K.Buf512+15
+				sta K.S.STAT+S.STAT.BLOCKS+1
+
+				asl K.S.STAT+S.STAT.SIZE+1
+				rol
+				sta K.S.STAT+S.STAT.SIZE+2
+				rol K.S.STAT+S.STAT.SIZE+3
+
+				clc
+				rts
+*--------------------------------------
+PASCAL.ChkVolA	sta K.MLI.PARAMS+1
+				>LDYAI K.Buf512
+				>STYA K.MLI.PARAMS+2
+				>LDYAI 2
+				>STYA K.MLI.PARAMS+4
+				>MLICALL MLI.READBLOCK
+				bcs .9
+
+				ldx #5
+
+				sec
+
+.1				lda K.Buf512,x
+				eor .7,x
+				bne .9
+
+				dex
+				bpl .1
+
+				ldy K.Buf512+6
+				beq .9
+
+				cpy #8
+
+.9				rts						Y = VOLNAME len
+
+.7				.HS 000006000000		Pascal VOLUME signature
+*--------------------------------------
+* K.MLI.PATH = LEN + /PASCALVOL/ + FILENAME
+*--------------------------------------
+PASCAL.FindFile
+
+				lda #MLI.E.FNOTFND
+				sec
+				rts
+*--------------------------------------
+MAN
+SAVE usr/src/sys/kernel.s.pascal
+LOAD usr/src/sys/kernel.s
+ASM
