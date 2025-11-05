@@ -24,7 +24,7 @@ Consult the **[documentation](#documentation)** section below to find other reso
 
 ### Lots of updates for 2025!
 
-16 Mb RAM support, ProDOS.FX/16M now mandatory.
+Added support for RamWorks memory expansion, up to 16 Mb RAM. For this, ProDOS.FX/16M is now mandatory (and yes, will run fine on 128k machines!)
 
 ## **Visit us at [A2osX](http://www.a2osx.com)**
 
