@@ -1,0 +1,1643 @@
+NEW
+  AUTO 3,1
+*--------------------------------------
+* int socket(int socket_family, int socket_type, int protocol);
+*--------------------------------------
+Socket			jsr SKT.New
+				bcs .9
+
+				>STYA pSKT
+
+				ldy #2					socket_type
+				jsr K.GetStkYW
+
+				tya
+
+				ldy #S.FD.SOCK.T
+				sta (pSKT),y
+
+				tax
+				jmp (J.Socket,x)
+
+.9				rts
+*--------------------------------------
+Socket_RAW		lda #S.FD.T.DSOCK
+				sta (pSKT)				#S.FD.T
+
+				ldy #0					protocol
+				jsr K.GetStkYW
+				tya
+				bra Socket_Q
+*--------------------------------------
+Socket_DGRAM	lda #S.FD.T.DSOCK
+				sta (pSKT)				#S.FD.T
+
+				lda #S.IP.PROTOCOL.UDP
+				bra Socket_Q
+*--------------------------------------
+Socket_SEQPACKET
+				lda #S.FD.T.DSOCK
+				sta (pSKT)				#S.FD.T
+
+				lda #S.IP.PROTOCOL.TCP
+
+Socket_Q		ldy #S.FD.SOCK.P
+				sta (pSKT),y
+
+				lda #S.SKT.IN.Q
+
+				ldy #S.SKT.IN.QTAIL
+				sta (pSKT),y
+				iny						#S.SKT.IN.QHEAD
+				sta (pSKT),y
+
+				ldy hSKT
+				lda #0
+
+				clc
+				rts
+*--------------------------------------
+Socket_STREAM	lda #S.FD.T.SSOCK
+				sta (pSKT)				#S.FD.T
+
+				lda #S.IP.PROTOCOL.TCP
+				ldy #S.FD.SOCK.P
+				sta (pSKT),y
+
+				ldy hSKT
+				lda #0
+
+				clc
+				rts
+*--------------------------------------
+* int bind(int socket, const struct sockaddr *address, socklen_t address_len)
+*--------------------------------------
+Bind			>LDYA pFD				socket
+				>STYA pSKT
+
+				ldy #2					address
+				jsr SKT.GetLocalAddrY
+				bcs .99
+
+				lda SA.LOCAL+S.SA.IN.PORT
+				ora SA.LOCAL+S.SA.IN.PORT+1
+				bne .3
+
+				jsr SKT.GetDynPort
+
+				>STAX SA.LOCAL+S.SA.IN.PORT
+
+.3				ldx #0
+
+.4				lda pFDs+1,x
+				beq .7
+
+				sta pFD+1
+				lda pFDs,x
+				sta pFD
+
+				lda (pFD)				#S.FD.T
+				cmp #S.FD.T.DSOCK
+				beq .5
+
+				cmp #S.FD.T.SSOCK
+				bne .7
+
+.5				ldy #S.FD.SOCK.AF
+				lda (pFD),y
+				cmp #AF_INET
+				bne .7
+
+				ldy #S.SKT.IN.LOC.ADDR
+
+.6				lda (pFD),y
+				cmp SA.LOCAL+S.SA.IN.ADDR-S.SKT.IN.LOC.ADDR,y
+				bne .7
+
+				iny
+				cpy #S.SKT.IN.LOC.PORT+2
+				bcc .6
+
+				lda #SKT.E.BUSY
+*				sec
+				rts
+
+.7				inx
+				inx
+
+				cpx #K.FD.MAX*2
+				bcc .4
+
+				jmp SKT.SetLocAddr
+
+.99				rts
+*--------------------------------------
+* int connect(int socket, const struct sockaddr *address, socklen_t address_len);
+*--------------------------------------
+Connect			ldy #4					socket
+				jsr SKT.GetpSKT
+				bcs .99
+
+				ldy #2
+				jsr SKT.GetRemoteAddrY
+				bcs .99
+
+				ldy #S.FD.SOCK.T
+				lda (pSKT),y
+				tax
+				jmp (J.Connect,x)
+
+.99				rts
+*--------------------------------------
+Connect_RAW
+Connect_DGRAM	jmp SKT.SetRemAddr
+*--------------------------------------
+Connect_SEQPACKET
+Connect_STREAM
+				ldy #S.FD.SOCK.S
+				lda (pSKT),y
+				beq .1
+
+				cmp #S.SKT.IN.S.ESTBLSH
+				beq .8
+				bcs .98
+
+				cmp #S.SKT.IN.S.OPENED
+				beq .2
+
+				cmp #S.SKT.IN.S.SYNSENT
+				beq .98
+
+				lda #SKT.E.BAD
+				sec
+				rts
+
+.1				jsr SKT.SetRemAddr
+				jsr SKT.TCPInit
+				bcs .99
+
+				lda #S.SKT.IN.S.OPENED
+				jsr SKT.Update.S
+
+.2				lda #S.TCP.OPTIONS.SYN
+				jsr TCP.OUT.SendOptA	Send SYN
+				bcs .98
+
+				lda #S.SKT.IN.S.SYNSENT
+				jsr SKT.Update.S
+
+.98				lda #SKT.E.NOCONN
+				sec
+.99				rts
+
+.8				clc
+				rts
+*--------------------------------------
+* int listen(int socket, int backlog);
+*--------------------------------------
+Listen			ldy #S.FD.SOCK.T
+				lda (pFD),y
+				cmp #SOCK_SEQPACKET
+				bcc listen.9
+
+				ldy #S.FD.SOCK.S
+				lda (pFD),y
+				bne listen.9
+
+				lda #S.SKT.IN.S.LISTEN
+				sta (pFD),y
+
+				ldy #S.FD.SOCK.O
+				lda #S.SKT.IN.O.ACCEPTCONN
+				sta (pFD),y
+
+				lda #S.SKT.IN.Q
+
+				ldy #S.SKT.IN.QTAIL
+				sta (pSKT),y
+				iny						#S.SKT.IN.QHEAD
+				sta (pSKT),y
+
+				clc
+				rts
+
+listen.9		lda #SKT.E.BAD
+				sec
+				rts
+*--------------------------------------
+* int accept(int socket, struct sockaddr *restrict address, socklen_t *restrict address_len);
+*--------------------------------------
+Accept			ldy #S.FD.SOCK.O
+				lda (pFD),y
+				and #S.SKT.IN.O.ACCEPTCONN
+				beq listen.9
+*--------------------------------------
+SKT.GetFromQ	ldy #S.SKT.IN.QTAIL
+				lda (pFD),y
+				iny						#S.SKT.IN.QHEAD
+				cmp (pFD),y
+				beq .9					CS
+
+				tay
+
+				lda (pFD),y
+				tax
+				stx .8+1
+
+				iny
+				iny
+
+				tya
+				cmp #S.SKT.IN
+				bne .1
+
+				lda #S.SKT.IN.Q
+
+.1				ldy #S.SKT.IN.QTAIL
+				sta (pFD),y
+
+				lda pFDs,x
+				sta pFD
+				lda pFDs+1,x
+				sta pFD+1
+
+				jsr GetPeerName
+
+.8				ldy #$FF				SELF MODIFIED
+				lda #0
+
+				clc
+				rts
+
+.9				lda #E.NODATA
+				sec
+				rts
+*--------------------------------------
+SKT.AddFrameInToQ
+				>LDYA pFrameIn
+SKT.AddYAToQ	pha
+				phy
+
+				ldy #S.SKT.IN.QHEAD
+				lda (pSKT),y
+
+				tax
+
+				inc
+				inc
+				cmp #S.SKT.IN
+				bne .1
+
+				lda #S.SKT.IN.Q
+
+.1				dey						#S.SKT.IN.QTAIL
+				cmp (pSKT),y
+				beq .9					Queue full!!
+
+				iny						#S.SKT.IN.QHEAD
+				sta (pSKT),y
+
+				txa
+				tay
+
+				pla
+				sta (pSKT),y
+				iny
+				pla
+				sta (pSKT),y
+				clc
+				rts
+
+.9				pla						dicard pFrame
+				pla
+*				sec
+				rts
+*--------------------------------------
+* int shutdown(int socket, int how);
+*--------------------------------------
+Shutdown		ldy #S.FD.SOCK.O
+				lda (pFD),y
+				and #S.SKT.IN.O.ACCEPTCONN
+				bne .1
+
+				ldy #S.FD.SOCK.T
+				lda (pFD),y
+				cmp #SOCK_SEQPACKET
+				bcc .7
+
+				bne .2					SOCK_STREAM
+
+.1				jsr Shutdown_EQ
+
+.2				ldy #S.FD.SOCK.S
+				lda (pFD),y
+				cmp #S.SKT.IN.S.CLWAIT
+				bne .3
+
+				lda #S.SKT.IN.S.TIMEWT
+				sta (pFD),y
+				clc
+				rts
+*--------------------------------------
+.3				jsr SKT.Get
+				ldy #S.FD.SOCK.S
+				lda (pSKT),y
+
+				cmp #S.SKT.IN.S.ESTBLSH
+				bne .4
+
+				jsr TCP.OUT.SendFINACK
+
+				lda #S.SKT.IN.S.FINWT1
+				jmp SKT.Update.S
+
+.4				cmp #S.SKT.IN.S.FINWT2
+				bne .5
+
+				jsr TCP.OUT.SendFINACK
+
+				lda #S.SKT.IN.S.LASTACK
+				jmp SKT.Update.S
+
+.5				lda #S.TCP.OPTIONS.RST
+				jsr TCP.OUT.SendOptA	Send RST
+
+				lda #S.SKT.IN.S.TIMEWT
+				jmp SKT.Update.S
+
+.7				jsr Shutdown_EQ
+
+				ldy #2					socket
+
+				jsr K.GetStkYW
+
+				tya
+				tax
+*--------------------------------------
+SKT.FreeX		>LDYA pFDs,x
+				stz pFDs+1,x
+				>DAPI KFree
+				rts
+*--------------------------------------
+Shutdown_EQ		jsr SKT.GetFromQ		SOCK_SEQPACKET
+				bcs .8
+
+				>DAPI KFree
+				bra Shutdown_EQ
+
+.8				rts
+*--------------------------------------
+RecvMsg
+
+				clc
+				rts
+*--------------------------------------
+RecvFrom
+
+				clc
+				rts
+*--------------------------------------
+* ssize_t recv(int socket, void *buffer, size_t length, int flags);
+*--------------------------------------
+Recv			ldy #2					length
+				jsr K.GetStkYW
+				>STYA A4
+
+				ora A4
+				bne .1
+
+				ldy #S.FD.SOCK.T
+				lda (pFD),y
+				tax
+				jmp (J.EOF,x)
+*--------------------------------------
+.1				>LDYA pFD				socket
+				>STYA pSKT
+
+				ldy #4					buffer
+				jsr K.GetStkYW
+				>STYA A2
+
+				ldy #S.FD.SOCK.T
+				lda (pSKT),y
+				tax
+				jmp (J.Recv,x)
+*--------------------------------------
+EOF_RAW
+EOF_DGRAM
+EOF_SEQPACKET
+				bra *
+*--------------------------------------
+EOF_STREAM		ldy #S.SKT.IN.INUSED
+				lda (pFD),y
+				iny
+				ora (pFD),y
+				beq EOF_TRUE
+
+				lda #0
+				tay						FALSE : exit with int=0
+				clc
+				rts
+
+EOF_TRUE		tay						TRUE : exit with int=1
+				iny
+				clc
+				rts
+*--------------------------------------
+Recv_RAW
+Recv_DGRAM
+Recv_SEQPACKET
+
+				jsr SKT.GetFromQ
+				bcs .9
+
+				>STYA A1
+				>STYA A3				for KFree
+
+				ldy #S.IP.PROTOCOL
+				lda (A1),y
+				cmp #S.IP.PROTOCOL.ICMP
+				bne .1
+
+				ldy #S.IP.TOTAL.LENGTH+1
+				lda (A1),y
+				iny
+				sec
+				sbc #S.IP
+				sta A4
+				dey
+				lda (A1),y
+				sbc /S.IP
+				sta A4+1
+
+				lda #S.IP
+				bra .5
+*--------------------------------------
+.1				cmp #S.IP.PROTOCOL.UDP
+				bne .2
+
+				ldy #S.UDP.LENGTH+1
+				lda (A1),y
+				sta A4
+				dey
+				lda (A1),y
+				sta A4+1
+
+				lda #S.UDP
+				bra .5
+*--------------------------------------
+.2				ldy #S.IP.TOTAL.LENGTH+1
+				lda (A1),y
+				iny
+				sec
+				sbc #S.ETH.EII
+				sta A4
+				dey
+				lda (A1),y
+				sbc /S.ETH.EII
+				sta A4+1
+
+				lda #S.ETH.EII
+*--------------------------------------
+.5				clc
+				adc A1
+				sta A1
+				bcc .6
+
+				inc A1+1
+
+.6				ldy #2					length
+				jsr K.GetStkYW
+
+				cpy A4
+				pha
+				sbc A4+1
+				pla
+				bcs .7
+
+				>STYA A4
+
+.7				sta IO.SETWRITEAUX
+				>DAPI MemCpy
+				sta IO.CLRWRITEAUX
+
+				>LDYA A3
+				>DAPI KFree
+
+				>LDYA A4
+
+				clc
+
+.9				rts
+*--------------------------------------
+Recv_STREAM		jsr SKT.Get
+
+				lda SKT.CACHE+S.SKT.IN.INUSED
+				ora SKT.CACHE+S.SKT.IN.INUSED+1
+				bne .1
+
+				jsr SKT.CheckStream
+				bcs .9					I/O error
+
+				lda #E.NODATA
+				sec
+.9				rts
+
+.1				>LDYA SKT.CACHE+S.SKT.IN.INUSED
+
+				cpy A4
+				pha
+				sbc A4+1
+				pla
+				bcs .2					more data in pipe, get full buffer of data
+
+				>STYA A4				less data than INUSED, Get only INUSED data
+
+.2				>LDYA A4
+				phy
+				pha
+				jsr SKT.GetDataFromSktIn
+				pla
+				ply
+				>STYA A4
+
+				ldx #S.SKT.IN.INFREE
+				jsr SKT.AddA4AtSktX
+
+				ldx #S.SKT.IN.INUSED
+				jsr SKT.SubA4AtSktX
+
+				lda A4
+				ldy A4+1
+				ldx #S.SKT.IN.INACKNUM
+				jsr TCP.AddAYToSktCacheAtX
+
+				jsr SKT.Update
+
+				lda #S.TCP.OPTIONS.ACK
+				jsr SKT.SetTCPOPT
+
+				>LDYA A4
+
+				clc
+				rts
+*--------------------------------------
+* ssize_t sendmsg(int, const struct msghdr *, int);
+*--------------------------------------
+SendMsg
+
+				clc
+				rts
+*--------------------------------------
+* ssize_t send(int socket, const void *message, size_t length, int flags);
+*--------------------------------------
+Send			>LDYA pFD				socket
+				>STYA pSKT
+
+				jsr SKT.GetRemAddr		Get remote address from Socket
+
+				ldy #S.FD.SOCK.T
+				lda (pSKT),y
+
+				tax
+
+				ldy #2					length
+				jsr K.GetStkYW
+				>STYA A4
+
+				ldy #4					message
+				jsr K.GetStkYW
+				>STYA A1
+
+				jmp (J.Send,x)
+*--------------------------------------
+* ssize_t sendto(int socket, const void *message, size_t length, int flags, const struct sockaddr *dest_addr, socklen_t dest_len);
+*--------------------------------------
+SendTo			>LDYA pFD				socket
+				>STYA pSKT
+
+				ldy #S.FD.SOCK.T
+				lda (pSKT),y
+				cmp #SOCK_SEQPACKET
+				bcs .98
+
+				tax
+
+				ldy #2					dest_addr
+				jsr SKT.GetRemoteAddrY
+				bcs .99
+
+				ldy #8					message
+				jsr K.GetStkYW
+				>STYA A1
+
+				ldy #6					length
+				jsr K.GetStkYW
+				>STYA A4
+
+				jmp (J.Send,x)
+
+.98				lda #E.INVH
+
+*				sec
+
+.99				rts
+*--------------------------------------
+Send_RAW		ldy #S.FD.SOCK.P
+				lda (pSKT),y
+				tax
+
+				jsr FRM.NewIP
+				bcs .9
+
+				jsr SKT.SetFrameOutSrcIP
+				jsr SKT.SetFrameOutDstIP
+
+				>DAPI MemCpyX2M
+
+				clc						Queue if fail
+
+				jmp FRM.SendIP
+
+.9				rts
+*--------------------------------------
+Send_DGRAM		ldx #S.IP.PROTOCOL.UDP
+
+				jsr FRM.NewIP
+				bcs .9
+
+				jsr SKT.SetFrameOutTCPUDPPorts
+
+				jsr SKT.SetFrameOutSrcIP
+				jsr SKT.SetFrameOutDstIP
+
+				>DAPI MemCpyX2M
+
+				clc						Queue if fail
+
+				jmp FRM.SendIP
+
+.9				rts
+*--------------------------------------
+Send_SEQPACKET	jsr SKT.CheckTCP
+				bcs .9
+
+				jsr TCP.OUT.NewFrame	will setup A2 to Data
+				bcs .9
+
+				>DAPI MemCpyX2M
+
+				jsr SKT.Get
+
+				jmp TCP.OUT.SEQSEND
+
+.9				rts
+*--------------------------------------
+Send_STREAM		jsr SKT.CheckStream
+				bcs .99
+
+				jsr SKT.Get
+
+				ldx SKT.CACHE+S.SKT.IN.OUTFREE
+				cpx A4
+				lda SKT.CACHE+S.SKT.IN.OUTFREE+1
+				sbc A4+1
+				bcc .9
+
+				lda A4
+				pha
+				lda A4+1
+				pha
+
+				jsr SKT.AddDataToSktOut
+
+				pla
+				sta A4+1
+				pla
+				sta A4
+
+				ldx #S.SKT.IN.OUTFREE
+				jsr SKT.SubA4AtSktX
+
+				ldx #S.SKT.IN.OUTUSED
+				jsr SKT.AddA4AtSktX
+
+				ldx #S.SKT.IN.OUTTOSEND
+				jsr SKT.AddA4AtSktX
+
+				jsr SKT.Update
+
+				>LDYA A4
+				clc
+				rts
+
+.9				lda #E.NODATA			Not enough room in Q,no data transfered
+				sec
+.99				rts
+*--------------------------------------
+* int getPeername(int socket, struct sockaddr *restrict address, socklen_t *restrict address_len);
+*--------------------------------------
+GetPeerName		lda #S.SKT.IN.REM.ADDR-2
+				bra SKT.GetName
+*--------------------------------------
+* int getsockname(int socket, struct sockaddr *restrict address, socklen_t *restrict address_len);
+*--------------------------------------
+GetSockName		lda #S.SKT.IN.LOC.ADDR-2
+
+SKT.GetName		clc
+				adc pFD
+				sta A1
+
+				lda pFD+1
+				adc #0
+				sta A1+1
+
+				ldy #2					sockaddr
+				jsr K.GetStkYW
+				>STYA A2
+
+				sta IO.SETWRITEAUX
+
+				lda #AF_INET
+				sta (A2)
+				ldy #1
+
+				lda #0
+				sta (A2),y
+
+.1				iny
+				lda (A1),y
+				sta (A2),y
+				cpy #7
+				bcc .1
+
+				sta IO.CLRWRITEAUX
+
+				clc
+				rts
+*--------------------------------------
+GetSockOpt
+
+				clc
+				rts
+*--------------------------------------
+SetSockOpt
+
+				clc
+				rts
+*--------------------------------------
+SKT.New			ldx #0
+
+.1				lda pFDs+1,x
+				beq .2
+
+				inx
+				inx
+				cpx #K.FD.MAX*2
+				bcc .1
+
+				lda #E.OOH
+
+*				sec
+				rts
+
+.2				stx hSKT
+
+				>LDYAI S.SKT.IN
+				>DAPI KMalloc
+				bcs .9
+
+				>STYA ZPPtr1
+
+				ldx hSKT
+
+				>STYA pFDs,x
+
+				ldy #S.SKT.IN-1
+				lda #0
+
+.3				sta (ZPPtr1),y
+				dey
+				bne .3
+
+				lda #AF_INET
+				ldy #S.FD.SOCK.AF
+				sta (ZPPtr1),y
+
+				>LDYA ZPPtr1
+
+*				clc
+
+.9				rts
+*--------------------------------------
+SKT.GetpSKT		jsr K.GetStkYW
+				tax
+				bne .9
+
+				lda pFDs+1,y
+				beq .9
+
+				sta pSKT+1
+				lda pFDs,y
+				sta pSKT
+
+				lda (pSKT)				#S.FD.T
+				cmp #S.FD.T.DSOCK
+				beq .1
+
+				cmp #S.FD.T.SSOCK
+				bne .9
+
+.1				ldy #S.FD.SOCK.AF
+				lda (pSKT),y
+
+				cmp #AF_INET
+				bne .9
+
+				clc
+				rts
+
+.9				lda #E.INVH
+				sec
+				rts
+*--------------------------------------
+SKT.GetLocalAddrY
+				jsr K.GetStkYW
+
+				>STYA TXTPTR
+
+				ldy #0
+
+.1				jsr A2osX.GetTXTPTR
+				>INCW TXTPTR
+				sta SA.LOCAL,y
+				iny
+				cpy #S.SA.IN
+				bcc .1
+
+				lda SA.LOCAL+S.SA.IN.AF
+				eor #AF_INET
+				beq .8
+
+				lda #E.INVH
+
+*				sec
+
+				rts
+
+.8				clc
+				rts
+*--------------------------------------
+SKT.GetRemoteAddrY
+				jsr K.GetStkYW
+
+				>STYA TXTPTR
+SKT.GetRemoteAddrTXTPTR
+				ldy #0
+
+.1				jsr A2osX.GetTXTPTR
+				>INCW TXTPTR
+				sta SA.REMOTE,y
+				iny
+				cpy #S.SA.IN
+				bcc .1
+
+				lda SA.REMOTE+S.SA.IN.AF
+				eor #AF_INET
+				beq .8
+
+				lda #E.INVH
+
+*				sec
+
+				rts
+
+.8				clc
+				rts
+*--------------------------------------
+SKT.SetLocAddr	ldy #S.SKT.IN.LOC.PORT+1
+
+.1				lda SA.LOCAL+S.SA.IN.ADDR-S.SKT.IN.LOC.ADDR,y
+				sta (pSKT),y
+				dey
+				cpy #S.SKT.IN.LOC.ADDR
+				bcs .1
+
+*				clc
+
+				rts
+*--------------------------------------
+SKT.GetRemAddr	ldy #S.SKT.IN.REM.PORT+1
+
+.1				lda (pSKT),y
+				sta SA.REMOTE+S.SA.IN.ADDR-S.SKT.IN.REM.ADDR,y
+				dey
+				cpy #S.SKT.IN.REM.ADDR
+				bcs .1
+
+*				clc
+
+				rts
+*--------------------------------------
+SKT.SetRemAddr	ldy #S.SKT.IN.REM.PORT+1
+
+.1				lda SA.REMOTE+S.SA.IN.ADDR-S.SKT.IN.REM.ADDR,y
+				sta (pSKT),y
+				dey
+				cpy #S.SKT.IN.REM.ADDR
+				bcs .1
+
+*				clc
+
+				rts
+*--------------------------------------
+*  FRM.SA.SRC = Incoming Frame SRC
+*  FRM.SA.DST = Incoming Frame DST
+*--------------------------------------
+SKT.Find		ldx #0
+
+.1				lda pFDs+1,x
+				beq .8
+
+				ldy pFDs,x
+
+				>STYA pSKT
+
+				ldy #S.FD.SOCK.AF
+				lda (pSKT),y
+				cmp #AF_INET
+				bne .8
+
+				ldy #S.FD.SOCK.P
+				lda (pSKT),y
+
+				ldy #S.IP.PROTOCOL
+				cmp (pFrameIn),y
+				bne .8
+
+				ldy #S.SKT.IN.LOC.ADDR
+
+.2				lda (pSKT),y			local is 0.0.0.0 ?
+				bne .4
+
+				ldy #S.SKT.IN.LOC.PORT	bound to 0.0.0.0,check only LOC port
+
+.3				lda (pSKT),y
+
+.4				cmp FRM.SA.DST+S.SA.IN.ADDR-S.SKT.IN.LOC.ADDR,y
+				bne .8
+
+				iny
+				cpy #S.SKT.IN.LOC.PORT+2
+				bne .3
+
+				ldy #S.FD.SOCK.O
+				lda (pSKT),y
+				and #S.SKT.IN.O.ACCEPTCONN
+				beq .6
+
+				ldy #S.TCP.OPTIONS		Listening, only SYN packet....
+				lda (pFrameIn),y
+				cmp #S.TCP.OPTIONS.SYN
+				beq .7					SYN received on a LISTEN socket, ok
+
+				bne .8					bad packet for this listening
+
+.6				lda FRM.SA.DST+S.SA.IN.ADDR
+
+				cmp #$ff				incoming frame Dst is FF.FF.FF.FF, Broadcast ?
+				bne .41
+
+				bra .43
+
+*				ldy #S.FD.SOCK.O
+				lda (pSKT),y
+				and #S.SKT.IN.O.BROADCAST
+				bne .43
+*				sec
+				rts						this socket does not accept broadcast
+
+.41				ldy #S.SKT.IN.REM.ADDR
+
+				lda (pSKT),y
+				bne .44
+
+.43				ldy #S.SKT.IN.REM.PORT	Frame is Broadcast, or listening is 0.0.0.0 check port only
+
+.42				lda (pSKT),y
+
+.44				cmp FRM.SA.SRC+S.SA.IN.ADDR-S.SKT.IN.REM.ADDR,y
+				bne .8					wrong remote host, exit....
+
+				iny
+				cpy #S.SKT.IN.REM.PORT+2
+				bne .42
+
+.7				clc						x = hFD
+				rts
+
+.8				inx
+				inx
+				cpx #K.FD.MAX*2
+				bcc .1
+
+*				sec
+				rts
+*--------------------------------------
+SKT.TCPInit		ldx #S.SKT.IN.INSEQNUM
+
+.1				stz SKT.CACHE,x
+				inx
+				cpx #S.SKT.IN
+				bne .1
+
+				ldx #3
+
+.2				lda A2osX.T16,x
+				sta SKT.CACHE+S.SKT.IN.OUTNEXTSEQ,x
+				dex
+				bpl .2
+
+				ldy #S.FD.SOCK.T
+				lda (pSKT),y
+				cmp #SOCK_SEQPACKET
+				bcc .8
+
+				tax
+
+				>LDYAI K.TCP.WSIZE
+				>STYA SKT.CACHE+S.SKT.IN.INFREE
+
+				cpx #SOCK_STREAM
+				bcc .8
+
+				lda A2osX.ActBnk
+				ldy #S.SKT.IN.BNK
+				sta (pSKT),y
+
+				>DAPI Malloc
+				bcs .99
+
+				>STYA SKT.CACHE+S.SKT.IN.pIN
+				pha
+				tya
+
+*				clc
+				adc #K.TCP.WSIZE
+				sta SKT.CACHE+S.SKT.IN.pINH
+				pla
+				adc /K.TCP.WSIZE
+				sta SKT.CACHE+S.SKT.IN.pINH+1
+
+				>LDYAI K.TCP.WSIZE
+				>STYA SKT.CACHE+S.SKT.IN.OUTFREE
+
+				>DAPI Malloc
+				bcs .98
+
+				>STYA SKT.CACHE+S.SKT.IN.pOUT
+				pha
+				tya
+
+*				clc
+				adc #K.TCP.WSIZE
+				sta SKT.CACHE+S.SKT.IN.pOUTH
+				pla
+				adc /K.TCP.WSIZE
+				iny
+				sta SKT.CACHE+S.SKT.IN.pOUTH+1
+
+.8
+*				clc
+				rts
+
+.98				pha
+				>LDYA SKT.CACHE+S.SKT.IN.pIN
+				>DAPI Free
+				pla
+				sec
+
+.99				rts
+*--------------------------------------
+SKT.Get		 	ldy #S.SKT.IN.INSEQNUM
+
+.1				lda (pSKT),y
+				sta SKT.CACHE,y
+				iny
+				cpy #S.SKT.IN
+				bcc .1
+
+				rts
+*--------------------------------------
+SKT.Update.S	ldy #S.FD.SOCK.S
+				sta (pSKT),y
+
+SKT.Update	 	ldy #S.SKT.IN.INSEQNUM
+
+.1				lda SKT.CACHE,y
+				sta (pSKT),y
+				iny
+				cpy #S.SKT.IN
+				bcc .1
+
+				clc
+				rts
+*--------------------------------------
+SKT.SetTCPOPT	ldy #S.SKT.IN.TCPOPT
+				ora (pSKT),y
+				sta (pSKT),y
+				rts
+*--------------------------------------
+SKT.CheckStream	ldy #S.FD.SOCK.T
+				lda (pSKT),y
+				cmp #SOCK_STREAM
+
+				bne SKT.BAD
+
+SKT.CheckTCP	ldy #S.FD.SOCK.O
+				lda (pSKT),y
+				and #S.SKT.IN.O.ACCEPTCONN
+				bne SKT.BAD
+
+				ldy #S.FD.SOCK.S
+				lda (pSKT),y
+				cmp #S.SKT.IN.S.ESTBLSH
+				beq .8
+
+				bcc .9
+
+				lda #MLI.E.IO
+*				sec
+				rts
+
+.8				lda #0
+				clc
+				rts
+
+.9				lda #SKT.E.NOCONN
+				sec
+				rts
+
+SKT.BAD			lda #SKT.E.BAD
+				sec
+				rts
+*--------------------------------------
+SKT.SetFrameOutTCPUDPPorts
+				ldy #S.SKT.IN.LOC.PORT
+				lda (pSKT),y
+				tax
+				iny
+				lda (pSKT),y
+
+				ldy #S.UDP.SRCPORT
+				sta (pFrameOut),y
+				iny
+				txa
+				sta (pFrameOut),y
+
+				ldy #S.SKT.IN.REM.PORT
+				lda (pSKT),y
+				tax
+				iny
+				ora (pSKT),y
+				beq .1
+
+				lda (pSKT),y
+				bra .2
+
+.1				lda SA.REMOTE+S.SA.IN.PORT+1
+				ldx SA.REMOTE+S.SA.IN.PORT
+
+.2 				ldy #S.UDP.DSTPORT
+				sta (pFrameOut),y
+				iny
+				txa
+				sta (pFrameOut),y
+
+				rts
+*--------------------------------------
+SKT.SetFrameOutSrcIP
+				ldy #S.SKT.IN.LOC.ADDR
+				lda (pSKT),y
+*				beq .8					Socket Bound to 0.0.0.0...
+
+				ldx #3
+
+.1				pha
+				iny
+				lda (pSKT),y
+				dex
+				bne .1
+
+				ldy #S.IP.SRC+3
+				sta (pFrameOut),y
+
+				ldx #3
+
+.2				dey
+				pla
+				sta (pFrameOut),y
+				dex
+				bne .2
+
+.8				rts
+*--------------------------------------
+SKT.SetFrameOutDstIP
+				ldx #3
+
+				ldy #S.SKT.IN.REM.ADDR
+				lda (pSKT),y
+				beq .3					Socket Connected to 0.0.0.0...
+
+.1				pha
+				iny
+				lda (pSKT),y
+				dex
+				bne .1
+
+				ldy #S.IP.DST+3
+				sta (pFrameOut),y
+
+				ldx #3
+
+.2				dey
+				pla
+				sta (pFrameOut),y
+				dex
+				bne .2
+
+				rts
+*--------------------------------------
+.3				ldy #S.IP.DST+3			...sent to provided SentTo ADDR
+
+.4				lda SA.REMOTE+S.SA.IN.ADDR,x
+				sta (pFrameOut),y
+				dey
+				dex
+				bpl .4
+
+				rts
+*--------------------------------------
+SKT.GetDynPort	inc DYNPORT.LAST
+				bne .1
+
+				inc DYNPORT.LAST+1
+				lda DYNPORT.LAST
+				cmp #K.DYNPORT.END
+				lda DYNPORT.LAST+1
+				sbc /K.DYNPORT.END
+				bcs .1
+
+				lda #K.DYNPORT.START
+				ldx /K.DYNPORT.START
+				sta DYNPORT.LAST
+				stx DYNPORT.LAST+1
+				rts
+
+.1				lda DYNPORT.LAST
+				ldx DYNPORT.LAST+1
+				rts
+*--------------------------------------
+* From Recv SOCK_STREAM
+*  Src : A1 = S.SKT.IN.pIN/INTAIL (AUX PIPE)
+*  Dst : A2 = User Buffer
+*  Len : A4 = User Buffer Len
+* Out:
+*  Y,A = bytes read
+*--------------------------------------
+SKT.GetDataFromSktIn
+				clc
+				lda SKT.CACHE+S.SKT.IN.pIN
+				adc SKT.CACHE+S.SKT.IN.INTAIL
+				sta A1
+
+				lda SKT.CACHE+S.SKT.IN.pIN+1
+				adc SKT.CACHE+S.SKT.IN.INTAIL+1
+				sta A1+1
+
+				clc
+				lda A1
+				adc A4
+				sta A3
+
+				lda A1+1
+				adc A4+1
+				sta A3+1				A3 = pIN+INTAIL+A4
+
+				sec
+				lda A3
+				sbc SKT.CACHE+S.SKT.IN.pINH
+				sta A3
+
+				lda A3+1
+				sbc SKT.CACHE+S.SKT.IN.pINH+1
+				sta A3+1			A3 = Extra data after pINH
+				bcc .8				no extra...
+
+*				sec
+				lda A4
+				sbc A3
+				sta A4
+
+				lda A4+1
+				sbc A3+1
+				sta A4+1
+
+				>DAPI MemCpyX2X
+
+				stz SKT.CACHE+S.SKT.IN.INTAIL
+				stz SKT.CACHE+S.SKT.IN.INTAIL+1
+
+				>LDYA SKT.CACHE+S.SKT.IN.pIN
+				>STYA A1
+
+				clc
+				lda A2
+				adc A4
+				sta A2
+
+				lda A2+1
+				adc A4+1
+				sta A2+1
+
+				>LDYA A3
+				>STYA A4
+
+.8				>DAPI MemCpyX2X
+
+				ldx #S.SKT.IN.INTAIL
+				jmp SKT.AddA4AtSktX
+*--------------------------------------
+* From TCP.IN (STREAM)
+*  Src : A1 = Data from FrameIn
+*  Len : A4
+*
+*  Dst : A2 = S.SKT.IN.pIN+INHEAD (AUX PIPE)
+*--------------------------------------
+SKT.AddDataToSktIn
+				sec
+				lda SKT.CACHE+S.SKT.IN.INFREE
+				sbc A4
+				tax
+				lda SKT.CACHE+S.SKT.IN.INFREE+1
+				sbc A4+1
+				bcs .1
+
+				sec					Not enough room in PIPE
+				rts
+
+.1				stx SKT.CACHE+S.SKT.IN.INFREE
+				sta SKT.CACHE+S.SKT.IN.INFREE+1
+
+				ldx #S.SKT.IN.INUSED
+				jsr SKT.AddA4AtSktX
+
+				lda A2osX.ActBnk
+				pha
+
+				ldy #S.SKT.IN.BNK
+				lda (pSKT),y
+				sta (pRWReg)
+
+				clc
+				lda SKT.CACHE+S.SKT.IN.pIN
+				adc SKT.CACHE+S.SKT.IN.INHEAD
+				sta A2
+
+				lda SKT.CACHE+S.SKT.IN.pIN+1
+				adc SKT.CACHE+S.SKT.IN.INHEAD+1
+				sta A2+1
+
+				clc
+				lda A2
+				adc A4
+				sta A3
+
+				lda A2+1
+				adc A4+1
+				sta A3+1			A3 = pIN+INHEAD+A4
+
+				sec
+				lda A3
+				sbc SKT.CACHE+S.SKT.IN.pINH
+				sta A3
+
+				lda A3+1
+				sbc SKT.CACHE+S.SKT.IN.pINH+1
+				sta A3+1			A3 = Extra data after pINH
+				bcc .8				no extra...
+
+*				sec
+				lda A4
+				sbc A3
+				sta A4
+
+				lda A4+1
+				sbc A3+1
+				sta A4+1
+
+				sta IO.SETWRITEAUX
+				>DAPI MemCpy
+				sta IO.CLRWRITEAUX
+
+				stz SKT.CACHE+S.SKT.IN.INHEAD
+				stz SKT.CACHE+S.SKT.IN.INHEAD+1
+
+				clc
+				lda A1
+				adc A4
+				sta A1
+
+				lda A1+1
+				adc A4+1
+				sta A1+1
+
+				>LDYA SKT.CACHE+S.SKT.IN.pIN
+				>STYA A2
+
+				>LDYA A3
+				>STYA A4
+
+.8				sta IO.SETWRITEAUX
+				>DAPI MemCpy
+				sta IO.CLRWRITEAUX
+
+				pla
+				sta (pRWReg)
+
+				ldx #S.SKT.IN.INHEAD
+				jmp SKT.AddA4AtSktX
+*--------------------------------------
+* From Send_STREAM
+* Src : A1 = User Buffer
+* Len : A4
+* Dst : A2 = S.SKT.IN.pOUT+OUTHEAD (AUX PIPE)
+*--------------------------------------
+SKT.AddDataToSktOut
+				clc
+				lda SKT.CACHE+S.SKT.IN.pOUT
+				adc SKT.CACHE+S.SKT.IN.OUTHEAD
+				sta A2
+
+				lda SKT.CACHE+S.SKT.IN.pOUT+1
+				adc SKT.CACHE+S.SKT.IN.OUTHEAD+1
+				sta A2+1
+
+				clc
+				lda A2
+				adc A4
+				sta A3
+
+				lda A2+1
+				adc A4+1
+				sta A3+1			A3 = pOUT+OUTHEAD+A4
+
+				sec
+				lda A3
+				sbc SKT.CACHE+S.SKT.IN.pOUTH
+				sta A3
+
+				lda A3+1
+				sbc SKT.CACHE+S.SKT.IN.pOUTH+1
+				sta A3+1			A3 = Extra data after pOUTH
+				bcc .8				no extra...
+
+*				sec
+				lda A4
+				sbc A3
+				sta A4
+
+				lda A4+1
+				sbc A3+1
+				sta A4+1
+
+				>DAPI MemCpyX2X
+
+				stz SKT.CACHE+S.SKT.IN.OUTHEAD
+				stz SKT.CACHE+S.SKT.IN.OUTHEAD+1
+
+				clc
+				lda A1
+				adc A4
+				sta A1
+
+				lda A1+1
+				adc A4+1
+				sta A1+1
+
+				>LDYA SKT.CACHE+S.SKT.IN.pOUT
+				>STYA A2
+
+				>LDYA A3
+				>STYA A4
+
+.8				>DAPI MemCpyX2X
+
+				ldx #S.SKT.IN.OUTHEAD
+				jmp SKT.AddA4AtSktX
+*--------------------------------------
+* From TCP.OUT
+* Src : A1 = S.SKT.IN.pOUT+OUTTAILSENT (AUX PIPE)
+* Dst : A2 = pDataOut
+*--------------------------------------
+SKT.GetDataFromSktOut
+				lda A2osX.ActBnk
+				pha
+
+				ldy #S.SKT.IN.BNK
+				lda (pSKT),y
+				sta (pRWReg)
+
+				clc
+				lda SKT.CACHE+S.SKT.IN.pOUT
+				adc SKT.CACHE+S.SKT.IN.OUTTAILSENT
+				sta A1
+
+				lda SKT.CACHE+S.SKT.IN.pOUT+1
+				adc SKT.CACHE+S.SKT.IN.OUTTAILSENT+1
+				sta A1+1
+
+				clc
+				lda A1
+				adc A4
+				sta A3
+
+				lda A1+1
+				adc A4+1
+				sta A3+1				A3 = pOUT+OUTTAILSENT+A4
+
+				sec
+				lda A3
+				sbc SKT.CACHE+S.SKT.IN.pOUTH
+				sta A3
+
+				lda A3+1
+				sbc SKT.CACHE+S.SKT.IN.pOUTH+1
+				sta A3+1				A3 = Extra data after pOUTH
+				bcc .8					no extra...
+
+*				sec
+				lda A4
+				sbc A3
+				sta A4
+
+				lda A4+1
+				sbc A3+1
+				sta A4+1
+
+				>DAPI MemCpyX2M
+
+				stz SKT.CACHE+S.SKT.IN.OUTTAILSENT
+				stz SKT.CACHE+S.SKT.IN.OUTTAILSENT+1
+
+				>LDYA SKT.CACHE+S.SKT.IN.pOUTH
+				>STYA A1
+
+				clc
+				lda A2
+				adc A4
+				sta A2
+
+				lda A2+1
+				adc A4+1
+				sta A2+1
+
+				>LDYA A3
+				>STYA A4
+
+.8				>DAPI MemCpyX2M
+
+				pla
+				sta (pRWReg)
+
+				ldx #S.SKT.IN.OUTTAILSENT
+*				jmp SKT.AddA4AtSktX
+*--------------------------------------
+SKT.AddA4AtSktX	clc
+
+				lda SKT.CACHE,x
+				adc A4
+				sta SKT.CACHE,x
+
+				lda SKT.CACHE+1,x
+				adc A4+1
+				sta SKT.CACHE+1,x
+
+				rts
+*--------------------------------------
+SKT.SubA4AtSktX	sec
+
+				lda SKT.CACHE,x
+				sbc A4
+				sta SKT.CACHE,x
+
+				lda SKT.CACHE+1,x
+				sbc A4+1
+				sta SKT.CACHE+1,x
+
+				rts
+*--------------------------------------
+MAN
+SAVE usr/src/sys/km.inet.s.skt
+LOAD usr/src/sys/km.inet.s
+ASM

@@ -1,0 +1,450 @@
+NEW
+  AUTO 3,1
+*/--------------------------------------
+* # ARP.Clear
+*  Clear ARP Cache
+* ## ASM
+* ## RETURN VALUE
+*\--------------------------------------
+ARP.Clear		ldx #0
+
+.2				stz ARP.CACHE,x
+				inx
+				cpx #K.ARPCACHE.SIZE*S.ARPCACHE
+				bcc .2
+
+				clc
+				rts
+*/--------------------------------------
+* # ARP.Query
+*  Query ARP Cache and returns HW address
+* ## ASM
+*  PUSHW PTR to IP
+*  PUSHW PTR to MAC (to fill)
+* ## RETURN VALUE
+*  CC: hit: MAC filled
+*  CS: missed
+*\--------------------------------------
+ARP.Query		ldy #2					IP
+				jsr K.GetStkYW
+				>STYA TXTPTR
+
+
+
+
+
+
+				jsr ARP.QueryYA
+				bcs .9
+
+				ldy #0					MAC
+				jsr K.GetStkYW
+				>STYA TXTPTR
+
+				ldy #0
+
+				sta IO.SETWRITEAUX
+
+.2				lda ARP.CACHE+S.ARPCACHE.MAC,x
+				sta (TXTPTR),y
+				inx
+				iny
+				cpy #6
+				bcc .2
+
+				sta IO.CLRWRITEAUX
+
+				clc
+
+.9				rts
+*/--------------------------------------
+* # ARP.Add
+*  Add a static ARP cache record
+* ## ASM
+*  PUSHW PTR to IP
+*  PUSHW PTR to MAC
+*\--------------------------------------
+ARP.Add			ldy #2					IP
+				jsr K.GetStkYW
+				>STYA TXTPTR
+
+
+
+
+				jsr ARP.CacheLookupYA
+				bcc .1
+
+				jsr ARP.GetFreeCache
+
+.1				lda #S.ARPCACHE.S.RESOLVED+S.ARPCACHE.S.STATIC
+				sta ARP.CACHE+S.ARPCACHE.S,x
+
+				stz ARP.CACHE+S.ARPCACHE.TTL,x
+				stz ARP.CACHE+S.ARPCACHE.TTL+1,x
+
+				ldy #0					MAC
+				jsr K.GetStkYW
+
+				>STYA TXTPTR
+
+				ldy #6
+
+.5				jsr A2osX.GetTXTPTR
+				sta ARP.CACHE+S.ARPCACHE.MAC,x
+				>INCW TXTPTR
+				inx
+				dey
+				bne .5
+
+				clc
+				rts
+*/--------------------------------------
+* # ARP.GetCache
+*  Return a Ptr to ARP Cache Table
+* ## ASM
+* ## RETURN VALUE
+*   Y,A = PTR to ARP.CACHE
+*\--------------------------------------
+ARP.GetCache	>LDYAI K.ARPCACHE.SIZE*S.ARPCACHE
+				>DAPI Malloc
+				bcs .9
+
+				>STYA TXTPTR
+
+				ldy #0
+
+				sta IO.SETWRITEAUX
+
+.1				lda ARP.CACHE,y
+				sta (TXTPTR),y
+				iny
+				cpy #K.ARPCACHE.SIZE*S.ARPCACHE
+				bcc .1
+
+				sta IO.CLRWRITEAUX
+
+				>LDYA TXTPTR
+
+				clc
+
+.9				rts
+*--------------------------------------
+*				PRIVATE
+*--------------------------------------
+ARP.IN			ldy #S.ARP.TPA+3
+				ldx #3
+
+.1				lda (pFrameIn),y
+				sta TmpDWord,x
+				dey
+				dex
+				bpl .1
+
+				ldy #S.IPCFG.IP+3
+				ldx #3
+
+.2				lda (pIPCFG),y
+				cmp TmpDWord,x
+				bne .9
+
+				dey
+				dex
+				bpl .2
+
+				ldy #S.ARP.OPERATION+1	HI byte
+				lda (pFrameIn),y
+				cmp #S.ARP.OPERATION.REQ
+				beq ARP.IN.REQ
+
+				cmp #S.ARP.OPERATION.REP
+				beq ARP.IN.REP
+
+.9				jmp FRM.DiscardIn
+*--------------------------------------
+ARP.IN.REQ		ldy #S.ARP.SPA+3
+				ldx #3
+
+.1				lda (pFrameIn),y
+				sta ARP.REP.TPA,x
+				dey
+				dex
+				bpl .1
+
+				ldy #S.ARP.SHA+5
+				ldx #5
+
+.2				lda (pFrameIn),y
+				sta ARP.REP.DSTMAC,x
+				sta ARP.REP.THA,x
+				dey
+				dex
+				bpl .2
+
+				ldy #S.IPCFG.MAC+9		MAC+IP
+				ldx #9
+
+.3				lda (pIPCFG),y
+				sta ARP.REP.SHA,x
+				dey
+				dex
+				bpl .3
+
+				ldx hIFIn
+				>LDYA L.ARP.REP
+				jsr ARP.Send
+				jmp FRM.DiscardIn
+*--------------------------------------
+ARP.IN.REP		lda pFrameIn
+				clc
+				adc #S.ARP.SPA
+				tay
+				lda pFrameIn+1
+				adc /S.ARP.SPA
+
+				jsr ARP.CacheLookupYA
+				bcs .9
+
+				lda #S.ARPCACHE.S.RESOLVED
+				sta ARP.CACHE+S.ARPCACHE.S,x
+
+				lda #K.ARP.TTL
+				sta ARP.CACHE+S.ARPCACHE.TTL,x
+				lda /K.ARP.TTL
+				sta ARP.CACHE+S.ARPCACHE.TTL+1,x
+
+				ldy #S.ARP.SHA
+
+.1				lda (pFrameIn),y
+				sta ARP.CACHE+S.ARPCACHE.MAC,x
+				inx
+				iny
+				cpy #S.ARP.SHA+6
+				bcc .1
+
+.9				jmp FRM.DiscardIn
+*--------------------------------------
+* hIFOut & pPICFG already set
+*--------------------------------------
+ARP.QueryYA		>STYA .2+1				IP
+
+				jsr ARP.CacheLookupYA
+				bcs .1					send an ARP request
+
+				lda ARP.CACHE+S.ARPCACHE.S,x		get status...
+				bpl .9					Pending...
+
+				lda #K.ARP.TTL
+				sta ARP.CACHE+S.ARPCACHE.TTL,x
+				lda /K.ARP.TTL
+				sta ARP.CACHE+S.ARPCACHE.TTL+1,x
+
+				clc
+				rts
+*--------------------------------------
+.1				ldx #3
+
+.2				lda $FFFF,x				SELF MODIFIED
+				sta ARP.REQ.TPA,x
+				dex
+				bpl .2
+
+				ldy #S.IPCFG.MAC+9
+				ldx #9
+
+.3				lda (pIPCFG),y
+				sta ARP.REQ.SHA,x
+				dey
+				dex
+				bpl .3
+
+				ldx hIFOut
+				>LDYA L.ARP.REQ
+				jsr ARP.Send
+				bcs .99
+
+				jsr ARP.GetFreeCache
+
+				lda #S.ARPCACHE.S.PENDING
+				sta ARP.CACHE+S.ARPCACHE.S,x
+
+				lda #K.ARP.TTL
+				sta ARP.CACHE+S.ARPCACHE.TTL,x
+				lda /K.ARP.TTL
+				sta ARP.CACHE+S.ARPCACHE.TTL+1,x
+
+				ldy #0
+
+.7				lda ARP.REQ.TPA,y
+				sta ARP.CACHE+S.ARPCACHE.IP,x
+				inx
+				iny
+				cpy #4
+				bcc .7
+
+.9				lda #SKT.E.PENDING
+				sec
+.99				rts
+*--------------------------------------
+ARP.CacheLookupYA
+				>STYA .2+1				IP
+
+				ldx #0
+
+.1				phx
+				lda ARP.CACHE,x
+				beq .7
+
+				ldy #0
+
+.2				lda $ffff,y				SELF MODIFIED
+				cmp ARP.CACHE+S.ARPCACHE.IP,x
+				bne .7
+
+				inx
+				iny
+				cpy #4
+				bne .2
+
+				plx
+
+				clc
+				rts
+
+.7				pla
+				clc
+				adc #S.ARPCACHE
+				tax
+
+				cpx #K.ARPCACHE.SIZE*S.ARPCACHE
+				bcc .1
+
+*				sec
+
+				rts
+*--------------------------------------
+ARP.GetFreeCache
+				lda #$ff
+				sta ZPPtr1
+				sta ZPPtr1+1
+
+				ldx #0
+
+.1				lda ARP.CACHE+S.ARPCACHE.S,x
+				beq .8
+
+				bpl .6
+
+				lda ARP.CACHE+S.ARPCACHE.TTL,x
+				cmp ZPPtr1
+				lda ARP.CACHE+S.ARPCACHE.TTL+1,x
+				sbc ZPPtr1+1
+				bcc .6
+
+				lda ARP.CACHE+S.ARPCACHE.TTL,x
+				sta ZPPtr1
+				lda ARP.CACHE+S.ARPCACHE.TTL+1,x
+				sta ZPPtr1+1
+
+				stx .7+1				save lowest TTL slot ...
+
+.6				txa
+				clc
+				adc #S.ARPCACHE
+				tax
+
+				cpx #K.ARPCACHE.SIZE*S.ARPCACHE
+				bcc .1
+
+.7				ldx #$FF				SELF MODIFIED
+
+				stz ARP.CACHE+S.ARPCACHE.S,x
+
+.8				clc
+				rts
+*--------------------------------------
+ARP.Expire		ldx #0
+			rts
+.1				lda ARP.CACHE+S.ARPCACHE.S,x
+				beq .7
+
+				and #S.ARPCACHE.S.STATIC
+				bne .7
+
+				lda ARP.CACHE+S.ARPCACHE.TTL,x
+				bne .3
+
+				lda ARP.CACHE+S.ARPCACHE.TTL+1,x
+				bne .2
+
+				stz ARP.CACHE+S.ARPCACHE.S,x
+				bra .7
+
+.2				dec ARP.CACHE+S.ARPCACHE.TTL+1,x
+
+.3				dec ARP.CACHE+S.ARPCACHE.TTL,x
+
+.7				txa
+				clc
+				adc #S.ARPCACHE
+				tax
+
+				cpx #K.ARPCACHE.SIZE*S.ARPCACHE
+				bcc .1
+
+				rts
+*--------------------------------------
+ARP.AddFrompFrameIn
+				lda pFrameIn
+				clc
+				adc #S.IP.SRC
+				tay
+				lda pFrameIn+1
+				adc /S.IP.SRC
+
+				jsr ARP.CacheLookupYA
+				bcc .1
+
+				jsr ARP.GetFreeCache
+
+.1				lda #S.ARPCACHE.S.RESOLVED
+				sta ARP.CACHE+S.ARPCACHE.S,x
+
+				lda #K.ARP.TTL
+				sta ARP.CACHE+S.ARPCACHE.TTL,x
+				lda /K.ARP.TTL
+				sta ARP.CACHE+S.ARPCACHE.TTL+1,x
+
+				phx
+
+				ldy #S.IP.SRC
+
+.2				lda (pFrameIn),y
+				sta ARP.CACHE+S.ARPCACHE.IP,x
+				inx
+				iny
+				cpy #S.IP.SRC+4
+				bcc .2
+
+				plx
+
+				ldy #S.ETH.SRCMAC
+
+.3				lda (pFrameIn),y
+				sta ARP.CACHE+S.ARPCACHE.MAC,x
+				inx
+				iny
+				cpy #S.ETH.SRCMAC+6
+				bcc .3
+
+				rts
+*--------------------------------------
+ARP.Send		>STYA K.S.IOCTL+S.IOCTL.BUFPTR
+				>LDYAI S.ARP
+				>STYA K.S.IOCTL+S.IOCTL.BYTECNT
+				txa
+				jmp FRM.SendA
+*--------------------------------------
+MAN
+SAVE usr/src/sys/km.inet.s.arp
+LOAD usr/src/sys/km.inet.s
+ASM

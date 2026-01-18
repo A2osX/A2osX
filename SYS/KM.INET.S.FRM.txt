@@ -1,0 +1,380 @@
+NEW
+  AUTO 3,1
+*--------------------------------------
+FRM.GetAddrPort	ldy #S.UDP.SRCPORT
+				lda (pFrameIn),y
+				sta FRM.SA.SRC+S.SA.IN.PORT+1
+				iny
+				lda (pFrameIn),y
+				sta FRM.SA.SRC+S.SA.IN.PORT
+
+				iny						#S.UDP.DSTPORT
+
+				lda (pFrameIn),y
+				sta FRM.SA.DST+S.SA.IN.PORT+1
+				iny
+				lda (pFrameIn),y
+				sta FRM.SA.DST+S.SA.IN.PORT
+
+FRM.GetAddr		ldy #S.IP.SRC+3
+				ldx #3
+
+.1				lda (pFrameIn),y
+				sta FRM.SA.SRC+S.SA.IN.ADDR,x
+				dey
+				dex
+				bpl .1
+
+				ldy #S.IP.DST+3
+				ldx #3
+
+.2				lda (pFrameIn),y
+				sta FRM.SA.DST+S.SA.IN.ADDR,x
+				dey
+				dex
+				bpl .2
+
+				rts
+*--------------------------------------
+* FRM.NewIP
+*  In:
+*  A4 = DataLen
+*  X = S.IP.PROTOCOL.xxx
+* Out:
+*  pFrameOut = Frame PTR
+*  FrameOutLen = Total frame len
+*  A2 = Data PTR
+*--------------------------------------
+FRM.NewIP		stx .8+1
+
+				cpx #S.IP.PROTOCOL.TCP
+				bne .1
+
+				lda #S.TCP
+				bra .4
+
+.1				cpx #S.IP.PROTOCOL.UDP
+				bne .2
+
+				lda #S.UDP
+				bra .4
+
+.2				lda #S.IP
+
+.4				sta	.5+1 				save Header len for reset later
+				clc
+				adc A4
+				sta FrameOutLen
+				tay
+				lda #0
+				adc A4+1
+				sta FrameOutLen+1
+				>DAPI KMalloc
+				bcs .9
+
+				>STYA pFrameOut
+
+				ldy #0
+.5				ldx #$ff				Self Modified, header length
+				lda #0
+
+.6				sta (pFrameOut),y
+				iny
+				dex
+				bne .6
+
+				tya
+*				clc
+				adc pFrameOut
+				sta A2
+				lda #0
+				adc pFrameOut+1
+				sta A2+1
+
+*				lda IPCFG+S.NETCFG.DevFlags
+*				and #S.DCB.NIC.FLAGS.IPOFFLOAD
+*				bne .7
+
+				ldy #S.ETH.EII.TYPE
+				lda /S.ETH.EII.TYPE.IP
+				sta (pFrameOut),y
+				iny
+				lda #S.ETH.EII.TYPE.IP
+				sta (pFrameOut),y
+
+				ldy #S.IP.V.IHL
+				lda #$45
+				sta (pFrameOut),y
+*				iny
+*				lda #$0
+*				sta (pFrameOut),y
+
+*				ldy #S.IP.FRAGMENT.FLAGS
+*				sta (pFrameOut),y
+*				iny
+*				sta (pFrameOut),y
+				ldy #S.IP.IDENTIFICATION+1
+				lda IP.ID
+				ldx IP.ID+1
+				inc
+				bne .61
+
+				inx
+
+				stx IP.ID+1
+
+.61				sta IP.ID
+				sta (pFrameOut),y
+				dey
+				txa
+				sta (pFrameOut),y
+
+				ldy #S.IP.TTL
+				lda #K.IP.TTL
+				sta (pFrameOut),y
+
+.7				ldy #S.IP.PROTOCOL
+
+.8				lda #$ff
+
+				sta (pFrameOut),y
+
+.9				rts
+*--------------------------------------
+*				clc						Queue if fail
+*				sec						DONT Queue if fail
+*--------------------------------------
+FRM.SendIP		php
+
+				jsr FRM.SendBroadcast
+				bcc .80
+
+*				lda IPCFG+S.NETCFG.DevFlags
+*				and #S.DCB.NIC.FLAGS.ARPOFFLOAD
+*				bne .8
+
+				jsr RT.pFrameOut		select proper hIFOut & SRC IP
+				bcs .99
+
+				bvs FRM.Queue			ARP pending...
+
+				jsr IP.OUT.Checksums
+
+				ldx #3
+
+.1				lda pFrameOut,x
+				sta K.S.IOCTL+S.IOCTL.BUFPTR,x
+				dex
+				bpl .1
+
+.8				jsr FRM.Send
+				bcs FRM.Queue
+
+				jsr	FRM.DiscardOut
+
+.80				plp
+
+				clc
+				rts
+
+.99				plp
+
+				sec
+				rts
+*--------------------------------------
+FRM.Queue		plp						A = last error
+				bcs FRM.DiscardOut
+
+				ldy pFrameOut+1
+				beq .9
+
+				ldx FRM.Q.Head
+				inx
+				inx
+				cpx #K.FRM.Q.MAX*2
+				bne .1
+
+				ldx #0
+
+.1				cpx FRM.Q.Tail
+				beq FRM.DiscardOut
+
+				ldy FRM.Q.Head
+				stx FRM.Q.Head
+
+				sta	FRM.Q.State,y
+				lda #K.FRMSEND.RETRY
+				sta FRM.Q.Retry,y
+
+				lda K.S.IOCTL+S.IOCTL.BUFPTR
+				sta FRM.Q.Ptr,y
+				lda K.S.IOCTL+S.IOCTL.BUFPTR+1
+				sta FRM.Q.Ptr+1,y
+
+				lda K.S.IOCTL+S.IOCTL.BYTECNT
+				sta FRM.Q.Len,y
+				lda K.S.IOCTL+S.IOCTL.BYTECNT+1
+				sta FRM.Q.Len+1,y
+
+				clc
+				rts
+
+.9				sec
+				rts
+*--------------------------------------
+FRM.DiscardIn	lda pFrameIn+1
+				beq .8
+
+				stz pFrameIn+1
+				ldy pFrameIn
+
+				>DAPI KFree
+
+.8				clc
+				rts
+*--------------------------------------
+FRM.DiscardOut	lda pFrameOut+1
+				beq .8
+
+				stz pFrameOut+1
+				ldy pFrameOut
+
+				>DAPI KFree
+
+.8				sec
+				rts
+*--------------------------------------
+FRM.Retry		ldx FRM.Q.Tail
+
+.1				cpx FRM.Q.Head
+				beq .8					Queue is empty, exit...
+
+				lda FRM.Q.Ptr,x
+				sta pFrameOut
+				sta K.S.IOCTL+S.IOCTL.BUFPTR
+				lda FRM.Q.Ptr+1,x
+				sta pFrameOut+1
+				sta K.S.IOCTL+S.IOCTL.BUFPTR
+
+				lda FRM.Q.Len,x
+				sta K.S.IOCTL+S.IOCTL.BYTECNT
+				lda FRM.Q.Len+1,x
+				sta K.S.IOCTL+S.IOCTL.BYTECNT+1
+
+				lda FRM.Q.State,x
+				cmp #SKT.E.PENDING
+				bne .2
+
+				jsr RT.pFrameOut		retry getting MAC
+				bcs .3
+
+				bvs .3					still error getting dest MAC
+
+				jsr IP.OUT.Checksums
+
+.2				jsr FRM.Send			try sending again to DRV
+				bcc .4
+
+.3				ldx FRM.Q.Tail
+				sta FRM.Q.State,x		save error...
+				dec FRM.Q.Retry,x
+				bne .8					exit....until next run!
+
+.4				ldx FRM.Q.Tail
+
+				>LDYA FRM.Q.Ptr,x		Success,or max retry, discard entry
+				inx
+				inx
+				cpx #K.FRM.Q.MAX*2
+				bne .5
+
+				ldx #0
+
+.5				stx FRM.Q.Tail
+
+				>DAPI KFree
+
+				bra FRM.Retry
+
+.8				rts
+*--------------------------------------
+FRM.Send		lda hIFOut
+
+FRM.SendA		>DAPI GetpFDByID
+				bcs .9
+
+				>STYA pFD
+
+				ldy #S.FD.DEV.pDRV
+				lda (pFD),y
+				sta .8+1
+				iny
+				lda (pFD),y
+				sta .8+2
+
+				>LDYAI K.S.IOCTL
+				ldx #IOCTL.WRITE
+
+.8				jmp $FFFF				SELF MODIFIED
+
+.9				rts
+*--------------------------------------
+FRM.SendBroadcast
+				ldy #S.IP.DST
+				lda (pFrameOut),y
+				iny
+
+.1				and (pFrameOut),y
+				iny
+				cpy #S.IP.DST+4
+				bne .1
+
+				cmp #$FF
+				bne .9					not a broadcast....
+
+				ldy #S.ETH.DSTMAC
+
+.2				sta (pFrameOut),y
+				iny
+				cpy #S.ETH.DSTMAC+6
+				bne .2
+
+				ldx #3
+
+.5				lda pFrameOut,x
+				sta K.S.IOCTL+S.IOCTL.BUFPTR,x
+				dex
+				bpl .5
+
+				ldx #0
+
+.6				lda pIPCFGs+1,x
+				beq .7
+
+				lda hIFs,x
+				sta hIFOut
+
+				phx
+				jsr IP.OUT.Checksums
+				jsr FRM.Send
+				plx
+
+.7				inx
+				inx
+				cpx #K.IF.MAX*2
+				bcc .6
+
+				>LDYA K.S.IOCTL+S.IOCTL.BUFPTR
+				>DAPI KFree
+
+*				clc
+
+				rts
+
+.9				sec
+				rts
+*--------------------------------------
+MAN
+SAVE usr/src/sys/km.inet.s.frm
+LOAD usr/src/sys/km.inet.s
+ASM

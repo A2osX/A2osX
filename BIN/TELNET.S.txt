@@ -7,8 +7,9 @@ NEW
 *--------------------------------------
 				.INB inc/macros.i
 				.INB inc/a2osx.i
+				.INB inc/a2osx.api.i
 				.INB inc/eth.i
-				.INB inc/net.tcpip.i
+				.INB inc/ip.i
 				.INB inc/net.telnet.i
 				.INB inc/net.db.i
 *--------------------------------------
@@ -43,16 +44,14 @@ CS.START		cld
 				.DA CS.SIG
 				.DA	CS.QUIT
 *--------------------------------------
-L.AI.HINTS		.DA AI.HINTS
-*--------------------------------------
-L.MSG.IPKO		.DA MSG.IPKO
 L.MSG.USAGE		.DA MSG.USAGE
 L.MSG.UNKNOWN	.DA MSG.UNKNOWN
-L.MSG.HOSTOK	.DA MSG.HOSTOK
+L.MSG.CONNECT	.DA MSG.CONNECT
 L.MSG.SKTOK		.DA MSG.SKTOK
 L.MSG.SKTERR	.DA MSG.SKTERR
 L.MSG.IOERR		.DA MSG.IOERR
 L.MSG.USER		.DA MSG.USER
+L.SA.LOCAL		.DA SA.LOCAL
 				.DA 0
 *--------------------------------------
 CS.INIT			clc
@@ -61,29 +60,32 @@ CS.INIT			clc
 CS.RUN			lda #TIMEOUT.MAX
 				sta TimeOut
 
-.2				>SLEEP
-
 				lda #1
 				>KAPI ArgV
 				bcs .9
-				
+
+				>STYA R1
+
+.2				>SLEEP
+
 				>SS
-				>PUSHYA
+				>PUSHW R1
 				>PUSHWZ
-				>PUSHW L.AI.HINTS
+				>PUSHWZ
 				>PUSHEA.G pAI
 				>LIBC GetAddrInfo
 				>SR
 				bcc CS.RUN.HOSTOK
 
+				cmp #GAI.E.AGAIN
+				bne .3
+
 				lda TimeOut
 				bne .2
 
-				>SS
+.3				>SS
 				>PUSHW L.MSG.UNKNOWN
-				lda #1
-				>KAPI ArgV
-				>PUSHYA
+				>PUSHW R1
 				>PUSHBI 2
 				>LIBC PrintF
 				>SR
@@ -95,7 +97,7 @@ CS.RUN			lda #TIMEOUT.MAX
 .98				lda #E.SYN
 				sec
 .99				rts
-
+*--------------------------------------
 CS.RUN.HOSTOK	>LDYA.G pAI
 				>STYA R1
 
@@ -105,42 +107,42 @@ CS.RUN.HOSTOK	>LDYA.G pAI
 				iny
 				lda (R1),y
 				sta R2+1
-				
-				>LEA.G SA
+
+				>LEA.G SA.REMOTE
 				>STYA R3
-				
-				ldy #S.SOCKADDR-1
-				
+
+				ldy #S.SA.IN-1
+
 .1				lda (R2),y
 				sta (R3),y
 				dey
 				bpl .1
-			
+
 				lda #2
 				>KAPI ArgV
-				bcs CS.RUN.PORTOK
+				bcs .2
 
 				>LIBC AToI
 				bra .3
-	
-.2				>LDYAI TCP.PORT.TELNET
-		
-.3				>STYA.G SA+S.SOCKADDR.PORT
 
+.2				>LDYAI TCP.PORT.TELNET
+
+.3				>STYA.G SA.REMOTE+S.SA.IN.PORT
+*--------------------------------------
 CS.RUN.PORTOK	>SS
-				>PUSHW L.MSG.HOSTOK
+				>PUSHW L.MSG.CONNECT
 
 				ldx #4
-				ldy #S.SOCKADDR.ADDR
+				ldy #S.SA.IN.ADDR
 
 .1				>PUSHB (R3),y
 				iny
 				dex
 				bne .1
 
-				ldy #S.SOCKADDR.PORT
+				ldy #S.SA.IN.PORT+1
 				>PUSHB (R3),y
-				iny
+				dey
 				>PUSHB (R3),y
 
 				lda #1
@@ -154,12 +156,20 @@ CS.RUN.PORTOK	>SS
 CS.RUN.CONNECT	>SS
 				>PUSHWI AF_INET
 				>PUSHWI SOCK_STREAM
-				>PUSHWI IPPROTO_TCP
+				>PUSHWZ
 				>LIBC Socket
 				>SR
 				bcs .9
 
 				>STYA hSocket
+
+				>SS
+				>PUSHW hSocket
+				>PUSHW L.SA.LOCAL
+				>PUSHWI S.SA.IN
+				>LIBC Bind
+				>SR
+				bcs .9
 
 				lda #TIMEOUT.MAX
 				sta TimeOut
@@ -168,19 +178,19 @@ CS.RUN.CONNECT	>SS
 
 				>SS
 				>PUSHW hSocket
-				>PUSHW.G SA
+				>PUSHEA.G SA.REMOTE
+				>PUSHWI S.SA.IN
 				>LIBC Connect
 				>SR
 				bcc .4
 
-				cmp #E.SKT.NOCONN
+				cmp #SKT.E.NOCONN
 				bne .9
 
-				lda TimeOut
+				ldx TimeOut
 				bne .3
 
-				lda #E.SKT.NOCONN
-				bra .9
+.9				jmp CS.RUN.SKTERR
 
 .4				>LDYA L.MSG.SKTOK
 				>LIBC PutS
@@ -189,30 +199,33 @@ CS.RUN.CONNECT	>SS
 				>LIBC Malloc
 				bcc .5
 
-.9				rts
+				rts
 
 .5				>STYA pBuf
-				
+
 *--------------------------------------
 CS.RUN.LOOP		>SLEEP
 
 				>SS
 				>LDYA hSocket
 				jsr CS.RUN.PushRead
+				>PUSHWZ					flags
 				>LIBC Recv
 				>SR
 				bcc .1
-				
+
 				cmp #E.NODATA
 				bne CS.RUN.SKTERR
-				
+
 				bra .2
 
 .1				>STYA BufLen
 
+				>SS
 				jsr CS.RUN.GetStdOut
 				jsr CS.RUN.PushWrite
 				>LIBC FWrite
+				>SR
 				bcs CS.RUN.IOERR
 
 .2				jsr CS.RUN.GetStdIn
@@ -220,11 +233,13 @@ CS.RUN.LOOP		>SLEEP
 				bcs CS.RUN.IOERR
 
 				tay
-				bne CS.RUN.LOOP			EOF = true, no char from STDIN
+.55				bne CS.RUN.LOOP			EOF = true, no char from STDIN
 
+				>SS
 				jsr CS.RUN.GetStdIn
 				jsr CS.RUN.PushRead
 				>LIBC FRead
+				>SR
 				bcs CS.RUN.IOERR
 
 				>STYA BufLen
@@ -236,20 +251,28 @@ CS.RUN.LOOP		>SLEEP
 				>SS
 				>LDYA hSocket
 				jsr CS.RUN.PushWrite
+				>PUSHWZ					flags
 				>LIBC Send
 				>SR
-				bcc CS.RUN.LOOP
+				bcc .55
 *--------------------------------------
-CS.RUN.SKTERR	ldx #0
-
-				bra CS.RUN.ERR
-*--------------------------------------
-CS.RUN.IOERR	ldx #2
-
-CS.RUN.ERR		pha
+CS.RUN.SKTERR	pha
 				tay
 				>SS
-				>PUSHW L.MSG.SKTERR,x
+				>PUSHW L.MSG.SKTERR
+				tya
+				>PUSHA
+				>PUSHBI 1
+				>LIBC PrintF
+				>SR
+				pla
+				sec
+				rts
+*--------------------------------------
+CS.RUN.IOERR	pha
+				tay
+				>SS
+				>PUSHW L.MSG.IOERR
 				tya
 				>PUSHA
 				>PUSHBI 1
@@ -301,8 +324,10 @@ CS.SIG			lda TimeOut
 .9				sec						do not discard TIMER event
 				rts
 *--------------------------------------
-CS.QUIT			>LDYA hSocket
+CS.QUIT			ldy hSocket
 				beq .1
+
+				lda hSocket+1
 
 				>LIBC Shutdown
 
@@ -316,36 +341,26 @@ CS.QUIT			>LDYA hSocket
 *--------------------------------------
 CS.END			.EQ *
 *--------------------------------------
-MSG.IPKO		.CZ "TCP/IP Not Loaded/Configured."
 MSG.USAGE		.CZ "Usage : TELNET <ip|host> [port]"
 MSG.UNKNOWN		.CZ "%s: Unknown host\r\n"
-MSG.HOSTOK		.CZ "Connecting to %d.%d.%d.%d:%D (%s)..."
+MSG.CONNECT		.CZ "Connecting to %d.%d.%d.%d:%D (%s)..."
 MSG.SKTOK		.CS "Connected\r\n"
 				.CZ "(Exit key is Ctrl-T)"
-MSG.SKTERR		.CZ "Socket Error : $%h\r\n"
-MSG.IOERR		.CZ "I/O Error : $%h\r\n"
+MSG.SKTERR		.CZ "[%h]:Socket Error.\r\n"
+MSG.IOERR		.CZ "[%h]:I/O Error.\r\n"
 MSG.USER		.CZ "User interrupt."
 *--------------------------------------
-AI.HINTS		.DA 0					S.ADDRINFO.F			
-				.DA AF_INET             S.ADDRINFO.AF			
-				.DA 0                   S.ADDRINFO.SOCKTYPE		
-				.DA 0                   S.ADDRINFO.PROTO		
-				.DA 0                   S.ADDRINFO.ALEN			
-				.DA 0                   S.ADDRINFO.pSOCKADDR	
-				.DA 0                   S.ADDRINFO.pNAME		
-				.DA 0                   S.ADDRINFO.pNEXT		
-*--------------------------------------
-SA.REMOTE		.DA AF_INET				S.SOCKADDR.AF
-				.BS 4					S.SOCKADDR.ADDR
-				.DA TCP.PORT.TELNET
+SA.LOCAL		.DA AF_INET
+				.DA #0,#0,#0,#0			any address
+				.DA 0					Dyn port
 *--------------------------------------
 ID.END			.EQ *
 *--------------------------------------
 				.DUMMY
 				.OR 0
-				
+
 pAI				.BS 2
-SA				.BS S.SOCKADDR
+SA.REMOTE		.BS S.SA.IN
 *--------------------------------------
 DS.END			.ED
 *--------------------------------------

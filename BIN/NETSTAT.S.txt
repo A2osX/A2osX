@@ -7,16 +7,15 @@ NEW
 *--------------------------------------
 				.INB inc/macros.i
 				.INB inc/a2osx.i
-				.INB inc/kernel.i
+				.INB inc/a2osx.api.i
 				.INB inc/eth.i
-				.INB inc/net.tcpip.i
-				.INB inc/libtcpip.i
+				.INB inc/ip.i
 *--------------------------------------
 				.DUMMY
 				.OR ZPBIN
 ZS.START
-ZPPTR1			.BS 2
-FDIndex			.BS 1
+pFD				.BS 2
+hFD				.BS 2
 ZS.END			.ED
 *--------------------------------------
 *			File Header (16 Bytes)
@@ -24,21 +23,22 @@ ZS.END			.ED
 CS.START		cld
 				jmp (.1,x)
 				.DA #$61				6502,Level 1 (65c02)
-				.DA #1					BIN Layout Version 1
-				.DA 0
-				.DA CS.END-CS.START		Code Size (without Constants)
-				.DA DS.END-DS.START		Data SegmentSize
+				.DA #2					BIN Layout Version 2
+				.DA #0					S.PS.SIG
+				.DA #0
+				.DA CS.END
+				.DA ID.END
+				.DA DS.END
 				.DA #64					Stack Size
 				.DA #ZS.END-ZS.START	Zero Page Size
-				.DA 0
 *--------------------------------------
 * Relocation Table
 *--------------------------------------
 .1				.DA CS.INIT
 				.DA CS.RUN
-				.DA CS.DOEVENT
+				.DA CS.SIG
 				.DA	CS.QUIT
-L.LIBTCPIP		.DA LIBTCPIP
+*--------------------------------------
 L.MSG0			.DA MSG0
 L.MSG1			.DA MSG1
 L.MSG1.T		.DA MSG1.T.RAW
@@ -63,141 +63,163 @@ L.MSG1.S		.DA MSG1.S.0
 				.DA MSG1.S.10
 				.DA MSG1.S.11
 				.DA MSG1.S.INV
+L.SPRINTF.IPP	.DA SPRINTF.IPP				
+				
 				.DA 0
 *--------------------------------------
-CS.INIT			>LDYA L.LIBTCPIP
-				>KAPI LoadLib
-				bcs .9
-
-				sta hLIBTCPIP
-
-.9				rts
+CS.INIT			clc
+				rts
 *--------------------------------------
 CS.RUN			>LDYA L.MSG0
 				>LIBC PutS
-			
-				inc FDIndex
-				ldx FDIndex
 
-.1				lda FDs.pHI-1,x
-				beq .7
+				lda #0
 
-				ldy FDs.pLO-1,x
-				>STYA ZPPTR1
+.1				sta hFD
+				
+				>KAPI GetFDByID
+				bcs .7
 
-				lda (ZPPTR1)
+				>STYA pFD
+
+				lda (pFD)
 				cmp #S.FD.T.DSOCK
 				beq .2
-				
+
 				cmp #S.FD.T.SSOCK
-				bne .7
+				bne .6
 
-.2				ldy #S.SOCKET.AF
-				lda (ZPPTR1),y
-				cmp #AF.INET
-				bne .7
+.2				ldy #S.FD.SOCK.AF
+				lda (pFD),y
+				cmp #AF_INET
+				bne .6
 
+				jsr CS.RUN.ADDR
+				
+				jsr CS.RUN.Print
+				
+.6				>LDYA pFD
+				>LIBC Free
+
+.7				lda hFD
+				inc
+				inc
+				cmp #K.FD.MAX*2
+				bcc .1
+
+				lda #0					tell TSKMGR that all done ok, but
+*				sec						we do not want to stay in memory
+.9				rts
+*--------------------------------------
+CS.RUN.Print	>SS
 				>PUSHW L.MSG1
 
 				jsr CS.RUN.TP
 
-				ldy	#S.SOCKET.LOC.ADDR
-				jsr CS.RUN.A
+				>PUSHEA.G LocAddr
+				>PUSHEA.G RemAddr
 
-				ldy	#S.SOCKET.REM.ADDR
-				jsr CS.RUN.A
-				
-				ldy #S.SOCKET.O
-				>PUSHB (ZPPTR1),y
-				
+				ldy #S.FD.SOCK.O
+				>PUSHB (pFD),y
+
 				jsr CS.RUN.S			2 bytes
-				>PUSHBI 19
+				>PUSHBI 11
 
 				>LIBC PrintF
-				bcs .9
-				
-.7				inc FDIndex
-				ldx FDIndex
-				cpx #K.FD.MAX+1
-				bcc .1
+				>SR
 
-				lda #0					tell TSKMGR that all done ok, but 
-*				sec						we do not want to stay in memory
-.9				rts
+				rts
 *--------------------------------------
-CS.RUN.TP		ldy #S.SOCKET.T
-				lda (ZPPTR1),y
+CS.RUN.TP		ldy #S.FD.SOCK.T
+				lda (pFD),y
 				tax
-				cpx #S.SOCKET.T.STREAM+1
+				cpx #SOCK_STREAM+1
 				bcc .1
 
-				ldx #S.SOCKET.T.STREAM+1
-				
-.1				>PUSHB L.MSG1.T+1,x
-				>PUSHB L.MSG1.T,x
+				ldx #SOCK_STREAM+1
 
-				ldy #S.SOCKET.PROTO
-				lda (ZPPTR1),y
+.1				>PUSHW L.MSG1.T,x
+
+				ldy #S.FD.SOCK.P
+				lda (pFD),y
 
 				ldx #0
-				
+
 .3				cmp PROTO,x
 				beq .4
 
 				inx
 				cpx #PROTO.Cnt
 				bne .3
-				
+
 .4				txa
 				asl
 				tax
-				>PUSHB L.MSG1.P+1,x
-				>PUSHB L.MSG1.P,x
+
+				>PUSHW L.MSG1.P,x
 				rts
 *--------------------------------------
-CS.RUN.A		ldx #4
+CS.RUN.ADDR		>SS
+				>PUSHW hFD
+				>PUSHEA.G SA
+				>PUSHWI S.SA.IN
+				>LIBC GetSockName
+				>SR
+				
+				>SS
+				>PUSHEA.G LocAddr
+				jsr CS.RUN.PushSA			
+				>PUSHBI 6
+				>LIBC SPrintF
+				>SR
 
-.2				>PUSHB (ZPPTR1),y
-				iny
-				dex
-				bne .2
-
-				iny
-				>PUSHB (ZPPTR1),y
-				dey
-				>PUSHB (ZPPTR1),y
-
+				>SS
+				>PUSHW hFD
+				>PUSHEA.G SA
+				>PUSHWI S.SA.IN
+				>LIBC GetPeerName
+				>SR
+				
+				>SS
+				>PUSHEA.G RemAddr
+				jsr CS.RUN.PushSA
+				>PUSHBI 6
+				>LIBC SPrintF
+				>SR
 				rts
 *--------------------------------------
-CS.RUN.S		ldy #S.SOCKET.TCP.S
-				lda (ZPPTR1),y
+CS.RUN.PushSA	>PUSHW L.SPRINTF.IPP
+				>PUSHB.G SA+2
+				>PUSHB.G SA+3
+				>PUSHB.G SA+4
+				>PUSHB.G SA+5
+				>PUSHW.G SA+6
+				rts
+*--------------------------------------
+CS.RUN.S		ldy #S.FD.SOCK.S
+				lda (pFD),y
 
-				cmp #S.SOCKET.TCP.S.TIMEWT+1
+				cmp #S.SKT.IN.S.TIMEWT+1
 				bcc .1
 
-				lda #S.SOCKET.TCP.S.TIMEWT+1
-	
+				lda #S.SKT.IN.S.TIMEWT+1
+
 .1				asl
 				tax
-				>PUSHB L.MSG1.S+1,x
-				>PUSHB L.MSG1.S,x
-				rts
-*--------------------------------------
-CS.DOEVENT		sec
-				rts
-*--------------------------------------
-CS.QUIT			lda hLIBTCPIP
-				beq .8
 
-				>KAPI UnloadLib
-.8				clc
+				>PUSHW L.MSG1.S,x
 				rts
 *--------------------------------------
-CS.END
-LIBTCPIP		.AZ "libtcpip"
-hLIBTCPIP		.BS	1
+CS.SIG			sec
+				rts
+*--------------------------------------
+CS.QUIT			clc
+				rts
+*--------------------------------------
+CS.END			.EQ *
+*--------------------------------------
 MSG0			.AZ "Type   Prot Local                 Remote                Options  Status"
-MSG1			.CZ "%s %s %3d.%3d.%3d.%3d:%5D %3d.%3d.%3d.%3d:%5D %b %s\r\n"
+MSG1			.CZ "%s %s %21s %21s %b %s\r\n"
 MSG1.T.RAW		.AZ "RAW   "
 MSG1.T.DGRAM	.AZ "DGRAM "
 MSG1.T.SEQPKT	.AZ "SEQPKT"
@@ -222,10 +244,16 @@ MSG1.S.9		.AZ "FIN-WAIT-2"
 MSG1.S.10		.AZ "CLOSING"
 MSG1.S.11		.AZ "TIME-WAIT"
 MSG1.S.INV		.AZ "???"
+SPRINTF.IPP		.AZ "%d.%d.%d.%d:%D"
+OPTIONS			.AZ "DARKDBUL"
+*--------------------------------------
+ID.END			.EQ *
 *--------------------------------------
 				.DUMMY
 				.OR 0
-DS.START
+SA				.BS S.SA.IN
+LocAddr			.BS 22
+RemAddr			.BS 22				
 DS.END			.ED
 *--------------------------------------
 MAN

@@ -1,0 +1,707 @@
+NEW
+  AUTO 3,1
+*--------------------------------------
+TCP.IN			ldy #S.TCP.OPTIONS
+				lda (pFrameIn),y
+
+				and #S.TCP.OPTIONS.RST	RST ? go Kill this socket...
+				bne TCP.IN.RST			...and discard frame
+
+				ldy #S.FD.SOCK.S
+				lda (pSKT),y
+				asl
+				tax
+				jmp (J.TCP.IN,x)
+*--------------------------------------
+TCP.IN.RST		lda #S.SKT.IN.S.TIMEWT
+				ldy #S.FD.SOCK.S
+				sta (pSKT),y
+
+TCP.IN.CLOSED
+TCP.IN.OPENED
+
+				clc
+				rts
+*--------------------------------------
+TCP.IN.LISTEN	jsr ARP.AddFrompFrameIn		trash ZPPtr1!!!
+
+				jsr SKT.New				Create a new client socket
+				bcs .8
+
+*				>STYA ZPPtr1			pNewSocket
+
+				ldy hSKT
+				lda #0
+
+				jsr SKT.AddYAToQ		Queued successfully ?
+				bcs .9					no, discard new socket...
+
+				ldy #0
+
+.1				lda (pSKT),y
+				sta (ZPPtr1),y
+				iny
+				cpy #S.FD.SOCK.S
+				bcc .1
+
+				lda #S.SKT.IN.S.SYNRCVD
+				sta (ZPPtr1),y
+
+				ldy #S.FD.SOCK.O
+				lda (pSKT),y
+				and #S.SKT.IN.O.ACCEPTCONN^$FF
+				sta (ZPPtr1),y
+
+				ldx #5
+				ldy #S.SKT.IN.LOC.ADDR+5
+
+.3				lda FRM.SA.DST+S.SA.IN.ADDR,x
+				sta (ZPPtr1),y
+				dey
+				dex
+				bpl .3
+
+				ldx #5
+				ldy #S.SKT.IN.REM.ADDR+5
+
+.4				lda FRM.SA.SRC+S.SA.IN.ADDR,x
+				sta (ZPPtr1),y
+				dey
+				dex
+				bpl .4
+
+				lda ZPPtr1
+				sta pSKT
+				lda ZPPtr1+1
+				sta pSKT+1
+
+				jsr SKT.TCPInit
+				bcs .9
+
+				jsr TCP.IN.ACKTheSYN
+				jsr SKT.Update
+
+				lda #S.TCP.OPTIONS.SYN+S.TCP.OPTIONS.ACK
+				jsr TCP.OUT.SendOptA	SYN received, Send SYN.ACK
+
+				jmp FRM.DiscardIn
+
+.9				ldx hSKT
+				jsr SKT.FreeX
+
+.8				jmp FRM.DiscardIn
+*--------------------------------------
+TCP.IN.SYNSENT	ldy #S.TCP.OPTIONS		SYN Send, only accept SYN.ACK packet, then Send ACK
+				lda (pFrameIn),y
+				and #S.TCP.OPTIONS.SYN+S.TCP.OPTIONS.ACK
+				cmp #S.TCP.OPTIONS.SYN+S.TCP.OPTIONS.ACK
+				bne .9
+
+				jsr SKT.Get
+				ldx #3
+				ldy #S.TCP.ACKNUM+3
+
+				sec						Check if ACK=OUTNEXTSEQ+1
+
+.1				lda SKT.CACHE+S.SKT.IN.OUTNEXTSEQ,x
+				adc #0
+				sta SKT.CACHE+S.SKT.IN.OUTNEXTSEQ,x
+				eor (pFrameIn),y
+				bne .9
+
+				dey
+				dex
+				bpl .1
+
+				jsr TCP.IN.ACKTheSYN
+
+				jsr TCP.OUT.SendACK		SYN.ACK received, Send, ACK
+				bcs .9
+
+				lda #S.SKT.IN.S.ESTBLSH
+				jmp SKT.Update.S
+
+.9				lda #S.TCP.OPTIONS.RST
+				jsr TCP.OUT.SendOptA	Send RST
+
+				jmp TCP.IN.RST
+*--------------------------------------
+TCP.IN.SYNRCVD	ldy #S.TCP.OPTIONS		SYN Received, SYN.ACK Sent, only accept ACK packet
+				lda (pFrameIn),y
+				cmp #S.TCP.OPTIONS.ACK
+				bne .8
+
+				jsr SKT.Get
+
+				ldx #3
+				ldy #S.TCP.ACKNUM+3
+
+				sec
+
+.1				lda	SKT.CACHE+S.SKT.IN.OUTNEXTSEQ,x 	Check if ACK=OUTNEXTSEQ+1
+				adc #0
+				sta SKT.CACHE+S.SKT.IN.OUTSENTSEQ,x 		setup SEQNUM
+				sta	SKT.CACHE+S.SKT.IN.OUTNEXTSEQ,x		...and update NEXTSEQ
+				eor (pFrameIn),y
+				bne .8
+
+				dey
+				dex
+				bpl .1
+
+				lda #S.SKT.IN.S.ESTBLSH
+				jmp SKT.Update.S
+
+.8				clc
+				rts
+*--------------------------------------
+TCP.IN.ESTBLSH	jsr SKT.Get
+
+				ldy #S.TCP.OPTIONS
+				lda (pFrameIn),y
+				and #S.TCP.OPTIONS.ACK	Remote side ACKed data ?
+				beq .4
+*--------------------------------------
+* Ack sent data
+*--------------------------------------
+				ldy #S.TCP.ACKNUM+3		Get new ACK number from FrameIn...
+				ldx #3					Substract old ACK from socket
+
+				sec
+
+.1				lda (pFrameIn),y
+				pha
+				sbc SKT.CACHE+S.SKT.IN.OUTSENTSEQ,x
+				sta TmpDWord,x
+				pla						....and Set SEQ = new SEQ
+				sta SKT.CACHE+S.SKT.IN.OUTSENTSEQ,x
+				dey
+				dex
+				bpl .1
+
+				bcc .7					ACK > SENT SEQ ????
+
+				lda TmpDWord+3
+				ldx TmpDWord+2
+				bne .2
+
+				tay
+				beq .4
+
+.2				pha
+
+				clc
+				adc SKT.CACHE+S.SKT.IN.OUTTAIL
+				sta SKT.CACHE+S.SKT.IN.OUTTAIL
+
+				txa
+				adc SKT.CACHE+S.SKT.IN.OUTTAIL+1
+				and /K.TCP.WSIZE-1
+				sta SKT.CACHE+S.SKT.IN.OUTTAIL+1
+				pla
+				clc
+				adc SKT.CACHE+S.SKT.IN.OUTFREE
+				sta SKT.CACHE+S.SKT.IN.OUTFREE
+				txa
+				adc SKT.CACHE+S.SKT.IN.OUTFREE+1
+				sta SKT.CACHE+S.SKT.IN.OUTFREE+1
+
+				lda SKT.CACHE+S.SKT.IN.OUTUSED
+				sec
+				sbc TmpDWord+3
+				sta SKT.CACHE+S.SKT.IN.OUTUSED
+				lda SKT.CACHE+S.SKT.IN.OUTUSED+1
+				sbc TmpDWord+2
+				sta SKT.CACHE+S.SKT.IN.OUTUSED+1
+
+				jsr SKT.Update
+*--------------------------------------
+* Store incoming data
+*--------------------------------------
+.4				jsr TCP.IN.SetA1A4
+				beq .7					No data in this frame
+
+				ldy #S.TCP.SEQNUM+3
+				ldx #3
+
+.5				lda (pFrameIn),y
+				eor SKT.CACHE+S.SKT.IN.INSEQNUM,x
+				bne .90					Missed a frame.....
+
+				dey
+				dex
+				bpl .5
+
+				ldy #S.FD.SOCK.T
+				lda (pSKT),y
+				cmp #SOCK_STREAM
+				bne .52
+
+				lda A4+1
+				pha
+				lda A4
+				pha
+
+				jsr SKT.AddDataToSktIn	yes, queue data if there is room for....
+
+				plx
+				stx A4
+				plx
+				stx A4+1
+
+				bcc .6
+
+				rts
+
+.52				jsr SKT.AddFrameInToQ
+				bcs .99
+
+				stz pFrameIn+1			DON'T DISCARD
+
+.6				lda A4
+				ldy A4+1
+				ldx #S.SKT.IN.INSEQNUM
+				jsr TCP.AddAYToSktCacheAtX
+
+				jsr SKT.Update
+*--------------------------------------
+.7				ldy #S.TCP.OPTIONS
+				lda (pFrameIn),y
+				and #S.TCP.OPTIONS.FIN
+				beq .8
+
+				jsr TCP.IN.ACKTheFIN
+
+				jsr TCP.OUT.SendFINACK
+
+				lda #S.SKT.IN.S.LASTACK
+				jmp SKT.Update.S
+
+.8				ldy #S.FD.SOCK.O
+				lda (pSKT),y
+				bne .91
+
+.80				clc
+.99				rts
+
+.90
+*				lda #S.TCP.OPTIONS.ACK	Send 3 ACK for last SEQ number
+*				jsr TCP.OUT.SendOptA
+
+*				lda #S.TCP.OPTIONS.ACK
+*				jsr TCP.OUT.SendOptA
+
+				lda #S.TCP.OPTIONS.ACK
+.91				jmp TCP.OUT.SendOptA
+*--------------------------------------
+TCP.IN.CLWAIT	clc						Wait for SKT.shutdown
+				rts
+*--------------------------------------
+TCP.IN.LASTACK	ldy #S.TCP.OPTIONS		only accept ACK packet
+				lda (pFrameIn),y
+				bit #S.TCP.OPTIONS.ACK
+				beq TCP.IN.CLWAIT
+
+				jsr SKT.Get
+
+*				jsr TCP.OUT.SendACK
+
+				lda #S.SKT.IN.S.CLWAIT
+				jmp SKT.Update.S
+*--------------------------------------
+TCP.IN.FINWT1	ldy #S.TCP.OPTIONS		FIN sent, accept ACK or FIN/ACK packet
+				lda (pFrameIn),y
+				bit #S.TCP.OPTIONS.FIN
+				bne TCP.IN.2TIMEWT		FIN/ACK
+
+				jsr SKT.Get
+				lda #S.SKT.IN.S.FINWT2
+				jmp SKT.Update.S
+*--------------------------------------
+TCP.IN.FINWT2	ldy #S.TCP.OPTIONS		FIN sent & ACKed, awaiting FIN
+				lda (pFrameIn),y
+
+				bit #S.TCP.OPTIONS.FIN
+				beq TCP.IN.TIMEWT
+
+TCP.IN.2TIMEWT	jsr SKT.Get
+
+				jsr TCP.IN.ACKTheFIN
+
+				jsr TCP.OUT.SendACK		FIN received, Send ACK
+				bcs .9
+
+				lda #S.SKT.IN.S.TIMEWT
+				jmp SKT.Update.S
+
+.9				rts
+*--------------------------------------
+TCP.IN.CLOSING
+
+* Wait for SKT.Shutdown
+
+*--------------------------------------
+TCP.IN.TIMEWT
+
+* Wait for TCP.SendClose
+
+				clc
+				rts
+*--------------------------------------
+TCP.IN.SetA1A4	ldy #S.IP.TOTAL.LENGTH+1
+				lda (pFrameIn),y
+				sec
+				sbc #S.IP-S.ETH.EII
+				sta A4
+
+				dey
+				lda (pFrameIn),y
+				sbc /S.IP-S.ETH.EII
+				sta A4+1
+				ora A4
+				beq .8
+
+				ldy #S.TCP.DATAOFFSET
+				lda (pFrameIn),y
+				and #$F0				Get TCP Header len in DWORD
+				lsr
+				lsr
+				sta A1					TMP Storage
+
+				lda A4
+				sec
+				sbc A1					TMP Storage
+				sta A4
+				bcs .1
+
+				dec A4+1
+
+.1				lda pFrameIn
+				clc
+				adc #S.IP
+				pha
+				lda pFrameIn+1
+				adc /S.IP
+				tax
+				pla
+				clc
+				adc A1		 			TMP Storage
+				bcc .2
+
+				inx
+
+.2				sta A1
+				stx A1+1
+				ora A1+1				NZ
+
+.8				rts
+*--------------------------------------
+TCP.IN.ACKTheSYN
+				ldy #S.TCP.SEQNUM+3		Get Remote SEQ
+				ldx #3
+
+				sec
+
+.3				lda (pFrameIn),y		Set OUTACK=SEQ+1 for new socket...
+				adc #0
+				sta SKT.CACHE+S.SKT.IN.INSEQNUM,x
+				sta SKT.CACHE+S.SKT.IN.INACKNUM,x
+				dey
+				dex
+				bpl .3
+
+				rts
+*--------------------------------------
+TCP.IN.ACKTheFIN
+				ldx #3
+
+.1				inc	SKT.CACHE+S.SKT.IN.INACKNUM,x
+				bne .2
+
+				dex
+				bpl .1
+
+.2				rts
+*--------------------------------------
+TCP.SendClose	ldx #0
+
+.1				lda pFDs+1,x
+				beq .8
+
+				ldy pFDs,x
+				>STYA pSKT
+
+				ldy #S.FD.SOCK.AF
+				lda (pSKT),y
+				cmp #AF_INET
+				bne .8
+
+				ldy	#S.FD.SOCK.T
+				lda (pSKT),y
+				cmp #SOCK_SEQPACKET
+				bcc .8
+
+				stx hSKT
+
+				tax
+
+				ldy #S.FD.SOCK.S
+				lda (pSKT),y
+				cmp #S.SKT.IN.S.TIMEWT
+				beq .4
+
+				cmp #S.SKT.IN.S.ESTBLSH
+				bne .3
+
+				cpx #SOCK_SEQPACKET
+				beq .2
+
+				jsr TCP.OUT
+				bra .7
+*--------------------------------------
+.2				ldy #S.SKT.IN.TCPOPT
+				lda (pSKT),y
+				and #S.TCP.OPTIONS.ACK
+				beq .7
+
+				jsr SKT.Get
+				jsr TCP.OUT.SendOpt
+				bra .7
+*--------------------------------------
+.3				cmp #S.SKT.IN.S.LISTEN
+				beq .7
+
+				cmp #S.SKT.IN.S.OPENED
+				bne .7
+
+				jsr SKT.Get
+				lda #S.TCP.OPTIONS.SYN
+				jsr TCP.OUT.SendOptA	Send SYN
+				bcs .7					failed ARP lookup....
+
+				lda #S.SKT.IN.S.SYNSENT
+				jsr SKT.Update.S
+				bra .7
+*--------------------------------------
+.4				cpx #SOCK_SEQPACKET
+				bne .5
+
+				jsr Shutdown_EQ
+				bra .7
+*--------------------------------------
+.5				ldy #S.SKT.IN.pIN
+				jsr .9
+
+				ldy #S.SKT.IN.pOUT
+				jsr .9
+
+				ldx hSKT
+
+				jsr SKT.FreeX
+*--------------------------------------
+.7				ldx hSKT
+
+.8				inx
+				inx
+				cpx #K.FD.MAX*2
+				bcc .1
+
+				clc
+				rts
+
+.9				lda (pSKT),y
+				pha
+				iny
+				lda (pSKT),y
+				ply
+				>DAPI Free
+				rts
+*--------------------------------------
+TCP.OUT			jsr SKT.Get
+
+				lda SKT.CACHE+S.SKT.IN.OUTTOSEND+1
+				ldy SKT.CACHE+S.SKT.IN.OUTTOSEND
+				bne .1
+
+				tax
+				bne .1
+
+*	Y,A=0 : no data to send
+
+				ldy #S.SKT.IN.TCPOPT
+				lda (pSKT),y
+				bne TCP.OUT.SendOpt		a least an option...
+
+				clc						No data, no flag....exit
+
+.9				rts
+
+.1				cpy #K.TCP.MSS
+				pha
+				sbc /K.TCP.MSS			OUTDATA > MSS ?
+				pla
+
+				bcc .2					no....keep data len
+
+				>LDYAI K.TCP.MSS		yes send only MSS
+
+.2				>STYA A4
+
+				jsr TCP.OUT.NewFrame
+				bcs .9
+
+				lda A4
+				pha
+				lda A4+1
+				pha
+
+				jsr SKT.GetDataFromSktOut
+
+				pla
+				sta A4+1
+				pla
+				sta A4
+
+				ldx #S.SKT.IN.OUTTOSEND
+				jsr SKT.SubA4AtSktX
+
+TCP.OUT.SEQSEND	ldy #S.TCP.WINDOW
+				lda SKT.CACHE+S.SKT.IN.INFREE+1
+				sta (pFrameOut),y
+				iny
+				lda SKT.CACHE+S.SKT.IN.INFREE
+				sta (pFrameOut),y
+
+				lda #S.TCP.OPTIONS.ACK+S.TCP.OPTIONS.PSH
+				jsr TCP.OUT.Send
+				bcs TCP.OUT.Send.RTS
+
+				lda A4
+				ldy A4+1
+				ldx #S.SKT.IN.OUTNEXTSEQ
+				jsr TCP.AddAYToSktCacheAtX
+
+				jmp SKT.Update			exits with CC
+*--------------------------------------
+TCP.OUT.SendFINACK
+				lda #S.TCP.OPTIONS.FIN+S.TCP.OPTIONS.ACK
+				jsr TCP.OUT.SendOptA	Send FIN/ACK
+				bcs .9
+
+				ldx #3
+
+.1				inc	SKT.CACHE+S.SKT.IN.OUTNEXTSEQ,x
+				bne .9
+
+				dex
+				bpl .1
+
+.9				rts
+*--------------------------------------
+TCP.OUT.SendACK	lda #S.TCP.OPTIONS.ACK
+
+TCP.OUT.SendOptA
+				ldy #S.SKT.IN.TCPOPT
+				ora (pSKT),y
+				sta (pSKT),y
+
+TCP.OUT.SendOpt	stz A4
+				stz A4+1				no DATA part
+
+				jsr TCP.OUT.NewFrame
+				bcs TCP.OUT.Send.RTS
+
+				ldy #S.SKT.IN.INFREE+1
+				lda (pSKT),y
+				tax
+				dey
+				lda (pSKT),y
+				ldy #S.TCP.WINDOW+1
+				sta (pFrameOut),y
+				dey
+				txa
+				sta (pFrameOut),y
+
+				ldy #S.SKT.IN.TCPOPT
+				lda (pSKT),y
+
+*				sec						DONT Queue if fail
+*				.HS 90					BCC
+
+TCP.OUT.Send	clc						Queue if fail
+
+				php
+
+				ldy #S.TCP.OPTIONS
+				sta (pFrameOut),y
+				bit #S.TCP.OPTIONS.ACK
+				beq .2
+
+				ldx #3
+				ldy #S.TCP.ACKNUM+3
+
+.1				lda SKT.CACHE+S.SKT.IN.INACKNUM,x
+				sta (pFrameOut),y
+				dey
+				dex
+				bpl .1
+
+.2				ldx #3
+				ldy #S.TCP.SEQNUM+3
+
+.3				lda SKT.CACHE+S.SKT.IN.OUTNEXTSEQ,x
+				sta (pFrameOut),y
+				dey
+				dex
+				bpl .3
+
+				plp						Get back Queue status
+
+				jsr FRM.SendIP
+				bcs TCP.OUT.Send.RTS
+
+				ldy #S.SKT.IN.TCPOPT
+				lda #0
+				sta (pSKT),y
+
+*				clc
+TCP.OUT.Send.RTS
+				rts
+*--------------------------------------
+TCP.OUT.NewFrame
+				ldx #S.IP.PROTOCOL.TCP
+				jsr FRM.NewIP
+				bcs .9
+
+				jsr SKT.SetFrameOutSrcIP
+				jsr SKT.SetFrameOutDstIP
+
+				jsr SKT.SetFrameOutTCPUDPPorts
+
+				ldy #S.TCP.DATAOFFSET
+				lda #$50				Header size = 5 DWORDS
+				sta (pFrameOut),y
+
+				clc
+.9				rts
+*--------------------------------------
+TCP.AddAYToSktCacheAtX
+				clc
+				adc SKT.CACHE+3,x
+				sta SKT.CACHE+3,x
+				tya
+				adc SKT.CACHE+2,x
+				sta SKT.CACHE+2,x
+				bcc .8
+
+				inc SKT.CACHE+1,x
+				bne .8
+
+				inc SKT.CACHE,x
+
+.8				rts
+*--------------------------------------
+MAN
+SAVE usr/src/sys/km.inet.s.tcp
+LOAD usr/src/sys/km.inet.s
+ASM

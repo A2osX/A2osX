@@ -1,30 +1,35 @@
 NEW
   AUTO 3,1
-				.LIST OFF	
+				.LIST OFF
 				.OP	65C02
 				.OR	$2000
 				.TF drv/uthernet2.drv
 *--------------------------------------
 				.INB inc/macros.i
 				.INB inc/a2osx.i
-				.INB inc/kernel.i
+				.INB inc/a2osx.api.i
+				.INB inc/io.i
 				.INB inc/mli.e.i
 				.INB inc/nic.i
 				.INB inc/nic.w5100.i
 				.INB inc/eth.i
 *--------------------------------------
-ZPArgPtr		.EQ ZPBIN
-DEVSLOT0x		.EQ ZPBIN+2
+				.DUMMY
+				.OR ZPBIN
+ZS.START
+ZPArgPtr		.BS 2
+DEVSLOT0x		.BS 1
+ZS.END			.ED
 *--------------------------------------
 *			File Header (16 Bytes)
 *--------------------------------------
 CS.START		cld
 				jmp Dev.Detect			cld,jmp abs=DRV
 				.DA #$61				6502,Level 1 (65c02)
-				.DA #1					DRV Layout Version 1
+				.DA #2					DRV Layout Version 2
 				.DA 0
-				.DA CS.END-CS.START		Code Length
-				.DA 0
+				.DA CS.END
+				.DA ID.END
 				.DA 0
 				.DA 0
 *--------------------------------------
@@ -79,11 +84,11 @@ Dev.Detect		>STYA ZPArgPtr
 				cmp /2000
 				bne .2
 
-				lda W5100.DR,x		Get RTR LO 
+				lda W5100.DR,x		Get RTR LO
 				cmp #2000
 				beq	.3
 
-.2				dec FD.DEV.NAME+3
+.2				dec FD.DEV.NAME+8
 				txa
 				sec
 				sbc #$10
@@ -100,27 +105,34 @@ Dev.Detect		>STYA ZPArgPtr
 
 .3				stx DEVSLOTx0
 				sty DEVSLOT0x
-
-				jsr Dev.ParseArgs
-				bcs .99
-
+*--------------------------------------
+Dev.Setup		>SS
 				>PUSHW L.MSG.DETECT.OK
 				>PUSHW L.FD.DEV.NAME
 				>PUSHBI 2
 				>LIBC PrintF
+				>SR
+				bcs .9
 
-				>PUSHWI DRV.END
-				>PUSHWI DRV.CS.END-DRV.CS.START
+				jsr Dev.ParseArgs
+				bcs .9
+
+				>SS
+				>PUSHW L.DRV.CS.START
 				>PUSHWI DRV.CS.START
-				>LDYA L.DRV.CS.START
+				>PUSHWI DRV.CS.END
+				>PUSHWI DRV.ID.END
 				>KAPI InsDrv
-.99				bcs .9
+				>SR
+				bcs .9
 
-				>STYA FD.DEV+S.FD.DEV.DRVPTR
+				>STYA FD.DEV+S.FD.DEV.pDRV
 
+				>SS
 				>PUSHW L.FD.DEV
 				>PUSHW L.FD.DEV.NAME
 				>LIBC MKDev
+				>SR
 				bcs .9
 
 				ldx DEVSLOT0x
@@ -142,9 +154,10 @@ Dev.ParseArgs	lda (ZPArgPtr)
 				clc
 				rts
 
-.1				>PUSHW ZPArgPtr
+.1				>SS
+				>PUSHW ZPArgPtr
 				>PUSHW L.SSCANF.MAC
-				
+
 				ldx #0
 
 .2				>PUSHW L.MAC0,x
@@ -152,17 +165,19 @@ Dev.ParseArgs	lda (ZPArgPtr)
 				inx
 				cpx #12
 				bne .2
-				
+
 				>PUSHBI 12				6 x byte PTRs
-				
+
 				>LIBC SScanF
+				>SR
 				bcc .8
 
 				lda #E.SYN
 *				sec
 .8				rts
 *--------------------------------------
-CS.END
+CS.END			.EQ *
+*--------------------------------------
 MSG.DETECT		.CZ "UtherNet2/W5100 Driver."
 MSG.DETECT.OK	.CZ "UtherNet2/W5100 Installed As Device : %s\r\n"
 MSG.DETECT.KO	.CZ "Hardware Not Found."
@@ -176,16 +191,19 @@ FD.DEV			.DA #S.FD.T.CDEV
 				.BS 2					DRVPTR
 				.DA 0					DCBPTR
 				.DA 0					BUFPTR
-FD.DEV.NAME		.AZ "eth7"
+FD.DEV.NAME		.AZ "/dev/eth7"
 *--------------------------------------
 *			Driver Code
 *--------------------------------------
-ZPIOCTL			.EQ ZPDRV
-ZPBufPtr		.EQ ZPDRV+2
-Counter			.EQ ZPDRV+4
-Offset			.EQ ZPDRV+6
-RXTX.Size		.EQ ZPDRV+8
-BUF.Size		.EQ ZPDRV+10
+				.DUMMY
+				.OR ZPDRV+4
+
+ZPIOCTL			.BS 2
+Offset			.BS 2
+RXTX.Size		.BS 2
+BUF.Size		.BS 2
+
+				.ED
 *--------------------------------------
 DRV.CS.START	cld
 				jmp (.1,x)
@@ -215,10 +233,17 @@ STATUS			jsr GET.IOCTLBUFPTR
 
 .1				ldy #3
 
+				bit A2osX.IOOpt
+				bpl .2
+
+				sta IO.SETWRITEAUX
+
 .2				lda DIB,y
-				sta (ZPBufPtr),y
+				sta (ZPpBuf),y
 				dey
 				bpl .2
+
+				sta IO.CLRWRITEAUX
 
 				clc
 				rts
@@ -228,10 +253,17 @@ STATUS.DCB		cmp #S.IOCTL.S.GETDCB
 
 				ldy #S.DCB.NIC-1
 
-.1				lda DCB,y
-				sta (ZPBufPtr),y
+				bit A2osX.IOOpt
+				bpl .2
+
+				sta IO.SETWRITEAUX
+
+.2				lda DCB,y
+				sta (ZPpBuf),y
 				dey
-				bpl .1
+				bpl .2
+
+				sta IO.CLRWRITEAUX
 
 				clc
 				rts
@@ -279,7 +311,7 @@ OPEN.I			jsr CLOSE
 
 				lda #S.DIB.S.OPENED
 				tsb DIB+S.DIB.S
-				
+
 				clc
 				rts
 *--------------------------------------
@@ -291,13 +323,14 @@ CLOSE			ldx DEVSLOTx0
 				lda $C019				we can use VBL as we are not on //c
 .1				eor $C019
 				bpl .1
+
 				lda $C019
 .2				eor $C019
 				bpl .2
-				
+
 				lda #S.DIB.S.OPENED
 				trb DIB+S.DIB.S
-				
+
 				clc
 				rts
 *--------------------------------------
@@ -336,11 +369,11 @@ READ			php
 
 				ldy #S.IOCTL.BYTECNT
 				sec
-				sbc #2					MACRAW:strip 2 bytes Header from Size 
+				sbc #2					MACRAW:strip 2 bytes Header from Size
 				sta (ZPIOCTL),y
 				sta BUF.Size
 				eor #$ff
-				sta Counter
+				sta ZPCnt
 
 				iny
 				lda RXTX.Size+1
@@ -348,14 +381,13 @@ READ			php
 				sta (ZPIOCTL),y
 				sta BUF.Size+1
 				eor #$ff
-				sta Counter+1
+				sta ZPCnt+1
 
 				>LDYA BUF.Size
-				>SYSCALL2 GetMem
-				bcs READWRITE.9
+				>DAPI KMalloc
+				bcs .9
 
-				>STYA ZPBufPtr
-				phx
+				>STYA ZPpBuf
 
 				phy
 				ldy #S.IOCTL.BUFPTR+1
@@ -364,22 +396,25 @@ READ			php
 				pla
 				sta (ZPIOCTL),y
 
-				ldy #0
+				ldx #S.DCB.NIC.RXP
+				jsr StatXp1
 
 				ldx DEVSLOTx0
-			
-.2				inc Counter
+
+				ldy #0
+
+.2				inc ZPCnt
 				bne .3
 
-				inc Counter+1
+				inc ZPCnt+1
 				beq .4
 
 .3				lda W5100.DR,x
-				sta (ZPBufPtr),y
+				sta (ZPpBuf),y
 				iny
 				bne .2
 
-				inc ZPBufPtr+1
+				inc ZPpBuf+1
 				bra .2
 
 .4				>AR.SELECT S0.RX.RD
@@ -399,21 +434,27 @@ READ			php
 				lda #W5100.AR.Sn.CR.RCVD
 				sta W5100.DR,x
 
-				pla						hMem
-
 				plp
-				clc
-				rts			
+
+				ldx #S.DCB.NIC.RXB
+				jmp StatX
+
+.9				ldx #S.DCB.NIC.RXE
+				jsr StatXp1
+
+				ldx #S.DCB.NIC.RXED
+				jmp StatXp1
 *--------------------------------------
 READWRITE.NODATA
 				lda #E.NODATA
 
-READWRITE.9		plp
+				plp
 				sec
 				rts
 *--------------------------------------
 WRITE			php
 				sei
+				>STYA ZPIOCTL
 
 				jsr GET.IOCTLBUFPTR
 
@@ -421,13 +462,13 @@ WRITE			php
 				lda (ZPIOCTL),y
 				sta RXTX.Size
 				eor #$ff
-				sta Counter
+				sta ZPCnt
 
 				iny
 				lda (ZPIOCTL),y
 				sta RXTX.Size+1
 				eor #$ff
-				sta Counter+1
+				sta ZPCnt+1
 
 				ldx DEVSLOTx0
 
@@ -444,7 +485,7 @@ WRITE			php
 				ldx #5
 
 .1				lda DCB+S.DCB.NIC.MAC,x
-				sta (ZPBufPtr),y
+				sta (ZPpBuf),y
 				dey
 				dex
 				bpl .1
@@ -466,18 +507,18 @@ WRITE			php
 
 				ldy #0
 
-.2				inc Counter
+.2				inc ZPCnt
 				bne .3
 
-				inc Counter+1
+				inc ZPCnt+1
 				beq .8
 
-.3				lda (ZPBufPtr),y
+.3				lda (ZPpBuf),y
 				sta W5100.DR,x
 				iny
 				bne .2
 
-				inc ZPBufPtr+1
+				inc ZPpBuf+1
 				bra .2
 
 .8				>AR.SELECT S0.TX.WR
@@ -496,36 +537,78 @@ WRITE			php
 				sta W5100.DR,x
 
 				plp
+
+				ldx #S.DCB.NIC.TXP
+				jsr StatXp1
+
+				ldx #S.DCB.NIC.TXB
+*--------------------------------------
+StatX			lda RXTX.Size
 				clc
-				rts
+				adc DCB,x
+				sta DCB,x
+				lda RXTX.Size+1
+				adc DCB+1,x
+				sta DCB+1,x
+				bcc .8
+
+				clc
+
+				inc DCB+2,x
+				bne .8
+
+				inc DCB+3,x
+
+.8				rts
+*--------------------------------------
+StatXp1			inc DCB,x
+				bne .8
+
+				inc DCB+1,x
+				bne .8
+
+				inc DCB+2,x
+				bne .8
+
+				inc DCB+3,x
+
+.8				rts
 *--------------------------------------
 GET.IOCTLBUFPTR	>STYA ZPIOCTL
 				ldy #S.IOCTL.BUFPTR
 				lda (ZPIOCTL),y
-				sta ZPBufPtr
+				sta ZPpBuf
 				iny
 				lda (ZPIOCTL),y
-				sta ZPBufPtr+1
+				sta ZPpBuf+1
 				rts
 *--------------------------------------
-DRV.CS.END
+DRV.CS.END		.EQ *
+*--------------------------------------
 DEVSLOTx0		.BS 1
 *--------------------------------------
 DIB				.DA #0
 				.DA #0,#0,#0			size
 				.PS "UtherNetII/W5100"
 				.DA #S.DIB.T.NIC
-				.BS 1					Subtype
+				.DA #2					Subtype=eth
 				.DA K.VER				Version
 *--------------------------------------
 DCB				.DA #S.DCB.T.NIC
-				.DA #0					FLAGS
+				.DA #S.DCB.NIC.F.BROADCAST
 				.DA #S.DCB.NIC.LINK.OK+S.DCB.NIC.LINK.FD
 				.DA #S.DCB.NIC.SPEED.100
 				.HS 0008DC123456		MAC
-				.BS 12					IP/MASK/GW
+				.DA #0,#0,#0,#0			no IPOFFLOAD
+				.DA #0,#0,#0,#0			no IPOFFLOAD
+				.DA #0,#0,#0,#0			no IPOFFLOAD
+				.BS 2					spare
+				.BS 48					Stats
 *--------------------------------------
-DRV.END
+DRV.ID.END		.EQ *
+*--------------------------------------
+ID.END			.EQ *
+*--------------------------------------
 MAN
 SAVE usr/src/drv/uthernet2.drv.s
 ASM

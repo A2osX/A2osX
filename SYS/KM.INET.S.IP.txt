@@ -1,0 +1,321 @@
+NEW
+  AUTO 3,1
+*--------------------------------------
+IP.IN			ldy #S.IP.PROTOCOL
+				lda (pFrameIn),y
+				cmp #S.IP.PROTOCOL.ICMP
+				bne .2
+
+				jmp ICMP.IN
+
+.2				cmp #S.IP.PROTOCOL.UDP
+				bne .3
+
+				jsr FRM.GetAddrPort
+				jsr SKT.Find
+				bcs .9
+
+				jsr SKT.AddFrameInToQ
+				bcs .9					Q full, discard...
+
+				rts
+
+.3				cmp #S.IP.PROTOCOL.TCP
+				bne .9
+
+				jsr FRM.GetAddrPort
+				jsr SKT.Find
+				bcs .9
+
+				jmp TCP.IN
+
+.9				jmp FRM.DiscardIn
+*--------------------------------------
+IP.OUT.Checksums
+*				lda IPCFG+S.NETCFG.DevFlags
+*				and #S.DCB.NIC.FLAGS.IPOFFLOAD
+*				bne .2
+
+				ldy #S.IP.TOTAL.LENGTH+1
+				lda FrameOutLen
+				sec
+				sbc #S.ETH.EII
+				sta (pFrameOut),y
+				dey
+				lda FrameOutLen+1
+				sbc /S.ETH.EII
+				sta (pFrameOut),y
+				lda #0
+				ldy #S.IP.HDR.CHECKSUM
+				sta (pFrameOut),y
+				iny
+				sta (pFrameOut),y
+
+				stz IP.CHECKSUM			RESET IP CHECKSUM
+				stz IP.CHECKSUM+1
+
+				clc
+
+				ldy #S.IP.V.IHL
+
+				ldx #10					10 words for IP Header
+
+.1				lda (pFrameOut),y
+				adc IP.CHECKSUM
+				sta IP.CHECKSUM
+
+				iny
+				lda (pFrameOut),y
+				adc IP.CHECKSUM+1
+				sta IP.CHECKSUM+1
+				iny
+				dex
+				bne .1
+
+				ldy #S.IP.HDR.CHECKSUM
+				lda IP.CHECKSUM
+				adc #0
+				eor #$FF
+				sta (pFrameOut),y
+				iny
+				lda IP.CHECKSUM+1
+				adc #0
+				eor #$FF
+				sta (pFrameOut),y
+*--------------------------------------
+.2				ldy #S.IP.PROTOCOL
+				lda (pFrameOut),y
+				cmp #S.IP.PROTOCOL.TCP
+				beq IP.OUT.TCPChecksum
+
+				cmp #S.IP.PROTOCOL.UDP
+				beq IP.OUT.UDPChecksum
+
+				cmp #S.IP.PROTOCOL.ICMP
+				bne .8
+*--------------------------------------
+* ICMP Checksum
+*--------------------------------------
+				stz IP.CHECKSUM
+				stz IP.CHECKSUM+1
+
+				lda FrameOutLen
+				sec
+				sbc #S.IP
+				eor #$ff
+				tax
+				lda FrameOutLen+1
+				sbc /S.IP
+				eor #$ff
+				ldy #S.ICMP.CHECKSUM
+				clc
+				bra IP.OUT.Checksum
+
+.8				rts
+*--------------------------------------
+IP.OUT.UDPChecksum
+				lda FrameOutLen
+				sec
+				sbc #S.IP
+				ldy #S.UDP.LENGTH+1
+				sta (pFrameOut),y
+				lda FrameOutLen+1
+				sbc /S.IP
+				dey
+				sta (pFrameOut),y
+
+				clc
+
+				ldy #S.UDP.LENGTH+1
+				lda (pFrameOut),y
+				adc #S.IP.PROTOCOL.UDP
+				sta IP.CHECKSUM+1
+
+				dey
+				lda (pFrameOut),y
+				adc /S.IP.PROTOCOL.UDP	 	(all zero)
+				sta IP.CHECKSUM
+				jsr IP.AddSrcDstIPToChecksum
+
+				ldy #S.UDP.LENGTH+1
+				lda (pFrameOut),y
+				eor #$ff
+				tax
+
+				dey
+				lda (pFrameOut),y
+				eor #$ff
+				ldy #S.UDP.CHECKSUM
+				bra IP.OUT.Checksum
+*--------------------------------------
+IP.OUT.TCPChecksum
+				lda FrameOutLen
+				sec
+				sbc #S.IP
+				sta .1+1
+
+				pha
+
+				lda FrameOutLen+1
+				sbc /S.IP
+				sta .2+1
+
+				clc
+
+*				adc /S.IP.PROTOCOL.TCP	 (all zero)
+				sta IP.CHECKSUM
+
+				pla
+
+				adc #S.IP.PROTOCOL.TCP
+				sta IP.CHECKSUM+1
+
+				jsr IP.AddSrcDstIPToChecksum
+
+.1				lda #$ff				SELF MODIFIED
+				eor #$ff
+				tax
+.2				lda #$ff				SELF MODIFIED
+				eor #$ff
+				ldy #S.TCP.CHECKSUM
+*--------------------------------------
+* X,A = !ByteCount, Y = Offset in Frame
+*--------------------------------------
+IP.OUT.Checksum	sty .80+1				Save Offset
+
+				ldy pFrameOut+1
+				phy
+
+				pha						Save !ByteCount.HI
+
+				ldy .80+1
+
+				lda #0					Reset Checksum
+				sta (pFrameOut),y
+				iny
+				sta (pFrameOut),y
+
+				ldy #S.IP
+
+.1				inx
+				bne .11
+
+				pla
+				inc
+				beq .8
+
+				pha
+
+.11				lda (pFrameOut),y
+				adc IP.CHECKSUM
+				sta IP.CHECKSUM
+
+				iny
+				bne .20
+
+				inc pFrameOut+1
+
+.20				inx
+				bne .2
+
+				pla
+				inc
+				beq .7
+
+				pha
+
+.2				lda (pFrameOut),y
+
+				adc IP.CHECKSUM+1
+				sta IP.CHECKSUM+1
+				iny
+				bne .1
+
+				inc pFrameOut+1
+				bra .1
+*--------------------------------------
+.7				adc IP.CHECKSUM+1		A=0 from beq .7
+				sta IP.CHECKSUM+1
+
+.8				pla
+				sta pFrameOut+1
+
+.80				ldy #$FF				SELF MODIFIED	restore offset
+
+				lda IP.CHECKSUM
+				adc #0					Don't forget to add last carry!!!
+				eor #$FF
+				sta (pFrameOut),y
+				iny
+				lda IP.CHECKSUM+1
+				adc #0					Don't forget to add last carry!!!
+				eor #$FF
+				sta (pFrameOut),y
+
+				rts
+*--------------------------------------
+IP.AddSrcDstIPToChecksum
+				ldy #S.IP.SRC
+				ldx #4					4 words for SRC & DST IP
+
+.1				lda (pFrameOut),y
+				adc IP.CHECKSUM
+				sta IP.CHECKSUM
+				iny
+				lda (pFrameOut),y
+				adc IP.CHECKSUM+1
+				sta IP.CHECKSUM+1
+				iny
+				dex
+				bne .1
+
+				rts
+*--------------------------------------
+IP.FindIPCFG	sty .2+1
+
+				ldx #0
+
+.1				lda pIPCFGs+1,x
+				beq .7
+
+				sta .4+2
+				lda pIPCFGs,x
+				sta .4+1
+
+				phx
+
+.2				ldy #$FF				SELF MODIFIED
+
+				ldx #S.IPCFG.IP
+
+.3				lda (pFrameIn),y
+
+.4				cmp $FFFF,x				SELF MODIFIED
+				bne .6
+
+				iny
+				inx
+				cpx #S.IPCFG.IP+4
+				bcc .3
+
+				plx
+
+				lda hIFs,x
+				sta hIFOut
+
+				clc
+				rts
+
+.6				plx
+
+.7				inx
+				inx
+				cpx #K.IF.MAX*2
+				bcc .1
+
+				rts
+*--------------------------------------
+MAN
+SAVE usr/src/sys/km.inet.s.ip
+LOAD usr/src/sys/km.inet.s
+ASM

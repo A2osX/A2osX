@@ -37,7 +37,8 @@ K.FileNo		>STYA pFILE
 				rts
 
 .3				lda (pFILE)				#S.FILE.hFD
-				ldy #0					fake a positive int
+				tay
+				lda #0					fake a positive int
 				clc
 				rts
 */--------------------------------------
@@ -178,17 +179,17 @@ K.PutS			>STYA TXTPTR
 *\--------------------------------------
 K.FPutS			ldy #2					s
 				jsr RAMSW.GetStkYW
-				jsr K.StrLen			s at A1L
+				jsr K.StrLen			s at A1
 
-				>STYA A4L
+				>STYA A4
 
 				>SS
 				sta IO.SETWRITEAUX
 				ldy #0					stream
 				jsr RAMSW.GetStkYW
 				>PUSHYA
-				>PUSHW A1L				push s
-				>PUSHW A4L				push len
+				>PUSHW A1				push s
+				>PUSHW A4				push len
 
 				sta IO.CLRWRITEAUX
 
@@ -414,21 +415,17 @@ K.FOpen			jsr PFT.GetPath4
 
 				jsr STDIO.GetOpenP
 
-STDIO.FOpen		ldx #_FOpen
+K.FOpen.0		ldx #_FOpen
 				jsr PFT.CheckExtFS
 				bcs K.FOpen.99
 
 				jsr UNISTD.Open
 				bcs K.FOpen.99
 
-*				lda (pFD)				#S.FD.T
-*				cmp #S.FD.T.DSOCK
-*				bcs K.FOpen.8 			don't create file for SOCK/PIPE
+K.FOpen.1		jsr STDIO.MKFILE
+				bcs .9
 
-K.FOpen.MKNod	jsr STAT.MKNod
-				bcs K.FOpen.90
-
-K.FOpen.8		ldy #S.FILE.oCnt
+				ldy #S.FILE.oCnt
 				lda (pFILE),y
 				inc
 				sta (pFILE),y
@@ -438,7 +435,7 @@ K.FOpen.8		ldy #S.FILE.oCnt
 				clc
 				rts
 
-K.FOpen.90		pha
+.9				pha
 				jsr UNISTD.Close
 				pla
 				sec
@@ -457,14 +454,67 @@ STDIO.GetOpenP	ldy #3
 				dey
 
 				jsr RAMSW.GetStkY		Aux type
-				sta IO.AuxType+1
+				sta IO.AuxT+1
 
 				dey
 
 				jsr RAMSW.GetStkY
-				sta IO.AuxType
+				sta IO.AuxT
 
 				rts
+*--------------------------------------
+STDIO.MKFILE	ldx #0
+
+.1				lda pFILEs+1,x
+				beq .2
+
+				inx
+				inx
+				cpx #K.FILE.MAX*2
+				bcc .1
+
+				lda #E.OOH
+
+*				sec
+
+				rts
+
+.2				stx .3+1
+
+				>LDYAI S.FILE
+				jsr MEM.Malloc
+				bcs .9
+
+				>STYA pFILE
+
+.3				ldx #$FF				SELF MODIFIED
+
+				>STYA pFILEs,x
+
+				lda IO.hFD
+				sta (pFILE)				#S.FILE.hFD
+
+				ldy #S.FILE.hFD+1
+
+				lda #0
+				sta (pFILE),y
+
+				txa
+				iny 					#S.FILE.ID
+				sta (pFILE),y
+
+				iny 					#S.FILE.ID+1
+
+				lda #0
+
+.4				sta (pFILE),y
+				iny
+				cpy #S.FILE
+				bcc .4
+
+				clc
+
+.9				rts
 */--------------------------------------
 * # FClose
 * Close a file
@@ -477,10 +527,10 @@ STDIO.GetOpenP	ldy #3
 * ## RETURN VALUE
 *\--------------------------------------
 K.FClose		jsr PFT.CheckNodeYA
-				bcs K.FRead.RTS
+				bcs .9
 
 				jsr UNISTD.Close
-				bcs K.FRead.RTS
+				bcs .9
 
 				ldy #S.FILE.oCnt
 				lda (pFILE),y
@@ -489,17 +539,18 @@ K.FClose		jsr PFT.CheckNodeYA
 
 *				clc
 
-				bne K.FRead.RTS
+				bne .9
 
 				ldy #S.FILE.ID
 				lda (pFILE),y
 				tax
 
 				stz pFILEs+1,x
-				stz pFILEs,x
 
 				>LDYA pFILE
 				jmp MEM.FreeYA
+
+.9				rts
 */--------------------------------------
 * # FRead (BLOCKING)
 * Read bytes from file
@@ -517,12 +568,12 @@ K.FClose		jsr PFT.CheckNodeYA
 K.FRead.PFT		ldx #_FRead				Needed by PFT
 
 K.FRead			jsr PFT.CheckNode4
-				bcs K.FRead.RTS
+				bcs .9
 
 				jsr UNISTD.Read
-				bcs K.FWrite.9
+				bcs K.FWriteE
 
-K.FRead.RTS		rts
+.9				rts
 */--------------------------------------
 * # FWrite (BLOCKING)
 * Write bytes to file
@@ -540,13 +591,15 @@ K.FRead.RTS		rts
 K.FWrite.PFT	ldx #_FWrite			Needed by PFT
 
 K.FWrite		jsr PFT.CheckNode4
-				bcs K.FRead.RTS
+				bcs .9
 
 				jsr UNISTD.Write
 
-				bcc K.FRead.RTS
+				bcs K.FWriteE
 
-K.FWrite.9		cmp #E.NODATA
+.9				rts
+
+K.FWriteE		cmp #E.NODATA
 				sec
 				bne .9					IO Error
 
@@ -659,7 +712,7 @@ K.FSeek			ldy #6
 				.HS 2C					bit abs
 .99				lda #E.FTB
 *				sec
-K.FSeek.RTS		rts
+				rts
 */--------------------------------------
 * # FEOF
 * Test the end-of-file indicator for hFILE
@@ -676,7 +729,7 @@ K.FSeek.RTS		rts
 *  CS :
 *\--------------------------------------
 K.FEOF			jsr PFT.CheckNodeYA
-				bcs K.FSeek.RTS
+				bcs .9
 
 				lda (pFD)				#S.FD.T
 				tax
@@ -687,9 +740,11 @@ K.FEOF			jsr PFT.CheckNodeYA
 				.DA DEV.EOF
 				.DA STDIO.IOERR			BDEV
 				.DA STDIO.IOERR			LNK
-				.DA STDIO.IOERR			DSOCK
+				.DA SOCK.EOF
 				.DA SOCK.EOF
 				.DA PIPE.EOF
+
+.9				rts
 */--------------------------------------
 * # FTell
 * Return the current value of the file-position indicator
@@ -723,7 +778,7 @@ K.FTell			jsr PFT.CheckNodeYA
 				dey
 				bpl .1
 
-*				sta IO.CLRWRITEAUX
+				sta IO.CLRWRITEAUX
 
 *				clc
 
@@ -790,8 +845,8 @@ K.Rename		jsr PFT.GetPath0		newpath
 .1				ldx #$ff
 
 .3				inx
-				lda K.MLI.PATH,x
-				sta K.MLI.PATH2,x
+				lda K.MLI.P1,x
+				sta K.MLI.P2,x
 				bne .3
 
 				jsr PFT.GetPath2		oldpath
@@ -803,7 +858,7 @@ K.Rename		jsr PFT.GetPath0		newpath
 				jsr PFT.Translate
 				bcs .9
 
-				>LDYAI K.MLI.PATH2
+				>LDYAI K.MLI.P2
 				>STYA K.MLI.PARAMS+3
 				>MLICALL MLI.RENAME
 
@@ -1026,7 +1081,8 @@ PrintF.ESC		jmp (.1,x)
 				.DA PrintF.S,PrintF.SS
 *--------------------------------------
 PrintF.B		jsr STDIO.GetStkB
-				bcs PrintF.B.RTS
+				bcs .99
+
 				ldy #8
 
 .1				asl
@@ -1043,8 +1099,8 @@ PrintF.B		jsr STDIO.GetStkB
 				rts
 
 .9				ply
-PrintF.B.RTS
-				rts
+
+.99				rts
 *--------------------------------------
 PrintF.I		sec						signed short
 				.HS 90					BCC
@@ -1072,7 +1128,7 @@ PrintF.NUM		sty .2+1
 				jsr M32.ACC32Z
 
 .1				jsr STDIO.GetStkB
-				bcs PrintF.B.RTS
+				bcs .9
 
 				sta ACC32-1,y			PULL 4,2 or 1
 				dey
@@ -1101,6 +1157,8 @@ PrintF.NUM		sty .2+1
 				rol ACC32S			get back signed/unsigned flag
 				jsr MATH.ACC322STR10
 				bra PrintF.StrNum
+
+.9				rts
 *--------------------------------------
 * EXP(8) 1(s) 1significants(31)
 * http://apple2.org.za/gswv/a2zine/GS.WorldView/Resources/GS.TECH.INFO/AppleSoft/
@@ -1125,6 +1183,7 @@ PrintF.F		clc
 *				sec
 				adc pStack
 				ldy pStack+1			A,Y = float
+*			>DEBUG
 				jsr RAMSW.AY2FAC
 
 				bit	IO.RROMWRAMBNK2

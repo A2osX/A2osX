@@ -7,29 +7,30 @@ NEW
 *--------------------------------------
 				.INB inc/macros.i
 				.INB inc/a2osx.i
+				.INB inc/a2osx.api.i
 				.INB inc/eth.i
-				.INB inc/net.tcpip.i
-				.INB inc/libtcpip.i
+				.INB inc/ip.i
+				.INB inc/net.db.i
 *--------------------------------------
-TIMEOUT.MAX		.EQ 40					4 sec.
+TIMEOUT.MAX		.EQ 240					4 sec.
+BUFSIZE			.EQ 1024
 *--------------------------------------
 				.DUMMY
 				.OR ZPBIN
 ZS.START
-ZPIPCfgPtr		.BS 2
-ZPTmpPtr		.BS 2
 Identifier		.BS 2
 Sequence		.BS 2
 
 TimeOut.ms		.BS 2
-ArgIndex		.BS 1
-ArgHostName		.BS 1
-hSocket			.BS 1
-hFrame			.BS 1
+pHostName		.BS 2
+hSocket			.BS 2
+
+pBuf			.BS 2
+ReplyLen		.BS 2
+
 PingCount		.BS 1
 TimeOut			.BS 1
-
-IP.Remote		.BS 4
+ArgIndex		.BS 1
 
 ZS.END			.ED
 *--------------------------------------
@@ -38,21 +39,20 @@ ZS.END			.ED
 CS.START		cld
 				jmp (.1,x)
 				.DA #$61				6502,Level 1 (65c02)
-				.DA #1					BIN Layout Version 1
-				.DA #S.PS.F.EVENT		S.PS.F
+				.DA #2					BIN Layout Version 2
+				.DA #S.PS.SIG.T1SEC
 				.DA #0
-				.DA CS.END-CS.START		Code Size (without Constants)
-				.DA DS.END-DS.START		Data SegmentSize
+				.DA CS.END
+				.DA ID.END
+				.DA DS.END
 				.DA #64					Stack Size
 				.DA #ZS.END-ZS.START	Zero Page Size
-				.DA 0
 *--------------------------------------
 .1				.DA CS.INIT
 				.DA CS.RUN
-				.DA CS.DOEVENT
+				.DA CS.SIG
 				.DA	CS.QUIT
-L.LIBTCPIP		.DA LIBTCPIP
-L.MSG.IPKO		.DA MSG.IPKO
+*--------------------------------------
 L.MSG.USAGE		.DA MSG.USAGE
 L.MSG.UNKNOWN	.DA MSG.UNKNOWN
 L.MSG.HOSTOK	.DA MSG.HOSTOK
@@ -61,165 +61,228 @@ L.MSG.REPLY		.DA MSG.REPLY
 L.MSG.UNREACH	.DA MSG.UNREACH
 				.DA 0
 *--------------------------------------
-CS.INIT			>LDYA L.LIBTCPIP
-				>KAPI LoadLib
-				bcs .9
-				sta hLIBTCPIP
+CS.INIT			clc
 
-.9				rts
+CS.INIT.RTS		rts
 *--------------------------------------
-CS.RUN			>LIBCALL hLIBTCPIP,LIBTCPIP.GETCFG	is TCPIP loaded ?
-				>STYA ZPIPCfgPtr
-				lda (ZPIPCfgPtr)		Configured ?
-				bmi .1
+CS.RUN			jsr CS.RUN.Args
+				bcs .99
 
-				>LDYA L.MSG.IPKO
-				>LIBC PutS
-				lda #E.SYN
-				sec
-				rts
+				jsr CS.RUN.Resolv
+				bcs .99
 
-.1				ldy #DATA.Len-1
+				>LDYAI BUFSIZE
+				>LIBC Malloc
+				bcs .99
 
-.2				lda ICMP.Request,y
-				sta (pData),y
+				>STYA pBuf
+
+				jsr CS.RUN.Socket
+				bcs .99
+
+				ldy #ICMP.RequestLen-1
+
+.1				lda ICMP.Request,y
+				sta (pData),y			RequestBuf
 				dey
-				bpl .2
+				bpl .1
 
+.2				jsr CS.RUN.Send
+				bcs .98
 
-CS.RUN.IPOK		inc ArgIndex
+				jsr CS.RUN.Recv
+				bcs .98
+
+				lda PingCount
+				beq .2
+
+				dec	PingCount
+				bne .2
+
+				lda #0
+
+.98				pha
+
+				>LDYA hSocket
+				>LIBC Shutdown
+
+				pla
+				sec
+
+.99				rts
+*--------------------------------------
+CS.RUN.Args		inc ArgIndex
 				lda ArgIndex
 				>KAPI ArgV
 				bcs .8
 
-				>STYA ZPTmpPtr
-				lda (ZPTmpPtr)
+				>STYA R1
+				lda (R1)
 				cmp #'-'
 				bne .1
 
 				ldy #1
-				lda (ZPTmpPtr),y
-				beq .9
+				lda (R1),y
+				beq .98
 
 				cmp #'0'
-				bcc .9
+				bcc .98
 
 				cmp #'9'+1
-				bcs .9
+				bcs .98
 
 				and #$0F
 				sta PingCount
-				bra CS.RUN.IPOK
+				bra CS.RUN.Args
 
-.1				lda #TIMEOUT.MAX
-				sta TimeOut
+.1				lda pHostName+1
+				bne .98
 
-.2				>PUSHEA.G SA.REMOTE+S.SOCKADDR.ADDR
-				>PUSHW ZPTmpPtr
-				>LIBCALL hLIBTCPIP,LIBTCPIP.HST.GetByName
-				bcc .3
+				>LDYA R1
+				>STYA pHostName
+				bra CS.RUN.Args
 
-				>SLEEP
-				lda TimeOut
-				bne .2
+.8				lda pHostName+1
+				beq .98
 
-				>PUSHW L.MSG.UNKNOWN
-				>PUSHW ZPTmpPtr
-				>PUSHBI 2
-				bra .99
+				clc
+				rts
 
-.3				lda ArgIndex
-				sta ArgHostName
-				jmp CS.RUN.IPOK
-
-.8				>LDA.G SA.REMOTE+S.SOCKADDR.ADDR
-				bne CS.RUN.ARGSOK
-
-.9				>PUSHW L.MSG.USAGE
-				>PUSHBI 0
-
-.99				>LIBC PrintF
+.98				>LDYA L.MSG.USAGE
+				>LIBC PutS
 
 				lda #E.SYN
 				sec
+.99				rts
+*--------------------------------------
+CS.RUN.Resolv	lda #TIMEOUT.MAX
+				sta TimeOut
+
+.1				>SLEEP
+
+				>SS
+				>PUSHW pHostName
+				>PUSHWZ
+				>PUSHWZ
+				>PUSHEA.G pAI
+				>LIBC GetAddrInfo
+				>SR
+				bcc .2
+
+				cmp #GAI.E.AGAIN
+				bne .9
+
+				lda TimeOut
+				bne .1
+
+				>SS
+				>PUSHW L.MSG.UNKNOWN
+				>PUSHW pHostName
+				>PUSHBI 2
+				>LIBC PrintF
+				>SR
+
+				lda #GAI.E.FAIL
+
+.9				sec
 				rts
 
-CS.RUN.ARGSOK	>PUSHW L.MSG.HOSTOK
+.2				>LDYA.G pAI
+				>STYA R1
+
+				ldy #S.ADDRINFO.pSOCKADDR
+				lda (R1),y
+				sta R2
+				iny
+				lda (R1),y
+				sta R2+1
+
+				>LEA.G SA.REMOTE
+				>STYA R3
+
+				ldy #S.SA.IN-1
+
+.3				lda (R2),y
+				sta (R3),y
+				dey
+				bpl .3
+
+				>LDYA R1
+				>LIBC Free
+
+				>SS
+				>PUSHW L.MSG.HOSTOK
 
 				ldx #4
-				ldy #SA.REMOTE+S.SOCKADDR.ADDR
+				ldy #SA.REMOTE+S.SA.IN.ADDR
 
-.1				lda (pData),y
+.4				lda (pData),y
 				>PUSHA
 				iny
 				dex
-				bne .1
+				bne .4
 
-				lda ArgHostName
-				>KAPI ArgV
-				>PUSHYA
+				>PUSHW pHostName
 
 				>PUSHBI 6
 				>LIBC PrintF
+				>SR
 
-CS.RUN.OPENSKT	ldx #3
-				ldy #S.IPCFG.IP+3
-
-.1				lda (ZPIPCfgPtr),y
-				sta IP.Remote,x
-				dey
-				dex
-				bpl .1
-
-				ldx #3
-				ldy #SA.LOCAL+S.SOCKADDR.ADDR+3
-
-.2				lda IP.Remote,x
-				sta (pData),y
-				dey
-				dex
-				bpl .2
+				rts
+*--------------------------------------
+CS.RUN.Socket	lda #AF_INET
+				>STA.G SA.LOCAL
 
 				lda A2osX.R16
 				eor A2osX.T16+1
-				>STA.G SA.LOCAL+S.SOCKADDR.PORT
-				>STA.G SA.REMOTE+S.SOCKADDR.PORT
+				>STA.G SA.LOCAL+S.SA.IN.PORT
+				>STA.G SA.REMOTE+S.SA.IN.PORT
 				sta Identifier
 
 				lda A2osX.R16+1
 				eor A2osX.T16
-				>STA.G SA.LOCAL+S.SOCKADDR.PORT+1
-				>STA.G SA.REMOTE+S.SOCKADDR.PORT+1
+				>STA.G SA.LOCAL+S.SA.IN.PORT+1
+				>STA.G SA.REMOTE+S.SA.IN.PORT+1
 				sta Identifier+1
 
-				>PUSHBI S.SOCKET.T.RAW
-				>PUSHBI S.IP.PROTOCOL.ICMP
-				>LIBCALL hLIBTCPIP,LIBTCPIP.Socket
+				>SS
+				>PUSHWI AF_INET
+				>PUSHWI SOCK_RAW
+				>PUSHWI IPPROTO_ICMP
+				>LIBC Socket
+				>SR
+
 				bcs .9
 
-				sta hSocket
+				>STYA hSocket
 
-				>PUSHB hSocket
+				>SS
+				>PUSHW hSocket
 				>PUSHEA.G SA.LOCAL
-				>LIBCALL hLIBTCPIP,LIBTCPIP.Bind
+				>PUSHWI S.SA.IN
+				>LIBC Bind
+				>SR
 				bcs .9
 
-				>PUSHB hSocket
+				>SS
+				>PUSHW hSocket
 				>PUSHEA.G SA.REMOTE
-				>LIBCALL hLIBTCPIP,LIBTCPIP.Connect
-				bcc CS.RUN.SEND.ECHO
+				>PUSHWI S.SA.IN
+				>LIBC Connect
+				>SR
+				bcs .9
 
-.9				>LDYA L.MSG.SKTKO
-				>LIBC PutS
-				lda #E.SYN
-				sec
 				rts
 
-CS.RUN.SEND.ECHO
-				>SLEEP
-
-				lda Identifier
-				>STA.G Request+S.ICMP.IDENTIFIER-S.IP+1
+.9				pha
+				>LDYA L.MSG.SKTKO
+				>LIBC PutS
+				pla
+				sec
+				rts
+*--------------------------------------
+CS.RUN.Send		lda Identifier
+				>STA.G RequestBuf+S.ICMP.IDENTIFIER-S.IP+1
 
 				lda Identifier+1
 				dey
@@ -231,96 +294,88 @@ CS.RUN.SEND.ECHO
 				inc Sequence+1
 
 .1				lda Sequence
-				>STA.G Request+S.ICMP.SEQUENCE-S.IP+1
+				>STA.G RequestBuf+S.ICMP.SEQUENCE-S.IP+1
 
 				lda Sequence+1
 				dey
 				sta (pData),y
 
-				>PUSHB hSocket
-				>PUSHW pData
-				>PUSHWI ICMP.RequestLen
-				>LIBCALL hLIBTCPIP,LIBTCPIP.Send
-				bcs CS.RUN.ERR
+				>SS
+				>PUSHW hSocket
+				>PUSHW pData			RequestBuf
+				>PUSHWI ICMP.RequestLen+S.SA.IN+S.SA.IN
+				>PUSHWZ					flags
+				>LIBC Send
+				>SR
+				bcc .99
 
-				lda #TIMEOUT.MAX
+				cmp #SKT.E.PENDING
+				sec
+				bne .99
+
+				clc
+
+.99				rts
+*--------------------------------------
+CS.RUN.Recv		lda #TIMEOUT.MAX
 				sta TimeOut
-CS.RUN.WAIT.REPLY
-				>SLEEP
-				ldy #S.PS.hStdIn
-				lda (pPS),y
+
+.10				>SLEEP
+
+				ldy #S.PS.pStdIn
+				jsr A2osX.GetPSy
+				pha
+				iny
+				jsr A2osX.GetPSy
+				ply
 				>LIBC FEOF
-				bcs CS.RUN.ERR
+				bcs .9
+
 				tay
 				bne	.1
 
 				>LIBC GetChar
-				bcs CS.RUN.ERR
+				bcs .9
 
 				cmp #3					Ctrl-C
-				beq CS.RUN.ERR			CS
+				beq .9					CS
 
-.1				lda hSocket
-				>LIBCALL hLIBTCPIP,LIBTCPIP.Recv
+.1				>SS
+				>PUSHW hSocket
+				>PUSHW pBuf
+				>PUSHWI BUFSIZE
+				>PUSHWZ					flags
+				>LIBC Recv
+				>SR
 				bcc .2
 
 				lda TimeOut
-				bne CS.RUN.WAIT.REPLY
+				bne .10
 
-				jsr CS.Print.UNREACH
-				bcs CS.RUN.ERR
-				bra .7
+				jmp CS.Print.UNREACH
 
-.2				sta hFrame
-				>LIBC GetMemPtr
-				>STYA ZPTmpPtr
+.2				>STYA ReplyLen
 
-				ldy #S.ICMP.SEQUENCE
-				lda (ZPTmpPtr),y
+				ldy #S.ICMP.SEQUENCE-S.IP
+				lda (pBuf),y
 				cmp Sequence+1
-				bne .3
+				bne .10
 
 				iny
-				lda (ZPTmpPtr),y
+				lda (pBuf),y
 				cmp Sequence
-				beq .4
+				bne .10
 
-.3				jsr CS.FrameDiscard
-				bra CS.RUN.WAIT.REPLY
+				jmp CS.Print.REPLY
 
-.4				jsr CS.Print.REPLY
-				bcs CS.RUN.ERR
-
-				jsr CS.FrameDiscard
-
-.7				lda PingCount
-				beq .8
-
-				dec	PingCount
-				dec						A=0
-				beq .80
-
-.8				jmp CS.RUN.SEND.ECHO
-
-.80				sec
-CS.RUN.ERR		rts
-*--------------------------------------
-CS.DOEVENT		lda (pEvent)
-				bpl .9					is it a TIMER event?
-
-				lda TimeOut
-				beq .9
-
-				dec TimeOut
-
-.9				sec						do not discard TIMER event
-				rts
+.9				rts
 *--------------------------------------
 CS.Print.UNREACH
+				>SS
 				>PUSHW L.MSG.UNREACH
 
 				ldx #4
-				ldy #SA.REMOTE+S.SOCKADDR.ADDR
+				ldy #SA.REMOTE+S.SA.IN.ADDR
 
 .1				lda (pData),y
 				>PUSHA
@@ -330,6 +385,7 @@ CS.Print.UNREACH
 
 				>PUSHBI 4
 				>LIBC PrintF
+				>SR
 				rts
 *--------------------------------------
 CS.Print.REPLY	lda #TIMEOUT.MAX
@@ -352,63 +408,72 @@ CS.Print.REPLY	lda #TIMEOUT.MAX
 .2				dex
 				bne .1
 
-.3				>PUSHW L.MSG.REPLY
+.3				>SS
+				>PUSHW L.MSG.REPLY
+
+				>PUSHW ReplyLen
+
+*				ldx #4
+*				ldy #S.IP.SRC
+*
+*4				>PUSHB (pBuf),y
+*				iny
+*				dex
+*				bne .4
 
 				ldx #4
-				ldy #S.IP.SRC
+				ldy #SA.REMOTE+S.SA.IN.ADDR
 
-.4				>PUSHB (ZPTmpPtr),y
+.4				lda (pData),y
+				>PUSHA
 				iny
 				dex
 				bne .4
 
-				ldy #S.ICMP.SEQUENCE
-				>PUSHB (ZPTmpPtr),y
+				ldy #S.ICMP.SEQUENCE-S.IP
+				>PUSHB (pBuf),y
 				iny
-				>PUSHB (ZPTmpPtr),y
+				>PUSHB (pBuf),y
 
-				ldy #S.IP.TTL
-				>PUSHB (ZPTmpPtr),y
+				ldy #S.IP.TTL-S.IP
+				>PUSHB (pBuf),y
 
 				>PUSHW TimeOut.ms
-				>PUSHBI 9
+				>PUSHBI 11
 
 				>LIBC PrintF
+				>SR
 				rts
 *--------------------------------------
-CS.QUIT			jsr CS.FrameDiscard
+CS.SIG			lda TimeOut
+				beq .9
 
-				lda hSocket
-				beq .2
+				dec TimeOut
 
-				>LIBCALL hLIBTCPIP,LIBTCPIP.Shutdown
-.2				lda hLIBTCPIP
+.9				rts
+*--------------------------------------
+CS.QUIT			>LDYA pBuf
+				beq .1
+
+				>LIBC Free
+
+.1				>LDYA hSocket
 				beq .8
-				>KAPI UnloadLib
+
+				>LIBC Shutdown
 
 .8				clc
 				rts
 *--------------------------------------
-CS.FrameDiscard	lda hFrame
-				beq .1
-
-				stz hFrame
-
-				>LIBC FreeMem
-
-.1				rts
+CS.END			.EQ *
 *--------------------------------------
-CS.END
-LIBTCPIP		.AZ "libtcpip"
-MSG.IPKO		.CZ "TCP/IP Not Loaded/Configured."
 MSG.USAGE		.CS "Usage : PING <ip|host>\r\n"
 				.CZ " -1-9 : Ping Count\r\n"
 MSG.UNKNOWN		.CZ "%s: Unknown host\r\n"
 MSG.HOSTOK		.CZ "PING %d.%d.%d.%d (%s)\r\n"
 MSG.SKTKO		.CZ "Failed to Open Socket."
-MSG.UNREACH		.CZ "%d.%d.%d.%d: TimeOut/Host unreachable\r\n"
-MSG.REPLY		.CZ "32 bytes from %d.%d.%d.%d, icmp_seq=%D, ttl=%d, time=%D ms\r\n"
-hLIBTCPIP		.BS 1
+MSG.UNREACH		.CZ "%d.%d.%d.%d: Timeout/Host unreachable\r\n"
+MSG.REPLY		.CZ "%D bytes from %d.%d.%d.%d, icmp_seq=%D, ttl=%d, time=%D ms\r\n"
 *--------------------------------------
 ICMP.Request	.DA #S.ICMP.TYPE.ECHOREQ
 				.DA #0					CODE
@@ -419,23 +484,15 @@ ICMP.Request	.DA #S.ICMP.TYPE.ECHOREQ
 				.AS "QRSTUVWXYZ012345"
 ICMP.RequestLen	.EQ *-ICMP.Request
 *--------------------------------------
-				.DA #AF.INET			S.SOCKADDR.AF
-				.BS 1
-				.BS 4					S.SOCKADDR.ADDR
-				.BS 2					S.SOCKADDR.PORT
-*--------------------------------------
-				.DA #AF.INET			S.SOCKADDR.AF
-				.BS 1
-				.BS 4					S.SOCKADDR.ADDR
-				.BS 2
-DATA.Len		.EQ *-ICMP.Request
+ID.END			.EQ *
 *--------------------------------------
 				.DUMMY
 				.OR 0
-DS.START
-Request			.BS ICMP.RequestLen
-SA.LOCAL		.BS S.SOCKADDR
-SA.REMOTE		.BS S.SOCKADDR
+RequestBuf		.BS ICMP.RequestLen
+SA.LOCAL		.BS S.SA.IN
+SA.REMOTE		.BS S.SA.IN
+pAI				.BS 2
+*--------------------------------------
 DS.END			.ED
 *--------------------------------------
 MAN

@@ -1,0 +1,557 @@
+NEW
+  AUTO 3,1
+*--------------------------------------
+DNS.Poll		lda pDNSSocket+1
+				beq .99
+
+				ldy pDNSSocket
+				>STYA pFD
+
+				jsr SKT.GetFromQ
+				bcs .99
+
+				>STYA pFrameIn
+
+				jsr DNS.FindByID
+				bcs .98
+
+				txa
+*				clc
+				adc L.DNS.CACHE
+				sta ZPPtr1
+
+				lda #0
+				adc L.DNS.CACHE+1
+				sta ZPPtr1+1
+
+				jsr DNS.CheckReply
+				bcs .98
+
+				ldx #3
+				ldy #S.DNSCACHE.TTL+3
+
+.1				lda TmpDWord,x
+				sta (ZPPtr1),y
+				dey
+				dex
+				bpl .1
+
+				ldx #3
+				ldy #S.DNSCACHE.IP+3
+
+.2				lda SA.REMOTE+S.SA.IN.ADDR,x
+				sta (ZPPtr1),y
+				dey
+				dex
+				bpl .2
+
+				lda #S.DNSCACHE.S.RESOLVED
+				sta (ZPPtr1)
+
+.98				jmp FRM.DiscardIn
+
+.99				rts
+*--------------------------------------
+DNS.CheckReply	ldy #S.UDP+S.DNS.F
+				lda (pFrameIn),y
+				and /S.DNS.F.QR
+				beq .9
+
+				ldy #S.UDP+S.DNS.ANCOUNT+1
+				lda (pFrameIn),y
+				beq .9
+
+				pha						save Answer count...
+				ldy #S.UDP+S.DNS.QDCOUNT+1
+				lda (pFrameIn),y
+
+				ldy #S.UDP+S.DNS
+
+				tax
+				beq .3					no QUERY to skip
+
+.1				lda (pFrameIn),y
+				beq .2
+
+				bpl	.11					Pointer ?
+
+				iny						yes, skip 2 bytes
+				iny
+				bra .2
+
+.11				tya
+				sec
+				adc (pFrameIn),y		Skip LEN+1 bytes
+				tay
+				bra .1
+
+.2				iny
+				iny
+				iny						Skip QTYPE & QCLASS
+				iny
+				iny						next pos
+.21				dex						skip another QUERY ?
+				bne .1
+
+				plx						get back answer count
+
+.3				lda (pFrameIn),y
+				beq .32
+				bpl .31					Pointer ?
+				iny						yes, skip 2 bytes
+				iny
+				bra .32
+
+.31 			tya
+				sec
+				adc (pFrameIn),y		Skip LEN+1 bytes
+				tay
+				bra .3
+
+.32				iny						skip S.DNS.QTYPE HIGH
+				lda (pFrameIn),y
+				cmp #S.DNS.QTYPE.A
+				beq .40
+
+				tya
+				clc
+				adc #7					skip CLASS,TTL+DATALENHIGH
+				tay
+				sec						skip DATALENLO
+				adc (pFrameIn),y    	add DATALEN
+				tay
+				dex
+				bne .3
+
+				bra .9
+
+.40				iny						skip QCLASS
+
+				iny
+				iny						next pos
+
+				ldx #3
+
+.4				lda (pFrameIn),y		TTL
+				sta TmpDWord,x
+				iny
+				dex
+				bpl .4
+
+				iny						skip DATALEN
+				iny
+
+				ldx #0
+
+.5				lda (pFrameIn),y
+				sta SA.REMOTE+S.SA.IN.ADDR,x
+				iny
+				inx
+				cpx #4
+				bne .5
+
+				clc
+				rts
+
+.9				sec
+				rts
+*--------------------------------------
+DNS.Expire		ldx #0
+
+.1				lda DNS.CACHE+S.DNSCACHE.S,x
+				beq .7
+
+				bit #S.DNSCACHE.S.STATIC
+				bne .7
+
+				phx
+
+				ldy #4
+				clc
+
+.2				lda DNS.CACHE+S.DNSCACHE.TTL,x
+				sbc #0
+				sta DNS.CACHE+S.DNSCACHE.TTL,x
+				inx
+				dey
+				bne .2
+
+				plx
+
+				bcs .7
+
+				jsr DNS.Free
+
+.7				txa
+				clc
+				adc #S.DNSCACHE
+				tax
+
+				cpx #K.DNSCACHE.SIZE*S.DNSCACHE
+				bcc .1
+
+DNS.Expire.8	clc
+				rts
+*--------------------------------------
+DNS.Query		jsr DNS.FindByName
+				bcc .1
+
+				lda DNSs
+				bne DNS.Request
+
+				lda #GAI.E.FAIL
+*				sec
+				rts
+
+.1				lda DNS.CACHE+S.DNSCACHE.S,x
+				bmi DNS.Expire.8
+
+				lda #GAI.E.AGAIN
+				sec
+				rts
+*--------------------------------------
+DNS.Request		jsr DNS.GetFree
+
+				>LDYA A2osX.T16
+				>STYA K.Buf512+S.DNS.ID
+
+				>STYA DNS.CACHE+S.DNSCACHE.ID,x
+
+				lda #S.DNSCACHE.S.PENDING
+				sta DNS.CACHE+S.DNSCACHE.S,x
+
+				lda #K.DNS.PENDING.TTL
+				sta DNS.CACHE+S.DNSCACHE.TTL,x
+
+				jsr DNS.AddName
+				bcs .99
+
+				jsr DNS.NewReq
+
+				jsr DNS.InitSKT
+				bcs .99
+
+				stz .8+1
+
+.7				ldx #S.IP.PROTOCOL.UDP
+
+				jsr FRM.NewIP
+				bcs .99
+
+				jsr SKT.SetFrameOutTCPUDPPorts
+
+				ldx .8+1
+				ldy #S.IP.DST
+
+.70				lda DNSs,x
+				sta (pFrameOut),y
+				inx
+				iny
+				cpy #S.IP.DST+4
+				bcc .70
+
+				stx .8+1
+
+				>LDYAI K.Buf512
+				>STYA A1
+
+				>DAPI MemCpy
+
+				clc						Queue if fail
+				jsr FRM.SendIP
+
+.8				ldx #$FF				SELF MODIFIED
+				cpx #16
+				bcs .80
+
+				lda DNSs,x
+				bne .7
+
+				sec
+
+.80				lda #GAI.E.AGAIN
+
+*				sec
+
+.99				rts
+*--------------------------------------
+* TXTPTR = requested host.domain
+*--------------------------------------
+DNS.GetName		ldy #0
+
+.1				iny
+				jsr A2osX.GetTXTPTR
+				sta K.Buf512+S.DNS,y
+				beq .8
+
+				>INCW TXTPTR
+				cpy #K.DNS.MAXLEN-1
+				bcc .1
+
+				lda #E.BADARG
+
+*				sec
+
+				rts
+
+.8				sty A4					String\0 len
+
+DNS.GetName.8	clc
+				rts
+*--------------------------------------
+DNS.GetFree		lda #$ff
+				sta TmpDWord
+				sta TmpDWord+1
+				sta TmpDWord+2
+				sta TmpDWord+3
+
+				ldx #0
+				stz .8+1
+
+.1				lda DNS.CACHE+S.DNSCACHE.S,x
+				beq DNS.GetName.8
+
+				bit #S.DNSCACHE.S.STATIC+S.DNSCACHE.S.PENDING
+				bne .7					Static/Pending.....skip
+
+				phx
+
+				ldy #0
+				sec
+
+.2				lda TmpDWord,y			is saved TTL greater then actual TTL?
+				sbc DNS.CACHE+S.DNSCACHE.TTL,x
+				inx
+				iny
+				tya
+				eor #4
+				bne .2
+
+				bcc .6					no,
+
+*				ldy #4
+
+.3				lda DNS.CACHE+S.DNSCACHE.TTL-1,x	Save new lowest TTL
+				sta TmpDWord-1,y
+				dex
+				dey
+				bne .3
+
+				stx .8+1				save lowest TTL slot ...
+
+.6				plx
+
+.7				txa
+				clc
+				adc #S.DNSCACHE
+				tax
+
+				cpx #K.DNSCACHE.SIZE*S.DNSCACHE
+				bcc .1
+
+.8				ldx #$FF				SELD MODIFIED
+*--------------------------------------
+DNS.Free		phx
+
+				>LDYA DNS.CACHE+S.DNSCACHE.pNAME,x
+				>DAPI KFree
+
+				plx
+
+				stz DNS.CACHE+S.DNSCACHE.S,x
+				stz DNS.CACHE+S.DNSCACHE.TTL+1,x
+				stz DNS.CACHE+S.DNSCACHE.TTL+2,x
+				stz DNS.CACHE+S.DNSCACHE.TTL+3,x
+
+				clc
+				rts
+*--------------------------------------
+DNS.AddName		phx
+
+				ldy A4					String len from GetName
+				lda #0
+
+				>DAPI KMalloc
+				plx
+
+				bcs .99
+
+				>STYA ZPPtr2
+				>STYA DNS.CACHE+S.DNSCACHE.pNAME,x
+
+				ldy #$ff
+
+.1				iny
+				lda K.Buf512+S.DNS+1,y
+				sta (ZPPtr2),y
+				bne .1
+
+*				clc
+
+.99				rts
+*--------------------------------------
+DNS.FindByName	ldx #0
+
+.1				lda DNS.CACHE+S.DNSCACHE.S,x
+				beq .7
+
+				lda DNS.CACHE+S.DNSCACHE.pNAME,x
+				sta ZPPtr2
+
+				lda DNS.CACHE+S.DNSCACHE.pNAME+1,x
+				sta ZPPtr2+1
+
+				ldy #$ff
+
+.2				iny
+				lda K.Buf512+S.DNS+1,y
+				cmp (ZPPtr2),y
+				bne .7
+
+				eor #0
+				bne .2
+
+				clc
+				rts
+
+.7				txa
+				clc
+				adc #S.DNSCACHE
+				tax
+
+				cpx #K.DNSCACHE.SIZE*S.DNSCACHE
+				bcc .1
+
+*				sec
+
+				rts
+*--------------------------------------
+DNS.FindByID	ldx #0
+
+.1				lda DNS.CACHE+S.DNSCACHE.S,x
+				beq .7
+
+				bmi .7					RESOLVED
+
+				ldy #S.UDP+S.DNS.ID
+				lda (pFrameIn),y
+				cmp DNS.CACHE+S.DNSCACHE.ID,x
+				bne .7
+
+				iny
+				lda (pFrameIn),y
+				cmp DNS.CACHE+S.DNSCACHE.ID+1,x
+				beq .8
+
+.7				txa
+				clc
+				adc #S.DNSCACHE
+				tax
+
+				cpx #K.DNSCACHE.SIZE*S.DNSCACHE
+				bcc .1
+
+*				sec
+
+				rts
+
+.8				clc
+				rts
+*--------------------------------------
+DNS.InitSKT		lda pDNSSocket+1
+				bne .8
+
+				jsr SKT.New
+				bcs .9
+
+				>STYA pSKT
+				>STYA pDNSSocket
+
+				ldy #S.FD.SOCK.T
+				lda #SOCK_DGRAM
+				sta (pSKT),y
+
+				lda #UDP.PORT.DNS
+				ldy #S.SKT.IN.REM.PORT
+				sta (pSKT),y			0.0.0.0:0 -> 0.0.0.0:53
+
+				jmp Socket_DGRAM
+
+.8				clc
+
+.9				rts
+*--------------------------------------
+DNS.NewReq		ldy #DNS.HDR.L-1
+
+.1				lda DNS.HDR,y
+				sta K.Buf512+S.DNS.F,y
+				dey
+				bpl .1
+
+				ldy A4					String len from GetName
+				dey
+
+				ldx #0
+
+.2				lda K.Buf512+S.DNS,y
+				and #$7f
+				cmp #'.'
+				beq .4
+
+				cmp #'A'
+				bcc .3
+
+				cmp #'Z'+1
+				bcs .3
+
+				eor #$20
+
+.3				inx
+				bra .5
+
+.4				txa
+				ldx #0
+
+.5				sta K.Buf512+S.DNS,y
+
+				dey
+				bne .2
+
+				stx K.Buf512+S.DNS
+
+				ldx #0
+				ldy A4					String len
+
+				iny
+
+.6				lda DNS.FTR,x
+				sta K.Buf512+S.DNS,y
+				iny
+				inx
+				cpx #DNS.FTR.L
+				bcc .6
+
+				tya
+				clc
+				adc #S.DNS
+				sta A4
+				lda /S.DNS
+				adc #0
+				sta A4+1
+
+				rts
+*--------------------------------------
+DNQ.CloseSKT	lda pDNSSocket+1
+				beq .8
+
+
+
+
+.8				clc
+
+				rts
+*--------------------------------------
+MAN
+SAVE usr/src/sys/km.inet.s.dns
+LOAD usr/src/sys/km.inet.s
+ASM

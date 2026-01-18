@@ -1,4 +1,4 @@
-# A2osX Macro Assembler (0.94)
+# A2osX Macro Assembler (1.00)
 
 ## Description
 

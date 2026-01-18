@@ -48,7 +48,7 @@ Y,A = Ptr to installed driver
 
 ## RETURN VALUE  
 CC = OK, CS = ERROR  
-A = hFD  
+Y,A = hFD  
 
 # MkFD  
 
@@ -78,7 +78,7 @@ Create a CDEV or BDEV
 `>SR`  
 
 ## RETURN VALUE  
- A = hDEV  
+ Y,A = hDEV  
 
 # IOCTL  
 
@@ -419,7 +419,7 @@ Add Data to MD5 computation
 `void *malloc(size_t size);`  
 
 ## ASM  
-`>LDYA ptr`  
+`>LDYAI size`  
 `>LIBC malloc`  
 
 ## RETURN VALUE  
@@ -776,9 +776,9 @@ Y,A=pSList
 
 ## ASM  
 `>SS`  
-`>PUSHWI AF_`  
-`>PUSHWI SOCK_`  
-`>PUSHWI Protocol`  
+`>PUSHWI socket_family`  
+`>PUSHWI socket_type`  
+`>PUSHWI protocol`  
 `>LIBC Socket`  
 `>SR`  
 
@@ -814,7 +814,7 @@ Y,A=pSList
 `>PUSHW socket`  
 `>PUSHW address`  
 `>PUSHWI address_len`  
-`>LIBC Bind`  
+`>LIBC Connect`  
 `>SR`  
 
 ## RETURN VALUE  
@@ -855,6 +855,138 @@ Y,A=pSList
  YA = hFD  
  CS = error  
  YA = -1 (ERRNO)  
+
+# Shutdown  
+
+## C / CSH  
+`#include <sys/socket.h>`  
+`int shutdown(int socket, int how);`  
+
+## ASM  
+`>SS`  
+`>PUSHW socket`  
+`>PUSHWI how`  
+`>LIBC Shutdown`  
+`>SR`  
+
+## RETURN VALUE  
+ CC = success  
+
+# Recv  
+
+## C / CSH  
+`#include <sys/socket.h>`  
+`ssize_t recv(int socket, void *buffer, size_t length, int flags);`  
+
+## ASM  
+`>SS`  
+`>PUSHW socket`  
+`>PUSHW buffer`  
+`>PUSHW length`  
+`>PUSHW flags`  
+`>LIBC Recv`  
+`>SR`  
+
+## RETURN VALUE  
+ CC = success  
+
+# RecvFrom  
+
+## C / CSH  
+`#include <sys/socket.h>`  
+`ssize_t recvfrom(int socket, void *restrict buffer, size_t length,`  
+`					int flags, struct sockaddr *restrict address,`  
+`					socklen_t *restrict address_len);`  
+
+## ASM  
+`>SS`  
+`>PUSHW socket`  
+`>PUSHW buffer`  
+`>PUSHWI length`  
+`>PUSHWI flags`  
+`>PUSHW dest_addr`  
+`>PUSHWI address_len`  
+`>LIBC RecvFrom`  
+`>SR`  
+
+## RETURN VALUE  
+ CC = success  
+
+# Send  
+
+## C / CSH  
+`#include <sys/socket.h>`  
+`ssize_t send(int socket, const void *buffer, size_t length, int flags);`  
+
+## ASM  
+`>SS`  
+`>PUSHW socket`  
+`>PUSHW message`  
+`>PUSHW length`  
+`>PUSHW flags`  
+`>LIBC Send`  
+`>SR`  
+
+## RETURN VALUE  
+ CC = success  
+
+# SendTo  
+
+## C / CSH  
+`#include <sys/socket.h>`  
+`ssize_t sendto(int socket, const void *message, size_t length,`  
+`				  int flags, const struct sockaddr *dest_addr,`  
+`				  socklen_t dest_len);`  
+
+## ASM  
+`>SS`  
+`>PUSHW socket`  
+`>PUSHW message`  
+`>PUSHWI length`  
+`>PUSHWI flags`  
+`>PUSHW dest_addr`  
+`>PUSHWI address_len`  
+`>LIBC SendTo`  
+`>SR`  
+
+## RETURN VALUE  
+ CC = success  
+
+# GetPeerName  
+
+## C / CSH  
+`#include <sys/socket.h>`  
+`int getpeername(int socket, struct sockaddr *restrict address, socklen_t *restrict address_len);`  
+
+## ASM  
+`>SS`  
+`>PUSHW socket`  
+`>PUSHW address`  
+`>PUSHWI address_len`  
+`>LIBC GetPeerName`  
+`>SR`  
+
+## RETURN VALUE  
+ CC = success  
+ CS = error  
+
+# GetSockName  
+
+## C / CSH  
+`#include <sys/socket.h>`  
+`int getsockname(int socket, struct sockaddr *restrict address, socklen_t *restrict address_len);`  
+
+## ASM  
+`>SS`  
+`>PUSHW socket`  
+`>PUSHW address`  
+`>PUSHWI address_len`  
+`>LIBC GetSockName`  
+`>SR`  
+
+## RETURN VALUE  
+ CC = success  
+ CS = error  
 
 # ChMod  
 change permissions of a file  
@@ -1543,7 +1675,7 @@ Create a new copy of this C-String
 
 ## ASM  
 Y,A = Ptr to source C-String  
-CC : success   
+CC : success  
  Y,A = PTR to String  
 CS : error  
  A = SYS error code  
@@ -1559,7 +1691,7 @@ Returns Length of C-String
 `>LDYAI str`  
 `>LIBC strlen`  
 
-## RETURN VALUE   
+## RETURN VALUE  
 Y,A = String length  
 
 # StrCat  
@@ -1574,7 +1706,7 @@ Concatenate strings
 `>PUSHWI source`  
 `>LIBC strcat`  
 
-## RETURN VALUE   
+## RETURN VALUE  
 Y,A = destination  
 
 # StrCpy  
@@ -1589,7 +1721,7 @@ Y,A = destination
 `>PUSHWI source`  
 `>LIBC strcpy`  
 
-## RETURN VALUE   
+## RETURN VALUE  
 Y,A = destination  
 
 # StrUpr/StrLwr  
@@ -1605,7 +1737,7 @@ Convert string to UPPERCASE/lowercase
 `>LIBC strupr`  
 `>LIBC strlwr`  
 
-## RETURN VALUE   
+## RETURN VALUE  
 Uppercased/lowercased String in Buffer  
 Y,A = str  
 
@@ -1621,7 +1753,7 @@ Compare 2 strings
 `>PUSHWI s2`  
 `>LIBC strcmp`  
 
-## RETURN VALUE   
+## RETURN VALUE  
 CC : match  
 CS : no match  
  CC, Y,A=0  
@@ -1639,7 +1771,7 @@ Compare 2 strings, ignoring case
 `>PUSHWI s2`  
 `>LIBC strcasecmp`  
 
-## RETURN VALUE   
+## RETURN VALUE  
 CC : match  
 CS : no match  
  CC, Y,A=0  

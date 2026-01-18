@@ -7,6 +7,20 @@ NEW
 *--------------------------------------
 				.INB inc/macros.i
 				.INB inc/a2osx.i
+				.INB inc/a2osx.api.i
+				.INB inc/kernel.i
+				.INB inc/io.i
+				.INB inc/mli.e.i
+				.INB inc/nic.i
+				.INB inc/eth.i
+				.INB inc/ip.i
+				.INB inc/net.db.i
+				.INB inc/net.dns.i
+*--------------------------------------
+				.DUMMY
+				.OR ZPDRV+4				ZPpBuf,ZPCnt
+ZS.START
+ZS.END			.ED
 *--------------------------------------
 *			File Header (16 Bytes)
 *--------------------------------------
@@ -23,34 +37,70 @@ CS.START		cld
 * Relocation Table
 *--------------------------------------
 L.KM.CS.START	.DA KM.CS.START
+
+L.LO.CS.START	.DA LO.CS.START
+
+L.LO.FD			.DA LO.FD
+L.DEVLO			.DA DEVLO
+L.LO.IPCFG		.DA LO.IPCFG
+
 				.DA 0					End Of Reloc Table
 *--------------------------------------
-KM.Init			>SS
-				>PUSHW L.KM.CS.START
-				>PUSHWI KM.CS.START
-				>PUSHWI KM.CS.END
-				>PUSHWI KM.ID.END
-				>KAPI InsDrv
-				>SR
+KM.Init			jsr KM.Init.KM
 				bcs .9
 
-				pha
-				tya
-				ldy #AF_INET
-				sec
-				sbc #_Socket
-				sta A2osX.pAFs,y
-				pla
-				sbc /_Socket
-				sta A2osX.pAFs+1,y
+				jsr KM.Init.LO
+				bcs .9
 
-				clc
+				jsr KM.Init.ETC
+
+*				clc
 
 .9				rts
 *--------------------------------------
+				.INB usr/src/sys/km.inet.s.init
+*--------------------------------------
 CS.END			.EQ *
 *--------------------------------------
-*			KM Code
+LO.FD			.DA #S.FD.T.CDEV
+				.DA #0					HANDLER
+				.DA #0					BUSID
+				.DA #0					DEVID
+				.DA 0					BUSPTR
+			.BS 2						DRVPTR
+				.DA 0					DCBPTR
+				.DA 0					BUFPTR
+*--------------------------------------
+DEVLO			.AZ "/dev/lo"
+*--------------------------------------
+LO.IPCFG		.DA #S.IPCFG.S.OK		S
+				.DA #S.DCB.NIC.F.LO+S.DCB.NIC.F.ARPOFFLOAD
+			.BS 2						DevFD
+				.BS 6					MAC
+				.DA #127,#0,#0,#1		IP
+				.DA #255,#0,#0,#0		MASK
+				.DA #0,#0,#0,#0			DHCPSRVR
+*--------------------------------------
+* KM Code
+*--------------------------------------
+				.DUMMY
+				.OR ZPDRV+12			WARNING : SHARED with NIC drivers
+
+pFrameIn		.BS 2
+hIFIn			.BS 1
+hIFOut			.BS 1
+
+pFrameOut		.BS 2
+FrameOutLen		.BS 2
+pSKT			.BS 2
+pIPCFG			.BS 2
+
+hSKT			.BS 2
+
+TmpDWord		.EQ *
+IP.CHECKSUM		.BS 2
+
+				.ED
 *--------------------------------------
 KM.CS.START		cld
 				jmp (.1,x)
@@ -71,30 +121,200 @@ KM.CS.START		cld
 				.DA GetSockName
 				.DA GetSockOpt
 				.DA SetSockOpt
-*--------------------------------------
-Socket
-Bind
-Connect
-Listen
-Accept
-Shutdown
-Recv
-RecvFrom
-RecvMsg
-Send
-SendMsg
-SendTo
-GetPeerName
-GetSockName
-GetSockOpt
-SetSockOpt
 
-				clc
-				rts
+				.DA SIG
+				.DA Incoming
+				.DA IF.GetCFG
+				.DA IF.SetCFG
+				.DA AI.GetAddrInfo
+				.DA AI.FreeAddrInfo
+				.DA RT.GetRoute
+				.DA RT.SetRoute
+				.DA IF.Up
+				.DA IF.Down
+
+				.DA ARP.Clear
+				.DA	ARP.Query
+				.DA ARP.Add
+				.DA ARP.GetCache
+
+				.DA AI.AddServInfo
+				.DA AI.AddNameInfo
+*--------------------------------------
+J.Socket		.DA Socket_RAW
+                .DA Socket_DGRAM
+                .DA Socket_SEQPACKET
+                .DA Socket_STREAM
+
+J.Connect		.DA Connect_RAW
+                .DA Connect_DGRAM
+                .DA Connect_SEQPACKET
+                .DA Connect_STREAM
+
+J.EOF			.DA EOF_RAW
+				.DA EOF_DGRAM
+				.DA EOF_SEQPACKET
+				.DA EOF_STREAM
+
+J.Recv			.DA Recv_RAW
+                .DA Recv_DGRAM
+                .DA Recv_SEQPACKET
+                .DA Recv_STREAM
+
+J.Send			.DA Send_RAW
+                .DA Send_DGRAM
+                .DA Send_SEQPACKET
+				.DA Send_STREAM
+
+J.TCP.IN		.DA TCP.IN.CLOSED
+				.DA TCP.IN.OPENED
+				.DA TCP.IN.LISTEN
+				.DA TCP.IN.SYNSENT
+				.DA TCP.IN.SYNRCVD
+				.DA TCP.IN.ESTBLSH
+				.DA TCP.IN.CLWAIT
+				.DA TCP.IN.LASTACK
+				.DA TCP.IN.FINWT1
+				.DA TCP.IN.FINWT2
+				.DA TCP.IN.CLOSING
+				.DA TCP.IN.TIMEWT
+
+L.ROUTE.GW		.DA ROUTE+S.ROUTE.GW
+
+L.ARP.REQ		.DA ARP.REQ
+L.ARP.REP		.DA ARP.REP
+
+L.DNS.CACHE		.DA DNS.CACHE
+
+L.SA.REMOTE		.DA SA.REMOTE
+
+				.DA 0
+*--------------------------------------
+SIG				and #S.PS.SIG.T1SEC
+				beq .1
+
+				jsr ARP.Expire			every sec
+				jsr DNS.Expire
+
+.1				jsr FRM.Retry			every 100ms
+				jsr DNS.Poll
+				jmp TCP.SendClose
+*--------------------------------------
+Incoming		sta hIFIn
+
+				jsr IF.GetIPCFGA
+				bcs .99
+
+				>LDYA K.S.IOCTL+S.IOCTL.BUFPTR
+				>STYA pFrameIn
+
+				ldy #S.ETH.EII.TYPE
+				lda (pFrameIn),y
+				cmp /S.ETH.EII.TYPE.IP
+				bne .9
+
+				iny
+				lda (pFrameIn),y
+				cmp #S.ETH.EII.TYPE.ARP
+				bne .1
+
+				jmp	ARP.IN
+
+.1				cmp #S.ETH.EII.TYPE.IP
+				bne .9
+
+				jmp IP.IN
+
+.9				sec
+
+.99				rts
+*--------------------------------------
+				.INB usr/src/sys/km.inet.s.ai
+				.INB usr/src/sys/km.inet.s.arp
+				.INB usr/src/sys/km.inet.s.dns
+				.INB usr/src/sys/km.inet.s.frm
+				.INB usr/src/sys/km.inet.s.icmp
+				.INB usr/src/sys/km.inet.s.if
+				.INB usr/src/sys/km.inet.s.ip
+				.INB usr/src/sys/km.inet.s.rt
+				.INB usr/src/sys/km.inet.s.skt
+				.INB usr/src/sys/km.inet.s.tcp
 *--------------------------------------
 KM.CS.END		.EQ *
 *--------------------------------------
+ARP.REQ			.HS FFFFFFFFFFFF		S.ETH.DSTMAC
+ARP.REQ.SRCMAC	.BS 6
+ARP.REQ.ETYPE	.DA /S.ETH.EII.TYPE.ARP
+				.DA #S.ETH.EII.TYPE.ARP
+				.HS 0001.0800.06.04
+ARP.REQ.OP		.DA /S.ARP.OPERATION.REQ
+				.DA #S.ARP.OPERATION.REQ
+ARP.REQ.SHA		.BS 6
+ARP.REQ.SPA		.BS 4
+ARP.REQ.THA		.BS 6
+ARP.REQ.TPA		.BS 4
+*--------------------------------------
+ARP.REP			.EQ *
+ARP.REP.DSTMAC	.BS 6
+ARP.REP.SRCMAC	.BS 6
+ARP.REP.ETYPE	.DA /S.ETH.EII.TYPE.ARP
+				.DA #S.ETH.EII.TYPE.ARP
+				.HS 0001.0800.06.04
+ARP.REP.OP		.DA /S.ARP.OPERATION.REP
+				.DA #S.ARP.OPERATION.REP
+ARP.REP.SHA		.BS 6
+ARP.REP.SPA		.BS 4
+ARP.REP.THA		.BS 6
+ARP.REP.TPA		.BS 4
+*--------------------------------------
+DNS.HDR			.DA /S.DNS.F.RD			Flags=query
+				.DA #S.DNS.F.RD
+				.HS 0001				QDCOUNT
+				.HS 0000				ANCOUNT
+				.HS 0000				NSCOUNT
+				.HS 0000				ARCOUNT
+DNS.HDR.L		.EQ *-DNS.HDR
+* name\0
+DNS.FTR			.DA /S.DNS.QTYPE.A
+				.DA #S.DNS.QTYPE.A
+				.DA /S.DNS.QCLASS.IN
+				.DA #S.DNS.QCLASS.IN
+DNS.FTR.L		.EQ *-DNS.FTR
+*--------------------------------------
+FRM.Q.Tail		.BS 1
+FRM.Q.Head		.BS 1
+FRM.Q.Ptr		.BS K.FRM.Q.MAX*2
+FRM.Q.Len		.BS K.FRM.Q.MAX*2
+FRM.Q.State		.BS K.FRM.Q.MAX*2
+FRM.Q.Retry		.EQ FRM.Q.State+1
+*--------------------------------------
+ROUTE			.BS S.ROUTE
+ROUTEs			.BS S.ROUTE*K.ROUTE.MAX
+*--------------------------------------
+ARP.CACHE		.BS K.ARPCACHE.SIZE*S.ARPCACHE
+DNS.CACHE		.BS K.DNSCACHE.SIZE*S.DNSCACHE
+*--------------------------------------
+hIFs			.BS K.IF.MAX*2
+pIPCFGs			.BS K.IF.MAX*2
+*--------------------------------------
+pDNSSocket		.BS 2
+*--------------------------------------
+DNSs			.BS 4
+				.BS 4
+				.BS 4
+				.BS 4
+*--------------------------------------
+IP.ID			.DA $A205
+DYNPORT.LAST	.DA K.DYNPORT.START
+FRM.SA.SRC		.BS S.SA.IN
+FRM.SA.DST		.BS S.SA.IN
+SA.LOCAL		.BS S.SA.IN
+SA.REMOTE		.BS S.SA.IN
+SKT.CACHE		.BS S.SKT.IN
+*--------------------------------------
 KM.ID.END		.EQ *
+*--------------------------------------
+				.INB usr/src/sys/km.inet.s.lo
 *--------------------------------------
 ID.END			.EQ *
 *--------------------------------------

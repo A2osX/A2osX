@@ -7,9 +7,10 @@ NEW
 *--------------------------------------
 				.INB inc/macros.i
 				.INB inc/a2osx.i
+				.INB inc/a2osx.api.i
 				.INB inc/kernel.i
 				.INB inc/eth.i
-				.INB inc/libtcpip.i
+				.INB inc/ip.i
 				.INB inc/net.telnet.i
 *--------------------------------------
 TIMEOUT.MAX		.EQ 200					20 sec.
@@ -17,11 +18,10 @@ TIMEOUT.MAX		.EQ 200					20 sec.
 				.DUMMY
 				.OR ZPBIN
 ZS.START
-ZPIPCfgPtr		.BS 2
-ZPSktPtr		.BS 2
+hSrvSocket		.BS 2
+hCltSocket		.BS 2
+
 TimeOut			.BS 1
-hSrvSocket		.BS 1
-hClientSocket	.BS 1
 ZS.END			.ED
 *--------------------------------------
 *			File Header (16 Bytes)
@@ -29,131 +29,68 @@ ZS.END			.ED
 CS.START		cld
 				jmp (.1,x)
 				.DA #$61				6502,Level 1 (65c02)
-				.DA #1					BIN Layout Version 1
-				.DA #S.PS.F.EVENT		S.PS.F
+				.DA #2					BIN Layout Version 2
+				.DA #S.PS.SIG.T1SEC
 				.DA #0
-				.DA CS.END-CS.START		CS
-				.DA DS.END-DS.START		DS
-				.DA #32					SS
+				.DA CS.END
+				.DA ID.END
+				.DA DS.END
+				.DA #64					Stack Size
 				.DA #ZS.END-ZS.START	Zero Page Size
-				.DA 0
 *--------------------------------------
 * Relocation Table
 *--------------------------------------
 .1				.DA CS.INIT
 				.DA CS.RUN
-				.DA CS.DOEVENT
+				.DA CS.SIG
 				.DA	CS.QUIT
-L.LIBTCPIP		.DA LIBTCPIP
+*--------------------------------------
 L.SA.LOCAL		.DA SA.LOCAL
-L.MSG.TCPWAIT	.DA MSG.TCPWAIT
 L.MSG.INITOK	.DA MSG.INITOK
-L.MSG.TCPIPERR	.DA MSG.TCPIPERR
 L.MSG.SKTERR	.DA MSG.SKTERR
 L.MSG.INCOMING	.DA MSG.INCOMING
 L.NOD.Template	.DA NOD.Template
 L.CMD.Template	.DA CMD.Template
 				.DA 0
 *--------------------------------------
-CS.INIT			>LDYA L.LIBTCPIP
-				>KAPI LoadLib
-				bcs .9
-				sta hLIBTCPIP
-
-.9				rts
-*--------------------------------------
-CS.RUN			lda #TIMEOUT.MAX
-				sta TimeOut
-
-				>LDYA L.MSG.TCPWAIT
-				>LIBC PutS
-
-.1				>SLEEP
-				>LIBCALL hLIBTCPIP,LIBTCPIP.GETCFG	is TCPIP loaded ?
-				bcs .99
-
-				>STYA ZPIPCfgPtr
-
-				lda (ZPIPCfgPtr)		Configured ?
-				bmi CS.RUN.INIT
-
-				lda TimeOut
-				beq .99
-
-				ldy #S.PS.hStdIn
-				lda (pPS),y
-				>LIBC FEOF
-				bcs .9					I/O err
-
-				tay
-				bne .1
-
-				>LIBC GetChar
-				bcs .9
-
-				cmp #$03
-				bne .1
-
-*				sec
-
+CS.INIT			clc
 				rts
-
-.99				pha
-				>LDYA L.MSG.TCPIPERR
-				>LIBC PutS
-				pla
-				sec
-.9				rts
-
-CS.RUN.INIT		ldx #3
-				ldy #S.IPCFG.IP+3
-
-.1				lda (ZPIPCfgPtr),y
-				sta SA.LOCAL+S.SOCKADDR.ADDR,x
-				dey
-				dex
-				bpl .1
-
-				lda #1
+*--------------------------------------
+CS.RUN			lda #1
 				>KAPI ArgV
-				bcs CS.RUN.PORTOK
+				bcs .1
 
 				>LIBC AToI
-				>STYA SA.LOCAL+S.SOCKADDR.PORT
+				>STYA SA.LOCAL+S.SA.IN.PORT
 
-CS.RUN.PORTOK	>PUSHBI S.SOCKET.T.STREAM
-				>PUSHBI 0				no protocol
-				>LIBCALL hLIBTCPIP,LIBTCPIP.Socket
+.1				>SS
+				>PUSHWI AF_INET
+				>PUSHWI SOCK_STREAM
+				>PUSHWZ
+				>LIBC Socket
+				>SR
 				bcs .9
 
-				sta hSrvSocket
+				>STYA hSrvSocket
 
-				>PUSHA
+				>SS
+				>PUSHW hSrvSocket
 				>PUSHW L.SA.LOCAL
-				>LIBCALL hLIBTCPIP,LIBTCPIP.Bind
+				>PUSHWI S.SA.IN
+				>LIBC Bind
+				>SR
 				bcs .9
 
-				lda hSrvSocket
-				>LIBCALL hLIBTCPIP,LIBTCPIP.Listen
+				>SS
+				>PUSHW hSrvSocket
+				>PUSHWI 16				backlog
+				>LIBC Listen
+				>SR
 				bcs .9
 
 				>LDYA L.MSG.INITOK
 				>LIBC PutS
-
-.2				>SLEEP
-
-				lda hSrvSocket
-				>LIBCALL hLIBTCPIP,LIBTCPIP.Accept
-				bcs .2
-
-				pha
-				jsr CS.RUN.CLIENT
-				pla
-
-				bcc .2
-
-				>LIBCALL hLIBTCPIP,LIBTCPIP.Shutdown
-				bra .2
+				bcc CS.RUN.LOOP
 
 .9				pha
 				>LDYA L.MSG.SKTERR
@@ -162,101 +99,121 @@ CS.RUN.PORTOK	>PUSHBI S.SOCKET.T.STREAM
 				sec
 				rts
 *--------------------------------------
+CS.RUN.LOOP		>SLEEP
+
+				>SS
+				>PUSHW hSrvSocket
+				>PUSHEA.G SA.CLNT
+				>PUSHWI S.SA.IN
+				>LIBC Accept
+				>SR
+				bcs CS.RUN.LOOP
+
+				>STYA hCltSocket
+				
+				jsr CS.RUN.CLIENT
+
+				bcc CS.RUN.LOOP
+
+				>SS
+				>PUSHW hCltSocket
+				>PUSHWI 0				how
+				>LIBC Shutdown
+				>SR
+				bra CS.RUN.LOOP
+*--------------------------------------
 CS.RUN.CLIENT	>SLEEP					give some time for TCPIP SYN/ACK
 
-				sta hClientSocket
-				tax
-				
-				lda FDs.pHI-1,x
-				ldy FDs.pLO-1,x
-				>STYA ZPSktPtr
-
+				>SS
 				>PUSHW L.MSG.INCOMING
 
-				>PUSHB hClientSocket
+				>PUSHB hCltSocket
 
 				ldx #3
-				ldy #S.SOCKET.REM.ADDR
+				ldy #SA.CLNT+S.SA.IN.ADDR
 
-.1				>PUSHB (ZPSktPtr),y
+.1				>PUSHB (pData),y
 				iny
 				dex
 				bpl .1
 
-				>PUSHBI 5
-				>LIBC PrintF
+				>PUSHW.G SA.CLNT+S.SA.IN.PORT
 
+				>PUSHBI 7
+				>LIBC PrintF
+				>SR
+
+				>SS
 				>PUSHEA.G NodBuf
 				>PUSHW L.NOD.Template
-				>PUSHB hClientSocket
+				>PUSHB hCltSocket
 				>PUSHBI 1
 				>LIBC SPrintF
+				>SR
 
-CS.RUN.CLIENT1	>PUSHEA.G NodBuf
+CS.RUN.CLIENT1	>SS
+				>PUSHEA.G NodBuf
 				>PUSHWZ
-				>PUSHB hClientSocket
+				>PUSHW hCltSocket
 				>LIBC MKNod
+				>SR
 				bcs .9
 
+				>SS
 				>PUSHEA.G CmdBuf
 				>PUSHW L.CMD.Template
 				>PUSHEA.G NodBuf
 				>PUSHBI 2
 				>LIBC SPrintF
+				>SR
+				bcs .9
 
+				>SS
 				>PUSHEA.G CmdBuf
-				>PUSHBI 0
+				>PUSHWI 0
 				>LIBC ExecL
-				
+				>SR
+
 .9				rts
 *--------------------------------------
-CS.DOEVENT		lda (pEvent)
-				bpl .9					is it a TIMER event?
-
-				lda TimeOut
+CS.SIG			lda TimeOut
 				beq .9
 
 				dec TimeOut
 
-.9				sec						do not discard TIMER event
-				rts
+.9				rts
 *--------------------------------------
-CS.QUIT			lda hSrvSocket
-				beq .3
-
-				>LIBCALL hLIBTCPIP,LIBTCPIP.Shutdown
-
-.3				lda hLIBTCPIP
+CS.QUIT			ldy hSrvSocket
 				beq .8
 
-				>KAPI UnloadLib
+				lda #0
+
+				>LIBC Shutdown
 
 .8				clc
 				rts
 *--------------------------------------
-CS.END
+CS.END			.EQ *
 *--------------------------------------
-hLIBTCPIP		.BS 1
-LIBTCPIP		.AZ "libtcpip"
-MSG.TCPWAIT		.AZ "TELNETD:Waiting for TCP/IP initializing..."
 MSG.INITOK		.AZ "TELNETD:Init Ok, Listening."
-MSG.TCPIPERR	.AZ "TELNETD:TCP/IP Not initialized properly."
 MSG.SKTERR		.AZ "TELNETD:Listen Error."
-MSG.INCOMING	.CZ "TELNETD:Incoming Connection [SKT=%h] From : %d.%d.%d.%d\r\n"
+MSG.INCOMING	.CZ "TELNETD:Incoming Connection [SKT=%h] From : %d.%d.%d.%d:%D\r\n"
 *--------------------------------------
 NOD.Template	.AZ "/dev/tty%h"
-CMD.Template	.AZ "${ROOT}sbin/getty -E %s ${ROOT}sbin/login"
+CMD.Template	.AZ "/sbin/getty -E %s /sbin/login"
 *--------------------------------------
-SA.LOCAL		.DA #AF.INET			S.SOCKADDR.AF
-				.BS 1
-				.BS 4					S.SOCKADDR.ADDR
+SA.LOCAL		.DA AF_INET				S.SA.IN.AF
+				.DA #0,#0,#0,#0			S.SA.IN.ADDR
 				.DA TCP.PORT.TELNET
+*--------------------------------------
+ID.END			.EQ *
 *--------------------------------------
 				.DUMMY
 				.OR 0
-DS.START
+SA.CLNT			.BS S.SA.IN
 NodBuf			.BS 11
 CmdBuf			.BS 65
+
 DS.END			.ED
 *--------------------------------------
 MAN
