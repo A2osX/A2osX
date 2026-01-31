@@ -16,12 +16,26 @@ TCP.IN			ldy #S.TCP.OPTIONS
 TCP.IN.RST		lda #S.SKT.IN.S.TIMEWT
 				ldy #S.FD.SOCK.S
 				sta (pSKT),y
-
+*--------------------------------------
 TCP.IN.CLOSED
+*--------------------------------------
 TCP.IN.OPENED
+*--------------------------------------
+TCP.IN.CLWAIT
 
-				clc
-				rts
+* Wait for SKT.shutdown
+
+*--------------------------------------
+TCP.IN.CLOSING
+
+* Wait for SKT.Shutdown
+
+*--------------------------------------
+TCP.IN.TIMEWT
+
+* Wait for TCP.SendClose
+
+				jmp FRM.DiscardIn
 *--------------------------------------
 TCP.IN.LISTEN	jsr ARP.AddFrompFrameIn		trash ZPPtr1!!!
 
@@ -69,6 +83,10 @@ TCP.IN.LISTEN	jsr ARP.AddFrompFrameIn		trash ZPPtr1!!!
 				dey
 				dex
 				bpl .4
+
+				ldy #S.SKT.IN.BNK
+				lda (pSKT),y
+				sta (ZPPtr1),y
 
 				lda ZPPtr1
 				sta pSKT
@@ -119,7 +137,9 @@ TCP.IN.SYNSENT	ldy #S.TCP.OPTIONS		SYN Send, only accept SYN.ACK packet, then Se
 				bcs .9
 
 				lda #S.SKT.IN.S.ESTBLSH
-				jmp SKT.Update.S
+				jsr SKT.Update.S
+
+				jmp FRM.DiscardIn
 
 .9				lda #S.TCP.OPTIONS.RST
 				jsr TCP.OUT.SendOptA	Send RST
@@ -150,17 +170,16 @@ TCP.IN.SYNRCVD	ldy #S.TCP.OPTIONS		SYN Received, SYN.ACK Sent, only accept ACK p
 				bpl .1
 
 				lda #S.SKT.IN.S.ESTBLSH
-				jmp SKT.Update.S
+				jsr SKT.Update.S
 
-.8				clc
-				rts
+.8				jmp FRM.DiscardIn
 *--------------------------------------
 TCP.IN.ESTBLSH	jsr SKT.Get
 
 				ldy #S.TCP.OPTIONS
 				lda (pFrameIn),y
 				and #S.TCP.OPTIONS.ACK	Remote side ACKed data ?
-				beq .4
+				beq .3
 *--------------------------------------
 * Ack sent data
 *--------------------------------------
@@ -179,63 +198,68 @@ TCP.IN.ESTBLSH	jsr SKT.Get
 				dex
 				bpl .1
 
-				bcc .7					ACK > SENT SEQ ????
+				bcc .80					ACK > SENTSEQ ????
 
 				lda TmpDWord+3
-				ldx TmpDWord+2
+				ora TmpDWord+2
+				beq .3					ACK = SENT SEQ
+
+				ldy #S.FD.SOCK.T
+				lda (pSKT),y
+				cmp #SOCK_STREAM
 				bne .2
 
+				clc
+				lda TmpDWord+3
+				sta A4
+				adc SKT.CACHE+S.SKT.IN.pOUTTAIL
+				sta SKT.CACHE+S.SKT.IN.pOUTTAIL
 				tay
-				beq .4
 
-.2				pha
+				lda TmpDWord+2
+				sta A4+1
+				adc SKT.CACHE+S.SKT.IN.pOUTTAIL+1
+				sta SKT.CACHE+S.SKT.IN.pOUTTAIL+1
 
-				clc
-				adc SKT.CACHE+S.SKT.IN.OUTTAIL
-				sta SKT.CACHE+S.SKT.IN.OUTTAIL
-
-				txa
-				adc SKT.CACHE+S.SKT.IN.OUTTAIL+1
-				and /K.TCP.WSIZE-1
-				sta SKT.CACHE+S.SKT.IN.OUTTAIL+1
-				pla
-				clc
-				adc SKT.CACHE+S.SKT.IN.OUTFREE
-				sta SKT.CACHE+S.SKT.IN.OUTFREE
-				txa
-				adc SKT.CACHE+S.SKT.IN.OUTFREE+1
-				sta SKT.CACHE+S.SKT.IN.OUTFREE+1
-
-				lda SKT.CACHE+S.SKT.IN.OUTUSED
+				pha
+				tya
 				sec
-				sbc TmpDWord+3
-				sta SKT.CACHE+S.SKT.IN.OUTUSED
-				lda SKT.CACHE+S.SKT.IN.OUTUSED+1
-				sbc TmpDWord+2
-				sta SKT.CACHE+S.SKT.IN.OUTUSED+1
+				sbc #K.TCP.WSIZE
+				tay
+				pla
+				sbc /K.TCP.WSIZE
+				bcc .20
 
-				jsr SKT.Update
+				>STYA SKT.CACHE+S.SKT.IN.pOUTTAIL
+
+.20				ldx #S.SKT.IN.OUTFREE
+				jsr SKT.AddA4AtSktX
+
+				ldx #S.SKT.IN.OUTUSED
+				jsr SKT.SubA4AtSktX
+
+.2				jsr SKT.Update
 *--------------------------------------
 * Store incoming data
 *--------------------------------------
-.4				jsr TCP.IN.SetA1A4
-				beq .7					No data in this frame
+.3				jsr TCP.IN.SetA1A4
+				beq .80					No data in this frame
 
 				ldy #S.TCP.SEQNUM+3
 				ldx #3
 
-.5				lda (pFrameIn),y
+.4				lda (pFrameIn),y
 				eor SKT.CACHE+S.SKT.IN.INSEQNUM,x
 				bne .90					Missed a frame.....
 
 				dey
 				dex
-				bpl .5
+				bpl .4
 
 				ldy #S.FD.SOCK.T
 				lda (pSKT),y
 				cmp #SOCK_STREAM
-				bne .52
+				bne .5
 
 				lda A4+1
 				pha
@@ -249,23 +273,43 @@ TCP.IN.ESTBLSH	jsr SKT.Get
 				plx
 				stx A4+1
 
-				bcc .6
+				bcs .80
 
-				rts
-
-.52				jsr SKT.AddFrameInToQ
-				bcs .99
-
-				stz pFrameIn+1			DON'T DISCARD
-
-.6				lda A4
-				ldy A4+1
 				ldx #S.SKT.IN.INSEQNUM
-				jsr TCP.AddAYToSktCacheAtX
+				jsr SKT.Add32A4AtSktX
 
 				jsr SKT.Update
+
+.80				jsr TCP.IN.CheckFIN
+
+				jmp FRM.DiscardIn
 *--------------------------------------
-.7				ldy #S.TCP.OPTIONS
+.5				jsr SKT.AddFrameInToQ
+				bcs .80
+
+.6				ldx #S.SKT.IN.INSEQNUM
+				jsr SKT.Add32A4AtSktX
+
+				jsr SKT.Update
+
+				jsr TCP.IN.CheckFIN
+
+				clc						DONT'T DISCARD
+				rts
+*--------------------------------------
+.90
+*				lda #S.TCP.OPTIONS.ACK	Send 3 ACK for last SEQ number
+*				jsr TCP.OUT.SendOptA
+
+*				lda #S.TCP.OPTIONS.ACK
+*				jsr TCP.OUT.SendOptA
+
+				lda #S.TCP.OPTIONS.ACK
+				jsr TCP.OUT.SendOptA
+
+				jmp FRM.DiscardIn
+*--------------------------------------
+TCP.IN.CheckFIN	ldy #S.TCP.OPTIONS
 				lda (pFrameIn),y
 				and #S.TCP.OPTIONS.FIN
 				beq .8
@@ -277,37 +321,21 @@ TCP.IN.ESTBLSH	jsr SKT.Get
 				lda #S.SKT.IN.S.LASTACK
 				jmp SKT.Update.S
 
-.8				ldy #S.FD.SOCK.O
-				lda (pSKT),y
-				bne .91
-
-.80				clc
-.99				rts
-
-.90
-*				lda #S.TCP.OPTIONS.ACK	Send 3 ACK for last SEQ number
-*				jsr TCP.OUT.SendOptA
-
-*				lda #S.TCP.OPTIONS.ACK
-*				jsr TCP.OUT.SendOptA
-
-				lda #S.TCP.OPTIONS.ACK
-.91				jmp TCP.OUT.SendOptA
-*--------------------------------------
-TCP.IN.CLWAIT	clc						Wait for SKT.shutdown
-				rts
+.8				rts
 *--------------------------------------
 TCP.IN.LASTACK	ldy #S.TCP.OPTIONS		only accept ACK packet
 				lda (pFrameIn),y
 				bit #S.TCP.OPTIONS.ACK
-				beq TCP.IN.CLWAIT
+				beq .8
 
 				jsr SKT.Get
 
 *				jsr TCP.OUT.SendACK
 
 				lda #S.SKT.IN.S.CLWAIT
-				jmp SKT.Update.S
+				jsr SKT.Update.S
+
+.8				jmp FRM.DiscardIn
 *--------------------------------------
 TCP.IN.FINWT1	ldy #S.TCP.OPTIONS		FIN sent, accept ACK or FIN/ACK packet
 				lda (pFrameIn),y
@@ -316,13 +344,15 @@ TCP.IN.FINWT1	ldy #S.TCP.OPTIONS		FIN sent, accept ACK or FIN/ACK packet
 
 				jsr SKT.Get
 				lda #S.SKT.IN.S.FINWT2
-				jmp SKT.Update.S
+				jsr SKT.Update.S
+
+TCP.IN.FINWT1.9	jmp FRM.DiscardIn
 *--------------------------------------
 TCP.IN.FINWT2	ldy #S.TCP.OPTIONS		FIN sent & ACKed, awaiting FIN
 				lda (pFrameIn),y
 
 				bit #S.TCP.OPTIONS.FIN
-				beq TCP.IN.TIMEWT
+				beq TCP.IN.FINWT1.9
 
 TCP.IN.2TIMEWT	jsr SKT.Get
 
@@ -332,21 +362,9 @@ TCP.IN.2TIMEWT	jsr SKT.Get
 				bcs .9
 
 				lda #S.SKT.IN.S.TIMEWT
-				jmp SKT.Update.S
+				jsr SKT.Update.S
 
-.9				rts
-*--------------------------------------
-TCP.IN.CLOSING
-
-* Wait for SKT.Shutdown
-
-*--------------------------------------
-TCP.IN.TIMEWT
-
-* Wait for TCP.SendClose
-
-				clc
-				rts
+.9				jmp FRM.DiscardIn
 *--------------------------------------
 TCP.IN.SetA1A4	ldy #S.IP.TOTAL.LENGTH+1
 				lda (pFrameIn),y
@@ -487,15 +505,11 @@ TCP.SendClose	ldx #0
 				bne .5
 
 				jsr Shutdown_EQ
-				bra .7
+				bra .6
 *--------------------------------------
-.5				ldy #S.SKT.IN.pIN
-				jsr .9
+.5				jsr .9
 
-				ldy #S.SKT.IN.pOUT
-				jsr .9
-
-				ldx hSKT
+.6				ldx hSKT
 
 				jsr SKT.FreeX
 *--------------------------------------
@@ -508,8 +522,25 @@ TCP.SendClose	ldx #0
 
 				clc
 				rts
+*--------------------------------------
+.9				lda A2osX.ActBnk
+				pha
 
-.9				lda (pSKT),y
+				ldy #S.SKT.IN.BNK
+				lda (pSKT),y
+				sta (pRWReg)
+
+				ldy #S.SKT.IN.pIN
+				jsr .90
+
+				ldy #S.SKT.IN.pOUT
+				jsr .90
+
+				pla
+				sta (pRWReg)
+				rts
+
+.90				lda (pSKT),y
 				pha
 				iny
 				lda (pSKT),y
@@ -517,16 +548,11 @@ TCP.SendClose	ldx #0
 				>DAPI Free
 				rts
 *--------------------------------------
-TCP.OUT			jsr SKT.Get
-
-				lda SKT.CACHE+S.SKT.IN.OUTTOSEND+1
-				ldy SKT.CACHE+S.SKT.IN.OUTTOSEND
+TCP.OUT			ldy #S.SKT.IN.OUTTOSEND
+				lda (pSKT),y
+				iny
+				ora (pSKT),y
 				bne .1
-
-				tax
-				bne .1
-
-*	Y,A=0 : no data to send
 
 				ldy #S.SKT.IN.TCPOPT
 				lda (pSKT),y
@@ -535,8 +561,12 @@ TCP.OUT			jsr SKT.Get
 				clc						No data, no flag....exit
 
 .9				rts
+*--------------------------------------
+.1				jsr SKT.Get
 
-.1				cpy #K.TCP.MSS
+				>LDYA SKT.CACHE+S.SKT.IN.OUTTOSEND
+
+				cpy #K.TCP.MSS
 				pha
 				sbc /K.TCP.MSS			OUTDATA > MSS ?
 				pla
@@ -564,22 +594,24 @@ TCP.OUT			jsr SKT.Get
 
 				ldx #S.SKT.IN.OUTTOSEND
 				jsr SKT.SubA4AtSktX
-
-TCP.OUT.SEQSEND	ldy #S.TCP.WINDOW
-				lda SKT.CACHE+S.SKT.IN.INFREE+1
+*--------------------------------------
+TCP.OUT.SEQSEND	ldy #S.SKT.IN.WSIZE+1
+				lda (pSKT),y
+				tax
+				dey
+				lda (pSKT),y
+				ldy #S.TCP.WINDOW+1
 				sta (pFrameOut),y
-				iny
-				lda SKT.CACHE+S.SKT.IN.INFREE
+				dey
+				txa
 				sta (pFrameOut),y
 
 				lda #S.TCP.OPTIONS.ACK+S.TCP.OPTIONS.PSH
 				jsr TCP.OUT.Send
 				bcs TCP.OUT.Send.RTS
 
-				lda A4
-				ldy A4+1
 				ldx #S.SKT.IN.OUTNEXTSEQ
-				jsr TCP.AddAYToSktCacheAtX
+				jsr SKT.Add32A4AtSktX
 
 				jmp SKT.Update			exits with CC
 *--------------------------------------
@@ -611,7 +643,7 @@ TCP.OUT.SendOpt	stz A4
 				jsr TCP.OUT.NewFrame
 				bcs TCP.OUT.Send.RTS
 
-				ldy #S.SKT.IN.INFREE+1
+				ldy #S.SKT.IN.WSIZE+1
 				lda (pSKT),y
 				tax
 				dey
@@ -684,22 +716,6 @@ TCP.OUT.NewFrame
 
 				clc
 .9				rts
-*--------------------------------------
-TCP.AddAYToSktCacheAtX
-				clc
-				adc SKT.CACHE+3,x
-				sta SKT.CACHE+3,x
-				tya
-				adc SKT.CACHE+2,x
-				sta SKT.CACHE+2,x
-				bcc .8
-
-				inc SKT.CACHE+1,x
-				bne .8
-
-				inc SKT.CACHE,x
-
-.8				rts
 *--------------------------------------
 MAN
 SAVE usr/src/sys/km.inet.s.tcp

@@ -8,6 +8,10 @@ Socket			jsr SKT.New
 
 				>STYA pSKT
 
+				lda A2osX.ActBnk
+				ldy #S.SKT.IN.BNK
+				sta (pSKT),y
+
 				ldy #2					socket_type
 				jsr K.GetStkYW
 
@@ -33,7 +37,17 @@ Socket_DGRAM	lda #S.FD.T.DSOCK
 				sta (pSKT)				#S.FD.T
 
 				lda #S.IP.PROTOCOL.UDP
-				bra Socket_Q
+
+Socket_Q		ldy #S.FD.SOCK.P
+				sta (pSKT),y
+
+				jsr SKT.InitQ
+
+				ldy hSKT
+				lda #0
+
+				clc
+				rts
 *--------------------------------------
 Socket_SEQPACKET
 				lda #S.FD.T.DSOCK
@@ -41,14 +55,7 @@ Socket_SEQPACKET
 
 				lda #S.IP.PROTOCOL.TCP
 
-Socket_Q		ldy #S.FD.SOCK.P
-				sta (pSKT),y
-
-				lda #S.SKT.IN.Q
-
-				ldy #S.SKT.IN.QTAIL
-				sta (pSKT),y
-				iny						#S.SKT.IN.QHEAD
+				ldy #S.FD.SOCK.P
 				sta (pSKT),y
 
 				ldy hSKT
@@ -153,8 +160,7 @@ Connect_RAW
 Connect_DGRAM	jmp SKT.SetRemAddr
 *--------------------------------------
 Connect_SEQPACKET
-Connect_STREAM
-				ldy #S.FD.SOCK.S
+Connect_STREAM	ldy #S.FD.SOCK.S
 				lda (pSKT),y
 				beq .1
 
@@ -211,15 +217,7 @@ Listen			ldy #S.FD.SOCK.T
 				lda #S.SKT.IN.O.ACCEPTCONN
 				sta (pFD),y
 
-				lda #S.SKT.IN.Q
-
-				ldy #S.SKT.IN.QTAIL
-				sta (pSKT),y
-				iny						#S.SKT.IN.QHEAD
-				sta (pSKT),y
-
-				clc
-				rts
+				jmp SKT.InitQ
 
 listen.9		lda #SKT.E.BAD
 				sec
@@ -231,87 +229,24 @@ Accept			ldy #S.FD.SOCK.O
 				lda (pFD),y
 				and #S.SKT.IN.O.ACCEPTCONN
 				beq listen.9
-*--------------------------------------
-SKT.GetFromQ	ldy #S.SKT.IN.QTAIL
-				lda (pFD),y
-				iny						#S.SKT.IN.QHEAD
-				cmp (pFD),y
-				beq .9					CS
 
-				tay
+				jsr SKT.GetFromQ
+				bcs .9
 
-				lda (pFD),y
-				tax
-				stx .8+1
+				phy
 
-				iny
-				iny
-
-				tya
-				cmp #S.SKT.IN
-				bne .1
-
-				lda #S.SKT.IN.Q
-
-.1				ldy #S.SKT.IN.QTAIL
-				sta (pFD),y
-
-				lda pFDs,x
+				lda pFDs,y
 				sta pFD
-				lda pFDs+1,x
+				lda pFDs+1,y
 				sta pFD+1
 
 				jsr GetPeerName
 
-.8				ldy #$FF				SELF MODIFIED
-				lda #0
+				ply
+				lda #0					Y,A = Socket
 
 				clc
-				rts
-
-.9				lda #E.NODATA
-				sec
-				rts
-*--------------------------------------
-SKT.AddFrameInToQ
-				>LDYA pFrameIn
-SKT.AddYAToQ	pha
-				phy
-
-				ldy #S.SKT.IN.QHEAD
-				lda (pSKT),y
-
-				tax
-
-				inc
-				inc
-				cmp #S.SKT.IN
-				bne .1
-
-				lda #S.SKT.IN.Q
-
-.1				dey						#S.SKT.IN.QTAIL
-				cmp (pSKT),y
-				beq .9					Queue full!!
-
-				iny						#S.SKT.IN.QHEAD
-				sta (pSKT),y
-
-				txa
-				tay
-
-				pla
-				sta (pSKT),y
-				iny
-				pla
-				sta (pSKT),y
-				clc
-				rts
-
-.9				pla						dicard pFrame
-				pla
-*				sec
-				rts
+.9				rts
 *--------------------------------------
 * int shutdown(int socket, int how);
 *--------------------------------------
@@ -445,10 +380,7 @@ EOF_TRUE		tay						TRUE : exit with int=1
 				rts
 *--------------------------------------
 Recv_RAW
-Recv_DGRAM
-Recv_SEQPACKET
-
-				jsr SKT.GetFromQ
+Recv_DGRAM		jsr SKT.GetFromQ
 				bcs .9
 
 				>STYA A1
@@ -488,7 +420,6 @@ Recv_SEQPACKET
 *--------------------------------------
 .2				ldy #S.IP.TOTAL.LENGTH+1
 				lda (A1),y
-				iny
 				sec
 				sbc #S.ETH.EII
 				sta A4
@@ -530,6 +461,74 @@ Recv_SEQPACKET
 
 .9				rts
 *--------------------------------------
+Recv_SEQPACKET	jsr SKT.GetFromQ
+				bcs .9
+*			>DEBUG
+				>STYA A1
+				>STYA A3				for KFree
+
+				ldy #S.IP.TOTAL.LENGTH+1
+				lda (A1),y
+				sec
+				sbc #S.TCP
+				sta A4
+				dey
+				lda (A1),y
+				sbc /S.TCP
+				sta A4+1
+
+				lda #S.TCP
+				clc
+				adc A1
+				sta A1
+				bcc .1
+
+				inc A1+1
+
+.1				ldy #S.SKT.IN.INACKNUM+3
+				clc
+				lda A4
+				adc (pSKT),y
+				sta (pSKT),y
+				dey
+				lda A4+1
+				adc (pSKT),y
+				sta (pSKT),y
+				dey
+				lda #0
+				adc (pSKT),y
+				sta (pSKT),y
+				dey
+				lda #0
+				adc (pSKT),y
+				sta (pSKT),y
+
+				lda #S.TCP.OPTIONS.ACK
+				jsr SKT.SetTCPOPT
+
+.6				ldy #2					length
+				jsr K.GetStkYW
+
+				cpy A4
+				pha
+				sbc A4+1
+				pla
+				bcs .7
+
+				>STYA A4
+
+.7				sta IO.SETWRITEAUX
+				>DAPI MemCpy
+				sta IO.CLRWRITEAUX
+
+				>LDYA A3
+				>DAPI KFree
+
+				>LDYA A4
+
+				clc
+.9				rts
+*--------------------------------------
 Recv_STREAM		jsr SKT.Get
 
 				lda SKT.CACHE+S.SKT.IN.INUSED
@@ -542,7 +541,7 @@ Recv_STREAM		jsr SKT.Get
 				lda #E.NODATA
 				sec
 .9				rts
-
+*--------------------------------------
 .1				>LDYA SKT.CACHE+S.SKT.IN.INUSED
 
 				cpy A4
@@ -567,10 +566,8 @@ Recv_STREAM		jsr SKT.Get
 				ldx #S.SKT.IN.INUSED
 				jsr SKT.SubA4AtSktX
 
-				lda A4
-				ldy A4+1
 				ldx #S.SKT.IN.INACKNUM
-				jsr TCP.AddAYToSktCacheAtX
+				jsr SKT.Add32A4AtSktX
 
 				jsr SKT.Update
 
@@ -1060,21 +1057,45 @@ SKT.TCPInit		ldx #S.SKT.IN.INSEQNUM
 
 				ldy #S.FD.SOCK.T
 				lda (pSKT),y
-				cmp #SOCK_SEQPACKET
-				bcc .8
+				cmp #SOCK_STREAM
+				beq SKT.TCPInitStream
+*--------------------------------------
+SKT.TCPInitSeqPkt
+				ldy #S.SKT.IN.WSIZE
+				lda #K.TCP.MSS*10
+				sta (pSKT),y
+				iny
+				lda /K.TCP.MSS*10
+				sta (pSKT),y
+*--------------------------------------
+SKT.InitQ		lda #S.SKT.IN.QBASE
 
-				tax
+				ldy #S.SKT.IN.QTAIL
+				sta (pSKT),y
+				iny						#S.SKT.IN.QHEAD
+				sta (pSKT),y
+
+				clc
+
+				rts
+*--------------------------------------
+SKT.TCPInitStream
+				ldy #S.SKT.IN.WSIZE
+				lda #K.TCP.WSIZE
+				sta (pSKT),y
+				iny
+				lda /K.TCP.WSIZE
+				sta (pSKT),y
+
+				lda A2osX.ActBnk
+				pha
+
+				ldy #S.SKT.IN.BNK
+				lda (pSKT),y
+				sta (pRWReg)
 
 				>LDYAI K.TCP.WSIZE
 				>STYA SKT.CACHE+S.SKT.IN.INFREE
-
-				cpx #SOCK_STREAM
-				bcc .8
-
-				lda A2osX.ActBnk
-				ldy #S.SKT.IN.BNK
-				sta (pSKT),y
-
 				>DAPI Malloc
 				bcs .99
 
@@ -1091,7 +1112,6 @@ SKT.TCPInit		ldx #S.SKT.IN.INSEQNUM
 
 				>LDYAI K.TCP.WSIZE
 				>STYA SKT.CACHE+S.SKT.IN.OUTFREE
-
 				>DAPI Malloc
 				bcs .98
 
@@ -1107,7 +1127,9 @@ SKT.TCPInit		ldx #S.SKT.IN.INSEQNUM
 				iny
 				sta SKT.CACHE+S.SKT.IN.pOUTH+1
 
-.8
+				pla
+				sta (pRWReg)
+
 *				clc
 				rts
 
@@ -1117,9 +1139,93 @@ SKT.TCPInit		ldx #S.SKT.IN.INSEQNUM
 				pla
 				sec
 
-.99				rts
+.99				tax
+				pla
+				sta (pRWReg)
+				txa
+				rts
 *--------------------------------------
-SKT.Get		 	ldy #S.SKT.IN.INSEQNUM
+SKT.AddFrameInToQ
+				>LDYA pFrameIn
+
+SKT.AddYAToQ	pha
+				phy
+
+				ldy #S.SKT.IN.QHEAD
+				lda (pSKT),y
+
+				tax
+
+				inc
+				inc
+
+				cmp #S.SKT.IN.QTOP
+				bne .1
+
+				lda #S.SKT.IN.QBASE
+
+.1				dey						#S.SKT.IN.QTAIL
+				cmp (pSKT),y
+				beq .9					Queue full!!
+
+				iny						#S.SKT.IN.QHEAD
+				sta (pSKT),y
+
+				txa
+				tay
+
+				pla
+				sta (pSKT),y
+				iny
+				pla
+				sta (pSKT),y
+				clc
+				rts
+
+.9				pla						dicard pFrame
+				pla
+*				sec
+				rts
+*--------------------------------------
+SKT.GetFromQ	ldy #S.SKT.IN.QTAIL
+				lda (pFD),y
+				iny						#S.SKT.IN.QHEAD
+				cmp (pFD),y
+				beq .9					CS
+
+				pha
+
+				inc
+				inc
+
+				cmp #S.SKT.IN.QTOP
+				bne .1
+
+				lda #S.SKT.IN.QBASE
+
+.1				dey						#S.SKT.IN.QTAIL
+				sta (pFD),y
+
+				ply
+				lda (pFD),y
+				pha
+				iny
+				lda (pFD),y
+				ply
+				clc
+				rts
+
+.9				lda #E.NODATA
+				sec
+				rts
+*--------------------------------------
+SKT.Get		 	ldy #S.FD.SOCK.T
+				lda (pSKT),y
+
+				ldy #S.SKT.IN.INSEQNUM
+
+				cmp #SOCK_STREAM
+				bne .2
 
 .1				lda (pSKT),y
 				sta SKT.CACHE,y
@@ -1128,17 +1234,42 @@ SKT.Get		 	ldy #S.SKT.IN.INSEQNUM
 				bcc .1
 
 				rts
+
+.2				lda (pSKT),y
+				sta SKT.CACHE,y
+				iny
+				cpy #S.SKT.IN.OUTSENTSEQ+4
+				bcc .2
+
+				rts
 *--------------------------------------
 SKT.Update.S	ldy #S.FD.SOCK.S
 				sta (pSKT),y
 
-SKT.Update	 	ldy #S.SKT.IN.INSEQNUM
+SKT.Update	 	ldy #S.FD.SOCK.T
+				lda (pSKT),y
+
+				ldy #S.SKT.IN.INSEQNUM
+
+				cmp #SOCK_STREAM
+				bne .2
+
+				ldy #S.SKT.IN.INSEQNUM
 
 .1				lda SKT.CACHE,y
 				sta (pSKT),y
 				iny
 				cpy #S.SKT.IN
 				bcc .1
+
+				clc
+				rts
+
+.2				lda SKT.CACHE,y
+				sta (pSKT),y
+				iny
+				cpy #S.SKT.IN.OUTSENTSEQ+4
+				bcc .2
 
 				clc
 				rts
@@ -1300,19 +1431,17 @@ SKT.GetDynPort	inc DYNPORT.LAST
 *--------------------------------------
 * From Recv SOCK_STREAM
 *  Src : A1 = S.SKT.IN.pIN/INTAIL (AUX PIPE)
-*  Dst : A2 = User Buffer
-*  Len : A4 = User Buffer Len
-* Out:
-*  Y,A = bytes read
+*  Dst : A2 = User Buffer (IOOpt)
+*  Len : A4
 *--------------------------------------
 SKT.GetDataFromSktIn
 				clc
 				lda SKT.CACHE+S.SKT.IN.pIN
-				adc SKT.CACHE+S.SKT.IN.INTAIL
+				adc SKT.CACHE+S.SKT.IN.pINTAIL
 				sta A1
 
 				lda SKT.CACHE+S.SKT.IN.pIN+1
-				adc SKT.CACHE+S.SKT.IN.INTAIL+1
+				adc SKT.CACHE+S.SKT.IN.pINTAIL+1
 				sta A1+1
 
 				clc
@@ -1332,7 +1461,7 @@ SKT.GetDataFromSktIn
 				lda A3+1
 				sbc SKT.CACHE+S.SKT.IN.pINH+1
 				sta A3+1			A3 = Extra data after pINH
-				bcc .8				no extra...
+				bcc .3				no extra...
 
 *				sec
 				lda A4
@@ -1343,10 +1472,16 @@ SKT.GetDataFromSktIn
 				sbc A3+1
 				sta A4+1
 
-				>DAPI MemCpyX2X
+				bit A2osX.IOOpt
+				bmi .1
 
-				stz SKT.CACHE+S.SKT.IN.INTAIL
-				stz SKT.CACHE+S.SKT.IN.INTAIL+1
+				>DAPI MemCpyX2M
+				bra .2
+
+.1				>DAPI MemCpyX2X
+
+.2				stz SKT.CACHE+S.SKT.IN.pINTAIL
+				stz SKT.CACHE+S.SKT.IN.pINTAIL+1
 
 				>LDYA SKT.CACHE+S.SKT.IN.pIN
 				>STYA A1
@@ -1363,16 +1498,21 @@ SKT.GetDataFromSktIn
 				>LDYA A3
 				>STYA A4
 
-.8				>DAPI MemCpyX2X
+.3				bit A2osX.IOOpt
+				bmi .4
 
-				ldx #S.SKT.IN.INTAIL
+				>DAPI MemCpyX2M
+				bra .8
+
+.4				>DAPI MemCpyX2X
+
+.8				ldx #S.SKT.IN.pINTAIL
 				jmp SKT.AddA4AtSktX
 *--------------------------------------
 * From TCP.IN (STREAM)
-*  Src : A1 = Data from FrameIn
-*  Len : A4
-*
+*  Src : A1 = Data from FrameIn (MAIN)
 *  Dst : A2 = S.SKT.IN.pIN+INHEAD (AUX PIPE)
+*  Len : A4
 *--------------------------------------
 SKT.AddDataToSktIn
 				sec
@@ -1401,11 +1541,11 @@ SKT.AddDataToSktIn
 
 				clc
 				lda SKT.CACHE+S.SKT.IN.pIN
-				adc SKT.CACHE+S.SKT.IN.INHEAD
+				adc SKT.CACHE+S.SKT.IN.pINHEAD
 				sta A2
 
 				lda SKT.CACHE+S.SKT.IN.pIN+1
-				adc SKT.CACHE+S.SKT.IN.INHEAD+1
+				adc SKT.CACHE+S.SKT.IN.pINHEAD+1
 				sta A2+1
 
 				clc
@@ -1440,8 +1580,8 @@ SKT.AddDataToSktIn
 				>DAPI MemCpy
 				sta IO.CLRWRITEAUX
 
-				stz SKT.CACHE+S.SKT.IN.INHEAD
-				stz SKT.CACHE+S.SKT.IN.INHEAD+1
+				stz SKT.CACHE+S.SKT.IN.pINHEAD
+				stz SKT.CACHE+S.SKT.IN.pINHEAD+1
 
 				clc
 				lda A1
@@ -1465,22 +1605,22 @@ SKT.AddDataToSktIn
 				pla
 				sta (pRWReg)
 
-				ldx #S.SKT.IN.INHEAD
+				ldx #S.SKT.IN.pINHEAD
 				jmp SKT.AddA4AtSktX
 *--------------------------------------
 * From Send_STREAM
-* Src : A1 = User Buffer
-* Len : A4
+* Src : A1 = User Buffer (IOOpt)
 * Dst : A2 = S.SKT.IN.pOUT+OUTHEAD (AUX PIPE)
+* Len : A4
 *--------------------------------------
 SKT.AddDataToSktOut
 				clc
 				lda SKT.CACHE+S.SKT.IN.pOUT
-				adc SKT.CACHE+S.SKT.IN.OUTHEAD
+				adc SKT.CACHE+S.SKT.IN.pOUTHEAD
 				sta A2
 
 				lda SKT.CACHE+S.SKT.IN.pOUT+1
-				adc SKT.CACHE+S.SKT.IN.OUTHEAD+1
+				adc SKT.CACHE+S.SKT.IN.pOUTHEAD+1
 				sta A2+1
 
 				clc
@@ -1500,7 +1640,7 @@ SKT.AddDataToSktOut
 				lda A3+1
 				sbc SKT.CACHE+S.SKT.IN.pOUTH+1
 				sta A3+1			A3 = Extra data after pOUTH
-				bcc .8				no extra...
+				bcc .3				no extra...
 
 *				sec
 				lda A4
@@ -1511,10 +1651,18 @@ SKT.AddDataToSktOut
 				sbc A3+1
 				sta A4+1
 
-				>DAPI MemCpyX2X
+				bit A2osX.IOOpt
+				bmi .1
 
-				stz SKT.CACHE+S.SKT.IN.OUTHEAD
-				stz SKT.CACHE+S.SKT.IN.OUTHEAD+1
+				sta IO.SETWRITEAUX
+				>DAPI MemCpy
+				sta IO.CLRWRITEAUX
+				bra .2
+
+.1				>DAPI MemCpyX2X
+
+.2				stz SKT.CACHE+S.SKT.IN.pOUTHEAD
+				stz SKT.CACHE+S.SKT.IN.pOUTHEAD+1
 
 				clc
 				lda A1
@@ -1531,14 +1679,23 @@ SKT.AddDataToSktOut
 				>LDYA A3
 				>STYA A4
 
-.8				>DAPI MemCpyX2X
+.3				bit A2osX.IOOpt
+				bmi .4
 
-				ldx #S.SKT.IN.OUTHEAD
+				sta IO.SETWRITEAUX
+				>DAPI MemCpy
+				sta IO.CLRWRITEAUX
+				bra .8
+
+.4				>DAPI MemCpyX2X
+
+.8				ldx #S.SKT.IN.pOUTHEAD
 				jmp SKT.AddA4AtSktX
 *--------------------------------------
 * From TCP.OUT
-* Src : A1 = S.SKT.IN.pOUT+OUTTAILSENT (AUX PIPE)
-* Dst : A2 = pDataOut
+* Src : A1 = S.SKT.IN.pOUT+pOUTTOSEND (AUX PIPE)
+* Dst : A2 = pDataOut (MAIN)
+* Len : A4
 *--------------------------------------
 SKT.GetDataFromSktOut
 				lda A2osX.ActBnk
@@ -1550,11 +1707,11 @@ SKT.GetDataFromSktOut
 
 				clc
 				lda SKT.CACHE+S.SKT.IN.pOUT
-				adc SKT.CACHE+S.SKT.IN.OUTTAILSENT
+				adc SKT.CACHE+S.SKT.IN.pOUTTOSEND
 				sta A1
 
 				lda SKT.CACHE+S.SKT.IN.pOUT+1
-				adc SKT.CACHE+S.SKT.IN.OUTTAILSENT+1
+				adc SKT.CACHE+S.SKT.IN.pOUTTOSEND+1
 				sta A1+1
 
 				clc
@@ -1564,7 +1721,7 @@ SKT.GetDataFromSktOut
 
 				lda A1+1
 				adc A4+1
-				sta A3+1				A3 = pOUT+OUTTAILSENT+A4
+				sta A3+1				A3 = pOUT+pOUTTOSEND+A4
 
 				sec
 				lda A3
@@ -1587,10 +1744,10 @@ SKT.GetDataFromSktOut
 
 				>DAPI MemCpyX2M
 
-				stz SKT.CACHE+S.SKT.IN.OUTTAILSENT
-				stz SKT.CACHE+S.SKT.IN.OUTTAILSENT+1
+				stz SKT.CACHE+S.SKT.IN.pOUTTOSEND
+				stz SKT.CACHE+S.SKT.IN.pOUTTOSEND+1
 
-				>LDYA SKT.CACHE+S.SKT.IN.pOUTH
+				>LDYA SKT.CACHE+S.SKT.IN.pOUT
 				>STYA A1
 
 				clc
@@ -1610,7 +1767,7 @@ SKT.GetDataFromSktOut
 				pla
 				sta (pRWReg)
 
-				ldx #S.SKT.IN.OUTTAILSENT
+				ldx #S.SKT.IN.pOUTTOSEND
 *				jmp SKT.AddA4AtSktX
 *--------------------------------------
 SKT.AddA4AtSktX	clc
@@ -1636,6 +1793,24 @@ SKT.SubA4AtSktX	sec
 				sta SKT.CACHE+1,x
 
 				rts
+*--------------------------------------
+SKT.Add32A4AtSktX
+				clc
+				lda SKT.CACHE+3,x
+				adc A4
+				sta SKT.CACHE+3,x
+
+				lda SKT.CACHE+2,x
+				adc A4+1
+				sta SKT.CACHE+2,x
+				bcc .8
+
+				inc SKT.CACHE+1,x
+				bne .8
+
+				inc SKT.CACHE,x
+
+.8				rts
 *--------------------------------------
 MAN
 SAVE usr/src/sys/km.inet.s.skt
