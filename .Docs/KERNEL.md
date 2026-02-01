@@ -1086,7 +1086,6 @@ Create a special or ordinary file.
 
 ## RETURN VALUE  
 CC = OK, CS = ERROR  
-A = hFILE  
 
 # pipe  
 
@@ -1364,8 +1363,8 @@ Test the end-of-file indicator for hFILE
 
 ## RETURN VALUE  
  CC :  
- A = $ff EOF  
- A = 0 NOT EOF  
+ Y,A = 0 EOF  
+ Y,A == 0 NOT EOF  
  CS :  
 
 # FTell  

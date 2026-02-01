@@ -1,12 +1,14 @@
 NEW
   AUTO 3,1
-				.LIST OFF	
+				.LIST OFF
 				.OP	65C02
 				.OR	$2000
 				.TF lib/libcrypt
 *--------------------------------------
 				.INB inc/macros.i
 				.INB inc/a2osx.i
+				.INB inc/a2osx.api.i
+				.INB inc/kernel.i
 				.INB inc/libcrypt.i
 *--------------------------------------
 				.DUMMY
@@ -33,7 +35,7 @@ ZS.END			.ED
 * - No I/O (printf....)
 *--------------------------------------
 				.DUMMY
-				.OR $1100
+				.OR K.Buf512
 ZPDataLen		.BS 2
 ZPChunkLen		.BS 2
 
@@ -122,10 +124,10 @@ HMACMD5.OPAD	.BS 65
 CS.START		cld
 				jmp (.1,x)
 				.DA #$61				6502,Level 1 (65c02)
-				.DA #1					BIN Layout Version 1
+				.DA #2					BIN Layout Version 2
 				.DA 0
-				.DA CS.END-CS.START
-				.DA 0
+				.DA CS.END
+				.DA ID.END
 				.DA 0
 				.DA 0
 *--------------------------------------
@@ -184,23 +186,27 @@ MD4				clc
 MD5				sec
 
 				ror MDx.MODE
-				
-				>PULLW ZPHashPtr
-				>PULLYA
+
+				>GETSTKW 2
+				>STYA ZPHashPtr
+				>GETSTKW 0
 				>STYA ZPDataPtr
-				>SYSCALL2 strlen
+				>LIBC StrLen
 				>STYA ZPDataLen
-.1				jsr MD5Init
+
+				jsr MD5Init
 				bcs .9
 
-				pha						save MD4 Context hMem
+*				>STYA ZPCtxPtr
 
 				jsr MDxUpdate.I
 				jsr MDxFinalize.I
 
-				pla
-				>SYSCALL2 FreeMem		Free MD4 Context
-				clc
+				>LDYA ZPCtxPtr
+				>LIBC Free
+
+*				clc
+
 .9				rts
 */--------------------------------------
 * ## MD4Init
@@ -217,14 +223,14 @@ MD4Init
 * ## MD5Init
 * Initialize a MD5 computation
 * # C
-* `hMD5 MD5init();`
+* `pMD5 MD5init();`
 * # ASM
 * `>LIBCALL hLIBCRYPT,LIBCRYPT.MD5Init`
 * ## RETURN VALUE
-* A = hMem To S.MD5
+* Y;A = pMD5
 *\--------------------------------------
 MD5Init			>LDYAI S.MDx
-				>SYSCALL2 getmem
+				>LIBC Malloc
 				bcs MDxInit.9
 
 				>STYA ZPCtxPtr
@@ -244,7 +250,8 @@ MDxReset.I		ldy #0
 				cpy #S.MDx				Includes S.MDx.FINALIZED Flag
 				bne .2
 
-				txa
+				>LDYA ZPCtxPtr
+
 				clc
 MDxInit.9		rts
 */--------------------------------------
@@ -276,13 +283,13 @@ MD4Update		clc
 MD5Update		sec
 
 				ror MDx.MODE
-				
-				>PULLW ZPDataLen		get LEN
-				>PULLW ZPDataPtr		get DATA
 
-				>PULLA
-				>SYSCALL2 GetMemPtr		get MD5 Context
+				>GETSTKW 4
 				>STYA ZPCtxPtr
+				>GETSTKW 2
+				>STYA ZPDataPtr
+				>GETSTKW 0
+				>STYA ZPDataLen
 
 MDxUpdate.I		ldy #S.MDx.FINALIZED
 				lda (ZPCtxPtr),y
@@ -295,7 +302,7 @@ MDxUpdate.I		ldy #S.MDx.FINALIZED
 				bne .3					yes
 
 				lda ZPDataLen
-				bne .2					Len = O ? 
+				bne .2					Len = O ?
 
 				clc						All data processed
 				rts
@@ -319,14 +326,14 @@ MDxUpdate.I		ldy #S.MDx.FINALIZED
 				cpy #64					Full 64 Bytes DATA ?
 				beq .58
 * Append "$80" & Padding & original size
-			
+
 				lda #$80				no, Append $80
 .52				sta MDx.BUFFER64,y
 
 				asl
 *				lda #0
 
-				iny						Pad with 0 to 64 
+				iny						Pad with 0 to 64
 				cpy #64
 				bcc .52
 
@@ -385,17 +392,16 @@ MD4Finalize		clc
 MD5Finalize		sec
 
 				ror MDx.MODE
-				
-				>PULLW ZPHashPtr
-				>PULLA
-				pha
-				>SYSCALL2 GetMemPtr
-				>STYA ZPCtxPtr			get MD5 Context
+
+				>GETSTKW 2
+				>STYA ZPCtxPtr
+				>GETSTKW 0
+				>STYA ZPHashPtr
 
 				jsr MDxFinalize.I
 
 				pla
-				>SYSCALL2 FreeMem
+				>LIBC Free
 				rts
 
 MDxFinalize.I	ldy #S.MDx.FINALIZED
@@ -435,9 +441,9 @@ MDxFinalize.I	ldy #S.MDx.FINALIZED
 				ldy MDx.i
 				inc MDx.i
 				sta (ZPHashPtr),y
-				
+
 				ply
-				
+
 MDxFinalize.RTS	rts
 */--------------------------------------
 * ## HMACMD5
@@ -454,21 +460,22 @@ MDxFinalize.RTS	rts
 *\--------------------------------------
 * https://github.com/fab13n/org.eclipse.mihini/blob/master/libs/hmac-md5/hmac_rfc2104/hmac-md5.c
 *--------------------------------------
-HMACMD5			>PULLW ZPHashPtr
-				>PULLW ZPDataPtr
-				>PULLW ZPKeyPtr
+HMACMD5			>GETSTKW 4
+				>STYA ZPDataPtr
+				>GETSTKW 2
+				>STYA ZPKeyPtr
+				>GETSTKW 0
+				>STYA ZPHashPtr
 
 				jsr MD5Init
 				bcs MDxFinalize.RTS
-			
+
 				sec
 
 				ror MDx.MODE			Switch to MD5
-				
-				pha
 
 				>LDYA ZPDataPtr
-				>SYSCALL2 strlen
+				>LIBC StrLen
 				>STYA ZPDataLen
 				cpy #65
 				bcs .2
@@ -509,12 +516,12 @@ HMACMD5			>PULLW ZPHashPtr
 				>STYA ZPDataPtr
 				>LDYAI 64
 				>STYA ZPDataLen
-				
+
 				jsr MDxUpdate.I
 
 				>LDYA ZPKeyPtr
 				>STYA ZPDataPtr
-				>SYSCALL2 strlen
+				>LIBC StrLen
 				>STYA ZPDataLen
 
 				jsr MDxUpdate.I
@@ -544,9 +551,9 @@ HMACMD5			>PULLW ZPHashPtr
 
 				jsr MDxUpdate.I
 				jsr MDxFinalize.I		MDx.MODE setup by MD5Update
-				
-				pla
-				>SYSCALL2 FreeMem
+
+				>LDYA ZPCtxPtr
+				>LIBC Free
 
 				rts
 *--------------------------------------
@@ -608,7 +615,7 @@ MDxUpdateBitCnt	stz ZPChunkLen+1
 .8				rts
 *--------------------------------------
 * MDxExtraChunk
-*  In : 
+*  In :
 *   ZPCtxPtr = MDx Context
 *--------------------------------------
 MDxExtraChunk	ldy #S.MDx.FINALIZED
@@ -633,12 +640,12 @@ MDxExtraChunk	ldy #S.MDx.FINALIZED
 				jsr MDxTransform
 *--------------------------------------
 * MDxUpdateABCD0
-*  In: 
+*  In:
 *   ZPCtxPtr = MDx Context
 *--------------------------------------
 MDxUpdateABCD0	ldy #0
 
-.1				clc						ADC32 A+A0->A0, B, C, D.... 
+.1				clc						ADC32 A+A0->A0, B, C, D....
 
 .2				lda MDx.ABCD,y
 				adc (ZPCtxPtr),y
@@ -662,14 +669,14 @@ MDxTransform	ldy #15					init ABCD Chunk with Context ABCD0
 
 				lda #0					make sure A = MDx.i = 0 before transform
 				sta MDx.i
-				
+
 				bit MDx.MODE
 				bpl MD4Transform
-				
+
 				jmp MD5Transform
 *--------------------------------------
-* MD4Transform 
-*  In: 
+* MD4Transform
+*  In:
 *   ZPCtxPtr = MD4 Context
 *   512 Bits Padded chunk in MDx.BUFFER64
 *  Out:
@@ -763,8 +770,8 @@ MD4.XXXX.END	>MOV32 MDx.D,MDx.DTemp
 				>MOV32 MDx.DTemp,MDx.A
 				rts
 *--------------------------------------
-* MD5Transform 
-*  In: 
+* MD5Transform
+*  In:
 *   ZPCtxPtr = MD5 Context
 *   512 Bits Padded chunk in MDx.BUFFER64
 *  Out:
@@ -855,7 +862,8 @@ MD5.XXXX.END	>MOV32 MDx.D,MDx.DTemp
 				>MOV32 MDx.DTemp,MDx.A
 				rts
 *--------------------------------------
-CS.END
+CS.END			.EQ *
+*--------------------------------------
 MDx.ABCDINIT	.HS 01234567.89ABCDEF.FEDCBA98.76543210
 *--------------------------------------
 MD4.s			.DA #3,#7,#11,#19,#3,#7,#11,#19,#3,#7,#11,#19,#3,#7,#11,#19
@@ -896,6 +904,8 @@ MD5.K			.HS 78A46AD7.56B7C7E8.DB702024.EECEBDC1
 				.HS 827E53F7.35F23ABD.BBD2D72A.91D386EB
 *--------------------------------------
 MDx.DIGITS		.AS "0123456789abcdef"
+*--------------------------------------
+ID.END			.EQ *
 *--------------------------------------
 MAN
 SAVE usr/src/lib/libcrypt.s

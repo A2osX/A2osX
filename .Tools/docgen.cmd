@@ -35,11 +35,6 @@ set SRCDIR=%~dp0..\LIB
 set FILTER=LIBGUI.S*.txt
 Call :SCAN
 
-set DOCFILE=%~dp0..\.Docs\LIBTCPIP.md
-set SRCDIR=%~dp0..\LIB
-set FILTER=LIBTCPIP.S*.txt
-Call :SCAN
-
 set DOCFILE=%~dp0..\.Docs\LIBCRYPT.md
 set SRCDIR=%~dp0..\LIB
 set FILTER=LIBCRYPT.S*.txt

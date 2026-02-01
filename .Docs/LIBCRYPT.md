@@ -47,13 +47,13 @@ A = hMem To S.MD4
 Initialize a MD5 computation  
 
 # C  
-`hMD5 MD5init();`  
+`pMD5 MD5init();`  
 
 # ASM  
 `>LIBCALL hLIBCRYPT,LIBCRYPT.MD5Init`  
 
 ## RETURN VALUE  
-A = hMem To S.MD5  
+Y;A = pMD5  
 
 ## MD4Update  
 Add Data to MD4 computation  
