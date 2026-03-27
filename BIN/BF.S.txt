@@ -7,8 +7,21 @@ NEW
 *--------------------------------------
 				.INB inc/macros.i
 				.INB inc/a2osx.i
+				.INB inc/a2osx.api.i
 				.INB inc/mli.i
 				.INB inc/mli.e.i
+*--------------------------------------
+				.MA PULLA
+				lda (pStack)
+				inc pStack
+				.EM
+*--------------------------------------
+				.MA PULLW
+				>PULLA
+				sta ]1
+				>PULLA
+				sta	]1+1
+				.EM
 *--------------------------------------
 BF.DATASIZE		.EQ 1024
 *--------------------------------------
@@ -17,20 +30,22 @@ BF.DATASIZE		.EQ 1024
 				.DUMMY
 				.OR ZPBIN
 ZS.START
-ZPCodePtr		.BS 2
-ZPDataPtr		.BS 2
+pCodePtr		.BS 2
+pDataPtr		.BS 2
 
 ZPPtr1			.BS 2
 ZPPtr2			.BS 2
 ZPPtr3			.BS 2
 
 ArgIndex		.BS 1
-hFileBuf		.BS 1
-hDataBuf		.BS 1
+
+pCodeBuf		.BS 2
+pDataBuf		.BS 2
+
 bDebug			.BS 1
 bTrace			.BS 1
 StackCnt		.BS 1
-ZPCnt			.BS 1
+Cnt				.BS 1
 ZS.END			.ED
 *--------------------------------------
 *			File Header (16 Bytes)
@@ -38,21 +53,22 @@ ZS.END			.ED
 CS.START		cld
 				jmp (.1,x)
 				.DA #$61				6502,Level 1 (65c02)
-				.DA #1					BIN Layout Version 1
-				.DA #0					S.PS.F.EVENT
+				.DA #2					BIN Layout Version 2
+				.DA #0					#S.PS.SIG
 				.DA #0
-				.DA CS.END-CS.START		Code Size (without Constants)
-				.DA DS.END-DS.START		Data SegmentSize
+				.DA CS.END
+				.DA ID.END
+				.DA DS.END
 				.DA #64					Stack Size
 				.DA #ZS.END-ZS.START	Zero Page Size
-				.DA 0
 *--------------------------------------
 * Relocation Table
 *--------------------------------------
 .1				.DA CS.INIT
 				.DA CS.RUN
-				.DA CS.DOEVENT
+				.DA CS.SIG
 				.DA	CS.QUIT
+*--------------------------------------
 L.MSG.GREETINGS	.DA MSG.GREETINGS
 L.MSG.USAGE		.DA MSG.USAGE
 L.MSG.ECHOCRLF	.DA MSG.ECHOCRLF
@@ -77,10 +93,12 @@ CS.INIT.RTS		rts
 * Called until exit with CS
 * if RUN exits with CC, RN entered again
 *--------------------------------------
-CS.RUN			>PUSHW L.MSG.GREETINGS
+CS.RUN			>SS
+				>PUSHW L.MSG.GREETINGS
 				>PUSHW A2osX.KVER
 				>PUSHBI 2
 				>LIBC PrintF
+				>SR
 				bcs CS.INIT.RTS
 
 				jsr CS.RUN.ARGS
@@ -91,11 +109,12 @@ CS.RUN			>PUSHW L.MSG.GREETINGS
 
 .1				>SLEEP
 
-				>LDA.G bDebug
+				bit bDebug
 				bpl .2
 
 				jsr PrintDebugMsg
-.2				>LDA.G bTrace
+
+.2				bit bTrace
 				bpl .3
 
 				jsr PrintTraceMsg
@@ -145,19 +164,16 @@ CS.RUN.ARGS		inc ArgIndex
 				sta $0,y
 				bra CS.RUN.ARGS
 
-.4				lda hFileBuf
+.4				lda pCodeBuf+1
 				bne .90
 
 				>LDYA ZPPtr1
 				jsr CS.RUN.LoadFile
 				bcs .9
 
-				>STYA ZPCodePtr
-
-				stx hFileBuf
 				bra CS.RUN.ARGS
 
-.7				lda hFileBuf
+.7				lda pCodeBuf+1
 				beq .90
 
 				clc
@@ -173,19 +189,17 @@ CS.RUN.ARGS		inc ArgIndex
 CS.RUN.LoadFile	>LIBC LoadTxtFile
 				bcs .9
 
-				phx
-				txa
-				>LIBC GetMemPtr
-				plx
+				>STYA pCodeBuf
+				>STYA pCode
 
 .9				rts
 *--------------------------------------
 BF.Init			>LDYAI BF.DATASIZE
-				>LIBC GetMem
+				>LIBC Malloc
 				bcs .9
 
-				>STYA ZPDataPtr
-				stx hDataBuf
+				>STYA pDataPtr
+				>STYA pDataBuf
 
 				>STYA ZPPtr1
 
@@ -228,37 +242,37 @@ BF.Run			jsr BF.GetCodeByte
 				sec
 				rts
 *--------------------------------------
-BF.KW.INCPTR	inc ZPDataPtr
+BF.KW.INCPTR	inc pDataPtr
 				bne .8
 
-				inc ZPDataPtr+1
+				inc pDataPtr+1
 
 .8				clc
 				jmp BF.NextCodeByte
 *--------------------------------------
-BF.KW.DECPTR	lda ZPDataPtr
+BF.KW.DECPTR	lda pDataPtr
 				bne .8
 
-				dec ZPDataPtr+1
+				dec pDataPtr+1
 
-.8				dec ZPDataPtr
+.8				dec pDataPtr
 
 				clc
 				jmp BF.NextCodeByte
 *--------------------------------------
-BF.KW.INCDATA	lda (ZPDataPtr)
+BF.KW.INCDATA	lda (pDataPtr)
 				inc
-				sta (ZPDataPtr)
+				sta (pDataPtr)
 				clc
 				jmp BF.NextCodeByte
 *--------------------------------------
-BF.KW.DECDATA	lda (ZPDataPtr)
+BF.KW.DECDATA	lda (pDataPtr)
 				dec
-				sta (ZPDataPtr)
+				sta (pDataPtr)
 				clc
 				jmp BF.NextCodeByte
 *--------------------------------------
-BF.KW.PUTCHAR	lda (ZPDataPtr)
+BF.KW.PUTCHAR	lda (pDataPtr)
 				>LIBC PutChar
 				bcs .9
 
@@ -269,17 +283,17 @@ BF.KW.PUTCHAR	lda (ZPDataPtr)
 BF.KW.GETCHAR	>LIBC GetChar
 				bcs .9
 
-				sta (ZPDataPtr)
+				sta (pDataPtr)
 
 				jmp BF.NextCodeByte
 
 .9				rts
 *--------------------------------------
-BF.KW.WHILE		lda (ZPDataPtr)
+BF.KW.WHILE		lda (pDataPtr)
 				bne .8
 
 				lda #1
-				sta ZPCnt
+				sta Cnt
 
 .1				jsr BF.NextCodeByte
 
@@ -288,20 +302,20 @@ BF.KW.WHILE		lda (ZPDataPtr)
 
 				cmp #'['
 				bne .2
-				
-				inc ZPCnt
+
+				inc Cnt
 				bra .1
 
 .2				cmp #']'
 				bne .1
-				
-				dec ZPCnt
+
+				dec Cnt
 				bne .1
 
 				clc
 				jmp BF.NextCodeByte
 
-.8				>PUSHW ZPCodePtr
+.8				>PUSHW pCodePtr
 				inc StackCnt
 				clc
 				jmp BF.NextCodeByte
@@ -313,7 +327,7 @@ BF.KW.WHILE		lda (ZPDataPtr)
 BF.KW.END		lda StackCnt
 				beq .9
 
-				>PULLW ZPCodePtr
+				>PULLW pCodePtr
 				dec StackCnt
 				clc
 				rts
@@ -322,7 +336,7 @@ BF.KW.END		lda StackCnt
 				sec
 				rts
 *--------------------------------------
-BF.GetCodeByte	lda (ZPCodePtr)
+BF.GetCodeByte	lda (pCodePtr)
 				beq .8
 
 				cmp #C.SPACE
@@ -338,8 +352,8 @@ BF.GetCodeByte	lda (ZPCodePtr)
 				bne .8
 
 .2				jsr BF.NextCodeByte
-				
-				lda (ZPCodePtr)
+
+				lda (pCodePtr)
 				beq .8
 
 				cmp #C.CR
@@ -351,79 +365,80 @@ BF.GetCodeByte	lda (ZPCodePtr)
 
 .8				rts
 *--------------------------------------
-BF.NextCodeByte	inc ZPCodePtr
+BF.NextCodeByte	inc pCodePtr
 				bne .8
 
-				inc ZPCodePtr+1
-				
-.8				rts				
+				inc pCodePtr+1
+
+.8				rts
 *--------------------------------------
-CS.DOEVENT		sec
+CS.SIG			sec
 				rts
 *--------------------------------------
-CS.QUIT			lda hFileBuf
+CS.QUIT			>LDYA pCodeBuf
 				beq .1
 
-				>LIBC FreeMem
+				>LIBC Free
 
-.1				lda hDataBuf
+.1				>LDYA pDataBuf
 				beq .8
 
-				>LIBC FreeMem
+				>LIBC Free
 
 .8				rts
 *--------------------------------------
 PrintDebugMsg	>LDYA pStack
 				>STYA ZPPtr2
+
+				>SS
 				>PUSHW L.MSG.DEBUG
 
-				>PUSHW ZPCodePtr
-				>PUSHW ZPDataPtr
-				>PUSHB (ZPDataPtr)
+				>PUSHW pCodePtr
+				>PUSHW pDataPtr
+				>PUSHB (pDataPtr)
 				>PUSHW ZPPtr2
 
 				>PUSHBI 7
 				>LIBC PrintF
+				>SR
 
 				rts
 *--------------------------------------
-PrintErrMsg		>LDA.G bTrace
+PrintErrMsg		bit bTrace
 				bmi .5
 
 				jsr PrintTraceMsg
 
 .5				lda ZPPtr3
-				cmp ZPCodePtr
+				cmp pCodePtr
 				bne .6
 
 				lda ZPPtr3+1
-				cmp ZPCodePtr+1
+				cmp pCodePtr+1
 				beq .8
 
-.6				ldy #S.PS.hStdErr
-				lda (pPS),y
-				>PUSHA
-				>PUSHBI '-'
+.6				>SS
+				>PUSHWI '-'
+				jsr STDERR
 				>LIBC FPutC
+				>SR
+
 				inc ZPPtr3
 				bne .5
 
 				inc ZPPtr3+1
 				bra .5
 
-.8				ldy #S.PS.hStdErr
-				lda (pPS),y
-				>PUSHA
+.8				>SS
+				jsr STDERR
 				>PUSHW L.MSG.ERR
 				>PUSHW ZPPtr2			Line counter
 				>PUSHBI 2
 				>LIBC FPrintF
-
+				>SR
 				rts
 *--------------------------------------
-PrintTraceMsg	lda hFileBuf
-
-.12				>LIBC GetMemPtr
+PrintTraceMsg	>LDYA pCodeBuf
 				>STYA ZPPtr1
 
 				stz ZPPtr2
@@ -448,17 +463,16 @@ PrintTraceMsg	lda hFileBuf
 				bne .20					Scan until EoL
 
 				ldx ZPPtr1
-				cpx ZPCodePtr
+				cpx pCodePtr
 				lda ZPPtr1+1
-				sbc ZPCodePtr+1
+				sbc pCodePtr+1
 				bcc .1					not this line....
 
-.4				ldy #S.PS.hStdErr
-				lda (pPS),y
-				>PUSHA
-				>PUSHBI '>'
+.4				>SS
+				>PUSHWI '>'
+				jsr STDERR
 				>LIBC FPutC
-
+				>SR
 				ldy #$ff
 
 .7				iny
@@ -469,31 +483,38 @@ PrintTraceMsg	lda hFileBuf
 				beq .8
 
 				phy
+				>SS
 				pha
-				ldy #S.PS.hStdErr
-				lda (pPS),y
-				>PUSHA
+				>PUSHBI 0
 				pla
 				>PUSHA
+				jsr STDERR
 				>LIBC FPutC
+				>SR
 				ply
 				bra .7
 
-.8 				ldy #S.PS.hStdErr
-				lda (pPS),y
-				>PUSHA
-
+.8 				>SS
+				jsr STDERR
 				>PUSHW L.MSG.ECHOCRLF
 				>PUSHBI 0
 				>LIBC FPrintF
-
+				>SR
 				rts
 *--------------------------------------
-CS.END
+STDERR			ldy #S.PS.pStdErr+1
+				jsr A2osX.GetPSy
+				>PUSHA
+				dey
+				jsr A2osX.GetPSy
+				>PUSHA
+				rts
+*--------------------------------------
+CS.END			.EQ *
 *--------------------------------------
 * Initialized DATA
 *--------------------------------------
-MSG.GREETINGS	.CZ "\r\nBrainFuck-Shell %d.%d\r\n\r\n"
+MSG.GREETINGS	.CZ "\r\nBrainFuck-Shell %d.%02d\r\n\r\n"
 MSG.USAGE		.CS "Usage : BF <option> file\r\n"
 				.CS "   -D : Debug Mode\r\n"
 				.CS "   -T : Trace On"
@@ -507,9 +528,11 @@ OptionVars		.DA #bDebug,#bDebug,#bTrace,#bTrace
 BF.KW			.AS "><+-.,[]"
 BF.KW.Cnt		.EQ *-BF.KW
 *--------------------------------------
+ID.END			.EQ *
+*--------------------------------------
 				.DUMMY
 				.OR 0
-DS.START
+
 DS.END			.ED
 *--------------------------------------
 MAN

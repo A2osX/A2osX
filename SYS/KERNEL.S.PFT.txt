@@ -16,71 +16,23 @@ PFT.GetPathYA	jsr RAMSW.YA2PathBuf
 				jsr STDLIB.Expand
 				jmp STDLIB.RealPath
 *--------------------------------------
-PFT.CheckExtFS	stx .6+1				Save SYSCALL #
-
-				ldx #0
-
-.1				lda pPFTs+1,x
-				beq .8
-
-				sta .3+2
-				lda pPFTs,x
-				sta .3+1
-
-				ldy #$ff
-
-.2				iny
-
-.3				lda $FFFF,y				SELF MODIFIED
-				beq .4					end of filter string....
-
-				cmp K.PathBuf,y			can be \0
-				beq .2
-
-				bra .8
-
-.4				lda K.PathBuf,y
-				beq .5					path is "/FILTER" ?
-
-				cmp #'/'				path is "/FILTER/..." ?
-				bne .8
-
-				iny
-
-.5				lda pCBs,x
-				sta .7+1
-
-				lda pCBs+1,x
-				sta .7+2
-
-				pla						discard JSR return @
-				pla
-
-				>LDYAI K.PathBuf		pass full path to handler
-
-.6				ldx #$ff				SELF MODIFIED SYSCALL #
-
-.7				jmp $ffff				SELF MODIFIED
-
-.8				inx
-				inx
-				cpx #K.PFT.MAX*2
-				bcc .1
-
-				clc
-				rts
-*--------------------------------------
-* X = 0 /dev VS = /dev/ VC = /dev/file
-* X = 2 /mnt VS = /mnt/ VC = /mnt/file
-* X = 4 /prodos/path VC
+* In:
+*  K.MLI.P1
+* Out:
+* VC
+*  X=FSID, K.MLI.P1= L+prodosvol, L+prodosvol/path, L+mount or L+mount/path
+* VS
+*  X = 0 /
+*  X = 2 /mnt
+*  X = 4 /dev
 *--------------------------------------
 PFT.Translate	>LDYAI K.MLI.P1
 				>STYA K.MLI.PARAMS+1
 
 				stz K.MLI.P1
 
-				jsr PFT.CheckDirs
-				bcc .20					/dev /mnt ....
+				jsr PFT.CheckVDirs
+				bcc .20					/mnt /dev ....
 
 				ldy #$ff
 
@@ -98,48 +50,54 @@ PFT.Translate	>LDYAI K.MLI.P1
 				lda #MLI.E.INVPATH
 *				sec
 				rts
-
+*--------------------------------------
 .11				stx K.MLI.P1
 
 				ldy #1					skip leading /
 				jsr PFT.Y2MLIPath
 				bcs .9
 
-				ldx #4					PRODOS
-				clv						not special DIR
+				ldx #0
+
+				clv						not virtual DIR
 
 *				clc
 
 				rts
 *--------------------------------------
-.20				bvs	.8					CC/VS, /dev or /mnt, X = special DIR
+.20				bvs	.30					CC/VS, /mnt or /dev, X = virtual DIR
 
-				txa						0 = /dev/file or 2 = /mnt/dir
-				beq .7					0 : nothing to do
+				phx
 
-				ldy #4					skip /mnt
+				ldy #4					CC/VC, skip /mnt /dev
 				jsr PFT.Y2MLIPath
+
+				plx
+
 				bcs .9
-
-				ldx #4					Standard ProDOS /VOLUME
-
-.7
 
 *				clv
 
-.8
+				rts
+*--------------------------------------
+.30
 
 *				clc
 
 .9				rts
 *--------------------------------------
-PFT.CheckDirs	bit .9					if V, NO additional path
+* In:
+*  K.PathBuf
+* Out:
+*  CC,VC: /dev/file or /mnt/dir
+*  CC,VS: /dev or /mnt
+*  CS: not a virtual dir
+*--------------------------------------
+PFT.CheckVDirs	ldx #4
 
-				ldx #0
-
-.1				lda PFT.Dirs,x
+.1				lda PFT.Dirs-2,x
 				sta .3+1
-				lda PFT.Dirs+1,x
+				lda PFT.Dirs-1,x
 				sta .3+2
 
 				ldy #0
@@ -162,7 +120,10 @@ PFT.CheckDirs	bit .9					if V, NO additional path
 				lda #0
 				sta K.PathBuf,y
 
-				clc						V set
+.8				bit .9					set V
+
+				clc
+
 				rts
 
 .4				cmp #'/'
@@ -174,17 +135,15 @@ PFT.CheckDirs	bit .9					if V, NO additional path
 
 				clv						/XXX/something.... clear V
 
-.8				clc
+				clc
+
 				rts
 
-.7				inx
-				inx
-				cpx #4
-				bcc .1
+.7				dex
+				dex
+				bpl .1
 
-				clv
-
-*				sec
+				sec
 
 .9				rts
 *--------------------------------------
@@ -209,55 +168,22 @@ PFT.Y2MLIPath	ldx K.MLI.P1
 				clc
 				rts
 *--------------------------------------
-PFT.CheckNode4	ldy #4
+PFT.GetNode4	ldy #4
 
-PFT.CheckNodeY	jsr RAMSW.GetStkYW
+PFT.GetNodeY	jsr RAMSW.GetStkYW
 
-PFT.CheckNodeYA	>STYA pFILE
+PFT.GetNodeYA	>STYA pFILE
 
 				lda (pFILE)				#S.FILE.hFD
 				jsr X.GethFDpFDA
 
-				ldy #S.FD.PFT
-				lda (pFD),y
-				beq .8					Handler is 0, back to kernel....
-
-				tay
-
-				lda pCBs,y
-				sta .1+1
-
-				lda pCBs+1,y
-				sta .1+2
-
-				pla						discard JSR return @
-				pla
-
-				>LDYA pFILE
-
-.1				jmp $ffff				SELF MODIFIED
-
-.8				jsr DEV.GetPDrv
-
-				lda (pFD)				#S.FD.T
-				cmp #S.FD.T.CDEV
-				bcs .80
-
-				ldy #S.FD.REG.REF		REG or DIR
-				lda (pFD),y
-
-				sta K.MLI.PARAMS+1
-
-.80				>LDYA pFILE
-
-				clc
-				rts
+				jmp DEV.GetPDrv
 *--------------------------------------
-PFT.Dirs		.DA PFT.DEV
-				.DA PFT.MNT
+PFT.Dirs		.DA PFT.MNT
+				.DA PFT.DEV
 
-PFT.DEV			.AZ "/dev"
 PFT.MNT			.AZ "/mnt"
+PFT.DEV			.AZ "/dev"
 *--------------------------------------
 MAN
 SAVE usr/src/sys/kernel.s.pft

@@ -88,8 +88,18 @@ PASCAL_DIR_EPB	.EQ 19
 *--------------------------------------
 				.DUMMY
 				.OR ZPDRV+4				ZPpBuf,ZPCnt
+pDirEnt			.BS 2
 pFilename		.BS 2
+
 DSSS0000		.BS 1
+OLBufPtr		.BS 1
+
+ByteCnt			.BS 2
+
+FPOS			.BS 4
+FSIZE			.BS 4
+DWORD			.BS 4
+
 				.ED
 *--------------------------------------
 KM.CS.START		cld
@@ -97,6 +107,7 @@ KM.CS.START		cld
 
 .1				.DA KM.StatDevA
 				.DA KM.Stat
+
 				.DA KM.OpenDir
 				.DA KM.ReadDir
 				.DA KM.CloseDir
@@ -135,26 +146,11 @@ KM.StatDevA		sta DSSS0000
 KM.Stat			jsr KM.FindVol
 				bcs .99
 
-				bvc .1
+				bvc .1					extra path, a filename
 
 				jmp KM.StatVol
 
-.1				txa
-
-				sta K.MLI.P1,x
-
-*				clc
-				adc #K.MLI.P1
-				sta pFilename
-				lda /K.MLI.P1
-				sta pFilename+1
-
-				lda K.MLI.P1
-				sec
-				sbc K.MLI.P1,x
-				sta K.MLI.P1,x
-
-				jsr KM.FindFile
+.1				jsr KM.FindFile
 				bcs .99
 
 				jsr KM.ClrStat
@@ -172,8 +168,8 @@ KM.OpenDir		jsr KM.FindVol
 
 				bvc .9					extra path...error
 
-				lda #$40+FS_PASCAL
-				ldy #S.FD.REG.REF
+				lda #FS_PASCAL
+				ldy #S.FD.FSID
 				sta (pFD),y
 
 				ldy #S.FD.DIR.FC
@@ -248,12 +244,12 @@ KM.ReadDir		ldy #S.FD.DIR.FC
 
 				ldy #S.FD.REG.IOBUF+1
 				lda (pFD),y
-				sta ZPPtr3+1
+				sta pDirEnt+1
 				dey
 				lda (pFD),y
-				sta ZPPtr3
+				sta pDirEnt
 
-				jsr KM.ReadDirNext		skip VOL header
+				jsr KM.NextDirEnt		skip VOL header
 
 .2				ldy #S.FD.DIR.FC
 				lda (pFD),y
@@ -263,12 +259,12 @@ KM.ReadDir		ldy #S.FD.DIR.FC
 				sta (pFD),y
 
 				ldy #6					Filename len
-				lda (ZPPtr3),y
+				lda (pDirEnt),y
 				tax
 
 .3				iny
 
-				lda (ZPPtr3),y
+				lda (pDirEnt),y
 				jsr KM.AddA2pBuf
 				dex
 				bne .3
@@ -283,7 +279,7 @@ KM.ReadDir		ldy #S.FD.DIR.FC
 				jsr KM.ModDate2Stat
 
 				jsr KM.AddStat2pBuf
-				jsr KM.ReadDirNext
+				jsr KM.NextDirEnt
 				bra .2
 
 .8				>LDYA ZPPtr4
@@ -292,38 +288,338 @@ KM.ReadDir		ldy #S.FD.DIR.FC
 
 .99				rts
 *--------------------------------------
-KM.ReadDirNext	lda ZPPtr3
-				clc
-				adc #PASCAL_DIR_EL
-				sta ZPPtr3
-				bcc .8
+KM.Open			jsr KM.FindVol
+				bcs .99
 
-				inc ZPPtr3+1
+				bvs .98					no extra path...error
 
-.8				rts
+				ldy #S.FD.REG.REF+1		A = DSSS0000
+				sta (pFD),y
+
+				jsr KM.FindFile
+				bcs .99
+
+				jsr KM.Dirent2Stat
+
+				ldy #S.FD.REG.FSIZE+3
+				ldx #3
+
+.1				lda K.S.STAT+S.STAT.SIZE,x
+				sta (pFD),y
+				dey
+				dex
+				bpl .1
+
+				lda (pDirEnt)
+				ldy #S.FD.REG.FSIZE+4	1st BLK
+				sta (pFD),y
+
+				ldy #1
+				lda (pDirEnt),y
+				ldy #S.FD.REG.FSIZE+5
+				sta (pFD),y
+
+				lda #FS_PASCAL
+				ldy #S.FD.FSID
+				sta (pFD),y
+
+*				clc
+				rts
+
+.98				lda #MLI.E.IO
+				sec
+.99				rts
 *--------------------------------------
-KM.CloseDir		lda #MLI.E.NOTPRODOS
+KM.CloseDir
+*--------------------------------------
+KM.Close		ldy #S.FD.REG.IOBUF+1
+				lda (pFD),y
+				beq .8
+
+				pha
+				dey
+				lda (pFD),y
+				tay
+				pla
+				>DAPI KFree
+
+				ldy #S.FD.REG.IOBUF+1
+				lda #0
+				sta (pFD),y
+
+.8				clc
+
+				rts
+*--------------------------------------
+KM.Read			ldy #S.FD.REG.FPOS+7
+				ldx #7
+
+.1				lda (pFD),y
+				sta FPOS,x
+				dey
+				dex
+				bpl .1
+
+				ldx #0
+
+				sec
+
+.2				lda FSIZE,x
+				sbc FPOS,x
+				sta DWORD,x
+				inx
+				txa
+				eor #4
+				bne .2					DWORD = SIZE-FPOS
+
+				bcc .98					SIZE < FPOS -> BEOF
+
+				lda DWORD
+				ora DWORD+1
+				ora DWORD+2
+				ora DWORD+3
+				beq .97					SIZE == FPOS -> EOF
+
+				ldy #2					Buf
+				jsr K.GetStkYW
+				>STYA ZPpBuf			User buffer
+
+				ldy #0					ByteCnt to read
+				jsr K.GetStkYW
+
+				>STYA ZPCnt
+				>STYA ByteCnt
+
+				lda DWORD
+				cmp ZPCnt
+				lda DWORD+1
+				sbc ZPCnt+1
+				bcs .3					ZPCnt <= remaining bytes
+
+				lda DWORD+2
+				ora DWORD+3
+				bne .3
+
+				>LDYA DWORD
+				>STYA ZPCnt
+				>STYA ByteCnt
+*--------------------------------------
+.3				ldy #S.FD.REG.REF+1
+				lda (pFD),y
+				sta K.MLI.PARAMS+1
+
+.4				lda FPOS
+				bne .5
+
+				lda FPOS+1
+				and #1
+				bne .5					not at block boundary
+
+				lda ZPCnt+1
+				cmp #2
+				bcc .5					not a full 512 block to read
+
+				jsr KM.ReadDirect
+				bcc .7
+
+				rts
+
+.5				jsr KM.ReadIndirect
+				bcs .99
+
+.7				lda ZPCnt
+				ora ZPCnt+1
+				bne .4
+
+				ldy #S.FD.REG.FPOS+3
+				ldx #3
+
+.8				lda FPOS,x
+				sta (pFD),y
+				dey
+				dex
+				bpl .8
+
+				>LDYA ByteCnt
+
+*				clc
+				rts
+
+.97				lda #MLI.E.EOF
+				sec
+				rts
+
+.98				lda #MLI.E.BEYEOF
+				sec
+.99				rts
+*--------------------------------------
+KM.ReadDirect	>LDYA ZPpBuf
+				>STYA K.MLI.PARAMS+2
+
+				jsr KM.GetCurBlock
+
+				lda A2osX.IOOpt			AUX ?
+				sta MLI.IOBANK
+
+				jsr KM.MLI.ReadBlock
+
+				stz MLI.IOBANK
+
+				bcs .9
+
+				lda FPOS+1
+
+*				clc
+				adc #2
+				sta FPOS+1
+				bcc .1
+
+				inc FPOS+2
+
+.1				lda ZPCnt+1
+				sec
+				sbc #2
+				sta ZPCnt+1
+
+				lda ZPpBuf+1
+				clc
+				adc #2
+				sta ZPpBuf+1
+
+*				clc
+
+.9				rts
+*--------------------------------------
+KM.ReadIndirect	ldy #S.FD.REG.IOBUF+1
+				lda (pFD),y
+				bne .1
+
+				>LDYAI 512
+				>DAPI KMalloc
+				bcs .9
+
+				>STYA K.MLI.PARAMS+2
+				pha
+				tya
+				ldy #S.FD.REG.IOBUF
+				sta (pFD),y
+				iny
+				pla
+				sta (pFD),y
+
+				jsr KM.GetCurBlock
+
+				jsr KM.MLI.ReadBlock
+				bcs .9
+
+.1				lda FPOS
+
+				clc
+
+				ldy #S.FD.REG.IOBUF
+				adc (pFD),y
+				sta A1
+
+				lda FPOS+1
+				and #1
+				iny
+				adc (pFD),y
+				sta A1+1				A1 = ptr in Disk Block
+
+				ldy #0
+
+				bit A2osX.IOOpt			AUX ?
+				bpl .2
+
+				sta IO.SETWRITEAUX
+
+.2				lda ZPCnt
+				bne .3
+
+				lda ZPCnt+1
+				beq .8
+
+				dec ZPCnt+1
+
+.3				dec ZPCnt
+
+				lda (A1),y
+				sta (ZPpBuf)
+				>INCW ZPpBuf
+				iny
+				bne .4
+
+				inc A1+1
+
+.4				inc FPOS
+				bne .2
+
+				inc FPOS+1
+				lda FPOS+1
+				lsr
+				bcs .2
+
+				sta IO.CLRWRITEAUX
+
+				ldy #S.FD.REG.IOBUF
+				lda (pFD),y
+				pha
+				iny
+				lda (pFD),y
+				ply
+				>DAPI KFree
+
+				ldy #S.FD.REG.IOBUF+1
+				lda #0
+				sta (pFD),y
+
+*				clc
+
+				rts
+
+.8				sta IO.CLRWRITEAUX
+
+				clc
+
+.9				rts
+*--------------------------------------
+KM.GetCurBlock	lda FPOS+2
+				lsr
+				pha
+				lda FPOS+1
+				ror
+
+*				clc
+
+				ldy #S.FD.REG.FSIZE+4	1st BLK
+				adc (pFD),y
+				sta K.MLI.PARAMS+4
+
+				pla
+				iny
+				adc (pFD),y
+				sta K.MLI.PARAMS+5
+				rts
+*--------------------------------------
+KM.Write		lda #MLI.E.LOCKED
 				sec
 				rts
 *--------------------------------------
-KM.Open
-KM.Close
-KM.Read
-KM.Write
 KM.LSeek
 
-				lda #MLI.E.NOTPRODOS
+				lda #MLI.E.IO
 				sec
 				rts
 *--------------------------------------
 * In: K.MLI.P1
 * Out:
+*  A = DSSS0000
 *  CC,VC : /PASCALVOL/FILE
 *  CC,VS : /PASCALVOL/
 *--------------------------------------
 KM.FindVol		ldx #0
 
-.1				stx .7+1
+.1				stx OLBufPtr
 
 				lda K.OLBuf,x
 				and #$0F
@@ -363,15 +659,30 @@ KM.FindVol		ldx #0
 				cpx K.MLI.P1
 				beq .8					K.MLI.P1=/VOL/
 
+				txa						X = /FILE Ptr in K.MLI.P1
+				sta K.MLI.P1,x
+
+				clc
+				adc #K.MLI.P1
+				sta pFilename
+				lda /K.MLI.P1
+				sta pFilename+1
+
+				lda K.MLI.P1
+				sec
+				sbc K.MLI.P1,x
+				sta K.MLI.P1,x
+
 				clv						Clr V, K.MLI.P1=/VOL/FILE
 
-.8				ldy .7+1
-				lda K.OLBuf,y			A = DSSS0000
+.8				ldx OLBufPtr
+				lda K.OLBuf,x			A = DSSS0000
 
-				clc						X = /FILE Ptr in K.MLI.P1
+				clc
+
 				rts
 
-.7				lda #$FF				SELF MODIFIED
+.7				lda OLBufPtr
 				clc
 				adc #16
 				tax
@@ -425,7 +736,7 @@ KM.ChkVolA		sta K.MLI.PARAMS+1		A = DSSS0000
 
 .9				rts						Y = VOLNAME len
 *--------------------------------------
-* K.MLI.P1 = LEN + /PASCALVOL/ + FILENAME
+* pFilename = LEN + FILENAME
 *--------------------------------------
 KM.FindFile		lda #4
 				sta ZPCnt+1
@@ -433,10 +744,10 @@ KM.FindFile		lda #4
 				>LDYAI K.Buf512+PASCAL_DIR_EL+6
 				ldx #PASCAL_DIR_EPB-1
 
-.1				>STYA ZPPtr3
+.1				>STYA pDirEnt
 				stx ZPCnt
 
-.2				lda (ZPPtr3)
+.2				lda (pDirEnt)
 				beq .6
 
 				cmp (pFilename)
@@ -444,7 +755,7 @@ KM.FindFile		lda #4
 
 				tay
 
-.3				lda (ZPPtr3),y
+.3				lda (pDirEnt),y
 				cmp (pFilename),y
 				bne .6
 
@@ -452,17 +763,17 @@ KM.FindFile		lda #4
 				bne .3
 
 *				sec
-				lda ZPPtr3
+				lda pDirEnt
 				sbc #6
-				sta ZPPtr3
-				lda ZPPtr3+1
+				sta pDirEnt
+				lda pDirEnt+1
 				sbc #0
-				sta ZPPtr3+1
+				sta pDirEnt+1
 
 				clc
 				rts
 
-.6				jsr KM.ReadDirNext
+.6				jsr KM.NextDirEnt
 				dec ZPCnt
 				bne .2
 
@@ -518,36 +829,42 @@ KM.ClrStat		ldx #S.STAT-1
 				rts
 *--------------------------------------
 KM.Dirent2Stat	ldy #4
-				lda (ZPPtr3),y
+				lda (pDirEnt),y
 				and #$f
 				sta K.S.STAT+S.STAT.P.TYPE
 
 				ldy #2
-				lda (ZPPtr3),y
-				clc
-				sbc (ZPPtr3)
+				lda (pDirEnt),y
+				clc						next-start-1
+				sbc (pDirEnt)
+				sta K.S.STAT+S.STAT.BLOCKS
 				sta K.S.STAT+S.STAT.SIZE+1
+
 				iny
-				lda (ZPPtr3),y
+				lda (pDirEnt),y
 				ldy #1
-				sbc (ZPPtr3),y
+				sbc (pDirEnt),y
+				sta K.S.STAT+S.STAT.BLOCKS+1
+
 				asl K.S.STAT+S.STAT.SIZE+1
 				rol
 				sta K.S.STAT+S.STAT.SIZE+2
 
+				>INCW K.S.STAT+S.STAT.BLOCKS
+
 				ldy #22
-				lda (ZPPtr3),y
+				lda (pDirEnt),y
 				adc K.S.STAT+S.STAT.SIZE
 				sta K.S.STAT+S.STAT.SIZE
 				iny
-				lda (ZPPtr3),y
+				lda (pDirEnt),y
 				adc K.S.STAT+S.STAT.SIZE+1
 				sta K.S.STAT+S.STAT.SIZE+1
 
 				rts
 *--------------------------------------
 KM.ModDate2Stat	ldy #24
-				lda (ZPPtr3),y
+				lda (pDirEnt),y
 				and #$f
 				beq .8
 
@@ -557,12 +874,12 @@ KM.ModDate2Stat	ldy #24
 				sta K.S.STAT+S.STAT.MTIME+S.TIME.MONTH
 
 				iny
-				lda (ZPPtr3),y
+				lda (pDirEnt),y
 				lsr
 				sta K.S.STAT+S.STAT.MTIME+S.TIME.YEAR
 				tax
 				dey
-				lda (ZPPtr3),y
+				lda (pDirEnt),y
 				ror
 				lsr
 				lsr
@@ -572,6 +889,16 @@ KM.ModDate2Stat	ldy #24
 				cpx #40
 				sbc #255
 				sta K.S.STAT+S.STAT.MTIME*S.TIME.CENTURY
+
+.8				rts
+*--------------------------------------
+KM.NextDirEnt	lda pDirEnt
+				clc
+				adc #PASCAL_DIR_EL
+				sta pDirEnt
+				bcc .8
+
+				inc pDirEnt+1
 
 .8				rts
 *--------------------------------------

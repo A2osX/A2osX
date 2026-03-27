@@ -4,16 +4,18 @@ NEW
 * # open
 * ## C / CSH
 * `#include <unistd.h>`
-* `int open(const char *pathname, short int flags);`
+* `int open(const char *pathname, int flags);`
 * ## ASM
+* `>SS`
 * `>PUSHW pathname`
-* `>PUSHB flags`
+* `>PUSHWI flags`
 * `>LIBC open`
+* `>SR`
 * ## RETURN VALUE
 * A = hFD
 * REG File created on ProDOS : T=TXT,X=$0000
 *\--------------------------------------
-K.Open			jsr PFT.GetPath1
+K.Open			jsr PFT.GetPath2
 				jsr RAMSW.GetStk
 				sta IO.Flags
 
@@ -23,27 +25,26 @@ K.Open			jsr PFT.GetPath1
 				stz IO.AuxT+1
 *--------------------------------------
 UNISTD.Open		jsr PFT.Translate
-				bcs .9
+				bcs .99
 
-				bvs .19					/dev/\0 or /mnt/\0
+				bvs .98					/mnt/\0 or /dev/\0
 
-				cpx #4
-				beq .1
+				jmp (.1,x)
 
-				cpx #0					/dev/file ?
-				bne .19
+.1				.DA UNISTD.OpenRoot
+				.DA UNISTD.OpenMnt
+				.DA UNISTD.OpenDev
 
-				jsr DEV.Find
-				bcc .6
-
-				rts
+.98				lda #MLI.E.INVPATH
+				sec
+.99				rts
 *--------------------------------------
 * Check for other special files... /tmp/fifo....
 *....or already opened files
 *--------------------------------------
-.1				ldx #0
+UNISTD.OpenRoot	ldx #0
 
-.3				lda pNames+1,x
+.1				lda pNames+1,x
 				beq .5
 
 				sta ZPPtr1+1
@@ -52,28 +53,28 @@ UNISTD.Open		jsr PFT.Translate
 
 				ldy #$ff
 
-.4				iny
+.2				iny
 				lda K.PathBuf,y
 				cmp (ZPPtr1),y
 				bne .5
 
 				cmp #0
-				bne .4
+				bne .2
 
 				txa
 				jsr X.GethFDpFDA
-				bra .7
+				bra UNISTD.OpenFD
 
 .5				inx
 				inx
 				cpx #K.FD.MAX*2
-				bcc .3
-
-				lda #S.FD.T.REG
+				bcc .1
+*--------------------------------------
+UNISTD.OpenMnt	lda #S.FD.T.REG
 				jsr DEV.NewNamedFD
 				bcs .9
 
-				jsr PRODOS.OpenReg
+				jsr FS.Open
 				bcc .9
 
 				pha
@@ -81,20 +82,23 @@ UNISTD.Open		jsr PFT.Translate
 				jsr DEV.FreeFD
 
 				pla
-				sec
-				rts
 
-.19				lda #MLI.E.INVPATH
 				sec
+
 .9				rts
 *--------------------------------------
-.6				jsr DEV.GetPDrv
+UNISTD.OpenDev	jsr DEV.Find
+				bcc UNISTD.OpenFD
 
-.7				lda (pFD)
+				rts
+
+UNISTD.OpenFD	jsr DEV.GetPDrv
+
+				lda (pFD)
 				tax
-				jmp (.8-2,x)
-.8
-*				.DA STDIO.IOERR			REG
+				jmp (.1,x)
+
+.1				.DA FS.Open				REG
 				.DA STDIO.IOERR			DIR
 				.DA DEV.Open
 				.DA DEV.Open
@@ -113,22 +117,29 @@ UNISTD.Open		jsr PFT.Translate
 *\--------------------------------------
 K.Close			tya						lo byte
 				jsr X.GethFDpFDA
-				bcc UNISTD.Close
+				bcs K.Close.9
 
-				rts
+UNISTD.Close	jsr .1
+				bcs K.Close.9
 
-UNISTD.Close	lda (pFD)
+				jmp DEV.FreeFD
+
+.9				rts
+
+.1				lda (pFD)
 				tax
-				jmp (.1,x)
+				jmp (.2,x)
 
-.1				.DA PRODOS.Close		REG
-				.DA PRODOS.Close		DIR
+.2				.DA FS.Close			REG
+				.DA FS.CloseDir			DIR
 				.DA DEV.Close
 				.DA DEV.Close
 				.DA STDIO.IOERR			LNK
 				.DA SOCK.Close
 				.DA SOCK.Close
 				.DA PIPE.Close
+
+K.Close.9		rts
 */--------------------------------------
 * # read
 * ## C
@@ -152,7 +163,7 @@ UNISTD.Read		lda (pFD)				#S.FD.T
 				tax
 				jmp (.1,x)
 
-.1				.DA PRODOS.Read
+.1				.DA FS.Read
 				.DA STDIO.IOERR			DIR
 				.DA DEV.Read
 				.DA STDIO.IOERR			BDEV
@@ -183,7 +194,7 @@ UNISTD.Write	lda (pFD)				#S.FD.T
 				tax
 				jmp (.1,x)
 
-.1				.DA PRODOS.Write
+.1				.DA FS.Write
 				.DA STDIO.IOERR			DIR
 				.DA DEV.Write
 				.DA STDIO.IOERR			BDEV
@@ -191,33 +202,31 @@ UNISTD.Write	lda (pFD)				#S.FD.T
 				.DA SOCK.Write
 				.DA SOCK.Write
 				.DA PIPE.Write
-*--------------------------------------
-UNISTD.Stat		lda (pFD)				#S.FD.T
-				tax
-				jmp (.1,x)
-
-.1				.DA PRODOS.Stat			REG
-				.DA PRODOS.Stat			DIR
-				.DA DEV.Stat			CDEV
-				.DA DEV.Stat			BDEV
-				.DA STDIO.IOERR			LNK
-				.DA STDIO.IOERR			DSOCK
-				.DA STDIO.IOERR			SSOCK
-				.DA PIPE.Stat
 */-------------------------------------
 * # LSeek
 * Set the file-position indicator for hFD
 * ## C
 * `#include <unistd.h>`
-* `int lseek(off_t fildes, off_t offset, short int whence );`
+* `off_t lseek(int fildes, off_t offset, int whence);`
 * ## ASM
 * `>PUSHB hFD`
 * `>PUSHL offset`
 * `>PUSHB whence`
 * `>LIBC LSeek`
 *\-------------------------------------
-*K.LSeek
+K.LSeek			ldy #6					fildes (lo byte)
+				jsr RAMSW.GetStkY
 
+				jsr X.GethFDpFDA
+
+UNISTD.LSeek	lda (pFD)				#S.FD.T
+				bne .9
+
+				jmp FS.LSeek
+
+.9				lda #MLI.E.IO
+				sec
+				rts
 */--------------------------------------
 * # ChOwn
 * ## C
@@ -235,45 +244,15 @@ UNISTD.Stat		lda (pFD)				#S.FD.T
 K.ChOwn			jsr PFT.GetPath4
 				bcs	.99
 
-				jsr PFT.CheckExtFS
-				bcs .99
-
 				jsr PFT.Translate
 				bcs .99
 
 				bvs .98
 
-				cpx #4
+				txa
 				bne .98
 
-				stz K.MLI.PARAMS+3+S.FIEX.ACL		read mode
-
-				>MLICALL MLI.ACL
-				bcs .99
-
-				ldy #1
-				jsr RAMSW.GetStkY
-				bmi .1
-
-				sta K.MLI.PARAMS+3+S.FIEX.ACL.GID+1
-				jsr RAMSW.GetStk
-				sta K.MLI.PARAMS+3+S.FIEX.ACL.GID
-
-.1				ldy #3
-				jsr RAMSW.GetStkY
-				bmi .2
-
-				sta K.MLI.PARAMS+3+S.FIEX.ACL.UID+1
-				dey
-				jsr RAMSW.GetStkY
-				sta K.MLI.PARAMS+3+S.FIEX.ACL.UID
-
-.2				lda #$57							write mode
-				sta K.MLI.PARAMS+3+S.FIEX.ACL
-
-				>MLICALL MLI.ACL
-
-				rts
+				jmp FS.ChOwn
 
 .98				lda #MLI.E.INVPATH
 				sec

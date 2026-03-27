@@ -17,9 +17,6 @@ NEW
 K.OpenDir		jsr PFT.GetPathYA
 				bcs .99
 
-				jsr PFT.CheckExtFS
-				bcs .99
-
 				lda #S.FD.T.DIR
 				jsr DEV.NewNamedFD
 				bcs .99
@@ -27,50 +24,18 @@ K.OpenDir		jsr PFT.GetPathYA
 				jsr PFT.Translate
 				bcs .98
 
-				bvc .1					NOT special dir
+				bvc .1					NOT virtual dir
 
-				txa						special dir ID
+				txa						virtual dir ID
 
 				ora #$80
-				ldy #S.FD.REG.REF
+				ldy #S.FD.FSID
 				sta (pFD),y
 
-.8				jmp K.FOpen.1
-*--------------------------------------
-.1				jsr PRODOS.OpenDir
+.8				jmp STDIO.FOpen
+
+.1				jsr FS.OpenDir
 				bcc .8
-
-				cmp #MLI.E.VNOTFND
-				bne .98
-
-				ldx #0
-
-.2				lda A2osX.pFSs+1,x
-				beq .4
-
-				ldy A2osX.pFSs,x
-
-				>STYA .3+1
-
-				phx
-
-				ldx #4					KM.OpenDir
-
-.3				jsr $FFFF				SELF MODIFIED
-
-				plx
-
-				bcc .8
-
-				cmp #MLI.E.VNOTFND
-				bne .98
-
-.4				inx
-				inx
-				cpx #8
-				bcc .2
-
-				lda #MLI.E.VNOTFND
 
 .98				pha
 				jsr DEV.FreeFD
@@ -103,213 +68,28 @@ K.ReadDir.BufS	.BS 2
 K.ReadDir.pBuf	.BS 2
 				.ED
 *--------------------------------------
-K.ReadDir		jsr PFT.CheckNodeYA
+K.ReadDir		jsr PFT.GetNodeYA
 				bcs .9
 
-				ldy #S.FD.REG.REF
+				ldy #S.FD.FSID
 				lda (pFD),y
-				bmi .1					Special dir...
-
-				cmp #$40
-				bcc K.ReadDir.PDIR		regular ProDOS FileID
-
 				tax
+				bmi .1					virtual dir...
 
-				lda A2osX.pFSs+1-$40,x
+				lda A2osX.pFSs+1,x
 				pha
-				lda A2osX.pFSs-$40,x
+				lda A2osX.pFSs,x
 				pha
 
 				ldx #6					KM.ReadDir
 
 				rts
 
-.1				tax
-				jmp (.2-$80,x)
+.1				jmp (.2-$82,x)
 
-.2				.DA K.ReadDir.DEV
-				.DA K.ReadDir.MNT
+.2				.DA K.ReadDir.MNT
+				.DA K.ReadDir.DEV
 
-.9				rts
-*--------------------------------------
-K.ReadDir.PDIR 	sta K.MLI.PARAMS+1		A=#S.DIR.PRODOS.REF
-
-				stz K.MLI.PARAMS+2
-				lda /K.Buf512
-				sta K.MLI.PARAMS+3
-
-				stz K.MLI.PARAMS+4
-				lda /512
-				sta K.MLI.PARAMS+5
-
-				>MLICALL MLI.READ		Read A block from directory
-				bcs .99
-
-				ldy #S.FD.DIR.EL		Check if first run....
-				lda (pFD),y
-				bne .2					no, we have all we need....
-
-				ldx #3
-
-.1				lda K.Buf512+$23,x		Get K.ReadDir.EL....	From Block
-				sta K.ReadDir.EL,x
-				dex
-				bpl .1
-
-				ldx #5
-
-				ldy #S.FD.DIR.UID+5
-
-.20				lda K.Buf512+$16,x
-				cpy #S.FD.DIR.MODE+1
-				bne .30
-
-				and #$0F
-
-.30				sta (pFD),y
-				dey
-				dex
-				bpl .20
-
-				inc K.ReadDir.EC		Add one to EC because we include VOL/DIR Header
-				bne .4
-
-				inc K.ReadDir.EC+1		...and ProDOS does NOT include header entry in EC
-				bra .4
-
-.99				rts
-*--------------------------------------
-.2				ldy #S.FD.DIR.EL+3
-				ldx #3
-
-.3				lda (pFD),y				get this session parameters from S.DIR
-				sta K.ReadDir.EL,x
-				dey
-				dex
-				bpl .3
-
-.4				lda K.ReadDir.EC
-				eor #$ff
-				tax
-
-				lda K.ReadDir.EC+1
-				eor #$ff
-				tay
-
-				inx						Any entry remaining ?
-				bne .5
-
-				iny
-				bne .5
-
-				lda #MLI.E.EOF
-				sec
-				rts
-*--------------------------------------
-* pass #1 compute BufSize...
-*--------------------------------------
-.5				lda K.ReadDir.EPB
-				sta K.ReadDir.ECIB
-
-				lda #1					For Ending 0
-				sta K.ReadDir.BufS
-				stz K.ReadDir.BufS+1
-
-				jsr K.ReadDir.P3Init
-
-K.ReadDir.PDIR1	lda (ZPPtr3)
-				beq .7					Free slot....goto next
-
-				and #$F0				get storage_type
-				cmp #$F0				Volume header ?
-				beq .1
-
-				cmp #$E0				directory header ?
-				beq .2
-
-				lda (ZPPtr3)			regular DIR or File, get LEN
-				and #$F					compute filename len
-				sec						add "#<filename>" + S.STAT
-				adc #S.STAT
-				.HS 2C					bit abs
-.1				lda #2+S.STAT			add "1." string + S.STAT
-				.HS 2C					bit abs
-.2				lda #2+S.STAT+3+S.STAT	add "1." + S.STAT + "2.." + S.STAT...
-
-				clc
-				adc K.ReadDir.BufS
-				sta K.ReadDir.BufS
-				bcc .3
-
-				inc K.ReadDir.BufS+1
-
-.3				inx						X,Y = !Total entry Count
-				bne .7
-
-				iny
-				beq K.ReadDir.PDIR2		we reached last entry in whole DIR
-
-.7				jsr K.ReadDir.P3Next
-				bne K.ReadDir.PDIR1
-*--------------------------------------
-* pass #2 Fill Buffer...(ZPPtr1 & Ptr2 can now be trashed)
-*--------------------------------------
-K.ReadDir.PDIR2	lda K.ReadDir.EPB
-				sta K.ReadDir.ECIB
-
-				>LDYA K.ReadDir.BufS	Get BufSize bytes buffer for storing results
-				jsr K.ReadDir.GetBuf
-				bcs .9
-
-				jsr K.ReadDir.P3Init
-
-.1				lda (ZPPtr3)
-				beq .7					Empty slot, skip
-
-				and #$F0
-				cmp #$F0				Vol Header ?
-				bne .2
-
-				jsr K.ReadDir.ADD.
-				bra .4
-
-.2				cmp #$E0				Dir Header ?
-				bne .3
-
-				jsr K.ReadDir.ADD.
-				jsr K.ReadDir.AddStatACL
-
-				jsr K.ReadDir.ADD..
-				bra .4
-
-.3				jsr K.ReadDir.AddFNToBuf
-
-.4				jsr K.ReadDir.AddStatACL
-
-				lda K.ReadDir.EC			decrease global counter...
-				sec
-				sbc #1
-				sta K.ReadDir.EC
-				lda K.ReadDir.EC+1
-				sbc #0
-				sta K.ReadDir.EC+1
-				ora K.ReadDir.EC
-				beq .8						0! no more files in DIR
-
-.7				jsr K.ReadDir.P3Next
-				bne .1
-
-.8				ldx #3
-				ldy #S.FD.DIR.EL+3
-
-.81				lda K.ReadDir.EL,x		Store back this session parameters to S.DIR
-				sta (pFD),y
-				dey
-				dex
-				bpl .81
-
-				>LDYA K.ReadDir.pBuf
-				clc
 .9				rts
 *--------------------------------------
 K.ReadDir.DEV	ldy #S.FD.DIR.FC
@@ -360,7 +140,7 @@ K.ReadDir.DEV	ldy #S.FD.DIR.FC
 				tax
 				bne .3
 
-				jsr DEV.Stat
+				jsr DEV.FStat
 				jsr K.ReadDir.AddStat
 
 				>LDYA K.ReadDir.pBuf
@@ -480,8 +260,6 @@ K.ReadDir.PVOL	tax
 				>LDYAI K.MLI.P1
 				>STYA K.MLI.PARAMS+1
 				>MLICALL MLI.GFINFO
-				sta K.S.STAT+S.STAT.P.DEVSTATUS
-
 				bcs .8
 
 				>LDYA K.MLI.PARAMS+5		AUXTYPE=TOTAL BLOCKS
@@ -492,7 +270,7 @@ K.ReadDir.PVOL	tax
 .8				jmp K.ReadDir.AddStat
 *--------------------------------------
 K.ReadDir.EXTVOL
-				ldx #0
+				ldx #2
 
 .2				lda A2osX.pFSs+1,x
 				beq .4
@@ -655,7 +433,7 @@ K.ReadDir.AddToBuf
 				rts
 *--------------------------------------
 K.ReadDir.AddStatACL
-				jsr FS.DirEnt2Stat
+				jsr PRODOS.DirEnt2Stat
 
 				ldy #S.FD.DIR.UID
 				ldx #S.STAT.UID
@@ -698,7 +476,38 @@ K.ReadDir.AddStat
 * ## RETURN VALUE
 *  none, always succeed.
 *\-------------------------------------
-*K.CloseDir		(same as K.FClose)
+K.CloseDir		jsr PFT.GetNodeYA
+				bcs .9
+
+				ldy #S.FILE.oCnt
+				lda (pFILE),y
+				dec
+				sta (pFILE),y
+
+*				clc
+
+				bne .9
+
+				ldy #S.FD.FSID
+				lda (pFD),y
+				tax
+				bmi .1					virtual dir...
+
+				jsr UNISTD.Close
+				bcc .2
+
+.9				rts
+
+.1				jsr DEV.FreeFD
+
+.2				ldy #S.FILE.ID
+				lda (pFILE),y
+				tax
+
+				stz pFILEs+1,x
+
+				>LDYA pFILE
+				jmp MEM.FreeYA
 *--------------------------------------
 MAN
 SAVE usr/src/sys/kernel.s.dirent

@@ -5,14 +5,27 @@ NEW
 				.OR	$2000
 				.TF bin/forth
 *--------------------------------------
-HIS.MAX			.EQ 10
-HISTORY.MAX		.EQ 512
+HISCNT.MAX		.EQ 10
+HISBUF.MAX		.EQ 512
 *--------------------------------------
 				.INB inc/macros.i
 				.INB inc/a2osx.i
+				.INB inc/a2osx.api.i
 				.INB inc/mli.i
 				.INB inc/mli.e.i
 				.INB inc/gfx.i
+*--------------------------------------
+				.MA PULLA
+				lda (pStack)
+				inc pStack
+				.EM
+*--------------------------------------
+				.MA PULLW
+				>PULLA
+				sta ]1
+				>PULLA
+				sta	]1+1
+				.EM
 *--------------------------------------
 CODE.SIZE		.EQ 2048
 DATA.SIZE		.EQ 2048
@@ -27,10 +40,10 @@ SYM.T.CODE		.EQ 128
 				.DUMMY
 				.OR ZPBIN
 ZS.START
-ZPCodePtr		.BS 2
-ZPDataPtr		.BS 2
-ZPInputBufPtr	.BS 2
-ZPOutputBufPtr	.BS 2
+ZPpCode			.BS 2
+ZPpData			.BS 2
+*ZPpInputBuf		.BS 2
+ZPpOutputBuf	.BS 2
 
 ZPKeyID			.BS 2
 ZPType			.BS 1
@@ -41,8 +54,7 @@ ZPPtr1			.BS 2
 ZPPtr2			.BS 2
 ZPPtr3			.BS 2
 
-ZPCLBuf			.BS 2
-ZPCLBufPtr		.BS 2
+ZPpCLBuf		.BS 2
 
 CL.Ptr			.BS 1
 CL.Len			.BS 1
@@ -62,21 +74,22 @@ ZS.END			.ED
 CS.START		cld
 				jmp (.1,x)
 				.DA #$61				6502,Level 1 (65c02)
-				.DA #1					BIN Layout Version 1
-				.DA #0					S.PS.F.EVENT
+				.DA #2					BIN Layout Version 2
+				.DA #0					S.PS.F.SIG
 				.DA #0
-				.DA CS.END-CS.START		Code Size (without Constants)
-				.DA DS.END-DS.START		Data SegmentSize
+				.DA CS.END
+				.DA ID.END
+				.DA DS.END
 				.DA #256				Stack Size
 				.DA #ZS.END-ZS.START	Zero Page Size
-				.DA 0
 *--------------------------------------
 * Relocation Table
 *--------------------------------------
 .1				.DA CS.INIT
 				.DA CS.RUN
-				.DA CS.DOEVENT
+				.DA CS.SIG
 				.DA	CS.QUIT
+*--------------------------------------
 L.DEV.GFX		.DA DEV.GFX
 L.MSG.GREETINGS	.DA MSG.GREETINGS
 L.MSG.HIS		.DA MSG.HIS
@@ -321,63 +334,58 @@ C.KEYWORDS		.DA CP.JSRX				GFX.TEXT
 CS.INIT			clc
 CS.INIT.RTS		rts
 *--------------------------------------
-CS.RUN			>PUSHW L.MSG.GREETINGS
+CS.RUN			>SS
+				>PUSHW L.MSG.GREETINGS
 				>PUSHW A2osX.KVER
 				>PUSHBI 2
 				>LIBC PrintF
-
+				>SR
 				bcs CS.INIT.RTS
 
+				jsr CS.RUN.ARG0
+				bcs CS.INIT.RTS
+				
 				jsr CS.RUN.ARGS
 				bcs CS.INIT.RTS
 
 				>LDYAI CODE.SIZE
-				>LIBC GetMem
+				>LIBC Malloc
 				bcs CS.INIT.RTS
 
-				>STYA ZPCodePtr
-				>STYA.G CodeBuf
-				txa
-				>STA.G hCodeBuf
+				>STYA ZPpCode
+				>STYA.G pCodeBuf
 
 				>LDYAI DATA.SIZE
-				>LIBC GetMem
+				>LIBC Malloc
 .9				bcs CS.INIT.RTS
 
-				>STYA ZPDataPtr
-				>STYA.G DataBuf
-				txa
-				>STA.G hDataBuf
+				>STYA ZPpData
+				>STYA.G pDataBuf
 
-				>LDYAI INPUT.SIZE
-				>LIBC GetMem
-				bcs .9
+*				>LDYAI INPUT.SIZE
+*				>LIBC Malloc
+*				bcs .9
 
-				>STYA ZPInputBufPtr
-				txa
-				>STA.G hInputBuf
+*				>STYA ZPpInputBuf
 
 				>LDYAI OUTPUT.SIZE
-				>LIBC GetMem
+				>LIBC Malloc
 				bcs .9
 
-				>STYA ZPOutputBufPtr
-				txa
-				>STA.G hOutputBuf
+				>STYA ZPpOutputBuf
+				>STYA.G pOutputBuf
 
 				>LDYAI CL.SIZE
-				>LIBC GetMem
+				>LIBC Malloc
 				bcs .9
 
-				>STYA ZPCLBuf
-				txa
-				>STA.G hCLBuf
+				>STYA.G pCLBuf
 
 				lda #SL..+SL._
 				>KAPI SListNew
 				bcs .9
 
-				>STA.G hSList
+				>STYA.G pSList
 
 *				stz bCompile
 				lda #127
@@ -397,12 +405,11 @@ CS.RUN.LOOP		>SLEEP
 .2				jsr CS.FORTH.Run
 				bcs .7
 
-				>LDA.G hFile
+				>LDA.G pFile+1
 				bne CS.RUN.LOOP
 
-				>PUSHW L.MSG.OK
-				>PUSHBI 0
-				>LIBC PrintF
+				>LDYA L.MSG.OK
+				>LIBC PutS
 				bcs .99
 
 				bra CS.RUN.LOOP
@@ -414,7 +421,8 @@ CS.RUN.LOOP		>SLEEP
 				beq .8
 
 				pha
-				>LDA.G hFile
+
+				>LDA.G pFile+1
 				beq .71
 
 				>LDA.G bTrace
@@ -429,11 +437,15 @@ CS.RUN.LOOP		>SLEEP
 
 .71				pla
 
+				>SS
 				>PUSHA
-				>PUSHW ZPCLBuf
-				>LIBC GetErrMsg
-				>LDYA ZPCLBuf
+				>PUSHW ZPpCLBuf
+				>KAPI GetErrMsg
+				>SR
+
+				>LDYA ZPpCLBuf
 				>LIBC PutS
+
 				bcc CS.RUN.LOOP
 
 				pha
@@ -448,7 +460,7 @@ CS.RUN.LOOP		>SLEEP
 *--------------------------------------
 CS.FORTH.Run	jsr CL.Reset
 
-				>LDA.G hFile
+				>LDA.G pFile+1
 				bne CS.FORTH.Run.File
 
 				lda #80
@@ -469,9 +481,11 @@ CS.FORTH.Run	jsr CL.Reset
 				bit CL.bReady			Something to execute ?
 				bpl .1
 
+				>SS
 				>PUSHW L.MSG.PROMPTCRLF
 				>PUSHBI 0
 				>LIBC PrintF
+				>SR
 
 				jsr HIS.Add
 
@@ -482,10 +496,12 @@ CS.FORTH.Run	jsr CL.Reset
 CS.FORTH.Run.File
 				>INCW.G LineCounter
 
-				>PUSHB.G hFile
-				>PUSHW ZPCLBuf
+				>SS
+				>PUSHW ZPpCLBuf
 				>PUSHWI 256
+				>PUSHW.G pFile
 				>LIBC FGetS
+				>SR
 				bcs .9
 
 				>LDA.G bTrace
@@ -493,7 +509,7 @@ CS.FORTH.Run.File
 
 				jsr PrintTraceMsg
 
-.1				lda (ZPCLBuf)
+.1				lda (ZPpCLBuf)
 				beq .8
 
 				cmp #'\'
@@ -503,7 +519,7 @@ CS.FORTH.Run.File
 				bne .2
 
 				ldy #1
-				lda (ZPCLBuf),y
+				lda (ZPpCLBuf),y
 				beq .2
 
 				cmp #'!'
@@ -514,7 +530,7 @@ CS.FORTH.Run.File
 .8				clc
 .9				rts
 *--------------------------------------
-CS.RUN.EXEC		lda (ZPCLBufPtr)
+CS.RUN.EXEC		lda (ZPpCLBuf)
 				beq .8					EOL
 
 				jsr IsSpaceOrCR
@@ -578,19 +594,58 @@ CS.RUN.EXEC		lda (ZPCLBufPtr)
 
 .80				jmp (ZPAddrPtr)			RUN
 *--------------------------------------
+CS.RUN.ARG0
+			ldy #S.PS.pCmdLine
+			jsr A2osX.GetPSy
+			pha
+			iny
+			jsr A2osX.GetPSy
+			ply
+			>LIBC PutS
+				
+			lda #0
+			>KAPI ArgV
+			>LIBC PutS
+			>DEBUG
+				
+				lda #0
+				>KAPI ArgV
+				>STYA R1
+
+				>SS
+				>PUSHYA
+				ldy #S.PS.pCmdLine+1
+				jsr A2osX.GetPSy
+				>PUSHA
+				dey
+				jsr A2osX.GetPSy
+				>PUSHA
+				>LIBC StrCmp
+				>SR
+				bcc .8					pCmdLine != Arg[0], filemode & exit
+
+				jsr CS.RUN.FOpen
+				bcs .9
+
+				lda #$FF
+				>STA.G bExitOnEOF
+
+.8				
+.9				rts
+*--------------------------------------
 CS.RUN.ARGS		inc ArgIndex
 
 				lda ArgIndex
 				>KAPI ArgV
 				bcs .8
 
-				>STYA ZPPtr1
-				lda (ZPPtr1)
+				>STYA R1
+				lda (R1)
 				cmp #'-'
 				bne .4
 
 				ldy #1
-				lda (ZPPtr1),y
+				lda (R1),y
 
 				ldx #OptionVars-OptionList-1
 
@@ -607,65 +662,71 @@ CS.RUN.ARGS		inc ArgIndex
 				sta (pData),y
 				bra CS.RUN.ARGS
 
-.4				>LDA.G hFile
+.4				>LDA.G pFile+1
 				bne .90
 
-				>LDYA ZPPtr1
 				jsr CS.RUN.FOpen
 				bcs .9
 
-				>STA.G hFile
 				bra CS.RUN.ARGS
 
 .8				clc
 .9				rts
 
-.90				>PUSHW L.MSG.USAGE
-				>PUSHBI 0
-				>LIBC PrintF
+.90				>LDYA L.MSG.USAGE
+				>LIBC PutS
 
 				lda #E.SYN
 				sec						QUIT Process
 				rts
 *--------------------------------------
-CS.RUN.FOpen	>PUSHYA
+CS.RUN.FOpen	>SS
+				>PUSHW R1
 				>PUSHBI	O.RDONLY
 				>PUSHBI S.FI.T.TXT
 				>PUSHWZ					Aux type
 				>LIBC FOpen
+				>SR
 				bcs .9
 
-				>STA.G hFile
+				>STYA.G pFile
 
 .9
 CS.RUN.FOpen.RTS
 				rts
 *--------------------------------------
 CS.RUN.GetSymbol
-				>PUSHB.G hSList
-				>PUSHW ZPCLBufPtr
+				>SS
+				>PUSHW.G pSList
+				>PUSHW ZPpCLBuf
 				>PUSHWI 0				ScopeID
 				>KAPI SListLookup
+				>SR
 				bcs CS.RUN.FOpen.RTS
 
 				>STYA ZPKeyID
 
 				txa
 				jsr NextKW
+*--------------------------------------
 CS.RUN.GetSymbolData
-				>PUSHB.G hSList
+				>SS
+				>PUSHW.G pSList
 				>PUSHW ZPKeyID
 				>PUSHWI ZPType
 				>PUSHWI 4				4 bytes
 				>PUSHWZ					From Start
 				>KAPI SListGetData
-
+				>SR
 .9				rts
 *--------------------------------------
-CS.RUN.GetNum	>PUSHW ZPCLBufPtr
-				>PUSHWI ZPCLBufPtr
-				>PUSHBI 10
+CS.RUN.GetNum	>SL
+				>SS
+				>PUSHW ZPpCLBuf
+				>PUSHWI ZPpCLBuf
+				>PUSHWI 10
 				>LIBC StrToL
+				>SR
 				bcs .9
 
 				bit bCompile
@@ -680,10 +741,10 @@ CS.RUN.GetNum	>PUSHW ZPCLBufPtr
 				lda (pStack)
 				sta (pStack),y
 
-				inc pStack
+				inc pStack				leave 16 bits NUM on stack
 
 *				clc
-.9				rts
+				rts
 
 .1				lda #$A9				lda #imm
 				jsr CP.Emit.Byte
@@ -700,93 +761,115 @@ CS.RUN.GetNum	>PUSHW ZPCLBufPtr
 
 				jsr CP.Emit.PUSHA
 
-				>RET 4
+.9				php
+				lda #4
+				clc
+				adc pStack
+				sta pStack
+				plp
+				rts
 *--------------------------------------
-CS.DOEVENT		sec
+CS.SIG			sec
 				rts
 *--------------------------------------
 CS.QUIT			jsr GFX.Close
 
-				>LDA.G HIS.hBuf
-				beq .10
-
-				>LIBC StrVFree
-
-.10				>LDA.G hSList
+				>LDYA.G pSList
+				cmp #0
 				beq .1
 
 				>KAPI SListFree
 
-.1				>LDA.G hFile
+.1				>LDYA.G pFile
+				cmp #0
 				beq .2
 
 				>LIBC FClose
 
-.2				ldy #hCodeBuf
+.2				ldy #pCodeBuf+1
 				jsr .7
 
-				ldy #hDataBuf
+				ldy #pDataBuf+1
 				jsr .7
 
-				ldy #hInputBuf
+*				ldy #pInputBuf+1
+*				jsr .7
+
+				ldy #pOutputBuf+1
 				jsr .7
 
-				ldy #hOutputBuf
+				ldy #pCLBuf+1
 				jsr .7
 
-				ldy #hCLBuf
+				ldy #HIS.pBuf+1
 
 .7				lda (pData),y
 				beq .8
 
-				>LIBC FreeMem
+				pha
+				dey
+				lda (pData),y
+				tay
+				pla
+
+				>LIBC Free
 
 .8				clc
 				rts
 *--------------------------------------
-PrintDebugMsg	lda pStack+1
-				ldy pStack
-				bne .1
-
+PrintDebugMsg	ldy #S.PS.pSS
+				jsr A2osX.GetPSy
+				sta R3
+				iny
+				jsr A2osX.GetPSy
 				inc
+				sta R3+1
 
-.1				pha
+				lda pStack
+				beq .1
 
+				sta R3
+				dec R3+1
+
+.1				>SS
 				>PUSHW L.MSG.DEBUG
-				>PUSHW ZPCodePtr
-				>PUSHW ZPDataPtr
-
-				pla
-				>PUSHYA
+				>PUSHW ZPpCode
+				>PUSHW ZPpData
+				>PUSHW R3
 				>PUSHB RP
 				>PUSHBI 7
 				>LIBC PrintF
-
+				>SR
 				rts
 *--------------------------------------
-PrintTraceMsg	ldy #S.PS.hStdErr
-				lda (pPS),y
-				>PUSHA
+PrintTraceMsg	>SS
+				ldy #S.PS.pStdErr
+				jsr A2osX.GetPSy
+				pha
+				iny
+				jsr A2osX.GetPSy
+				ply
+				>PUSHYA
 
 				>PUSHW L.MSG.TRACE
 
 				>PUSHW.G LineCounter
-				>PUSHW ZPCLBuf
+				>PUSHW ZPpCLBuf
 				>PUSHBI 4
 				>LIBC FPrintF
-
+				>SR
 				rts
 *--------------------------------------
-PrintErrPtr		lda ZPCLBufPtr
+PrintErrPtr		lda ZPpCLBuf
 				sec
-				sbc ZPCLBuf
+				sbc pCLBuf
 
 				tax
 
 				ldy #0
 				lda #C.SPACE
 
-.1				sta (ZPCLBuf),y
+.1				sta (ZPpCLBuf),y
 				iny
 				cpy #7
 				bne .1
@@ -796,42 +879,51 @@ PrintErrPtr		lda ZPCLBufPtr
 
 				lda #'-'
 
-.2				sta (ZPCLBuf),y
+.2				sta (ZPpCLBuf),y
 				iny
 				dex
 				bne .2
 
 .3				lda #'^'
-				sta (ZPCLBuf),y
+				sta (ZPpCLBuf),y
 				iny
 
 				lda #C.CR
-				sta (ZPCLBuf),y
+				sta (ZPpCLBuf),y
 				iny
 
 				lda #C.LF
-				sta (ZPCLBuf),y
+				sta (ZPpCLBuf),y
 				iny
 
 				txa
-				sta (ZPCLBuf),y
+				sta (ZPpCLBuf),y
 
-				ldy #S.PS.hStdErr
-				lda (pPS),y
-				>PUSHA
-
-				>PUSHW ZPCLBuf
+				>SS
+				>PUSHW ZPpCLBuf
+				ldy #S.PS.pStdErr
+				pha
+				iny
+				jsr A2osX.GetPSy
+				ply
+				jsr A2osX.GetPSy
+				>PUSHYA
 				>LIBC FPutS
-
+				>SR
 				rts
 *--------------------------------------
-CheckLFAfterCR	ldy #S.PS.hStdIn		Check for any extra LF
-				lda (pPS),y
+CheckLFAfterCR	ldy #S.PS.pStdIn
+				jsr A2osX.GetPSy
+				pha
+				iny
+				jsr A2osX.GetPSy
+				ply
 				>LIBC FEOF
 				bcs .9
 
-				tay
+				tya
 				bne .9
+
 				>LIBC GetChar
 
 .9				rts
@@ -842,12 +934,12 @@ IncPtr1			inc ZPPtr1
 IncPtr1.8		rts
 *--------------------------------------
 NextKW			clc
-				adc ZPCLBufPtr
-				sta ZPCLBufPtr
+				adc ZPpCLBuf
+				sta ZPpCLBuf
 				bcc NextCharNB
-				inc ZPCLBufPtr+1
+				inc ZPpCLBuf+1
 *--------------------------------------
-NextCharNB		lda (ZPCLBufPtr)
+NextCharNB		lda (ZPpCLBuf)
 				beq .9
 
 				jsr IsSpaceOrCR
@@ -861,10 +953,10 @@ NextCharNB		lda (ZPCLBufPtr)
 .9				sec
 				rts
 *--------------------------------------
-NextChar		inc ZPCLBufPtr
+NextChar		inc ZPpCLBuf
 				bne .8
 
-				inc ZPCLBufPtr+1
+				inc ZPpCLBuf+1
 
 .8				rts
 *--------------------------------------
@@ -895,11 +987,18 @@ CheckStackPop4	lda pStack
 				cmp #$FD
 				bcs .9
 
-				clc
+*				clc
 				rts
 
 .9				lda #E.STACKERROR
 				sec
+				rts
+*--------------------------------------
+IO.OutYA		>SS
+				>PUSHYA
+				>PUSHBI 0
+				>LIBC PrintF
+				>SR
 				rts
 *--------------------------------------
 				.INB usr/src/bin/forth.s.cl
@@ -908,10 +1007,10 @@ CheckStackPop4	lda pStack
 				.INB usr/src/bin/forth.s.kw
 				.INB usr/src/bin/forth.s.gfx
 *--------------------------------------
-CS.END
+CS.END			.EQ *
 *--------------------------------------
 DEV.GFX			.AZ "/dev/gfx"
-MSG.GREETINGS	.CZ "\e[?7h\r\nA2osX-FORTH %d.%d (FORTH-79)\r\n"
+MSG.GREETINGS	.CZ "\e[?7h\r\nA2osX-FORTH %d.%02d (FORTH-79)\r\n"
 MSG.HIS			.CZ "\r\n%3d : %s"
 MSG.HISPROMPT	.CZ "\r\n\r\n? "
 MSG.HISROMPTCLR .CZ "\b \b"
@@ -923,7 +1022,7 @@ MSG.DEBUG		.CZ "(CODE:%H, DATA=%H, SP=%H, RP=%h)\r\n"
 MSG.TRACE		.CZ "[%5D]%s\r\n"
 MSG.PROMPT		.CZ "\e[?7h\r\n> "		Enable Line Wrap
 MSG.PROMPTCRLF	.CZ "\e[?7l\r\n"		Disable Line Wrap
-MSG.OK			.CZ "OK\r\n"
+MSG.OK			.CZ "OK"
 MSG.DUMP2		.CZ "%s %s%D "
 MSG.CONST		.CZ "Const V="
 MSG.VAR			.CZ "Var @="
@@ -1158,6 +1257,8 @@ CODE.LEAVE		ldy RP
 				sta (pData),y			I LO
 CODE.LEAVE.L	.EQ *-CODE.LEAVE
 *--------------------------------------
+ID.END			.EQ *
+*--------------------------------------
 				.DUMMY
 				.OR 0
 DS.START		.BS 128					RETURN STACK
@@ -1166,26 +1267,20 @@ bDebug			.BS 1
 bTrace			.BS 1
 bExitOnEOF		.BS 1
 
-hCodeBuf		.BS 1
-CodeBuf			.BS 2
+pCodeBuf		.BS 2
+pDataBuf		.BS 2
+pOutputBuf		.BS 2
+pCLBuf			.BS 2
 
-hDataBuf		.BS 1
-DataBuf			.BS 2
-
-hInputBuf		.BS 1
-hOutputBuf		.BS 1
-
-hCLBuf			.BS 1
-
-HIS.hBuf		.BS 1
+HIS.pBuf		.BS 2
 HIS.Count		.BS 1
-HIS.Index		.BS 1
-HIS.LRU			.BS 1
+HIS.Ptr			.BS 1
 
-hFile			.BS 1
+pFile			.BS 2
 LineCounter		.BS 2
-hSList			.BS 1
-hDevGFX			.BS 1
+pSList			.BS 2
+hDevGFX			.BS 2
+
 DS.END			.ED
 *--------------------------------------
 MAN
