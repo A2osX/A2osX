@@ -1,0 +1,598 @@
+NEW
+  AUTO 3,1
+				.LIST OFF
+*---
+* libcrypto.ghash.s - GHASH and GCM internal routines
+* Included by libcrypto.s after CS.END
+* Uses W.xxx offsets into WorkBuf for all working storage
+*
+* GHASH operates in GF(2^128) with polynomial
+* x^128 + x^7 + x^2 + x + 1
+*---
+*
+* GHASH_BuildTable
+* Build 4-bit table from GHASH_H in context
+* 16 entries x 16 bytes = 256 bytes at S.AES128.GHASH_Tbl
+* Entry 0 = 0, Entry 1 = H, Entry N = H * x^(N-1)
+*---
+GHASH_BuildTable
+				; Entry 0 = zero block
+				ldy #S.AES128.GHASH_Tbl
+				lda #0
+				ldx #16
+.1				sta (ZPCtxPtr),y
+				iny
+				dex
+				bne .1
+
+				; Entry 1 = H
+				ldy #S.AES128.GHASH_H
+				ldx #0
+.2				lda (ZPCtxPtr),y
+				sta W.GHASHBuf,x
+				iny
+				inx
+				cpx #16
+				bne .2
+
+				ldy #S.AES128.GHASH_Tbl+16
+				ldx #0
+.3				lda W.GHASHBuf,x
+				sta (ZPCtxPtr),y
+				iny
+				inx
+				cpx #16
+				bne .3
+
+				; Entries 2-15: entry N = entry(N-1) * x
+				lda #2
+				sta W.AESTemp1
+.4				lda W.AESTemp1
+				dec
+				asl
+				asl
+				asl
+				asl                     ; (N-1)*16
+				clc
+				adc #S.AES128.GHASH_Tbl
+				tay
+				ldx #0
+.5			lda (ZPCtxPtr),y
+				sta W.GHASHBuf,x
+				iny
+				inx
+				cpx #16
+				bne .5
+
+				jsr GHASH_MulX
+
+				lda W.AESTemp1
+				asl
+				asl
+				asl
+				asl                     ; N*16
+				clc
+				adc #S.AES128.GHASH_Tbl
+				tay
+				ldx #0
+.6				lda W.GHASHBuf,x
+				sta (ZPCtxPtr),y
+				iny
+				inx
+				cpx #16
+				bne .6
+
+				inc W.AESTemp1
+				lda W.AESTemp1
+				cmp #16
+				bne .4
+				rts
+*---
+* GHASH_MulX
+* Multiply W.GHASHBuf by x in GF(2^128)
+* GCM right-shift convention, poly reduction 0xE1 at MSB
+*---
+GHASH_MulX
+				; Save LSB of W.GHASHBuf[15] before shifting
+				lda W.GHASHBuf+15
+				and #1
+				sta W.AESTemp2
+
+				; Right-shift 128-bit value by 1
+				lsr W.GHASHBuf+0
+				ldx #0
+.1				ror W.GHASHBuf+1,x
+				inx
+				cpx #15
+				bne .1
+
+				; If carry-out was 1, XOR MSB with 0xE1
+				lda W.AESTemp2
+				beq .9
+				lda W.GHASHBuf+0
+				eor #$E1
+				sta W.GHASHBuf+0
+.9				rts
+*---
+* GHASH_Block
+* XOR W.GHASHBuf with GHASH_S, then multiply by H
+* Result stored back into GHASH_S in context
+*---
+GHASH_Block
+				ldy #S.AES128.GHASH_S
+				ldx #0
+.1				lda W.GHASHBuf,x
+				eor (ZPCtxPtr),y
+				sta W.GHASHBuf,x
+				iny
+				inx
+				cpx #16
+				bne .1
+
+				jsr GHASH_MulH
+
+				ldy #S.AES128.GHASH_S
+				ldx #0
+.2				lda W.GHASHProd,x
+				sta (ZPCtxPtr),y
+				iny
+				inx
+				cpx #16
+				bne .2
+				rts
+*---
+* GHASH_MulH
+* Multiply W.GHASHBuf by H using 4-bit table
+* Result in W.GHASHProd
+*---
+GHASH_MulH
+				ldx #15
+				lda #0
+.1				sta W.GHASHProd,x
+				dex
+				bpl .1
+
+				; Process bytes MSB to LSB, high nibble then low
+				ldx #0
+.2				lda W.GHASHBuf,x
+				lsr
+				lsr
+				lsr
+				lsr
+				tay
+				jsr GHASH_MulStep
+
+				lda W.GHASHBuf,x
+				and #$0F
+				tay
+				jsr GHASH_MulStep
+
+				inx
+				cpx #16
+				bne .2
+				rts
+*---
+* GHASH_MulStep
+* Shift W.GHASHProd right 4 bits then XOR with table[Y]
+* Y = 4-bit index (0-15)
+*---
+GHASH_MulStep
+				; 4 single-bit right shifts of 128-bit value
+				ldx #4
+.1				lsr W.GHASHProd+0
+				ror W.GHASHProd+1
+				ror W.GHASHProd+2
+				ror W.GHASHProd+3
+				ror W.GHASHProd+4
+				ror W.GHASHProd+5
+				ror W.GHASHProd+6
+				ror W.GHASHProd+7
+				ror W.GHASHProd+8
+				ror W.GHASHProd+9
+				ror W.GHASHProd+10
+				ror W.GHASHProd+11
+				ror W.GHASHProd+12
+				ror W.GHASHProd+13
+				ror W.GHASHProd+14
+				ror W.GHASHProd+15
+				dex
+				bne .1
+
+				; XOR with table[Y]
+				tya
+				asl
+				asl
+				asl
+				asl                     ; Y*16
+				clc
+				adc #S.AES128.GHASH_Tbl
+				tay
+				ldx #0
+.2				lda W.GHASHProd,x
+				eor (ZPCtxPtr),y
+				sta W.GHASHProd,x
+				iny
+				inx
+				cpx #16
+				bne .2
+				rts
+*---
+* GHASH_Pad
+* Zero-pad partial block and process via GHASH_Block
+* Input: zDataPtr = data, W.AESTemp1 = byte count (1-15)
+*---
+GHASH_Pad
+				ldx #15
+				lda #0
+.1				sta W.GHASHBuf,x
+				dex
+				bpl .1
+
+				lda W.AESTemp1
+				beq .9
+				ldy #0
+				ldx #0
+.2				lda (zDataPtr),y
+				sta W.GHASHBuf,x
+				iny
+				inx
+				dec W.AESTemp1
+				bne .2
+.9				jsr GHASH_Block
+				rts
+*---
+* GHASH_LenBlock
+* Build and process 16-byte length block
+* AAD bit-length at bytes 4-7, cipher bit-length at bytes 12-15
+* Input: zAADLenLo/Hi, zLenLo/Hi (byte lengths)
+*---
+GHASH_LenBlock
+				ldx #15
+				lda #0
+.1				sta W.GHASHBuf,x
+				dex
+				bpl .1
+
+				; AAD length in bits, big-endian, in bytes 4-7
+				; 16-bit byte count << 3 fits in 19 bits -> bytes 5,6,7
+				lda zAADLenHi
+				lsr
+				lsr
+				lsr
+				lsr
+				lsr
+				sta W.GHASHBuf+5
+
+				lda zAADLenHi
+				asl
+				asl
+				asl
+				sta W.AESTemp1
+				lda zAADLenLo
+				lsr
+				lsr
+				lsr
+				lsr
+				lsr
+				ora W.AESTemp1
+				sta W.GHASHBuf+6
+
+				lda zAADLenLo
+				asl
+				asl
+				asl
+				sta W.GHASHBuf+7
+
+				; Cipher length in bits, big-endian, in bytes 12-15
+				lda zLenHi
+				lsr
+				lsr
+				lsr
+				lsr
+				lsr
+				sta W.GHASHBuf+13
+
+				lda zLenHi
+				asl
+				asl
+				asl
+				sta W.AESTemp1
+				lda zLenLo
+				lsr
+				lsr
+				lsr
+				lsr
+				lsr
+				ora W.AESTemp1
+				sta W.GHASHBuf+14
+
+				lda zLenLo
+				asl
+				asl
+				asl
+				sta W.GHASHBuf+15
+
+				jsr GHASH_Block
+				rts
+*---
+* GCM_InitState
+* Zero GHASH_S, set up counter block from nonce
+* Input: zDataPtr = 12-byte nonce
+*---
+GCM_InitState
+				ldy #S.AES128.GHASH_S
+				lda #0
+				ldx #16
+.1				sta (ZPCtxPtr),y
+				iny
+				dex
+				bne .1
+
+				jsr AES_CTRInit
+				rts
+*---
+* GCM_ProcessAAD
+* Hash AAD into GHASH state
+* Input: zAADPtr, zAADLenLo/Hi
+*---
+GCM_ProcessAAD
+				lda zAADLenLo
+				ora zAADLenHi
+				beq .9
+
+.1				lda zAADLenHi
+				bne .2
+				lda zAADLenLo
+				cmp #16
+				bcc .5
+
+.2				ldy #0
+				ldx #0
+.3				lda (zAADPtr),y
+				sta W.GHASHBuf,x
+				iny
+				inx
+				cpx #16
+				bne .3
+
+				jsr GHASH_Block
+
+				lda zAADPtr
+				clc
+				adc #16
+				sta zAADPtr
+				bcc .4
+				inc zAADPtr+1
+.4				lda zAADLenLo
+				sec
+				sbc #16
+				sta zAADLenLo
+				bcs .1
+				dec zAADLenHi
+				bra .1
+
+.5				; Save byte count before GHASH_Pad consumes W.AESTemp1
+				lda zAADLenLo
+				sta W.AESTemp1
+				sta W.AESTemp2          ; second copy to advance pointer after
+				jsr GHASH_Pad
+
+				; Advance zAADPtr by saved count
+				lda zAADPtr
+				clc
+				adc W.AESTemp2
+				sta zAADPtr
+				bcc .9
+				inc zAADPtr+1
+				stz zAADLenLo
+				stz zAADLenHi
+.9				rts
+*---
+* GCM_EncryptData
+* CTR encrypt zLenLo/Hi bytes (zDataPtr) -> (zDstPtr)
+* Also feeds ciphertext to GHASH
+*---
+GCM_EncryptData
+				lda zLenLo
+				ora zLenHi
+				bne .1
+				rts
+
+.1				jsr AES_CTRBlock				; keystream in W.AESState
+
+				lda zLenHi
+				bne .2
+				lda zLenLo
+				cmp #16
+				bcc epartial
+
+.2				ldy #0
+.3				lda (zDataPtr),y
+				eor W.AESState,y
+				sta W.GHASHBuf,y
+				sta (zDstPtr),y
+				iny
+				cpy #16
+				bne .3
+
+				jsr GHASH_Block
+
+				lda zDataPtr
+				clc
+				adc #16
+				sta zDataPtr
+				bcc .4
+				inc zDataPtr+1
+.4				lda zDstPtr
+				clc
+				adc #16
+				sta zDstPtr
+				bcc .5
+				inc zDstPtr+1
+.5				lda zLenLo
+				sec
+				sbc #16
+				sta zLenLo
+				bcs .1
+				dec zLenHi
+				bra .1
+
+epartial		lda zLenLo
+				sta W.AESTemp1				; save partial count
+				ldy #0
+				ldx #0
+.1				lda (zDataPtr),y
+				eor W.AESState,x
+				sta W.GHASHBuf,x
+				sta (zDstPtr),y
+				iny
+				inx
+				dec W.AESTemp1
+				bne .1
+
+.2				cpx #16
+				beq .3
+				lda #0
+				sta W.GHASHBuf,x
+				inx
+				bra .2
+
+.3				jsr GHASH_Block
+				stz zLenLo
+				rts
+*---
+* GCM_DecryptData
+* CTR decrypt zLenLo/Hi bytes (zDataPtr) -> (zDstPtr)
+* Feeds CIPHERTEXT to GHASH before decrypting
+*---
+GCM_DecryptData
+				lda zLenLo
+				ora zLenHi
+				bne .1
+				rts
+
+.1				jsr AES_CTRBlock
+
+				lda zLenHi
+				bne .2
+				lda zLenLo
+				cmp #16
+				bcc dpartial
+
+.2				; Hash ciphertext first
+				ldy #0
+.3				lda (zDataPtr),y
+				sta W.GHASHBuf,y
+				iny
+				cpy #16
+				bne .3
+				jsr GHASH_Block
+
+				; Decrypt
+				ldy #0
+.4				lda (zDataPtr),y
+				eor W.AESState,y
+				sta (zDstPtr),y
+				iny
+				cpy #16
+				bne .4
+
+				lda zDataPtr
+				clc
+				adc #16
+				sta zDataPtr
+				bcc .5
+				inc zDataPtr+1
+.5				lda zDstPtr
+				clc
+				adc #16
+				sta zDstPtr
+				bcc .6
+				inc zDstPtr+1
+.6				lda zLenLo
+				sec
+				sbc #16
+				sta zLenLo
+				bcs .1
+				dec zLenHi
+				bra .1
+
+dpartial		lda zLenLo
+				sta W.AESTemp1				   ; save partial count
+				sta W.AESTemp2				   ; second copy for decrypt loop
+
+				; Hash ciphertext
+				ldx #0
+				ldy #0
+.1				lda (zDataPtr),y
+				sta W.GHASHBuf,x
+				iny
+				inx
+				dec W.AESTemp1
+				bne .1
+.2				cpx #16
+				beq .3
+				lda #0
+				sta W.GHASHBuf,x
+				inx
+				bra .2
+.3				jsr GHASH_Block
+
+				; Decrypt
+				ldy #0
+				ldx #0
+.4				lda W.GHASHBuf,x				 ; was ciphertext
+				eor W.AESState,x
+				sta (zDstPtr),y
+				iny
+				inx
+				dec W.AESTemp2
+				bne .4
+				stz zLenLo
+				rts
+*---
+* GCM_ComputeTag
+* Tag = E(K, J0) XOR GHASH_S
+* J0 = nonce || 00 00 00 01
+* Result in W.AESState
+*---
+GCM_ComputeTag
+				; Reset CTRBlock counter field to 1 (restore J0)
+				ldy #S.AES128.CTRBlock+12
+				lda #0
+				sta (ZPCtxPtr),y
+				iny
+				sta (ZPCtxPtr),y
+				iny
+				sta (ZPCtxPtr),y
+				iny
+				lda #1
+				sta (ZPCtxPtr),y
+
+				; Copy CTRBlock to W.AESState and encrypt
+				ldy #S.AES128.CTRBlock
+				ldx #0
+.1				lda (ZPCtxPtr),y
+				sta W.AESState,x
+				iny
+				inx
+				cpx #16
+				bne .1
+				jsr AES_EncCore
+
+				; XOR with GHASH_S
+				ldy #S.AES128.GHASH_S
+				ldx #0
+.2				lda W.AESState,x
+				eor (ZPCtxPtr),y
+				sta W.AESState,x
+				iny
+				inx
+				cpx #16
+				bne .2
+				rts
+*---
+MAN
+SAVE usr/src/lib/libcrypto.s.gha
+LOAD usr/src/lib/libcrypto.s
+ASM

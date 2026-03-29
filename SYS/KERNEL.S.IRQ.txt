@@ -1,7 +1,9 @@
 NEW
   AUTO 3,1
 *--------------------------------------
-* Called By ProDOS
+MSLOT			.EQ $7f8
+*--------------------------------------
+* Called By ROM
 *--------------------------------------
 IRQ				cld
 
@@ -13,8 +15,113 @@ IRQ.JSR			jsr IRQ.DEVs			SELF MODIFIED
 				rts
 
 IRQ.Exit		stz IRQ.Skip			reset flag
-				sec
+				sec						CS, IRQ not cleared
 				rts
+*--------------------------------------
+IRQ.BRK			bra *
+*--------------------------------------
+* Called By IRQM from MainLC
+* !!!!! MainZP SELECTED !!!!!
+* A = IO.RDREADAUX,IO.RDALTZP = -0------
+* Y = P register
+*--------------------------------------
+IRQ.MLC
+
+*--------------------------------------
+* Called By IRQX from AuxLC0
+* !!!!! AuxZP SELECTED !!!!!
+* A = IO.RDREADAUX,IO.RDALTZP = -1------
+* Y = P register
+*--------------------------------------
+IRQ.XLC0		ldx #$80
+				cpx IO.RDWRITEAUX
+				lsr						A=IO.RDWRITEAUX,IO.RDREADAUX,IO.RDALTZP
+				sta IO.CLRWRITEAUX
+			>DEBUG
+				cpx IO.RD80STORE
+				bcc .1
+
+				cpx IO.RDPAGE2			Driver may R/W in screen holes
+				sta IO.CLRPAGE2
+
+.1				lsr						A=IO.RDPAGE2,IO.RDWRITEAUX,IO.RDREADAUX,IO.RDALTZP
+
+*				cpx IO.RDCXROM			C100-C7ff state
+*				lsr
+*				sta IO.CLRCXROM			Enable access to slot C100-C7ff space
+
+				sta IRQ.3+1				Save memory status
+
+				lda MSLOT				Save MSLOT
+				sta IRQ.2+2
+
+				tya
+				bne IRQ.BRK
+
+IRQX.JSR		jsr IRQ.DEVs			SELF MODIFIED
+
+				bcs .8					IRQ not cleared
+
+.3				bvc .8					if not V, skip task switching
+
+				tsx						Check Stack if before "dec IRQ.InKernel"
+				cpx #$fc				$1ff-PChi-PClo-P = $1fc
+				bcs .7					in CORE.Run or CORE.Dispatch
+
+				lda $103,x
+				cmp #$C0
+				bcs .8					we are in kernel GP or LC
+
+				php
+				php						make room for 2 additional bytes
+
+				tsx
+
+				lda $104,x				get RTI PC LO
+				bne .4
+
+				dec $105,x				adjust RTI PC HI
+
+.4				dec $104,x				back one byte, to make it a "RTS" return adddress
+
+				lda $103,x				get IRQ pushed P
+				sta $101,x				down 2 bytes
+				lda #A2osX.SLEEP		make a RTI like "jsr A2osX.SLEEP"
+				sta $102,x
+				lda /A2osX.SLEEP		with RTS=PC IRQ-1
+				sta $103,x
+
+.7				clc						CC, IRQ cleared
+*--------------------------------------
+.8				lda IRQ.2+2				Get back MSLOT
+				sta MSLOT
+
+				and #$F0
+				eor #$C0				....mmm...not looking like Cn....
+				bne IRQ.3
+
+				sta	IO.CLRC8ROM			Release $C800
+
+IRQ.2			lda $C100				SELF MODIFIED
+
+IRQ.3			lda #$ff				SELF MODIFIED
+
+*				bpl .1
+*				sta O.CLRCXROM
+
+*.1				asl
+
+				bpl .2
+
+				sta IO.SETPAGE2
+
+.2				asl
+				bpl .3
+
+				sta IO.SETWRITEAUX
+
+.3				plp
+				jmp IRQX.Exit
 *--------------------------------------
 * Called by IIgs formware, Native Mode, 8bits
 *--------------------------------------
@@ -37,10 +144,8 @@ IRQ.GS			.OP 65816
 				plb
 				pla
 
-*				clc
 				rtl
 
-*				bra IRQ.Switch
 				.OP 65C02
 *--------------------------------------
 * Called by :
@@ -96,7 +201,7 @@ IRQ.Switch		inc IRQ.Tick
 
 .9				clv						VC, Cancel task switching
 
-				clc
+				clc						CC, IRQ cleared
 				rts
 *--------------------------------------
 .3				ldx CORE.PSIndex
@@ -114,7 +219,7 @@ IRQ.Switch		inc IRQ.Tick
 				lda IRQ.InLib
 				bmi .9					we are in LIB, no switching
 
-.8				clc						exit with V flag set
+.8				clc						CC, IRQ cleared
 				rts
 *--------------------------------------
 IRQ.DEVs		ldx #0
@@ -138,7 +243,7 @@ IRQ.DEVs		ldx #0
 .3				cpx #K.IRQV.MAX*2
 				bcc .1
 
-.9				sec						CC, IRQ not cleared
+.9				sec						CS, IRQ not cleared
 
 				dec IRQ.Skip			Make regular ROM IRQ manager skip A2osX
 

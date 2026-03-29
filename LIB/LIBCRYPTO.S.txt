@@ -1,0 +1,979 @@
+NEW
+  AUTO 3,1
+				.LIST OFF
+				.OP 65C02
+				.OR $2000
+				.TF lib/libcrypto
+*---
+				.INB inc/macros.i
+				.INB inc/a2osx.i
+				.INB inc/a2osx.api.i
+				.INB inc/kernel.i
+				.INB inc/libcrypto.i
+*---
+				.DUMMY
+				.OR ZPLIB
+ZS.START
+ZPCtxPtr		.BS 2				; current context pointer
+zDataPtr		.BS 2				; data source pointer
+zDstPtr			.BS 2				; destination pointer
+zLenLo			.BS 1				; data length lo
+zLenHi			.BS 1				; data length hi
+zCount			.BS 1				; SHA256 counter / AES zRound
+zVarIdx			.BS 8				; SHA256 variable index rotation
+zT1				.BS 4				; SHA256 temp 1
+zT2				.BS 4				; SHA256 temp 2
+zScratch		.BS 4				; SHA256 scratch / GCM zAADLen
+zByteIdx		.BS 2				; SHA256 Maj offsets / GCM zAADPtr
+zTemp1			.BS 1				; ROTB temp
+ZS.END			.ED
+* Aliases - shared ZP (functions are mutually exclusive)
+zRound			.EQ zCount				; AES alias
+zAADPtr			.EQ zByteIdx			; GCM alias
+zAADLenLo		.EQ zScratch+2			; GCM alias
+zAADLenHi		.EQ zScratch+3			; GCM alias
+*---
+				.MA ROTB
+				ldx ]1
+				lda ]2,x
+				sta zTemp1
+				ldx ]4
+				lda ]3,x
+				ora zTemp1
+				.EM
+*---
+*   File Header
+*---
+CS.START		cld
+				jmp (.1,x)
+				.DA #$61
+				.DA #2
+				.DA 0
+				.DA CS.END
+				.DA ID.END
+				.DA 0
+				.DA 0
+*---
+* Relocation Table
+*---
+.1				.DA LIB.LOAD
+				.DA LIB.UNLOAD
+				.DA SHA256Init
+				.DA SHA256Update
+				.DA SHA256Finalize
+				.DA SHA256
+				.DA HMACInit
+				.DA HMACUpdate
+				.DA HMACFinalize
+				.DA HMAC
+				.DA AES128Init
+				.DA AES128Free
+				.DA AES128EncBlock
+				.DA AES128DecBlock
+				.DA AES128GCMEncrypt
+				.DA AES128GCMDecrypt
+L.W.WPage		.DA W.WPage
+L.W.WA			.DA W.WA
+L.W.HMACipad	.DA W.HMACipad
+L.W.HMACopad	.DA W.HMACopad
+L.W.HMACinner	.DA W.HMACinner
+L.W.HMACData	.DA W.HMACData
+L.W.HMACCtx2	.DA W.HMACCtx2
+				.DA 0
+*---
+LIB.LOAD
+LIB.UNLOAD		clc
+				rts
+*/--------------------------------------
+* ## SHA256Init
+* Allocate and initialise SHA256 context
+* `>LIBCALL hLIBCRYPTO,LIBCRYPTO.SHA256Init`
+* ## RETURN VALUE
+* CC: Y;A = context pointer  CS: error
+*\--------------------------------------
+SHA256Init
+				>LDYAI S.SHA256
+				>LIBC Malloc
+				bcs .9
+
+				>STYA ZPCtxPtr
+
+				; Initialise hState from hTable
+				ldy #0
+.1				lda hTable,y
+				sta (ZPCtxPtr),y
+				iny
+				cpy #S.SHA256.MsgLen
+				bne .1
+
+				; Zero MsgLen and BitLen (bytes 32..39)
+				lda #0
+;				ldy #S.SHA256.MsgLen
+.2				sta (ZPCtxPtr),y
+				iny
+				cpy #S.SHA256.MsgBuf+64
+				bne .2
+
+				>LDYA ZPCtxPtr
+				clc
+.9				rts
+*/--------------------------------------
+* ## SHA256Update
+* `>PUSHW ctxptr`
+* `>PUSHW dataptr`
+* `>PUSHW len`
+* `>LIBCALL hLIBCRYPTO,LIBCRYPTO.SHA256Update`
+*\--------------------------------------
+SHA256Update	>GETSTKW 4
+				>STAX ZPCtxPtr
+				>GETSTKW 2
+				>STAX zDataPtr
+				>GETSTKW 0
+				sta zLenLo
+				stx zLenHi
+
+SHA256Update.I
+				lda zLenLo
+				ora zLenHi
+				bne .1
+				clc
+				rts
+
+.1				ldy #S.SHA256.MsgLen
+				lda (ZPCtxPtr),y
+				and #63
+				sta zCount
+
+				; If buffer empty and >= 64 bytes available, process directly
+.2				lda zCount
+				bne partial
+				lda zLenHi
+				bne .3
+				lda zLenLo
+				cmp #64
+				bcc partial			; partial
+
+				; Copy 64 bytes from zDataPtr into W.WPage
+.3				ldy #0
+.4				lda (zDataPtr),y
+				sta W.WPage,y
+				iny
+				cpy #64
+				bne .4
+
+				; Advance zDataPtr by 64
+				lda zDataPtr
+				clc
+				adc #64
+				sta zDataPtr
+				bcc .5
+				inc zDataPtr+1
+
+				; Subtract 64 from length
+.5				lda zLenLo
+				sec
+				sbc #64
+				sta zLenLo
+				bcs .6
+				dec zLenHi
+
+				; Update MsgLen
+.6				ldy #S.SHA256.MsgLen
+				lda (ZPCtxPtr),y
+				clc
+				adc #64
+				sta (ZPCtxPtr),y
+				bcc .7
+				iny
+				lda (ZPCtxPtr),y
+				inc
+				sta (ZPCtxPtr),y
+
+.7				jsr SHA256_ProcessBlock
+
+				lda zLenLo
+				ora zLenHi
+				bne .2
+				clc
+				rts
+
+				; Byte-at-a-time path for partial buffer fill
+partial			ldy #0
+				lda (zDataPtr),y
+				sta zScratch+0
+
+				lda zDataPtr
+				inc
+				sta zDataPtr
+				bne .1
+				inc zDataPtr+1
+
+.1				lda zCount
+				clc
+				adc #S.SHA256.MsgBuf
+				tay
+				lda zScratch+0
+				sta (ZPCtxPtr),y
+
+				; Increment MsgLen
+				ldy #S.SHA256.MsgLen
+				lda (ZPCtxPtr),y
+				inc
+				sta (ZPCtxPtr),y
+				bne .2
+				iny
+				lda (ZPCtxPtr),y
+				inc
+				sta (ZPCtxPtr),y
+
+.2				inc zCount
+				lda zLenLo
+				sec
+				sbc #1
+				sta zLenLo
+				bcs .3
+				dec zLenHi
+
+.3				lda zCount
+				cmp #64
+				bne .5
+
+				; Buffer full - copy MsgBuf to W.WPage and process
+				ldy #S.SHA256.MsgBuf
+				ldx #0
+.4				lda (ZPCtxPtr),y
+				sta W.WPage,x
+				iny
+				inx
+				cpx #64
+				bne .4
+				stz zCount
+
+				jsr SHA256_ProcessBlock
+
+.5				lda zLenLo
+				ora zLenHi
+				bne partial
+				clc
+				rts
+*/--------------------------------------
+* ## SHA256Finalize
+* `>PUSHW ctxptr`
+* `>PUSHW digestptr`
+* `>LIBCALL hLIBCRYPTO,LIBCRYPTO.SHA256Finalize`
+* Frees context after writing digest
+*\--------------------------------------
+SHA256Finalize
+				>GETSTKW 2
+				>STAX ZPCtxPtr
+				>GETSTKW 0
+				>STAX zDstPtr
+
+SHA256Finalize.I
+				; Find current buffer position
+				ldy #S.SHA256.MsgLen
+				lda (ZPCtxPtr),y
+				and #63
+				sta zCount
+
+				; Append 0x80
+				lda zCount
+				clc
+				adc #S.SHA256.MsgBuf
+				tay
+				lda #$80
+				sta (ZPCtxPtr),y
+				inc zCount
+
+				; If buffer too full for length field, pad and process now
+				lda zCount
+				cmp #57
+				bcc .4
+
+.1				lda zCount
+				cmp #64
+				beq .2
+				lda zCount
+				clc
+				adc #S.SHA256.MsgBuf
+				tay
+				lda #0
+				sta (ZPCtxPtr),y
+				inc zCount
+				bra .1
+
+.2				ldy #S.SHA256.MsgBuf
+				ldx #0
+.3				lda (ZPCtxPtr),y
+				sta W.WPage,x
+				iny
+				inx
+				cpx #64
+				bne .3
+				jsr SHA256_ProcessBlock
+				stz zCount
+
+				; Pad remaining bytes up to byte 56
+.4				
+				lda zCount
+				cmp #56
+				beq bitlen
+				lda zCount
+				clc
+				adc #S.SHA256.MsgBuf
+				tay
+				lda #0
+				sta (ZPCtxPtr),y
+				inc zCount
+				bra .4
+
+				; Copy MsgLen to BitLen
+bitlen			ldy #S.SHA256.MsgLen
+				lda (ZPCtxPtr),y
+				ldy #S.SHA256.BitLen
+				sta (ZPCtxPtr),y
+				ldy #S.SHA256.MsgLen+1
+				lda (ZPCtxPtr),y
+				ldy #S.SHA256.BitLen+1
+				sta (ZPCtxPtr),y
+				ldy #S.SHA256.MsgLen+2
+				lda (ZPCtxPtr),y
+				ldy #S.SHA256.BitLen+2
+				sta (ZPCtxPtr),y
+				ldy #S.SHA256.MsgLen+3
+				lda (ZPCtxPtr),y
+				ldy #S.SHA256.BitLen+3
+				sta (ZPCtxPtr),y
+
+				; BitLen *= 8 (left shift 3)
+				ldx #3
+.2				ldy #S.SHA256.BitLen
+				lda (ZPCtxPtr),y
+				asl
+				sta (ZPCtxPtr),y
+				iny
+				lda (ZPCtxPtr),y
+				rol
+				sta (ZPCtxPtr),y
+				iny
+				lda (ZPCtxPtr),y
+				rol
+				sta (ZPCtxPtr),y
+				iny
+				lda (ZPCtxPtr),y
+				rol
+				sta (ZPCtxPtr),y
+				dex
+				bne .2
+
+				; Zero bytes 56-59
+				ldy #S.SHA256.MsgBuf+56
+				lda #0
+				sta (ZPCtxPtr),y
+				iny
+				sta (ZPCtxPtr),y
+				iny
+				sta (ZPCtxPtr),y
+				iny
+				sta (ZPCtxPtr),y
+
+				; Append BitLen big-endian at bytes 60-63
+				ldy #S.SHA256.BitLen+3
+				lda (ZPCtxPtr),y
+				ldy #S.SHA256.MsgBuf+60
+				sta (ZPCtxPtr),y
+				ldy #S.SHA256.BitLen+2
+				lda (ZPCtxPtr),y
+				ldy #S.SHA256.MsgBuf+61
+				sta (ZPCtxPtr),y
+				ldy #S.SHA256.BitLen+1
+				lda (ZPCtxPtr),y
+				ldy #S.SHA256.MsgBuf+62
+				sta (ZPCtxPtr),y
+				ldy #S.SHA256.BitLen+0
+				lda (ZPCtxPtr),y
+				ldy #S.SHA256.MsgBuf+63
+				sta (ZPCtxPtr),y
+
+				; Process final block
+				ldy #S.SHA256.MsgBuf
+				ldx #0
+loop			lda (ZPCtxPtr),y
+				sta W.WPage,x
+				iny
+				inx
+				cpx #64
+				bne loop
+				jsr SHA256_ProcessBlock
+				jsr SHA256_DigestOut
+				>LDYA ZPCtxPtr
+				>LIBC Free
+				clc
+				rts
+*/--------------------------------------
+* ## SHA256 - one-shot hash
+* `>PUSHW dataptr`
+* `>PUSHW len`
+* `>PUSHW digestptr`
+* `>LIBCALL hLIBCRYPTO,LIBCRYPTO.SHA256`
+*\--------------------------------------
+SHA256
+				>GETSTKW 4
+				>STAX zDataPtr
+				>GETSTKW 2
+				sta zLenLo
+				stx zLenHi
+				>GETSTKW 0
+				>STAX zDstPtr
+
+				jsr SHA256Init
+				bcs .9
+
+				jsr SHA256Update.I
+				bcs .9
+
+				jsr SHA256Finalize.I
+				bcs .9
+
+				clc
+.9				rts
+*/--------------------------------------
+* ## HMACInit
+* `>PUSHW keyptr`
+* `>PUSHW keylen`
+* `>LIBCALL hLIBCRYPTO,LIBCRYPTO.HMACInit`
+* ## RETURN VALUE
+* CC: Y;A = outer context pointer
+*     inner context pointer in W.HMACCtx2
+*\--------------------------------------
+HMACInit
+				>GETSTKW 2
+				>STAX zDataPtr
+				>GETSTKW 0
+				sta zTemp1
+				;stx zTemp2
+
+				; Save key pointer before HMAC_BuildPad calls clobber zDataPtr
+				lda zDataPtr
+				sta zT1+2
+				lda zDataPtr+1
+				sta zT1+3
+
+				; Build ipad key block into W.WPage
+				lda #$36
+				jsr HMAC_BuildPads
+
+				; Init inner context
+				jsr SHA256Init
+				bcs .9
+				>STYA ZPCtxPtr
+				lda ZPCtxPtr
+				sta W.HMACCtx2
+				lda ZPCtxPtr+1
+				sta W.HMACCtx2+1
+
+				; Feed ipad block into inner context
+				>LDYA L.W.WPage
+				>STYA zDataPtr
+				lda #64
+				sta zLenLo
+				stz zLenHi
+				jsr SHA256Update.I
+				bcs .9
+
+				; Restore key pointer then build opad block into W.WPage
+				lda zT1+2
+				sta zDataPtr
+				lda zT1+3
+				sta zDataPtr+1
+				lda #$5C
+				jsr HMAC_BuildPads
+
+				; Init outer context
+				jsr SHA256Init
+				bcs .9
+				>STYA ZPCtxPtr
+
+				; Feed opad block into outer context
+				>LDYA L.W.WPage
+				>STYA zDataPtr
+				lda #64
+				sta zLenLo
+				stz zLenHi
+				jsr SHA256Update.I
+				bcs .9
+
+				>LDYA ZPCtxPtr				   ; return outer context in Y;A
+				clc
+.9								rts
+*---
+* HMAC_BuildPads
+* Build ipad into W.HMACipad and opad into W.HMACipad+64 in one pass
+* zDataPtr = key, zTemp1 = key length
+*---
+HMAC_BuildPads
+				ldy #0
+.1				cpy zTemp1
+				bcs .2
+				lda (zDataPtr),y				; key byte
+				pha
+				eor #$36
+				sta W.HMACipad,y
+				pla
+				eor #$5C
+				sta W.HMACopad,y
+				iny
+				bra .1
+.2				cpy #64
+				beq .9
+				lda #$36
+				sta W.HMACipad,y
+				lda #$5C
+				sta W.HMACopad,y
+				iny
+				bra .2
+.9				rts
+*/--------------------------------------
+* ## HMACUpdate
+* Delegates to SHA256Update on inner context
+* `>PUSHW innerctxptr`
+* `>PUSHW dataptr`
+* `>PUSHW len`
+* `>LIBCALL hLIBCRYPTO,LIBCRYPTO.HMACUpdate`
+*\--------------------------------------
+HMACUpdate
+				jmp SHA256Update
+*/--------------------------------------
+* ## HMACFinalize
+* `>PUSHW innerctxptr`
+* `>PUSHW outerctxptr`
+* `>PUSHW digestptr`
+* `>LIBCALL hLIBCRYPTO,LIBCRYPTO.HMACFinalize`
+*\--------------------------------------
+HMACFinalize
+				>GETSTKW 4
+				>STAX ZPCtxPtr				   ; inner context
+				>GETSTKW 2
+				sta zT1+0								 ; save outer context lo
+				stx zT1+1								 ; save outer context hi
+				>GETSTKW 0
+				sta zT2+0								 ; save caller digest ptr lo
+				stx zT2+1								 ; save caller digest ptr hi
+
+				; Finalize inner hash -> W.WPage (32 bytes)
+				>LDYA L.W.WPage
+				>STYA zDstPtr
+				jsr SHA256Finalize.I    ; frees inner context
+				bcs .9
+
+				; Feed inner hash into outer context
+				lda zT1+0
+				sta ZPCtxPtr
+				lda zT1+1
+				sta ZPCtxPtr+1
+
+				>LDYA L.W.WPage
+				>STYA zDataPtr
+				lda #32
+				sta zLenLo
+				stz zLenHi
+				jsr SHA256Update.I
+				bcs .9
+
+				; Finalize outer hash to caller's digest pointer
+				lda zT2+0
+				sta zDstPtr
+				lda zT2+1
+				sta zDstPtr+1
+				jsr SHA256Finalize.I
+				bcs .9
+
+				clc
+.9				rts
+*/--------------------------------------
+* ## HMAC - one-shot HMAC-SHA256
+* `>PUSHW keyptr`
+* `>PUSHW keylen`
+* `>PUSHW dataptr`
+* `>PUSHW datalen`
+* `>PUSHW digestptr`
+* `>LIBCALL hLIBCRYPTO,LIBCRYPTO.HMAC`
+*\--------------------------------------
+HMAC
+				; Get parameters from stack
+				>GETSTKW 8					; keyptr
+				>STAX zDataPtr
+				>GETSTKW 6					; keylen
+				sta zTemp1
+				;stx zTemp2					; hi byte unused
+				; Save dataptr, datalen, digestptr in W.HMACData
+				>GETSTKW 4					; dataptr
+				sta W.HMACData+0
+				stx W.HMACData+1
+				>GETSTKW 2					; datalen
+				sta W.HMACData+2
+				stx W.HMACData+3
+				>GETSTKW 0					; digestptr
+				sta W.HMACData+4
+				stx W.HMACData+5
+
+				; Build ipad into W.HMACipad, opad into W.HMACipad+64
+				jsr HMAC_BuildPads
+
+				; Allocate single SHA256 context
+				jsr SHA256Init
+				bcs .9
+
+				>STYA ZPCtxPtr
+
+				; Inner: ipad
+				>LDYA L.W.HMACipad
+				>STYA zDataPtr
+				
+				lda #64
+				sta zLenLo
+				stz zLenHi
+				jsr SHA256Update.I
+				bcs .9
+
+				; Inner: message
+				lda W.HMACData+0
+				sta zDataPtr
+				lda W.HMACData+1
+				sta zDataPtr+1
+				lda W.HMACData+2
+				sta zLenLo
+				lda W.HMACData+3
+				sta zLenHi
+				jsr SHA256Update.I
+				bcs .9
+				bra inner
+.9				rts
+
+inner				; Inner: finalize -> W.HMACinner, keep context
+				>LDYA L.W.HMACinner
+				>STYA zDstPtr
+NF				jsr SHA256Digest_NF
+				bcs .9 
+
+				; Reset same context for outer hash
+				jsr SHA256Reset_I
+				bcs .9
+
+				; Outer: opad
+				>LDYA L.W.HMACopad
+				>STYA zDataPtr
+				lda #64
+				sta zLenLo
+				stz zLenHi
+				jsr SHA256Update.I
+				bcs .9
+
+				; Outer: inner hash
+				>LDYA L.W.HMACinner
+				>STYA zDataPtr
+				lda #32
+				sta zLenLo
+				stz zLenHi
+				jsr SHA256Update.I
+				bcs .9
+
+				; Outer: finalize -> digestptr, frees context
+				lda W.HMACData+4
+				sta zDstPtr
+				lda W.HMACData+5
+				sta zDstPtr+1
+				jsr SHA256Finalize.I
+				bcs .9
+
+				clc
+.9				rts
+*/--------------------------------------
+* ## AES128Init
+* `>PUSHW keyptr`
+* `>LIBCALL hLIBCRYPTO,LIBCRYPTO.AES128Init`
+* ## RETURN VALUE CC: Y;A = context pointer
+*\--------------------------------------
+AES128Init
+				>GETSTKW 0
+				>STAX zDataPtr
+
+				>LDYAI S.AES128
+				>LIBC Malloc
+				bcs .9
+				>STYA ZPCtxPtr
+
+				; Copy 16-byte key into context KeySched[0..15]
+				; S.AES128.KeySched = 0 so context offset = x directly
+				ldx #0
+.1				txa
+				tay
+				lda (zDataPtr),y				 ; key[x]
+				sta (ZPCtxPtr),y				 ; context[x]
+				inx
+				cpx #16
+				bne .1
+
+				jsr AES_ExpandKey
+
+				; Compute H = AES(key, zero block)
+				ldx #15
+				lda #0
+.2				sta W.AESState,x
+				dex
+				bpl .2
+				jsr AES_EncCore
+
+				; Copy W.AESState to GHASH_H in context
+				ldy #S.AES128.GHASH_H
+				ldx #0
+.3				lda W.AESState,x
+				sta (ZPCtxPtr),y
+				iny
+				inx
+				cpx #16
+				bne .3
+
+				jsr GHASH_BuildTable
+
+				>LDYA ZPCtxPtr
+				clc
+.9				rts
+*/--------------------------------------
+* ## AES128Free
+* `>PUSHW ctxptr`
+* `>LIBCALL hLIBCRYPTO,LIBCRYPTO.AES128Free`
+*\--------------------------------------
+AES128Free
+				>GETSTKW 0
+				>LIBC Free
+				clc
+				rts
+*/--------------------------------------
+* ## AES128EncBlock
+* `>PUSHW ctxptr`
+* `>PUSHW srcptr`
+* `>PUSHW dstptr`
+* `>LIBCALL hLIBCRYPTO,LIBCRYPTO.AES128EncBlock`
+*\--------------------------------------
+AES128EncBlock
+				>GETSTKW 4
+				>STAX ZPCtxPtr
+				>GETSTKW 2
+				>STAX zDataPtr
+				>GETSTKW 0
+				>STAX zDstPtr
+
+				ldy #15
+.1				lda (zDataPtr),y
+				sta W.AESState,y
+				dey
+				bpl .1
+
+				jsr AES_EncCore
+
+				ldy #15
+.2				lda W.AESState,y
+				sta (zDstPtr),y
+				dey
+				bpl .2
+
+				clc
+				rts
+*/--------------------------------------
+* ## AES128DecBlock
+* `>PUSHW ctxptr`
+* `>PUSHW srcptr`
+* `>PUSHW dstptr`
+* `>LIBCALL hLIBCRYPTO,LIBCRYPTO.AES128DecBlock`
+*\--------------------------------------
+AES128DecBlock
+				>GETSTKW 4
+				>STAX ZPCtxPtr
+				>GETSTKW 2
+				>STAX zDataPtr
+				>GETSTKW 0
+				>STAX zDstPtr
+
+				ldy #15
+.1				lda (zDataPtr),y
+				sta W.AESState,y
+				dey
+				bpl .1
+
+				jsr AES_PrepDecryptKeys
+				jsr AES_DecCore
+
+				ldy #15
+.2				lda W.AESState,y
+				sta (zDstPtr),y
+				dey
+				bpl .2
+
+				clc
+				rts
+*/--------------------------------------
+* ## AES128GCMEncrypt
+* `>PUSHW ctxptr`
+* `>PUSHW nonceptr`  12 bytes
+* `>PUSHW aadptr`
+* `>PUSHW aadlen`    16-bit byte count
+* `>PUSHW plainptr`
+* `>PUSHW plainlen`  16-bit byte count
+* `>PUSHW cipherptr`
+* `>PUSHW tagptr`    16 bytes output
+* `>LIBCALL hLIBCRYPTO,LIBCRYPTO.AES128GCMEncrypt`
+*\--------------------------------------
+AES128GCMEncrypt
+				>GETSTKW 14
+				>STAX ZPCtxPtr
+				>GETSTKW 12
+				>STAX zDataPtr				   ; nonce
+				jsr GCM_InitState
+
+				>GETSTKW 10
+				>STAX zAADPtr
+				>GETSTKW 8
+				sta zAADLenLo
+				stx zAADLenHi
+				jsr GCM_ProcessAAD
+
+				>GETSTKW 6
+				>STAX zDataPtr				   ; plaintext
+				>GETSTKW 4
+				sta zLenLo
+				stx zLenHi
+
+				; Save cipherptr in zT1, tagptr in zT2
+				>GETSTKW 2
+				sta zT1+0
+				stx zT1+1
+				>GETSTKW 0
+				sta zT2+0
+				stx zT2+1
+
+				lda zT1+0
+				sta zDstPtr
+				lda zT1+1
+				sta zDstPtr+1
+
+				jsr GCM_EncryptData
+
+				jsr GHASH_LenBlock
+
+				jsr GCM_ComputeTag
+
+				; Write tag to tagptr
+				lda zT2+0
+				sta zDstPtr
+				lda zT2+1
+				sta zDstPtr+1
+				ldy #15
+.1				lda W.AESState,y
+				sta (zDstPtr),y
+				dey
+				bpl .1
+
+				clc
+				rts
+*/--------------------------------------
+* ## AES128GCMDecrypt
+* `>PUSHW ctxptr`
+* `>PUSHW nonceptr`  12 bytes
+* `>PUSHW aadptr`
+* `>PUSHW aadlen`    16-bit byte count
+* `>PUSHW cipherptr`
+* `>PUSHW cipherlen` 16-bit byte count
+* `>PUSHW plainptr`
+* `>PUSHW tagptr`    16 bytes to verify
+* `>LIBCALL hLIBCRYPTO,LIBCRYPTO.AES128GCMDecrypt`
+* ## RETURN VALUE CC=ok CS=tag mismatch
+*\--------------------------------------
+AES128GCMDecrypt
+				>GETSTKW 14
+				>STAX ZPCtxPtr
+				>GETSTKW 12
+				>STAX zDataPtr				   ; nonce
+				jsr GCM_InitState
+
+				>GETSTKW 10
+				>STAX zAADPtr
+				>GETSTKW 8
+				sta zAADLenLo
+				stx zAADLenHi
+				jsr GCM_ProcessAAD
+
+				>GETSTKW 6
+				>STAX zDataPtr				   ; ciphertext
+				>GETSTKW 4
+				sta zLenLo
+				stx zLenHi
+				>GETSTKW 2
+				>STAX zDstPtr				    ; plaintext output
+				>GETSTKW 0
+				sta zT1+0
+				stx zT1+1						 ; expected tag pointer
+				jsr GCM_DecryptData
+				jsr GHASH_LenBlock
+				jsr GCM_ComputeTag
+				; Compare computed tag (W.AESState) with expected tag
+				lda zT1+0
+				sta zAADPtr
+				lda zT1+1
+				sta zAADPtr+1
+				ldy #15
+.1				lda W.AESState,y
+				eor (zAADPtr),y
+				bne .9
+				dey
+				bpl .1
+				clc
+				rts
+.9				sec
+				rts
+*---
+* Internal routines
+*---
+				.INB usr/src/lib/libcrypto.s.sha
+				.INB usr/src/lib/libcrypto.s.aes
+				.INB usr/src/lib/libcrypto.s.gha
+*---
+CS.END			.EQ *
+*---
+*---
+* Static data and WorkBuf in ID segment
+*---
+WorkBuf			.EQ *
+W.WA			.EQ WorkBuf+0				; 32 bytes - SHA256 a..h
+W.WPage			.EQ WorkBuf+32      ; 256 bytes - message schedule W[0..63]
+W.Sig0			.EQ WorkBuf+288     ; 4 bytes
+W.Sig1			.EQ WorkBuf+292     ; 4 bytes
+W.SmallTemp     .EQ WorkBuf+296     ; 4 bytes
+W.AESState      .EQ WorkBuf+300     ; 16 bytes
+W.AESState2     .EQ WorkBuf+316     ; 16 bytes
+W.AESScratch    .EQ WorkBuf+332     ; 4 bytes
+W.AESScratch2   .EQ WorkBuf+336     ; 4 bytes
+W.AESKeyBuf     .EQ WorkBuf+340     ; 32 bytes (2 round keys)
+W.AESTemp1      .EQ WorkBuf+372     ; 1 byte
+W.AESTemp2      .EQ WorkBuf+373     ; 1 byte
+W.AESRConIdx    .EQ WorkBuf+374     ; 1 byte
+W.AESCol		.EQ WorkBuf+375     ; 1 byte
+W.GHASHBuf      .EQ WorkBuf+376     ; 16 bytes
+W.GHASHProd     .EQ WorkBuf+392     ; 16 bytes
+W.HMACCtx2      .EQ WorkBuf+408     ; 2 bytes - unused (kept for compat)
+W.HMACData      .EQ WorkBuf+410     ; 6 bytes - dataptr(2) datalen(2) digestptr(2)
+W.HMACipad      .EQ WorkBuf+416     ; 160 bytes - ipad(64) opad(64) inner(32)
+W.HMACopad      .EQ WorkBuf+480     ; opad (within HMACipad)
+W.HMACinner     .EQ WorkBuf+544     ; 32 bytes - inner hash result
+WORKBUF.SIZE    .EQ 576
+				.BS WORKBUF.SIZE    ; reserve buffer
+*---
+* Shift & rotation tables
+*---
+				.INB usr/src/lib/libcrypto.s.tbl
+*---
+ID.END			.EQ *
+*---
+MAN
+SAVE usr/src/lib/libcrypto.s
+ASM

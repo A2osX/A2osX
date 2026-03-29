@@ -1,0 +1,694 @@
+NEW
+  AUTO 3,1
+				.LIST OFF
+*---
+* libcrypto.AES128.s - AES128 internal engine
+* Included by libcrypto.s after CS.END
+* Uses W.xxx offsets into WorkBuf for all working storage
+*
+* Context layout (S.AES128):
+*   KeySched    +0   176 bytes
+*   CTRBlock    +176  16 bytes
+*   GHASH_H     +192  16 bytes
+*   GHASH_S     +208  16 bytes
+*   GHASH_Tbl   +224 256 bytes
+*            = 480 bytes total
+*---
+*
+* AES_ExpandKey
+* Key already copied into context KeySched[0..15] by caller
+* Expands to full 11 round keys, stored back into context
+* ZPCtxPtr = AES context
+*---
+AES_ExpandKey
+				stz W.AESRConIdx
+
+				; Copy round key 0 from context into W.AESKeyBuf[0..15]
+				ldy #S.AES128.KeySched
+				ldx #0
+.0				lda (ZPCtxPtr),y
+				sta W.AESKeyBuf,x
+				iny
+				inx
+				cpx #16
+				bne .0
+
+				; Generate and store round keys 1-10
+.1				; RotWord(W[N-1]) + SubWord + Rcon -> new W[N]
+				lda W.AESKeyBuf+13
+				tax
+				lda SBOX,x
+				ldx W.AESRConIdx
+				eor RconTable,x
+				eor W.AESKeyBuf+0
+				sta W.AESKeyBuf+16
+
+				lda W.AESKeyBuf+14
+				tax
+				lda SBOX,x
+				eor W.AESKeyBuf+1
+				sta W.AESKeyBuf+17
+
+				lda W.AESKeyBuf+15
+				tax
+				lda SBOX,x
+				eor W.AESKeyBuf+2
+				sta W.AESKeyBuf+18
+
+				lda W.AESKeyBuf+12
+				tax
+				lda SBOX,x
+				eor W.AESKeyBuf+3
+				sta W.AESKeyBuf+19
+
+				; XOR propagation for words 1-3
+				ldy #4
+.2				sty W.AESTemp1
+				tya
+				sec
+				sbc #4
+				tay
+				lda W.AESKeyBuf+16,y
+				ldy W.AESTemp1
+				eor W.AESKeyBuf,y
+				sta W.AESKeyBuf+16,y
+				iny
+				cpy #16
+				bne .2
+				bra .4
+.3				bra .1
+.4				; Store new round key into context
+				; offset = S.AES128.KeySched + (RConIdx+1)*16
+				inc W.AESRConIdx
+				lda W.AESRConIdx
+				asl
+				asl
+				asl
+				asl                     ; *16
+				clc
+				adc #S.AES128.KeySched
+				sta W.AESTemp2          ; save context offset
+
+				ldx #0
+.5				lda W.AESKeyBuf+16,x
+				ldy W.AESTemp2
+				sta (ZPCtxPtr),y
+				inc W.AESTemp2
+				inx
+				cpx #16
+				bne .5
+
+				; Shift new key down to W.AESKeyBuf[0..15]
+				ldx #0
+.6				lda W.AESKeyBuf+16,x
+				sta W.AESKeyBuf,x
+				inx
+				cpx #16
+				bne .6
+
+				lda W.AESRConIdx
+				cmp #10
+				bne .3			long branch 2 step
+				rts
+*---
+* AES_LoadRoundKey
+* XOR AESState with round key zRound from context
+*---
+AES_LoadRoundKey
+				lda zRound
+				asl
+				asl
+				asl
+				asl                     ; *16
+				clc
+				adc #S.AES128.KeySched
+				tay
+				ldx #0
+.1				lda W.AESState,x
+				eor (ZPCtxPtr),y
+				sta W.AESState,x
+				iny
+				inx
+				cpx #16
+				bne .1
+				rts
+*---
+AES_SubBytes
+				ldx #15
+.1				lda W.AESState,x
+				tay
+				lda SBOX,y
+				sta W.AESState,x
+				dex
+				bpl .1
+				rts
+*---
+AES_ShiftRows
+				; Row 1: left rotate by 1 (bytes 1,5,9,13)
+				lda W.AESState+1
+				tax
+				lda W.AESState+5
+				sta W.AESState+1
+				lda W.AESState+9
+				sta W.AESState+5
+				lda W.AESState+13
+				sta W.AESState+9
+				txa
+				sta W.AESState+13
+
+				; Row 2: left rotate by 2 (bytes 2,6,10,14)
+				lda W.AESState+2
+				tax
+				lda W.AESState+10
+				sta W.AESState+2
+				txa
+				sta W.AESState+10
+				lda W.AESState+6
+				tax
+				lda W.AESState+14
+				sta W.AESState+6
+				txa
+				sta W.AESState+14
+
+				; Row 3: right rotate by 1 (bytes 3,7,11,15)
+				lda W.AESState+15
+				tax
+				lda W.AESState+11
+				sta W.AESState+15
+				lda W.AESState+7
+				sta W.AESState+11
+				lda W.AESState+3
+				sta W.AESState+7
+				txa
+				sta W.AESState+3
+				rts
+*---
+AES_MixColumns
+				stz W.AESCol
+.1				ldy W.AESCol
+				lda W.AESState+0,y
+				sta W.AESScratch+0
+				lda W.AESState+1,y
+				sta W.AESScratch+1
+				lda W.AESState+2,y
+				sta W.AESScratch+2
+				lda W.AESState+3,y
+				sta W.AESScratch+3
+
+				lda W.AESScratch+0
+				eor W.AESScratch+1
+				eor W.AESScratch+2
+				eor W.AESScratch+3
+				sta W.AESTemp1
+
+				lda W.AESScratch+0
+				eor W.AESScratch+1
+				asl
+				bcc .2
+				eor #$1B
+.2				eor W.AESTemp1
+				eor W.AESScratch+0
+				ldy W.AESCol
+				sta W.AESState+0,y
+
+				lda W.AESScratch+1
+				eor W.AESScratch+2
+				asl
+				bcc .3
+				eor #$1B
+.3				eor W.AESTemp1
+				eor W.AESScratch+1
+				sta W.AESState+1,y
+				bra .5
+.4				bra .1
+.5				lda W.AESScratch+2
+				eor W.AESScratch+3
+				asl
+				bcc .6
+				eor #$1B
+.6				eor W.AESTemp1
+				eor W.AESScratch+2
+				sta W.AESState+2,y
+
+				lda W.AESScratch+3
+				eor W.AESScratch+0
+				asl
+				bcc .7
+				eor #$1B
+.7				eor W.AESTemp1
+				eor W.AESScratch+3
+				sta W.AESState+3,y
+
+				lda W.AESCol
+				clc
+				adc #4
+				sta W.AESCol
+				cmp #16
+				bne .4				; long branch 2 step
+				rts
+*---
+AES_EncCore
+				stz zRound
+				jsr AES_LoadRoundKey
+				lda #9
+				sta W.AESTemp2
+.1				inc zRound
+				jsr AES_SubBytes
+				jsr AES_ShiftRows
+				jsr AES_MixColumns
+				jsr AES_LoadRoundKey
+				dec W.AESTemp2
+				bne .1
+				inc zRound
+				jsr AES_SubBytes
+				jsr AES_ShiftRows
+				jsr AES_LoadRoundKey
+				rts
+*---
+AES_InvSubBytes
+				ldx #15
+.1				lda W.AESState,x
+				tay
+				lda Inv_SBOX,y
+				sta W.AESState,x
+				dex
+				bpl .1
+				rts
+*---
+AES_InvShiftRows
+				; Row 1: right rotate by 1
+				lda W.AESState+13
+				tax
+				lda W.AESState+9
+				sta W.AESState+13
+				lda W.AESState+5
+				sta W.AESState+9
+				lda W.AESState+1
+				sta W.AESState+5
+				txa
+				sta W.AESState+1
+
+				; Row 2: rotate by 2 (same as forward)
+				lda W.AESState+2
+				tax
+				lda W.AESState+10
+				sta W.AESState+2
+				txa
+				sta W.AESState+10
+				lda W.AESState+6
+				tax
+				lda W.AESState+14
+				sta W.AESState+6
+				txa
+				sta W.AESState+14
+
+				; Row 3: left rotate by 1
+				lda W.AESState+3
+				tax
+				lda W.AESState+7
+				sta W.AESState+3
+				lda W.AESState+11
+				sta W.AESState+7
+				lda W.AESState+15
+				sta W.AESState+11
+				txa
+				sta W.AESState+15
+				rts
+*---
+* AES_InvMixColumns_Core
+* InvMixColumns on 4 bytes in W.AESScratch -> W.AESScratch2
+*---
+AES_InvMixColumns_Core
+				ldx W.AESScratch+0
+				lda MUL_0E,x
+				ldx W.AESScratch+1
+				eor MUL_0B,x
+				ldx W.AESScratch+2
+				eor MUL_0D,x
+				ldx W.AESScratch+3
+				eor MUL_09,x
+				sta W.AESScratch2+0
+
+				ldx W.AESScratch+0
+				lda MUL_09,x
+				ldx W.AESScratch+1
+				eor MUL_0E,x
+				ldx W.AESScratch+2
+				eor MUL_0B,x
+				ldx W.AESScratch+3
+				eor MUL_0D,x
+				sta W.AESScratch2+1
+
+				ldx W.AESScratch+0
+				lda MUL_0D,x
+				ldx W.AESScratch+1
+				eor MUL_09,x
+				ldx W.AESScratch+2
+				eor MUL_0E,x
+				ldx W.AESScratch+3
+				eor MUL_0B,x
+				sta W.AESScratch2+2
+
+				ldx W.AESScratch+0
+				lda MUL_0B,x
+				ldx W.AESScratch+1
+				eor MUL_0D,x
+				ldx W.AESScratch+2
+				eor MUL_09,x
+				ldx W.AESScratch+3
+				eor MUL_0E,x
+				sta W.AESScratch2+3
+				rts
+*---
+* AES_PrepDecryptKeys
+* Apply InvMixColumns to round keys 1-9 in context
+*---
+AES_PrepDecryptKeys
+				lda #1
+				sta zRound
+.1				; Process each column of this round key
+				lda #0
+				sta W.AESCol
+.2				; Compute context offset for this column
+				; offset = S.AES128.KeySched + zRound*16 + AESCol*4
+				lda zRound
+				asl
+				asl
+				asl
+				asl                     ; zRound*16
+				sta W.AESTemp1          ; save round base
+				lda W.AESCol
+				asl
+				asl                     ; AESCol*4
+				clc
+				adc W.AESTemp1
+				clc
+				adc #S.AES128.KeySched
+				tay
+
+				; Load 4 bytes from context at that offset
+				lda (ZPCtxPtr),y
+				sta W.AESScratch+0
+				iny
+				lda (ZPCtxPtr),y
+				sta W.AESScratch+1
+				iny
+				lda (ZPCtxPtr),y
+				sta W.AESScratch+2
+				iny
+				lda (ZPCtxPtr),y
+				sta W.AESScratch+3
+
+				jsr AES_InvMixColumns_Core
+
+				; Recompute same offset and store result back
+				lda zRound
+				asl
+				asl
+				asl
+				asl
+				sta W.AESTemp1
+				lda W.AESCol
+				asl
+				asl
+				clc
+				adc W.AESTemp1
+				clc
+				adc #S.AES128.KeySched
+				tay
+
+				lda W.AESScratch2+0
+				sta (ZPCtxPtr),y
+				iny
+				lda W.AESScratch2+1
+				sta (ZPCtxPtr),y
+				iny
+				lda W.AESScratch2+2
+				sta (ZPCtxPtr),y
+				iny
+				lda W.AESScratch2+3
+				sta (ZPCtxPtr),y
+
+				lda W.AESCol
+				inc
+				sta W.AESCol
+				cmp #4
+				bne .2
+
+				inc zRound
+				lda zRound
+				cmp #10
+				bne .1
+				rts
+*---
+AES_DecCore
+				lda #10
+				sta zRound
+				jsr AES_LoadRoundKey
+				lda #9
+				sta W.AESTemp2
+.1				dec zRound
+				jsr AES_TTblTrans
+				jsr AES_LoadRoundKey
+				dec W.AESTemp2
+				bne .1
+				rts
+*---
+* AES_TTblTrans
+* Combined InvShiftRows + InvSubBytes + optional InvMixColumns
+* For final round (zRound=0 on entry to that iteration) skip MixColumns
+*---
+AES_TTblTrans
+				; Col 0: rows 0,13,10,7
+				lda W.AESState+0
+				tax
+				lda Inv_SBOX,x
+				sta W.AESScratch+0
+				lda W.AESState+13
+				tax
+				lda Inv_SBOX,x
+				sta W.AESScratch+1
+				lda W.AESState+10
+				tax
+				lda Inv_SBOX,x
+				sta W.AESScratch+2
+				lda W.AESState+7
+				tax
+				lda Inv_SBOX,x
+				sta W.AESScratch+3
+				lda zRound
+				beq .0
+				jsr AES_InvMixColumns_Core
+				lda W.AESScratch2+0
+				sta W.AESState2+0
+				lda W.AESScratch2+1
+				sta W.AESState2+1
+				lda W.AESScratch2+2
+				sta W.AESState2+2
+				lda W.AESScratch2+3
+				sta W.AESState2+3
+				bra col1
+.0				lda W.AESScratch+0
+				sta W.AESState2+0
+				lda W.AESScratch+1
+				sta W.AESState2+1
+				lda W.AESScratch+2
+				sta W.AESState2+2
+				lda W.AESScratch+3
+				sta W.AESState2+3
+
+				; Col 1: rows 4,1,14,11
+col1			lda W.AESState+4
+				tax
+				lda Inv_SBOX,x
+				sta W.AESScratch+0
+				lda W.AESState+1
+				tax
+				lda Inv_SBOX,x
+				sta W.AESScratch+1
+				lda W.AESState+14
+				tax
+				lda Inv_SBOX,x
+				sta W.AESScratch+2
+				lda W.AESState+11
+				tax
+				lda Inv_SBOX,x
+				sta W.AESScratch+3
+				lda zRound
+				beq c1skip
+				jsr AES_InvMixColumns_Core
+				lda W.AESScratch2+0
+				sta W.AESState2+4
+				lda W.AESScratch2+1
+				sta W.AESState2+5
+				lda W.AESScratch2+2
+				sta W.AESState2+6
+				lda W.AESScratch2+3
+				sta W.AESState2+7
+				bra col2
+c1skip			lda W.AESScratch+0
+				sta W.AESState2+4
+				lda W.AESScratch+1
+				sta W.AESState2+5
+				lda W.AESScratch+2
+				sta W.AESState2+6
+				lda W.AESScratch+3
+				sta W.AESState2+7
+
+				; Col 2: rows 8,5,2,15
+col2			lda W.AESState+8
+				tax
+				lda Inv_SBOX,x
+				sta W.AESScratch+0
+				lda W.AESState+5
+				tax
+				lda Inv_SBOX,x
+				sta W.AESScratch+1
+				lda W.AESState+2
+				tax
+				lda Inv_SBOX,x
+				sta W.AESScratch+2
+				lda W.AESState+15
+				tax
+				lda Inv_SBOX,x
+				sta W.AESScratch+3
+				lda zRound
+				beq c2skip
+				jsr AES_InvMixColumns_Core
+				lda W.AESScratch2+0
+				sta W.AESState2+8
+				lda W.AESScratch2+1
+				sta W.AESState2+9
+				lda W.AESScratch2+2
+				sta W.AESState2+10
+				lda W.AESScratch2+3
+				sta W.AESState2+11
+				bra col3
+c2skip			lda W.AESScratch+0
+				sta W.AESState2+8
+				lda W.AESScratch+1
+				sta W.AESState2+9
+				lda W.AESScratch+2
+				sta W.AESState2+10
+				lda W.AESScratch+3
+				sta W.AESState2+11
+
+				; Col 3: rows 12,9,6,3
+col3			lda W.AESState+12
+				tax
+				lda Inv_SBOX,x
+				sta W.AESScratch+0
+				lda W.AESState+9
+				tax
+				lda Inv_SBOX,x
+				sta W.AESScratch+1
+				lda W.AESState+6
+				tax
+				lda Inv_SBOX,x
+				sta W.AESScratch+2
+				lda W.AESState+3
+				tax
+				lda Inv_SBOX,x
+				sta W.AESScratch+3
+				lda zRound
+				beq c3skip
+				jsr AES_InvMixColumns_Core
+				lda W.AESScratch2+0
+				sta W.AESState2+12
+				lda W.AESScratch2+1
+				sta W.AESState2+13
+				lda W.AESScratch2+2
+				sta W.AESState2+14
+				lda W.AESScratch2+3
+				sta W.AESState2+15
+				bra copy
+c3skip			lda W.AESScratch+0
+				sta W.AESState2+12
+				lda W.AESScratch+1
+				sta W.AESState2+13
+				lda W.AESScratch+2
+				sta W.AESState2+14
+				lda W.AESScratch+3
+				sta W.AESState2+15
+
+copy			ldx #15
+.1				lda W.AESState2,x
+				sta W.AESState,x
+				dex
+				bpl .1
+				rts
+*---
+* AES_CTRInit
+* Counter block = nonce[0..11] || 00 00 00 01
+* Input: zDataPtr = 12-byte nonce, ZPCtxPtr = context
+*---
+AES_CTRInit
+				ldy #0
+				sty W.AESTemp1          ; loop counter
+.1				lda (zDataPtr),y        ; load nonce byte
+				sta W.AESScratch+0      ; save it
+				lda #S.AES128.CTRBlock
+				clc
+				adc W.AESTemp1          ; context offset = CTRBlock + i
+				tay
+				lda W.AESScratch+0
+				sta (ZPCtxPtr),y
+				inc W.AESTemp1
+				ldy W.AESTemp1
+				cpy #12
+				bne .1
+
+				; bytes 12-14 = 0, byte 15 = 1
+				ldy #S.AES128.CTRBlock+12
+				lda #0
+				sta (ZPCtxPtr),y
+				iny
+				sta (ZPCtxPtr),y
+				iny
+				sta (ZPCtxPtr),y
+				iny
+				lda #1
+				sta (ZPCtxPtr),y
+				rts
+*---
+* AES_CTRBlock
+* Encrypt current counter block -> keystream in W.AESState
+* Then increment big-endian counter at bytes 12-15
+*---
+AES_CTRBlock
+				ldy #S.AES128.CTRBlock
+				ldx #0
+.1				lda (ZPCtxPtr),y
+				sta W.AESState,x
+				iny
+				inx
+				cpx #16
+				bne .1
+
+				jsr AES_EncCore
+
+				; Increment counter big-endian
+				ldy #S.AES128.CTRBlock+15
+				lda (ZPCtxPtr),y
+				inc
+				sta (ZPCtxPtr),y
+				bne .9
+				dey
+				lda (ZPCtxPtr),y
+				inc
+				sta (ZPCtxPtr),y
+				bne .9
+				dey
+				lda (ZPCtxPtr),y
+				inc
+				sta (ZPCtxPtr),y
+				bne .9
+				dey
+				lda (ZPCtxPtr),y
+				inc
+				sta (ZPCtxPtr),y
+.9				rts
+MAN
+SAVE usr/src/lib/libcrypto.s.aes
+LOAD usr/src/lib/libcrypto.s
+ASM

@@ -1,0 +1,1025 @@
+NEW
+  AUTO 3,1
+				.LIST OFF
+*--------------------------------------
+* libcrypto.SHA256.s - SHA256 internal engine
+* Included by libcrypto.s
+*
+* ZP variables (declared by parent):
+*   ZPCtxPtr  - context pointer
+*   zDstPtr   - digest output pointer
+*   zVarIdx   - variable index rotation (8 bytes, hot)
+*   zT1,zT2   - 32-bit temps (hot)
+*   zScratch  - 32-bit scratch (hot)
+*   zTemp1    - ROTB byte temp (hot)
+*   zCount    - round/pad counter
+*   zByteIdx  - 2 bytes, Maj b/c offsets / X,Y save
+*
+* WorkBuf (absolute addresses in ID segment):
+*   W.WA       = WorkBuf+0    32 bytes
+*   W.WPage    = WorkBuf+32   256 bytes
+*   W.Sig0     = WorkBuf+288  4 bytes
+*   W.Sig1     = WorkBuf+292  4 bytes
+*   W.SmallTemp= WorkBuf+296  4 bytes
+*
+* ROTB macro (4 args, defined in parent):
+*   ]1=src_addr ]2=shr_table ]3=shl_table ]4=carry_addr
+*--------------------------------------
+*
+* SHA256_BlockInit
+* Copy hState (32 bytes) from context into W.WA
+*--------------------------------------
+SHA256_BlockInit
+				ldy #S.SHA256.hState
+				ldx #0
+.1				lda (ZPCtxPtr),y
+				sta W.WA,x
+				iny
+				inx
+				cpx #32
+				bne .1
+				rts
+*--------------------------------------
+* SHA256_UpdateState
+* Add W.WA into hState (32-bit add x8)
+*--------------------------------------
+SHA256_UpdateState
+				ldy #S.SHA256.hState
+				ldx #0
+USloop			clc
+				lda (ZPCtxPtr),y
+				adc W.WA,x
+				sta (ZPCtxPtr),y
+				iny
+				lda (ZPCtxPtr),y
+				adc W.WA+1,x
+				sta (ZPCtxPtr),y
+				iny
+				lda (ZPCtxPtr),y
+				adc W.WA+2,x
+				sta (ZPCtxPtr),y
+				iny
+				lda (ZPCtxPtr),y
+				adc W.WA+3,x
+				sta (ZPCtxPtr),y
+				iny
+				txa
+				clc
+				adc #4
+				tax
+				cpx #32
+				bne USloop
+				rts
+*--------------------------------------
+* SHA256_SwapEndian
+* Byte-swap each 32-bit word in W.WPage
+*--------------------------------------
+SHA256_SwapEndian
+				ldx #0
+.1				lda W.WPage+0,x
+				ldy W.WPage+3,x
+				sta W.WPage+3,x
+				tya
+				sta W.WPage+0,x
+				lda W.WPage+1,x
+				ldy W.WPage+2,x
+				sta W.WPage+2,x
+				tya
+				sta W.WPage+1,x
+				txa
+				clc
+				adc #4
+				tax
+				cpx #64
+				bcc .1
+				rts
+*--------------------------------------
+* SHA256_FetchVar
+* Input:  A = index 0-7
+* Output: zScratch = W.WA[index*4]
+*--------------------------------------
+SHA256_FetchVar
+				asl
+				asl
+				tay
+				lda W.WA,y
+				sta zScratch+0
+				iny
+				lda W.WA,y
+				sta zScratch+1
+				iny
+				lda W.WA,y
+				sta zScratch+2
+				iny
+				lda W.WA,y
+				sta zScratch+3
+				rts
+*--------------------------------------
+* SHA256_StoreVar
+* Input: A = index 0-7, zScratch = value
+*--------------------------------------
+SHA256_StoreVar
+				asl
+				asl
+				tay
+				lda zScratch+0
+				sta W.WA,y
+				iny
+				lda zScratch+1
+				sta W.WA,y
+				iny
+				lda zScratch+2
+				sta W.WA,y
+				iny
+				lda zScratch+3
+				sta W.WA,y
+				rts
+*--------------------------------------
+* SHA256_AddT1ToVar
+* Input: A = index 0-7
+* Adds zT1 to W.WA[index] in place
+*--------------------------------------
+SHA256_AddT1ToVar
+				asl
+				asl
+				tay
+				clc
+				lda W.WA,y
+				adc zT1+0
+				sta W.WA,y
+				iny
+				lda W.WA,y
+				adc zT1+1
+				sta W.WA,y
+				iny
+				lda W.WA,y
+				adc zT1+2
+				sta W.WA,y
+				iny
+				lda W.WA,y
+				adc zT1+3
+				sta W.WA,y
+				rts
+*--------------------------------------
+SHA256_Init_Indices
+				ldx #7
+.1				txa
+				sta zVarIdx,x
+				dex
+				bpl .1
+				rts
+*--------------------------------------
+SHA256_Rotate_Vars
+				
+				lda zVarIdx+7
+				pha
+				ldx #6
+.1				lda zVarIdx,x
+				sta zVarIdx+1,x
+				dex
+				bpl .1
+				pla
+				sta zVarIdx+0
+				rts
+*--------------------------------------
+* SHA256_Sigma0_Small
+* sigma0(x) = ROTR7(x) ^ ROTR18(x) ^ SHR3(x)
+* Input:  W.SmallTemp
+* Output: W.Sig0
+*--------------------------------------
+SHA256_Sigma0_Small
+				phx
+				; ROTR7
+				>ROTB W.SmallTemp+0,tab_shr7,tab_shl1,W.SmallTemp+1
+				sta W.Sig0+0
+				>ROTB W.SmallTemp+1,tab_shr7,tab_shl1,W.SmallTemp+2
+				sta W.Sig0+1
+				>ROTB W.SmallTemp+2,tab_shr7,tab_shl1,W.SmallTemp+3
+				sta W.Sig0+2
+				>ROTB W.SmallTemp+3,tab_shr7,tab_shl1,W.SmallTemp+0
+				sta W.Sig0+3
+				; XOR ROTR18
+				>ROTB W.SmallTemp+2,tab_shr2,tab_shl6,W.SmallTemp+3
+				eor W.Sig0+0
+				sta W.Sig0+0
+				>ROTB W.SmallTemp+3,tab_shr2,tab_shl6,W.SmallTemp+0
+				eor W.Sig0+1
+				sta W.Sig0+1
+				>ROTB W.SmallTemp+0,tab_shr2,tab_shl6,W.SmallTemp+1
+				eor W.Sig0+2
+				sta W.Sig0+2
+				>ROTB W.SmallTemp+1,tab_shr2,tab_shl6,W.SmallTemp+2
+				eor W.Sig0+3
+				sta W.Sig0+3
+				; XOR SHR3
+				ldx W.SmallTemp+0
+				lda tab_shr3,x
+				sta zTemp1
+				ldx W.SmallTemp+1
+				lda tab_shl5,x
+				ora zTemp1
+				eor W.Sig0+0
+				sta W.Sig0+0
+				ldx W.SmallTemp+1
+				lda tab_shr3,x
+				sta zTemp1
+				ldx W.SmallTemp+2
+				lda tab_shl5,x
+				ora zTemp1
+				eor W.Sig0+1
+				sta W.Sig0+1
+				ldx W.SmallTemp+2
+				lda tab_shr3,x
+				sta zTemp1
+				ldx W.SmallTemp+3
+				lda tab_shl5,x
+				ora zTemp1
+				eor W.Sig0+2
+				sta W.Sig0+2
+				ldx W.SmallTemp+3
+				lda tab_shr3,x
+				eor W.Sig0+3
+				sta W.Sig0+3
+				plx
+				rts
+*--------------------------------------
+* SHA256_Sigma1_Small
+* sigma1(x) = ROTR17(x) ^ ROTR19(x) ^ SHR10(x)
+* Input:  W.SmallTemp
+* Output: W.Sig1
+*--------------------------------------
+SHA256_Sigma1_Small
+				phx
+				; ROTR17
+				>ROTB W.SmallTemp+2,tab_shr1,tab_shl7,W.SmallTemp+3
+				sta W.Sig1+0
+				>ROTB W.SmallTemp+3,tab_shr1,tab_shl7,W.SmallTemp+0
+				sta W.Sig1+1
+				>ROTB W.SmallTemp+0,tab_shr1,tab_shl7,W.SmallTemp+1
+				sta W.Sig1+2
+				>ROTB W.SmallTemp+1,tab_shr1,tab_shl7,W.SmallTemp+2
+				sta W.Sig1+3
+				; XOR ROTR19
+				>ROTB W.SmallTemp+2,tab_shr3,tab_shl5,W.SmallTemp+3
+				eor W.Sig1+0
+				sta W.Sig1+0
+				>ROTB W.SmallTemp+3,tab_shr3,tab_shl5,W.SmallTemp+0
+				eor W.Sig1+1
+				sta W.Sig1+1
+				>ROTB W.SmallTemp+0,tab_shr3,tab_shl5,W.SmallTemp+1
+				eor W.Sig1+2
+				sta W.Sig1+2
+				>ROTB W.SmallTemp+1,tab_shr3,tab_shl5,W.SmallTemp+2
+				eor W.Sig1+3
+				sta W.Sig1+3
+				; XOR SHR10
+				ldx W.SmallTemp+1
+				lda tab_shr2,x
+				sta zTemp1
+				ldx W.SmallTemp+2
+				lda tab_shl6,x
+				ora zTemp1
+				eor W.Sig1+0
+				sta W.Sig1+0
+				ldx W.SmallTemp+2
+				lda tab_shr2,x
+				sta zTemp1
+				ldx W.SmallTemp+3
+				lda tab_shl6,x
+				ora zTemp1
+				eor W.Sig1+1
+				sta W.Sig1+1
+				ldx W.SmallTemp+3
+				lda tab_shr2,x
+				eor W.Sig1+2
+				sta W.Sig1+2
+				lda #0
+				eor W.Sig1+3
+				sta W.Sig1+3
+				plx
+				rts
+*--------------------------------------
+* LoadWtoSmall
+* Load W.WPage[x-offset] into W.SmallTemp
+* A = offset (2, 15)
+* X = current word index (preserved)
+* zTemp1 used as scratch
+*--------------------------------------
+LoadWtoSmall
+				sta zTemp1
+				txa
+				sec
+				sbc zTemp1
+				asl
+				asl
+				sta zTemp1              ; byte offset into W.WPage
+				tay
+				lda W.WPage+0,y
+				sta W.SmallTemp+0
+				ldy zTemp1
+				iny
+				lda W.WPage+0,y
+				sta W.SmallTemp+1
+				ldy zTemp1
+				iny
+				iny
+				lda W.WPage+0,y
+				sta W.SmallTemp+2
+				ldy zTemp1
+				iny
+				iny
+				iny
+				lda W.WPage+0,y
+				sta W.SmallTemp+3
+				rts
+*--------------------------------------
+* AddWtoSig1
+* Sig1 += W.WPage[x-offset]
+* A = offset (7, 16)
+* X = current word index (preserved)
+* Carry must be clear on entry
+* zTemp1 used as scratch
+*--------------------------------------
+AddWtoSig1
+				sta zTemp1
+				txa
+				sec
+				sbc zTemp1
+				asl
+				asl
+				sta zTemp1              ; byte offset into W.WPage
+				tay
+				clc
+				lda W.WPage+0,y
+				adc W.Sig1+0
+				sta W.Sig1+0
+				ldy zTemp1
+				iny
+				lda W.WPage+0,y
+				adc W.Sig1+1
+				sta W.Sig1+1
+				ldy zTemp1
+				iny
+				iny
+				lda W.WPage+0,y
+				adc W.Sig1+2
+				sta W.Sig1+2
+				ldy zTemp1
+				iny
+				iny
+				iny
+				lda W.WPage+0,y
+				adc W.Sig1+3
+				sta W.Sig1+3
+				rts
+*--------------------------------------
+* SHA256_EXPAND_WPage
+* Expand W[16..63] from W[0..15]
+* X = current word index (16..63)
+*--------------------------------------
+SHA256_EXPAND_WPage
+				ldx #16
+.1				lda #2
+				jsr LoadWtoSmall
+				phx
+				jsr SHA256_Sigma1_Small
+				plx
+				clc
+				lda #7
+				jsr AddWtoSig1
+				lda #15
+				jsr LoadWtoSmall
+				phx
+				jsr SHA256_Sigma0_Small
+				plx
+				; Sig1 += Sig0
+				clc
+				lda W.Sig0+0
+				adc W.Sig1+0
+				sta W.Sig1+0
+				lda W.Sig0+1
+				adc W.Sig1+1
+				sta W.Sig1+1
+				lda W.Sig0+2
+				adc W.Sig1+2
+				sta W.Sig1+2
+				lda W.Sig0+3
+				adc W.Sig1+3
+				sta W.Sig1+3
+				clc
+				lda #16
+				jsr AddWtoSig1
+				; Store W[x] = Sig1
+				txa
+				asl
+				asl
+				sta zTemp1
+				tay
+				lda W.Sig1+0
+				sta W.WPage+0,y
+				ldy zTemp1
+				iny
+				lda W.Sig1+1
+				sta W.WPage+0,y
+				ldy zTemp1
+				iny
+				iny
+				lda W.Sig1+2
+				sta W.WPage+0,y
+				ldy zTemp1
+				iny
+				iny
+				iny
+				lda W.Sig1+3
+				sta W.WPage+0,y
+				inx
+				cpx #64
+				bcc .1
+				rts
+*--------------------------------------
+* SHA256_DoRound
+* X = K table index (0-63)
+* Y = W[] byte offset (0,4,8..252)
+*--------------------------------------
+SHA256_DoRound
+				phx
+				phy
+				stx zByteIdx
+				sty zByteIdx+1
+				; zT1 = h
+				lda zVarIdx+7
+				jsr SHA256_FetchVar
+				lda zScratch+0
+				sta zT1+0
+				lda zScratch+1
+				sta zT1+1
+				lda zScratch+2
+				sta zT1+2
+				lda zScratch+3
+				sta zT1+3
+
+ 				; Fetch e into zScratch
+				lda zVarIdx+4
+				jsr SHA256_FetchVar
+				
+				; Sigma1(e) = ROTR6 ^ ROTR11 ^ ROTR25 -> zT2
+				>ROTB zScratch+0,tab_shr6,tab_shl2,zScratch+1
+				sta zT2+0
+				>ROTB zScratch+1,tab_shr6,tab_shl2,zScratch+2
+				sta zT2+1
+				>ROTB zScratch+2,tab_shr6,tab_shl2,zScratch+3
+				sta zT2+2
+				>ROTB zScratch+3,tab_shr6,tab_shl2,zScratch+0
+				sta zT2+3
+
+				>ROTB zScratch+1,tab_shr3,tab_shl5,zScratch+2
+				eor zT2+0
+				sta zT2+0
+				>ROTB zScratch+2,tab_shr3,tab_shl5,zScratch+3
+				eor zT2+1
+				sta zT2+1
+				>ROTB zScratch+3,tab_shr3,tab_shl5,zScratch+0
+				eor zT2+2
+				sta zT2+2
+				>ROTB zScratch+0,tab_shr3,tab_shl5,zScratch+1
+				eor zT2+3
+				sta zT2+3
+
+				>ROTB zScratch+3,tab_shr1,tab_shl7,zScratch+0
+				eor zT2+0
+				sta zT2+0
+				>ROTB zScratch+0,tab_shr1,tab_shl7,zScratch+1
+				eor zT2+1
+				sta zT2+1
+				>ROTB zScratch+1,tab_shr1,tab_shl7,zScratch+2
+				eor zT2+2
+				sta zT2+2
+				>ROTB zScratch+2,tab_shr1,tab_shl7,zScratch+3
+				eor zT2+3
+				sta zT2+3
+
+				; zT1 += Sigma1(e)
+				clc
+				lda zT1+0
+				adc zT2+0
+				sta zT1+0
+				lda zT1+1
+				adc zT2+1
+				sta zT1+1
+				lda zT1+2
+				adc zT2+2
+				sta zT1+2
+				lda zT1+3
+				adc zT2+3
+				sta zT1+3
+				
+ 				; Save e (still in zScratch) into SmallTemp
+				lda zScratch+0
+				sta W.SmallTemp+0
+				lda zScratch+1
+				sta W.SmallTemp+1
+				lda zScratch+2
+				sta W.SmallTemp+2
+				lda zScratch+3
+				sta W.SmallTemp+3
+
+				; zT2 = g
+				lda zVarIdx+6
+				asl
+				asl
+				tay
+				lda W.WA,y
+				sta zT2+0
+				iny
+				lda W.WA,y
+				sta zT2+1
+				iny
+				lda W.WA,y
+				sta zT2+2
+				iny
+				lda W.WA,y
+				sta zT2+3
+
+				; Fetch f into zScratch
+				lda zVarIdx+5
+				jsr SHA256_FetchVar
+
+				; Ch(e,f,g) = g XOR (e AND (f XOR g))
+				; e=W.SmallTemp, f=zScratch, g=zT2
+				lda zScratch+0
+				eor zT2+0
+				and W.SmallTemp+0
+				eor zT2+0
+				clc
+				adc zT1+0
+				sta zT1+0
+				lda zScratch+1
+				eor zT2+1
+				and W.SmallTemp+1
+				eor zT2+1
+				adc zT1+1
+				sta zT1+1
+				lda zScratch+2
+				eor zT2+2
+				and W.SmallTemp+2
+				eor zT2+2
+				adc zT1+2
+				sta zT1+2
+				lda zScratch+3
+				eor zT2+3
+				and W.SmallTemp+3
+				eor zT2+3
+				adc zT1+3
+				sta zT1+3
+				; zT1 += W[i]
+				ldy zByteIdx+1
+				clc
+				lda W.WPage+0,y
+				adc zT1+0
+				sta zT1+0
+				lda W.WPage+1,y
+				adc zT1+1
+				sta zT1+1
+				lda W.WPage+2,y
+				adc zT1+2
+				sta zT1+2
+				lda W.WPage+3,y
+				adc zT1+3
+				sta zT1+3
+
+				; zT1 += K[i]
+				ldx zByteIdx
+				clc
+				lda zT1+0
+				adc KTbl_lo,x
+				sta zT1+0
+				lda zT1+1
+				adc KTbl_m1,x
+				sta zT1+1
+				lda zT1+2
+				adc KTbl_m2,x
+				sta zT1+2
+				lda zT1+3
+				adc KTbl_hi,x
+				sta zT1+3
+
+				; d += T1
+				lda zVarIdx+3
+				jsr SHA256_AddT1ToVar
+
+				; Fetch a into zScratch for Sigma0
+				lda zVarIdx+0
+				jsr SHA256_FetchVar
+
+				; Sigma0(a) = ROTR2 ^ ROTR13 ^ ROTR22 -> zT2
+				>ROTB zScratch+0,tab_shr2,tab_shl6,zScratch+1
+				sta zT2+0
+				>ROTB zScratch+1,tab_shr2,tab_shl6,zScratch+2
+				sta zT2+1
+				>ROTB zScratch+2,tab_shr2,tab_shl6,zScratch+3
+				sta zT2+2
+				>ROTB zScratch+3,tab_shr2,tab_shl6,zScratch+0
+				sta zT2+3
+
+				>ROTB zScratch+1,tab_shr5,tab_shl3,zScratch+2
+				eor zT2+0
+				sta zT2+0
+				>ROTB zScratch+2,tab_shr5,tab_shl3,zScratch+3
+				eor zT2+1
+				sta zT2+1
+				>ROTB zScratch+3,tab_shr5,tab_shl3,zScratch+0
+				eor zT2+2
+				sta zT2+2
+				>ROTB zScratch+0,tab_shr5,tab_shl3,zScratch+1
+				eor zT2+3
+				sta zT2+3
+
+				>ROTB zScratch+2,tab_shr6,tab_shl2,zScratch+3
+				eor zT2+0
+				sta zT2+0
+				>ROTB zScratch+3,tab_shr6,tab_shl2,zScratch+0
+				eor zT2+1
+				sta zT2+1
+				>ROTB zScratch+0,tab_shr6,tab_shl2,zScratch+1
+				eor zT2+2
+				sta zT2+2
+				>ROTB zScratch+1,tab_shr6,tab_shl2,zScratch+2
+				eor zT2+3
+				sta zT2+3
+
+				; Save a (zScratch after ROTB) into SmallTemp for Maj
+				lda zScratch+0
+				sta W.SmallTemp+0
+				lda zScratch+1
+				sta W.SmallTemp+1
+				lda zScratch+2
+				sta W.SmallTemp+2
+				lda zScratch+3
+				sta W.SmallTemp+3
+
+				; b offset -> zByteIdx
+				lda zVarIdx+1
+				asl
+				asl
+				sta zByteIdx
+
+				; c offset -> zByteIdx+1
+				lda zVarIdx+2
+				asl
+				asl
+				sta zByteIdx+1
+
+				; Maj(a,b,c) byte by byte -> zScratch+0..3
+				; a=W.SmallTemp, b=W.WA[zByteIdx], c=W.WA[zByteIdx+1]
+				; zScratch+2 used as (a AND b) temp within each byte
+
+				; byte 0
+				ldy zByteIdx
+				lda W.WA,y              ; b0
+				and W.SmallTemp+0       ; a AND b
+				sta zScratch+2          ; save a AND b
+				lda W.WA,y              ; b0
+				eor W.SmallTemp+0       ; a XOR b
+				ldy zByteIdx+1
+				and W.WA,y              ; (a XOR b) AND c0
+				ora zScratch+2          ; OR (a AND b) = Maj byte 0
+				sta zScratch+0
+
+				; byte 1
+				ldy zByteIdx
+				iny
+				lda W.WA,y              ; b1
+				and W.SmallTemp+1
+				sta zScratch+2
+				lda W.WA,y              ; b1
+				eor W.SmallTemp+1
+				ldy zByteIdx+1
+				iny
+				and W.WA,y              ; c1
+				ora zScratch+2
+				sta zScratch+1
+
+				; byte 2
+				ldy zByteIdx
+				iny
+				iny
+				lda W.WA,y              ; b2
+				and W.SmallTemp+2
+				sta zScratch+2
+				lda W.WA,y              ; b2
+				eor W.SmallTemp+2
+				ldy zByteIdx+1
+				iny
+				iny
+				and W.WA,y              ; c2
+				ora zScratch+2
+				sta zScratch+2          ; Maj byte 2 overwrites temp - fine
+
+				; byte 3
+				ldy zByteIdx
+				iny
+				iny
+				iny
+				lda W.WA,y              ; b3
+				and W.SmallTemp+3
+				sta zScratch+3          ; use zScratch+3 as temp for byte 3
+				lda W.WA,y              ; b3
+				eor W.SmallTemp+3
+				ldy zByteIdx+1
+				iny
+				iny
+				iny
+				and W.WA,y              ; c3
+				ora zScratch+3
+				sta zScratch+3          ; Maj byte 3
+
+				; zT2 (Sigma0) += Maj
+				clc
+				lda zT2+0
+				adc zScratch+0
+				sta zT2+0
+				lda zT2+1
+				adc zScratch+1
+				sta zT2+1
+				lda zT2+2
+				adc zScratch+2
+				sta zT2+2
+				lda zT2+3
+				adc zScratch+3
+				sta zT2+3
+	
+				; new a = T1 + Sigma0(a) + Maj(a,b,c)
+				clc
+				lda zT1+0
+				adc zT2+0
+				sta zScratch+0
+				lda zT1+1
+				adc zT2+1
+				sta zScratch+1
+				lda zT1+2
+				adc zT2+2
+				sta zScratch+2
+				lda zT1+3
+				adc zT2+3
+				sta zScratch+3
+				lda zVarIdx+7
+				jsr SHA256_StoreVar
+				ply
+				plx
+				rts
+*--------------------------------------
+SHA256_64
+				jsr SHA256_Init_Indices
+				ldx #0
+				ldy #0
+				lda #64
+				sta zCount
+.1
+				jsr SHA256_DoRound
+				phx
+				phy
+				jsr SHA256_Rotate_Vars
+				ply
+				plx
+				inx
+				tya
+				clc
+				adc #4
+				tay
+				dec zCount
+				bne .1
+				rts
+*--------------------------------------
+SHA256_ProcessBlock
+				jsr SHA256_SwapEndian
+				jsr SHA256_BlockInit
+				jsr SHA256_EXPAND_WPage
+				jsr SHA256_64
+				jsr SHA256_UpdateState
+				rts
+*--------------------------------------
+* SHA256_DigestOut
+* Write 32-byte digest big-endian to (zDstPtr)
+*--------------------------------------
+SHA256_DigestOut
+				ldy #S.SHA256.hState
+.1				lda (ZPCtxPtr),y
+				sta zT1+0
+				iny
+				lda (ZPCtxPtr),y
+				sta zT1+1
+				iny
+				lda (ZPCtxPtr),y
+				sta zT1+2
+				iny
+				lda (ZPCtxPtr),y
+				sta zT1+3
+				iny
+				phy
+				ldy #0
+				lda zT1+3
+				sta (zDstPtr),y
+				iny
+				lda zT1+2
+				sta (zDstPtr),y
+				iny
+				lda zT1+1
+				sta (zDstPtr),y
+				iny
+				lda zT1+0
+				sta (zDstPtr),y
+				lda zDstPtr
+				clc
+				adc #4
+				sta zDstPtr
+				bcc .2
+				inc zDstPtr+1
+.2				ply
+				cpy #S.SHA256.hState+32
+				bne .1
+				rts
+				*---
+* SHA256Reset_I
+* Re-initialise context without free/malloc
+* ZPCtxPtr = existing context
+*---
+SHA256Reset_I
+				ldy #0
+.1				lda hTable,y
+				sta (ZPCtxPtr),y
+				iny
+				cpy #S.SHA256.MsgLen
+				bne .1
+				lda #0
+.2				sta (ZPCtxPtr),y
+				iny
+				cpy #S.SHA256.MsgBuf+64
+				bne .2
+				clc
+				rts
+*---
+* SHA256Digest_NF
+* Write digest to zDstPtr WITHOUT freeing context
+* ZPCtxPtr = context, zDstPtr = output buffer
+*---
+SHA256Digest_NF
+				; Finalize padding (same as SHA256Finalize.I)
+				ldy #S.SHA256.MsgLen
+				lda (ZPCtxPtr),y
+				and #63
+				sta zCount
+				lda zCount
+				clc
+				adc #S.SHA256.MsgBuf
+				tay
+				lda #$80
+				sta (ZPCtxPtr),y
+				inc zCount
+				lda zCount
+				cmp #57
+				bcc .4
+.1				lda zCount
+				cmp #64
+				beq .2
+				lda zCount
+				clc
+				adc #S.SHA256.MsgBuf
+				tay
+				lda #0
+				sta (ZPCtxPtr),y
+				inc zCount
+				bra .1
+.2				ldy #S.SHA256.MsgBuf
+				ldx #0
+.3				lda (ZPCtxPtr),y
+				sta W.WPage,x
+				iny
+				inx
+				cpx #64
+				bne .3
+				jsr SHA256_ProcessBlock
+				stz zCount
+.4				lda zCount
+				cmp #56
+				beq bitlen2
+				lda zCount
+				clc
+				adc #S.SHA256.MsgBuf
+				tay
+				lda #0
+				sta (ZPCtxPtr),y
+				inc zCount
+				bra .4
+bitlen2			ldy #S.SHA256.MsgLen
+				lda (ZPCtxPtr),y
+				ldy #S.SHA256.BitLen
+				sta (ZPCtxPtr),y
+				ldy #S.SHA256.MsgLen+1
+				lda (ZPCtxPtr),y
+				ldy #S.SHA256.BitLen+1
+				sta (ZPCtxPtr),y
+				ldy #S.SHA256.MsgLen+2
+				lda (ZPCtxPtr),y
+				ldy #S.SHA256.BitLen+2
+				sta (ZPCtxPtr),y
+				ldy #S.SHA256.MsgLen+3
+				lda (ZPCtxPtr),y
+				ldy #S.SHA256.BitLen+3
+				sta (ZPCtxPtr),y
+				ldx #3
+.5				ldy #S.SHA256.BitLen
+				lda (ZPCtxPtr),y
+				asl
+				sta (ZPCtxPtr),y
+				iny
+				lda (ZPCtxPtr),y
+				rol
+				sta (ZPCtxPtr),y
+				iny
+				lda (ZPCtxPtr),y
+				rol
+				sta (ZPCtxPtr),y
+				iny
+				lda (ZPCtxPtr),y
+				rol
+				sta (ZPCtxPtr),y
+				dex
+				bne .5
+				ldy #S.SHA256.MsgBuf+56
+				lda #0
+				sta (ZPCtxPtr),y
+				iny
+				sta (ZPCtxPtr),y
+				iny
+				sta (ZPCtxPtr),y
+				iny
+				sta (ZPCtxPtr),y
+				ldy #S.SHA256.BitLen+3
+				lda (ZPCtxPtr),y
+				ldy #S.SHA256.MsgBuf+60
+				sta (ZPCtxPtr),y
+				ldy #S.SHA256.BitLen+2
+				lda (ZPCtxPtr),y
+				ldy #S.SHA256.MsgBuf+61
+				sta (ZPCtxPtr),y
+				ldy #S.SHA256.BitLen+1
+				lda (ZPCtxPtr),y
+				ldy #S.SHA256.MsgBuf+62
+				sta (ZPCtxPtr),y
+				ldy #S.SHA256.BitLen+0
+				lda (ZPCtxPtr),y
+				ldy #S.SHA256.MsgBuf+63
+				sta (ZPCtxPtr),y
+				ldy #S.SHA256.MsgBuf
+				ldx #0
+.6				lda (ZPCtxPtr),y
+				sta W.WPage,x
+				iny
+				inx
+				cpx #64
+				bne .6
+				jsr SHA256_ProcessBlock
+
+				; Write hState to zDstPtr big-endian, WITHOUT freeing
+				ldy #S.SHA256.hState
+.7				lda (ZPCtxPtr),y
+				sta zT1+0
+				iny
+				lda (ZPCtxPtr),y
+				sta zT1+1
+				iny
+				lda (ZPCtxPtr),y
+				sta zT1+2
+				iny
+				lda (ZPCtxPtr),y
+				sta zT1+3
+				iny
+				phy
+				ldy #0
+				lda zT1+3
+				sta (zDstPtr),y
+				iny
+				lda zT1+2
+				sta (zDstPtr),y
+				iny
+				lda zT1+1
+				sta (zDstPtr),y
+				iny
+				lda zT1+0
+				sta (zDstPtr),y
+				lda zDstPtr
+				clc
+				adc #4
+				sta zDstPtr
+				bcc .8
+				inc zDstPtr+1
+.8				ply
+				cpy #S.SHA256.hState+32
+				bne .7
+				clc
+				rts
+*---
+MAN
+SAVE usr/src/lib/libcrypto.s.sha
+LOAD usr/src/lib/libcrypto.s
+ASM
