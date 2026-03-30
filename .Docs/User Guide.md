@@ -176,7 +176,7 @@ A2osX supports multiple internet connected terminals via a **telnetd** server pr
 
 >Note, if you are using Telnet Client Software such as *PuTTY* for Windows and see random garbled characters (odd graphics symbols), you may need to change your **Remote Character Set** to something other than **UTF-8**, such as **ISO-8859-1:1998 (Latin-1, West Europe)**.
 
-One of the images available in the .Floppies folder is *TDBOOT.po* which is a preconfigured A2osX system that loads the Uthernet 2 Driver, TCP and **tetlnetd** at boot.  If you want to use this image on *AppleWin*, edit the *./etc/init* file to comment out the *uthernet2.drv* driver and remove the comment from the *uthernet.drv* line and reboot.  See the section on running A2osX under *AppleWin* for more information.
+One of the images available in the _Media folder is *TDBOOT.po* which is a preconfigured A2osX system that loads the Uthernet 2 Driver, TCP and **tetlnetd** at boot.  If you want to use this image on *AppleWin*, edit the *./etc/init* file to comment out the *uthernet2.drv* driver and remove the comment from the *uthernet.drv* line and reboot.  See the section on running A2osX under *AppleWin* for more information.
 
 ## Hardware
 

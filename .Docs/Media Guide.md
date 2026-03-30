@@ -17,18 +17,18 @@ We have changed the media set for A2osX.  New A2osX Users should download the mo
 
 ## Disk images
 
-You can use and/or install A2osX from the media found in our Media directory found **[here](../.Floppies)**.  The current set of available media includes:
+You can use and/or install A2osX from the media found in our Media directory found **[here](../_Media)**.  The current set of available media includes:
 
 | Image Name | Edition |ProDOS <br> Version| Description !
 | --- | --- | --- | --- |
-| [RC.140.po](../.Floppies/RC.140.po) | RC |FX Paked|An 140K 5.25" disk image containing the main BOOT and support files for running A2osX.  |
-| [RC.800.po](../.Floppies/RC.800.po) | RC |203.tc|An 800K 3.5" disk image containing A2osX system, utilities and application files for running A2osX.  |
-| [RC.32MB.po](../.Floppies/RC.32MB.po) | RC |FX|A 32MB HD disk image containing A2osX system, utilities and applications; suitable for use with emulators such as AppleWin or for use with the CFFA card.  |
-| [TDBOOT.po](../.Floppies/TDBOOT.po) | RC |FX|A special 32MB HD disk image, preconfigured to automatically load Uthernet2 driver, start network services and launch the TelnetD server process for use with the CFFA or similar card. |
-| [DEBUG.po](../.Floppies/DEBUG.po) | RC |FX Paked|An 140K 5.25 disk image containing the main BOOT and support files for A2osX and preconfigured with the least options enabled.  This is intended to be used as a minimal boot to help identify hardware conflicts. |
-| [STABLE.140.po](../.Floppies/STABLE.140.po) | STABLE |FX Paked|An 140K 5.25" disk image containing the main BOOT and support files for running A2osX.  |
-| [STABLE.800.po](../.Floppies/STABLE.800.po) | STABLE |203tc| An 800K 3.5" disk image containing the main BOOT and support files for running A2osX. |
-| [STABLE.32MB.po](../.Floppies/STABLE.32MB.po) | STABLE |FX| A formatted empty ProDOS 32MB HD disk image, suitable for use with emulators such as AppleWin |
+| [RC.140.po](../_Media/RC.140.po) | RC |FX Paked|An 140K 5.25" disk image containing the main BOOT and support files for running A2osX.  |
+| [RC.800.po](../_Media/RC.800.po) | RC |203.tc|An 800K 3.5" disk image containing A2osX system, utilities and application files for running A2osX.  |
+| [RC.32MB.po](../_Media/RC.32MB.po) | RC |FX|A 32MB HD disk image containing A2osX system, utilities and applications; suitable for use with emulators such as AppleWin or for use with the CFFA card.  |
+| [TDBOOT.po](../_Media/TDBOOT.po) | RC |FX|A special 32MB HD disk image, preconfigured to automatically load Uthernet2 driver, start network services and launch the TelnetD server process for use with the CFFA or similar card. |
+| [DEBUG.po](../_Media/DEBUG.po) | RC |FX Paked|An 140K 5.25 disk image containing the main BOOT and support files for A2osX and preconfigured with the least options enabled.  This is intended to be used as a minimal boot to help identify hardware conflicts. |
+| [STABLE.140.po](../_Media/STABLE.140.po) | STABLE |FX Paked|An 140K 5.25" disk image containing the main BOOT and support files for running A2osX.  |
+| [STABLE.800.po](../_Media/STABLE.800.po) | STABLE |203tc| An 800K 3.5" disk image containing the main BOOT and support files for running A2osX. |
+| [STABLE.32MB.po](../_Media/STABLE.32MB.po) | STABLE |FX| A formatted empty ProDOS 32MB HD disk image, suitable for use with emulators such as AppleWin |
 | A2OSX.BUILD.po | Bleed |203tc<br>FX| 32MB disk image with S-C MASM 3.0, all binaries and all source for A2osX <br> This is primary development media for A2osX, especially pre-launch of Release, Stable and official Build Media.  See below.|
 | A2OSX.MAKE.po | Bleed |203tc<br>FX| 32MB disk image with S-C MASM 3.0, all binaries and all source for multiple BUILD versions of A2osX stored in directories on MAKE.  The image also includes the TEST, ADMIN, and EXAMPLE scripts being created to support A2osX. |
 | A2OSX.B800.po | Bleed |FX| An 800K 3.5" disk image containing the main BOOT and support files for running A2osX. |
@@ -36,9 +36,9 @@ You can use and/or install A2osX from the media found in our Media directory fou
 | BLANK32MB.po | Support |None| A formatted empty ProDOS 32MB HD disk image, suitable for use with emulators such as AppleWin |
 | BLANK800.po | Support |None| A formatted empty ProDOS 3.5" 800K disk image, suitable for use with emulators such as AppleWin |
 | BLANK140.po | Support |None| A formatted empty ProDOS 5.25" 140K disk image, suitable for use with emulators such as AppleWin |
-| [RELEASE.140.po](../.Floppies/RELEASE.140.po) | RELEASE |NA|An 140K 5.25" disk image containing the main BOOT and support files for running A2osX.  |
-| [RELEASE.800.po](../.Floppies/RELEASE.800.po) | RELEASE |NA|An 800K 3.5" disk image containing the main BOOT and support files for running A2osX.  |
-| [RELEASE.32MB.po](../.Floppies/RELEASE.32MB.po) | RELEASE |NA| A formatted empty ProDOS 32MB HD disk image, suitable for use with emulators such as AppleWin  |
+| [RELEASE.140.po](../_Media/RELEASE.140.po) | RELEASE |NA|An 140K 5.25" disk image containing the main BOOT and support files for running A2osX.  |
+| [RELEASE.800.po](../_Media/RELEASE.800.po) | RELEASE |NA|An 800K 3.5" disk image containing the main BOOT and support files for running A2osX.  |
+| [RELEASE.32MB.po](../_Media/RELEASE.32MB.po) | RELEASE |NA| A formatted empty ProDOS 32MB HD disk image, suitable for use with emulators such as AppleWin  |
 
 ## ProDOS Versions
 

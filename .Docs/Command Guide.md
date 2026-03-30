@@ -51,7 +51,7 @@ This is a stub, or a placeholder, for a new routine being added to A2osX.  It wi
 
 	kconfig
 
-![](../.screen-shots/ScreenShot.KCONFIG.png)
+![](../_screen-shots/ScreenShot.KCONFIG.png)
 
 **kconfig**, short for "Kernel Configuration" Utility, is a system program that allows the A2osX administrator to configure various settings of their A2osX system.  Any changes to your system configuration are stored in A2OSX.KCONFIG located in the root directory of your A2osX installation.  When A2osX boots and loads the KERNEL process, it looks for this file, and if not present it initializes the KERNEL with A2osX defaults.
 
@@ -217,11 +217,11 @@ It looks like the same results, but instead of LS simply outputting all of its r
  
 	edit file
 
-![](../.screen-shots/ScreenShot.EDIT.png)
+![](../_screen-shots/ScreenShot.EDIT.png)
 
 The **edit** command allows the user to interactively read and edit standard text files in A2osX.  If you do not specify a file name on the command line, you will be prompted to enter one when you save your work (control-S).  Consult the help screen below for a list of the special keys that can be used while editing a file.
 
-![](../.screen-shots/ScreenShot.EDIT%20Help.png)
+![](../_screen-shots/ScreenShot.EDIT%20Help.png)
 
 >A note for the touch typists!: While **edit** is not a word processor, it still is one of the most complex programs included in A2osX.  It does a lot!  A side affect of this, and due to the lack of a keyboard buffer in the Apple //e, if you try to speed type while using EDIT some keystrokes may be dropped.  This is most noticeable when using the AppleWin emulator set to 1.0 speed.  Changing the emulator speed to at least 2.0 will significantly reduce or eliminate the dropped keys.
 
@@ -287,7 +287,7 @@ the errand process by its PID found in the displayed process list (i.e. KILL 27 
 
 	ls [-a] [-c|-f|-l] [-r] filespec
 
-![](../.screen-shots/ScreenShot.LS.png)
+![](../_screen-shots/ScreenShot.LS.png)
 
 The LS command is probably the most used and useful of all commands available to the A2osX user.  **ls** allows you to list the names of the files and directories in the current or specified directory.  If supplied with the all check (**-a**) **ls** will include the special directories **.** and **..**.  The recurse check (**-r**) tells **ls** to list files and directories of any directory listed (recursively).  The display checks (**-c -f and -l**) tell **ls** change the format of the display to a single column of just file/directory names (**-c**), to a single column that includes full paths (**-f**) or a listing with extended file information (**-l**) which includes file ownership, permissions, date/time, etc.. You can pass the **ls** command a *filespec* that includes a directory name and or wild card spec for filtering the listing.  For example the command `LS ../MYDIR/FT*` would only list files that begin with FT and are found in the MYDIR sub directory of the parent of the current directory.
 
@@ -295,7 +295,7 @@ The LS command is probably the most used and useful of all commands available to
 
 	lsdev
 
-![](../.screen-shots/ScreenShot.LSDEV.png)
+![](../_screen-shots/ScreenShot.LSDEV.png)
 
 Displays a listing of the currently defined devices in the running A2osX system as seen in the screenshot below.
 
@@ -454,7 +454,7 @@ The **httpget** command is a utility for retrieving a network page or message fr
 
 	ipconfig [-d|-e|-s]
 
-![](../.screen-shots/ScreenShot.IP1.png)
+![](../_screen-shots/ScreenShot.IP1.png)
 
 The **ipconfig** command will display the current network configuration for your system.  In some cases, if the network drivers and libraries are loaded but not configured, **ipconfig** may configure your system by obtaining (through DHCP) or setting (statically through config files) your IP address and other settings.  Optionally you can force a set/reset of your configuration. If Network services are not started when you use this command, an error message will be displayed saying that TCP/IP is not bound to any device.
 
@@ -490,7 +490,7 @@ While almost every command and program that comes with A2osX can be considered a
 
 	memdump
 
-![](../.screen-shots/ScreenShot.MEMDUMP.png)
+![](../_screen-shots/ScreenShot.MEMDUMP.png)
 
 **memdump** is a program that allows the developer to display the contents of all of the memory that A2osX is currently using to aide with the debugging of your programs.  Lines displayed in inverse indicate memory associated with processes no longer running (dead or abandoned memory, could be caused by program crash).
 

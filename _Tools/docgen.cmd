@@ -13,34 +13,39 @@ echo                                    Apple //e
 
 set /a c=0
 
-if not exist "%~dp0..\.Docs" md "%~dp0..\.Docs"
+if not exist "%~dp0..\_Docs" md "%~dp0..\_Docs"
 
-set DOCFILE=%~dp0..\.Docs\KERNEL.md
+set DOCFILE=%~dp0..\_Docs\KERNEL.md
 set SRCDIR=%~dp0..\SYS
 set FILTER=KERNEL.S*.txt
 Call :SCAN
 
-set DOCFILE=%~dp0..\.Docs\LIBBLKDEV.md
+set DOCFILE=%~dp0..\_Docs\LIBBLKDEV.md
 set SRCDIR=%~dp0..\LIB
 set FILTER=LIBBLKDEV.S*.txt
 Call :SCAN
 
-set DOCFILE=%~dp0..\.Docs\LIBTUI.md
+set DOCFILE=%~dp0..\_Docs\LIBTUI.md
 set SRCDIR=%~dp0..\LIB
 set FILTER=LIBTUI.S*.txt
 Call :SCAN
 
-set DOCFILE=%~dp0..\.Docs\LIBGUI.md
+set DOCFILE=%~dp0..\_Docs\LIBGUI.md
 set SRCDIR=%~dp0..\LIB
 set FILTER=LIBGUI.S*.txt
 Call :SCAN
 
-set DOCFILE=%~dp0..\.Docs\LIBCRYPT.md
+set DOCFILE=%~dp0..\_Docs\LIBCRYPT.md
 set SRCDIR=%~dp0..\LIB
 set FILTER=LIBCRYPT.S*.txt
 Call :SCAN
 
-set DOCFILE=%~dp0..\.Docs\Commands.md
+set DOCFILE=%~dp0..\_Docs\LIBCRYPT2.md
+set SRCDIR=%~dp0..\LIB
+set FILTER=LIBCRYPT.S*.txt
+Call :SCAN
+
+set DOCFILE=%~dp0..\_Docs\Commands.md
 set SRCDIR=%~dp0..\BIN
 set FILTER=*.S.txt
 Call :SCAN

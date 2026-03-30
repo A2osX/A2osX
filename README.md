@@ -4,7 +4,7 @@
 
 ## A2osX 1.00
 
-![](./.screen-shots/ScreenShot.Logo.png)
+![](./_screen-shots/ScreenShot.Logo.png)
 
 If you would like to see more screen shots of A2osX click **[here](.Docs/Screen%20Shots.md)**.
 
@@ -32,7 +32,7 @@ This is just a place holder and plug for our [A2osX](http://www.a2osx.com) inter
 
 ## Disk images
 
-You can use and/or install A2osX from the media in our Media directory found **[here](.Floppies)**.  Provided media includes **Release**, **RC** (Release Candidate), **Stable** and **Bleed** (Cutting Edge) editions in 140K, 800K and 32MB images.  Please consult our **[Media Guide](.Docs/Media%20Guide.md)** for more information.
+You can use and/or install A2osX from the media in our Media directory found **[here](_Media)**.  Provided media includes **Release**, **RC** (Release Candidate), **Stable** and **Bleed** (Cutting Edge) editions in 140K, 800K and 32MB images.  Please consult our **[Media Guide](.Docs/Media%20Guide.md)** for more information.
 
 ## Documentation
 

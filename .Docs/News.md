@@ -48,11 +48,11 @@ Updated RC images to Build 1653 which fixed bugs in CUT and includes a patched v
 
 ## Latest News 2019-10-18
 
-Updated A2osX Release Candidate based on Build No 1650 is now available and can be found in our **[Media directory](.Floppies)**.  In addition, a new disk image **TDBOOT** has been created that is preconfigured to automatically load Uthernet2 driver, start network services and launch the TelnetD server process (hence name TD for TelnetD Boot).
+Updated A2osX Release Candidate based on Build No 1650 is now available and can be found in our **[Media directory](_Media)**.  In addition, a new disk image **TDBOOT** has been created that is preconfigured to automatically load Uthernet2 driver, start network services and launch the TelnetD server process (hence name TD for TelnetD Boot).
 
 ## Latest News 2019-10-15
 
-**The first A2osX Release Candidate is now available and can be found in our [Media directory](.Floppies)**.  
+**The first A2osX Release Candidate is now available and can be found in our [Media directory](_Media)**.  
 
 ## Latest News 2019-04-19
 
