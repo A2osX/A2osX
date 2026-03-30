@@ -6,7 +6,7 @@
 
 ![](./_screen-shots/ScreenShot.Logo.png)
 
-If you would like to see more screen shots of A2osX click **[here](.Docs/Screen%20Shots.md)**.
+If you would like to see more screen shots of A2osX click **[here](_Docs/Screen%20Shots.md)**.
 
 ## Introduction
 
@@ -32,17 +32,17 @@ This is just a place holder and plug for our [A2osX](http://www.a2osx.com) inter
 
 ## Disk images
 
-You can use and/or install A2osX from the media in our Media directory found **[here](_Media)**.  Provided media includes **Release**, **RC** (Release Candidate), **Stable** and **Bleed** (Cutting Edge) editions in 140K, 800K and 32MB images.  Please consult our **[Media Guide](.Docs/Media%20Guide.md)** for more information.
+You can use and/or install A2osX from the media in our Media directory found **[here](_Media)**.  Provided media includes **Release**, **RC** (Release Candidate), **Stable** and **Bleed** (Cutting Edge) editions in 140K, 800K and 32MB images.  Please consult our **[Media Guide](_Docs/Media%20Guide.md)** for more information.
 
 ## Documentation
 
-The A2osX team is pleased to report that great strides have been made in terms of documentation.  While much of it is in draft form, there is a new **[Users Guide](.Docs/User%20Guide.md)**, **[Developers Guide](.Docs/Developers%20Guide.md)**, **[Shell Developers Guide](.Docs/Shell%20Developers%20Guide.md)**, **[Technical Spec](.Docs/Technical%20Spec.md)** and **[Command Guide](.Docs/Command%20Guide.md)**.   Work continues to expand and enhance the documentation for A2osX.  While still under construction, it is provided to you to bring you as much information about A2osX as quickly as possible.  We happily welcome any help and contributions from others to this or any area of the A2osX project.  The repository all A2osX documentation can be found **[here](.Docs)**.  This directory includes the system generated specifications for all the A2osX APIs as well as all our other documentation. 
+The A2osX team is pleased to report that great strides have been made in terms of documentation.  While much of it is in draft form, there is a new **[Users Guide](_Docs/User%20Guide.md)**, **[Developers Guide](_Docs/Developers%20Guide.md)**, **[Shell Developers Guide](_Docs/Shell%20Developers%20Guide.md)**, **[Technical Spec](_Docs/Technical%20Spec.md)** and **[Command Guide](_Docs/Command%20Guide.md)**.   Work continues to expand and enhance the documentation for A2osX.  While still under construction, it is provided to you to bring you as much information about A2osX as quickly as possible.  We happily welcome any help and contributions from others to this or any area of the A2osX project.  The repository all A2osX documentation can be found **[here](_Docs)**.  This directory includes the system generated specifications for all the A2osX APIs as well as all our other documentation. 
 
 ### Technical Documentation
 
-There are two types of Technical Documentation available.  First there is the Automatically Generated Documentation that is created from the source code of A2osX.  These documents capture all the internal A2osX APIs and system calls available to the A2osX programmer.  Developers should scan through these documents before beginning any A2osX project.  In addition, please make sure you look at the programming template file that is the best start to any A2osX program; it can be found **[here](.Docs/.TEMPLATE.S.txt)**.
+There are two types of Technical Documentation available.  First there is the Automatically Generated Documentation that is created from the source code of A2osX.  These documents capture all the internal A2osX APIs and system calls available to the A2osX programmer.  Developers should scan through these documents before beginning any A2osX project.  In addition, please make sure you look at the programming template file that is the best start to any A2osX program; it can be found **[here](_Docs/.TEMPLATE.S.txt)**.
 
-In addition, there is the developer generated Technical Specifications that document the internal and external A2osX commands, utilities and shell language.  The master technical spec file can be found **[here](.Docs/Technical%20Spec.md)**.
+In addition, there is the developer generated Technical Specifications that document the internal and external A2osX commands, utilities and shell language.  The master technical spec file can be found **[here](_Docs/Technical%20Spec.md)**.
 
 ## How You Can Help
 
