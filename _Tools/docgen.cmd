@@ -40,9 +40,9 @@ set SRCDIR=%~dp0..\LIB
 set FILTER=LIBCRYPT.S*.txt
 Call :SCAN
 
-set DOCFILE=%~dp0..\_Docs\LIBCRYPT2.md
+set DOCFILE=%~dp0..\_Docs\LIBCRYPTO.md
 set SRCDIR=%~dp0..\LIB
-set FILTER=LIBCRYPT.S*.txt
+set FILTER=LIBCRYPTO.S*.txt
 Call :SCAN
 
 set DOCFILE=%~dp0..\_Docs\Commands.md

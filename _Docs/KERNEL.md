@@ -484,17 +484,17 @@ Change AuxType of a ProDOS File
 
 ## RETURN VALUE  
 
-# SetAttr  
+# ChAttr  
 Change Attributes of a ProDOS File  
 
 ## C  
 `#include <prodos.h>`  
-`int setattr(const char *filepath, short int attributes);`  
+`int chattr(const char *filepath, short int attributes);`  
 
 ## ASM  
 `>PUSHW filepath`  
 `>PUSHB attributes`  
-`>LIBC setattr`  
+`>LIBC chattr`  
 
 ## RETURN VALUE  
 
@@ -992,27 +992,14 @@ Y,A=pSList
 change permissions of a file  
 
 ## C  
-`int chmod(const char *pathname, int mode);`  
-
-## ASM  
-`>PUSHW pathname`  
-`>PUSHW mode`  
-`>LIBC chmod`  
-
-## RETURN VALUE  
-
-# FStat  
-Return information about a FD  
-
-## C  
-`#include <sys/stat.h>`  
-`int fstat(int fd, struct stat *statbuf);`  
+ `#include <sys/stat.h>`  
+`int chmod(const char *path, mode_t mode);`  
 
 ## ASM  
 `>SS`  
-`>PUSHW fd`  
-`>PUSHW statbuf`  
-`>LIBC fstat`  
+`>PUSHW path`  
+`>PUSHW mode`  
+`>LIBC chmod`  
 `>SR`  
 
 ## RETURN VALUE  
@@ -1029,6 +1016,22 @@ Return information about a file
 `>PUSHW pathname`  
 `>PUSHW statbuf`  
 `>LIBC stat`  
+`>SR`  
+
+## RETURN VALUE  
+
+# FStat  
+Return information about a FD  
+
+## C  
+`#include <sys/stat.h>`  
+`int fstat(int fd, struct stat *statbuf);`  
+
+## ASM  
+`>SS`  
+`>PUSHW fd`  
+`>PUSHW statbuf`  
+`>LIBC fstat`  
 `>SR`  
 
 ## RETURN VALUE  
@@ -1336,7 +1339,7 @@ Write bytes to file
 `>LIBC fflush`  
 
 # FSeek  
-Set the file-position indicator for hFILE  
+reposition a file-position indicator in a stream  
 
 ## C / CSH  
 `#include <stdio.h>`  
@@ -1981,12 +1984,14 @@ Convert S.TIME struct to CSTR
 
 ## C / CSH  
 `#include <unistd.h>`  
-`int open(const char *pathname, short int flags);`  
+`int open(const char *pathname, int flags);`  
 
 ## ASM  
+`>SS`  
 `>PUSHW pathname`  
-`>PUSHB flags`  
+`>PUSHWI flags`  
 `>LIBC open`  
+`>SR`  
 
 ## RETURN VALUE  
 A = hFD  
@@ -2039,7 +2044,7 @@ Set the file-position indicator for hFD
 
 ## C  
 `#include <unistd.h>`  
-`int lseek(off_t fildes, off_t offset, short int whence );`  
+`off_t lseek(int fildes, off_t offset, int whence);`  
 
 ## ASM  
 `>PUSHB hFD`  
