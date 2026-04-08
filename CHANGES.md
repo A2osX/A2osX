@@ -123,6 +123,44 @@ produce bootable 800K ProDOS FX disk images:
 ProDOS FX boot blocks assembled from source (`SHARED/X.BB.FX.S.txt`,
 `SHARED/X.BB.SOS.S.txt`) rather than binary blobs.
 
+### fix(src) — Restore ZP.WNDTOP/CV in A2osX.S.txt; fix cmake .i cache staleness
+
+**Problem:** `f2ec8c3f` (SRC REORG #05) removed `.INB inc/zp.i` from `A2osX.S.txt`,
+but `A2osX.ScreenDLGR` still uses `ZP.WNDTOP` and `ZP.CV`. Without `zp.i`, both
+symbols resolved to 0. The generated code stored the window-top value (20) to
+ZP `$00` (`TmpPtr1`) instead of `$22`/`$25`. The text scroll window was never
+constrained to the bottom 4 rows, so stale screen content (colorful garbage)
+appeared in the mixed-mode text area during logo display — visible as artifacts
+in the 4 bottom text rows while the DHGR logo was shown.
+
+**Also fixed:** `cmake/A2osXHelpers.cmake` step-1 `.i`-file copy had a `NOT EXISTS`
+guard that left `inc/rom.ii.i` as a stale 100-line cache (ROM calls only) when
+`INC/ROM.II.txt` grew to 139 lines (ZP + ROM calls). Guard removed so `.i` files
+are always refreshed from their source.
+
+---
+
+### fix(kernel) — Initialize TTY LC RAM framebuffers on first activation
+
+**Problem:** `TERM.OPEN` allocates a DCB and calls `TERM.RESET` (which initializes
+DCB state) but never clears the LC RAM framebuffer for the new TTY. On first
+`TERM.CONTROL` activation, `TERMX.Swap` exchanges the hardware text page with the
+uninitialized LC RAM region — exposing whatever random content was there (MAME
+initializes LC RAM to repeating `'p'` characters, producing a full-screen garbage
+pattern immediately after the first getty process activates its TTY).
+
+**Fix:** `TERM.CONTROL` now checks a per-FB initialized flag (`TERM.FBInited[n]`,
+8 zero-initialized bytes in the TERM driver data) before calling `TERMX.Swap` for
+the first time. On first activation, `TERM.ED2` is called to fill the incoming
+framebuffer with spaces before the swap, then the flag is set so subsequent
+activations of the same TTY go directly to the swap.
+
+The fix is in `TERM.CONTROL` rather than `TERM.OPEN` because `TERM.OPEN` is entered
+via `jmp (pDRV)` from `DEV.pDrvJmp1` — calling `CORE.JMPX` from within that path
+caused a hardware-text-page clear and hang (nested bank-switch disrupted the
+execution context). `TERM.CONTROL` is a clean top-level TERM dispatch entry point
+where `jsr TERM.ED2` -> `jmp CORE.JMPX` is safe.
+
 ---
 
 ## xasm++_binv2 Commits (on top of xasm++_master)
@@ -137,21 +175,6 @@ Files: `BIN/AARP`, `ACC`, `ACOS`, `ADT`, `ATBROWSE`, `ATLOGON`, `ATMOUNT`, `CSH`
 `DNSINFO`, `ETCONFIG`, `FNT2FON`, `GOPHER`, `HMACMD5`, `HTTPGET`, `IRC`, `MD4`,
 `MD5`, `NETCONFIG`, `NFSMOUNT`, `NTPDATE`, `USERADD`, `USERDEL`, `USERMOD`, `WHO`;
 `SBIN/BBSD`, `CIFSD`, `NFSD`, `VEDD`.
-
-### 23c056fe — Restore ZP.WNDTOP/CV in A2osX.S.txt; fix cmake .i cache staleness
-
-**Problem:** `f2ec8c3f` (SRC REORG #05) removed `.INB inc/zp.i` from `A2osX.S.txt`,
-but `A2osX.ScreenDLGR` still uses `ZP.WNDTOP` and `ZP.CV`. Without `zp.i`, both
-symbols resolved to 0. The generated code stored the window-top value (20) to
-ZP `$00` (`TmpPtr1`) instead of `$22`/`$25`. The text scroll window was never
-constrained to the bottom 4 rows, so stale screen content (colorful garbage)
-appeared in the mixed-mode text area during logo display — visible as artifacts
-in the 4 bottom text rows while the DHGR logo was shown.
-
-**Also fixed:** `cmake/A2osXHelpers.cmake` step-1 `.i`-file copy had a `NOT EXISTS`
-guard that left `inc/rom.ii.i` as a stale 100-line cache (ROM calls only) when
-`INC/ROM.II.txt` grew to 139 lines (ZP + ROM calls). Guard removed so `.i` files
-are always refreshed from their source.
 
 ---
 
