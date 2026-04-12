@@ -42,14 +42,14 @@ The following chart lists all the known (to the author) versions of ProDOS and
 | 1.9 | Not Tested  | No | TC 1991|Simple |16509 | |
 |2.0.1 | Not Tested  | No | TC 1999|Enhanced|17128 | |
 | 2.0.2 | Not Tested  | No | TC 1999 |Enhanced| 17128| |
-| 2.0.3 |Working | No | TC 1999 |Enhanced |17128 | Date/Years not current |
-| 2.0.3tc |Working | No | TC 2023|Enhanced |17128 | |
-| 2.4 | Not Tested | No | TC 1999|Enhanced |17128 | |
-| 2.4.1 | Not Tested | No | TC 1999| Enhanced| 17128| |
-| 2.4.2 |Working | No | TC 2023| Enhanced|17128 | |
-| 2.5.0a8 |Working w/ Issues | Yes | TC 2924|Advanced | 16616| |
-| FX |Working| Yes | TC 2023<br>NSC<br>GS/Cortland | Advanced| 15244| |
-| FX Paked |Working| Yes | TC 2023<br>NSC<br>GS/Cortland | Advanced|13295 | |
+| 2.0.3 | Not Working | No | TC 1999 |Enhanced |17128 | Date/Years not current |
+| 2.0.3tc | Not Working | No | TC 2026 |Enhanced |17128 | |
+| 2.4 | Not Tested | No | TC 1999 |Enhanced |17128 | |
+| 2.4.1 | Not Working | No | TC 1999 | Enhanced| 17128| |
+| 2.4.2 | Not Working | No | TC 2023 | Enhanced|17128 | |
+| 2.5.0a8 | Not Working | Yes | TC 2924|Advanced | 16616| |
+| FX/16M | Working | Yes | TC 2026 <br>NSC<br>DClk<br>XClk<br>GS/Cortland | Advanced| 16827 | |
+| FX/16M (Tiny, PAKed) | Working | Yes | TC 2026 <br>NSC<br>DClk<br>XClk<br>GS/Cortland | Advanced| 10931 | |
 
 ### Drive Remapping
 
@@ -81,7 +81,7 @@ This is the final release of ProDOS from Apple Computer.
 
 ### ProDOS 2.03tc
 
-This version of ProDOS includes an updated ThunderClock year table to support dates through the year 2023.  ProDOS 2.03tc is included on the 800K media images listed above and provides the maximum compatibility with existing systems.
+This version of ProDOS includes an updated ThunderClock year table to support dates through the year 2026.  ProDOS 2.03tc is included on the 800K media images listed above and provides the maximum compatibility with existing systems.
 
 ### ProDOS.FX:
 
@@ -89,14 +89,19 @@ ProDOS FX is a branch new version of ProDOS built by the A2osX team from a signi
 
 >### **Repeating this note because it is important: As with any new critical piece of software such as an operating system that handles writing to disks, you should test this software extensively before using it with any disks, volumes, images, data containing valuable information!** #
 
-
+- up to 10 VCBs
 - Added lowercase support
 - Extended syntax for filenames with the 1st char in  . _ a-z A-Z and char 2-15 in . _ a-z A-Z 0-9
+- Direct R/W to Ramworks banks up to 16Mb
 - Enhanced IRQ manager (does NOT support //e OLD roms)
-- Adds support for No Slot Clock and //gs internal clock to existing ThunderClock driver
-- ThunderClock supports years through 2023
+- Support for DS1216e (No Slot Clock)
+- Support for ROMce Clock
+- Support for DS1215 Clock
+- ThunderClock supports years through 2026
+- Enhanced Quit Code able to launch .BIN and .BAS files
 - Smaller on Disk, loads faster
 - PAKed version available (even smaller on disk) for use with 140K floppies
+- Added BlockDev remap from any slot to any slot, up to 14 devices, if 14 devices mounted, /RAM wont install
 - Added SmartPort remap from any slot to any slot, up to 14 devices, if 14 devices mounted, /RAM wont install
 
 **VERY IMPORTANT**: ProDOS FX allows for the files **File**, **file**, **fiLE** and **FILE** all to exist in the same directory.  They are unique to ProDOS FX.  This may (**IS LIKELY**) incompatible with other operating systems accessing the same volumes, most notably GSOS.  This is also true of files that start with . (dot or period) and _ (underscore).  Testing and care should be taken when using these features on volumes that you plan to share with other operating systems.

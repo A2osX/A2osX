@@ -9,15 +9,17 @@ TLS				.EQ 0
 *--------------------------------------
 				.INB inc/macros.i
 				.INB inc/a2osx.i
-				.INB inc/mli.i
+				.INB inc/a2osx.api.i
 				.INB inc/mli.e.i
 				.INB inc/eth.i
-				.INB inc/libtcpip.i
+				.INB inc/ip.i
+				.INB inc/net.skt.i
+				.INB inc/net.db.i
 				.DO TLS=1
 				.INB inc/net.tls.i
 				.FIN
 *--------------------------------------
-TIMEOUT.MAX		.EQ 250					25 sec.
+TIMEOUT.MAX		.EQ 25					25 sec.
 MSGSIZE			.EQ 4096
 TEXTMAX			.EQ 240
 *--------------------------------------
@@ -30,8 +32,8 @@ ZPPtr1			.BS 2
 ZPPtr2			.BS 2
 bEscMode		.BS 1
 bJoin			.BS 1
-TimeOut			.BS 1
-hSocket			.BS 1
+
+hSocket			.BS 2
 
 ZPRespPtr		.BS 2
 ZPMsg			.BS 2
@@ -51,6 +53,7 @@ TextPtr			.BS 1
 TextLen			.BS 1
 
 bPendingMsg		.BS 1
+TimeOut			.BS 1
 
 ZS.END			.ED
 *--------------------------------------
@@ -60,23 +63,20 @@ CS.START		cld
 				jmp (.1,x)
 				.DA #$61				6502,Level 1 (65c02)
 				.DA #1					BIN Layout Version 1
-				.DA #S.PS.F.EVENT		S.PS.F
+				.DA #2					BIN Layout Version 2
+				.DA #S.PS.SIG.T1SEC
 				.DA #0
-				.DA CS.END-CS.START		Code Size (without Constants)
-				.DA DS.END-DS.START		Data Segment Size
+				.DA CS.END
+				.DA ID.END
+				.DA DS.END
 				.DA #64					Stack Size
 				.DA #ZS.END-ZS.START	Zero Page Size
-				.DA 0
 *--------------------------------------
 .1				.DA CS.INIT
 				.DA CS.RUN
-				.DA CS.DOEVENT
+				.DA CS.SIG
 				.DA	CS.QUIT
-L.LIBTCPIP		.DA LIBTCPIP
-L.SA.LOCAL		.DA SA.LOCAL
-L.SA.REMOTE		.DA SA.REMOTE
-L.SA.REMOTE.AD	.DA SA.REMOTE+S.SOCKADDR.ADDR
-L.MSG.IPKO		.DA MSG.IPKO
+*--------------------------------------
 L.MSG.USAGE		.DA MSG.USAGE
 L.MSG.UNKNOWN	.DA MSG.UNKNOWN
 L.MSG.HOSTOK	.DA MSG.HOSTOK
@@ -89,6 +89,9 @@ L.MSG.TOPBAR	.DA MSG.TOPBAR
 L.MSG.STATUSBAR	.DA MSG.STATUSBAR
 L.MSG.STATUSBARMSG	.DA MSG.STATUSBARMSG
 L.MSG.NULL		.DA MSG.NULL
+
+L.SA.LOCAL		.DA SA.LOCAL
+
 L.IRC.REGISTER	.DA IRC.REGISTER
 L.IRC.JOIN		.DA IRC.JOIN
 L.IRC.JOINKEY	.DA IRC.JOINKEY
@@ -96,6 +99,7 @@ L.IRC.PONG		.DA IRC.PONG
 L.IRC.PART		.DA IRC.PART
 L.IRC.NAMES		.DA IRC.NAMES
 L.IRC.PRIVMSG	.DA IRC.PRIVMSG
+
 L.SEQ.INIT		.DA SEQ.INIT
 L.SEQ.BAR		.DA SEQ.BAR
 L.SEQ.TXTCLR	.DA SEQ.TXTCLR
@@ -103,6 +107,7 @@ L.SEQ.PRIVMSG	.DA SEQ.PRIVMSG
 L.SEQ.INFOMSG	.DA SEQ.INFOMSG
 L.SEQ.DUMPMSG	.DA SEQ.DUMPMSG
 L.SEQ.RESET		.DA SEQ.RESET
+
 L.IRC.CMDS		.DA IRC.CMDS
 J.IRC.CMDS		.DA CS.RUN.CMD.PING
 				.DA CS.RUN.CMD.JOIN
@@ -128,19 +133,10 @@ L.TLS.CHELLO.UT	.DA TLS.CHELLO.UT
 				.FIN
 				.DA 0
 *--------------------------------------
-CS.INIT			>LDYA L.LIBTCPIP
-				>KAPI LoadLib
-				bcs .9
-
-				sta hLIBTCPIP
-
-.9
+CS.INIT			clc
 CS.INIT.RTS		rts
 *--------------------------------------
-CS.RUN			jsr CS.RUN.CheckTCPIP
-				bcs CS.INIT.RTS
-
-				jsr CS.RUN.CheckArgs
+CS.RUN			jsr CS.RUN.CheckArgs
 				bcs CS.INIT.RTS
 
 				jsr CS.RUN.GetBuffers
@@ -174,13 +170,16 @@ CS.RUN.LOOP		>SLEEP
 
 				>SLEEP
 
-.2				ldy #S.PS.hStdIn
-				lda (pPS),y
-
+.2				ldy #S.PS.pStdIn
+				jsr A2osX.GetPSy
+				pha
+				iny
+				jsr A2osX.GetPSy
+				ply
 				>LIBC FEOF
 				bcs .9
 
-				tay
+				tya
 				bne CS.RUN.LOOP			EOF = true, no char from STDIN
 
 				>LIBC GetChar
@@ -191,41 +190,18 @@ CS.RUN.LOOP		>SLEEP
 
 .9				php
 				pha
+				>SS
 				>PUSHW L.SEQ.RESET
 				>PUSHBI 0
 				>LIBC PrintF
+				>SR
 				pla
 				plp
 				rts
 *--------------------------------------
-CS.RUN.CheckTCPIP
-				>LIBCALL hLIBTCPIP,LIBTCPIP.GETCFG	is TCPIP loaded ?
-				bcs .9
-
-				>STYA ZPPtr1
-				lda (ZPPtr1)			Configured ?
-				bpl .99
-
-				ldy #S.IPCFG.IP+3
-				ldx #3
-
-.1				lda (ZPPtr1),y
-				sta SA.LOCAL+S.SOCKADDR.ADDR,x
-				dey
-				dex
-				bpl .1
-
-				rts
-
-.99				>LDYA L.MSG.IPKO
-				>LIBC PutS
-				lda #E.SYN
-				sec
-.9				rts
-*--------------------------------------
 CS.RUN.CheckArgs
 				ldy #S.PS.ARGC
-				lda (pPS),y
+				jsr A2osX.GetPSy
 				cmp #3
 				bcs .1
 
@@ -236,98 +212,141 @@ CS.RUN.CheckArgs
 				sec
 				rts
 
-.1				lda #TIMEOUT.MAX
-				sta TimeOut
-
-.2				>PUSHW L.SA.REMOTE.AD
-				lda #1
-				>KAPI ArgV
-				>PUSHYA
-				>LIBCALL hLIBTCPIP,LIBTCPIP.HST.GetByName
-				bcc .3
-
-				>SLEEP
-
-				lda TimeOut
-				bne .2
-
-				>PUSHW L.MSG.UNKNOWN
-				lda #1
-				>KAPI ArgV
-				>PUSHYA
-				>PUSHBI 2
-				>LIBC PrintF
-				lda #ERR.SKT.NOCONN
-				sec
-				rts
+.1				jsr CS.RUN.GetHost
+				bcs .9
 
 .3				lda #2
 				>KAPI ArgV
 				>LIBC AToI
-				>STYA SA.REMOTE+S.SOCKADDR.PORT
+				>STYA.G SA.REMOTE+S.SA.IN.PORT
 
+				>SS
 				>PUSHW L.MSG.HOSTOK
 				ldx #0
 
-.4				>PUSHB SA.REMOTE+S.SOCKADDR.ADDR,x
+.4				>PUSHB SA.REMOTE+S.SA.IN.ADDR,x
 				inx
 				cpx #4
 				bne .4
 
-				>PUSHW SA.REMOTE+S.SOCKADDR.PORT
+				>PUSHW SA.REMOTE+S.SA.IN.PORT
 				lda #1
 				>KAPI ArgV
 				>PUSHYA
 
 				>PUSHBI 8
 				>LIBC PrintF
+				>SR
+
+.9				rts
+*--------------------------------------
+CS.RUN.GetHost	lda #TIMEOUT.MAX
+				sta TimeOut
+
+				lda #1
+				>KAPI ArgV
+
+				>STYA R1
+
+.2				>SLEEP
+
+				>SS
+				>PUSHW R1
+				>PUSHWZ
+				>PUSHWZ
+				>PUSHEA.G pAI
+				>LIBC GetAddrInfo
+				>SR
+				bcc .4
+
+				cmp #GAI.E.AGAIN
+				bne .3
+
+				lda TimeOut
+				bne .2
+
+.3				>SS
+				>PUSHW L.MSG.UNKNOWN
+				>PUSHW R1
+				>PUSHBI 2
+				>LIBC PrintF
+				>SR
+
+.9				lda #E.SYN
+				sec
+				rts
+
+.4				>LDYA.G pAI
+				>STYA R1
+
+				ldy #S.ADDRINFO.pSOCKADDR
+				lda (R1),y
+				sta R2
+				iny
+				lda (R1),y
+				sta R2+1
+
+				>LEA.G SA.REMOTE
+				>STYA R3
+
+				ldy #S.SA.IN-1
+
+.5				lda (R2),y
+				sta (R3),y
+				dey
+				bpl .5
+
+*				clc
+
 				rts
 *--------------------------------------
 CS.RUN.GetBuffers
 				>LDYAI 5120
-				>LIBC GetMem
+				>LIBC Malloc
 				bcs .9
 
 				>STYA ZPBufPtr
-				txa
-				>STA.G hBufBuf
+				>STYA.G pBuf
 
 				>LDYAI MSGSIZE
-				>LIBC GetMem
+				>LIBC Malloc
 				bcs .9
 
 				>STYA ZPMsg
-				txa
-				>STA.G hMsgBuf
+				>STYA.G pMsgBuf
 
 				>LDYAI 384
-				>LIBC GetMem
+				>LIBC Malloc
 				bcs .9
 
 				>STYA ZPRespPtr
-				txa
-				>STA.G hRespBuf
+				>STYA.G pRespBuf
 
 				>LDYAI 256
-				>LIBC GetMem
+				>LIBC Malloc
 				bcs .9
 
 				>STYA ZPOutputBufPtr
-				txa
-				>STA.G hOutputBuf
+				>STYA.G pOutputBuf
 
 .9				rts
 *--------------------------------------
-CS.RUN.Connect	>PUSHBI S.SOCKET.T.STREAM
-				>PUSHBI 0				no protocol
-				>LIBCALL hLIBTCPIP,LIBTCPIP.Socket
+CS.RUN.Connect	>SS
+				>PUSHWI AF_INET
+				>PUSHWI SOCK_STREAM
+				>PUSHWZ
+				>LIBC Socket
+				>SR
 				bcs .9
 
-				sta hSocket
+				>STYA hSocket
 
-				>PUSHA
+				>SS
+				>PUSHW hSocket
 				>PUSHW L.SA.LOCAL
-				>LIBCALL hLIBTCPIP,LIBTCPIP.Bind
+				>PUSHWI S.SA.IN
+				>LIBC Bind
+				>SR
 				bcs .9
 
 				lda #TIMEOUT.MAX
@@ -335,10 +354,16 @@ CS.RUN.Connect	>PUSHBI S.SOCKET.T.STREAM
 
 .1				>SLEEP
 
-				>PUSHB hSocket
-				>PUSHW L.SA.REMOTE
-				>LIBCALL hLIBTCPIP,LIBTCPIP.Connect
+				>SS
+				>PUSHW hSocket
+				>PUSHEA.G SA.REMOTE
+				>PUSHWI S.SA.IN
+				>LIBC Connect
+				>SR
 				bcc .8
+
+				cmp #SKT.E.PENDING
+				bne .9
 
 				ldx TimeOut
 				bne .1
@@ -358,6 +383,7 @@ CS.RUN.Connect	>PUSHBI S.SOCKET.T.STREAM
 CS.RUN.Register	>LDYA L.MSG.REGISTER
 				jsr CS.RUN.STATUSMSG
 
+				>SS
 				>PUSHW ZPRespPtr
 				>PUSHW L.IRC.REGISTER
 
@@ -375,6 +401,7 @@ CS.RUN.Register	>LDYA L.MSG.REGISTER
 				>PUSHYA
 				>PUSHBI 8
 				>LIBC SPrintF
+				>SR
 				bcs .9
 
 				jsr CS.RUN.SendMsg
@@ -390,10 +417,13 @@ CS.RUN.GetMsg	bit bPendingMsg
 .10				ldy BufLen
 				bne .2
 
-.1				>PUSHB hSocket
+.1				>SS
+				>PUSHW hSocket
 				>PUSHW ZPBufPtr
 				>PUSHWI 255
-				>LIBCALL hLIBTCPIP,LIBTCPIP.Read
+				>PUSHWZ					flags
+				>LIBC Recv
+				>SR
 				bcs .7
 
 				sty BufLen
@@ -600,11 +630,13 @@ CS.RUN.ProcessMsg
 .8				clc
 .9				rts
 *--------------------------------------
-CS.RUN.CMD.PING	>PUSHW ZPRespPtr
+CS.RUN.CMD.PING	>SS
+				>PUSHW ZPRespPtr
 				>PUSHW L.IRC.PONG
 				>PUSHW ZPMsgExtPtr
 				>PUSHBI 2
 				>LIBC SPrintF
+				>SR
 				bcs .9
 
 				jsr CS.RUN.SendMsg
@@ -618,13 +650,15 @@ CS.RUN.CMD.JOIN	sec
 				jsr CS.RUN.STATUSPDATE
 *--------------------------------------
 CS.RUN.CMD.PART
-CS.RUN.CMD.QUIT	>PUSHW ZPRespPtr
+CS.RUN.CMD.QUIT	>SS
+				>PUSHW ZPRespPtr
 				>PUSHW L.IRC.NAMES
 				lda #4					channel
 				>KAPI ArgV
 				>PUSHYA
 				>PUSHBI 2
 				>LIBC SPrintF
+				>SR
 				bcs .9
 
 				jsr CS.RUN.SendMsg
@@ -643,13 +677,13 @@ CS.RUN.CMD.PRIVMSG
 
 .2				sta	(ZPMsgPfxPtr),y
 
+				>SS
 				>PUSHW L.SEQ.PRIVMSG
-
 				>PUSHW ZPMsgPfxPtr
 				>PUSHW ZPMsgExtPtr
-
 				>PUSHBI 4
 				>LIBC PrintF
+				>SR
 
 				rts
 *--------------------------------------
@@ -662,6 +696,7 @@ CS.RUN.CMD.001	jsr CS.RUN.CMD.INFO
 				>LDYA L.MSG.JOIN
 				jsr CS.RUN.STATUSMSG
 
+				>SS
 				>PUSHW ZPRespPtr
 
 				lda #5					key
@@ -688,6 +723,7 @@ CS.RUN.CMD.001	jsr CS.RUN.CMD.INFO
 				>PUSHBI 2
 
 .2				>LIBC SPrintF
+				>SR
 				bcs .9
 
 				jsr CS.RUN.SendMsg
@@ -705,13 +741,16 @@ CS.RUN.CMD.372
 CS.RUN.CMD.375
 CS.RUN.CMD.376
 
-CS.RUN.CMD.INFO	>PUSHW L.SEQ.INFOMSG
+CS.RUN.CMD.INFO	>SS
+				>PUSHW L.SEQ.INFOMSG
 				>PUSHW ZPMsgExtPtr
 				>PUSHBI 2
 				>LIBC PrintF
+				>SR
 				rts
 *--------------------------------------
-CS.RUN.DUMPMSG	>PUSHW L.SEQ.DUMPMSG
+CS.RUN.DUMPMSG	>SS
+				>PUSHW L.SEQ.DUMPMSG
 
 				>PUSHW ZPMsgPfxPtr
 				>PUSHW ZPMsgCmdPtr
@@ -720,14 +759,18 @@ CS.RUN.DUMPMSG	>PUSHW L.SEQ.DUMPMSG
 
 				>PUSHBI 8
 				>LIBC PrintF
+				>SR
 				rts
 *--------------------------------------
-CS.RUN.SendMsg	pha
-				>PUSHB hSocket
+CS.RUN.SendMsg	>SS
+				pha
+				>PUSHW hSocket
 				>PUSHW ZPRespPtr
 				pla
 				>PUSHYA
-				>LIBCALL hLIBTCPIP,LIBTCPIP.Write
+				>PUSHWZ					flags
+				>LIBC Send
+				>SR
 				rts
 *--------------------------------------
 CS.RUN.SCRSETUP	>PUSHW L.SEQ.INIT
@@ -745,13 +788,16 @@ CS.RUN.TXTCLR	lda #0
 				stz TextLen
 				stz bEscMode
 
+				>SS
 				>PUSHW L.SEQ.TXTCLR
 				>PUSHBI 0
 				>LIBC PrintF
+				>SR
 CS.RUN.TXTCLR.RTS
 				rts
 *--------------------------------------
 CS.RUN.TOPUPDATE
+				>SS
 				>PUSHW ZPOutputBufPtr
 				>PUSHW L.MSG.TOPBAR
 				>PUSHW A2osX.KVER
@@ -770,16 +816,20 @@ CS.RUN.TOPUPDATE
 
 				>PUSHBI 8
 				>LIBC SPrintF
+				>SR
 
+				>SS
 				>PUSHW L.SEQ.BAR
 				>PUSHBI 1
 				>PUSHW ZPOutputBufPtr
 				>PUSHBI 3
 				>LIBC PrintF
+				>SR
 
 				rts
 *--------------------------------------
 CS.RUN.STATUSPDATE
+				>SS
 				pha
 				phy
 				>PUSHW ZPOutputBufPtr
@@ -792,24 +842,29 @@ CS.RUN.STATUSPDATE
 				pla
 				>PUSHYA
 				>PUSHBI 4
+				>LIBC SPrintF
+				>SR
 
 				bra CS.RUN.STATUS
 *--------------------------------------
 CS.RUN.STATUSMSG
+				>SS
 				pha
 				>PUSHW ZPOutputBufPtr
 				>PUSHW L.MSG.STATUSBARMSG
 				pla
 				>PUSHYA
 				>PUSHBI 2
+				>LIBC SPrintF
+				>SR
 
-CS.RUN.STATUS	>LIBC SPrintF
-
+CS.RUN.STATUS	>SS
 				>PUSHW L.SEQ.BAR
 				>PUSHBI 21
 				>PUSHW ZPOutputBufPtr
 				>PUSHBI 3
 				>LIBC PrintF
+				>SR
 				rts
 *--------------------------------------
 CS.RUN.CHARIN	bit bEscMode
@@ -884,6 +939,7 @@ CS.RUN.CHARIN.CTRL
 				cmp #$14				Ctrl-T
 				bne .8
 
+				>SS
 				>PUSHW ZPRespPtr
 				>PUSHW L.IRC.PART
 				lda #4					channel
@@ -891,6 +947,7 @@ CS.RUN.CHARIN.CTRL
 				>PUSHYA
 				>PUSHBI 2
 				>LIBC SPrintF
+				>SR
 				bcs .9
 
 				jsr CS.RUN.SendMsg
@@ -910,6 +967,7 @@ CS.RUN.CHARIN.CR
 				lda TextLen
 				beq CS.RUN.CHARIN.INS.8
 
+				>SS
 				>PUSHW ZPRespPtr
 				>PUSHW L.IRC.PRIVMSG
 
@@ -920,11 +978,13 @@ CS.RUN.CHARIN.CR
 
 				>PUSHBI 4
 				>LIBC SPrintF
+				>SR
 				bcs .9
 
 				jsr CS.RUN.SendMsg
 				bcs .9
 
+				>SS
 				>PUSHW L.SEQ.PRIVMSG
 
 				lda #3					nickname
@@ -934,6 +994,7 @@ CS.RUN.CHARIN.CR
 
 				>PUSHBI 4
 				>LIBC PrintF
+				>SR
 				bcs .9
 
 				jmp CS.RUN.TXTCLR
@@ -990,59 +1051,55 @@ CS.RUN.CHARIN.RIGHT
 
 				lda #'C'
 				>LIBC PutChar
-				
+
 .9				rts
 *--------------------------------------
-CS.DOEVENT		lda (pEvent)
-				bpl .9					is it a TIMER event?
-
-				lda TimeOut
+CS.SIG			lda TimeOut
 				beq .9
 
 				dec TimeOut
 
-.9				sec						do not discard TIMER event
-				rts
+.9				rts
 *--------------------------------------
-CS.QUIT			ldy #hOutputBuf
+CS.QUIT			ldy #pOutputBuf+1
 				jsr .7
 
-				ldy #hRespBuf
+				ldy #pRespBuf+1
 				jsr .7
 
-				ldy #hMsgBuf
+				ldy #pMsgBuf+1
 				jsr .7
 
-				ldy #hBufBuf
+				ldy #pBuf+1
 				jsr .7
 
-				lda hSocket
+				ldy hSocket
 				beq .1
 
-				>LIBCALL hLIBTCPIP,LIBTCPIP.Shutdown
+				lda #0
+				>LIBC Shutdown
 
-.1				lda hLIBTCPIP
-				beq .2
-
-				>KAPI UnloadLib
-
-.2				clc
+.1				clc
 				rts
 
 .7				lda (pData),y
 				beq .8
 
-				>LIBC FreeMem
+				pha
+				dey
+				lda (pData),y
+				tay
+				pla
+
+				>LIBC Free
 .8				rts
 *--------------------------------------
 				.DO TLS=1
 				.INB usr/src/bin/irc.s.tls
 				.FIN
 *--------------------------------------
-CS.END
-LIBTCPIP		.AZ "libtcpip"
-hLIBTCPIP		.BS 1
-MSG.IPKO		.CZ "TCP/IP Not Loaded/Configured."
+CS.END			.EQ *
+*--------------------------------------
 MSG.USAGE		.CZ "Usage : IRC <ip|host> <port> <nickname> <#channel> [key]"
 MSG.UNKNOWN		.CZ "%s: Unknown host\r\n"
 MSG.HOSTOK		.CZ "Connecting to %d.%d.%d.%d:%D (%s)..."
@@ -1056,7 +1113,7 @@ MSG.TLSKO		.CZ "TLS:Negotiation failed."
 				.FIN
 MSG.REGISTER	.CZ "Registering User..."
 MSG.JOIN		.CZ "Joining Channel..."
-MSG.TOPBAR		.CZ "A2osX IRC %d.%d   Server:%s:%s   Nick:%s"
+MSG.TOPBAR		.CZ "A2osX IRC %d.%02d   Server:%s:%s   Nick:%s"
 MSG.STATUSBAR	.CZ "%s:%s"
 MSG.STATUSBARMSG	.AS "STATUS:%s"
 MSG.NULL		.HS 00
@@ -1099,15 +1156,9 @@ SEQ.DUMPMSG		.CZ "\e7\e[20;1H\r\n\e[7m%s \e[0m%s %s %s\e8"
 SEQ.INFOMSG		.CZ "\e7\e[20;1H\e[92;44m%s\r\n\e8"
 SEQ.RESET		.CZ "\ec"
 *--------------------------------------
-SA.LOCAL		.DA #AF.INET			S.SOCKADDR.AF
-				.BS 1
-				.BS 4					S.SOCKADDR.ADDR
-				.BS 2					S.SOCKADDR.PORT
-*--------------------------------------
-SA.REMOTE		.DA #AF.INET			S.SOCKADDR.AF
-				.BS 1
-				.BS 4					S.SOCKADDR.ADDR
-				.DA 6667
+SA.LOCAL		.DA AF_INET
+				.DA #0,#0,#0,#0			any address
+				.DA 0					Dyn port
 *--------------------------------------
 				.DO TLS=1
 TLS.CHELLO		.DA #TLS.CT.HS
@@ -1134,17 +1185,25 @@ TLS.CHELLO.LE	.EQ *-TLS.CHELLO.E
 *--------------------------------------
 TLS.HDR			.DA #TLS.CT.HS
 				.DA TLS.LV.TLS12
-TLS.HDR.L		.EQ *-TLS.HDR				
+TLS.HDR.L		.EQ *-TLS.HDR
 *--------------------------------------
 				.FIN
 *--------------------------------------
+ID.END			.EQ *
+*--------------------------------------
 				.DUMMY
 				.OR 0
-DS.START		.BS TEXTMAX+1
-hBufBuf			.BS 1
-hMsgBuf			.BS 1
-hRespBuf		.BS 1
-hOutputBuf		.BS 1
+
+				.BS TEXTMAX+1
+
+pAI				.BS 2
+SA.REMOTE		.BS S.SA.IN
+
+pBuf			.BS 2
+pMsgBuf			.BS 2
+pRespBuf		.BS 2
+pOutputBuf		.BS 2
+
 DS.END			.ED
 *--------------------------------------
 MAN

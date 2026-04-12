@@ -1,211 +1,184 @@
-PR#3
 NEW
-PREFIX
-AUTO 4,1
+  AUTO 3,1
 				.LIST OFF
 				.OP	65C02
 				.OR	$2000
-				.TF SBIN/NFSD
+				.TF sbin/nfsd
 *--------------------------------------
-				.INB INC/MACROS.I
-				.INB INC/A2OSX.I
-				.INB INC/LIBTCPIP.I
+				.INB inc/macros.i
+				.INB inc/a2osx.i
+				.INB inc/a2osx.api.i
+				.INB inc/kernel.i
+				.INB inc/eth.i
+				.INB inc/ip.i
+				.INB inc/net.skt.i
 *--------------------------------------
-TIMEOUT.MAX		.EQ 30					30 sec.
+TIMEOUT.MAX		.EQ 20					20 sec.
 *--------------------------------------
-ZPIPCfgPtr		.EQ ZPBIN
-ZPSktPtr		.EQ ZPBIN+2
+				.DUMMY
+				.OR ZPBIN
+ZS.START
+
+hSrvSocket		.BS 2
+hCltSocket		.BS 2
+
+TimeOut			.BS 1
+ZS.END			.ED
 *--------------------------------------
 *			File Header (16 Bytes)
 *--------------------------------------
 CS.START		cld
 				jmp (.1,x)
 				.DA #$61				6502,Level 1 (65c02)
-				.DA #1					BIN Layout Version 1
-				.DA 0
-				.DA CS.END-CS.START		Code Length To Relocate
-				.DA DS.END-DS.START		Data Segment to Allocate
-				.DA 0
-				.DA 0
+				.DA #2					BIN Layout Version 2
+				.DA #S.PS.SIG.T1SEC
+				.DA #0
+				.DA CS.END
+				.DA ID.END
+				.DA DS.END
+				.DA #64					Stack Size
+				.DA #ZS.END-ZS.START	Zero Page Size
 *--------------------------------------
 * Relocation Table
 *--------------------------------------
 .1				.DA CS.INIT
 				.DA CS.RUN
-				.DA CS.DOEVENT
+				.DA CS.SIG
 				.DA	CS.QUIT
-				.DA CS.HOOK
-L.LIBTCPIP		.DA LIBTCPIP
-L.Socket		.DA Socket
-L.MSG.TCPWAIT	.DA MSG.TCPWAIT
+*--------------------------------------
+L.SA.LOCAL		.DA SA.LOCAL
 L.MSG.INITOK	.DA MSG.INITOK
-L.MSG.TCPIPERR	.DA MSG.TCPIPERR
 L.MSG.SKTERR	.DA MSG.SKTERR
-L.MSG.ABORT		.DA MSG.ABORT
 L.MSG.INCOMING	.DA MSG.INCOMING
 				.DA 0
 *--------------------------------------
-CS.INIT			>LDYA L.LIBTCPIP
-				>KAPI LoadLibYA
-				sta hLIBTCPIP
-
-				lda (pPS)
-				ora #S.PS.F.EVENT		Now accept events
-				sta (pPS)
-				clc
-				rts
+CS.INIT			clc
+CS.INIT.RTS		rts
 *--------------------------------------
-CS.RUN			jsr Init.Timeout
-
-				>LDYA L.MSG.TCPWAIT
-				>LIBC PrintF
-.1				>LIBCALL hLIBTCPIP,LIBTCPIP.GET.IPCFG	is TCPIP loaded ?
-				bcs .99
-				>STYA ZPIPCfgPtr
-				lda (ZPIPCfgPtr)		Configured ?
-				bmi CS.RUN.INIT
-				>SLEEP
-				jsr Wait.Timeout
-				bcc .1
-.99				>LDYA L.MSG.TCPIPERR
-				>LIBC PrintF
-				lda #E.SYN
-				sec	
-				rts
-CS.RUN.INIT		ldx #3
-				ldy #S.IPCFG.IP+3
-.1				lda (ZPIPCfgPtr),y
-				sta Socket.Src.Addr,x
-				dey
-				dex
-				bpl .1
-				>PUSHW L.Socket
-				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.New
+CS.RUN			>SS
+				>PUSHWI AF_INET
+				>PUSHWI SOCK_STREAM
+				>PUSHWZ
+				>LIBC Socket
+				>SR
 				bcs .9
 
-				>STA.G hSocket
+				>STYA hSrvSocket
+
+				>SS
+				>PUSHW hSrvSocket
+				>PUSHW L.SA.LOCAL
+				>PUSHWI S.SA.IN
+				>LIBC Bind
+				>SR
+				bcs .9
+
+				>SS
+				>PUSHW hSrvSocket
+				>PUSHWI 16				backlog
+				>LIBC Listen
+				>SR
+				bcs .9
+
 				>LDYA L.MSG.INITOK
-				>LIBC PrintF
+				>LIBC PutS
+				bcc CS.RUN.LOOP
 
-.11				>SLEEP
-				ldy #bCTRLC
-				lda (pData),y
-				bmi .99
-				bra .11
-				ldy #hSocket
-				lda (pData),y
-				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.AcceptA
-				bcs .11
-				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.GETA
-				>STYA ZPSktPtr
+.9				pha
+				>LDYA L.MSG.SKTERR
+				>LIBC PutS
+				pla
+				sec
+				rts
+*--------------------------------------
+CS.RUN.LOOP		>SLEEP
+
+				>SS
+				>PUSHW hSrvSocket
+				>PUSHEA.G SA.CLNT
+				>PUSHWI S.SA.IN
+				>LIBC Accept
+				>SR
+				bcs CS.RUN.LOOP
+
+				>STYA hCltSocket
+
+				jsr CS.RUN.CLIENT
+
+				bcc CS.RUN.LOOP
+
+				>SS
+				>PUSHW hCltSocket
+				>PUSHWI 0				how
+				>LIBC Shutdown
+				>SR
+				bra CS.RUN.LOOP
+*--------------------------------------
+CS.RUN.CLIENT	>SLEEP					give some time for TCPIP SYN/ACK
+
+				>SS
+				>PUSHW L.MSG.INCOMING
+
+				>PUSHB hCltSocket
+
 				ldx #3
-				ldy #S.SOCKET.DST.ADDR+3
-.2				>PUSHB (ZPSktPtr),y
-				dey
+				ldy #SA.CLNT+S.SA.IN.ADDR
+
+.1				>PUSHB (pData),y
+				iny
 				dex
-				bpl .2
-				>LDYA L.MSG.INCOMING
+				bpl .1
+
+				>PUSHW.G SA.CLNT+S.SA.IN.PORT
+
+				>PUSHBI 7
 				>LIBC PrintF
-				bra .11
-.9				>LDYA L.MSG.SKTERR
-				>LIBC PrintF
-				lda #E.SYN
-				sec	
-				rts
-.99				>LDYA L.MSG.ABORT
-				>LIBC PrintF
-				lda #0
-				sec	
-				rts
-*--------------------------------------
-CS.DOEVENT		lda (pEvent)
-				bpl .1					is it a TIMER event?
+				>SR
 
-				asl						One second ?
-				bpl .9
-				ldy #TimeOut
-				lda (pData),y
-				beq .9
-				dec
-				sta (pData),y
-				sec						do not discard TIMER event
-				rts
 
-.1				bit #S.EVT.F.KEY		is it a KEY event?
-				beq .9
 
-				ldy #S.EVT.DATAHI		is it an O or SAPPLE key ?
-				lda (pEvent),y
-				bne	.9
-
-				ldy #S.EVT.DATALO	
-				lda (pEvent),y
-				cmp #$03				Ctrl-C
-				bne .9
-
-				lda #$FF
-				ldy #bCTRLC
-				sta (pData),y
-				clc
-				rts
-.9				sec
-				rts
-*--------------------------------------
-CS.QUIT			ldy #hSocket
-				lda (pData),y
-				>LIBCALL hLIBTCPIP,LIBTCPIP.SKT.CLOSEA
-				lda hLIBTCPIP
-				>KAPI UnloadLibA
-				clc
-				rts
-*--------------------------------------
-CS.HOOK			
-*--------------------------------------
-Init.Timeout	ldy #TimeOut
-				lda #TIMEOUT.MAX
-				sta (pData),y
-				rts
-*--------------------------------------
-Wait.TimeOut	sec
-				ldy #TimeOut
-				lda (pData),y
-				beq .9
-				ldy #bCTRLC
-				lda (pData),y
-				bmi .9
-				clc
 .9				rts
 *--------------------------------------
-CS.END
+CS.SIG			lda TimeOut
+				beq .9
+
+				dec TimeOut
+
+.9				rts
 *--------------------------------------
-LIBTCPIP		>PSTR "libtcpip.o"
-MSG.TCPWAIT		.AZ "NFSD:Waiting for TCP/IP initializing...\n"
-MSG.INITOK		.AZ "NFSD:Init Ok, Listening.\n"
-MSG.TCPIPERR	.AZ "NFSD:TCP/IP Not initialized properly\n"
-MSG.SKTERR		.AZ "NFSD:Listen Error\n"
-MSG.ABORT		.AZ "NFSD:User Aborted\n"
-MSG.INCOMING	.AZ "NFSD:Incoming Connection From : %d.%d.%d.%d\n"	
-hLIBTCPIP		.BS 1
+CS.QUIT			ldy hSrvSocket
+				beq .8
+
+				lda #0
+
+				>LIBC Shutdown
+
+.8				clc
+				rts
 *--------------------------------------
-Socket			.DA #S.SOCKET.T.DGRAM
-				.DA #S.SOCKET.O.ACCEPTCONN
-				.DA #S.SOCKET.TCP.S.LISTEN
-				.BS 1
-Socket.Src.Addr	.BS 4
-Socket.Src.Port	.DA 2049
-Socket.Dst.Addr	.BS 4
-Socket.Dst.Port	.BS 2
-				.BS 16
+
+*--------------------------------------
+
+*--------------------------------------
+CS.END			.EQ *
+*--------------------------------------
+MSG.INITOK		.AZ "NFSD:Init Ok, Listening."
+MSG.SKTERR		.AZ "NFSD:Listen Error."
+MSG.INCOMING	.AZ "NFSD:Incoming Connection [SKT=%h] From : %d.%d.%d.%d:%D\r\n""
+*--------------------------------------
+SA.LOCAL		.DA AF_INET
+				.DA #0,#0,#0,#0			any address
+				.DA 2049
+*--------------------------------------
+ID.END			.EQ *
 *--------------------------------------
 				.DUMMY
 				.OR 0
-DS.START
-TimeOut			.BS 1
-bCTRLC			.BS 1
-hSocket			.BS 1
-DS.END
-				.ED
+
+SA.CLNT			.BS S.SA.IN
+
+DS.END			.ED
 *--------------------------------------
 MAN
-SAVE USR/SRC/SBIN/NFSD.S
+SAVE usr/src/sbin/nfsd.s
 ASM

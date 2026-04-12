@@ -17,7 +17,7 @@ XDOS.Close		ldy #$01				close all ?
 				lda XDOS.FCBs+FCB.ID,x	is this reference file open ?
 				beq .2				  	no, try next.
 
-				jsr flush2				clean it out...
+				jsr XDOS.FlushFcbX		clean it out...
 				bcs L46B6			  	return flush errors.
 
 				jsr close2				update fcb & vcb
@@ -80,7 +80,7 @@ L46C3  			sta XDOS.FCBPtr			save current low byte of pointer.
 				lda XDOS.FCBs,x			is this reference file open ?
 				beq L46D1			  	no, try next.
 
-				jsr flush2			 	clean it out...
+				jsr XDOS.FlushFcbX	 	clean it out...
 				bcs L46E6			  	return anty errors.
 
 L46D1  			lda XDOS.FCBPtr			inc pointer to next fcb.
@@ -95,7 +95,7 @@ L46D9  			clc
 				sec		 				report error now
 L46E0  			rts
 *--------------------------------------
-flush2			jsr XDOS.GetFCBBufX		must set up vcb & buffer locations 1st.
+XDOS.FlushFcbX	jsr XDOS.GetFCBBufX		must set up vcb & buffer locations 1st.
 				bcc L46F1			  	branch if no error.
 
 L46E6  			jmp glberr				error so check for close or flush all.
@@ -190,7 +190,7 @@ L476C  			lda XDOS.FCBs+FCB.EOF,x	needed or not.
 				bne L476C			  	branch always.
 
 L4780  			ldx XDOS.FCBPtr
-				lda XDOS.FCBs+FCB.STYPE,x	the last thing to update is storage
+				lda XDOS.FCBs+FCB.ST,x	the last thing to update is storage
 				asl			  			type (y=XDOS.FCBPtr+2). shift into high
 				asl			  			nibble.
 				asl
@@ -238,13 +238,12 @@ XDOS.FCBDevIDSelect
 				sta MLI.DEVNUM
 				rts
 *--------------------------------------
-XDOS.SetFCBSType
-				lsr
+XDOS.SetFCB.ST	lsr
 				lsr
 				lsr
 				lsr
 				ldy XDOS.FCBPtr			and save it in fcb.
-				sta XDOS.FCBs+FCB.STYPE,y
+				sta XDOS.FCBs+FCB.ST,y
 				rts
 *--------------------------------------
 XDOS.ClrFCBStatus
@@ -290,47 +289,50 @@ XDOS.SetEOF		jsr XDOS.GetFCB.ST		can only move end of tree, sapling or seed.
 *				iny		 				upon contraction.
 *				ldx #$02			 	all 3 bytes of the eof
 
-				jsr plus2fcb
+				jsr XDOS.FCBPtrp2y2x
 
-L47EF  			lda XDOS.FCBs+FCB.EOF,y
+.1  			lda XDOS.FCBs+FCB.EOF,y
 				sta XDOS.OldEOF,x
 				dey
 				dex
-				bpl L47EF
+				bpl .1
 
 				ldy #$04
 				ldx #$02
 
-L47FD  			lda (ZP.A3L),y			position mark to new eof
+.2  			lda (ZP.A3L),y			position mark to new eof
 				sta XDOS.NewMark,x
 				dey
 				dex
-				bpl L47FD
+				bpl .2
 
 				ldx #$02			 	point to 3rd byte.
 
-L4808  			lda XDOS.OldEOF,x		see if eof moved backwards so blocks
+.3  			lda XDOS.OldEOF,x		see if eof moved backwards so blocks
 				cmp XDOS.NewMark,x		can be released.
 				bcc eofset				(branch if not)
+
 				bne purge			  	branch if blocks to be released
 
 				dex
-				bpl L4808			  	all 3 bytes
-
+				bpl .3				  	all 3 bytes
+*--------------------------------------
 eofset			ldy #$04
 				ldx XDOS.FCBPtr			place new end of file into fcb
 				inx
 				inx
 
-L481C  			lda (ZP.A3L),y
+.1  			lda (ZP.A3L),y
 				sta XDOS.FCBs+FCB.EOF,x
 				dex
 				dey
 				cpy #$02			 	all 3 bytes moved ?
-				bcs L481C			  	no.
+				bcs .1				  	no.
+
+*				clc
 
 				jmp XDOS.SetFCB.DIRTY	mark fcb as dirty.
-
+*--------------------------------------
 purge  			jsr XDOS.FlushOne	 	make sure file is current
 				bcs L47CD
 
@@ -340,13 +342,16 @@ purge  			jsr XDOS.FlushOne	 	make sure file is current
 				stx zpt+1			  	(zero page conflict with dir buf ptr)
 				ldx ZP.DataPtr
 				stx zpt
-				ldy XDOS.FCBPtr			check if eof < mark
-				iny
-				iny
-				ldx #$02
+
+				jsr XDOS.FCBPtrp2y2x
+
+*				ldy XDOS.FCBPtr			check if eof < mark
+*				iny
+*				iny
+*				ldx #$02
 
 L4840  			lda XDOS.FCBs+FCB.MARK,y
-				cmp XDOS.NewMark,x			compare until not equal or carry clear.
+				cmp XDOS.NewMark,x		compare until not equal or carry clear.
 				bcc L485F			  	branch if eof > mark.
 
 				bne L484E			  	branch if eof < mark.
@@ -358,17 +363,17 @@ L4840  			lda XDOS.FCBs+FCB.MARK,y
 L484E  			ldy XDOS.FCBPtr
 				ldx #$00
 
-L4853  			lda XDOS.NewMark,x			fake position, correct position will
+L4853  			lda XDOS.NewMark,x		fake position, correct position will
 				sta XDOS.FCBs+FCB.MARK,y	be made below...
 				iny
 				inx
 				cpx #$03			 	move all 3 bytes
 				bne L4853
 
-L485F  			jsr XDOS.GetFreeCntVCBX	force free block count before releasing
-				lda XDOS.NewMark			 	blocks. prepare for purge of excess...
+L485F  			jsr XDOS.GetFreeCntVCBPtr	force free block count before releasing
+				lda XDOS.NewMark		blocks. prepare for purge of excess...
 				sta dseed			  	all blocks and bytes beyond new eof
-				lda XDOS.NewMark+1				must be zero'd
+				lda XDOS.NewMark+1		must be zero'd
 				sta dsap
 				and #$01
 				sta dseed+1
@@ -396,6 +401,7 @@ L485F  			jsr XDOS.GetFreeCntVCBX	force free block count before releasing
 				sta dsap
 
 L489F  			sta dseed+1
+
 L48A2  			ldy XDOS.FCBPtr			also must pass file's 1st block address.
 				lda XDOS.FCBs+FCB.1stBLK,y
 				sta XDOS.1stBLK
@@ -422,15 +428,17 @@ L48C2  			inx
 				beq L48C2			  	without disturbing carry.
 
 				lda stortyp				get possibly modified storage type
-				jsr XDOS.SetFCBSType
+				jsr XDOS.SetFCB.ST
 
 				jsr XDOS.ClrFCBStatus	make it look as though position has
 				jsr XDOS.SetVCB.FBLK	nothing allocated, update total blocks
-				ldy XDOS.FCBPtr			in fcb and correct position.
-				iny
-				iny
 
-				ldx #2
+				jsr XDOS.FCBPtrp2y2x
+
+*				ldy XDOS.FCBPtr			in fcb and correct position.
+*				iny
+*				iny
+*				ldx #2
 
 L48F2  			lda XDOS.FCBs+FCB.MARK,y	tell 'XDOS.ReadAtNewMark' to go to correct
 				sta XDOS.NewMark,x
@@ -626,8 +634,8 @@ XDOS.GetFileInfoVol
 				stz reql			 	force a count of free blocks.
 				stz reqh
 
-				ldx XDOS.VCBPtr
-				jsr XDOS.GetFreeCntVCBX	get a fresh count of free blocks on
+*				ldx XDOS.VCBPtr
+				jsr XDOS.GetFreeCntVCBPtr	get a fresh count of free blocks on
 
 				ldx XDOS.VCBPtr			this volume.
 				lda XDOS.VCBs+VCB.FBLK+1,x	return total blocks and total in use.
@@ -962,7 +970,7 @@ L4B93  			pha		 				save possible error code.
 L4BAF  			cmp #$01			 	adjust carry accordingly
 				rts
 *--------------------------------------
-L4BCD  			bcc L4B85			  	branch widened (always taken)
+*L4BCD  			bcc L4B85			branch widened (always taken)
 *--------------------------------------
 XDOS.DestroyDir	cmp #$D0			 	is this a directory file ?
 				bne L4C1B			  	no, file incompatible.
@@ -989,7 +997,9 @@ L4BFE  			lda XDOS.GBuf+2			get forward link.
 				cmp #$01			 	test for null block into carry.
 				ldx XDOS.GBuf+3			get the rest of the block address.
 				bne L4C0A			  	branch if not null.
-				bcc L4BCD			  	was the low part null as well ?
+*				bcc L4BCD			  	was the low part null as well ?
+
+				bcc L4B85
 
 L4C0A  			jsr XDOS.DeallocAX		free this block.
 				bcs L4C1A

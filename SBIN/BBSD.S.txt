@@ -10,32 +10,31 @@ NEW
 				.INB inc/mli.i
 				.INB inc/mli.e.i
 				.INB inc/eth.i
-				.INB inc/libtcpip.i
-				.INB inc/net.telnet.i
+				.INB inc/ip.i
+				.INB inc/net.skt.i
 *--------------------------------------
-TIMEOUT.MAX		.EQ 200					20 sec.
+TIMEOUT.MAX		.EQ 20					20 sec.
 *--------------------------------------
 				.DUMMY
 				.OR ZPBIN
 ZS.START
-ZPIPCfgPtr		.BS 2
 ZPSktPtr		.BS 2
 
 ZPMsgFile		.BS 2
 ZPStartupFile	.BS 2
 
-hFile			.BS 1
-hLineBuf		.BS 1
-ZPLinePtr		.BS 2
+pFile			.BS 2
+pLineBuf		.BS 2
+pLine			.BS 2
 
-ZPPtr1			.BS 2
+pMsgFile		.BS 2
+pStartupFile	.BS 2
 
-hMsgFile		.BS 1
-hStartupFile	.BS 1
+hSrvSocket		.BS 2
+hCltSocket		.BS 2
 
 TimeOut			.BS 1
-hSrvSocket		.BS 1
-hClientSocket	.BS 1
+
 ZS.END			.ED
 *--------------------------------------
 *			File Header (16 Bytes)
@@ -43,248 +42,214 @@ ZS.END			.ED
 CS.START		cld
 				jmp (.1,x)
 				.DA #$61				6502,Level 1 (65c02)
-				.DA #1					BIN Layout Version 1
-				.DA #S.PS.F.EVENT		S.PS.F
+				.DA #2					BIN Layout Version 2
+				.DA #S.PS.SIG.T1SEC
 				.DA #0
-				.DA CS.END-CS.START		CS
-				.DA DS.END-DS.START		DS
-				.DA #32					SS
+				.DA CS.END
+				.DA ID.END
+				.DA DS.END
+				.DA #64					Stack Size
 				.DA #ZS.END-ZS.START	Zero Page Size
-				.DA 0
 *--------------------------------------
 * Relocation Table
 *--------------------------------------
 .1				.DA CS.INIT
 				.DA CS.RUN
-				.DA CS.DOEVENT
+				.DA CS.SIG
 				.DA	CS.QUIT
-L.LIBTCPIP		.DA LIBTCPIP
+*--------------------------------------
 L.ETCBBSDCONF	.DA ETCBBSDCONF
 L.KEYWORDS.CONF	.DA KEYWORDS.CONF
 J.KEYWORDS.CONF	.DA CS.RUN.CONF.TCPLISTEN
 				.DA CS.RUN.CONF.COMLISTEN
 				.DA CS.RUN.CONF.MSGFILE
 				.DA CS.RUN.CONF.STARTUPFILE
-L.SA.LOCAL		.DA SA.LOCAL
-L.MSG.TCPWAIT	.DA MSG.TCPWAIT
 L.MSG.INITOK	.DA MSG.INITOK
-L.MSG.TCPIPERR	.DA MSG.TCPIPERR
 L.MSG.SKTERR	.DA MSG.SKTERR
 L.MSG.INCOMING	.DA MSG.INCOMING
+L.SA.LOCAL		.DA SA.LOCAL
 L.NOD.Template	.DA NOD.Template
 L.CMD.Template	.DA CMD.Template
 				.DA 0
 *--------------------------------------
-CS.INIT			>LDYA L.LIBTCPIP
-				>KAPI LoadLib
-				bcs .9
-
-				sta hLIBTCPIP
-
-.9				rts
+CS.INIT			clc
+CS.INIT.RTS		rts
 *--------------------------------------
-CS.RUN			lda #TIMEOUT.MAX
-				sta TimeOut
+CS.RUN			jsr CS.RUN.CONF
+				bcs CS.INIT.RTS
 
-				>LDYA L.MSG.TCPWAIT
-				>LIBC PutS
-
-.1				>SLEEP
-				>LIBCALL hLIBTCPIP,LIBTCPIP.GETCFG	is TCPIP loaded ?
-				bcs .99
-
-				>STYA ZPIPCfgPtr
-
-				lda (ZPIPCfgPtr)		Configured ?
-				bmi CS.RUN.INIT
-
-				lda TimeOut
-				beq .99
-
-				ldy #S.PS.hStdIn
-				lda (pPS),y
-				>LIBC FEOF
-				bcs .9					I/O err
-
-				tay
-				bne .1
-
-				>LIBC GetChar
+.1				>SS
+				>PUSHWI AF_INET
+				>PUSHWI SOCK_STREAM
+				>PUSHWZ
+				>LIBC Socket
+				>SR
 				bcs .9
 
-				cmp #$03
-				bne .1
-*				sec
-				rts
+				>STYA hSrvSocket
 
-.99				pha
-				>LDYA L.MSG.TCPIPERR
-				>LIBC PutS
-				pla
-				sec
-.9				rts
-
-CS.RUN.INIT		ldx #3
-				ldy #S.IPCFG.IP+3
-
-.1				lda (ZPIPCfgPtr),y
-				sta SA.LOCAL+S.SOCKADDR.ADDR,x
-				dey
-				dex
-				bpl .1
-
-				jsr CS.RUN.CONF
-				bcs .99
-
-				>PUSHBI S.SOCKET.T.STREAM
-				>PUSHBI 0				no protocol
-				>LIBCALL hLIBTCPIP,LIBTCPIP.Socket
-				bcs .9
-
-				sta hSrvSocket
-
-				>PUSHA
+				>SS
+				>PUSHW hSrvSocket
 				>PUSHW L.SA.LOCAL
-				>LIBCALL hLIBTCPIP,LIBTCPIP.Bind
+				>PUSHWI S.SA.IN
+				>LIBC Bind
+				>SR
 				bcs .9
 
-				lda hSrvSocket
-				>LIBCALL hLIBTCPIP,LIBTCPIP.Listen
+				>SS
+				>PUSHW hSrvSocket
+				>PUSHWI 16				backlog
+				>LIBC Listen
+				>SR
 				bcs .9
 
 				>LDYA L.MSG.INITOK
 				>LIBC PutS
-
-.2				>SLEEP
-
-				lda hSrvSocket
-				>LIBCALL hLIBTCPIP,LIBTCPIP.Accept
-				bcs .2
-
-				pha
-				jsr CS.RUN.CLIENT
-				pla
-
-				bcc .2
-				>LIBCALL hLIBTCPIP,LIBTCPIP.Shutdown
-				bra .2
+				bcc CS.RUN.LOOP
 
 .9				pha
 				>LDYA L.MSG.SKTERR
 				>LIBC PutS
 				pla
 				sec
-.99				rts
+				rts
+*--------------------------------------
+CS.RUN.LOOP		>SLEEP
+
+				>SS
+				>PUSHW hSrvSocket
+				>PUSHEA.G SA.CLNT
+				>PUSHWI S.SA.IN
+				>LIBC Accept
+				>SR
+				bcs CS.RUN.LOOP
+
+				>STYA hCltSocket
+
+				jsr CS.RUN.CLIENT
+
+				bcc CS.RUN.LOOP
+
+				>SS
+				>PUSHW hCltSocket
+				>PUSHWI 0				how
+				>LIBC Shutdown
+				>SR
+				bra CS.RUN.LOOP
 *--------------------------------------
 CS.RUN.CLIENT	>SLEEP					give some time for TCPIP SYN/ACK
 
-				sta hClientSocket
-				>LIBC GetMemPtr
-				>STYA ZPSktPtr
-
+				>SS
 				>PUSHW L.MSG.INCOMING
 
-				>PUSHB hClientSocket
+				>PUSHB hCltSocket
 
 				ldx #3
-				ldy #S.SOCKET.REM.ADDR
+				ldy #SA.CLNT+S.SA.IN.ADDR
 
-.1				>PUSHB (ZPSktPtr),y
+.1				>PUSHB (pData),y
 				iny
 				dex
 				bpl .1
 
-				>PUSHBI 5
-				>LIBC PrintF
+				>PUSHW.G SA.CLNT+S.SA.IN.PORT
 
+				>PUSHBI 7
+				>LIBC PrintF
+				>SR
+
+				>SS
 				>PUSHEA.G NodBuf
 				>PUSHW L.NOD.Template
-				>PUSHB hClientSocket
+				>PUSHB hCltSocket
 				>PUSHBI 1
 				>LIBC SPrintF
+				>SR
 
-CS.RUN.CLIENT1	>PUSHEA.G NodBuf+5
-				>PUSHW 0
-				>PUSHB hClientSocket
+CS.RUN.CLIENT1	>SS
+				>PUSHEA.G NodBuf
+				>PUSHWZ
+				>PUSHW hCltSocket
 				>LIBC MKNod
+				>SR
 				bcs .9
 
+				>SS
 				>PUSHEA.G CmdBuf
 				>PUSHW L.CMD.Template
 				>PUSHEA.G NodBuf
-				>PUSHW ZPStartupFile
-				>PUSHBI 4
+				>PUSHBI 2
 				>LIBC SPrintF
+				>SR
+				bcs .9
 
+				>SS
 				>PUSHEA.G CmdBuf
-				>PUSHBI 0
+				>PUSHWI 0
 				>LIBC ExecL
+				>SR
 
-*				clc
 .9				rts
 *--------------------------------------
-CS.DOEVENT		lda (pEvent)
-				bpl .9					is it a TIMER event?
-
-				lda TimeOut
+CS.SIG			lda TimeOut
 				beq .9
 
 				dec TimeOut
 
-.9				sec						do not discard TIMER event
-				rts
+.9				rts
 *--------------------------------------
-CS.QUIT			lda hSrvSocket
-				beq .3
-
-				>LIBCALL hLIBTCPIP,LIBTCPIP.Shutdown
-
-.3				lda hLIBTCPIP
+CS.QUIT			ldy hSrvSocket
 				beq .8
 
-				>KAPI UnloadLib
+				lda #0
+
+				>LIBC Shutdown
 
 .8				clc
+
 CS.QUIT.RTS		rts
 *--------------------------------------
-CS.RUN.CONF		>PUSHW L.ETCBBSDCONF
+CS.RUN.CONF		>SS
+				>PUSHW L.ETCBBSDCONF
 				>PUSHBI	O.RDONLY+O.TEXT
 				>PUSHBI S.FI.T.TXT
 				>PUSHWZ
 				>LIBC FOpen
+				>SR
 				bcs CS.QUIT.RTS
 
-				sta hFile
-				
+				>STYA pFile
+
 				>LDYAI 256
-				>LIBC GetMem
+				>LIBC Malloc
 				bcs .97
 
-				>STYA ZPLinePtr
-				stx hLineBuf
+				>STYA pLineBuf
 
-.1				>PUSHB hFile
-				>PUSHW ZPLinePtr
+.1				>SS
+				>PUSHW pLineBuf
 				>PUSHWI 256
+				>PUSHW pFile
 				>LIBC FGetS
+				>SR
 				bcs .8
 
 				tya
 				beq .1
 
-				lda (ZPLinePtr)
+				lda (pLineBuf)
 				cmp #'#'
 				beq .1
 
 				>LDYA L.KEYWORDS.CONF
-				>STYA ZPPtr1
+				>STYA R1
 
 				ldx #0
 
 .2				ldy #0
 
-.3				lda (ZPPtr1),y
-				cmp	(ZPLinePtr),y
+.3				lda (R1),y
+				cmp	(pLineBuf),y
 				bne .4
 
 				iny
@@ -302,92 +267,93 @@ CS.RUN.CONF		>PUSHW L.ETCBBSDCONF
 				ldy #0
 
 .5				iny
-				lda (ZPPtr1),y
+				lda (R1),y
 				cmp #C.SPACE
 				bne .5
 
 				tya
 				sec
-				adc ZPPtr1
-				sta ZPPtr1
+				adc R1
+				sta R1
 				bcc .6
-				inc ZPPtr1+1
+				inc R1+1
 
-.6				lda	(ZPPtr1)
+.6				lda	(R1)
 				bne .2
 
 .96				lda #E.SYN
 				sec
 				.HS 90					BCC
-.8				clc				
-				
+.8				clc
+
 .97				php
 				pha
-				
-				lda hLineBuf
+
+				>LDYA pLineBuf
 				beq .98
-				
-				>LIBC FreeMem
-				
-.98				lda hFile
-				beq .99		
+
+				>LIBC Free
+
+.98				>LDYA pFile
+				beq .99
 
 				>LIBC FClose
-				
+
 .99				pla
 				plp
 				rts
 *--------------------------------------
 CS.RUN.CONF.JMP	tya
 				clc
-				adc ZPLinePtr
-				sta ZPPtr1
+				adc pLineBuf
+				sta R1
 				tay
 				lda #0
-				adc ZPLinePtr+1
-				sta ZPPtr1+1
-				
-				jmp (J.KEYWORDS.CONF,x)
+				adc pLineBuf+1
+				sta R1+1
 
+				jmp (J.KEYWORDS.CONF,x)
+*--------------------------------------
 CS.RUN.CONF.TCPLISTEN
 				>LIBC AToI
 				bcs .9
 
-				>STYA SA.LOCAL+S.SOCKADDR.PORT
+				>STYA SA.LOCAL+S.SA.IN.PORT
 
 .9				rts
-
+*--------------------------------------
 CS.RUN.CONF.COMLISTEN
 
 .9				clc
 				rts
+*--------------------------------------
 CS.RUN.CONF.MSGFILE
+				>SS
 				>PUSHYA
 				>PUSHWZ					Allocate
 				>LIBC RealPath
+				>SR
 				bcs .9
 
 				>STYA ZPMsgFile
-				stx hMsgFile
 
 .9				rts
-
+*--------------------------------------
 CS.RUN.CONF.STARTUPFILE
+				>SS
 				>PUSHYA
 				>PUSHWZ					Allocate
 				>LIBC RealPath
+				>SR
 				bcs .9
 
 				>STYA ZPStartupFile
-				stx hStartupFile
 
 .9				rts
 *--------------------------------------
-CS.END
+CS.END			.EQ *
 *--------------------------------------
-hLIBTCPIP		.BS 1
-LIBTCPIP		.AZ "libtcpip"
-ETCBBSDCONF		.AZ "${BOOT}etc/bbsd.conf"
+ETCBBSDCONF		.AZ "/etc/bbsd.conf"
 *--------------------------------------
 KEYWORDS.CONF	.AS "tcplisten "
 				.AS "comlisten "
@@ -395,23 +361,23 @@ KEYWORDS.CONF	.AS "tcplisten "
 				.AS "startupfile "
 				.DA #0
 *--------------------------------------
-MSG.TCPWAIT		.AZ "BBSD:Waiting for TCP/IP initializing..."
 MSG.INITOK		.AZ "BBSD:Init Ok, Listening."
-MSG.TCPIPERR	.AZ "BBSD:TCP/IP Not initialized properly."
 MSG.SKTERR		.AZ "BBSD:Listen Error."
 MSG.INCOMING	.CZ "BBSD:Incoming Connection [SKT=%h] From : %d.%d.%d.%d\r\n"
 *--------------------------------------
 NOD.Template	.AZ "/dev/tty%h"
-CMD.Template	.AZ "${ROOT}sbin/getty -E %s %s"
+CMD.Template	.AZ "/sbin/getty -E %s %s"
 *--------------------------------------
-SA.LOCAL		.DA #AF.INET			S.SOCKADDR.AF
-				.BS 1
-				.BS 4					S.SOCKADDR.ADDR
-				.DA TCP.PORT.TELNET
+SA.LOCAL		.DA AF_INET				S.SOCKADDR.AF
+				.DA #0,#0,#0,#0			S.SA.IN.ADDR
+				.DA 6502
+*--------------------------------------
+ID.END			.EQ *
 *--------------------------------------
 				.DUMMY
 				.OR 0
-DS.START
+
+SA.CLNT			.BS S.SA.IN
 NodBuf			.BS 11
 CmdBuf			.BS 65
 DS.END			.ED

@@ -34,11 +34,13 @@ none
 # InsDrv  
 
 ## ASM  
-`>PUSHW src  
-`>PUSHW drvcsstart  
-`>PUSHW drvcsend  
-`>PUSHW drvidend  
-`>LIBC insdrv`  
+`>SS`  
+`>PUSHW src`  
+`>PUSHW drvcsstart`  
+`>PUSHW drvcsend`  
+`>PUSHW drvidend`  
+`>KAPI insdrv`  
+`>SR`  
 
 ## RETURN VALUE  
 Y,A = Ptr to installed driver  
@@ -271,10 +273,9 @@ Return X+Y, X-Y, X*Y, X/Y, X mod Y....
 `>PUSHW hBuf`  
 `>PUSHW start`  
 `>PUSHW len`  
-`>PUSHW dst  
+`>PUSHW dst`  
 `>KAPI GetBufData`  
 `>SR`  
-*  
 
 # GetBuf  
 
@@ -1621,7 +1622,7 @@ Convert String to 16 bits int
 
 ## ASM  
 `>LDYA str`  
-`>LIBC atoi`  
+`>LIBC AToI`  
 
 ## RETURN VALUE  
  Y,A = int  
@@ -1704,24 +1705,29 @@ Concatenate strings
 `char * strcat ( char * destination, const char * source );`  
 
 ## ASM  
+`>SS`  
 `>PUSHWI destination`  
 `>PUSHWI source`  
 `>LIBC strcat`  
+`>SR`  
 
 ## RETURN VALUE  
 Y,A = destination  
 
 # StrCpy  
-`#include <string.h>`* Copy string  
+`#include <string.h>`  
+Copy string  
 
 ## C  
 `#include <string.h>`  
 `char *strcpy(char *restrict dst, const char *restrict src);`  
 
 ## ASM  
+`>SS`  
 `>PUSHWI destination`  
 `>PUSHWI source`  
 `>LIBC strcpy`  
+`>SR`  
 
 ## RETURN VALUE  
 Y,A = destination  
@@ -1751,9 +1757,11 @@ Compare 2 strings
 `int strcmp(const char *s1, const char *s2);`  
 
 ## ASM  
+`>SS`  
 `>PUSHWI s1`  
 `>PUSHWI s2`  
 `>LIBC strcmp`  
+`>SR`  
 
 ## RETURN VALUE  
 CC : match  
@@ -1769,9 +1777,11 @@ Compare 2 strings, ignoring case
 `int strcasecmp(const char *s1, const char *s2);`  
 
 ## ASM  
+`>SS`  
 `>PUSHWI s1`  
 `>PUSHWI s2`  
 `>LIBC strcasecmp`  
+`>SR`  
 
 ## RETURN VALUE  
 CC : match  
