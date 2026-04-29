@@ -13,24 +13,36 @@ NEW
 				.INB inc/ip.i
 				.INB inc/net.skt.i
 				.INB inc/net.db.i
+				.INB inc/libtui.i
 *--------------------------------------
-RESP.BUFSIZE	.EQ 1024
+EV.LBOX1.CHANGED	.EQ $C0
+EV.LBOX1.PRESSED	.EQ $C1
+EV.LBOX1.PGUP		.EQ $C2
+EV.LBOX1.PGDN		.EQ $C3
+
+EV.LBOX2.CHANGED	.EQ $C4
+EV.LBOX2.PRESSED	.EQ $C5
+*--------------------------------------
+REQ.BUFSIZE		.EQ 1024
+REP.BUFSIZE		.EQ 1024
 TIMEOUT.MAX		.EQ 20					20 sec.
 *--------------------------------------
 				.DUMMY
 				.OR ZPBIN
 ZS.START
 
-ZPpRespBuf		.BS 2
-ZPRespLen		.BS 2
+ZPpReqBuf		.BS 2
+ZPReqLen		.BS 2
+ZPpRepBuf		.BS 2
+ZPRepLen		.BS 2
 
 ZPpPayloadBuf	.BS 2
 ZPPayloadLen	.BS 2
+ZPPgCnt			.BS 2
+ZPBlkNum		.BS 2
 
-ZPCount			.BS 2
-
+ZPnCnt			.BS 2
 hSocket			.BS 2
-
 iArg			.BS 1
 iHost			.BS 1
 iPort			.BS 1
@@ -65,19 +77,35 @@ J.CheckArgs		.DA CS.RUN.CheckArgs.U
 L.MSG.USAGE		.DA MSG.USAGE
 
 L.MSG.UNKNOWN	.DA MSG.UNKNOWN
-L.MSG.HOSTOK	.DA MSG.HOSTOK
 L.MSG.SKTKO		.DA MSG.SKTKO
-L.MSG.SKTOK		.DA MSG.SKTOK
 L.MSG.SKTERR	.DA MSG.SKTERR
 L.MSG.IOERR		.DA MSG.IOERR
-L.ADT.DIR		.DA ADT.DIR
 
 L.SA.LOCAL		.DA SA.LOCAL
 
+L.SCR.Title		.DA SCR.Title
+L.SCR.Status    .DA SCR.Status
+L.LBOX1.Status	.DA LBOX1.Status
+L.LBOX2.Title	.DA LBOX2.Title
+
+L.LIBTUI		.DA LIBTUI
+L.LIBBLKDEV		.DA LIBBLKDEV
+
 				.DA 0
 *--------------------------------------
-CS.INIT			clc
-				rts
+CS.INIT			>LDYA L.LIBTUI
+				>KAPI LoadLib
+				bcs .9
+
+				>STYA LIBTUI
+
+				>LDYA L.LIBBLKDEV
+				>KAPI LoadLib
+				bcs .9
+
+				>STYA LIBBLKDEV
+
+.9				rts
 *--------------------------------------
 CS.RUN			jsr CS.RUN.CheckArgs
 				bcs .9
@@ -91,18 +119,76 @@ CS.RUN			jsr CS.RUN.CheckArgs
 				jsr CS.RUN.OpenSocket
 				bcs .9
 
-				>LDYAI RESP.BUFSIZE
-				>LIBC Malloc
+				jsr CS.RUN.GetBufs
 				bcs .9
 
-				>STYA ZPpRespBuf
-				>STYA.G pRespBuf
-
-				jsr CS.RUN.GETDIR
+				jsr CS.SCR.Init
 				bcs .9
+
+				jsr CS.SCR.SetTitle
+				bcs .9
+
+				jsr CS.LBOX1.Init
+				bcs .9
+
+				jsr CS.LBOX2.Init
+				bcs .9
+
+				>SS
+				>PUSHW.G pLBOX1
+				>LIBCALL LIBTUI,Activate
+				>SR
+				bcc CS.RUN.Loop
+
+				rts
 
 .8				lda #0
 				sec
+.9				rts
+*--------------------------------------
+CS.RUN.Loop		jsr CS.ADT.DIR.Q
+				bcs .1
+
+.10				jsr CS.LBOX1.Update
+				bcs .9
+
+.1				>SLEEP
+
+				>SS
+				>PUSHW.G pSCR
+				>LIBCALL LIBTUI,Exec
+				>SR
+				bcs .9
+
+				cmp #EV.LBOX1.PGUP
+				bne .2
+
+				>LDA.G LBOX1.Page
+				iny
+				ora (pData),y
+				beq .1
+
+				>DECW.G LBOX1.Page
+				bra CS.RUN.Loop
+
+.2				cmp #EV.LBOX1.PGDN
+				bne .3
+
+				>INCW.G LBOX1.Page
+				jsr CS.ADT.DIR.Q
+				bcc .10
+
+				>DECW.G LBOX1.Page
+				bra .1
+
+.3				cmp #EV.LBOX1.CHANGED
+				bne .8
+
+				jsr CS.ADT.QFS.Q
+
+
+.8				bra .1
+
 .9				rts
 *--------------------------------------
 CS.RUN.CheckArgs
@@ -243,13 +329,11 @@ CS.RUN.GetPort	lda iPort
 				>LIBC AToI
 
 .8				>STYA.G SA.REMOTE+S.SA.IN.PORT
+
 				clc
 				rts
 *--------------------------------------
 CS.RUN.OpenSocket
-				lda #TIMEOUT.MAX
-				sta TimeOut
-
 				>SS
 				>PUSHWI AF_INET
 				>PUSHWI SOCK_DGRAM
@@ -276,18 +360,7 @@ CS.RUN.OpenSocket
 				>PUSHWI S.SA.IN
 				>LIBC Connect
 				>SR
-				bcc .4
-
-				cmp #SKT.E.PENDING
-				bne .9
-
-				ldx TimeOut
-				bne .3
-
-				bra .9
-
-.4				clc
-				rts
+				bcc .8
 
 .9				pha
 				tay
@@ -302,133 +375,677 @@ CS.RUN.OpenSocket
 				sec
 .8				rts
 *--------------------------------------
-CS.RUN.GETDIR	>SS
-				>PUSHW hSocket
-				>PUSHW L.ADT.DIR
-				>PUSHWI ADT.DIR.LEN
-				>PUSHWZ					flags
-				>LIBC Send
-				>SR
-				bcc .2
+CS.RUN.GetBufs	>LDYAI REQ.BUFSIZE
+				>LIBC Malloc
+				bcs .9
 
-				cmp #SKT.E.PENDING
-				beq .2
+				>STYA ZPpReqBuf
+				>STYA.G pReqBuf
 
-				lda #MLI.E.IO
-				sec
-				rts
+				>LDYAI REP.BUFSIZE
+				>LIBC Malloc
+				bcs .9
 
-.2				lda #TIMEOUT.MAX
-				sta TimeOut
-
-.3				>SLEEP
-
-				>SS
-				>PUSHW hSocket
-				>LDYA.G pRespBuf
-				>STYA ZPpRespBuf
-				>PUSHYA
-				>PUSHWI RESP.BUFSIZE
-				>PUSHWZ					flags
-				>LIBC Recv
-				>SR
-				bcc CS.RUN.GETDIR.R
-
-				ldx TimeOut
-				bne .3
-
-*				sec
+				>STYA ZPpRepBuf
+				>STYA.G pRepBuf
 
 .9				rts
 *--------------------------------------
-CS.RUN.GETDIR.R	>STYA ZPRespLen
+CS.ADT.DIR.Q	>LDYA.G LBOX1.Page
+				>STYA R1
 
-				ldy #S.UDP+1
-				lda (pRespBuf),y
-				cmp #$C1
-				bne .9
+				ldy #0
 
+.1				lda ADT.DIRQ,y
+				sta (ZPpReqBuf),y
 				iny
-				lda (pRespBuf),y
-				sta ZPPayloadLen
-				iny
-				lda (pRespBuf),y
-				sta ZPPayloadLen+1
-				iny
-				lda (pRespBuf),y
-				cmp #$D3
-				bne .9
+				cpy #ADT.DIRQ.L
+				bcc .1
 
-				jsr CS.RUN.UNRLE
+				lda R1+1
+				sta (ZPpReqBuf),y
+				iny
+
+				lda R1
+				sta (ZPpReqBuf),y
+				iny
+
+				eor R1+1
+				sta (ZPpReqBuf),y
+				iny
+
+				sty ZPReqLen
+				stz ZPReqLen+1
+
+				jsr CS.ADT.SendReq
 				bcs .99
 
-				>SS
-				ldy #S.PS.pStdOut+1
-				jsr A2osX.GetPSy
-				>PUSHA
-				dey
-				jsr A2osX.GetPSy
-				>PUSHA
-				>PUSHW pPayloadBuf
-				>PUSHW ZPPayloadLen
-				>LIBC fwrite
-				>SR
+				jsr CS.ADT.RecvRep
+				bcs .99
 
+				jsr CS.ADT.DIR.R
+				bcs .98
+
+				jsr CS.ADT.DIR.GetPL
+				bcs .98
+
+				jsr CS.ADT.DIR.A
+
+				jsr CS.ADT.DIR.ChkPL
+
+				lda (R2)
+				beq .97
+
+				clc
 				rts
 
-.9				lda #MLI.E.IO
+.97				>LDYA ZPpPayloadBuf
+				>LIBC Free
+
+				lda #MLI.E.IO
+				sec
+
+.98				php
+				pha
+
+				>LDYA ZPpRepBuf
+				>LIBC Free
+
+				pha
+				plp
+
+.99				rts
+*--------------------------------------
+CS.ADT.DIR.R	ldy #1
+				lda (ZPpRepBuf),y
+				cmp #$C1
+				bne .98
+
+				iny
+				lda (ZPpRepBuf),y
+				sta ZPPayloadLen
+				sta ZPPgCnt
+
+				iny
+				lda (ZPpRepBuf),y
+				sta ZPPayloadLen+1
+				sta ZPPgCnt+1
+
+				iny
+				lda (ZPpRepBuf),y
+				cmp #$D3
+				bne .98
+
+				iny						Header Checksum
+
+				iny
+				lda (ZPpRepBuf),y
+				sta ZPBlkNum
+
+				iny
+				lda (ZPpRepBuf),y
+				sta ZPBlkNum+1
+
+				clc
+				rts
+
+.98				lda #MLI.E.IO
 
 				sec
 
 .99				rts
 *--------------------------------------
-CS.RUN.UNRLE	>LDYA ZPPayloadLen
+CS.ADT.DIR.GetPL
+				>LDYA ZPPayloadLen
+				>LIBC Malloc
+				bcs .99
+
+				pha						to restore ZPpPayloadBuf at exit
+
+				>STYA ZPpPayloadBuf
+
+				lda ZPpRepBuf
+				clc
+				adc #7
+				sta R1
+				lda ZPpRepBuf+1
+				adc #0
+				sta R1+1
+
+				stz R2					Initial Byte
+
+				stz R3					CRC
+				stz R3+1
+
+				ldy #0
+
+.1				jsr .80
+				beq .2
+
+				clc
+				adc R2
+				sta R2
+				jsr .70
+				iny
+				bne .1
+
+				bra .7
+
+.2				jsr .80
+
+				sta R2+1				Target Y
+
+.3				lda R2					Reload byte, trashed by CRC
+
+				jsr .70
+				iny
+				cpy R2+1
+				bne .3
+
+				tya
+				bne .1
+
+.7				inc ZPpPayloadBuf+1
+
+				dec ZPPgCnt+1
+				bne .1
+
+.8				jsr .80					CRC lo
+				tay
+
+				jsr .80					CRC hi
+
+				plx						restore ZPpPayloadBuf
+
+				stx ZPpPayloadBuf+1
+
+				cpy R3
+				bne .9
+
+				cmp R3+1
+				bne .9
+
+				clc
+
+				rts
+
+.9				>LDYA ZPpPayloadBuf
+				>LIBC Free
+
+				lda #MLI.E.IO
+
+				sec
+
+.99				rts
+*--------------------------------------
+.70				sta (ZPpPayloadBuf),y
+				eor R3+1
+				tax
+				lda CRC16H,x
+				eor R3
+				sta R3+1
+				lda CRC16L,x
+				sta R3
+				rts
+*--------------------------------------
+.80				inc R1
+				bne .81
+
+				inc R1+1
+
+.81				lda (R1)
+
+				rts
+*--------------------------------------
+CS.ADT.DIR.A	>LDA.G LBOX1.Page
+				clc
+				adc #2
+				sta R1+1
+				stz R1
+
+				ldy #0
+
+.1				lda ADT.ACK,y
+				sta (ZPpReqBuf),y
+				iny
+				cpy #ADT.ACK.L
+				bcc .1
+
+				lda #6
+				sta (ZPpReqBuf),y
+				iny
+
+				lda R1+1
+				sta (ZPpReqBuf),y
+				iny
+
+				lda R1
+				sta (ZPpReqBuf),y
+				iny
+
+				eor R1+1
+				eor #6
+				sta (ZPpReqBuf),y
+				iny
+
+				sty ZPReqLen
+				stz ZPReqLen+1
+
+				jmp CS.ADT.SendAck
+*--------------------------------------
+CS.ADT.DIR.ChkPL
+				lda ZPpPayloadBuf
+				clc
+				adc #14					Skip "DIRECTORY OF "
+				sta R1
+
+				lda ZPpPayloadBuf+1
+				adc #0
+				sta R1+1
+
+				ldy #$ff
+
+.1				iny
+				lda (R1),y
+				beq .2
+
+				eor #C.CR
+				bne .1
+
+				sta (R1),y
+
+.2				tya
+				clc
+				adc R1
+				sta R2
+				lda R1+1
+				adc #0
+				sta R2+1
+
+				lda #42
+				adc R2
+				sta R2
+
+				lda #0
+				adc R2+1
+				sta R2+1
+
+				rts
+*--------------------------------------
+* Payload = 0x01 + (page+1) + (idx+3)
+*--------------------------------------
+CS.ADT.QFS.Q	>LDYA.G LBOX1.Var
+				
+				>STYA R1
+
+				ldy #$ff
+				
+.1				iny
+				lda (R1),y
+				beq .2
+				
+				cmp #C.CR
+				bne .1
+				
+.2				iny
+				sty R2					Filename len+\0
+				
+				lda #$C1
+				sta (ZPpReqBuf)
+				
+				
+				ldy #1
+				lda R2
+				sta (ZPpReqBuf),y
+				
+				iny
+				lda #0
+				sta (ZPpReqBuf),y
+				
+				iny
+				lda #$DA
+				sta (ZPpReqBuf),y
+
+				iny
+				
+				lda #$C1^$DA
+				eor R2
+				sta (ZPpReqBuf),y
+				
+				lda ZPpReqBuf
+				clc
+				adc #5
+				sta R3
+				lda ZPpReqBuf+1
+				adc #0
+				sta R3+1
+				
+				stz R2+1				EOR
+				
+				ldy #$ff
+				
+.3				iny
+				lda (R1),y
+				beq .4
+				
+				cmp #C.CR
+				beq .4
+				
+				sta (R3),y
+				eor R2+1
+				sta R2+1
+				bra .3
+
+.4				lda #0
+				sta (R3),y
+
+				iny
+				lda R2+1
+				sta (R3),y
+				
+				tya
+				clc
+				adc #6
+				sta ZPReqLen
+				stz ZPReqLen+1
+
+				jsr CS.ADT.SendReq
+				
+				rts
+*--------------------------------------
+CS.ADT.SendReq	jsr CS.ADT.Send
+				bcc .8
+
+				cmp #SKT.E.PENDING
+				clc
+				beq .8
+
+				sec
+
+.8				rts
+*--------------------------------------
+CS.ADT.RecvRep	lda #TIMEOUT.MAX
+				sta TimeOut
+
+.1				>SLEEP
+
+				>SS
+				>PUSHW hSocket
+				>LDYA.G pRepBuf
+				>STYA ZPpRepBuf
+				>PUSHYA
+				>PUSHWI REP.BUFSIZE
+				>PUSHWZ					flags
+				>LIBC Recv
+				>SR
+				bcc .8
+
+				ldx TimeOut
+				bne .1
+
+*				sec
+
+				rts
+
+.8				>STYA ZPRepLen
+
+*				clc
+
+				rts
+*--------------------------------------
+CS.ADT.SendAck	jsr CS.ADT.Send
+				bcc .8
+
+				cmp #SKT.E.PENDING
+				clc
+				beq .8
+
+				sec
+
+.8				rts
+*--------------------------------------
+CS.ADT.Send		>SS
+				>PUSHW hSocket
+				>PUSHW ZPpReqBuf
+				>PUSHW ZPReqLen
+				>PUSHWZ					flags
+				>LIBC Send
+				>SR
+				rts
+*--------------------------------------
+CS.SCR.Init		>LIBCALL LIBTUI,Init
+				bcs .9
+
+				>STYA.G pCTX
+
+				>SS
+				>PUSHW.G pCTX
+				>PUSHWI S.OBJ.F.bTitle+S.OBJ.F.bStatus
+				>LIBCALL LIBTUI,NewScrn
+				>SR
+				bcs .9
+
+				>STYA.G pSCR
+
+				>SS
+				>PUSHW.G pSCR
+				>PUSHWI S.OBJ.pStatus
+				>PUSHW L.SCR.Status
+				>LIBCALL LIBTUI,SetProp
+				>SR
+
+.9				rts
+*--------------------------------------
+CS.SCR.SetTitle	>SS
+				>PUSHEA.G SCR.pTitleBuf
+				>PUSHW L.SCR.Title
+
+				>PUSHW A2osX.KVER
+
+				ldy #SA.REMOTE+S.SA.IN.ADDR
+
+.1				lda (pData),y
+				>PUSHA
+				iny
+				cpy #SA.REMOTE+S.SA.IN.ADDR+4
+				bcc .1
+
+				>PUSHW.G SA.REMOTE+S.SA.IN.PORT
+
+				lda iHost
+				>KAPI ArgV
+				>PUSHYA
+
+				>PUSHBI 10
+				>LIBC SPrintF
+				>SR
+
+				>SS
+				>PUSHW.G pSCR
+				>PUSHWI S.OBJ.pTitle
+				>PUSHEA.G SCR.pTitleBuf
+				>LIBCALL LIBTUI,SetProp
+				>SR
+				rts
+*--------------------------------------
+CS.LBOX1.Init	>SS
+				>PUSHW.G pSCR
+				>PUSHBI 0				X1
+				>PUSHBI 1				Y1
+				>PUSHBI	42				W
+				>PUSHBI 20				H
+				>PUSHBI EV.LBOX1.CHANGED
+				>PUSHBI EV.LBOX1.PRESSED
+				>PUSHWI S.OBJ.F.bHBorder+S.OBJ.F.bVBorder+S.OBJ.F.bTitle+S.OBJ.F.bStatus
+				>PUSHWZ					pList = NULL
+				>PUSHEA.G LBOX1.Var
+				>LIBCALL LIBTUI,NewLBox
+				>SR
+				bcs .9
+
+				>STYA.G pLBOX1
+
+				>SS
+				>PUSHW.G pLBOX1
+				>PUSHWI S.LBOX.EV.PGUP
+				>PUSHBI EV.LBOX1.PGDN
+				>PUSHBI EV.LBOX1.PGUP
+				>LIBCALL LIBTUI,SetProp
+				>SR
+				bcs .9
+
+				>SS
+				>PUSHW.G pLBOX1
+				>LIBCALL LIBTUI,Draw
+				>SR
+
+.9				rts
+*--------------------------------------
+CS.LBOX1.Update	>LDYA.G LBOX1.pBuf
+				cmp #0
+				beq .3
+
+				>LIBC Free
+
+.3				>LDYA ZPpPayloadBuf
+				>STYA.G LBOX1.pBuf
+
+				>SS
+				>PUSHW.G pLBOX1
+				>PUSHWI S.OBJ.pTitle
+				>PUSHW R1
+				>LIBCALL LIBTUI,SetProp
+				>SR
+*				bcs .99
+
+				>SS
+				>PUSHW.G pLBOX1
+				>PUSHWI S.OBJ.pBuf
+				>PUSHW R2
+				>LIBCALL LIBTUI,SetProp
+				>SR
+*				bcs .99
+
+				>SS
+				>PUSHEA.G LBOX1.pStatusBuf
+				>PUSHW L.LBOX1.Status
+				>LDA.G LBOX1.Page
+				clc
+				adc #1
+				tax
+				iny
+				lda (pData),y
+				adc #0
+				>PUSHA
+				txa
+				>PUSHA
+				>PUSHBI 2
+				>LIBC SPrintF
+				>SR
+
+				>SS
+				>PUSHW.G pLBOX1
+				>PUSHWI S.OBJ.pStatus
+				>PUSHEA.G LBOX1.pStatusBuf
+				>LIBCALL LIBTUI,SetProp
+				>SR
+
+				rts
+*--------------------------------------
+CS.LBOX2.Init	jsr CS.GetFDs
+				bcc .1
+
+				rts
+
+.1				>SS
+				>PUSHW.G pSCR
+				>PUSHBI 44				X1
+				>PUSHBI 1				Y1
+				>PUSHBI	32				W
+				>PUSHBI 12				H
+				>PUSHBI EV.LBOX2.CHANGED
+				>PUSHBI EV.LBOX2.PRESSED
+				>PUSHWI S.OBJ.F.bHBorder+S.OBJ.F.bVBorder+S.OBJ.F.bTitle+S.OBJ.F.bStatus
+				>PUSHW.G pDevList
+				>PUSHEA.G LBOX2.Var
+				>LIBCALL LIBTUI,NewLBox
+				>SR
+				bcs .9
+
+				>STYA.G pLBOX2
+
+				>SS
+				>PUSHW.G pLBOX2
+				>LIBCALL LIBTUI,Draw
+				>SR
+
+				>SS
+				>PUSHW.G pLBOX2
+				>PUSHWI S.OBJ.pTitle
+				>PUSHW L.LBOX2.Title
+				>LIBCALL LIBTUI,SetProp
+				>SR
+
+.9				rts
+*--------------------------------------
+CS.GetFDs		>LDYAI 14*30+1
 				>LIBC Malloc
 				bcs .9
 
-				>STYA ZPpPayloadBuf
-				>STYA.G pPayloadBuf
+				>STYA R4
+				>STYA.G pDevList
 
-				lda ZPPayloadLen
-				eor #$ff
-				sta ZPCount
+				lda #0
 
-				lda ZPPayloadLen+1
-				eor #$ff
-				sta ZPCount+1
+.1				sta R1					hFD
+				>KAPI GetFDByID
+				bcs .7
 
-				ldx #0
-				ldy #S.UDP+8
+				>STYA R2				pFD
 
-.1				inc ZPCount
+				lda (R2)				#S.FD.T
+				cmp #S.FD.T.BDEV
+				bne .6
+
+				stz R3					pName
+				stz R3+1
+
+				lda R1
+				>KAPI GetNameByID
+				bcs .6
+
+				>STYA R3
+
+				ldy #$ff
+
+.2				iny
+				lda (R3),y
+				sta (R4)
+
+				>INCW R4
+
+				tax
 				bne .2
 
-				inc ZPCount+1
-				beq .8
+				>LDYA R3
+				>LIBC Free
 
-.2				txa
+.6				>LDYA R2
+				>LIBC Free
+
+.7				lda R1
+
+				inc
+				inc
+				cmp #K.FD.MAX*2
+				bcc .1
+
+				lda #0
+				sta (R4)
+
 				clc
-				adc (pRespBuf),y
-				tax
-				jsr .80
-
-				iny
-				bne .3
-
-				inc pRespBuf+1
-.3				bra .1
-
-.8				clc
 
 .9				rts
-
-.80				sta (ZPpPayloadBuf)
-				inc ZPpPayloadBuf
-				bne .81
-
-				inc ZPpPayloadBuf+1
-
-.81				rts
 *--------------------------------------
 CS.SIG			lda TimeOut
 				beq .9
@@ -440,17 +1057,21 @@ CS.SIG			lda TimeOut
 CS.QUIT			ldy hSocket
 				beq .1
 
-				lda hSocket+1
-
+				>SS
+				>PUSHW hSocket
+				>PUSHWI 0				how
 				>LIBC Shutdown
+				>SR
 
-.1				>STYA.G pRespBuf
+.1				>STYA.G pRepBuf
 				cmp #0
 				beq .2
 
 				>LIBC Free
 
-.2
+.2				>LDYA LIBTUI
+
+				>KAPI UnloadLib
 
 .8				clc
 				rts
@@ -465,9 +1086,7 @@ MSG.USAGE		.CS "Usage : ADT <ip|host> [port]\r\n"
 				.CZ "        -F UrlFile\r\n"
 *--------------------------------------
 MSG.UNKNOWN		.CZ "%s: Unknown host\r\n"
-MSG.HOSTOK		.CZ "Connecting to %d.%d.%d.%d:%D (%s)..."
 MSG.SKTKO		.CZ "Failed to Open Socket."
-MSG.SKTOK		.CZ "Connected."
 MSG.SKTERR		.CZ "Socket Error : $%h\r\n"
 MSG.IOERR		.CZ "I/O Error : $%h\r\n"
 *--------------------------------------
@@ -475,8 +1094,67 @@ SA.LOCAL		.DA AF_INET
 				.DA #0,#0,#0,#0			any address
 				.DA 0					Dyn port
 *--------------------------------------
-ADT.DIR			.HS C10100C4040101
-ADT.DIR.LEN		.EQ *-ADT.DIR
+ADT.DIRQ		.HS C10200C407
+ADT.DIRQ.L		.EQ *-ADT.DIRQ
+*				.HS 0000				BlkNum
+*				.HS 00					ChkSum
+*--------------------------------------
+* ADT.QFS		.BS C1 + wlen + D4 + bEOR
+*				.AZ "filename" + bEOR
+*--------------------------------------
+ADT.ACK			.HS C10300CB09
+ADT.ACK.L		.EQ *-ADT.ACK
+*				.HS 06					ACK
+*				.HS	0200				ZPBlkNum+2
+*				.HS 04					ChkSum
+*--------------------------------------
+CRC16L
+	.HS 0021426384A5C6E708294A6B8CADCEEF
+	.HS 31107352B594F7D639187B5ABD9CFFDE
+	.HS 62432001E6C7A4856A4B2809EECFAC8D
+	.HS 53721130D7F695B45B7A1938DFFE9DBC
+	.HS C4E586A740610223CCED8EAF48690A2B
+	.HS F5D4B79671503312FDDCBF9E79583B1A
+	.HS A687E4C522036041AE8FECCD2A0B6849
+	.HS 97B6D5F4133251709FBEDDFC1B3A5978
+	.HS 88A9CAEB0C2D4E6F80A1C2E304254667
+	.HS B998FBDA3D1C7F5EB190F3D235147756
+	.HS EACBA8896E4F2C0DE2C3A08166472405
+	.HS DBFA99B85F7E1D3CD3F291B057761534
+	.HS 4C6D0E2FC8E98AAB44650627C0E182A3
+	.HS 7D5C3F1EF9D8BB9A75543716F1D0B392
+	.HS 2E0F6C4DAA8BE8C926076445A283E0C1
+	.HS 1F3E5D7C9BBAD9F81736557493B2D1F0
+*--------------------------------------
+CRC16H
+	.HS 00102030405060708191A1B1C1D1E1F1
+	.HS 12023222524272629383B3A3D3C3F3E3
+	.HS 2434041464744454A5B58595E5F5C5D5
+	.HS 3626160676665646B7A79787F7E7D7C7
+	.HS 4858687808182838C9D9E9F98999A9B9
+	.HS 5A4A7A6A1A0A3A2ADBCBFBEB9B8BBBAB
+	.HS 6C7C4C5C2C3C0C1CEDFDCDDDADBD8D9D
+	.HS 7E6E5E4E3E2E1E0EFFEFDFCFBFAF9F8F
+	.HS 9181B1A1D1C1F1E11000302050407060
+	.HS 8393A3B3C3D3E3F30212223242526272
+	.HS B5A59585F5E5D5C53424140474645444
+	.HS A7B78797E7F7C7D72636061666764656
+	.HS D9C9F9E99989B9A95848786818083828
+	.HS CBDBEBFB8B9BABBB4A5A6A7A0A1A2A3A
+	.HS FDEDDDCDBDAD9D8D7C6C5C4C3C2C1C0C
+	.HS EFFFCFDFAFBF8F9F6E7E4E5E2E3E0E1E
+*--------------------------------------
+*--------------------------------------
+SCR.Title		.CZ "A2osX-%d.%02d ADT Client: %d.%d.%d.%d:%D (%s)"
+SCR.Status		.CZ "Status bar..."
+LBOX1.Status	.CZ "Page:%D"
+LBOX2.Title		.CZ "Local devices"
+*--------------------------------------
+
+*--------------------------------------
+LIBTUI			.AZ "libtui"
+LIBBLKDEV		.AZ "libblkdev"
+				.DA #*-LIBTUI
 *--------------------------------------
 ID.END			.EQ *
 *--------------------------------------
@@ -486,8 +1164,24 @@ ID.END			.EQ *
 pAI				.BS 2
 SA.REMOTE		.BS S.SA.IN
 
-pRespBuf		.BS 2
-pPayloadBuf		.BS 2
+pReqBuf			.BS 2
+pRepBuf			.BS 2
+
+pCTX			.BS 2
+
+pSCR			.BS 2
+SCR.pTitleBuf	.BS 80
+
+pLBOX1			.BS 2
+LBOX1.Page		.BS 2
+LBOX1.pBuf		.BS 2
+LBOX1.Var		.BS 2
+LBOX1.pStatusBuf	.BS 11
+
+pDevList		.BS 2
+
+pLBOX2			.BS 2
+LBOX2.Var		.BS 2
 
 DS.END			.ED
 *--------------------------------------
