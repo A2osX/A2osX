@@ -18,7 +18,10 @@ pCTX			.BS 2
 pSCR			.BS 2
 pTBOX			.BS 2
 
-pLineBuf		.BS 2
+pLinkBuf		.BS 2
+pFilename		.BS 2
+pHTag			.BS 2
+
 pFileBuf		.BS 2
 BufSize			.BS 2
 
@@ -26,7 +29,6 @@ ZPPtr1			.BS 2
 ZPPtr2			.BS 2
 ZPPtr3			.BS 2
 
-TimeOut			.BS 1
 ErrCode			.BS 1
 
 ZS.END			.ED
@@ -37,7 +39,7 @@ CS.START		cld
 				jmp (.1,x)
 				.DA #$61				6502,Level 1 (65c02)
 				.DA #2					BIN Layout Version 2
-				.DA #S.PS.SIG.T1SEC
+				.DA #0					S.PS.SIG
 				.DA #0
 				.DA CS.END
 				.DA ID.END
@@ -82,7 +84,13 @@ CS.RUN			>LDYAI 256
 				>LIBC Malloc
 				bcs CS.INIT.RTS
 
-				>STYA pLineBuf
+				>STYA pLinkBuf
+
+				>LDYAI 256
+				>LIBC Malloc
+				bcs CS.INIT.RTS
+
+				>STYA pFilename
 
 				lda #1
 				>KAPI ArgV
@@ -90,18 +98,36 @@ CS.RUN			>LDYAI 256
 
 				>LDYA L.FILE.INDEX
 
-.1				jsr CS.GetLink
+.1				>STYA R1
+
+				ldy #$ff
+
+.2				iny
+				lda (R1),y
+				sta (pLinkBuf),y
+				bne .2
+
+				jsr CS.CheckLink
 				bcs CS.RUN.USAGE
 
-				jsr CS.GetFile
+				jsr CS.SCR.Init
 				bcs CS.INIT.RTS
 
-				jsr CS.Scr.Init
+				jsr CS.LoadFile
 				bcs CS.INIT.RTS
 *--------------------------------------
-CS.RUN.LOOP0	jsr CS.Scr.SetBuf
-				jsr CS.Scr.SetStatusOkErr
-*--------------------------------------
+CS.RUN.LOOP0	jsr CS.TBOX.SetBuf
+				jsr CS.SCR.SetStatusOkErr
+				bcs CS.RUN.LOOP
+
+				jsr CS.SCR.SetTitle
+
+CS.RUN.LOOP1	lda (pHTag)
+				beq CS.RUN.LOOP
+
+
+
+
 CS.RUN.LOOP		>SS
 				>PUSHW pSCR
                 >LIBCALL LIBTUI,Exec
@@ -111,10 +137,7 @@ CS.RUN.LOOP		>SS
 				cmp #EV.HL.SELECTED
 				bne .1
 
-				>LEA.G LinkBuf
-				jsr CS.GetLink
-
-				jsr CS.Scr.SetStatusGoto
+				jsr CS.SCR.SetStatusGoto
 				bcc CS.RUN.LOOP
 
 				rts
@@ -122,11 +145,18 @@ CS.RUN.LOOP		>SS
 .1				cmp #EV.HL.PRESSED
 				bne .2
 
-				jsr CS.GetFile
-				jsr CS.Scr.SetStatusOkErr
+				jsr CS.CheckLink
+				bcs CS.RUN.LOOP
+
+				lda (pLinkBuf)
+				cmp #'#'
+				beq CS.RUN.LOOP1
+
+				jsr CS.LoadFile
+				jsr CS.SCR.SetStatusOkErr
 				bcc CS.RUN.LOOP0
 
-				rts
+				bra CS.RUN.LOOP
 
 .2				eor #17					Ctrl-Q
 				bne CS.RUN.LOOP
@@ -135,15 +165,13 @@ CS.RUN.LOOP		>SS
 
 .9				rts
 *--------------------------------------
-CS.SIG			lda TimeOut
-				beq .9
-
-				dec TimeOut
-
-.9				sec
+CS.SIG			sec
 				rts
 *--------------------------------------
-CS.QUIT			>LDYA pLineBuf
+CS.QUIT			>LDYA pFilename
+				jsr .7
+
+				>LDYA pLinkBuf
 				jsr .7
 
 				>LDYA pFileBuf
@@ -171,7 +199,7 @@ CS.QUIT			>LDYA pLineBuf
 
 .8				rts
 *--------------------------------------
-CS.Scr.Init		>LIBCALL LIBTUI,Init
+CS.SCR.Init		>LIBCALL LIBTUI,Init
                 bcs .98
 
                 >STYA pCTX
@@ -185,9 +213,6 @@ CS.Scr.Init		>LIBCALL LIBTUI,Init
 
                 >STYA pSCR
 
-				jsr CS.Scr.SetTitle
-				jsr CS.Scr.SetStatus
-
 				>SS
 				>PUSHW pSCR
                 >PUSHBI 0    			X1
@@ -195,8 +220,8 @@ CS.Scr.Init		>LIBCALL LIBTUI,Init
                 >PUSHBI 80    			W
                 >PUSHBI 22    			H
                 >PUSHWI 0				F
-                >PUSHW pFileBuf
-                >PUSHW BufSize
+                >PUSHWZ					pFileBuf
+                >PUSHWZ					BufSize
                 >LIBCALL LIBTUI,NewTBox
 				>SR
 .99             bcs .9
@@ -209,21 +234,31 @@ CS.Scr.Init		>LIBCALL LIBTUI,Init
 				>SS
 				>PUSHW pTBOX
                 >PUSHWI S.OBJ.pVar
-                >PUSHEA.G LinkBuf
+                >PUSHW pLinkBuf
                 >LIBCALL LIBTUI,SetProp
 				>SR
 
 .9              rts
 *--------------------------------------
-CS.Scr.SetTitle	>SS
+CS.SCR.SetTitle	>SS
+				>PUSHEA.G SCR.TitleBuf
+				>PUSHW L.MSG.ScrTitle
+				>PUSHW A2osX.KVER
+				>PUSHW pFilename
+				>PUSHBI 4
+				>LIBC SPrintF
+				>SR
+
+				>SS
 				>PUSHW pSCR
                 >PUSHWI S.OBJ.pTITLE
-                >PUSHW L.MSG.ScrTitle
+                >PUSHEA.G SCR.TitleBuf
                 >LIBCALL LIBTUI,SetProp
 				>SR
+
 				rts
 *--------------------------------------
-CS.Scr.SetBuf	>SS
+CS.TBOX.SetBuf	>SS
 				>PUSHW pTBOX
 				>PUSHWI S.OBJ.pBuf
 				>PUSHW pFileBuf
@@ -240,18 +275,17 @@ CS.Scr.SetBuf	>SS
 
 .9				rts
 *--------------------------------------
-CS.Scr.SetStatusGoto
+CS.SCR.SetStatusGoto
 				>SS
-				>PUSHEA.G SCR.StatusBuf	skip type
+				>PUSHEA.G SCR.StatusBuf
 				>PUSHW L.MSG.GOTO
-				>PUSHEA.G PathBuf
-				>PUSHEA.G HtagBuf
-				>PUSHBI 4
+				>PUSHW pLinkBuf
+				>PUSHBI 2
 				>LIBC SPrintF
 				>SR
-				bra CS.Scr.SetStatus
+				bra CS.SCR.SetStatus
 *--------------------------------------
-CS.Scr.SetStatusOkErr
+CS.SCR.SetStatusOkErr
 				bcc .1
 
 				sta ErrCode
@@ -264,7 +298,7 @@ CS.Scr.SetStatusOkErr
 				>LIBC SPrintF
 				>SR
 
-				jsr CS.Scr.SetStatus
+				jsr CS.SCR.SetStatus
 
 				lda ErrCode
 				sec
@@ -277,7 +311,7 @@ CS.Scr.SetStatusOkErr
 				>LIBC SPrintF
 				>SR
 *--------------------------------------
-CS.Scr.SetStatus
+CS.SCR.SetStatus
 				>SS
 				>PUSHW pSCR
                 >PUSHWI S.OBJ.pSTATUS
@@ -286,68 +320,85 @@ CS.Scr.SetStatus
 				>SR
 				rts
 *--------------------------------------
-* [[text]host:port/path#htag]
-* [#htag]text]
-*--------------------------------------
-CS.GetLink		>STYA ZPPtr1
+CS.CheckLink	>LDYA L.MSG.NULL
+				>STYA pHTag
 
-				>LEA.G PathBuf
-				>STYA ZPPtr2
+				ldy #0
+				lda (pLinkBuf)
+				cmp #'#'
+				beq .3
 
 				>LDYA L.ENV.MANPATH
 				>LIBC GetEnv
 
-				>STYA ZPPtr3
+				>STYA R1
 
 				ldy #$ff
 
 .1				iny
-				lda (ZPPtr3),y
-				sta (ZPPtr2),y
+				lda (R1),y
+				sta (pFilename),y
 				bne .1
 
-.2				jsr CS.GetCharPtr1
-				beq .4
-
-				cmp #'#'
-				beq .3
-
-				sta (ZPPtr2),y
-				iny
-				bra .2
-
-.3				lda #0
-
-.4				sta (ZPPtr2),y
-
-				>LEA.G HTagBuf
-				>STYA ZPPtr3
+				tya
+				clc
+				adc pFilename
+				sta R2
+				lda pFilename+1
+				adc #0
+				sta R2+1
 
 				ldy #$ff
 
-.5				iny
-				jsr CS.GetCharPtr1
-				sta (ZPPtr3),y
-				bne .5
+.2				iny
+				lda (pLinkBuf),y
+				sta (R2),y
+				beq .8
 
-				clc
+				eor #'#'
+				bne .2
+
+				sta (R2),y
+
+.3				tya
+				sec
+
+				adc pLinkBuf
+				sta pHTag
+				lda #0
+				adc pLinkBuf+1
+				sta pHTag+1
+
+.8				clc
 
 .9				rts
 *--------------------------------------
-CS.GetFile		>LEA.G PathBuf
+CS.LoadFile		>LDYA pFilename
 				>LIBC LoadTxtFile
 				bcs .9
 
+				>STYA R1
+
+				>LDYA pFileBuf
+				beq .10
+
+				>LIBC Free
+
+.10				>LDYA R1
 				>STYA pFileBuf
-				>STYA ZPPtr1
 
 				ldy #1
 				ldx #0
 
-.1				jsr CS.GetCharPtr1
+.1				lda (R1)
 				beq .8
 
-				iny
+				inc R1
+				bne .2
+
+				inc R1+1
+
+.2				iny
 				bne .1
 
 				inx
@@ -360,28 +411,18 @@ CS.GetFile		>LEA.G PathBuf
 
 .9				rts
 *--------------------------------------
-CS.GetCharPtr1	lda (ZPPtr1)
-				beq .8
-
-				inc ZPPtr1
-				bne .8
-
-				inc ZPPtr1+1
-
-.8				rts
-*--------------------------------------
 CS.END			.EQ *
 *--------------------------------------
 LIBTUI          .AZ "libtui"
 ENV.MANPATH		.AZ "MANPATH"
 FILE.INDEX		.AZ "index"
 *--------------------------------------
-MSG.ScrTitle	.CZ "A2osX-MAN - <Ctrl-Q>uit"
+MSG.ScrTitle	.CZ "A2osX-%d.%02d MAN %s - <Ctrl-Q>uit"
 *--------------------------------------
 MSG.USAGE		.CS "Usage : MAN <manfile>[#htag]"
 MSG.CRLF		.CS "\r\n"
 MSG.NULL		.HS 00
-MSG.GOTO		.CZ "Goto: %s#%s"
+MSG.GOTO		.CZ "Goto: %s"
 MSG.OK			.CZ "Ok"
 MSG.ERROR		.CZ "Error: $%h"
 *--------------------------------------
@@ -389,9 +430,7 @@ ID.END			.EQ *
 *--------------------------------------
 				.DUMMY
 				.OR 0
-LinkBuf			.BS 32
-PathBuf			.BS MLI.MAXPATH+1
-HTagBuf			.BS 32
+SCR.TitleBuf	.BS 80
 SCR.StatusBuf	.BS 80
 DS.END			.ED
 *--------------------------------------
