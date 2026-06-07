@@ -19,7 +19,9 @@ K.TBufInsL		ldy #0					DataPtr
 				>STYA ZPPtr2
 
 				ldy #4					pTBuf
-				jsr TBUF.GetP			Y = 1
+				jsr TBUF.GetP
+
+*				ldy #1
 
 .1				iny
 				lda (pIBlk),y
@@ -30,50 +32,30 @@ K.TBufInsL		ldy #0					DataPtr
 				sty iBlk
 
 				lda (ZPPtr3),y
+
+*				dec						ending \0
+
 				sta iByte
 
 				lda (pIBlk),y
 				jsr BLIST.GetpDblkY
 
 .2				jsr RAMSW.xTXTPTRgn
-				beq .8
+				beq .7
 
-				tax
-
-.3				ldy iBlk
-				lda (ZPPtr3),y
-				inc
-				sta (ZPPtr3),y
-
-				cpx #C.CR
-				bne .4
-
-				lda (ZPPtr4),y
-				inc
-				sta (ZPPtr4),y
-
-.4				txa
-
-				jsr BLIST.AddByte
+				jsr TBUF.AddC
 				bcc .2
 
 				rts
 
-.8				ldy iBlk
-				lda (ZPPtr3),y
-				inc
-				sta (ZPPtr3),y
-
-				lda (ZPPtr4),y
-				inc
-				sta (ZPPtr4),y
-
-				lda #C.CR
-				jsr BLIST.AddByte
+.7				lda #C.CR
+				jsr TBUF.AddC
 				bcs .9
 
 				lda #0
-				jmp BLIST.AddByte		A=0
+				ldy iByte
+				clc
+				jmp BLIST.SetDBlkYB
 
 .9				rts
 */--------------------------------------
@@ -104,19 +86,17 @@ K.TBufGetL		ldy #4					pTBuf
 				stz ZPPtr1
 				stz ZPPtr1+1
 
-.5				jsr TBUF.GetNByte
-				tax
+.5				jsr TBUF.GetC
 				beq .8
 
 				cmp #C.CR
 				beq .7
 
 				jsr X.xFORPNTpn
-				inc ZPPtr1
-				bne .5
+				>INCW ZPPtr1
 
-				inc ZPPtr1+1
-				bra .5
+				jsr TBUF.NextC
+				bcc .5
 
 .7				lda #0
 
@@ -126,49 +106,73 @@ K.TBufGetL		ldy #4					pTBuf
 
 				clc
 
+				rts
+
 .9				lda #E.NOKEY
 
 *				sec
 
 				rts
 */--------------------------------------
-* # TBufSetL
+* # TBufInsC
 * ## ASM
 * `>SS`
 * `>PUSHW pTBuf`
-* `>PUSHW LineNum`
-* `>PUSHW DataPtr`
-* `>KAPI TBufSetL`
+* `>PUSHW PosX`
+* `>PUSHW PosY`
+* `>PUSHW Char`
+* `>KAPI TBufInsC`
 * `>SR`
 * ## RETURN VALUE
-*  Y,A = Line length
 *\--------------------------------------
-K.TBufSetL 		ldy #4					pTBuf
+K.TBufInsC		ldy #6					pTBuf
 				jsr TBUF.GetP
 
 				ldy #2					LineNum
 				jsr RAMSW.GetStkYW
+
 				jsr TBUF.FindL
 				bcs .9
 
-				ldy #0					DataPtr
-				jsr RAMSW.StkY2TXTPTR
+				ldy #4					PosX
+				jsr RAMSW.GetStkYW
+				eor #$ff
+				sta ZPPtr1+1
+				tya
+				eor #$ff
+				sta ZPPtr1
 
-				jsr TBUF.DelL
+.1				inc ZPPtr1
+				bne .2
 
-				lda TXTPTR+1
+				inc ZPPtr1+1
 				beq .8
 
-				jmp TBUF.InsL
+.2				jsr TBUF.GetC
+				beq .9
 
-.8				clc
-				rts
+				cmp #C.CR
+				beq .9
+
+				inc iByte
+				beq .9
+
+				ldy iBlk
+				lda (ZPPtr3),y
+				beq .1
+
+				cmp iByte
+				bcs .1
 
 .9				lda #E.NOKEY
 
-*				sec
+				sec
 
 				rts
+
+.8				jsr RAMSW.GetStk
+
+				jmp TBUF.InsC
 */--------------------------------------
 * # TBufGetB
 * ## ASM
@@ -193,7 +197,6 @@ K.TBufGetB		ldy #6					pTBuf
 
 				lda #2
 				sta iBlk
-
 
 				clc
 				rts
@@ -243,6 +246,8 @@ K.TBufNew		lda #0
 				jsr MEM.Malloc.YAX		Kernel Memory
 				bcs .9
 
+				>STYA ZPPtr3
+
 				txa						hLBlk
 
 				sta (pIBlk)
@@ -284,7 +289,7 @@ TBUF.GetP		jsr RAMSW.GetStkYW
 
 				rts
 *--------------------------------------
-TBUF.FindL		>STYA ZPPtr2
+TBUF.FindL		>STYA ZPPtr2			Requested line num
 
 				ldx #0					start at LineCnt = 0
 				txa
@@ -297,7 +302,7 @@ TBUF.FindL		>STYA ZPPtr2
 				iny						Next DBlk
 
 				lda (pIBlk),y
-				beq .9
+				beq .9					Last block
 
 				lda (ZPPtr4),y			we have one more DBlk block
 				clc
@@ -314,6 +319,7 @@ TBUF.FindL		>STYA ZPPtr2
 				bcc .1					LineNum is not in this block
 
 				sty iBlk
+
 				jsr BLIST.GetpDblkY
 
 				stz iByte
@@ -326,189 +332,201 @@ TBUF.FindL		>STYA ZPPtr2
 				eor ZPPtr2+1
 				beq .8
 
-.3				jsr TBUF.GetNByte
-				tax
+.3				jsr TBUF.GetC
 				beq .9
 
 				cmp #C.CR
-				bne .3
+				beq .4
 
-				inc ZPPtr1
-				bne .2
+				jsr TBUF.NextC
+				bcc .3
 
-				inc ZPPtr1+1
-				bra .2
+				bra .9
+
+.4				>INCW ZPPtr1
+
+				jsr TBUF.NextC
+				bcc .2
+
+.9				>LDYA ZPPtr1			not found, exit with line count
+
+				sec
+				rts
+
 
 .8				clc
 				rts
-
-.9				>LDYA ZPPtr1			not found, exit with line count
-				sec
-				rts
 *--------------------------------------
-TBUF.DelL		ldy iByte
-
-.1				jsr BLIST.GetDBlkYB
-				cmp #C.CR
-				beq .4
-
-				iny
-				bne .1
-
-				lda iByte
-				beq .2
-
-				ldy iBlk
-				sta (ZPPtr3),y
-
-				stz iByte
-				jsr BLIST.2NBlk
-				bcc TBUF.DelL
-
-				rts
-
-.2				jsr TBUF.FreeB
-				bcc TBUF.DelL
-
-				rts
+* ZPPtr3 = LEN block
+* ZPPtr4 = CR block
 *--------------------------------------
-* Delete between iByte -- Y+1
-*--------------------------------------
-.4				lda iByte
-				clc
-				adc pDBlk
-				sta ZPPtr1
-				lda pDBlk+1
-				adc #0
-				sta ZPPtr1+1
+TBUF.InsC		tax
 
 				lda SLIST.Bnk
 				sta (pRWReg)
-				sta IO.SETWRITEAUX
-
-				ldx #0					!CR deleted
-
-.5				iny
-				beq .6
-
-				jsr BLIST.GetDBlkY
-				sta (ZPPtr1)
-				beq .6
-
-				>INCW ZPPtr1
-
-				cmp #C.CR
-				bne .5
-
-				dex
-				bra .5
-
-.6				sta IO.CLRWRITEAUX
-				lda A2osX.ActBnk
-				sta (pRWReg)
-
-				tya
-				ldy iBlk
-
-				sta (ZPPtr3),y
-
-				txa
-				clc
-				adc (ZPPtr4),y
-				sta (ZPPtr4),y
-
-				rts
-*--------------------------------------
-TBUF.InsL		lda TXTPTR+1
-				pha
-
-				jsr RAMSW.xTXTPTRl
-				sty ZPPtr1				StrLen
-				stx ZPPtr1+1
-
-				pla
-				sta TXTPTR+1
-
-.1				jsr RAMSW.xTXTPTRgn
-				beq .3
-
-				tax
 
 				ldy iBlk
 				lda (ZPPtr3),y
 				inc
+				beq .3					no room in this block..
+
 				sta (ZPPtr3),y
+
+				tay
+
+				sta IO.SETWRITEAUX
+
+.1				dey
+				jsr RAMSW.GetDBlkY
+				iny
+				sta (pDBlk),y
+				dey
+				cpy iByte
+				bne .1
+
+				txa
+
+				sta (pDBlk),y
+
+				sta IO.CLRWRITEAUX
 
 				cpx #C.CR
 				bne .2
 
+				ldy iBlk
 				lda (ZPPtr4),y
 				inc
 				sta (ZPPtr4),y
 
-.2				txa
-
-				ldy iByte
-				jsr BLIST.SetDBlkY
-				inc iByte
-				bne .1
-
-				jsr TBUF.InsB
-				bcc .1
-
-				rts
-
-.3				ldy iBlk
-				lda (ZPPtr3),y
-				inc
-				sta (ZPPtr3),y
-
-				lda (ZPPtr4),y
-				inc
-				sta (ZPPtr4),y
-
-				lda #C.CR
-
-				ldy iByte
-				jsr BLIST.SetDBlkY
-				inc iByte
-				beq TBUF.InsB
+.2				lda A2osX.ActBnk
+				sta (pRWReg)
 
 				clc
 				rts
 *--------------------------------------
-TBUF.InsB		ldy iBlk
+* split this block at iByte
+*--------------------------------------
+.3				stx .6+1
 
-.3				lda (pIBlk),y
-				beq .4
+				jsr TBUF.InsB
+				bcs .9
+
+				stz ZPPtr1
+				stz ZPPtr1+1
+
+				sta IO.SETWRITEAUX
+
+				ldy iByte
+
+.4				jsr RAMSW.GetDBlkY
+
+				sta (ZPPtr2)
+
+				>INCW ZPPtr2
+
+				inc ZPPtr1
+
+				cmp #C.CR
+				bne .5
+
+				inc ZPPtr1+1
+
+.5				iny
+				cpy #$ff
+				bne .4
+
+				ldy iByte
+
+.6				lda #$ff				SELF MODIFIED
+				sta (pDBlk),y
+
+				sta IO.CLRWRITEAUX
+				tax
+
+				ldy iBlk
+
+				lda (ZPPtr3),y
+				sec
+				sbc ZPPtr1
+				inc						+1 char
+				sta (ZPPtr3),y
+
+				lda (ZPPtr4),y
+				sec
+				sbc ZPPtr1+1
+
+				cpx #C.CR				+1 CR ?
+				bne .7
+
+				inc
+
+.7				sta (ZPPtr4),y
 
 				iny
-				bra .3
 
-.4				lda (pIBlk),y
+				lda ZPPtr1
+				sta (ZPPtr3),y
+				lda ZPPtr1+1
+				sta (ZPPtr4),y
+
+				lda A2osX.ActBnk
+				sta (pRWReg)
+				clc
+				rts
+
+.9				pha
+				lda A2osX.ActBnk
+				sta (pRWReg)
+				pla
+				rts
+*--------------------------------------
+TBUF.InsB		>LDYAI 256
+				jsr K.Malloc
+				bcs .9
+
+				>STYA ZPPtr2
+
+				ldy iBlk
+				iny
+				lda (pIBlk),y
+				beq .8					Append this new block
+
+.1				iny
+				lda (pIBlk),y
+				bne .1					go to end...
+
+.2				dey
+				cpy iBlk
+				beq .7
+
+				lda (pIBlk),y
 				iny
 				sta (pIBlk),y
-
 				dey
+
 				lda (ZPPtr3),y
 				iny
 				sta (ZPPtr3),y
-
 				dey
+
 				lda (ZPPtr4),y
 				iny
 				sta (ZPPtr4),y
-
 				dey
-				cpy iBlk
-				bne .4
+				bra .2
+
+.7				iny
+
+.8				txa
+				sta (pIBlk),y
 
 				lda #0
-				sta (pIBlk),y
 				sta (ZPPtr3),y
 				sta (ZPPtr4),y
 
-				jmp BLIST.AddBlk
+				clc
+
+.9				rts
 *--------------------------------------
 TBUF.FreeB		ldy iBlk
 				lda (pIBlk),y
@@ -540,24 +558,74 @@ TBUF.FreeB		ldy iBlk
 				ldy iBlk
 				jmp BLIST.GetpDblkY
 *--------------------------------------
-TBUF.GetNByte	ldy iByte
-				jsr BLIST.GetDBlkYB
-				bne .1
+TBUF.AddC		tax
+
+				ldy iByte
+				iny
+				bne .5
+
+				phx
+
+				jsr BLIST.AddBlk
+				plx
+				bcs .9
 
 				stz iByte
-				jsr BLIST.2NBlk
-				bcc TBUF.GetNByte
 
-				rts
+.5				ldy iBlk
+				lda (ZPPtr3),y
+				inc
+				sta (ZPPtr3),y
 
-.1				inc iByte
+				cpx #C.CR
+				bne .6
+
+				lda (ZPPtr4),y
+				inc
+				sta (ZPPtr4),y
+
+.6				txa
+
+				ldy iByte
+				jsr BLIST.SetDBlkYB
+
+				inc iByte
+
+				clc
+.9				rts
+*--------------------------------------
+TBUF.GetC		ldy iByte
+
+*				ldy iBlk
+*				cmp (ZPPtr3),y
+*				bcc .8
+*
+*				lda #0
+*				rts
+*
+*.8				tay
+
+				jmp RAMSW.GetDBlkYB
+*--------------------------------------
+TBUF.NextC		inc iByte
+				beq .1
+
+				ldy iBlk
+				lda (ZPPtr3),y
+				beq .9
+
+				cmp iByte
 				bne .8
 
-				pha
-				jsr BLIST.2NBlk
-				pla
+				stz iByte
 
-.8				rts
+.1				jmp BLIST.2NBlk
+
+.8				clc
+				rts
+
+.9				sec
+				rts
 *--------------------------------------
 MAN
 SAVE usr/src/sys/kernel.s.tbuf
