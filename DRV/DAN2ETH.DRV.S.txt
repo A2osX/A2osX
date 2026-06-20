@@ -7,7 +7,8 @@ NEW
 *--------------------------------------
 				.INB inc/macros.i
 				.INB inc/a2osx.i
-				.INB inc/kernel.i
+				.INB inc/a2osx.api.i
+				.INB inc/io.i
 				.INB inc/mli.e.i
 				.INB inc/nic.i
 				.INB inc/eth.i
@@ -54,10 +55,10 @@ ZS.END			.ED
 CS.START		cld
 				jmp Dev.Detect			cld,jmp abs=DRV
 				.DA #$61				6502,Level 1 (65c02)
-				.DA #1					DRV Layout Version 1
+				.DA #2					DRV Layout Version 2
 				.DA 0
-				.DA CS.END-CS.START			Code Length
-				.DA 0
+				.DA CS.END
+				.DA ID.END
 				.DA 0
 				.DA 0
 *--------------------------------------
@@ -87,9 +88,9 @@ Dev.Detect		>STYA ZPArgPtr
 				lda #$C7
 
 .1				sta ZPPtr1+1
-				
+
 				ldy #ROM.SIG.L-1
-				
+
 .10				lda (ZPPtr1),y
 				cmp ROM.SIG,y
 				bne	.2
@@ -105,7 +106,7 @@ Dev.Detect		>STYA ZPArgPtr
 				asl
 				asl
 				ora #$88
-				sta DEVSLOTx0 
+				sta DEVSLOTx0
 				bra .3
 
 .2				dec FD.DEV.NAME+3
@@ -120,31 +121,37 @@ Dev.Detect		>STYA ZPArgPtr
 				lda #MLI.E.NODEV
 				sec
 .99				rts
-*--------------------------------------
-.3				
-*				sta DIB+S.DIB.VERSION+1
-*				sta DIB+S.DIB.VERSION
 
-				jsr Dev.ParseArgs
-				bcs .99
-				
-.8				>PUSHW L.MSG.DETECT.OK
+.3
+
+*--------------------------------------
+Dev.Setup		>SS
+				>PUSHW L.MSG.DETECT.OK
 				>PUSHW L.FD.DEV.NAME
 				>PUSHBI 2
 				>LIBC PrintF
-				
-				>PUSHWI DRV.END
-				>PUSHWI DRV.CS.END-DRV.CS.START
-				>PUSHWI DRV.CS.START
-				>LDYA L.DRV.CS.START
-				>KAPI InsDrv
+				>SR
 				bcs .9
 
-				>STYA FD.DEV+S.FD.DEV.DRVPTR
+				jsr Dev.ParseArgs
+				bcs .9
 
+				>SS
+				>PUSHW L.DRV.CS.START
+				>PUSHWI DRV.CS.START
+				>PUSHWI DRV.CS.END
+				>PUSHWI DRV.ID.END
+				>KAPI InsDrv
+				>SR
+				bcs .9
+
+				>STYA FD.DEV+S.FD.DEV.pDRV
+
+				>SS
 				>PUSHW L.FD.DEV
 				>PUSHW L.FD.DEV.NAME
 				>LIBC MKDev
+				>SR
 				bcs .9
 
 				ldx DEVSLOT0x
@@ -166,9 +173,10 @@ Dev.ParseArgs	lda (ZPArgPtr)
 				clc
 				rts
 
-.1				>PUSHW ZPArgPtr
+.1				>SS
+				>PUSHW ZPArgPtr
 				>PUSHW L.SSCANF.MAC
-	
+
 				ldx #0
 
 .2				>PUSHW L.MAC0,x
@@ -179,17 +187,20 @@ Dev.ParseArgs	lda (ZPArgPtr)
 
 				>PUSHBI 12				6 x byte PTRs
 				>LIBC SScanF
+				>SR
 				bcc .8
-				
+
 				lda #E.SYN
 *				sec
 .8				rts
 *--------------------------------------
-CS.END
+CS.END			.EQ *
+*--------------------------------------
 MSG.DETECT		.CZ "dan2eth/W5500 Driver."
 MSG.DETECT.OK	.CZ "dan2eth/W5500 Installed As Device : %s\r\n"
 MSG.DETECT.KO	.CZ "Hardware Not Found."
 SSCANF.MAC		.CZ "%h:%h:%h:%h:%h:%h"
+*--------------------------------------
 ROM.SIG			.HS E0.20.A0.00.E0.03.A2.3C.D0.05.A9.01.9D.FB.BF.A0
 ROM.SIG.L		.EQ *-ROM.SIG
 *--------------------------------------
@@ -201,15 +212,19 @@ FD.DEV			.DA #S.FD.T.CDEV
 				.BS 2					DRVPTR
 				.DA 0					DCBPTR
 				.DA 0					BUFPTR
-FD.DEV.NAME		.AZ "eth7"
+FD.DEV.NAME		.AZ "/dev/eth7"
 *--------------------------------------
 *			Driver Code
 *--------------------------------------
 * https://github.com/profdc9/ip65/blob/main/drivers/dan2d.s
 *--------------------------------------
-ZPIOCTL			.EQ ZPDRV
-ZPBufPtr		.EQ ZPDRV+2
-Counter			.EQ ZPDRV+4
+				.DUMMY
+				.OR ZPDRV+4
+
+ZPIOCTL			.BS 2
+RXTX.Size		.BS 2
+
+				.ED
 *--------------------------------------
 DRV.CS.START	cld
 				jmp (.1,x)
@@ -225,7 +240,7 @@ DRV.CS.START	cld
 				.DA WRITE
 				.DA 0					end or relocation
 *--------------------------------------
-STATUS			>STYA ZPIOCTL
+STATUS			jsr GET.IOCTLBUFPTR
 
 				ldy #S.IOCTL.S
 				lda (ZPIOCTL),y
@@ -240,18 +255,17 @@ STATUS			>STYA ZPIOCTL
 
 .1				ldx #3
 
-				ldy #S.IOCTL.BUFPTR
-				lda (ZPIOCTL),y
-				sta .3+1
-				iny
-				lda (ZPIOCTL),y
-				sta .3+2
-
-.2				lda DIB,x
-
-.3				sta $ffff,x				SELF MODIFIED
-				dex
+				bit A2osX.IOOpt
 				bpl .2
+
+				sta IO.SETWRITEAUX
+
+.2				lda DIB,y
+				sta (ZPpBuf),y
+				dey
+				bpl .2
+
+				sta IO.CLRWRITEAUX
 
 				clc
 				rts
@@ -261,27 +275,25 @@ STATUS.DCB		cmp #S.IOCTL.S.GETDCB
 
 				stz DCB+S.DCB.NIC.LINK
 
-
 				lda #S.DCB.NIC.LINK.OK
 				tsb DCB+S.DCB.NIC.LINK
-	
 
 				lda #S.DCB.NIC.LINK.FD
 				tsb DCB+S.DCB.NIC.LINK
 
-.1				ldy #S.IOCTL.BUFPTR
-				lda (ZPIOCTL),y
-				sta .3+1
-				iny
-				lda (ZPIOCTL),y
-				sta .3+2
-				ldx #S.DCB.NIC-1
+				ldy #S.DCB.NIC-1
 
-.2				lda DCB,x
-
-.3				sta $ffff,x				SELF MODIFIED
-				dex
+				bit A2osX.IOOpt
 				bpl .2
+
+				sta IO.SETWRITEAUX
+
+.2				lda DCB,y
+				sta (ZPpBuf),y
+				dey
+				bpl .2
+
+				sta IO.CLRWRITEAUX
 
 				clc
 				rts
@@ -311,20 +323,20 @@ OPEN			lda #S.DIB.S.OPENED
 .1				lda DCB+S.DCB.NIC.MAC,y
 				>WRITEBYTE
 				iny
-				
+
 				cpy #6
 				bcc .1
 
 				>READBYTE
 				beq .8
-			
+
 				lda #MLI.E.IO
 				sec
 				rts
 
 .8				lda #S.DIB.S.OPENED
 				tsb DIB+S.DIB.S
-				
+
 				clc
 				rts
 
@@ -348,44 +360,42 @@ READ			php
 				sei
 
 				>STYA ZPIOCTL
-				
+
 				ldx DEVSLOTx0
 
 				lda #IO.8255.Cmd.PFX
 				>WRITEBYTE
 				lda #IO.8255.Cmd.POLL
 				>WRITEBYTE
-				lda #1514
+				lda #K.ETH.FRAME.LEN
 				>WRITEBYTE
-				lda /1514
+				lda /K.ETH.FRAME.LEN
 				>WRITEBYTE
 
 				>READBYTE
 				ldy #S.IOCTL.BYTECNT
 				sta (ZPIOCTL),y
-				pha
+				sta RXTX.Size
 				eor #$ff
-				sta Counter
-				
+				sta ZPCnt
+
 				>READBYTE
 				iny
 				sta (ZPIOCTL),y
-				pha
+				sta RXTX.Size+1
 				eor #$ff
-				sta Counter+1
+				sta ZPCnt+1
 
-				pla
-				ply
-				bne .1
-				
-				tax
-				beq READWRITE.9
-				
-.1				>SYSCALL2 GetMem
-				bcs READWRITE.99
+				and ZPCnt
+				inc
+				beq READWRITE.NODATA
 
-				>STYA ZPBufPtr
-				phx
+.1				>LDYA RXTX.Size
+				>DAPI KMalloc
+				bcs .9
+
+				>STYA ZPpBuf
+
 				phy
 				ldy #S.IOCTL.BUFPTR+1
 				sta (ZPIOCTL),y
@@ -393,39 +403,48 @@ READ			php
 				pla
 				sta (ZPIOCTL),y
 
+				ldx #S.DCB.NIC.RXP
+				jsr StatXp1
+
 				ldx DEVSLOTx0
 
 				ldy #0
 
-.2				inc Counter
+.2				inc ZPCnt
 				bne .3
 
-				inc Counter+1
+				inc ZPCnt+1
 				beq .8
 
 .3				>READBYTE
-				sta	(ZPBufPtr),y
+				sta	(ZPpBuf),y
 				iny
 				bne .2
 
-				inc ZPBufPtr+1
+				inc ZPpBuf+1
 				bra .2
 
-.8				pla						hMem
+.8				plp
+
+				ldx #S.DCB.NIC.RXB
+				jmp StatX
+
+.9				ldx #S.DCB.NIC.RXE
+				jsr StatXp1
+
+				ldx #S.DCB.NIC.RXED
+				jsr StatXp1
+*--------------------------------------
+READWRITE.NODATA
+				lda #E.NODATA
 
 				plp
-				clc
-				rts
-*--------------------------------------
-READWRITE.9		lda #E.NODATA
-
-READWRITE.99	plp
 				sec
 				rts
 *--------------------------------------
 WRITE			php
 				sei
-				>STYA ZPIOCTL
+				jsr GET.IOCTLBUFPTR
 
 				ldx DEVSLOTx0
 
@@ -436,52 +455,92 @@ WRITE			php
 				ldy #S.IOCTL.BYTECNT
 				lda (ZPIOCTL),y
 				>WRITEBYTE
-				lda (ZPIOCTL),y
+			lda (ZPIOCTL),y
+				sta RXTX.Size
 				eor #$ff
-				sta Counter
+				sta ZPCnt
+
 				iny
 				lda (ZPIOCTL),y
 				>WRITEBYTE
-				lda (ZPIOCTL),y
+			lda (ZPIOCTL),y
+				sta RXTX.Size+1
 				eor #$ff
-				sta Counter+1
-
-				ldy #S.IOCTL.BUFPTR
-				lda (ZPIOCTL),y
-				sta ZPBufPtr
-				iny
-				lda (ZPIOCTL),y
-				sta ZPBufPtr+1
+				sta ZPCnt+1
 
 				ldy #0
 
-.1				inc Counter
+.1				inc ZPCnt
 				bne .2
 
-				inc Counter+1
-				beq .8
+				inc ZPCnt+1
+				beq .7
 
-.2				lda	(ZPBufPtr),y
+.2				lda	(ZPpBuf),y
 				>WRITEBYTE
 				iny
 				bne .1
 
-				inc ZPBufPtr+1
+				inc ZPpBuf+1
 				bra .1
 
-.8				>READBYTE
-				bne WRITE.99
+.7				>READBYTE
+				beq .8
 
-				plp
-				clc
-				rts
-				
-WRITE.99		lda #MLI.E.IO
+				lda #MLI.E.IO
 				plp
 				sec
-				rts			
+				rts
+
+.8				plp
+
+				ldx #S.DCB.NIC.TXP
+				jsr StatXp1
+
+				ldx #S.DCB.NIC.TXB
 *--------------------------------------
-DRV.CS.END
+StatX			lda RXTX.Size
+				clc
+				adc DCB,x
+				sta DCB,x
+				lda RXTX.Size+1
+				adc DCB+1,x
+				sta DCB+1,x
+				bcc .8
+
+				clc
+
+				inc DCB+2,x
+				bne .8
+
+				inc DCB+3,x
+
+.8				rts
+*--------------------------------------
+StatXp1			inc DCB,x
+				bne .8
+
+				inc DCB+1,x
+				bne .8
+
+				inc DCB+2,x
+				bne .8
+
+				inc DCB+3,x
+
+.8				rts
+*--------------------------------------
+GET.IOCTLBUFPTR	>STYA ZPIOCTL
+				ldy #S.IOCTL.BUFPTR
+				lda (ZPIOCTL),y
+				sta ZPpBuf
+				iny
+				lda (ZPIOCTL),y
+				sta ZPpBuf+1
+				rts
+*--------------------------------------
+DRV.CS.END		.EQ *
+*--------------------------------------
 DEVSLOTx0		.BS 1
 *--------------------------------------
 DIB				.DA #0
@@ -497,9 +556,16 @@ DCB				.DA #S.DCB.T.NIC
 				.BS 1					LINK
 				.DA #S.DCB.NIC.SPEED.10
 				.HS 0008DC123456		MAC
-				.BS 12					IP/MASK/GW
+				.DA #0,#0,#0,#0			no IPOFFLOAD
+				.DA #0,#0,#0,#0			no IPOFFLOAD
+				.DA #0,#0,#0,#0			no IPOFFLOAD
+				.BS 2					spare
+				.BS 48					Stats
 *--------------------------------------
-DRV.END
+DRV.ID.END		.EQ *
+*--------------------------------------
+ID.END			.EQ *
+*--------------------------------------
 MAN
 SAVE usr/src/drv/dan2eth.drv.s
 ASM
