@@ -1,6 +1,6 @@
 # A2osX Multi-Tasking OS for Apple II  
 
-### Updated January 19, 2025
+### Updated August 20, 2026
 
 ## A2osX 1.00
 
@@ -20,9 +20,15 @@ A2osX is designed to work on any 128k Enhanced Apple //e or newer computer.  Spe
 
 Consult the **[documentation](#documentation)** section below to find other resources available to you for learning how to install, use, develop and test A2osX.  The Hardware section of the User Guide contains more information on tested and supported hardware.
 
+## Quick Start
+
+If you're looking to get started with A2osX, the easiest way is to download one of the 'STABLE' disk images in the [media](https://github.com/A2osX/A2osX/tree/master/_Media) directory. See the [media guide](https://github.com/A2osX/A2osX/blob/master/_Docs/Media%20Guide.md) for more information.
+
+Note that despite this platform being based on ProDOS, it is strongly recommended to run A2osX with "ProDOS FX" instead of other versions such as the 2.0 or 2.4.x series. It will run on (say) 2.4.2, but there are some subtle incompatibilities that can arise. Please see the [documentation](https://github.com/A2osX/A2osX/tree/master/_Docs) folder for more information.
+
 ## News
 
-### Lots of updates for 2025!
+### Lots of updates for 2026!
 
 Added support for RamWorks memory expansion, up to 16 Mb RAM. For this, ProDOS.FX/16M is now mandatory (and yes, will run fine on 128k machines!)
 
@@ -69,4 +75,4 @@ The full A2osX license can be found **[Here](LICENSE)**.
 
 ## Copyright
 
-Copyright 2015 - 2025, Remy Gibert and the A2osX contributors.
+Copyright 2015 - 2026, Remy Gibert and the A2osX contributors.
