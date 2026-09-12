@@ -5,8 +5,11 @@ NEW
 				.OR	$2000
 				.TF bin/md5
 *--------------------------------------
+* passowrd = 5f4dcc3b5aa765d61d8327deb882cf99
+*--------------------------------------
 				.INB inc/macros.i
 				.INB inc/a2osx.i
+				.INB inc/a2osx.api.i
 				.INB inc/mli.e.i
 *--------------------------------------
 FILEBUF.SIZE	.EQ 4096
@@ -15,15 +18,17 @@ FILEBUF.SIZE	.EQ 4096
 				.OR ZPBIN
 ZS.START
 ZPPtr1			.BS 2
-ZPDataBufPtr	.BS 2
-ZPDataLen		.BS 2
 
 ArgIndex		.BS 1
 Arg				.BS 1
 bText			.BS 1
-hFile			.BS 1
-hDataBuf		.BS 1
-hMD5Ctx			.BS 1
+
+pMD5Ctx			.BS 2
+
+pFile			.BS 1
+
+ZPDataBuf		.BS 2
+ZPDataLen		.BS 2
 
 ZS.END			.ED
 *--------------------------------------
@@ -32,20 +37,22 @@ ZS.END			.ED
 CS.START		cld
 				jmp (.1,x)
 				.DA #$61				6502,Level 1 (65c02)
-				.DA #1					BIN Layout Version 1
-				.DA 0
-				.DA CS.END-CS.START		CS
-				.DA DS.END-DS.START		DS
-				.DA #16					SS
-				.DA #ZS.END-ZS.START	ZP
-				.DA 0
+				.DA #2					BIN Layout Version 2
+				.DA #0					#S.PS.SIG
+				.DA #0
+				.DA CS.END
+				.DA ID.END
+				.DA DS.END
+				.DA #64					Stack Size
+				.DA #ZS.END-ZS.START	Zero Page Size
 *--------------------------------------
 * Relocation Table
 *--------------------------------------
 .1				.DA CS.INIT
 				.DA CS.RUN
-				.DA CS.DOEVENT		
+				.DA CS.SIG
 				.DA	CS.QUIT
+*--------------------------------------
 L.MSG.USAGE		.DA MSG.USAGE
 				.DA 0
 *--------------------------------------
@@ -53,19 +60,20 @@ CS.INIT			clc
 				rts
 *--------------------------------------
 CS.RUN			ldy #S.PS.ARGC
-				lda (pPS),y
+				jsr A2osX.GetPSy
 				beq .99
 
 .1				inc ArgIndex
 				lda ArgIndex
 				>KAPI ArgV
 				bcs .8
-				
+
 				>STYA ZPPtr1
 				lda (ZPPtr1)
 				cmp #'-'
 				bne .4
-				ldy #1 
+
+				ldy #1
 				lda (ZPPtr1),y
 				beq .99
 
@@ -73,12 +81,12 @@ CS.RUN			ldy #S.PS.ARGC
 
 .2				cmp OptionList,y
 				beq .3
+
 				dey
 				bpl .2
 
-.99				>PUSHW L.MSG.USAGE
-				>PUSHBI 0
-				>LIBC PrintF
+.99				>LDYA L.MSG.USAGE
+				>LIBC PutS
 				lda #E.SYN
 				sec
 				rts
@@ -90,105 +98,117 @@ CS.RUN			ldy #S.PS.ARGC
 
 .4				lda Arg
 				bne .99
-				
+
 				lda ArgIndex
 				sta Arg
 				bra .1
-				
+
 .8				lda Arg
 				beq .99
-				
+
 				lda bText
 				beq CS.RUN.FILE
 *--------------------------------------
 CS.RUN.TEXT		lda Arg
 				>KAPI ArgV
+
+				>SS
 				>PUSHYA
 				>PUSHEA.G MD5Buf
 				>LIBC MD5
+				>SR
 				jmp CS.RUN.PRINT
 *--------------------------------------
 CS.RUN.FILE		>LDYAI FILEBUF.SIZE
-				>LIBC GetMem
+				>LIBC Malloc
 				bcs .9
-				
-				>STYA ZPDataBufPtr
-				stx hDataBuf
-				
+
+				>STYA ZPDataBuf
+
 				lda Arg
 				>KAPI ArgV
+
+				>SS
 				>PUSHYA
 				>PUSHBI	O.RDONLY
 				>PUSHBI 0				ftype
 				>PUSHWZ					Aux type
 				>LIBC FOpen
+				>SR
 				bcs .9
 
-				sta hFile
-				
+				>STYA pFile
+
 				>LIBC MD5Init
 				bcs .9
-				
-				sta hMD5Ctx
-				
+
+				>STYA pMD5Ctx
+
 .1				>SLEEP
-				
-				>PUSHB hFile
-				>PUSHW ZPDataBufPtr		Dst Ptr
+
+				>SS
+				>PUSHW pFile
+				>PUSHW ZPDataBuf
 				>PUSHWI FILEBUF.SIZE	Bytes To Read
 				>LIBC FRead
+				>SR
 				bcc .2
-				
+
 				cmp #MLI.E.EOF
 				beq .8
-				
+
 .9				rts
 
 .2				>STYA ZPDataLen
 
 				>SLEEP
-				
-				>PUSHB hMD5Ctx
-				>PUSHW ZPDataBufPtr
+
+				>SS
+				>PUSHW pMD5Ctx
+				>PUSHW ZPDataBuf
 				>PUSHW ZPDataLen
 				>LIBC MD5Update
+				>SR
 				bra .1
 
-.8				>PUSHB hMD5Ctx
+.8				>SS
+				>PUSHW pMD5Ctx
 				>PUSHEA.G MD5Buf
 				>LIBC MD5Finalize
-				
+				>SR
+
 CS.RUN.PRINT	>LEA.G MD5Buf
 				>LIBC PutS
 				lda #0
 *				sec
 *				rts
 *--------------------------------------
-CS.DOEVENT		sec
-				rts
+CS.SIG			rts
 *--------------------------------------
-CS.QUIT			lda hDataBuf
+CS.QUIT			>LDYA ZPDataBuf
 				beq .2
-				
-				>LIBC FreeMem
-.2				lda hFile
+
+				>LIBC Free
+
+.2				>LDYA pFile
 				beq .3
-	
+
 				>LIBC FClose
 
 .3				clc
 				rts
 *--------------------------------------
-CS.END
+CS.END			.EQ *
 *--------------------------------------
 OptionList		.AS "Dd"
 OptionVars		.DA #bText,#bText
 *--------------------------------------
 MSG.USAGE		.CZ "Usage : MD5 [ -d input text | input file ]\r\n"
 *--------------------------------------
+ID.END			.EQ *
+*--------------------------------------
 				.DUMMY
 				.OR 0
-DS.START
 MD5Buf			.BS 33
 DS.END			.ED
 *--------------------------------------
