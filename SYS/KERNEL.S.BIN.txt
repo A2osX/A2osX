@@ -1,12 +1,6 @@
 NEW
   AUTO 3,1
 *--------------------------------------
-BIN.R.CS.Start	.BS 2
-BIN.R.CS.End	.BS 2
-BIN.R.ID.End	.BS 2
-BIN.R.Offset	.BS 2
-BIN.R.Stop		.BS 2
-*--------------------------------------
 * LoadLib
 *  in :
 *   Y,A = PTR To "LibName" C-String
@@ -69,7 +63,7 @@ K.UnloadLib		>STYA RAMSW.2AUX
 * ## RETURN VALUE
 * none
 *\--------------------------------------
-K.LoadDrv		>STYA K.LoadDrv.Args	Save "BIN\0ARGS\0\0"
+K.LoadDrv		>STYA K.LoadDrv.Args	Save "NAME.DRV\0ARGS\0\0"
 				>STYA ZPPtr1
 
 				jsr RAMSW.xP1g
@@ -91,7 +85,7 @@ K.LoadDrv		>STYA K.LoadDrv.Args	Save "BIN\0ARGS\0\0"
 .3				jsr PS.Find.DRV
 				bcs .9
 
-.4				jsr BIN.Load			K.PathBuf = "/PATH/BIN"
+.4				jsr BIN.Load			K.PathBuf = "/PATH/NAME.DRV"
 				bcs .9
 
 * PS.pBuf = PTR to Code Segment, A1 = CmdLine
@@ -150,15 +144,20 @@ BIN.Load		jsr MEM.FindByBIN
 				lda #S.FI.T.BIN
 				sta IO.Type
 				>LDYA K.S.STAT+S.STAT.P.AUXTYPE
-				>STYA BIN.R.CS.Start
-				>STYA IO.AuxT
+				>STYA IO.AuxT			for PS.LoadFile
+				>STYA BIN.R.Start		for relocation
 
-				stz IO.bTXT				BIN
+				clc
+				lda K.S.STAT+S.STAT.SIZE
+				adc K.S.STAT+S.STAT.P.AUXTYPE
+				sta BIN.R.End			for relocation
+				lda K.S.STAT+S.STAT.SIZE+1
+				adc K.S.STAT+S.STAT.P.AUXTYPE+1
+				sta BIN.R.End+1			for relocation
 
-				sec						load in User Memory
-				ror A2osX.IOOpt			C = AUX/MAIN
+				stz IO.bTXT				for PS.LoadFile
 
-				jsr PS.LoadFile
+				jsr PS.LoadFile			will load in User space
 				bcs .9					Error Loading file
 
 * file loaded at PS.pBuf
@@ -183,7 +182,7 @@ BIN.Load		jsr MEM.FindByBIN
 				cpy #H.BIN.ID.END+2
 				bcc .2
 
-.3				jsr BIN.CompOfsStop		PS.pBuf = actual load address
+.3				jsr BIN.RelInit			PS.pBuf = actual load address
 				jsr BIN.RelExe
 				bcs BIN.FreeBuf
 
@@ -264,7 +263,7 @@ K.InsDrv		ldy #6					src
 
 				ldy #4					drvcsstart
 				jsr RAMSW.GetStkYW
-				>STYA BIN.R.CS.Start
+				>STYA BIN.R.Start
 
 				ldy #2					drvcsend
 				jsr RAMSW.GetStkYW
@@ -272,15 +271,15 @@ K.InsDrv		ldy #6					src
 
 				jsr RAMSW.GetStk		drvidend
 
-				sta BIN.R.ID.End
+				sta BIN.R.End
 				sec
-				sbc BIN.R.CS.Start
+				sbc BIN.R.Start
 				sta A4					...for move...
 
 				ldy #1
 				jsr RAMSW.GetStkY
-				sta BIN.R.ID.End+1
-				sbc BIN.R.CS.Start+1
+				sta BIN.R.End+1
+				sbc BIN.R.Start+1
 				sta A4+1				...for move...
 
 				ldy A4
@@ -290,11 +289,11 @@ K.InsDrv		ldy #6					src
 				>STYA ZPPtr1			Y,A = DST Buf for RelDrv...
 				>STYA A2				...for move and for exit
 
-				jsr BIN.CompOfsStop
-
 				jsr MEM.CpyX2M
 
 				lsr A2osX.IOOpt			Relocate in Main....
+
+				jsr BIN.RelInit
 
 				jsr BIN.RelDrv			Relocate at Ptr1
 
@@ -318,20 +317,18 @@ BIN.RelExe		ldy #H.BIN.T+1
 				ldy #H.BIN.V
 				lda (ZPPtr1),y
 				cmp #2
-				bne .9
+				beq .8
 
-				bra .8
+.9				lda #E.IBIN
+				sec
+				rts
 
 .2				jsr RAMSW.xP1gY
 				cmp /H.BIN.T.BIN65
 				beq .7
 
 				cmp /H.BIN.T.DRV65
-				beq .7
-
-.9				lda #E.IBIN
-				sec
-				rts
+				bne .9
 
 .7				ldy #H.BIN.V
 				jsr RAMSW.xP1gY
@@ -339,7 +336,12 @@ BIN.RelExe		ldy #H.BIN.T+1
 				bne .9
 
 .8				ldy #H.BIN.JMP			relocate Main JMP
+				jsr BIN.RelAtPtr1Y
 
+				ldy #H.BIN.CS.END		relocate ID segment PTR for CC
+				jsr BIN.RelAtPtr1Y
+
+				ldy #H.BIN.ID.END		relocate LIB PTR for PS.UnloadBIN
 				jsr BIN.RelAtPtr1Y
 
 				ldy #16					skip Header, CS.SIZE & DS.SIZE... (16 bytes)
@@ -406,12 +408,12 @@ BIN.RelDrv		ldy #2					start after CLD JMP
 				clc						Make sure exit with CC
 				rts
 *-------------------------------------- YA = Target Address
-BIN.CompOfsStop	lda ZPPtr1
+BIN.RelInit		lda ZPPtr1
 				sec
-				sbc BIN.R.CS.Start
+				sbc BIN.R.Start
 				sta BIN.R.Offset
 				lda ZPPtr1+1
-				sbc BIN.R.CS.Start+1
+				sbc BIN.R.Start+1
 				sta BIN.R.Offset+1
 
 				lda BIN.R.CS.End
@@ -436,15 +438,15 @@ BIN.RelAtPtr1Y	jsr BIN.GetWAtPtr1Y
 
 BIN.RelAX		pha
 
-				cpx BIN.R.CS.Start
-				sbc BIN.R.CS.Start+1
+				cpx BIN.R.Start
+				sbc BIN.R.Start+1
 				pla
-				bcc .9					addr < BIN.R.CS.Start, out of range
+				bcc .9					addr < BIN.R.Start, out of range
 
 				pha
 
-				cpx BIN.R.ID.End
-				sbc BIN.R.ID.End+1
+				cpx BIN.R.End
+				sbc BIN.R.End+1
 				pla
 				bcs .9					addr > BIN.R.End, out of range
 

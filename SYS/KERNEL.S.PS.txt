@@ -414,7 +414,7 @@ PS.Load			ldx #$ff
 .6				lda K.S.STAT+S.STAT.P.TYPE
 
 				cmp #S.FI.T.BIN
-				beq .8
+				beq PS.LoadBIN
 
 				cmp #S.FI.T.TXT
 				beq PS.LoadTXT
@@ -424,9 +424,9 @@ PS.Load			ldx #$ff
 
 				>LDYAI PS.SHUTDOWN
 				jsr PS.Find.PATH
-				bcs PS.RTS
+				bcc PS.LoadBIN
 
-.8				jmp PS.LoadBIN
+				rts
 *--------------------------------------
 PS.Load.IPATH	lda #E.BADPATH
 				.HS 2C
@@ -466,9 +466,9 @@ PS.LoadTXT		jsr PS.LoadGetHeader
 				bne PS.Load.IBIN
 *--------------------------------------
 PS.LoadBIN		jsr BIN.Load			K.PathBuf= "/BIN/SH\0", K.IOBuf=/.../SCRIPT
-				bcs PS.RTS
+.9				bcs PS.RTS
 
-* PS.pBuf = PTR to Code Segment, A1 = CmdLine
+* Y,A = PS.pBuf = PTR to Code Segment, A1 = CmdLine
 
 				phy
 				ldy #S.PS.pCode+1
@@ -556,11 +556,145 @@ PS.LoadBIN		jsr BIN.Load			K.PathBuf= "/BIN/SH\0", K.IOBuf=/.../SCRIPT
 				ldy #S.PS.pBase
 				sta (PS.pTmpPS),y
 
+				jsr PS.SetOwner
+*--------------------------------------
+* PS.pBuf = Code
+*--------------------------------------
+PS.LoadLIBs		lda BIN.R.ID.End
 				clc
+				adc BIN.R.Offset
+				sta BIN.R.LIBs
 
-				jmp PS.SetOwner
+				lda BIN.R.ID.End+1
+				adc BIN.R.Offset+1
+				sta BIN.R.LIBs+1
+
+.1				>LDYA BIN.R.LIBs
+				>STYA ZPPtr1
+
+				jsr RAMSW.xP1g
+				beq .8
+
+				jsr PS.Find.LIB
+				bcs .99
+
+				jsr BIN.Load			K.PathBuf = "/LIB/LIBNAME"
+				bcs .99
+
+* PS.pBuf = PTR to Code Segment, A1 = CmdLine
+
+				>STYA RAMSW.2AUX
+
+				ldx #LIBMGR.LOAD		Pass pLIB to LibLoad
+
+				jsr RAMSW.2AUXJSR		Call LIB.LOAD function
+				bcc .2
+
+				pha
+				jsr BIN.FreeBuf
+				pla
+				sec
+				rts
+
+.2				>LDYA BIN.R.LIBs
+				>STYA ZPPtr1
+
+				sta IO.SETWRITEAUX
+
+				lda #$4C				JMP
+				sta (ZPPtr1)
+
+				ldy #1
+				lda RAMSW.2AUX
+				sta (ZPPtr1),y
+				iny
+				lda RAMSW.2AUX+1
+				sta (ZPPtr1),y
+
+				sta IO.CLRWRITEAUX
+
+.3				iny
+				jsr RAMSW.xP1gY
+				bne .3
+
+				tya
+				sec
+				adc BIN.R.LIBs
+				sta BIN.R.LIBs
+				bcc .1
+
+				inc BIN.R.LIBs+1
+				bra .1
+
+.8				clc
+
+.99				rts
+*--------------------------------------
+PS.UnloadLIBs	ldy #S.PS.pCode
+				lda (PS.pTmpPS),y
+				sta ZPPtr1
+
+				iny
+				lda (PS.pTmpPS),y
+				sta ZPPtr1+1
+
+				ldy #H.BIN.ID.END
+				jsr RAMSW.xP1gY
+				sta BIN.R.LIBs
+				tax
+				iny
+				jsr RAMSW.xP1gY
+				sta BIN.R.LIBs+1
+
+				stx ZPPtr1
+				sta ZPPtr1+1
+
+.1				jsr RAMSW.xP1g
+				beq .8
+
+				cmp #$4C
+				bne .6
+
+				ldy #1
+				jsr RAMSW.xP1gY
+				sta RAMSW.2AUX
+				iny
+				jsr RAMSW.xP1gY
+				sta RAMSW.2AUX+1
+
+				ldx #LIBMGR.UNLOAD
+
+				jsr RAMSW.2AUXJSR		Call LIB.UNLOAD function
+				bcs .9
+
+				>LDYA RAMSW.2AUX
+				jsr K.Free
+
+				>LDYA BIN.R.LIBs
+				>STYA ZPPtr1
+
+.6				ldy #3
+
+.7				iny
+				jsr RAMSW.xP1gY
+				bne .7
+
+				tya
+				sec
+				adc BIN.R.LIBs
+				sta BIN.R.LIBs
+				sta ZPPtr1
+				bcc .1
+
+				inc BIN.R.LIBs+1
+				inc ZPPtr1+1
+				bra .1
+
+.8				clc
 
 .9				rts
+*--------------------------------------
+PS.NextLIB
 *--------------------------------------
 PS.SetOwner		sta IO.SETWRITEAUX
 
@@ -592,6 +726,7 @@ PS.LoadGetHeader
 
 *				>STYA pFILE
 *				>PUSHW pFILE
+
 				>SS
 				sta IO.SETWRITEAUX
 				>PUSHYA
@@ -680,7 +815,9 @@ PS.DestroyX		stx PS.DestroyIdx
 
 				rts
 *--------------------------------------
-PS.Destroy		ldx #5
+PS.Destroy		jsr PS.UnloadLIBs
+
+				ldx #5
 
 .1				ldy .10,x
 				lda (PS.pTmpPS),y
