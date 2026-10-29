@@ -350,12 +350,15 @@ EXP.GetNum		lda (ZPPtr2)			#SYM.T
 				bra EXP.GetNumL
 
 .1				cmp #SYM.T.FLOAT
+				beq .2
 
 				bcc EXP.GetNumL
 
-				bne .99
+				lda #E.TMISMATCH
 
-				>SF
+				rts
+
+.2				>SF
 				>SS
 				>PUSHW ZP.pLineBuf
 				>PUSHWI ZP.pLineBuf
@@ -365,10 +368,10 @@ EXP.GetNum		lda (ZPPtr2)			#SYM.T
 
 				ldy #4
 
-.2				lda (pStack),y
+.3				lda (pStack),y
 				jsr CODE.PUSHI
 				dey
-				bpl .2
+				bpl .3
 
 				lda #5
 				clc
@@ -559,16 +562,16 @@ EXP.GetVar		lda State
 				and #State.LAonStack+State.LAinR1
 				sta State
 
-				jsr EXP.POSTOPS			var++, var[0]... ?
-				bcs .99
-
-				ldx ZPPtr3+1			preop &var, *var, --var ...
+				ldx ZPPtr3+1
 				bmi .10
 
-				jsr EXP.PREOPS
+				jsr EXP.PREOPS			preop &var, *var, --var ...
 				bcs .99
 
-.10				jsr EXP.CheckType
+.10				jsr EXP.POSTOPS			var++, var[0]... ?
+				bcs .99
+
+				jsr EXP.CheckType
 				bcs .99
 
 				lda State
@@ -610,6 +613,87 @@ EXP.GetVar		lda State
 .8
 
 *				clc
+
+.99				rts
+*--------------------------------------
+* PREOPS
+*--------------------------------------
+EXP.PREOPS		jmp (J.EXP.PREOPS,x)
+*--------------------------------------
+EXP.Ref			ldy #SYM.Q
+				lda (ZP.pRSymBuf),y
+				clc
+				adc #SYM.Q.POINTER
+				bcs .9					more than ***
+
+				sta (ZP.pRSymBuf),y
+
+				jsr EXP.GetRAinYA
+				bcs .99
+
+.8				lda #State.RVinYA
+				tsb State
+
+*				clc						Addr on stack
+
+				rts
+
+.9				lda #E.TMISMATCH
+*				sec
+.99				rts
+*--------------------------------------
+EXP.Deref		ldy #SYM.Q
+				lda (ZP.pRSymBuf),y
+				bit #SYM.Q.PPPOINTER
+				beq .9
+
+				sec
+				sbc #SYM.Q.POINTER
+				sta (ZP.pRSymBuf),y
+
+				jsr EXP.GetRAinR2
+				bcs .99
+
+				>LDYA L.PCC.Deref2
+				jmp CODE.EmitPCC
+
+.9				lda #E.TMISMATCH
+				sec
+.99				rts
+*--------------------------------------
+EXP.Abs
+
+				clc
+
+.99				rts
+*--------------------------------------
+EXP.Negate
+
+				clc
+
+.99				rts
+*--------------------------------------
+EXP.lNot
+
+				clc
+
+.99				rts
+*--------------------------------------
+EXP.bNot
+
+				clc
+
+.99				rts
+*--------------------------------------
+EXP.PreInc
+
+				clc
+
+.99				rts
+*--------------------------------------
+EXP.PreDec
+
+				clc
 
 .99				rts
 *--------------------------------------
@@ -701,7 +785,7 @@ EXP.PostDec		jsr EXP.GetRAinR2
 EXP.Array		ldy #SYM.Q
 				lda (ZP.pRSymBuf),y
 				bit #SYM.Q.AAARRAY
-				bne EXP.ArrayBounds
+				bne EXP.ArrayB
 
 				and #SYM.Q.PPPOINTER
 				cmp #SYM.Q.POINTER
@@ -750,8 +834,10 @@ EXP.Array		ldy #SYM.Q
 
 				jsr CORE.GetNCharNB	skip ']'
 
-				lda #State.RAonStack
-				tsb State
+				lda State
+				and #State.LAonStack+State.LAinR1
+				ora #State.RAonStack
+				sta State
 
 				clc
 				rts
@@ -762,58 +848,67 @@ EXP.Array		ldy #SYM.Q
 
 .98				lda #E.TMISMATCH
 				sec
-.99				rts
+.99
+EXP.Array.RTS	rts
 *--------------------------------------
-EXP.ArrayBounds	ldy #SYM.A1
-				lda (ZP.pRSymBuf),y
-				iny
-				ora (ZP.pRSymBuf),y
-				beq .1
+EXP.ArrayB		and #SYM.Q.PPPOINTER
+				beq EXP.ArrayB1
 
-				jsr EXP.PushAddr		array[int]...
-				bcc .2
+				cmp #SYM.Q.POINTER
+				bne .9
 
-.90				rts
-
-.1				jsr EXP.GetRAinR2		array[]...it is a *
-				bcs .90
+				jsr EXP.GetRAinR2
+				bcs .99
 
 				>LDYA L.PCC.PushDeref2
 				jsr CODE.EmitPCC
-				bcs .90
+				bcs .99
 
-.2				jsr EXP.Array.GetIdx
-				bcs .9
+				bra EXP.ArrayB2
+
+.9				lda #E.ESYN
+				sec
+.99				rts
+
+EXP.ArrayB1		jsr EXP.PushRAddr		array[int]...
+				bcs EXP.Array.RTS
+
+EXP.ArrayB2		ldy #SYM.Q
+				lda (ZP.pRSymBuf),y
+				sec
+				sbc #SYM.Q.ARRAY
+				sta (ZP.pRSymBuf),y
+
+				jsr EXP.Array.GetIdx
+				bcs EXP.Array.RTS
 
 				jsr EXP.StackPushV		...int16 on stack...
-				bcs .9
-
-*			jsr CODE.DEBUG
+				bcs EXP.Array.RTS
 
 				jsr EXP.GetRSymSizeOf
-				jsr CODE.PUSHAXI		...sizeof on stack...
+				cmp #1
+				bne .3
+
+				cpx #0
+				beq .4					sizeof=1, no MUL required
+
+.3				jsr CODE.PUSHAXI		...sizeof on stack...
 				bcs .9
 
 				ldx #FPU.wMUL
 				jsr CODE.FPUCALL		...sizeof*int16...
 				bcs .9
 
-				ldx #FPU.wADD
+.4				ldx #FPU.wADD
 				jsr CODE.FPUCALL		...add to base address
 				bcs .9
-
-.3				ldy #SYM.Q
-				lda (ZP.pRSymBuf),y
-				sec
-				sbc #SYM.Q.ARRAY
-				sta (ZP.pRSymBuf),y
 
 				jsr CORE.GetNCharNB	skip ']'
 				bcs .98
 
 				cmp #'['
 				bne .8
-
+* [][]
 				jsr CORE.GetNCharNB	skip '['
 				bcs .98
 
@@ -821,6 +916,12 @@ EXP.ArrayBounds	ldy #SYM.A1
 				lda (ZP.pRSymBuf),y
 				and #SYM.Q.AAARRAY
 				beq .99
+
+				ldy #SYM.Q
+				lda (ZP.pRSymBuf),y
+				sec
+				sbc #SYM.Q.ARRAY
+				sta (ZP.pRSymBuf),y
 
 				jsr EXP.Array.GetIdx
 				bcs .9
@@ -854,8 +955,10 @@ EXP.ArrayBounds	ldy #SYM.A1
 
 * TODO : [][][]
 
-.8				lda #State.RAonStack
-				tsb State
+.8				lda State
+				and #State.LAonStack+State.LAinR1
+				ora #State.RAonStack
+				sta State
 
 				clc
 .9				rts
@@ -899,14 +1002,39 @@ EXP.Array.GetIdx
 *--------------------------------------
 EXP.SU			lda (ZP.pRSymBuf)
 				cmp #SYM.T.SU
-				bne .97
+				bne EXP.SU.E
 
 				ldy #SYM.Q
 				lda (ZP.pRSymBuf),y
 				and #SYM.Q.PPPOINTER
-				bne .97
+				bne EXP.SU.E
 
-				jsr CC.GetCharNB
+				jsr EXP.PushRAddr
+				bcc EXP.SU1
+
+				rts
+
+EXP.SU.E		lda #E.TMISMATCH
+				sec
+EXP.SU.RTS		rts
+*--------------------------------------
+EXP.pSU			lda (ZP.pRSymBuf)
+				cmp #SYM.T.SU
+				bne EXP.SU.E
+
+				ldy #SYM.Q
+				lda (ZP.pRSymBuf),y
+				and #SYM.Q.PPPOINTER
+				beq EXP.SU.E
+
+				jsr EXP.GetRAinR2
+				bcs EXP.SU.RTS
+
+				>LDYA L.PCC.PushDeref2
+				jsr CODE.EmitPCC
+				bcs EXP.SU.RTS
+*--------------------------------------
+EXP.SU1			jsr CC.GetCharNB
 				bcs .98
 
 				jsr CC.IsLetter
@@ -922,120 +1050,40 @@ EXP.SU			lda (ZP.pRSymBuf)
 				jsr SYM.RLookupYA
 				bcs .99
 
+				ldy #SYM.Addr+1
+				lda (ZP.pRSymBuf),y
+				jsr CODE.PUSHI
+				bcs .99
+
 				ldy #SYM.Addr
 				lda (ZP.pRSymBuf),y
+				jsr CODE.PUSHI
+				bcs .99
 
-				pha
-				iny
-				lda (ZP.pRSymBuf),y
-				ply
-				clc
-				rts
+				ldx #FPU.wADD
+				jsr CODE.FPUCALL
+				bcs .99
 
-.97				lda #E.TMISMATCH
-				sec
+				lda State
+				and #State.LAonStack+State.LAinR1
+				ora #State.RAonStack
+				sta State
+
+*				clc
+
 				rts
 
 .98				lda #E.ESYN
-				sec
-.99				rts
-*--------------------------------------
-EXP.pSU			lda #E.ESYN
-				sec
-				rts
-*--------------------------------------
-* PREOPS
-*--------------------------------------
-EXP.PREOPS		jmp (J.EXP.PREOPS,x)
-*--------------------------------------
-EXP.Ref			ldy #SYM.Q
-				lda (ZP.pRSymBuf),y
-				clc
-				adc #SYM.Q.POINTER
-				bcs .9					more than ***
-
-*				and #$FF^SYM.Q.AAARRAY
-				sta (ZP.pRSymBuf),y
-
-*			>DEBUG
-
-				lda State
-				bit #State.RAonStack
-				bne .8
-
-				jsr EXP.PushAddr
-				bcs .99
-
-
-.8				lda #State.RVonStack
-				tsb State
-
-*			jsr CODE.DEBUG
-
-*				clc						Addr on stack
-
-				rts
-
-.9				lda #E.TMISMATCH
 *				sec
 .99				rts
 *--------------------------------------
-EXP.Deref		ldy #SYM.Q
-				lda (ZP.pRSymBuf),y
-				bit #SYM.Q.PPPOINTER
-				beq .9
+EXP.PushRAddr	lda #State.RAonStack
+				bit State
+				bne .8
 
-				sec
-				sbc #SYM.Q.POINTER
-				sta (ZP.pRSymBuf),y
+				tsb State
 
-				jsr EXP.GetRAinR2
-				bcs .99
-
-				>LDYA L.PCC.Deref2
-				jmp CODE.EmitPCC
-
-.9				lda #E.TMISMATCH
-				sec
-.99				rts
-*--------------------------------------
-EXP.Abs
-
-				clc
-
-.99				rts
-*--------------------------------------
-EXP.Negate
-
-				clc
-
-.99				rts
-*--------------------------------------
-EXP.lNot
-
-				clc
-
-.99				rts
-*--------------------------------------
-EXP.bNot
-
-				clc
-
-.99				rts
-*--------------------------------------
-EXP.PreInc
-
-				clc
-
-.99				rts
-*--------------------------------------
-EXP.PreDec
-
-				clc
-
-.99				rts
-*--------------------------------------
-EXP.PushAddr	ldy #SYM.SC
+				ldy #SYM.SC
 				lda (ZP.pRSymBuf),y
 				beq .1					SYM.SC.STATIC
 * LOCAL
@@ -1075,7 +1123,66 @@ EXP.PushAddr	ldy #SYM.SC
 .2				>LDYA L.PCC.PushUAddr
 				jmp CODE.EmitPCC
 
+.8				clc
+
 .9				rts
+*--------------------------------------
+EXP.GetRAinYA	lda State
+				bit #State.RAonStack
+				beq .1
+
+				lda #State.RAonStack
+				trb State
+
+				>LDYA L.PCC.PopYA
+				jmp CODE.EmitPCC
+
+.1				bit #State.RAinR2
+				beq .2
+
+				>LDYA L.PCC.GetR2inYA
+				jmp CODE.EmitPCC
+
+.2				ldy #SYM.SC
+				lda (ZP.pRSymBuf),y
+				beq .3					SYM.SC.STATIC
+
+* LOCAL
+
+				ldy #SYM.Addr
+				lda (ZP.pRSymBuf),y
+
+				jsr CODE.LDAI
+				bcs .99
+
+				>LDYA L.PCC.GetLAddrYA
+				jmp CODE.EmitPCC
+
+.3				ldy #SYM.Addr+1
+				lda (ZP.pRSymBuf),y
+				tax
+
+				dey
+				lda (ZP.pRSymBuf),y
+
+				jsr CODE.LDAXI
+				bcs .99
+
+				ldy #SYM.Q
+				lda (ZP.pRSymBuf),y
+				and #SYM.Q.CONST
+				beq .4
+
+* CS
+				>LDYA L.PCC.GetIAddrYA
+				jmp CODE.EmitPCC
+
+* DS
+
+.4				>LDYA L.PCC.GetUAddrYA
+				jmp CODE.EmitPCC
+
+.99				rts
 *--------------------------------------
 EXP.GetRAinR2	lda State
 				bit #State.RAinR2

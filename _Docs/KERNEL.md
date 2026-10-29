@@ -167,10 +167,12 @@ Change or add an environment variable
 `int setenv(const char *envname, const char *envval, int overwrite);`  
 
 ## ASM  
+`>SS`  
 `>PUSHW envname`  
 `>PUSHW envval`  
 `>PUSHW overwrite`  
 `>LIBC setenv`  
+`>SR`  
 
 ## RETURN VALUE  
  CC, Y,A = 0  
@@ -442,6 +444,22 @@ Add Data to MD5 computation
 
 ## RETURN VALUE  
  none.  
+
+# PTime2Time  
+ Convert ProDOS Time To S.TM  
+
+## C  
+`#include <prodos.h>`  
+`void PTime2Time (long ptime, const struct tm* timeptr);`  
+
+## ASM  
+`>SS`  
+`>PUSHL ptime`  
+`>PUSHW timeptr`  
+`>LIBC PTime2Time`  
+`>SR`  
+
+## RETURN VALUE  
 
 # Online  
 Get ProDOS Volume Info  
@@ -1849,18 +1867,18 @@ CS : no match
  CC:Y,A = Line length  
  CS:Y,A = Line count  
 
-# TBufSetL  
+# TBufInsC  
 
 ## ASM  
 `>SS`  
 `>PUSHW pTBuf`  
-`>PUSHW LineNum`  
-`>PUSHW DataPtr`  
-`>KAPI TBufSetL`  
+`>PUSHW PosX`  
+`>PUSHW PosY`  
+`>PUSHW Char`  
+`>KAPI TBufInsC`  
 `>SR`  
 
 ## RETURN VALUE  
- Y,A = Line length  
 
 # TBufGetB  
 
@@ -1880,7 +1898,8 @@ CS : no match
 ## ASM  
 `>SS`  
 `>PUSHW pTBuf`  
-`>PUSHW DataOfs`  
+`>PUSHW PosX`  
+`>PUSHW PosY`  
 `>PUSHW DataPtr`  
 `>PUSHW DataLen`  
 `>KAPI TBufInsB`  
@@ -1893,7 +1912,8 @@ CS : no match
 ## ASM  
 `>SS`  
 `>PUSHW pTBuf`  
-`>PUSHW DataOfs`  
+`>PUSHW PosX`  
+`>PUSHW PosY`  
 `>PUSHW DataLen`  
 `>KAPI TBufDelB`  
 `>SR`  
@@ -1919,50 +1939,51 @@ CS : no match
 Get System Time in Buffer  
 
 ## C  
-`void time (struct tm* timeptr);`  
+`#include <time.h>`  
+`time_t time(time_t *tloc);`  
 
 ## ASM  
-`>LDYA timeptr`  
+`>SL`  
+`>LDYA tloc`  
 `>LIBC time`  
 
 ## RETURN VALUE  
-S.TIME filled with System date/time  
+ time_t  
 
-# PTime2Time  
- Convert ProDOS Time To S.TIME  
+# MKTime  
+ Convert S.TM to CTime  
 
 ## C  
-`void PTime2Time (long ptime, const struct tm* timeptr );`  
+`#include <prodos.h>`  
+`time_t mktime(struct tm *timeptr);`  
 
 ## ASM  
-`>SS`  
-`>PUSHL ptime`  
-`>PUSHW timeptr`  
-`>LIBC PTime2Time`  
-`>SR`  
+`>SL`  
+`>LDYA timeptr`  
+`>LIBC MKTime`  
 
 ## RETURN VALUE  
 
-# CTime2Time  
- Convert CTime Time To S.TIME  
+# GMTime  
+ Convert CTime To S.TM  
 
 ## C  
-`void CTime2Time (long ctime, const struct tm* timeptr );`  
+`#include <time.h>`  
+`struct tm *gmtime(const time_t *timer);`  
 
 ## ASM  
-`>SS`  
-`>PUSHL ctime`  
-`>PUSHW timeptr`  
+`>LDYA timeptr`  
 `>LIBC CTime2Time`  
-`>SR`  
 
 ## RETURN VALUE  
+ Y,A = pointer to allocatd tm struct  
 
 # StrFTime  
 
 ## C  
-Convert S.TIME struct to CSTR  
-`void strftime (char* str, const char* format, const struct tm* timeptr );`  
+Convert S.TM struct to CSTR  
+`#include <time.h>`  
+`void strftime (char* str, const char* format, const struct tm* timeptr);`  
 
 ## ASM  
 `>SS`  

@@ -7,13 +7,10 @@ Copyright 2015 - 2025, Remy Gibert and the A2osX contributors.
 Initialize screen & create a new context  
 
 ## C  
-`CTX *pCTX tuiInit();`  
+`tuiCTX tuiInit(void);`  
 
 ## ASM  
-`>SS`  
-`>PUSHWI retries`  
-`>LIBCALL pLIBTUI,LIBTUI.Init`  
-`>SR`  
+`>LIBCALL LIBTUI,Init`  
 
 ## RETURN VALUE  
 CC = success, Y,A = pCTX  
@@ -22,14 +19,160 @@ CC = success, Y,A = pCTX
 destroy context  
 
 ## C  
-`void tuiClose(CTX *pCTX);`  
+`void tuiClose(CTX tuiCTX);`  
 
 ## ASM  
-`>PUSHW pCTX`  
-`>LIBCALL hLIBTUI,LIBTUI.Close`  
+`>LDYA tuiCTX`  
+`>LIBCALL LIBTUI,Close`  
 
 ## RETURN VALUE  
 CC = success  
+
+# tuiDestroy  
+Initialize screen & create a new context  
+
+## C  
+`tuiDestroy tuiExec(tuiOBJ);`  
+
+## ASM  
+`>LDYA tuiObj`  
+`>LIBCALL LIBTUI,Destroy`  
+
+## RETURN VALUE  
+CC = success  
+
+# tuiNewScrn  
+Initialize screen & create a new context  
+
+## C  
+`tuiOBJ tuiNewScrn(tuiOBJ, Flags);`  
+
+## ASM  
+`>SS`  
+`>PUSHW tuiOBJ`  
+`>PUSHW Flags`  
+`>LIBCALL LIBTUI,tuiNewScrn`  
+`>SR`  
+
+## RETURN VALUE  
+CC = success, Y,A = Event  
+
+# tuiExec  
+Initialize screen & create a new context  
+
+## C  
+`int tuiExec(tuiOBJ);`  
+
+## ASM  
+`>LDYA tuiOBJ`  
+`>LIBCALL LIBTUI,Exec`  
+
+## RETURN VALUE  
+CC = success, Y,A = Event  
+
+# tuiDraw  
+Initialize screen & create a new context  
+
+## C  
+`tuiCTX tuiDraw(tuiOBJ);`  
+
+## ASM  
+`>LDYA tuiOBJ`  
+`>LIBCALL LIBTUI,Draw`  
+
+## RETURN VALUE  
+CC = success, Y,A = Event  
+
+# tuiGetProp  
+Initialize screen & create a new context  
+
+## C  
+`tuiCTX tuiGetProp(tuiOBJ);`  
+
+## ASM  
+`>LDYA tuiOBJ`  
+`>LIBCALL LIBTUI,GetProp`  
+
+## RETURN VALUE  
+CC = success, Y,A = Event  
+
+# tuiExec  
+Initialize screen & create a new context  
+
+## C  
+`tuiCTX tuiExec(tuiOBJ);`  
+
+## ASM  
+`>LDYA tuiOBJ`  
+`>LIBCALL LIBTUI,Exec`  
+
+## RETURN VALUE  
+CC = success, Y,A = Event  
+
+# tuiActivate  
+Initialize screen & create a new context  
+
+## C  
+`tuiActivate tuiExec(tuiOBJ);`  
+
+## ASM  
+`>LDYA tuiOBJ`  
+`>LIBCALL LIBTUI,Activate`  
+
+## RETURN VALUE  
+CC = success, Y,A = Event  
+
+# tuiDeactivate  
+Initialize screen & create a new context  
+
+## C  
+`tuiCTX tuiDeactivate(tuiOBJ);`  
+
+## ASM  
+`>LDYA tuiObj`  
+`>LIBCALL LIBTUI,Deactivate`  
+
+## RETURN VALUE  
+CC = success, Y,A = Event  
+
+# tuiFindActive  
+Initialize screen & create a new context  
+
+## C  
+`tuiCTX tuiFindActive(tuiOBJ);`  
+
+## ASM  
+`>LDYA tuiObj`  
+`>LIBCALL LIBTUI,FindActive`  
+
+## RETURN VALUE  
+CC = success, Y,A = Event  
+
+# tuiShow  
+Initialize screen & create a new context  
+
+## C  
+`tuiCTX tuiShow(tuiOBJ);`  
+
+## ASM  
+`>LDYA tuiOBJ`  
+`>LIBCALL LIBTUI,Show`  
+
+## RETURN VALUE  
+CC = success, Y,A = Event  
+
+# tuiHide  
+Initialize screen & create a new context  
+
+## C  
+`tuiCTX tuiHide(tuiOBJ);`  
+
+## ASM  
+`>LDYA tuiOBJ`  
+`>LIBCALL LIBTUI,Hide`  
+
+## RETURN VALUE  
+CC = success, Y,A = Event  
 
 ## License
 A2osX is licensed under the GNU General Public License.
