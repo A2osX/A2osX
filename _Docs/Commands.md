@@ -22,7 +22,7 @@ Apple II speed (SLOW mode).
 Code does not detect if any accelerator  
 exists, thus return value is limited to  
 whether or not a valid argument was  
-given.   
+given.  
 
 # GREP  
 Print lines that match patterns  

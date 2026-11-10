@@ -55,7 +55,7 @@ Y,A = hFD
 # MkFD  
 
 ## C  
-`short int mkfd(short int type);`  
+`int int mkfd(short int type);`  
 
 ## ASM  
 `>SS`  
@@ -353,9 +353,11 @@ Return MD5 Hash for input String
 `void md5 (const char* str, char* digest);`  
 
 # ASM  
+`>SS`  
 `>PUSHW str`  
 `>PUSHW digest`  
 `>LIBC md5`  
+`>SR`  
 
 ## RETURN VALUE  
 CC  
@@ -379,10 +381,12 @@ Add Data to MD5 computation
 `void md5update (void *md5, char *data, int len);`  
 
 # ASM  
+`>SS`  
 `>PUSHW md5`  
 `>PUSHW data`  
 `>PUSHW len`  
 `>LIBC MD5Update`  
+`>SR`  
 
 ## RETURN VALUE  
 
@@ -392,9 +396,11 @@ Add Data to MD5 computation
 `void md5finalize (void *md5, char* digest);`  
 
 # ASM  
+`>SS`  
 `>PUSHW md5`  
 `>PUSHW digest`  
 `>LIBC MD5Finalize`  
+`>SR`  
 
 ## RETURN VALUE  
 
@@ -466,7 +472,7 @@ Get ProDOS Volume Info
 
 ## C  
 `#include <prodos.h>`  
-`int online(short int volid, void *buf);`  
+`int online(int volid, void *buf);`  
 
 ## ASM  
 `>PUSHB volid`  
@@ -480,11 +486,11 @@ Change Type of a ProDOS File
 
 ## C  
 `#include <prodos.h>`  
-`int chtyp(const char *filepath, short int filetype);`  
+`int chtyp(const char *filepath, int filetype);`  
 
 ## ASM  
 `>PUSHW filepath`  
-`>PUSHB filetype`  
+`>PUSHW filetype`  
 `>LIBC ChTyp`  
 
 ## RETURN VALUE  
@@ -508,11 +514,11 @@ Change Attributes of a ProDOS File
 
 ## C  
 `#include <prodos.h>`  
-`int chattr(const char *filepath, short int attributes);`  
+`int chattr(const char *filepath, int attributes);`  
 
 ## ASM  
 `>PUSHW filepath`  
-`>PUSHB attributes`  
+`>PUSHW attributes`  
 `>LIBC chattr`  
 
 ## RETURN VALUE  
@@ -609,11 +615,13 @@ Load a file in memory
 `void *loadfile(const char *filename, short int flags, short int ftype, int auxtype);`  
 
 ## ASM  
+`>SS`  
 `>PUSHW filename`  
 `>PUSHB flags`  
 `>PUSHB ftype`  
 `>PUSHW auxtype`  
 `>LIBC loadfile`  
+`>SR`  
 
 ## RETURN VALUE  
  Y,A = Ptr to loaded file  
@@ -2045,10 +2053,12 @@ REG File created on ProDOS : T=TXT,X=$0000
 `size_t read(int fd, void *buf, size_t count);`  
 
 ## ASM  
+`>SS`  
 `>PUSHW fd`  
 `>PUSHW buf`  
 `>PUSHW count`  
 `>LIBC read`  
+`>SR`  
 
 ## RETURN VALUE  
 CC: Y,A = bytes read  
@@ -2061,10 +2071,12 @@ CS: A = EC
 `int write(int fd, const void *buf, int count);`  
 
 ## ASM  
+`>SS`  
 `>PUSHW fd`  
 `>PUSHW buf`  
 `>PUSHW count`  
 `>LIBC write`  
+`>SR`  
 
 ## RETURN VALUE  
 CC: Y,A = bytes written  
@@ -2078,10 +2090,12 @@ Set the file-position indicator for hFD
 `off_t lseek(int fildes, off_t offset, int whence);`  
 
 ## ASM  
-`>PUSHB hFD`  
+`>SS`  
+`>PUSHW hFD`  
 `>PUSHL offset`  
 `>PUSHB whence`  
 `>LIBC LSeek`  
+`>SR`  
 
 # ChOwn  
 
@@ -2106,9 +2120,11 @@ Set the file-position indicator for hFD
  `char *getcwd(char *buf, size_t size);`  
 
 ## ASM  
+`>SS`  
 `>PUSHW buf`  
 `>PUSHW size`  
 `>LIBC chown`  
+`>SR`  
 
 ## RETURN VALUE  
  NULL CS  
