@@ -16,7 +16,6 @@ NEW
 ZS.START
 ArgIndex		.BS 1
 ArgFile			.BS 1
-ZPPtr1			.BS 2
 
 bAll			.BS 1
 bAccess			.BS 1
@@ -28,6 +27,7 @@ bBlocks			.BS 1
 bCTime			.BS 1
 bMTime			.BS 1
 bATime			.BS 1
+bSlotDrive		.BS 1
 
 ZS.END			.ED
 *--------------------------------------
@@ -49,7 +49,7 @@ CS.START		cld
 *--------------------------------------
 .1				.DA CS.INIT
 				.DA CS.RUN
-				.DA CS.DOEVENT
+				.DA CS.SIG
 				.DA	CS.QUIT
 L.MSG.USAGE		.DA MSG.USAGE
 L.MSG.Filename	.DA MSG.Filename
@@ -60,12 +60,14 @@ L.FMT.DateTime	.DA FMT.DateTime
 L.MSG.CMATimes	.DA MSG.CMATimes
 L.MSG.D			.DA MSG.D
 L.MSG.U			.DA MSG.U
+L.MSG.SlotDrive	.DA MSG.SlotDrive
+L.MSG.SxDy		.DA MSG.SxDy
 				.DA 0
 *--------------------------------------
 CS.INIT
 *--------------------------------------
 CS.QUIT			clc
-				rts
+CS.SIG			rts
 *--------------------------------------
 CS.RUN			dec bAll
 
@@ -74,9 +76,9 @@ CS.RUN			dec bAll
 				>KAPI ArgV
 				bcs .3
 
-				>STYA ZPPtr1
+				>STYA R1
 
-				lda (ZPPtr1)
+				lda (R1)
 				cmp #'-'
 				bne .2
 
@@ -172,7 +174,7 @@ CS.RUN.PRINT	bit bAccess
 				>PUSHBI 4
 				>LIBC PrintF
 				>SR
-				bcs CS.RUN.PRINT.RTS
+				bcs .99
 
 .5				bit bBlocks
 				bpl CS.RUN.PRINT2
@@ -183,29 +185,47 @@ CS.RUN.PRINT	bit bAccess
 				>PUSHBI 4
 				>LIBC PrintF
 				>SR
-				bcs CS.RUN.PRINT.RTS
+.99				bcs CS.RUN.PRINT.RTS
 
 CS.RUN.PRINT2	bit bCTime
 				bpl .7
 
 				>LEA.G TIME.Create
 				>LIBC PutS
-				bcs .9
+				bcs CS.RUN.PRINT.RTS
 
 .7				bit bMTime
 				bpl .8
 
 				>LEA.G TIME.Mod
 				>LIBC PutS
-				bcs .9
+				bcs CS.RUN.PRINT.RTS
 
 .8				bit bATime
 				bpl .9
 
 				>LEA.G TIME.Access
 				>LIBC PutS
+				bcs CS.RUN.PRINT.RTS
 
-.9
+.9				bit bSlotDrive
+				bpl .10
+
+				>LDA.G StatBuf+S.STAT.P.SLOT
+				iny
+				ora (pData),y			S.STAT.P.DRIVE
+				beq .10
+
+				>SS
+				>PUSHW L.MSG.SxDy
+				>PUSHB.G StatBuf+S.STAT.P.SLOT
+				>PUSHB.G StatBuf+S.STAT.P.DRIVE
+				>PUSHBI 2
+				>LIBC PrintF
+				>SR
+
+.10
+
 CS.RUN.PRINT.RTS
 				rts
 *--------------------------------------
@@ -218,17 +238,24 @@ CS.RUN.DUMP		>SS
 				>SR
 				bcs CS.RUN.PRINT.RTS
 
-				>STYA ZPPtr1
+				>STYA R1
 
 				>SS
 				>PUSHW L.MSG.Filename
-				>PUSHW ZPPtr1
+				>PUSHW R1
 				>PUSHBI 2
 				>LIBC PrintF
 				>SR
 
-				>LDYA ZPPtr1
+				php
+				pha
+
+				>LDYA R1
 				>LIBC Free
+
+				pla
+				plp
+.9				bcs CS.RUN.PRINT.RTS
 
 				>SS
 				>PUSHW L.MSG.Access
@@ -236,13 +263,15 @@ CS.RUN.DUMP		>SS
 				>PUSHBI 2
 				>LIBC PrintF
 				>SR
+				bcs .9
 
-				>SS
+CS.RUN.DUMP2	>SS
 				>PUSHW L.MSG.Mod
 				>PUSHEA.G MOD
 				>PUSHBI 2
 				>LIBC PrintF
 				>SR
+				bcs .9
 
 				>SS
 				>PUSHW L.MSG.UIDGIDSIZE
@@ -254,8 +283,11 @@ CS.RUN.DUMP		>SS
 				>PUSHBI 14
 				>LIBC PrintF
 				>SR
+				bcc CS.RUN.DUMP3
 
-				>SS
+.9				rts
+
+CS.RUN.DUMP3	>SS
 				>PUSHW L.MSG.CMATimes
 				>PUSHEA.G TIME.Create
 				>PUSHEA.G TIME.Mod
@@ -263,7 +295,25 @@ CS.RUN.DUMP		>SS
 				>PUSHBI 6
 				>LIBC PrintF
 				>SR
-				rts
+				bcs .9
+
+				>LDA.G StatBuf+S.STAT.P.SLOT
+				iny
+				ora (pData),y			S.STAT.P.DRIVE
+
+*				clc
+
+				beq .9
+
+				>SS
+				>PUSHW L.MSG.SlotDrive
+				>PUSHB.G StatBuf+S.STAT.P.SLOT
+				>PUSHB.G StatBuf+S.STAT.P.DRIVE
+				>PUSHBI 2
+				>LIBC PrintF
+				>SR
+
+.9				rts
 *--------------------------------------
 CS.RUN.CONVERT	jsr Access2CSTR
 				jsr Mod2CSTR
@@ -389,11 +439,8 @@ CS.RUN.PrintAMCTime.NODATE
 
 				rts
 *--------------------------------------
-CS.DOEVENT		sec
-				rts
-*--------------------------------------
 CS.RUN.CheckOpt	ldy #1
-				lda (ZPPtr1),y
+				lda (R1),y
 
 				ldx #OptionVars-OptionList-1
 
@@ -417,7 +464,7 @@ CS.RUN.CheckOpt	ldy #1
 *--------------------------------------
 CS.END			.EQ *
 *--------------------------------------
-OptionList		.AS "AaDdUuGgSsBbCcMmLl"
+OptionList		.AS "AaDdUuGgSsBbCcMmLlXx"
 OptionVars		.DA #bAccess,#bAccess
 				.DA #bMod,#bMod
 				.DA #bUID,#bUID
@@ -427,6 +474,7 @@ OptionVars		.DA #bAccess,#bAccess
 				.DA #bCTime,#bCTime
 				.DA #bMTime,#bMTime
 				.DA #bATime,#bATime
+				.DA #bSlotDrive,#bSlotDrive
 ATTRS			.AS "DeReBn----InWrRd"
 TYPES			.AS "-dcblssp"
 ACCESS			.AS "xwrxwrxwr"
@@ -442,18 +490,21 @@ MSG.USAGE		.CS "Usage : STAT File\r\n"
 				.CS "   -B : Size in blocks\r\n"
 				.CS "   -C : Creation date/time\r\n"
 				.CS "   -M : Modification date/time\r\n"
-				.CZ "   -L : Last access date/time\r\n"
+				.CS "   -L : Last access date/time\r\n"
+				.CZ "   -X : Slot/drive\r\n"
 *--------------------------------------
-MSG.Filename	.CZ "Filename : %s\r\n"
-MSG.Access		.CZ "Access   : %s\r\n"
-MSG.Mod			.CZ "Mod      : %s\r\n"
-MSG.UIDGIDSIZE	.CS "UID      : %10D\r\n"
-				.CS "GID      : %10D\r\n"
-				.CS "Size     : %10u\r\n"
-				.CZ "Blocks   : %10u (%D)\r\n"
-MSG.CMATimes	.CS "Created  : %s\r\n"
-				.CS "Modified : %s\r\n"
-				.CZ "Accessed : %s\r\n"
+MSG.Filename	.CZ "Filename   : %s\r\n"
+MSG.Access		.CZ "Access     : %s\r\n"
+MSG.Mod			.CZ "Mod        : %s\r\n"
+MSG.UIDGIDSIZE	.CS "UID        : %10D\r\n"
+				.CS "GID        : %10D\r\n"
+				.CS "Size       : %10u\r\n"
+				.CZ "Blocks     : %10u (%D)\r\n"
+MSG.CMATimes	.CS "Created    : %s\r\n"
+				.CS "Modified   : %s\r\n"
+				.CZ "Accessed   : %s\r\n"
+MSG.SlotDrive	.CS "Slot/drive : "
+MSG.SxDy		.CZ "s%dd%d\r\n"
 MSG.D			.CZ "%D\r\n"
 MSG.U			.CZ "%u\r\n"
 *--------------------------------------

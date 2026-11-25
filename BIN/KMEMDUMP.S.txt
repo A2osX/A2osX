@@ -1,0 +1,367 @@
+NEW
+  AUTO 3,1
+				.LIST OFF
+				.OP	65C02
+				.OR	$2000
+				.TF bin/kmemdump
+*--------------------------------------
+				.INB inc/macros.i
+				.INB inc/a2osx.i
+				.INB inc/a2osx.api.i
+				.INB inc/io.i
+*--------------------------------------
+PAGE.LEN		.EQ 23
+*--------------------------------------
+				.DUMMY
+				.OR ZPBIN
+ZS.START		.BS 16
+MEM.COUNT		.BS 1
+USED.COUNT		.BS 1
+MEM.LAST		.BS 1
+LineCnt			.BS 1
+bSTOP			.BS 1
+
+ZS.END			.ED
+*--------------------------------------
+*			File Header (16 Bytes)
+*--------------------------------------
+CS.START		cld
+				jmp (.1,x)
+				.DA #$61				6502,Level 1 (65c02)
+				.DA #2					BIN Layout Version 2
+				.DA #0					S.PS.F.SIG
+				.DA #0
+				.DA CS.END
+				.DA ID.END
+				.DA DS.END
+				.DA #64					Stack Size
+				.DA #ZS.END-ZS.START	Zero Page Size
+*--------------------------------------
+* Relocation Table
+*--------------------------------------
+.1				.DA CS.INIT
+				.DA CS.RUN
+				.DA CS.SIG
+				.DA	CS.QUIT
+*--------------------------------------
+L.MSG0			.DA MSG0
+L.MSG1.INV		.DA MSG1.INV
+L.MSG1			.DA MSG1
+L.MSG1.BIN		.DA MSG1.BIN
+L.MSG1.STR		.DA MSG1.STR
+L.MSG1.HEX		.DA MSG1.HEX
+L.MSG.CRLF		.DA MSG.CRLF
+				.DA 0
+*--------------------------------------
+CS.INIT
+CS.SIG
+CS.QUIT			clc
+CS.INIT.RTS		rts
+*--------------------------------------
+CS.RUN			ldx #ZP.CODE.L-1
+
+.1				lda ZP.CODE,x
+				sta ZS.START,x
+				dex
+				bpl .1
+
+				>LDYAI MEM.LoMem
+				>STYA R1
+
+				jsr ZS.START
+
+				ldy #6
+				lda (pData),y
+				sta MEM.LAST
+
+				>LDYA L.MSG0
+				>LIBC PutS
+				bcs CS.INIT.RTS
+
+				jsr CS.RUN.IncLineCnt
+
+*				stz MEM.COUNT
+*				stz USED.COUNT
+*--------------------------------------
+CS.RUN.LOOP		jsr CS.RUN.CheckStop
+				bcs CS.INIT.RTS
+
+.1				inc MEM.COUNT
+
+				lda R1
+				clc
+				adc #S.MEM
+				sta R1
+				bcc .2
+
+				inc R1+1
+
+.2				jsr ZS.START
+
+				lda (pData)
+				bpl .3
+
+				inc USED.COUNT
+
+.3				jsr CS.RUN.PRINTMEM
+
+				jsr CS.RUN.PrintCRLF
+
+				lda MEM.COUNT
+				cmp MEM.LAST
+				bne CS.RUN.LOOP
+
+				jsr CS.RUN.PrintCRLF
+
+				lda #0
+				sec
+				rts
+*--------------------------------------
+CS.RUN.PRINTMEM	>SS
+				>PUSHW L.MSG1
+
+				>PUSHB MEM.COUNT
+
+				lda (pData)				Get flags
+				ldy #MEM.FLAGS+7
+				ldx #7
+
+.20				lsr
+				pha
+				lda #'-'
+				bcc .30
+
+				lda MSG.FLAGS,x
+
+.30				sta (pData),y
+				pla
+				dey
+				dex
+				bpl .20
+
+				>PUSHEA.G MEM.FLAGS
+
+				lda (pData)				Get flags
+				and #S.MEM.F.CODE
+				eor #S.MEM.F.CODE
+				tay
+				beq .31
+
+				ldy #S.MEM.OWNER
+				lda (pData),y
+				pha
+				iny
+				lda (pData),y
+				ply
+
+.31				>PUSHYA
+
+				ldy #S.MEM.REFCNT
+				lda (pData),y
+				>PUSHA
+
+				ldy #S.MEM.PTR+1
+				lda (pData),y
+				>PUSHA
+				dey
+				lda (pData),y
+				>PUSHA
+
+				ldy #S.MEM.LEN+1
+				lda (pData),y
+				>PUSHA
+				dey
+				lda (pData),y
+				>PUSHA
+
+				>PUSHBI 10
+
+				>LIBC PrintF
+				>SR
+
+				rts
+
+
+				lda (R1)
+				and #S.MEM.F.INUSE+S.MEM.F.CODE
+				cmp #S.MEM.F.INUSE+S.MEM.F.CODE
+				bne CS.RUN.PRINTMEM.DATA
+
+				jmp CS.RUN.PRINTMEM.CODE
+*--------------------------------------
+CS.RUN.PRINTMEM.DATA
+
+				ldy #S.MEM.PTR
+				lda (R1),y
+				sta R2
+				iny
+				lda (R1),y
+				sta R2+1
+
+				ldy #$ff
+
+.1				iny
+				lda (R2),y			Check if it looks like a printable string
+				beq .11
+
+				bmi .2
+
+				cmp #$20
+				bcc .2					not printable....->hex
+
+				cpy #$ff
+				bne .1
+
+.11				tya
+				beq .2					Starting with 0...PrintHEX
+
+				>SS
+				>PUSHW L.MSG1.STR
+				tya
+				>PUSHA					len
+				>PUSHW R2			String
+				>PUSHBI 3
+				>LIBC PrintF
+				>SR
+
+				jmp CS.RUN.IncLineCnt
+*--------------------------------------
+.2				>SS
+				>PUSHW L.MSG1.HEX
+
+				ldy #0
+
+.3				>PUSHB (R2),y
+				iny
+				cpy #16
+				bne .3
+
+				>PUSHBI 16
+				>LIBC PrintF
+				>SR
+
+				jmp CS.RUN.IncLineCnt
+*--------------------------------------
+CS.RUN.PRINTMEM.CODE
+				>SS
+				>PUSHW L.MSG1.BIN
+
+				ldy #S.MEM.OWNER+1
+				lda (R1),y
+				>PUSHA
+				dey
+				lda (R1),y
+				>PUSHA
+
+				>PUSHBI 2
+				>LIBC PrintF
+				>SR
+
+				jmp CS.RUN.IncLineCnt
+*--------------------------------------
+CS.RUN.CHECKPS	lda (R1)			Get flags
+				and #S.MEM.F.CODE
+				bne .9
+
+				ldy #S.MEM.OWNER
+				lda (R1),y
+				pha
+				iny
+				lda (R1),y
+				ply
+
+				bne .1
+
+				cmp #0
+				beq .8
+
+.1				>LIBC GetPS
+				bcs .9
+
+				>LIBC Free
+
+*				clc
+
+				rts
+
+.8				clc
+.9				rts
+*--------------------------------------
+CS.RUN.CheckStop
+				lda bSTOP
+				beq .8
+
+.1				>LIBC GetChar
+				bcs .9
+
+				cmp #3					Ctrl-C
+				beq .9					CS
+
+				stz bSTOP
+
+.8				clc
+.9				rts
+*--------------------------------------
+CS.RUN.PrintINV	>SS
+				>PUSHW L.MSG1.INV
+				>PUSHBI 0
+				>LIBC PrintF
+				>SR
+				rts
+*--------------------------------------
+CS.RUN.PrintCRLF
+				>SS
+				>PUSHW L.MSG.CRLF
+				>PUSHBI 0
+				>LIBC PrintF
+				>SR
+
+CS.RUN.IncLineCnt
+				inc LineCnt
+				lda LineCnt
+				cmp #PAGE.LEN
+				bcc .8
+
+				dec bSTOP
+				stz LineCnt
+				clc
+.8
+.9				rts
+*--------------------------------------
+CS.END			.EQ *
+*--------------------------------------
+ZP.CODE			sta IO.CLRREADAUX
+
+				ldy #7
+
+.1				lda (R1),y
+				sta (pData),y
+				dey
+				bpl .1
+
+				sta IO.SETREADAUX
+
+				rts
+
+ZP.CODE.L		.EQ *-ZP.CODE
+*--------------------------------------
+MSG0			.CZ "hMem Flags    Owner REF PTR  LEN   BINPATH/DATA"
+MSG1.INV		.CZ "\e[7m"
+MSG1			.CZ " %h  %s %5D %3d %H %5D "
+MSG1.BIN		.CZ "\e[7m%s\e[0m\r\n"
+MSG1.STR		.CZ "[%03d:%s]\e[0m\r\n"
+MSG1.HEX		.CZ "?HEX:%h%h.%h%h.%h%h.%h%h.%h%h.%h%h.%h%h.%h%h\e[0m\r\n"
+MSG.CRLF		.CZ "\r\n"
+MSG.FLAGS		.CS "UZXAncdp"
+*--------------------------------------
+ID.END			.HS 00
+*--------------------------------------
+				.DUMMY
+				.OR 0
+MEM.Slot		.BS 8
+MEM.FLAGS		.BS 9
+DS.END			.ED
+*--------------------------------------
+MAN
+SAVE usr/src/bin/kmemdump.s
+ASM
